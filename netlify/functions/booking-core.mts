@@ -611,14 +611,19 @@ async function seedItems() {
 }
 
 async function ensureAdminUser() {
-  const email = env("CLARITY_ADMIN_EMAIL", "sam@clarity.golf");
-  const envPassword = env("CLARITY_ADMIN_PASSWORD");
-  const password = envPassword || "clarity-admin";
+  const email = cleanEmail(env("CLARITY_ADMIN_EMAIL"), "");
+  const password = env("CLARITY_ADMIN_PASSWORD");
+
+  if (!email || !password) {
+    console.warn("Admin user not seeded because CLARITY_ADMIN_EMAIL or CLARITY_ADMIN_PASSWORD is not set.");
+    return;
+  }
+
   const existing = await db().sql`SELECT id FROM admin_users WHERE email = ${email}`;
 
   const { passwordHash, salt } = hashPassword(password);
-  if (existing.length && envPassword) {
-    const seedKey = hashToken(`${email}:${envPassword}`);
+  const seedKey = hashToken(`${email}:${password}`);
+  if (existing.length) {
     const currentSeedKey = await getSetting("adminPasswordSeedKey");
     if (currentSeedKey === seedKey) return;
     await db().sql`
@@ -631,14 +636,13 @@ async function ensureAdminUser() {
     await setSetting("adminPasswordSeedKey", seedKey);
     return;
   }
-  if (existing.length) return;
 
   await db().sql`
     INSERT INTO admin_users (id, email, password_hash, password_salt, created_at, updated_at)
     VALUES (${randomUUID()}, ${email}, ${passwordHash}, ${salt}, NOW(), NOW())
     ON CONFLICT (email) DO NOTHING
   `;
-  if (envPassword) await setSetting("adminPasswordSeedKey", hashToken(`${email}:${envPassword}`));
+  await setSetting("adminPasswordSeedKey", seedKey);
 }
 
 async function ensureNotificationHistoryTable() {
@@ -1431,7 +1435,7 @@ function queueBookingNotifications(appointment, options = {}, context = null) {
 async function verifyAdminPassword(email, password) {
   const rows = await db().sql`
     SELECT * FROM admin_users
-    WHERE email = ${cleanString(email, "sam@clarity.golf", 180)}
+    WHERE email = ${cleanString(email, "", 180)}
   `;
   const row = rows[0];
   if (!row || typeof password !== "string") return null;
@@ -2178,7 +2182,7 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "") {
     if (req.method === "POST" && pathname === "/api/auth/login") {
       await cleanupExpiredSessions();
       const body = await parseBody(req);
-      const user = await verifyAdminPassword(body.email || "sam@clarity.golf", body.password || "");
+      const user = await verifyAdminPassword(body.email || "", body.password || "");
       if (!user) return json({ error: "invalid_login", message: "Email or password is incorrect." }, 401);
       const session = await createAdminSession(user.id);
       return json(

@@ -252,7 +252,7 @@ export function calendarApiMiddleware() {
       if (req.method === "POST" && pathname === "/api/auth/login") {
         await cleanupExpiredSessions();
         const body = await readJsonBody(req);
-        const user = await verifyAdminPassword(body.email || "sam@clarity.golf", body.password || "");
+        const user = await verifyAdminPassword(body.email || "", body.password || "");
         if (!user) {
           sendJson(res, 401, { error: "invalid_login", message: "Email or password is incorrect." });
           return;

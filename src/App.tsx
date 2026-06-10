@@ -1413,11 +1413,11 @@ function App() {
   const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [authStatus, setAuthStatus] = useState<AuthStatus>(isEmbedMode ? "authenticated" : "checking");
   const [authMode, setAuthMode] = useState<AuthMode>(() => (getInitialResetToken() ? "reset" : "login"));
-  const [adminEmail, setAdminEmail] = useState("sam@clarity.golf");
+  const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [authError, setAuthError] = useState("");
-  const [forgotEmail, setForgotEmail] = useState("sam@clarity.golf");
+  const [forgotEmail, setForgotEmail] = useState("");
   const [forgotState, setForgotState] = useState<"idle" | "sending" | "sent">("idle");
   const [forgotMessage, setForgotMessage] = useState("");
   const [resetToken] = useState(getInitialResetToken);

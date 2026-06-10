@@ -1029,14 +1029,19 @@ function hashToken(token) {
 
 function ensureAdminUser() {
   const database = getDb();
-  const email = process.env.CLARITY_ADMIN_EMAIL || "sam@clarity.golf";
-  const envPassword = process.env.CLARITY_ADMIN_PASSWORD || "";
-  const password = envPassword || "clarity-admin";
+  const email = cleanEmail(process.env.CLARITY_ADMIN_EMAIL || "", "");
+  const password = process.env.CLARITY_ADMIN_PASSWORD || "";
+
+  if (!email || !password) {
+    console.warn("Admin user not seeded because CLARITY_ADMIN_EMAIL or CLARITY_ADMIN_PASSWORD is not set.");
+    return;
+  }
+
   const existing = database.prepare("SELECT id FROM admin_users WHERE email = ?").get(email);
 
   const { passwordHash, salt } = hashPassword(password);
-  if (existing && envPassword) {
-    const seedKey = hashToken(`${email}:${envPassword}`);
+  const seedKey = hashToken(`${email}:${password}`);
+  if (existing) {
     if (getSetting("adminPasswordSeedKey") === seedKey) return;
     database
       .prepare("UPDATE admin_users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE email = ?")
@@ -1044,7 +1049,6 @@ function ensureAdminUser() {
     setSetting("adminPasswordSeedKey", seedKey);
     return;
   }
-  if (existing) return;
 
   const timestamp = nowIso();
   database
@@ -1053,13 +1057,13 @@ function ensureAdminUser() {
        VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(randomUUID(), email, passwordHash, salt, timestamp, timestamp);
-  if (envPassword) setSetting("adminPasswordSeedKey", hashToken(`${email}:${envPassword}`));
+  setSetting("adminPasswordSeedKey", seedKey);
 }
 
 export async function verifyAdminPassword(email, password) {
   const row = getDb()
     .prepare("SELECT * FROM admin_users WHERE email = ?")
-    .get(cleanString(email, "sam@clarity.golf", 180));
+    .get(cleanString(email, "", 180));
   if (!row || typeof password !== "string") return null;
 
   const { passwordHash } = hashPassword(password, row.password_salt);
