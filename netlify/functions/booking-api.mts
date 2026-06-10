@@ -1,8 +1,8 @@
-import type { Config } from "@netlify/functions";
+import type { Config, Context } from "@netlify/functions";
 
 import { handleBookingApiRoute } from "./booking-core.mts";
 
-export default async (req: Request) => handleBookingApiRoute(req);
+export default async (req: Request, context: Context) => handleBookingApiRoute(req, "", context);
 
 export const config: Config = {
   path: "/api/*",

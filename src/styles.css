@@ -4398,3 +4398,365 @@ button {
     padding: 0 6px;
   }
 }
+
+/* Compact lesson cards + email receipt indicators */
+.calendar-item.appointment {
+  will-change: transform;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.calendar-item.appointment .item-content {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  padding-right: 26px;
+}
+
+.calendar-item.appointment .item-content strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-item.appointment .item-content span,
+.calendar-item.appointment .item-content em {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-2px);
+  transition: opacity 150ms ease, max-height 150ms ease, transform 150ms ease;
+}
+
+.calendar-item.appointment:hover,
+.calendar-item.appointment.selected {
+  z-index: 6;
+  transform: translateY(-1px);
+}
+
+.calendar-item.appointment:hover .item-content span,
+.calendar-item.appointment:hover .item-content em,
+.calendar-item.appointment.selected .item-content span,
+.calendar-item.appointment.selected .item-content em,
+.floating-drag-tile .item-content span,
+.floating-drag-tile .item-content em {
+  max-height: 16px;
+  opacity: 0.76;
+  transform: translateY(0);
+}
+
+.calendar-item.appointment.is-lifted {
+  animation: cardGrabFlex 340ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.item-email-indicators {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 3;
+  display: inline-flex;
+  gap: 3px;
+  pointer-events: auto;
+}
+
+.email-status-dot {
+  width: 17px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.email-status-dot.sent {
+  background: color-mix(in srgb, var(--coach-primary) 70%, #1b1b1b);
+}
+
+.email-status-dot.failed {
+  background: #c94a35;
+}
+
+.email-status-dot.skipped {
+  background: color-mix(in srgb, var(--coach-secondary) 70%, #2b2114);
+}
+
+.email-status-dot.pending {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.lesson-receipts-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+}
+
+.receipt-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--heading);
+  font-weight: 800;
+}
+
+.lesson-receipts-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.email-receipt-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 9px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.email-receipt-row .email-status-dot {
+  margin-top: 2px;
+}
+
+.email-receipt-row strong,
+.email-receipt-row span,
+.email-receipt-row em {
+  display: block;
+}
+
+.email-receipt-row strong {
+  color: var(--heading);
+  font-size: 13px;
+}
+
+.email-receipt-row span,
+.email-receipt-row em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.email-status.failed {
+  border-color: #c94a35;
+  background: color-mix(in srgb, #c94a35 10%, #fff);
+}
+
+.email-status.skipped {
+  border-color: color-mix(in srgb, var(--coach-secondary) 56%, #deded8);
+  background: color-mix(in srgb, var(--coach-secondary) 10%, #fff);
+}
+
+/* Glossy physical-card movement: grab flex, flight flex, and dock landing */
+.floating-drag-tile {
+  animation: cardInAirFlex 760ms ease-in-out infinite;
+  transform-origin: center;
+}
+
+.floating-drag-tile .item-content,
+.dock-tile.flying-to-dock span {
+  animation: cardCoreLead 680ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.dock-tile.flying-to-dock {
+  pointer-events: none;
+  animation: flyToDock 680ms cubic-bezier(0.18, 0.92, 0.18, 1) both;
+  transform-origin: center;
+}
+
+.dock-tile.flying-to-dock::before {
+  width: 3px;
+  animation: flightEdgeLag 680ms cubic-bezier(0.18, 0.92, 0.18, 1) both;
+}
+
+@keyframes cardGrabFlex {
+  0% {
+    transform: translateY(0) scale(1) skewY(0deg);
+  }
+  48% {
+    transform: translateY(-3px) scale(1.018) skewY(-1.8deg);
+  }
+  100% {
+    transform: translateY(-1px) scale(1.006) skewY(0deg);
+  }
+}
+
+@keyframes cardInAirFlex {
+  0%,
+  100% {
+    transform: rotate(-1deg) skewY(0deg) scale(1.01);
+  }
+  45% {
+    transform: rotate(-0.4deg) skewY(-2.4deg) scaleX(1.018) scaleY(0.994);
+  }
+  72% {
+    transform: rotate(-1.5deg) skewY(1.4deg) scaleX(0.996) scaleY(1.006);
+  }
+}
+
+@keyframes cardCoreLead {
+  0% {
+    transform: translateY(4px) scaleX(0.985);
+  }
+  42% {
+    transform: translateY(-3px) scaleX(1.018);
+  }
+  74% {
+    transform: translateY(1px) scaleX(0.996);
+  }
+  100% {
+    transform: translateY(0) scaleX(1);
+  }
+}
+
+@keyframes flightEdgeLag {
+  0% {
+    transform: translateY(5px) scaleY(0.92);
+  }
+  54% {
+    transform: translateY(-2px) scaleY(1.08);
+  }
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes flyToDock {
+  0% {
+    opacity: 0.88;
+    transform: translate(var(--dock-fly-x, 240px), var(--dock-fly-y, 120px)) scale(1.045) skewY(-2.2deg);
+  }
+  38% {
+    opacity: 1;
+    transform: translate(calc(var(--dock-fly-x, 240px) * 0.42), calc(var(--dock-fly-y, 120px) * 0.34 - 18px)) scale(1.022) skewY(2deg);
+  }
+  74% {
+    transform: translate(0, -8px) scale(1.012) skewY(-0.8deg);
+  }
+  88% {
+    transform: translate(0, 3px) scaleX(1.014) scaleY(0.986) skewY(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1) skewY(0deg);
+  }
+}
+
+@keyframes dockSettle {
+  0% {
+    transform: translateY(-7px) scaleY(1.018);
+  }
+  48% {
+    transform: translateY(3px) scaleX(1.012) scaleY(0.986);
+  }
+  72% {
+    transform: translateY(-2px) scaleX(0.998) scaleY(1.006);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* External hover preview: transparent booking-card style, outside the calendar lane bounds */
+.calendar-hover-card {
+  position: fixed;
+  z-index: 1200;
+  width: 304px;
+  pointer-events: none;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: color-mix(in srgb, var(--coach-neutral) 76%, transparent);
+  color: var(--coach-accent);
+  box-shadow: 0 22px 60px rgba(4, 10, 7, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.48);
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
+  animation: hoverCardIn 140ms ease-out both;
+}
+
+.calendar-hover-card::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.06) 38%, rgba(255, 255, 255, 0.18));
+  pointer-events: none;
+}
+
+.calendar-hover-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.hover-card-kicker {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.calendar-hover-card strong {
+  display: block;
+  font-size: 1.1rem;
+  line-height: 1.15;
+  margin-bottom: 5px;
+}
+
+.calendar-hover-card em {
+  display: block;
+  color: var(--muted);
+  font-style: normal;
+  margin-bottom: 14px;
+}
+
+.hover-card-line {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin: 8px 0;
+  font-size: 0.84rem;
+}
+
+.hover-card-line svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.hover-card-receipts {
+  display: grid;
+  gap: 5px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(7, 16, 10, 0.12);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+@keyframes hoverCardIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px) translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(0) scale(1);
+  }
+}
+
+/* Keep calendar lane cards compact; full details live in the external hover preview or click-through card. */
+.calendar-item.appointment:hover .item-content span,
+.calendar-item.appointment:hover .item-content em,
+.calendar-item.appointment.selected .item-content span,
+.calendar-item.appointment.selected .item-content em {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-2px);
+}

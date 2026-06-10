@@ -90,12 +90,31 @@ type PlacementAnimation = {
   fromY: number;
 };
 
+type DockFlight = PendingBooking & {
+  fromX?: number;
+  fromY?: number;
+};
+
 type FloatingDrag = {
   itemId: string;
   x: number;
   y: number;
   width: number;
   height: number;
+};
+
+type CalendarHoverPreview = {
+  itemId: string;
+  x: number;
+  y: number;
+  client: string;
+  service: string;
+  time: string;
+  venue: string;
+  phone: string;
+  email: string;
+  clientEmailStatus: string;
+  adminEmailStatus: string;
 };
 
 type Person = {
@@ -251,6 +270,10 @@ type EmailSendResult = {
   id?: string;
   reason?: string;
   error?: string;
+  recipient?: string;
+  subject?: string;
+  kind?: string;
+  status?: string;
 };
 
 type BookingConfirmation = {
@@ -1148,6 +1171,42 @@ function serviceCapacityLabel(service: Pick<Service, "capacity" | "lessonFormat"
   return `${service.capacity} client${service.capacity === 1 ? "" : "s"}`;
 }
 
+function notificationKindLabel(kind = "") {
+  if (kind.includes("admin")) return "Admin notification";
+  if (kind.includes("client")) return "Client email";
+  if (kind.includes("reschedule")) return "Reschedule email";
+  if (kind.includes("test")) return "Test email";
+  return "Email receipt";
+}
+
+function notificationStatusLabel(notification: Pick<NotificationRecord, "status" | "error">) {
+  if (notification.status === "sent") return "Sent";
+  if (notification.status === "skipped") return notification.error ? `Skipped · ${notification.error.replaceAll("_", " ")}` : "Skipped";
+  if (notification.status === "failed") return notification.error ? `Failed · ${notification.error.replaceAll("_", " ")}` : "Failed";
+  return notification.status || "Pending";
+}
+
+function notificationTone(status = "") {
+  if (status === "sent") return "sent";
+  if (status === "skipped") return "skipped";
+  if (status === "failed") return "failed";
+  return "pending";
+}
+
+function notificationTimeLabel(createdAt = "") {
+  if (!createdAt) return "";
+  const time = new Date(createdAt);
+  return Number.isNaN(time.getTime()) ? "" : time.toLocaleString();
+}
+
+function emailResultTone(result?: Pick<EmailSendResult, "sent" | "status" | "reason" | "error"> | null) {
+  if (!result) return "pending";
+  if (result.sent || result.status === "sent") return "sent";
+  if (result.status === "skipped") return "skipped";
+  if (result.status === "failed" || result.reason || result.error) return "failed";
+  return "pending";
+}
+
 function emptyServiceEditor(): ServiceEditor {
   return {
     name: "",
@@ -1456,10 +1515,11 @@ function App() {
   const [quickClientSearch, setQuickClientSearch] = useState("");
   const [quickMatchField, setQuickMatchField] = useState<"name" | "phone" | "email">("name");
   const [dockBookings, setDockBookings] = useState<PendingBooking[]>([]);
-  const [flyingBooking, setFlyingBooking] = useState<PendingBooking | null>(null);
+  const [flyingBooking, setFlyingBooking] = useState<DockFlight | null>(null);
   const [activeDockBookingId, setActiveDockBookingId] = useState("");
   const [placementAnimation, setPlacementAnimation] = useState<PlacementAnimation | null>(null);
   const [floatingDrag, setFloatingDrag] = useState<FloatingDrag | null>(null);
+  const [calendarHover, setCalendarHover] = useState<CalendarHoverPreview | null>(null);
   const [activeWeek, setActiveWeek] = useState(0);
   const [edgeCue, setEdgeCue] = useState<null | "prev" | "next">(null);
   const [bookingServiceId, setBookingServiceId] = useState("");
@@ -1502,12 +1562,14 @@ function App() {
   const clickPlaceRef = useRef<null | { bookingId: string; candidate: SlotCandidate }>(null);
   const pointerClientRef = useRef({ x: 0, y: 0 });
   const pointerStartRef = useRef({ x: 0, y: 0 });
+  const pointerTrailRef = useRef<{ x: number; y: number; t: number }[]>([]);
   const pointerKindRef = useRef<globalThis.PointerEvent["pointerType"]>("mouse");
   const dragPreviewMetaRef = useRef<null | { width: number; height: number; offsetX: number; offsetY: number }>(null);
   const lastEdgeNavRef = useRef(0);
   const edgeCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestureCleanupRef = useRef<null | (() => void)>(null);
   const brandSaveVersionRef = useRef(0);
+  const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
@@ -1518,7 +1580,11 @@ function App() {
   const blocks = weekItems.filter((item) => item.kind === "block").length;
   const activeDockBooking = dockBookings.find((booking) => booking.id === activeDockBookingId) ?? null;
   const dockFocus =
-    !selected && (dockBookings.length > 0 || Boolean(flyingBooking) || pointerSession?.mode === "place");
+    !selected &&
+    (dockBookings.length > 0 ||
+      Boolean(flyingBooking) ||
+      pointerSession?.mode === "place" ||
+      (pointerSession?.mode === "move" && Boolean(floatingDrag)));
   const appointmentServices = services.filter((service) => service.active);
   const publicServices = services.filter((service) => service.active && service.visibility === "public");
   const quickCreateServices = publicServices.slice(0, 4);
@@ -1648,6 +1714,49 @@ function App() {
     let cancelled = false;
     let attempts = 0;
     let timer: ReturnType<typeof window.setTimeout> | null = null;
+    const triggerKey = `${bookingConfirmation.kind}:${bookingConfirmation.appointmentId}`;
+
+    const mergeNotificationResults = (results: EmailSendResult[]) => {
+      if (!results.length || cancelled) return;
+      setBookingConfirmation((current) => {
+        if (!current || current.appointmentId !== bookingConfirmation.appointmentId) return current;
+        const seen = new Set(current.notifications.map((result) => `${result.kind || result.channel}:${result.recipient || ""}:${result.status || result.sent}`));
+        const additions = results.filter((result) => {
+          const key = `${result.kind || result.channel}:${result.recipient || ""}:${result.status || result.sent}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return additions.length ? { ...current, notifications: [...additions, ...current.notifications] } : current;
+      });
+      if (results.some((result) => result.channel === "client" && result.sent)) setEmailNoticeVisible(true);
+    };
+
+    const triggerEmailSend = async () => {
+      if (publicNotificationTriggerRef.current.has(triggerKey)) return;
+      publicNotificationTriggerRef.current.add(triggerKey);
+      try {
+        const response = await fetch("/api/public-booking-notifications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            appointmentId: bookingConfirmation.appointmentId,
+            email: bookingConfirmation.email,
+            phone: bookingConfirmation.phone || "",
+            kind: bookingConfirmation.kind,
+          }),
+        });
+        const data = (await response.json().catch(() => ({}))) as {
+          results?: EmailSendResult[];
+          notifications?: NotificationRecord[];
+        };
+        if (Array.isArray(data.notifications)) setNotifications(data.notifications);
+        if (Array.isArray(data.results)) mergeNotificationResults(data.results);
+      } catch {
+        // The booking is confirmed already; polling below can still pick up a background receipt.
+      }
+    };
+
     const poll = async () => {
       attempts += 1;
       try {
@@ -1660,33 +1769,35 @@ function App() {
           headers: { Accept: "application/json" },
         });
         const data = (await response.json()) as { sent?: boolean; notification?: EmailSendResult | null };
-        if (!cancelled && response.ok && data.sent && data.notification) {
-          setBookingConfirmation((current) =>
-            current && current.appointmentId === bookingConfirmation.appointmentId
-              ? { ...current, notifications: [data.notification as EmailSendResult, ...current.notifications] }
-              : current,
-          );
-          setEmailNoticeVisible(true);
-          return;
+        if (!cancelled && response.ok && data.notification) {
+          mergeNotificationResults([data.notification]);
+          if (data.sent) return;
         }
       } catch {
         // The booking is already confirmed; email status is a secondary receipt.
       }
-      if (!cancelled && attempts < 8) timer = window.setTimeout(poll, 1250);
+      if (!cancelled && attempts < 36) timer = window.setTimeout(poll, 5000);
     };
 
-    timer = window.setTimeout(poll, 900);
+    void triggerEmailSend().finally(() => {
+      if (!cancelled) timer = window.setTimeout(poll, 1200);
+    });
+
     return () => {
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [bookingConfirmation?.appointmentId, bookingConfirmation?.email, bookingConfirmation?.phone, isEmbedMode]);
+  }, [bookingConfirmation?.appointmentId, bookingConfirmation?.email, bookingConfirmation?.kind, bookingConfirmation?.phone, isEmbedMode]);
 
   useEffect(() => {
     if (activeDockBookingId && !dockBookings.some((booking) => booking.id === activeDockBookingId)) {
       setActiveDockBookingId("");
     }
   }, [activeDockBookingId, dockBookings]);
+
+  useEffect(() => {
+    if (pointerSession) setCalendarHover(null);
+  }, [pointerSession]);
 
   useEffect(() => {
     if (bookingServiceId && !publicServices.some((service) => service.id === bookingServiceId)) {
@@ -1739,6 +1850,18 @@ function App() {
     };
   }, [isEmbedMode]);
 
+  async function refreshNotificationHistory() {
+    if (isEmbedMode || authStatus !== "authenticated") return;
+    try {
+      const response = await fetch("/api/notification-history", { headers: { Accept: "application/json" } });
+      if (!response.ok) return;
+      const data = (await response.json()) as { notifications?: NotificationRecord[] };
+      if (Array.isArray(data.notifications)) setNotifications(data.notifications);
+    } catch {
+      // Email receipts are secondary; keep the calendar usable if polling fails.
+    }
+  }
+
   useEffect(() => {
     if (!isEmbedMode || attemptedSavedRescheduleRef.current) return;
     const saved = initialRescheduleLoginRef.current;
@@ -1761,9 +1884,17 @@ function App() {
       body: JSON.stringify({ items, syncKey: calendarSyncKey }),
       signal: controller.signal,
     })
-      .then((response) => {
+      .then(async (response) => {
         if (!response.ok) throw new Error("Calendar feed save failed");
         setCalendarFeedStatus("connected");
+        const data = (await response.json().catch(() => ({}))) as {
+          notifications?: NotificationRecord[];
+          notificationResults?: EmailSendResult[];
+        };
+        if (Array.isArray(data.notifications)) setNotifications(data.notifications);
+        window.setTimeout(() => void refreshNotificationHistory(), 1500);
+        window.setTimeout(() => void refreshNotificationHistory(), 8000);
+        window.setTimeout(() => void refreshNotificationHistory(), 35000);
       })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -1773,6 +1904,12 @@ function App() {
 
     return () => controller.abort();
   }, [authStatus, calendarSyncKey, isEmbedMode, items]);
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || activeView !== "calendar") return;
+    const timer = window.setInterval(() => void refreshNotificationHistory(), 15000);
+    return () => window.clearInterval(timer);
+  }, [activeView, authStatus, isEmbedMode]);
 
   function applyNotificationSettings(settings?: Partial<NotificationSettings>) {
     const delaySeconds = Number(settings?.notificationDelaySeconds ?? defaultNotificationSettings.notificationDelaySeconds);
@@ -1962,6 +2099,20 @@ function App() {
     bookingForm.phone,
   ]);
 
+  const notificationsByAppointment = useMemo(() => {
+    const byAppointment = new Map<string, NotificationRecord[]>();
+    notifications.forEach((notification) => {
+      if (!notification.calendarItemId) return;
+      const current = byAppointment.get(notification.calendarItemId) ?? [];
+      current.push(notification);
+      byAppointment.set(notification.calendarItemId, current);
+    });
+    byAppointment.forEach((records) => {
+      records.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    });
+    return byAppointment;
+  }, [notifications]);
+
   const selectedClient =
     !isAddingClient && selectedClientId ? clients.find((client) => client.id === selectedClientId) ?? null : null;
   const selectedClientAppointments = useMemo(() => {
@@ -1972,12 +2123,61 @@ function App() {
       .filter((item) => clientKey(item.client || item.title, item.email ?? "", item.phone ?? "") === key)
       .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
   }, [items, selectedClient]);
+  const selectedAppointmentNotifications = useMemo(() => {
+    if (!selected || selected.kind !== "appointment") return [];
+    return notificationsByAppointment.get(selected.id) ?? [];
+  }, [notificationsByAppointment, selected]);
+
+  function showCalendarItemHover(
+    event: ReactPointerEvent<HTMLElement>,
+    item: CalendarItem,
+    service: Service | undefined | null,
+    latestClientEmail?: NotificationRecord,
+    latestAdminEmail?: NotificationRecord,
+  ) {
+    if (isEmbedMode || item.kind !== "appointment" || pointerSessionRef.current) return;
+    if (event.pointerType === "touch") return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const cardWidth = 304;
+    const gap = 14;
+    const rightX = rect.right + gap;
+    const leftX = rect.left - cardWidth - gap;
+    const x = rightX + cardWidth < window.innerWidth - 16 ? rightX : Math.max(16, leftX);
+    const y = clamp(rect.top - 12, 16, Math.max(16, window.innerHeight - 260));
+    setCalendarHover({
+      itemId: item.id,
+      x,
+      y,
+      client: item.client || item.title,
+      service: service?.name ?? "Golf lesson",
+      time: `${dateForSlot(itemWeek(item), item.day).toLocaleDateString("en-NZ", { weekday: "long", month: "short", day: "numeric" })}, ${formatRange(item.start, item.duration)}`,
+      venue: service?.location || coachAccount.venueShortName || coachAccount.venueName,
+      phone: item.phone || "",
+      email: item.email || "",
+      clientEmailStatus: latestClientEmail ? notificationStatusLabel(latestClientEmail) : "No client email receipt yet",
+      adminEmailStatus: latestAdminEmail ? notificationStatusLabel(latestAdminEmail) : "No admin receipt yet",
+    });
+  }
+
+  function hideCalendarItemHover(itemId?: string) {
+    setCalendarHover((current) => (!itemId || current?.itemId === itemId ? null : current));
+  }
+
   const selectedClientNotifications = useMemo(() => {
     if (!selectedClient) return [];
     const keys = clientNotificationKeys(selectedClient.name, selectedClient.email, selectedClient.phone);
     const appointmentIds = new Set(selectedClientAppointments.map((appointment) => appointment.id));
+    const clientEmail = selectedClient.email.trim().toLowerCase();
     return notifications
-      .filter((notification) => keys.has(notification.personKey) || appointmentIds.has(notification.calendarItemId))
+      .filter((notification) => {
+        const isClientFacing = notification.kind.includes("client") || Boolean(clientEmail && notification.recipient.toLowerCase() === clientEmail);
+        if (!isClientFacing || notification.kind.includes("admin")) return false;
+        return (
+          keys.has(notification.personKey) ||
+          appointmentIds.has(notification.calendarItemId) ||
+          Boolean(clientEmail && notification.recipient.toLowerCase() === clientEmail)
+        );
+      })
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   }, [notifications, selectedClient, selectedClientAppointments]);
   const hasSelectedClientCaddyProfile = Boolean(
@@ -2084,6 +2284,89 @@ function App() {
   function setMovedState(nextMoved: boolean) {
     hasMovedRef.current = nextMoved;
     setHasMoved(nextMoved);
+  }
+
+  function resetPointerTrail(clientX: number, clientY: number) {
+    pointerTrailRef.current = [{ x: clientX, y: clientY, t: performance.now() }];
+  }
+
+  function recordPointerTrail(clientX: number, clientY: number) {
+    const now = performance.now();
+    pointerTrailRef.current = [
+      ...pointerTrailRef.current.filter((sample) => now - sample.t <= 240),
+      { x: clientX, y: clientY, t: now },
+    ].slice(-8);
+  }
+
+  function isFlickTowardDock() {
+    const samples = pointerTrailRef.current;
+    if (samples.length < 2) return false;
+    const latest = samples.at(-1);
+    if (!latest) return false;
+    const previous =
+      samples
+        .slice(0, -1)
+        .reverse()
+        .find((sample) => latest.t - sample.t >= 55) ?? samples[0];
+    const elapsed = Math.max(latest.t - previous.t, 1);
+    const recentDeltaY = latest.y - previous.y;
+    const recentDeltaX = Math.abs(latest.x - previous.x);
+    const totalDeltaY = latest.y - pointerStartRef.current.y;
+    const velocityY = recentDeltaY / elapsed;
+    const dockRect = dockRef.current?.getBoundingClientRect();
+    const nearDock = dockRect ? latest.y <= dockRect.bottom + 180 : latest.y <= pointerStartRef.current.y - 80;
+    return (
+      recentDeltaY < -42 &&
+      totalDeltaY < -76 &&
+      Math.abs(recentDeltaY) > recentDeltaX * 0.72 &&
+      velocityY < -0.42 &&
+      nearDock
+    );
+  }
+
+  function dockAppointmentItem(movedItem: CalendarItem, options: { fromFlick?: boolean } = {}) {
+    if (movedItem.kind !== "appointment") return false;
+    const service = itemService(movedItem, services);
+    if (!service) return false;
+
+    const docked: PendingBooking = {
+      id: `dock-${Date.now()}`,
+      sourceItemId: movedItem.id,
+      client: movedItem.client ?? movedItem.title,
+      title: movedItem.title,
+      serviceId: service.id,
+      duration: movedItem.duration,
+      phone: movedItem.phone,
+      email: movedItem.email,
+      note: movedItem.note,
+    };
+    const dockRect = dockRef.current?.getBoundingClientRect();
+    const meta = dragPreviewMetaRef.current;
+    const startX = pointerClientRef.current.x - (meta?.width ?? 180) / 2;
+    const startY = pointerClientRef.current.y - (meta?.height ?? 42) / 2;
+    const fromX = dockRect ? startX - dockRect.left : undefined;
+    const fromY = dockRect ? startY - dockRect.top : undefined;
+
+    setItems(items.filter((item) => item.id !== movedItem.id));
+    setFloatingDrag(null);
+    setSelectedId("");
+    setFlyingBooking({ ...docked, fromX, fromY });
+    window.setTimeout(() => {
+      setDockBookings((current) => [...current, docked]);
+      setActiveDockBookingId(docked.id);
+      setFlyingBooking((current) => (current?.id === docked.id ? null : current));
+      setToast({
+        message: options.fromFlick
+          ? `${docked.client} flew into the dock.`
+          : `${docked.client} is parked on the shelf.`,
+        undo: () => {
+          setDockBookings((current) => current.filter((booking) => booking.id !== docked.id));
+          setItems((current) => [...current, movedItem]);
+          setActiveDockBookingId("");
+        },
+      });
+    }, 680);
+    return true;
   }
 
   function hasPointerMovedPastThreshold(clientX: number, clientY: number) {
@@ -2294,6 +2577,7 @@ function App() {
     const rect = event.currentTarget.getBoundingClientRect();
     pointerStartRef.current = { x: event.clientX, y: event.clientY };
     pointerClientRef.current = { x: event.clientX, y: event.clientY };
+    resetPointerTrail(event.clientX, event.clientY);
     pointerKindRef.current = event.pointerType || "mouse";
     dragPreviewMetaRef.current = {
       width: rect.width,
@@ -2319,6 +2603,7 @@ function App() {
     event.stopPropagation();
     pointerStartRef.current = { x: event.clientX, y: event.clientY };
     pointerClientRef.current = { x: event.clientX, y: event.clientY };
+    resetPointerTrail(event.clientX, event.clientY);
     pointerKindRef.current = event.pointerType || "mouse";
     dragPreviewMetaRef.current = null;
     setFloatingDrag(null);
@@ -2336,6 +2621,7 @@ function App() {
     if (!slot) return;
     pointerStartRef.current = { x: event.clientX, y: event.clientY };
     pointerClientRef.current = { x: event.clientX, y: event.clientY };
+    resetPointerTrail(event.clientX, event.clientY);
     pointerKindRef.current = event.pointerType || "mouse";
     dragPreviewMetaRef.current = null;
     setFloatingDrag(null);
@@ -2374,6 +2660,7 @@ function App() {
 
   function updatePointerAt(clientX: number, clientY: number) {
     pointerClientRef.current = { x: clientX, y: clientY };
+    recordPointerTrail(clientX, clientY);
     const session = pointerSessionRef.current;
     if (!session) return;
     if (!hasPointerMovedPastThreshold(clientX, clientY)) return;
@@ -2480,35 +2767,15 @@ function App() {
     }
     clickPlaceRef.current = null;
 
-    if (session.mode === "move" && isClientInsideDock(pointerClientRef.current.x, pointerClientRef.current.y)) {
+    if (session.mode === "move") {
       const movedItem = items.find((item) => item.id === session.itemId);
-      if (!movedItem || movedItem.kind !== "appointment") {
+      const dockByDrop = isClientInsideDock(pointerClientRef.current.x, pointerClientRef.current.y);
+      const dockByFlick = isFlickTowardDock();
+      if (movedItem?.kind === "appointment" && (dockByDrop || dockByFlick)) {
+        dockAppointmentItem(movedItem, { fromFlick: dockByFlick && !dockByDrop });
         clearGesture();
         return;
       }
-      const service = itemService(movedItem, services);
-      if (!service) {
-        clearGesture();
-        return;
-      }
-      const docked: PendingBooking = {
-        id: `dock-${Date.now()}`,
-        sourceItemId: movedItem.id,
-        client: movedItem.client ?? movedItem.title,
-        title: movedItem.title,
-        serviceId: service.id,
-        duration: movedItem.duration,
-        phone: movedItem.phone,
-        email: movedItem.email,
-        note: movedItem.note,
-      };
-      setItems(items.filter((item) => item.id !== movedItem.id));
-      setDockBookings([...dockBookings, docked]);
-      setActiveDockBookingId(docked.id);
-      setSelectedId("");
-      setToast({ message: `${docked.client} is parked on the shelf.` });
-      clearGesture();
-      return;
     }
 
     if (!activeDraft || !activeDraft.valid) {
@@ -2791,6 +3058,7 @@ function App() {
     event.stopPropagation();
     pointerStartRef.current = { x: event.clientX, y: event.clientY };
     pointerClientRef.current = { x: event.clientX, y: event.clientY };
+    resetPointerTrail(event.clientX, event.clientY);
     pointerKindRef.current = event.pointerType || "mouse";
     dragPreviewMetaRef.current = null;
     setFloatingDrag(null);
@@ -4393,6 +4661,32 @@ function App() {
         </div>
       )}
 
+      {selected.kind === "appointment" && (
+        <div className="lesson-receipts-panel">
+          <div className="receipt-panel-title">
+            <Mail size={16} />
+            <span>Email receipts</span>
+          </div>
+          {selectedAppointmentNotifications.length ? (
+            selectedAppointmentNotifications.map((notification) => (
+              <div className="email-receipt-row" key={notification.id}>
+                <span className={`email-status-dot ${notificationTone(notification.status)}`} aria-hidden="true" />
+                <div>
+                  <strong>{notificationKindLabel(notification.kind)}</strong>
+                  <span>{notification.recipient || "No recipient"}</span>
+                </div>
+                <em>
+                  {notificationStatusLabel(notification)}
+                  {notification.createdAt ? ` · ${notificationTimeLabel(notification.createdAt)}` : ""}
+                </em>
+              </div>
+            ))
+          ) : (
+            <p>No email receipts recorded for this lesson yet.</p>
+          )}
+        </div>
+      )}
+
       {selected.kind === "block" && (
         <div className="admin-override">
           <span>Admin override</span>
@@ -4673,7 +4967,15 @@ function App() {
             }
           >
             {flyingBooking && (
-              <div className="dock-tile flying-to-dock">
+              <div
+                className="dock-tile flying-to-dock"
+                style={
+                  {
+                    "--dock-fly-x": `${flyingBooking.fromX ?? 240}px`,
+                    "--dock-fly-y": `${flyingBooking.fromY ?? 120}px`,
+                  } as CSSProperties
+                }
+              >
                 <GripVertical size={14} />
                 <span>
                   <strong>{flyingBooking.client}</strong>
@@ -4805,13 +5107,28 @@ function App() {
                   const width = 100 / DAY_COUNT;
                   const left = item.day * width;
                   const flyAnimation = placementAnimation?.itemId === item.id ? placementAnimation : null;
+                  const itemNotifications = notificationsByAppointment.get(item.id) ?? [];
+                  const latestClientEmail = itemNotifications.find((notification) => notification.kind.includes("client"));
+                  const latestAdminEmail = itemNotifications.find((notification) => notification.kind.includes("admin"));
+                  const tooltipRows = [
+                    item.client || item.title,
+                    service?.name ?? (item.kind === "block" ? "Blocked time" : "Lesson"),
+                    formatRange(item.start, item.duration),
+                    latestClientEmail ? `Client email: ${notificationStatusLabel(latestClientEmail)}` : "",
+                    latestAdminEmail ? `Admin email: ${notificationStatusLabel(latestAdminEmail)}` : "",
+                  ].filter(Boolean);
                   return (
                     <article
                       data-calendar-item
                       key={item.id}
                       className={`calendar-item ${item.kind} ${selectedId === item.id ? "selected" : ""} ${
                         invalid ? "invalid" : ""
-                      } ${flyAnimation ? "just-placed-from-dock" : ""}`}
+                      } ${flyAnimation ? "just-placed-from-dock" : ""} ${
+                        pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
+                      }`}
+                      aria-label={tooltipRows.join(", ")}
+                      onPointerEnter={(event) => showCalendarItemHover(event, item, service, latestClientEmail, latestAdminEmail)}
+                      onPointerLeave={() => hideCalendarItemHover(item.id)}
                       style={{
                         top,
                         height: Math.max(height, 34),
@@ -4824,7 +5141,10 @@ function App() {
                             } as CSSProperties)
                           : {}),
                       }}
-                      onPointerDown={(event) => beginMove(event, item)}
+                      onPointerDown={(event) => {
+                        hideCalendarItemHover();
+                        beginMove(event, item);
+                      }}
                       onClick={(event) => {
                         event.stopPropagation();
                         if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
@@ -4836,10 +5156,30 @@ function App() {
                         <GripVertical size={14} />
                       </div>
                       <div className="item-content">
-                        <strong>{item.title}</strong>
+                        <strong>{item.kind === "appointment" ? item.client || item.title : item.title}</strong>
                         <span>{service?.name ?? "Busy"}</span>
                         <em>{formatRange(item.start, item.duration)}</em>
                       </div>
+                      {item.kind === "appointment" && (latestClientEmail || latestAdminEmail) && (
+                        <div className="item-email-indicators" aria-label="Email receipt status">
+                          {latestClientEmail && (
+                            <span
+                              className={`email-status-dot ${notificationTone(latestClientEmail.status)}`}
+                              title={`Client: ${notificationStatusLabel(latestClientEmail)}`}
+                            >
+                              C
+                            </span>
+                          )}
+                          {latestAdminEmail && (
+                            <span
+                              className={`email-status-dot ${notificationTone(latestAdminEmail.status)}`}
+                              title={`Admin: ${notificationStatusLabel(latestAdminEmail)}`}
+                            >
+                              A
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <button
                         className="resize-handle"
                         aria-label="Resize calendar item"
@@ -5060,6 +5400,42 @@ function App() {
           </article>
         )}
 
+        {!isEmbedMode && activeView === "calendar" && calendarHover && !pointerSession && (
+          <aside
+            className="calendar-hover-card"
+            style={{ left: calendarHover.x, top: calendarHover.y }}
+            aria-hidden="true"
+          >
+            <span className="hover-card-kicker">Appointment</span>
+            <strong>{calendarHover.client}</strong>
+            <em>{calendarHover.service}</em>
+            <div className="hover-card-line">
+              <Clock size={14} />
+              <span>{calendarHover.time}</span>
+            </div>
+            <div className="hover-card-line">
+              <MapPin size={14} />
+              <span>{calendarHover.venue}</span>
+            </div>
+            {calendarHover.phone && (
+              <div className="hover-card-line">
+                <Phone size={14} />
+                <span>{calendarHover.phone}</span>
+              </div>
+            )}
+            {calendarHover.email && (
+              <div className="hover-card-line">
+                <Mail size={14} />
+                <span>{calendarHover.email}</span>
+              </div>
+            )}
+            <div className="hover-card-receipts">
+              <span>{calendarHover.clientEmailStatus}</span>
+              <span>{calendarHover.adminEmailStatus}</span>
+            </div>
+          </aside>
+        )}
+
         {!isEmbedMode && activeView === "clients" && (
           <section className="module-page clients-page">
             <div className="client-toolbar">
@@ -5211,15 +5587,23 @@ function App() {
                   </em>
                   <p>{coachAccount.venueName}</p>
                 </div>
-                {emailNoticeVisible &&
-                  bookingConfirmation.notifications.some((result) => result.channel === "client" && result.sent) && (
-                    <div className="email-status-list">
-                    <div className="email-status sent">
-                      <Check size={17} />
-                      <span>Email sent to {bookingConfirmation.email}</span>
-                    </div>
-                    </div>
-                  )}
+                {bookingConfirmation.notifications.length > 0 && (
+                  <div className="email-status-list">
+                    {bookingConfirmation.notifications.map((result, index) => {
+                      const tone = emailResultTone(result);
+                      return (
+                        <div className={`email-status ${tone}`} key={`${result.channel}-${index}`}>
+                          {tone === "sent" ? <Check size={17} /> : tone === "failed" ? <X size={17} /> : <Mail size={17} />}
+                          <span>
+                            {result.channel === "admin" ? "Admin notification" : "Client email"}: {tone === "sent" ? "sent" : tone}
+                            {result.recipient ? ` to ${result.recipient}` : ""}
+                            {result.reason || result.error ? ` · ${(result.reason || result.error || "").replaceAll("_", " ")}` : ""}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="calendar-add-actions">
                   <a className="outline-button" href={googleCalendarUrl(bookingConfirmation)} target="_blank" rel="noreferrer">
                     <CalendarDays size={16} />
@@ -6499,7 +6883,7 @@ function App() {
                     aria-selected={clientProfileTab === "notifications"}
                   >
                     <Mail size={16} />
-                    Notification history
+                    Emails sent
                   </button>
                 </div>
 
@@ -6526,19 +6910,19 @@ function App() {
                     selectedClientNotifications.map((notification) => (
                       <div className="profile-history-row notification-history-row" key={notification.id}>
                         <div>
-                          <strong>{notification.subject}</strong>
+                          <strong>{notification.subject || notificationKindLabel(notification.kind)}</strong>
                           <span>
-                            {notification.kind} email to {notification.recipient}
+                            {notificationKindLabel(notification.kind)} to {notification.recipient}
                           </span>
                         </div>
                         <em>
-                          {notification.status}
-                          {notification.createdAt ? ` · ${new Date(notification.createdAt).toLocaleString()}` : ""}
+                          {notificationStatusLabel(notification)}
+                          {notification.createdAt ? ` · ${notificationTimeLabel(notification.createdAt)}` : ""}
                         </em>
                       </div>
                     ))
                   ) : (
-                    <p>No email notifications recorded yet.</p>
+                    <p>No email receipts recorded yet.</p>
                   )}
                 </div>
               </div>

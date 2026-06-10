@@ -1402,27 +1402,9 @@ function publicBookingState(state) {
   };
 }
 
-async function sendBookingNotificationsWithTimeout(appointment, options = {}, timeoutMs = 1200) {
-  if (!env("RESEND_API_KEY")) return [];
-  let timer;
-  try {
-    return await Promise.race([
-      sendBookingNotifications(appointment, options),
-      new Promise((resolve) => {
-        timer = setTimeout(() => resolve([{ channel: "client", sent: false, reason: "notification_timeout" }]), timeoutMs);
-      }),
-    ]);
-  } catch (error) {
-    console.error("Booking notifications timed out or failed", error);
-    return [];
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 function queueBookingNotifications(appointment, options = {}, context = null) {
-  if (!env("RESEND_API_KEY")) return;
-  const task = sendBookingNotificationsWithTimeout(appointment, options, 6000).catch((error) => {
+  if (!appointment?.email && options.kind !== "admin") return;
+  const task = sendBookingNotifications(appointment, options).catch((error) => {
     console.error("Queued booking notifications failed", error);
   });
   if (context?.waitUntil) {
@@ -1430,6 +1412,45 @@ function queueBookingNotifications(appointment, options = {}, context = null) {
     return;
   }
   void task;
+}
+
+function appointmentSlotSignature(item) {
+  return [itemWeek(item), item.day, item.start, item.duration, item.serviceId || ""].join(":");
+}
+
+function appointmentContactSignature(item) {
+  return [item.client || item.title || "", item.email || "", item.phone || ""].join(":").toLowerCase();
+}
+
+function notificationJobsForCalendarChange(previousItems = [], nextItems = []) {
+  const previousById = new Map(
+    previousItems.filter((item) => item.kind === "appointment").map((item) => [item.id, item]),
+  );
+  return nextItems
+    .filter((item) => item.kind === "appointment" && item.email)
+    .map((item) => {
+      const previous = previousById.get(item.id);
+      if (!previous) return { appointment: item, kind: "booking" };
+      if (appointmentSlotSignature(previous) !== appointmentSlotSignature(item)) {
+        return { appointment: item, kind: "reschedule" };
+      }
+      if (!previous.email && item.email) return { appointment: item, kind: "booking" };
+      if (appointmentContactSignature(previous) !== appointmentContactSignature(item)) return null;
+      return null;
+    })
+    .filter(Boolean);
+}
+
+async function sendCalendarChangeNotifications(previousItems = [], nextItems = []) {
+  const results = [];
+  for (const { appointment, kind } of notificationJobsForCalendarChange(previousItems, nextItems)) {
+    try {
+      results.push(...(await sendBookingNotifications(appointment, { kind })));
+    } catch (error) {
+      console.error("Calendar change notification failed", appointment?.id, kind, error);
+    }
+  }
+  return results;
 }
 
 async function verifyAdminPassword(email, password) {
@@ -1626,6 +1647,7 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
   const jobs = [];
 
   async function sendAndRecord(channel, recipient, subject, html, text, key) {
+    const notificationKind = `${kind}_${channel}_email`;
     const result = await sendEmail({
       to: recipient,
       subject,
@@ -1634,6 +1656,7 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
       replyTo,
       idempotencyKey: key,
     });
+    const status = result.sent ? "sent" : "failed";
 
     try {
       await recordNotification({
@@ -1641,8 +1664,8 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
         calendarItemId: appointment.id,
         recipient,
         subject,
-        kind: `${kind}_${channel}_email`,
-        status: result.sent ? "sent" : "failed",
+        kind: notificationKind,
+        status,
         provider: "resend",
         providerId: result.id || "",
         error: result.reason || result.error || "",
@@ -1655,7 +1678,34 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
       console.log("Booking email sent", channel, recipient, result.id || "no-provider-id");
     }
 
-    return { channel, ...result };
+    return {
+      channel,
+      recipient,
+      subject,
+      kind: notificationKind,
+      status,
+      ...result,
+    };
+  }
+
+  async function recordSkipped(channel, recipient, subject, reason) {
+    const notificationKind = `${kind}_${channel}_email`;
+    try {
+      await recordNotification({
+        personKey,
+        calendarItemId: appointment.id,
+        recipient,
+        subject,
+        kind: notificationKind,
+        status: "skipped",
+        provider: "settings",
+        providerId: "",
+        error: reason,
+      });
+    } catch (error) {
+      console.error("Notification skipped history write failed", channel, error);
+    }
+    return { channel, recipient, subject, kind: notificationKind, status: "skipped", sent: false, reason };
   }
 
   if ((settings.sendClientEmail || kind === "test") && (testRecipient || appointment.email)) {
@@ -1678,6 +1728,17 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
         `${kind}-client-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
       ),
     );
+  } else if (kind !== "test") {
+    const recipient = appointment.email || "";
+    const subject = renderTemplate(settings.clientEmailSubject, variables);
+    jobs.push(
+      recordSkipped(
+        "client",
+        recipient,
+        subject,
+        settings.sendClientEmail ? "missing_client_email" : "disabled_in_notification_settings",
+      ),
+    );
   }
 
   if (settings.sendAdminEmail && kind !== "test") {
@@ -1694,6 +1755,10 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
         `${kind}-admin-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
       ),
     );
+  } else if (kind !== "test") {
+    const recipient = settings.notificationEmail || account.contactEmail;
+    const subject = renderTemplate(settings.adminEmailSubject, variables);
+    jobs.push(recordSkipped("admin", recipient, subject, "disabled_in_notification_settings"));
   }
 
   if (!jobs.length) return [];
@@ -1893,21 +1958,12 @@ export async function handlePublicNotificationStatusRequest(req) {
     }
 
     const history = await readNotificationHistory();
-    const sent = history.find(
-      (notification) =>
-        notification.calendarItemId === appointmentId &&
-        notification.status === "sent" &&
-        notification.kind.includes("client_email"),
+    const notification = history.find(
+      (candidate) => candidate.calendarItemId === appointmentId && candidate.kind.includes("client_email"),
     );
     return json({
-      sent: Boolean(sent),
-      notification: sent
-        ? {
-            channel: "client",
-            sent: true,
-            id: sent.providerId,
-          }
-        : null,
+      sent: notification?.status === "sent",
+      notification: notification ? notificationResultFromRecord(notification) : null,
     });
   } catch (error) {
     console.error("public_notification_status:failed", error);
@@ -1937,6 +1993,61 @@ function matchesRescheduleContact(item, email, phone) {
   const itemEmail = normalizeRescheduleContact(item.email);
   const itemPhone = normalizeRescheduleContact(item.phone);
   return Boolean(itemEmail && itemPhone && itemEmail === email && itemPhone === phone);
+}
+
+function matchesNotificationContact(item, email, phone) {
+  if (item.kind !== "appointment") return false;
+  const itemEmail = normalizeRescheduleContact(item.email);
+  const itemPhone = normalizeRescheduleContact(item.phone);
+  if (!itemEmail || itemEmail !== email) return false;
+  return !itemPhone || !phone || itemPhone === phone;
+}
+
+function notificationResultFromRecord(notification) {
+  const channel = notification.kind.includes("admin") ? "admin" : "client";
+  return {
+    channel,
+    recipient: notification.recipient,
+    subject: notification.subject,
+    kind: notification.kind,
+    status: notification.status,
+    sent: notification.status === "sent",
+    id: notification.providerId,
+    reason: notification.error,
+  };
+}
+
+async function triggerPublicBookingNotifications(payload) {
+  const appointmentId = cleanString(payload?.appointmentId || payload?.appointment || "", "", 120);
+  const email = normalizeRescheduleContact(payload?.email);
+  const phone = normalizeRescheduleContact(payload?.phone);
+  const kind = payload?.kind === "reschedule" ? "reschedule" : "booking";
+
+  if (!appointmentId || !email) {
+    throw Object.assign(new Error("Booking email details are missing."), { status: 400 });
+  }
+
+  const state = await readPublicCalendarState();
+  const appointment = state.items.find((item) => item.id === appointmentId);
+  if (!appointment || !matchesNotificationContact(appointment, email, phone)) {
+    throw Object.assign(new Error("That booking could not be verified for email notification."), { status: 404 });
+  }
+
+  const existing = (await readNotificationHistory()).filter(
+    (notification) => notification.calendarItemId === appointmentId && notification.kind.startsWith(`${kind}_`),
+  );
+  const alreadySent = existing.some((notification) => notification.status === "sent");
+  if (alreadySent) {
+    return { ok: true, alreadySent: true, results: existing.map(notificationResultFromRecord) };
+  }
+
+  const results = await sendBookingNotifications(appointment, { kind });
+  return {
+    ok: results.some((result) => result.sent),
+    alreadySent: false,
+    results,
+    notifications: await readNotificationHistory(),
+  };
 }
 
 async function lookupPublicReschedule(payload) {
@@ -2163,7 +2274,7 @@ async function parseBody(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-export async function handleBookingApiRoute(req: Request, forcedPathname = "") {
+export async function handleBookingApiRoute(req: Request, forcedPathname = "", context = null) {
   const url = new URL(req.url);
   const rawPathname = url.pathname;
   const pathname = forcedPathname
@@ -2252,6 +2363,10 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "") {
       return handlePublicBookingStateRequest();
     }
 
+    if (req.method === "POST" && pathname === "/api/public-booking-notifications") {
+      return json(await triggerPublicBookingNotifications(await parseBody(req)));
+    }
+
     if (req.method === "GET" && pathname === "/api/public-diagnostics") {
       return json(await runPublicDiagnostics());
     }
@@ -2271,14 +2386,15 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "") {
     if (req.method === "PUT" && pathname === "/api/calendar-state") {
       const body = await parseBody(req);
       const current = await readCalendarState();
-      return json(
-        publicCalendarState(
-          await writeCalendarState({
-            syncKey: typeof body.syncKey === "string" ? body.syncKey : current.syncKey,
-            items: Array.isArray(body.items) ? body.items : current.items,
-          }),
-        ),
-      );
+      const nextState = await writeCalendarState({
+        syncKey: typeof body.syncKey === "string" ? body.syncKey : current.syncKey,
+        items: Array.isArray(body.items) ? body.items : current.items,
+      });
+      const notificationResults = await sendCalendarChangeNotifications(current.items, nextState.items);
+      return json({
+        ...publicCalendarState({ ...nextState, notifications: await readNotificationHistory() }),
+        notificationResults,
+      });
     }
 
     if (req.method === "PUT" && pathname === "/api/calendar-sync-key") {
