@@ -669,6 +669,20 @@ async function ensureNotificationHistoryTable() {
     CREATE INDEX IF NOT EXISTS idx_notification_history_item
     ON notification_history (calendar_item_id, created_at DESC)
   `;
+  await db().sql`
+    CREATE INDEX IF NOT EXISTS idx_notification_history_provider
+    ON notification_history (provider_id)
+    WHERE provider_id IS NOT NULL AND provider_id <> ''
+  `;
+  await db().sql`
+    CREATE TABLE IF NOT EXISTS notification_webhook_events (
+      id TEXT PRIMARY KEY,
+      provider_id TEXT,
+      event_type TEXT NOT NULL,
+      payload TEXT,
+      received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
 }
 
 async function ensureSeeded() {
@@ -792,6 +806,68 @@ function notificationPersonKey({ name = "", email = "", phone = "" } = {}) {
   if (phoneDigits) return `phone:${phoneDigits}`;
   const cleanName = cleanString(name, "", 180).toLowerCase().replace(/\s+/g, " ").trim();
   return cleanName ? `name:${cleanName}` : "";
+}
+
+function notificationStatusPriority(status = "") {
+  return ({
+    skipped: 0,
+    queued: 1,
+    sent: 10,
+    delayed: 15,
+    delivered: 20,
+    opened: 25,
+    clicked: 30,
+    failed: 40,
+    suppressed: 45,
+    complained: 50,
+    bounced: 60,
+  })[status] ?? 0;
+}
+
+function shouldApplyNotificationStatus(currentStatus = "", nextStatus = "") {
+  if (!nextStatus) return false;
+  if (!currentStatus) return true;
+  return notificationStatusPriority(nextStatus) >= notificationStatusPriority(currentStatus);
+}
+
+function resendWebhookStatus(type = "") {
+  switch (type) {
+    case "email.sent":
+      return "sent";
+    case "email.delivered":
+      return "delivered";
+    case "email.delivery_delayed":
+      return "delayed";
+    case "email.opened":
+      return "opened";
+    case "email.clicked":
+      return "clicked";
+    case "email.failed":
+      return "failed";
+    case "email.bounced":
+      return "bounced";
+    case "email.complained":
+      return "complained";
+    case "email.suppressed":
+      return "suppressed";
+    default:
+      return "";
+  }
+}
+
+function resendWebhookErrorMessage(event = {}) {
+  const data = event?.data || {};
+  const bounce = data?.bounce || {};
+  return cleanString(
+    bounce?.message ||
+      data?.error ||
+      data?.message ||
+      data?.reason ||
+      data?.response ||
+      "",
+    "",
+    500,
+  );
 }
 
 function rowToNotification(row) {
@@ -1962,13 +2038,80 @@ export async function handlePublicNotificationStatusRequest(req) {
       (candidate) => candidate.calendarItemId === appointmentId && candidate.kind.includes("client_email"),
     );
     return json({
-      sent: notification?.status === "sent",
+      sent: ["sent", "delivered", "opened", "clicked"].includes(notification?.status || ""),
       notification: notification ? notificationResultFromRecord(notification) : null,
     });
   } catch (error) {
     console.error("public_notification_status:failed", error);
     return json({ sent: false }, 500);
   }
+}
+
+async function applyResendWebhookEvent(event = {}, deliveryId = "") {
+  const status = resendWebhookStatus(event?.type || "");
+  const providerId = cleanString(deliveryId || event?.data?.email_id || "", "", 180);
+  if (!status || !providerId) {
+    return { ok: false, reason: "ignored", providerId, status };
+  }
+
+  const existingRows = await db().sql`
+    SELECT id, status, error
+    FROM notification_history
+    WHERE provider_id = ${providerId}
+  `;
+  if (!existingRows.length) {
+    return { ok: false, reason: "notification_not_found", providerId, status };
+  }
+
+  const errorMessage = resendWebhookErrorMessage(event);
+  for (const row of existingRows) {
+    if (!shouldApplyNotificationStatus(row.status || "", status)) continue;
+    await db().sql`
+      UPDATE notification_history
+      SET status = ${status},
+          error = CASE
+            WHEN ${errorMessage} <> '' THEN ${errorMessage}
+            ELSE error
+          END
+      WHERE id = ${row.id}
+    `;
+  }
+
+  return { ok: true, providerId, status };
+}
+
+export async function handleResendWebhookRequest(req) {
+  const payloadText = await req.text();
+  let event = {};
+  try {
+    event = payloadText ? JSON.parse(payloadText) : {};
+  } catch {
+    return json({ ok: false, message: "Invalid webhook payload." }, 400);
+  }
+
+  await ensureSeeded();
+
+  const deliveryId = cleanString(req.headers.get("svix-id") || "", "", 180);
+  if (deliveryId) {
+    const existing = await db().sql`SELECT id FROM notification_webhook_events WHERE id = ${deliveryId} LIMIT 1`;
+    if (existing.length) return json({ ok: true, duplicate: true });
+  }
+
+  const result = await applyResendWebhookEvent(event, "");
+
+  await db().sql`
+    INSERT INTO notification_webhook_events (id, provider_id, event_type, payload, received_at)
+    VALUES (
+      ${deliveryId || randomUUID()},
+      ${cleanString(event?.data?.email_id || "", "", 180)},
+      ${cleanString(event?.type || "unknown", "unknown", 120)},
+      ${payloadText.slice(0, 12000)},
+      NOW()
+    )
+    ON CONFLICT (id) DO NOTHING
+  `;
+
+  return json({ ok: true, result });
 }
 
 function normalizeRescheduleContact(value) {
@@ -2011,7 +2154,7 @@ function notificationResultFromRecord(notification) {
     subject: notification.subject,
     kind: notification.kind,
     status: notification.status,
-    sent: notification.status === "sent",
+    sent: ["sent", "delivered", "opened", "clicked"].includes(notification.status || ""),
     id: notification.providerId,
     reason: notification.error,
   };

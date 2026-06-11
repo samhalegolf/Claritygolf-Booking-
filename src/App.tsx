@@ -1180,16 +1180,25 @@ function notificationKindLabel(kind = "") {
 }
 
 function notificationStatusLabel(notification: Pick<NotificationRecord, "status" | "error">) {
-  if (notification.status === "sent") return "Sent";
+  if (notification.status === "delivered") return "Delivered";
+  if (notification.status === "opened") return "Opened";
+  if (notification.status === "clicked") return "Clicked";
+  if (notification.status === "sent") return "Sent to provider";
+  if (notification.status === "delayed") return notification.error ? `Delayed · ${notification.error.replaceAll("_", " ")}` : "Delayed";
+  if (notification.status === "bounced") return notification.error ? `Bounced · ${notification.error.replaceAll("_", " ")}` : "Bounced";
+  if (notification.status === "suppressed") return notification.error ? `Suppressed · ${notification.error.replaceAll("_", " ")}` : "Suppressed";
+  if (notification.status === "complained") return notification.error ? `Complained · ${notification.error.replaceAll("_", " ")}` : "Complained";
   if (notification.status === "skipped") return notification.error ? `Skipped · ${notification.error.replaceAll("_", " ")}` : "Skipped";
   if (notification.status === "failed") return notification.error ? `Failed · ${notification.error.replaceAll("_", " ")}` : "Failed";
   return notification.status || "Pending";
 }
 
 function notificationTone(status = "") {
+  if (["delivered", "opened", "clicked"].includes(status)) return "delivered";
   if (status === "sent") return "sent";
+  if (["bounced", "failed", "complained", "suppressed"].includes(status)) return "failed";
   if (status === "skipped") return "skipped";
-  if (status === "failed") return "failed";
+  if (status === "delayed") return "delayed";
   return "pending";
 }
 

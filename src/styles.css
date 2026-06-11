@@ -4474,11 +4474,19 @@ button {
 }
 
 .email-status-dot.sent {
-  background: color-mix(in srgb, var(--coach-primary) 70%, #1b1b1b);
+  background: color-mix(in srgb, #6db7ff 72%, #172235);
+}
+
+.email-status-dot.delivered {
+  background: color-mix(in srgb, var(--coach-primary) 75%, #15311f);
 }
 
 .email-status-dot.failed {
   background: #c94a35;
+}
+
+.email-status-dot.delayed {
+  background: color-mix(in srgb, #d7b06b 72%, #3a2a14);
 }
 
 .email-status-dot.skipped {
