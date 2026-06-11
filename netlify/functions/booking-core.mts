@@ -1986,8 +1986,8 @@ async function createPublicBooking(payload, context = null) {
     note: "Booked from public booking page.",
   };
   await writePublicBookingState(state, [...state.items, appointment]);
-  queueBookingNotifications(appointment, { kind: "booking" }, context);
-  return { appointment, notifications: [] };
+  const notifications = await sendInitialBookingNotifications(appointment, "booking");
+  return { appointment, notifications };
 }
 
 export async function handlePublicBookingRequest(req, context = null) {
@@ -2255,9 +2255,9 @@ async function reschedulePublicBooking(payload, context = null) {
     state,
     state.items.map((item) => (item.id === appointment.id ? updatedAppointment : item)),
   );
-  queueBookingNotifications(updatedAppointment, { kind: "reschedule" }, context);
+  const notifications = await sendInitialBookingNotifications(updatedAppointment, "reschedule");
 
-  return { appointment: updatedAppointment, notifications: [] };
+  return { appointment: updatedAppointment, notifications };
 }
 
 export async function handlePublicRescheduleLookupRequest(req) {
