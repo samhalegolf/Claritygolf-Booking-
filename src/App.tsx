@@ -1963,6 +1963,35 @@ function App() {
     setBrandSettings(cleanBrandSettings(settings));
   }
 
+
+  async function readApiFailure(response: Response, fallback: string) {
+    try {
+      const contentType = response.headers.get("Content-Type") || "";
+      if (contentType.includes("application/json")) {
+        const data = (await response.json()) as { message?: string; error?: string; failed?: Array<{ name?: string; message?: string }> };
+        const firstFailed = Array.isArray(data.failed) && data.failed[0] ? `${data.failed[0].name}: ${data.failed[0].message}` : "";
+        return [data.message, firstFailed, data.error, `${response.status} ${response.statusText}`].filter(Boolean).join(" · ");
+      }
+      const text = await response.text();
+      return text ? `${response.status} ${response.statusText}: ${text.slice(0, 280)}` : `${response.status} ${response.statusText}`;
+    } catch {
+      return fallback;
+    }
+  }
+
+  async function fetchDatabaseHealthSummary() {
+    try {
+      const response = await fetch("/api/database-health", { headers: { Accept: "application/json" } });
+      if (!response.ok) return "";
+      const data = (await response.json()) as { ok?: boolean; failed?: Array<{ name?: string; message?: string }> };
+      if (data.ok) return "Database health passed, but calendar state still failed.";
+      const firstFailed = Array.isArray(data.failed) && data.failed[0] ? data.failed[0] : null;
+      return firstFailed ? `Database health failed at ${firstFailed.name}: ${firstFailed.message}` : "Database health failed.";
+    } catch {
+      return "";
+    }
+  }
+
   async function loadAdminCalendarState() {
     hasLoadedCalendarApiRef.current = false;
     setCalendarFeedStatus("checking");
@@ -1973,7 +2002,11 @@ function App() {
       setAuthStatus("guest");
       throw new Error("Admin login required");
     }
-    if (!response.ok) throw new Error("Calendar API unavailable");
+    if (!response.ok) {
+      const apiMessage = await readApiFailure(response, "Calendar API unavailable");
+      const healthMessage = await fetchDatabaseHealthSummary();
+      throw new Error([apiMessage, healthMessage].filter(Boolean).join(" · "));
+    }
     const data = (await response.json()) as {
       syncKey?: string;
       items?: CalendarItem[];
@@ -3670,12 +3703,13 @@ function App() {
       if (data.email) setAdminEmail(data.email);
       try {
         await loadAdminCalendarState();
-      } catch {
+      } catch (error) {
         hasLoadedCalendarApiRef.current = false;
         setAuthStatus("guest");
         setCalendarFeedStatus("offline");
         await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-        setAuthError("Login worked, but the live database is not connected. Nothing will be editable until the database connection is fixed.");
+        const detail = error instanceof Error && error.message ? ` Details: ${error.message}` : "";
+        setAuthError(`Login worked, but the live database is not connected. Nothing will be editable until the database connection is fixed.${detail}`);
         return;
       }
       setAuthStatus("authenticated");

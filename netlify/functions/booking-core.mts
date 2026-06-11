@@ -1386,6 +1386,76 @@ async function runPublicSerializationDiagnostics() {
   return diagnostics;
 }
 
+
+async function runDatabaseHealth() {
+  const checks = {};
+  async function check(name, fn) {
+    const startedAt = Date.now();
+    try {
+      const result = await fn();
+      checks[name] = {
+        ok: true,
+        ms: Date.now() - startedAt,
+        summary:
+          typeof result === "number"
+            ? `${result} records`
+            : typeof result === "string"
+              ? result
+              : Array.isArray(result)
+                ? `${result.length} records`
+                : "ok",
+      };
+    } catch (error) {
+      checks[name] = {
+        ok: false,
+        ms: Date.now() - startedAt,
+        message: error instanceof Error ? error.message : "Unknown database health error",
+        name: error instanceof Error ? error.name : "UnknownError",
+      };
+    }
+  }
+
+  await check("getDatabase", async () => {
+    db();
+    return "database handle created";
+  });
+  await check("coreTables", async () => {
+    await ensureCoreTables();
+    return "core tables ready";
+  });
+  await check("settingsSeed", async () => {
+    await seedSettings();
+    return "settings seed ready";
+  });
+  await check("notificationTables", async () => {
+    await ensureNotificationHistoryTable();
+    return "notification tables ready";
+  });
+  await check("itemsRead", async () => (await readItems()).length);
+  await check("servicesRead", async () => (await readServices()).length);
+  await check("availabilityRead", async () => (await readAvailability()).flat().length);
+  await check("peopleRead", async () => (await readPeople()).length);
+  await check("notificationsRead", async () => (await readNotificationHistory()).length);
+  await check("adminSeed", async () => {
+    await ensureAdminUser();
+    return "admin seed checked";
+  });
+  await check("calendarStateRead", async () => {
+    const state = await readCalendarState();
+    return `${state.items.length} items, ${state.people.length} people`;
+  });
+
+  const failed = Object.entries(checks)
+    .filter(([, value]) => !value.ok)
+    .map(([name, value]) => ({ name, ...value }));
+  return {
+    ok: failed.length === 0,
+    failed,
+    checks,
+    timestamp: nowIso(),
+  };
+}
+
 export async function handleCalendarFeedRequest(req: Request) {
   try {
     const state = await readPublicCalendarState();
@@ -2595,6 +2665,10 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
 
     if (req.method === "GET" && pathname === "/api/public-serialization-diagnostics") {
       return json(await runPublicSerializationDiagnostics());
+    }
+
+    if (req.method === "GET" && pathname === "/api/database-health") {
+      return json(await runDatabaseHealth());
     }
 
     if (pathname.startsWith("/api/")) {
