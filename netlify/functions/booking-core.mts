@@ -1409,6 +1409,12 @@ export async function handlePublicBookingStateRequest() {
 
 async function writeCalendarState(nextState) {
   const current = await readCalendarState();
+  const expectedUpdatedAt = cleanString(nextState?.updatedAt || nextState?.previousUpdatedAt, "", 120);
+  if (expectedUpdatedAt && current.updatedAt && expectedUpdatedAt !== current.updatedAt) {
+    throw Object.assign(new Error("Calendar changed elsewhere. Reload before saving so you do not overwrite live bookings."), {
+      status: 409,
+    });
+  }
   const syncKey = cleanString(nextState?.syncKey, current.syncKey, 140);
   const items = await writeItems(nextState?.items ?? current.items);
   const updatedAt = nowIso();
@@ -2605,6 +2611,7 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
       const nextState = await writeCalendarState({
         syncKey: typeof body.syncKey === "string" ? body.syncKey : current.syncKey,
         items: Array.isArray(body.items) ? body.items : current.items,
+        updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
       });
       const notificationResults = await sendCalendarChangeNotifications(current.items, nextState.items);
       return json({

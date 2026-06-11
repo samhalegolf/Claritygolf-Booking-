@@ -307,6 +307,7 @@ type SavedBookingLogin = BookingForm;
 type ClientProfileTab = "bookings" | "notifications";
 
 type CalendarFeedStatus = "checking" | "connected" | "offline";
+type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
 type AuthStatus = "checking" | "authenticated" | "guest";
 type AuthMode = "login" | "forgot" | "reset";
 type ThemeMode = "light" | "dark";
@@ -1550,6 +1551,9 @@ function App() {
   const [calendarSyncKey, setCalendarSyncKey] = useState(generateSyncKey);
   const [copiedSync, setCopiedSync] = useState<"url" | "key" | null>(null);
   const [calendarFeedStatus, setCalendarFeedStatus] = useState<CalendarFeedStatus>("checking");
+  const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
+  const [calendarSaveError, setCalendarSaveError] = useState("");
+  const [calendarStateVersion, setCalendarStateVersion] = useState("");
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
   const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
@@ -1888,27 +1892,48 @@ function App() {
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
     const saveVersion = ++calendarSaveVersionRef.current;
+    setCalendarSaveStatus("saving");
+    setCalendarSaveError("");
     void fetch("/api/calendar-state", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items, syncKey: calendarSyncKey }),
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ items, syncKey: calendarSyncKey, updatedAt: calendarStateVersion }),
     })
       .then(async (response) => {
         if (calendarSaveVersionRef.current !== saveVersion) return;
-        if (!response.ok) throw new Error("Calendar feed save failed");
-        setCalendarFeedStatus("connected");
         const data = (await response.json().catch(() => ({}))) as {
+          message?: string;
+          error?: string;
           notifications?: NotificationRecord[];
           notificationResults?: EmailSendResult[];
+          updatedAt?: string;
+          items?: CalendarItem[];
         };
+        if (response.status === 401) {
+          setAuthStatus("guest");
+          throw new Error(data.message || "Admin login expired. Sign in again before editing the calendar.");
+        }
+        if (!response.ok) throw new Error(data.message || data.error || "Calendar save failed.");
+        setCalendarFeedStatus("connected");
+        setCalendarSaveStatus("saved");
+        setCalendarSaveError("");
+        if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+        if (Array.isArray(data.items)) setItems(data.items);
         if (Array.isArray(data.notifications)) setNotifications(data.notifications);
+        window.setTimeout(() => {
+          if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
+        }, 1800);
         window.setTimeout(() => void refreshNotificationHistory(), 1500);
         window.setTimeout(() => void refreshNotificationHistory(), 8000);
         window.setTimeout(() => void refreshNotificationHistory(), 35000);
       })
-      .catch(() => {
+      .catch((error) => {
         if (calendarSaveVersionRef.current === saveVersion) {
+          const message = error instanceof Error ? error.message : "Calendar save failed.";
           setCalendarFeedStatus("offline");
+          setCalendarSaveStatus("failed");
+          setCalendarSaveError(message);
+          setToast({ message: `Calendar did not save: ${message}` });
         }
       });
   }, [authStatus, calendarSyncKey, isEmbedMode, items]);
@@ -1953,7 +1978,9 @@ function App() {
       settings?: Partial<NotificationSettings>;
       brand?: Partial<BrandSettings>;
       account?: Partial<CoachAccount>;
+      updatedAt?: string;
     };
+    if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
     if (Array.isArray(data.items)) setItems(data.items);
     if (Array.isArray(data.people)) setPeople(data.people);
     if (Array.isArray(data.notifications)) setNotifications(data.notifications);
@@ -1978,7 +2005,9 @@ function App() {
       notifications?: NotificationRecord[];
       brand?: Partial<BrandSettings>;
       account?: Partial<CoachAccount>;
+      updatedAt?: string;
     };
+    if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
     if (Array.isArray(data.items)) setItems(data.items);
     if (Array.isArray(data.notifications)) setNotifications(data.notifications);
     if (Array.isArray(data.services)) setServices(cleanServices(data.services));
@@ -5042,7 +5071,26 @@ function App() {
           <div className="calendar-card">
             <div className="calendar-toolbar">
               <h2>{weekTitle}</h2>
+              <div className={`calendar-save-pill ${calendarSaveStatus}`}>
+                <strong>
+                  {calendarSaveStatus === "saving"
+                    ? "Saving"
+                    : calendarSaveStatus === "saved"
+                      ? "Saved"
+                      : calendarSaveStatus === "failed"
+                        ? "Save failed"
+                        : calendarFeedStatus === "connected"
+                          ? "Live database"
+                          : "Not connected"}
+                </strong>
+                {calendarSaveStatus === "failed" && calendarSaveError ? <span>{calendarSaveError}</span> : null}
+              </div>
             </div>
+            {calendarSaveStatus === "failed" && (
+              <div className="calendar-save-warning">
+                This calendar is not saving to the production database. Do not trust bookings or email receipts until this is fixed.
+              </div>
+            )}
 
             <div className="calendar-header-row">
               <div className="time-gutter" />
@@ -6210,12 +6258,14 @@ function App() {
                   <span>Feed endpoint</span>
                   <strong>
                     {calendarFeedStatus === "connected"
-                      ? "Connected"
+                      ? calendarSaveStatus === "failed"
+                        ? "Connected, but save failed"
+                        : "Connected"
                       : calendarFeedStatus === "checking"
                         ? "Checking"
                         : "Offline"}
                   </strong>
-                  <em>{calendarFeedUrl}</em>
+                  <em>{calendarSaveError || calendarFeedUrl}</em>
                 </div>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">

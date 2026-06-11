@@ -4768,3 +4768,66 @@ button {
   opacity: 0;
   transform: translateY(-2px);
 }
+
+/* Persistence safety: make the production database save state visible. */
+.calendar-save-pill {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  max-width: min(360px, 48vw);
+  padding: 8px 11px;
+  border: 1px solid rgba(20, 25, 20, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 8px 18px rgba(20, 20, 20, 0.08);
+  backdrop-filter: blur(12px);
+  color: #25251f;
+  text-align: right;
+}
+
+.calendar-save-pill strong {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.calendar-save-pill span {
+  max-width: 100%;
+  overflow: hidden;
+  color: #7d3028;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-save-pill.saving strong {
+  color: #8a6a19;
+}
+
+.calendar-save-pill.saved strong,
+.calendar-save-pill.idle strong {
+  color: #206f3d;
+}
+
+.calendar-save-pill.failed {
+  border-color: rgba(201, 74, 53, 0.36);
+  background: rgba(255, 241, 238, 0.9);
+}
+
+.calendar-save-pill.failed strong {
+  color: #c94a35;
+}
+
+.calendar-save-warning {
+  margin: 12px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(201, 74, 53, 0.34);
+  border-radius: 14px;
+  background: rgba(255, 241, 238, 0.94);
+  color: #7d3028;
+  font-size: 13px;
+  font-weight: 800;
+}
