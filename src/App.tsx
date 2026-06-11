@@ -1578,6 +1578,7 @@ function App() {
   const edgeCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestureCleanupRef = useRef<null | (() => void)>(null);
   const brandSaveVersionRef = useRef(0);
+  const calendarSaveVersionRef = useRef(0);
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
@@ -1886,14 +1887,14 @@ function App() {
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
-    const controller = new AbortController();
+    const saveVersion = ++calendarSaveVersionRef.current;
     void fetch("/api/calendar-state", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items, syncKey: calendarSyncKey }),
-      signal: controller.signal,
     })
       .then(async (response) => {
+        if (calendarSaveVersionRef.current !== saveVersion) return;
         if (!response.ok) throw new Error("Calendar feed save failed");
         setCalendarFeedStatus("connected");
         const data = (await response.json().catch(() => ({}))) as {
@@ -1905,13 +1906,11 @@ function App() {
         window.setTimeout(() => void refreshNotificationHistory(), 8000);
         window.setTimeout(() => void refreshNotificationHistory(), 35000);
       })
-      .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
+      .catch(() => {
+        if (calendarSaveVersionRef.current === saveVersion) {
           setCalendarFeedStatus("offline");
         }
       });
-
-    return () => controller.abort();
   }, [authStatus, calendarSyncKey, isEmbedMode, items]);
 
   useEffect(() => {

@@ -1841,6 +1841,79 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
   return Promise.all(jobs);
 }
 
+async function sendInitialBookingNotifications(appointment, kind = "booking") {
+  try {
+    const results = await sendBookingNotifications(appointment, { kind });
+    return Array.isArray(results) ? results : [];
+  } catch (error) {
+    const errorMessage = cleanString(error instanceof Error ? error.message : String(error || "unknown_error"), "unknown_error", 450);
+    console.error("Initial booking notifications failed", appointment?.id, kind, error);
+
+    const fallbackResults = [];
+    try {
+      const settings = await readAdminSettings();
+      const account = await readCoachAccount();
+      const services = await readServices();
+      const service = services.find((candidate) => candidate.id === appointment?.serviceId);
+      const variables = bookingEmailVariables({ appointment, service, account });
+      const personKey = notificationPersonKey({
+        name: appointment?.client || appointment?.title,
+        email: appointment?.email,
+        phone: appointment?.phone,
+      });
+
+      async function recordFailed(channel, recipient, subject, reason = "send_exception") {
+        const notificationKind = `${kind}_${channel}_email`;
+        const result = {
+          channel,
+          recipient,
+          subject,
+          kind: notificationKind,
+          status: "failed",
+          sent: false,
+          reason,
+          error: errorMessage,
+        };
+        fallbackResults.push(result);
+        await recordNotification({
+          personKey,
+          calendarItemId: appointment?.id || "",
+          recipient,
+          subject,
+          kind: notificationKind,
+          status: "failed",
+          provider: "resend",
+          providerId: "",
+          error: `${reason}:${errorMessage}`,
+        });
+      }
+
+      if (appointment?.email && settings.sendClientEmail) {
+        await recordFailed(
+          "client",
+          appointment.email,
+          renderTemplate(settings.clientEmailSubject, variables),
+        );
+      }
+
+      if (settings.sendAdminEmail) {
+        const recipient = settings.notificationEmail || account.contactEmail;
+        await recordFailed(
+          "admin",
+          recipient,
+          renderTemplate(settings.adminEmailSubject, variables),
+        );
+      }
+    } catch (recordError) {
+      console.error("Initial booking notification fallback receipt failed", appointment?.id, kind, recordError);
+    }
+
+    return fallbackResults.length
+      ? fallbackResults
+      : [{ channel: "client", sent: false, status: "failed", reason: "send_exception", error: errorMessage }];
+  }
+}
+
 async function resetAdminPassword(token, password) {
   const cleanToken = cleanString(token, "", 500);
   if (!cleanToken) return { error: "invalid_token" };
