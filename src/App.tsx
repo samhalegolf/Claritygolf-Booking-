@@ -1846,12 +1846,14 @@ function App() {
           return;
         }
 
-        setAuthStatus("authenticated");
         if (session.email) setAdminEmail(session.email);
         await loadAdminCalendarState();
+        if (cancelled) return;
+        setAuthStatus("authenticated");
         setCalendarFeedStatus("connected");
       } catch {
         if (!cancelled) {
+          hasLoadedCalendarApiRef.current = false;
           setCalendarFeedStatus("offline");
           if (!isEmbedMode) setAuthStatus("guest");
         }
@@ -1962,6 +1964,10 @@ function App() {
   }
 
   async function loadAdminCalendarState() {
+    hasLoadedCalendarApiRef.current = false;
+    setCalendarFeedStatus("checking");
+    setCalendarSaveStatus("idle");
+    setCalendarSaveError("");
     const response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
     if (response.status === 401) {
       setAuthStatus("guest");
@@ -2015,6 +2021,28 @@ function App() {
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
     hasLoadedCalendarApiRef.current = true;
+  }
+
+  function requireLiveDatabase(action = "edit the calendar") {
+    if (isEmbedMode) return true;
+    if (authStatus !== "authenticated") {
+      hasLoadedCalendarApiRef.current = false;
+      setCalendarFeedStatus("offline");
+      setAuthStatus("guest");
+      setToast({ message: "Sign in again before editing. The calendar is not connected to the live database." });
+      return false;
+    }
+    if (calendarFeedStatus !== "connected" || !hasLoadedCalendarApiRef.current) {
+      setCalendarSaveStatus("failed");
+      setCalendarSaveError("Calendar is not connected to the live database.");
+      setToast({ message: `Cannot ${action}: the live database is not connected. Reload and sign in again.` });
+      return false;
+    }
+    if (calendarSaveStatus === "failed") {
+      setToast({ message: `Cannot ${action}: fix the save error or reload before editing again.` });
+      return false;
+    }
+    return true;
   }
 
   const displayItems = useMemo(() => {
@@ -2362,6 +2390,7 @@ function App() {
   }
 
   function dockAppointmentItem(movedItem: CalendarItem, options: { fromFlick?: boolean } = {}) {
+    if (!requireLiveDatabase("dock appointments")) return false;
     if (movedItem.kind !== "appointment") return false;
     const service = itemService(movedItem, services);
     if (!service) return false;
@@ -2609,6 +2638,7 @@ function App() {
   function beginMove(event: ReactPointerEvent<HTMLElement>, item: CalendarItem) {
     event.preventDefault();
     event.stopPropagation();
+    if (!requireLiveDatabase("move appointments")) return;
     const slot = slotFromPointer(event);
     if (!slot) return;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -2638,6 +2668,7 @@ function App() {
   function beginResize(event: ReactPointerEvent<HTMLElement>, item: CalendarItem) {
     event.preventDefault();
     event.stopPropagation();
+    if (!requireLiveDatabase("resize appointments")) return;
     pointerStartRef.current = { x: event.clientX, y: event.clientY };
     pointerClientRef.current = { x: event.clientX, y: event.clientY };
     resetPointerTrail(event.clientX, event.clientY);
@@ -2654,6 +2685,7 @@ function App() {
   function beginBlankGesture(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
     if ((event.target as HTMLElement).closest("[data-calendar-item]")) return;
+    if (!requireLiveDatabase("create calendar items")) return;
     const slot = slotFromPointer(event);
     if (!slot) return;
     pointerStartRef.current = { x: event.clientX, y: event.clientY };
@@ -2978,6 +3010,7 @@ function App() {
 
   function confirmQuickAppointment() {
     if (!quickCreate || !quickCreateService) return;
+    if (!requireLiveDatabase("create appointments")) return;
     const matchedClient = resolveQuickClient();
     const typedClientName = quickClientSearch.trim();
     const clientName = matchedClient?.name || typedClientName;
@@ -3014,6 +3047,7 @@ function App() {
 
   function createBlockFromQuick() {
     if (!quickCreate) return;
+    if (!requireLiveDatabase("create blocks")) return;
     const candidate = { week: activeWeek, day: quickCreate.day, start: quickCreate.start, duration: 30 };
     if (!isValidBlockSlot(candidate)) {
       setToast({ message: "That block would overlap with another calendar item." });
@@ -3633,12 +3667,24 @@ function App() {
         setAuthError(data.message || "Login failed.");
         return;
       }
+      if (data.email) setAdminEmail(data.email);
+      try {
+        await loadAdminCalendarState();
+      } catch {
+        hasLoadedCalendarApiRef.current = false;
+        setAuthStatus("guest");
+        setCalendarFeedStatus("offline");
+        await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+        setAuthError("Login worked, but the live database is not connected. Nothing will be editable until the database connection is fixed.");
+        return;
+      }
       setAuthStatus("authenticated");
       setAdminPassword("");
-      if (data.email) setAdminEmail(data.email);
-      await loadAdminCalendarState();
       setCalendarFeedStatus("connected");
+      setAuthError("");
     } catch {
+      hasLoadedCalendarApiRef.current = false;
+      setAuthStatus("guest");
       setAuthError("Could not reach the booking server.");
       setCalendarFeedStatus("offline");
     }
@@ -3719,6 +3765,8 @@ function App() {
     setAuthStatus("guest");
     setSelectedId("");
     setCalendarFeedStatus("offline");
+    setCalendarSaveStatus("idle");
+    setCalendarSaveError("");
   }
 
   async function saveNotificationSettings() {
@@ -4083,6 +4131,7 @@ function App() {
 
   function removeSelected() {
     if (!selected) return;
+    if (!requireLiveDatabase("remove calendar items")) return;
     const previous = items;
     setItems(items.filter((item) => item.id !== selected.id));
     setSelectedId("");
