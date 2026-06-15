@@ -165,6 +165,21 @@ function personFromItem(item: ReturnType<typeof itemToRow>) {
   };
 }
 
+function uniqueById<T extends { id?: string | null }>(rows: T[]) {
+  const byId = new Map<string, T>();
+  for (const row of rows) {
+    if (!row.id) continue;
+    byId.set(row.id, row);
+  }
+  return [...byId.values()];
+}
+
+function postgrestQuotedList(values: string[]) {
+  return values
+    .map((value) => `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`)
+    .join(",");
+}
+
 async function setSetting(key: string, value: unknown) {
   await supabase("settings", {
     method: "POST",
@@ -243,11 +258,29 @@ async function readState() {
 }
 
 async function writeState(body: any) {
-  const rows = Array.isArray(body?.items) ? body.items.map(itemToRow) : [];
-  await supabase("calendar_items", { method: "DELETE", query: "id=not.is.null", prefer: "return=minimal" });
+  const rows = uniqueById(Array.isArray(body?.items) ? body.items.map(itemToRow) : []);
   if (rows.length) {
-    await supabase("calendar_items", { method: "POST", body: rows, prefer: "return=minimal" });
-    const people = rows.map(personFromItem).filter(Boolean);
+    await supabase("calendar_items", {
+      method: "POST",
+      query: "on_conflict=id",
+      body: rows,
+      prefer: "resolution=merge-duplicates,return=minimal",
+    });
+
+    const keepIds = postgrestQuotedList(rows.map((row) => row.id));
+    if (keepIds) {
+      await supabase("calendar_items", {
+        method: "DELETE",
+        query: `id=not.in.(${keepIds})`,
+        prefer: "return=minimal",
+      });
+    }
+
+    const people = uniqueById(
+      rows
+        .map(personFromItem)
+        .filter((person): person is NonNullable<ReturnType<typeof personFromItem>> => Boolean(person)),
+    );
     if (people.length) {
       await supabase("people", {
         method: "POST",
@@ -256,6 +289,8 @@ async function writeState(body: any) {
         body: people,
       });
     }
+  } else {
+    await supabase("calendar_items", { method: "DELETE", query: "id=not.is.null", prefer: "return=minimal" });
   }
   if (typeof body?.syncKey === "string") await setSetting("syncKey", body.syncKey);
   await setSetting("updatedAt", nowIso());
