@@ -1,1 +1,9 @@
-{"name":"clarity-local-database-adapter","version":"1.0.0","type":"module","main":"index.mjs"}
+{
+  "name": "@netlify/database",
+  "version": "1.0.0-clarity-supabase",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  }
+}
