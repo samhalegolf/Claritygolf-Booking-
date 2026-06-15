@@ -16,6 +16,7 @@ export const config: Config = {
     "/api/auth/session",
     "/api/calendar-state",
     "/api/test-email",
+    "/api/system-smoke",
     "/api/public-booking-state",
     "/api/public-notification-status",
     "/api/public-booking",
