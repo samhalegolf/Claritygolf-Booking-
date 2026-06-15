@@ -2,7 +2,7 @@ import type { Config, Context } from "@netlify/functions";
 
 import { handleBookingApiRoute } from "./booking-core.mts";
 
-const databaseAdapterBuild = "supabase-local-adapter-v6";
+const databaseAdapterBuild = "supabase-local-adapter-v7";
 
 export default async (req: Request, context: Context) => {
   void databaseAdapterBuild;
@@ -15,6 +15,7 @@ export const config: Config = {
     "/api/auth/login",
     "/api/auth/session",
     "/api/calendar-state",
+    "/api/notification-history",
     "/api/test-email",
     "/api/system-smoke",
     "/api/public-booking-state",
