@@ -2,7 +2,12 @@ import type { Config, Context } from "@netlify/functions";
 
 import { handleBookingApiRoute } from "./booking-core.mts";
 
-export default async (req: Request, context: Context) => handleBookingApiRoute(req, "", context);
+const databaseAdapterBuild = "supabase-local-adapter-v2";
+
+export default async (req: Request, context: Context) => {
+  void databaseAdapterBuild;
+  return handleBookingApiRoute(req, "", context);
+};
 
 export const config: Config = {
   path: "/api/*",
