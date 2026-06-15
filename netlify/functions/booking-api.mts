@@ -13,5 +13,6 @@ export const config: Config = {
     "/api/public-reschedule",
     "/api/public-reschedule-lookup",
     "/api/public-reschedule/lookup",
+    "/api/people/migrate",
   ],
 };
