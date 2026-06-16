@@ -4,6 +4,83 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Clarity Golf Booking</title>
+    <script>
+      // Production safety net: older booking/client rows can contain null text fields.
+      // Normalise those fields before React reads API JSON so helpers like toLowerCase()/trim() cannot white-screen the app.
+      (() => {
+        const TEXT_KEYS = new Set([
+          "id",
+          "name",
+          "firstName",
+          "lastName",
+          "email",
+          "phone",
+          "notes",
+          "note",
+          "client",
+          "title",
+          "source",
+          "serviceName",
+          "provider",
+          "providerId",
+          "recipient",
+          "subject",
+          "kind",
+          "status",
+          "error",
+          "calendarItemId",
+          "personKey",
+          "caddyProfileId",
+          "caddyProfileUrl",
+          "coachName",
+          "businessName",
+          "venueName",
+          "venueShortName",
+          "timezone",
+          "contactEmail",
+          "bookingUrl",
+          "calendarSlug",
+          "caddyWorkspaceUrl",
+          "logoName",
+          "logoPreview",
+          "neutral",
+          "primary",
+          "secondary",
+          "accent",
+          "bookingTheme",
+          "description",
+          "visibility",
+          "location",
+          "lessonFormat",
+          "priceMode",
+          "syncKey",
+          "updatedAt",
+          "createdAt"
+        ]);
+
+        function normaliseClarityText(value, key) {
+          if (value === null || value === undefined) return TEXT_KEYS.has(key) ? "" : value;
+          if (Array.isArray(value)) return value.map((item) => normaliseClarityText(item, ""));
+          if (typeof value !== "object") return value;
+          Object.keys(value).forEach((childKey) => {
+            value[childKey] = normaliseClarityText(value[childKey], childKey);
+          });
+          return value;
+        }
+
+        const originalFetch = window.fetch;
+        if (typeof originalFetch === "function") {
+          window.fetch = async (...args) => {
+            const response = await originalFetch(...args);
+            const originalJson = response.json.bind(response);
+            response.json = async () => normaliseClarityText(await originalJson(), "");
+            return response;
+          };
+        }
+
+        window.__clarityNormaliseTextFields = normaliseClarityText;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
