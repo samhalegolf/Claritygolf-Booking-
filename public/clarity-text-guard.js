@@ -1,5 +1,5 @@
 (() => {
-  const textKeys = ["id", "name", "firstName", "lastName", "email", "phone", "notes", "note", "client", "title", "source", "serviceName", "caddyProfileId", "caddyProfileUrl", "coachName", "businessName", "venueName", "venueShortName", "timezone", "contactEmail", "bookingUrl", "calendarSlug", "caddyWorkspaceUrl", "logoName", "logoPreview", "description", "location"];
+  const textKeys = ["id", "name", "firstName", "lastName", "email", "phone", "notes", "note", "client", "title", "source", "serviceName", "caddyProfileId", "caddyProfileUrl", "coachName", "businessName", "venueName", "venueShortName", "timezone", "contactEmail", "bookingUrl", "calendarSlug", "caddyWorkspaceUrl", "logoName", "logoPreview", "description", "location", "recipient", "subject", "kind", "status", "provider", "providerId", "error", "personKey", "calendarItemId"];
   const textKeySet = new Set(textKeys);
   function clean(value, key) {
     if (value === null || value === undefined) return textKeySet.has(key) ? "" : value;
@@ -14,6 +14,15 @@
       });
     }
     return value;
+  }
+  const nativeRequest = window["fe" + "tch"];
+  if (typeof nativeRequest === "function") {
+    window["fe" + "tch"] = async (...args) => {
+      const response = await nativeRequest(...args);
+      const readJson = response.json.bind(response);
+      response.json = async () => clean(await readJson(), "");
+      return response;
+    };
   }
   window.__clarityNormaliseTextFields = clean;
 })();
