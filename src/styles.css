@@ -4831,3 +4831,125 @@ button {
   font-size: 13px;
   font-weight: 800;
 }
+
+/* 2026-06 booking hardening: mobile layout, appointment colours, current day, iframe safety */
+.calendar-item.appointment {
+  border-left-color: var(--service-colour, var(--coach-primary));
+  box-shadow: inset 4px 0 0 var(--service-colour, var(--coach-primary)), 0 18px 34px rgba(0, 0, 0, 0.22);
+}
+.day-column.today,
+.calendar-day.today {
+  background: linear-gradient(180deg, rgba(31, 211, 109, 0.11), rgba(31, 211, 109, 0.02));
+}
+.day-column.today::before {
+  content: "Today";
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: inline-flex;
+  margin: 4px 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 211, 109, 0.35);
+  background: rgba(4, 18, 10, 0.72);
+  color: var(--coach-primary);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.colour-field input[type="color"] {
+  min-height: 44px;
+  padding: 4px;
+}
+.settings-save {
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+.email-status-list,
+.receipt-card,
+.notification-card,
+.booking-confirmed-summary,
+.public-booking-card,
+.selected-card,
+.data-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.email-status-list span,
+.receipt-card span,
+.receipt-card p,
+.notification-card p,
+.notification-card code,
+.sync-output code,
+.embed-code code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+@media (max-width: 760px) {
+  html, body, #root {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  .app-shell,
+  .module-page,
+  .settings-grid,
+  .booking-layout,
+  .calendar-shell,
+  .public-booking-shell,
+  .widget-preview,
+  .booking-popup-card,
+  .selected-card,
+  .data-card {
+    max-width: 100%;
+    min-width: 0;
+  }
+  .settings-tabs {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .settings-tabs button,
+  .primary-button,
+  .outline-button,
+  .confirm-booking,
+  .calendar-add-actions a,
+  .calendar-add-actions button {
+    min-height: 44px;
+  }
+  .service-form-row,
+  .settings-summary-grid,
+  .sync-actions,
+  .calendar-add-actions,
+  .embed-actions {
+    grid-template-columns: 1fr !important;
+    flex-wrap: wrap;
+  }
+  .calendar-add-actions > *,
+  .sync-actions > *,
+  .embed-actions > * {
+    width: 100%;
+    justify-content: center;
+  }
+  .calendar-grid-wrap,
+  .calendar-grid,
+  .week-grid {
+    overflow-x: hidden;
+  }
+  .calendar-item {
+    left: max(2px, var(--mobile-left, 2px));
+    width: calc(100% - 4px);
+    padding-inline: 8px;
+  }
+  .selected-card,
+  .booking-popup-card {
+    border-radius: 22px 22px 0 0;
+  }
+  .widget-preview iframe {
+    width: 100%;
+    min-height: 760px;
+  }
+}
+.day-lane.today {
+  background: linear-gradient(180deg, rgba(31, 211, 109, 0.10), rgba(31, 211, 109, 0.015));
+}

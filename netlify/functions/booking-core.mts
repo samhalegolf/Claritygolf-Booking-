@@ -13,6 +13,8 @@ const defaultEmailTemplates = {
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
 };
 
+const serviceDefaultColours = ["#1fd36d", "#38bdf8", "#f59e0b", "#a78bfa", "#fb7185", "#22c55e", "#d7b06b", "#60a5fa"];
+
 const defaultServices = [
   {
     id: "lesson-30",
@@ -26,6 +28,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#1fd36d",
     location: "Bay hire included",
   },
   {
@@ -40,6 +43,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#38bdf8",
     location: "Bay hire included",
   },
   {
@@ -54,6 +58,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#f59e0b",
     location: "Bay hire included",
   },
   {
@@ -68,6 +73,7 @@ const defaultServices = [
     minParticipants: 3,
     lessonFormat: "group",
     priceMode: "per-person",
+    color: "#a78bfa",
     location: "Group coaching bay",
   },
   {
@@ -82,6 +88,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#22c55e",
     location: "Range 24/7 member bay",
   },
   {
@@ -96,6 +103,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#d7b06b",
     location: "Range 24/7 member bay",
   },
   {
@@ -110,6 +118,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#60a5fa",
     location: "Package redemption",
   },
 ];
@@ -281,6 +290,7 @@ function cleanService(service, index = 0) {
     lessonFormat,
     priceMode,
     location: cleanString(service?.location, fallback.location, 160),
+    color: cleanHexColor(service?.color, fallback.color || serviceDefaultColours[index % serviceDefaultColours.length]),
   };
 }
 
@@ -2072,7 +2082,11 @@ async function cleanupExpiredSessions() {
 
 async function requireAdmin(req) {
   const session = await readAdminSession(sessionTokenFromRequest(req));
-  if (!session) return null;
+  if (!session) {
+    const error = new Error("Admin login required");
+    error.status = 401;
+    throw error;
+  }
   return session;
 }
 
@@ -2712,6 +2726,7 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "PUT" && pathname === "/api/admin-settings") {
+      await requireAdmin(req);
       return json(await writeAdminSettings(await parseBody(req)));
     }
 
@@ -2761,6 +2776,7 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "PUT" && pathname === "/api/coach-account") {
+      await requireAdmin(req);
       return json(await writeCoachAccount(await parseBody(req)));
     }
 
@@ -2769,6 +2785,7 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "PUT" && pathname === "/api/services") {
+      await requireAdmin(req);
       const body = await parseBody(req);
       return json({ services: await writeServices(body.services) });
     }
@@ -2778,6 +2795,7 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "PUT" && pathname === "/api/availability") {
+      await requireAdmin(req);
       const body = await parseBody(req);
       return json({ availability: await writeAvailability(body.availability) });
     }
@@ -2787,6 +2805,7 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "PUT" && pathname === "/api/brand-settings") {
+      await requireAdmin(req);
       return json(await writeBrandSettings(await parseBody(req)));
     }
 
@@ -2795,11 +2814,13 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "POST" && pathname === "/api/people/import") {
+      await requireAdmin(req);
       const body = await parseBody(req);
       return json(await importPeople(body.people, "manual_import"), 201);
     }
 
     if (req.method === "PUT" && pathname === "/api/people") {
+      await requireAdmin(req);
       const body = await parseBody(req);
       return json(await updatePerson(body.person || body));
     }

@@ -3,6 +3,7 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
+  ChevronDown,
   Code2,
   Copy,
   Clock,
@@ -55,6 +56,7 @@ type Service = {
   lessonFormat: LessonFormat;
   priceMode: PriceMode;
   location: string;
+  color: string;
 };
 
 type CalendarItem = {
@@ -408,6 +410,9 @@ const BRAND_STORAGE_KEY = "clarity-booking-brand";
 const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
 const RESCHEDULE_LOGIN_STORAGE_KEY = "clarity-booking-reschedule-login";
 const BOOKING_LOGIN_STORAGE_KEY = "clarity-booking-login";
+const BLOCK_DRAG_THRESHOLD_PX = 12;
+const CALENDAR_IDLE_RESET_MS = 10 * 60 * 1000;
+const SERVICE_DEFAULT_COLOURS = ["#1fd36d", "#38bdf8", "#f59e0b", "#a78bfa", "#fb7185", "#22c55e", "#d7b06b", "#60a5fa"];
 
 const baseWeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const fullDayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -426,6 +431,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#1fd36d",
     location: "Bay hire included",
   },
   {
@@ -440,6 +446,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#38bdf8",
     location: "Bay hire included",
   },
   {
@@ -454,6 +461,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#f59e0b",
     location: "Bay hire included",
   },
   {
@@ -468,6 +476,7 @@ const defaultServices: Service[] = [
     minParticipants: 3,
     lessonFormat: "group",
     priceMode: "per-person",
+    color: "#a78bfa",
     location: "Group coaching bay",
   },
   {
@@ -482,6 +491,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#22c55e",
     location: "Range 24/7 member bay",
   },
   {
@@ -496,6 +506,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#d7b06b",
     location: "Range 24/7 member bay",
   },
   {
@@ -510,6 +521,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: "#60a5fa",
     location: "Package redemption",
   },
 ];
@@ -632,6 +644,16 @@ function compactDateTime(date: Date, minutes: number) {
 
 function escapeIcsText(value: string) {
   return value.replaceAll("\\", "\\\\").replaceAll("\n", "\\n").replaceAll(";", "\\;").replaceAll(",", "\\,");
+}
+
+function isTodayColumn(dayIndex: number, week: number) {
+  const today = new Date();
+  const slotDate = dateForSlot(week, dayIndex);
+  return (
+    today.getFullYear() === slotDate.getFullYear() &&
+    today.getMonth() === slotDate.getMonth() &&
+    today.getDate() === slotDate.getDate()
+  );
 }
 
 function formatWeekTitle(week: number) {
@@ -1143,6 +1165,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     lessonFormat,
     priceMode,
     location: typeof service?.location === "string" ? service.location.trim().slice(0, 160) : fallback.location,
+    color: cleanHexColor(service?.color, fallback.color || SERVICE_DEFAULT_COLOURS[index % SERVICE_DEFAULT_COLOURS.length]),
   };
 }
 
@@ -1230,6 +1253,7 @@ function emptyServiceEditor(): ServiceEditor {
     lessonFormat: "private",
     priceMode: "session",
     location: "",
+    color: SERVICE_DEFAULT_COLOURS[0],
   };
 }
 
@@ -1477,9 +1501,11 @@ function App() {
   const isEmbedMode = isPublicBookingMode();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
-  const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [coachAccountDirty, setCoachAccountDirty] = useState(false);
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(getStoredBrandSettings);
-  const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [brandDirty, setBrandDirty] = useState(false);
   const [authStatus, setAuthStatus] = useState<AuthStatus>(isEmbedMode ? "authenticated" : "checking");
   const [authMode, setAuthMode] = useState<AuthMode>(() => (getInitialResetToken() ? "reset" : "login"));
   const [adminEmail, setAdminEmail] = useState("");
@@ -1556,7 +1582,8 @@ function App() {
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
-  const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [settingsDirty, setSettingsDirty] = useState(false);
   const [testEmailAddress, setTestEmailAddress] = useState("");
   const [testEmailState, setTestEmailState] = useState<"idle" | "sending" | "sent">("idle");
   const [emailNoticeVisible, setEmailNoticeVisible] = useState(false);
@@ -1584,6 +1611,7 @@ function App() {
   const brandSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
+  const calendarIdleTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
@@ -1803,6 +1831,23 @@ function App() {
     };
   }, [bookingConfirmation?.appointmentId, bookingConfirmation?.email, bookingConfirmation?.kind, bookingConfirmation?.phone, isEmbedMode]);
 
+
+  function resetCalendarIdleTimer() {
+    if (isEmbedMode || activeView !== "calendar") return;
+    if (calendarIdleTimerRef.current) window.clearTimeout(calendarIdleTimerRef.current);
+    calendarIdleTimerRef.current = window.setTimeout(() => {
+      if (!pointerSessionRef.current && !selectedId && !quickCreate) setActiveWeek(0);
+    }, CALENDAR_IDLE_RESET_MS);
+  }
+
+  useEffect(() => {
+    if (isEmbedMode || activeView !== "calendar") return;
+    resetCalendarIdleTimer();
+    return () => {
+      if (calendarIdleTimerRef.current) window.clearTimeout(calendarIdleTimerRef.current);
+    };
+  }, [activeView, activeWeek, isEmbedMode, quickCreate, selectedId]);
+
   useEffect(() => {
     if (activeDockBookingId && !dockBookings.some((booking) => booking.id === activeDockBookingId)) {
       setActiveDockBookingId("");
@@ -1829,13 +1874,14 @@ function App() {
 
     async function loadInitialState() {
       try {
+        if (!isEmbedMode) setAuthStatus("checking");
         if (isEmbedMode) {
           await loadPublicBookingState();
           if (!cancelled) setCalendarFeedStatus("connected");
           return;
         }
 
-        const sessionResponse = await fetch("/api/auth/session", { headers: { Accept: "application/json" } });
+        const sessionResponse = await fetch("/api/auth/session", { credentials: "include", headers: { Accept: "application/json" } });
         if (!sessionResponse.ok) throw new Error("Session API unavailable");
         const session = (await sessionResponse.json()) as { authenticated?: boolean; email?: string };
         if (cancelled) return;
@@ -1997,7 +2043,7 @@ function App() {
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
-    const response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
+    const response = await fetch("/api/calendar-state", { credentials: "include", headers: { Accept: "application/json" } });
     if (response.status === 401) {
       setAuthStatus("guest");
       throw new Error("Admin login required");
@@ -2029,8 +2075,11 @@ function App() {
       setCalendarSyncKey(data.syncKey);
     }
     applyNotificationSettings(data.settings);
+    setSettingsDirty(false);
     applyCoachAccount(data.account);
+    setCoachAccountDirty(false);
     applyBrandSettings(data.brand);
+    setBrandDirty(false);
     hasLoadedCalendarApiRef.current = true;
   }
 
@@ -2716,6 +2765,7 @@ function App() {
   }
 
   function beginBlankGesture(event: ReactPointerEvent<HTMLDivElement>) {
+    resetCalendarIdleTimer();
     if (event.button !== 0) return;
     if ((event.target as HTMLElement).closest("[data-calendar-item]")) return;
     if (!requireLiveDatabase("create calendar items")) return;
@@ -2757,6 +2807,7 @@ function App() {
   }
 
   function updatePointer(event: ReactPointerEvent<HTMLElement>) {
+    resetCalendarIdleTimer();
     updatePointerAt(event.clientX, event.clientY);
   }
 
@@ -2846,6 +2897,7 @@ function App() {
   }
 
   function endPointer() {
+    resetCalendarIdleTimer();
     const session = pointerSessionRef.current;
     const activeDraft = draftRef.current;
     if (!session) return;
@@ -2887,6 +2939,11 @@ function App() {
     }
 
     if (activeDraft.mode === "block") {
+      if (activeDraft.duration < 30) {
+        setToast({ message: "Drag a clear area before creating a blockout." });
+        clearGesture();
+        return;
+      }
       const previous = items;
       const newBlock: CalendarItem = {
         id: `block-${Date.now()}`,
@@ -3312,7 +3369,7 @@ function App() {
       text: `${confirmation.service} with ${coachAccount.businessName}`,
       dates: `${start}/${end}`,
       location: coachAccount.venueName,
-      details: `${confirmation.service} for ${confirmation.client}.`,
+      details: `${confirmation.service} for ${confirmation.client}. Booking reference: ${confirmation.appointmentId}.`,
       ctz: coachAccount.timezone,
     });
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
@@ -3333,7 +3390,7 @@ function App() {
       `DTEND;TZID=${coachAccount.timezone}:${end}`,
       `SUMMARY:${escapeIcsText(`${confirmation.service} with ${coachAccount.businessName}`)}`,
       `LOCATION:${escapeIcsText(coachAccount.venueName)}`,
-      `DESCRIPTION:${escapeIcsText(`${confirmation.service} for ${confirmation.client}.`)}`,
+      `DESCRIPTION:${escapeIcsText(`${confirmation.service} for ${confirmation.client}. Booking reference: ${confirmation.appointmentId}.`)}`,
       "STATUS:CONFIRMED",
       "END:VEVENT",
       "END:VCALENDAR",
@@ -3466,16 +3523,19 @@ function App() {
 
   function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
     setSettingsSaveState("idle");
+    setSettingsDirty(true);
     setNotificationSettings((current) => ({ ...current, [field]: value }));
   }
 
   function updateBrandSetting<K extends keyof BrandSettings>(field: K, value: BrandSettings[K]) {
     setBrandSaveState("idle");
+    setBrandDirty(true);
     setBrandSettings((current) => cleanBrandSettings({ ...current, [field]: value }));
   }
 
   function updateCoachAccount<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
     setCoachAccountSaveState("idle");
+    setCoachAccountDirty(true);
     setCoachAccount((current) => cleanCoachAccount({ ...current, [field]: value }));
   }
 
@@ -3667,6 +3727,7 @@ function App() {
     try {
       const response = await fetch("/api/coach-account", {
         method: "PUT",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(clean),
       });
@@ -3692,6 +3753,7 @@ function App() {
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: adminEmail, password: adminPassword }),
       });
@@ -3707,7 +3769,7 @@ function App() {
         hasLoadedCalendarApiRef.current = false;
         setAuthStatus("guest");
         setCalendarFeedStatus("offline");
-        await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+        await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
         const detail = error instanceof Error && error.message ? ` Details: ${error.message}` : "";
         setAuthError(`Login worked, but the live database is not connected. Nothing will be editable until the database connection is fixed.${detail}`);
         return;
@@ -3732,6 +3794,7 @@ function App() {
     try {
       const response = await fetch("/api/auth/forgot-password", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: forgotEmail }),
       });
@@ -3769,6 +3832,7 @@ function App() {
     try {
       const response = await fetch("/api/auth/reset-password", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: resetToken, password: resetPassword }),
       });
@@ -3794,7 +3858,7 @@ function App() {
   }
 
   async function handleAdminLogout() {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
     hasLoadedCalendarApiRef.current = false;
     setAuthStatus("guest");
     setSelectedId("");
@@ -3808,6 +3872,7 @@ function App() {
     try {
       const response = await fetch("/api/admin-settings", {
         method: "PUT",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(notificationSettings),
       });
@@ -3818,12 +3883,13 @@ function App() {
       if (!response.ok) throw new Error("Settings save failed");
       const settings = (await response.json()) as NotificationSettings;
       applyNotificationSettings(settings);
+      setSettingsDirty(false);
       setSettingsSaveState("saved");
       setToast({ message: "Notification and text settings saved." });
       window.setTimeout(() => setSettingsSaveState("idle"), 1600);
     } catch {
-      setSettingsSaveState("idle");
-      setToast({ message: "Could not save notification settings." });
+      setSettingsSaveState("error");
+      setToast({ message: "Could not save notification settings. Check Supabase settings/RLS/write access." });
     }
   }
 
@@ -3835,6 +3901,7 @@ function App() {
     try {
       const response = await fetch("/api/brand-settings", {
         method: "PUT",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(cleanBrand),
       });
@@ -5216,7 +5283,7 @@ function App() {
                 }}
               >
                 {weekDays.map((day, dayIndex) => (
-                  <div className="day-lane" key={day.label} style={{ left: `${(dayIndex / DAY_COUNT) * 100}%` }}>
+                  <div className={`day-lane ${isTodayColumn(dayIndex, activeWeek) ? "today" : ""}`} key={day.label} style={{ left: `${(dayIndex / DAY_COUNT) * 100}%` }}>
                     {availability[dayIndex].map((window, index) => (
                       <div
                         className="available-band"
@@ -5273,6 +5340,7 @@ function App() {
                         height: Math.max(height, 34),
                         left: `calc(${left}% + 6px)`,
                         width: `calc(${width}% - 12px)`,
+                        ...(item.kind === "appointment" && service?.color ? ({ "--service-colour": service.color } as CSSProperties) : {}),
                         ...(flyAnimation
                           ? ({
                               "--dock-fly-x": `${flyAnimation.fromX}px`,
@@ -6319,6 +6387,7 @@ function App() {
                     </div>
                   </details>
                 </div>
+                {coachAccountDirty && (
                 <button className="primary-button settings-save" onClick={saveCoachAccount}>
                   {coachAccountSaveState === "saving"
                     ? "Saving"
@@ -6326,6 +6395,7 @@ function App() {
                     ? "Saved"
                     : "Save Coach Account"}
                 </button>
+                )}
               </article>
 
               <article className="data-card sync-card settings-section settings-integrations">
@@ -6487,6 +6557,7 @@ function App() {
                     <span>Send admin booking alert</span>
                   </label>
                 </details>
+                {settingsDirty && (
                 <button className="primary-button settings-save" onClick={saveNotificationSettings}>
                   {settingsSaveState === "saving"
                     ? "Saving"
@@ -6494,6 +6565,7 @@ function App() {
                       ? "Saved"
                       : "Save Email Settings"}
                 </button>
+                )}
               </article>
 
               <article className="data-card notification-card settings-section settings-experience settings-integrations">
@@ -6575,6 +6647,7 @@ function App() {
                     <span>Send admin text alert</span>
                   </label>
                 </details>
+                {settingsDirty && (
                 <button className="primary-button settings-save" onClick={saveNotificationSettings}>
                   {settingsSaveState === "saving"
                     ? "Saving"
@@ -6582,6 +6655,7 @@ function App() {
                       ? "Saved"
                       : "Save Text Settings"}
                 </button>
+                )}
               </article>
 
               <article className="data-card notification-card email-template-card settings-section settings-experience settings-branding">
@@ -6712,6 +6786,7 @@ function App() {
                     <code>{"{{price}}"}</code>
                   </div>
                 </details>
+                {settingsDirty && (
                 <button className="primary-button settings-save" onClick={saveNotificationSettings}>
                   {settingsSaveState === "saving"
                     ? "Saving"
@@ -6719,6 +6794,7 @@ function App() {
                       ? "Saved"
                       : "Save Template"}
                 </button>
+                )}
               </article>
 
               <article className="data-card notification-card settings-section settings-experience settings-branding">
