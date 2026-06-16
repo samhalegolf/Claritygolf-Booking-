@@ -1,0 +1,50 @@
+*** Begin Patch
+*** Update File: netlify/functions/booking-core.mts
+@@
+-import { getDatabase } from "@netlify/database";
++import { getSupabaseDatabase } from "./supabase-storage.mts";
+ import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+@@
+function db() {
+-  return getDatabase();
++  return getSupabaseDatabase();
+}
+@@
+ async function updatePerson(rawPerson) {
+@@
+ }
++
++async function migrateClientList(payload = {}) {
++  await ensureSeeded();
++  const appointmentPeople = (await readItems())
++    .map(personFromAppointment)
++    .filter(Boolean)
++    .map((person) => ({ ...person, source: "appointment_migration" }));
++  const providedPeople = Array.isArray(payload?.people)
++    ? payload.people.map((person) => ({ ...person, source: person?.source || "manual_migration" }))
++    : [];
++  const result = await importPeople([...appointmentPeople, ...providedPeople], "client_migration");
++  return {
++    ok: true,
++    sourceCounts: {
++      appointments: appointmentPeople.length,
++      provided: providedPeople.length,
++    },
++    ...result,
++    people: await readPeople(),
++  };
++}
+ 
+ async function writeItems(items) {
+@@
+     if (req.method === "POST" && pathname === "/api/people/import") {
+       const body = await parseBody(req);
+       return json(await importPeople(body.people, "manual_import"), 201);
+     }
++
++    if (req.method === "POST" && pathname === "/api/people/migrate") {
++      return json(await migrateClientList(await parseBody(req)), 201);
++    }
+ 
+     if (req.method === "PUT" && pathname === "/api/people") {
+*** End Patch

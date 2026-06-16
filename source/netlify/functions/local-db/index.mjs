@@ -1,0 +1,1 @@
+export { getSupabaseDatabase as getDatabase } from "./supabase-storage.mjs";
