@@ -91,3 +91,25 @@ Run these on the deployed Netlify app, especially iPhone Safari:
 4. Public booking through widget iframe on an external page.
 5. Group class booking with capacity edge cases.
 6. Google Calendar button and Apple `.ics` import from a real booking confirmation.
+
+## 2026-06-17 White-screen hotfix
+
+After the GitHub deploy caused the white screen to return, the calendar hydration/save path was reviewed. A request loop was found in the logged-in admin calendar path:
+
+- Initial `/api/calendar-state` load marked the calendar as loaded.
+- The autosave effect then immediately PUT the same data back.
+- The PUT response replaced the `items` array with a fresh array.
+- Because `items` is an autosave dependency, this could repeatedly re-save and lock up the app.
+
+Hotfix applied:
+
+- Added a one-shot `skipNextCalendarSaveRef` after initial calendar hydration.
+- Added `credentials: "include"` to calendar-state autosave PUT.
+- Stopped replacing calendar `items` from the save echo response to prevent the autosave loop.
+- Rebuilt production bundle successfully.
+
+Validation performed:
+
+- `npm run build` passes.
+- Headless DOM smoke test for guest route renders the login screen.
+- Headless DOM smoke test for authenticated route now performs one session request and one calendar-state request, then renders the admin calendar without repeated `/api/calendar-state` loops.
