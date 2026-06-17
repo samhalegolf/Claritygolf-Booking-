@@ -112,7 +112,7 @@ function parseCsvRows(text: string) {
   let row: string[] = [];
   let cell = "";
   let quoted = false;
-  const normalised = text.replace(/^\uFEFF/, "");
+  const normalised = text.replace(/^\\uFEFF/, "");
 
   for (let index = 0; index < normalised.length; index += 1) {
     const char = normalised[index];
@@ -183,7 +183,7 @@ function inferImportField(header: string, index: number, sampleValues: string[])
 
   const samples = sampleValues.map((value) => value.trim()).filter(Boolean);
   if (samples.some((value) => /@/.test(value))) return "email";
-  if (samples.some((value) => /(?:\+?\d[\d\s().-]{6,})/.test(value))) return "phone";
+  if (samples.some((value) => /(?:\\+?\\d[\\d\\s().-]{6,})/.test(value))) return "phone";
   if (index === 0) return "name";
   if (index === 1) return "email";
   if (index === 2) return "phone";
@@ -197,7 +197,7 @@ function analysePeopleImport(text: string, manualMapping: Record<number, ImportF
 
   const firstRowGuesses = rows[0].map((cell, index) => inferImportField(cell, index, rows.slice(1, 6).map((row) => row[index] || "")));
   const hasHeader = firstRowGuesses.some((field) => field !== "") && rows.length > 1;
-  const headers = hasHeader ? rows[0] : rows[0].map((_, index) => `Column ${index + 1}`);
+  const headers = hasHeader ? rows[0] : rows[0].map((_, index) => \`Column \${index + 1}\`);
   const bodyRows = hasHeader ? rows.slice(1) : rows;
   const mapping = Object.fromEntries(
     headers.map((header, index) => [
@@ -223,7 +223,7 @@ function analysePeopleImport(text: string, manualMapping: Record<number, ImportF
       const email = String(record.email || "").trim().toLowerCase();
       if (!name && !email) return null;
       return {
-        id: `import-${Date.now()}-${index}`,
+        id: \`import-\${Date.now()}-\${index}\`,
         name: name || email,
         email,
         phone: String(record.phone || "").trim(),
@@ -282,7 +282,7 @@ replaceOnce(
       setPeopleImportMapping(analysis.mapping);
       setPeopleImportState("idle");
       setShowClientImport(true);
-      setToast({ message: `${analysis.people.length} possible clients found. Check the field mapping before importing.` });
+      setToast({ message: \`${analysis.people.length} possible clients found. Check the field mapping before importing.\` });
     } catch {
       setToast({ message: "Could not read that CSV file." });
     }
@@ -404,7 +404,7 @@ if (source.includes(newClientImport)) {
 const oldSettingsSummary = `<span>CSV paste</span>
                       <strong>{peopleImportPreview} ready</strong>`;
 const newSettingsSummary = `<span>CSV upload</span>
-                      <strong>{peopleImportFileName ? `${peopleImportPreview} ready from ${peopleImportFileName}` : `${peopleImportPreview} ready`}</strong>`;
+                      <strong>{peopleImportFileName ? peopleImportPreview + " ready from " + peopleImportFileName : peopleImportPreview + " ready"}</strong>`;
 replaceOnce("settings import summary", oldSettingsSummary, newSettingsSummary);
 
 if (changed) writeFileSync(appPath, source);
