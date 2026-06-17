@@ -18,4 +18,6 @@
 .csv-enhancer-preview div:last-child { border-bottom: 0; }
 .csv-enhancer-preview strong { color: var(--heading); font-size: 13px; }
 .csv-enhancer-preview span { color: var(--muted); font-size: 12px; }
-.csv-enhancer-confirm { justify-self: end; }
+.csv-enhancer-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.csv-enhancer-status { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12px; font-weight: 700; }
+.csv-enhancer-import:disabled { cursor: not-allowed; }
