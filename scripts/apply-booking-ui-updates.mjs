@@ -141,6 +141,84 @@ replaceOnce(
                       </div>`,
 );
 
+const accountAdminLinksBefore = `                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Calendar slug</span>
+                        <input
+                          value={coachAccount.calendarSlug}
+                          onChange={(event) => updateCoachAccount("calendarSlug", event.target.value)}
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Caddy workspace</span>
+                        <input
+                          value={coachAccount.caddyWorkspaceUrl}
+                          onChange={(event) => updateCoachAccount("caddyWorkspaceUrl", event.target.value)}
+                        />
+                      </label>
+                    </div>`;
+
+const accountAdminLinksAfter = `                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Calendar slug</span>
+                        <input
+                          value={coachAccount.calendarSlug}
+                          onChange={(event) => updateCoachAccount("calendarSlug", event.target.value)}
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Caddy workspace</span>
+                        <input
+                          value={coachAccount.caddyWorkspaceUrl}
+                          onChange={(event) => updateCoachAccount("caddyWorkspaceUrl", event.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <div className="sync-output">
+                      <span>Public booking link</span>
+                      <code>{bookingWidgetUrl}</code>
+                    </div>
+                    <label className="settings-field">
+                      <span>Widget / iframe embed code</span>
+                      <textarea
+                        readOnly
+                        rows={4}
+                        value={iframeCode}
+                        onFocus={(event) => event.currentTarget.select()}
+                      />
+                    </label>
+                    <div className="sync-actions">
+                      <button className="outline-button" onClick={copyEmbedCode} type="button">
+                        {copiedEmbed ? <Check size={16} /> : <Copy size={16} />}
+                        {copiedEmbed ? "Copied iframe" : "Copy iframe"}
+                      </button>
+                      <a className="outline-button" href={bookingWidgetUrl} target="_blank" rel="noreferrer">
+                        <ExternalLink size={16} />
+                        Open public card
+                      </a>
+                    </div>
+                    <div className="sync-output">
+                      <span>Calendar feed / .ics link</span>
+                      <code>{calendarFeedUrl}</code>
+                    </div>
+                    <div className="sync-actions">
+                      <button className="outline-button" onClick={() => copySyncText("url")} type="button">
+                        {copiedSync === "url" ? <Check size={16} /> : <Copy size={16} />}
+                        {copiedSync === "url" ? "Copied calendar link" : "Copy calendar link"}
+                      </button>
+                      <a
+                        className="outline-button"
+                        href="https://calendar.google.com/calendar/u/0/r/settings/addbyurl"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <ExternalLink size={16} />
+                        Add to Google
+                      </a>
+                    </div>`;
+
+replaceOnce("restore iframe and public booking link in coach account admin", accountAdminLinksBefore, accountAdminLinksAfter);
+
 const duplicateBookingTheme = `                <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Eye size={18} />
@@ -209,9 +287,14 @@ const publicThemeControl = `
                       </span>
                     </button>
                   </div>
+                  <div className="booking-preview-mini">
+                    <span>Customer booking card preview</span>
+                    <strong>{bookingBrandName}</strong>
+                    <em>{coachAccount.venueShortName}</em>
+                  </div>
                 </details>`;
 
-if (!source.includes('data-testid="booking-theme-switch"')) {
+if (!source.includes('Public card theme')) {
   const importCardMarker = '              <article className="data-card import-card settings-section settings-data">';
   const brandCardMarker = '              <article className="data-card brand-vein-card settings-section settings-branding settings-experience">';
   const importIndex = source.indexOf(importCardMarker);
