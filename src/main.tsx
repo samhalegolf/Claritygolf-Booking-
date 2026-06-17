@@ -4,6 +4,7 @@ import App from "./App";
 import "./styles.css";
 import "./compact-iframe.css";
 import "./compact-iframe-polish.css";
+import "./client-csv-import.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
