@@ -30,9 +30,32 @@ replaceOnce(
 );
 
 replaceOnce(
+  "iframe theme URL override constant",
+  '  const locationLine = coachAccount.venueName;',
+  `  const publicBookingTheme = useMemo<ThemeMode>(() => {
+    if (!isEmbedMode || typeof window === "undefined") return brandSettings.bookingTheme;
+    const themeParam = new URLSearchParams(window.location.search).get("theme");
+    return themeParam === "light" ? "light" : themeParam === "dark" ? "dark" : brandSettings.bookingTheme;
+  }, [brandSettings.bookingTheme, isEmbedMode]);
+  const locationLine = coachAccount.venueName;`,
+);
+
+replaceOnce(
+  "public booking class uses URL theme",
+  '          <section className={`public-booking booking-theme-${brandSettings.bookingTheme} module-page`}>',
+  '          <section className={`public-booking booking-theme-${publicBookingTheme} module-page`}>',
+);
+
+replaceOnce(
   "shorter iframe embed height",
   'height="760" style="border:0;max-width:100%;"',
+  'height="520" style="border:0;max-width:100%;width:100%;border-radius:14px;display:block;"',
+);
+
+replaceOnce(
+  "rounded iframe embed style",
   'height="520" style="border:0;max-width:100%;width:100%;"',
+  'height="520" style="border:0;max-width:100%;width:100%;border-radius:14px;display:block;"',
 );
 
 replaceOnce(
