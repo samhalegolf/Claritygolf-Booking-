@@ -1610,6 +1610,7 @@ function App() {
   const gestureCleanupRef = useRef<null | (() => void)>(null);
   const brandSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
+  const skipNextCalendarSaveRef = useRef(false);
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
   const calendarIdleTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
@@ -1939,11 +1940,16 @@ function App() {
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
+    if (skipNextCalendarSaveRef.current) {
+      skipNextCalendarSaveRef.current = false;
+      return;
+    }
     const saveVersion = ++calendarSaveVersionRef.current;
     setCalendarSaveStatus("saving");
     setCalendarSaveError("");
     void fetch("/api/calendar-state", {
       method: "PUT",
+      credentials: "include",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ items, syncKey: calendarSyncKey, updatedAt: calendarStateVersion }),
     })
@@ -1966,7 +1972,8 @@ function App() {
         setCalendarSaveStatus("saved");
         setCalendarSaveError("");
         if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-        if (Array.isArray(data.items)) setItems(data.items);
+        // Do not replace items from the save echo. Replacing the array after every save
+        // re-triggers this autosave effect and can lock the app in a request loop.
         if (Array.isArray(data.notifications)) setNotifications(data.notifications);
         window.setTimeout(() => {
           if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
@@ -2081,6 +2088,7 @@ function App() {
     applyBrandSettings(data.brand);
     setBrandDirty(false);
     hasLoadedCalendarApiRef.current = true;
+    skipNextCalendarSaveRef.current = true;
   }
 
   async function loadPublicBookingState() {
