@@ -282,7 +282,7 @@ replaceOnce(
       setPeopleImportMapping(analysis.mapping);
       setPeopleImportState("idle");
       setShowClientImport(true);
-      setToast({ message: \`${analysis.people.length} possible clients found. Check the field mapping before importing.\` });
+      setToast({ message: \`\${analysis.people.length} possible clients found. Check the field mapping before importing.\` });
     } catch {
       setToast({ message: "Could not read that CSV file." });
     }
