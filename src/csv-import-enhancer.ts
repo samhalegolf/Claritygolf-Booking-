@@ -1,10 +1,19 @@
 type CsvField = "" | "name" | "firstName" | "lastName" | "email" | "phone" | "notes" | "caddyProfileUrl" | "caddyProfileId";
 
+type CsvPerson = {
+  name: string;
+  email: string;
+  phone: string;
+  notes: string;
+  caddyProfileUrl: string;
+  caddyProfileId: string;
+};
+
 type CsvAnalysis = {
   headers: string[];
   rows: string[][];
   mapping: Record<number, CsvField>;
-  people: Array<{ name: string; email: string; phone: string; notes: string; caddyProfileUrl: string; caddyProfileId: string }>;
+  people: CsvPerson[];
   warnings: string[];
   hasHeader: boolean;
 };
@@ -153,7 +162,7 @@ function analyse(text: string, manualMapping: Record<number, CsvField> = {}): Cs
         caddyProfileId: (record.caddyProfileId || "").trim(),
       };
     })
-    .filter(Boolean) as CsvAnalysis["people"];
+    .filter(Boolean) as CsvPerson[];
 
   const warnings: string[] = [];
   if (!Object.values(mapping).some((field) => field === "name" || field === "firstName" || field === "lastName")) {
@@ -165,11 +174,29 @@ function analyse(text: string, manualMapping: Record<number, CsvField> = {}): Cs
   return { headers, rows, mapping, people, warnings, hasHeader };
 }
 
+function clientIdFor(person: CsvPerson, index: number) {
+  const key = person.email || `${person.name}-${person.phone}` || String(index);
+  return `csv-${btoa(unescape(encodeURIComponent(key))).replace(/=+$/, "")}`;
+}
+
+function peoplePayload(people: CsvPerson[]) {
+  return people.map((person, index) => ({
+    id: clientIdFor(person, index),
+    name: person.name,
+    email: person.email,
+    phone: person.phone,
+    notes: person.notes,
+    source: "csv_import",
+    caddyProfileUrl: person.caddyProfileUrl,
+    caddyProfileId: person.caddyProfileId,
+  }));
+}
+
 function csvCell(value: string) {
   return /[",\n\r]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
 }
 
-function toCanonicalCsv(people: CsvAnalysis["people"]) {
+function toCanonicalCsv(people: CsvPerson[]) {
   return [
     "name,email,phone,notes,caddyProfileUrl,caddyProfileId",
     ...people.map((person) =>
@@ -184,6 +211,21 @@ function textareaValueSet(textarea: HTMLTextAreaElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
   setter?.call(textarea, value);
   textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  textarea.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+async function importCheckedPeople(people: CsvPerson[]) {
+  const response = await fetch("/api/people/import", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ people: peoplePayload(people) }),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(text || `${response.status} ${response.statusText}`);
+  }
+  return response.json().catch(() => ({}));
 }
 
 function enhanceCard(card: HTMLElement) {
@@ -194,6 +236,11 @@ function enhanceCard(card: HTMLElement) {
 
   let currentText = "";
   let currentMapping: Record<number, CsvField> = {};
+  let importState: "idle" | "importing" | "imported" | "error" = "idle";
+  let statusText = "";
+
+  const oldActions = card.querySelector<HTMLElement>(".import-actions");
+  if (oldActions) oldActions.hidden = true;
 
   const panel = document.createElement("div");
   panel.className = "csv-enhancer";
@@ -217,6 +264,7 @@ function enhanceCard(card: HTMLElement) {
     const analysis = analyse(currentText, currentMapping);
     checkpoint.hidden = !currentText;
     if (!currentText) return;
+    const importLabel = importState === "importing" ? "Importing..." : importState === "imported" ? "Imported" : "Import checked clients";
     checkpoint.innerHTML = `
       <div class="csv-enhancer-summary">
         <strong>${analysis.people.length} clients ready</strong>
@@ -244,7 +292,11 @@ function enhanceCard(card: HTMLElement) {
           .map((person) => `<div><strong>${person.name}</strong><span>${[person.email, person.phone].filter(Boolean).join(" · ") || "No email or phone"}</span></div>`)
           .join("")}
       </div>
-      <button class="primary-button csv-enhancer-confirm" type="button"${analysis.people.length ? "" : " disabled"}>Use this checked CSV</button>
+      <div class="csv-enhancer-actions">
+        <button class="outline-button csv-enhancer-canonical" type="button"${analysis.people.length ? "" : " disabled"}>Use checked CSV in box</button>
+        <button class="primary-button csv-enhancer-import" type="button"${analysis.people.length && importState !== "importing" ? "" : " disabled"}>${importLabel}</button>
+      </div>
+      ${statusText ? `<div class="csv-enhancer-status">${statusText}</div>` : ""}
     `;
   }
 
@@ -254,6 +306,8 @@ function enhanceCard(card: HTMLElement) {
     if (!file) return;
     currentText = await file.text();
     currentMapping = analyse(currentText).mapping;
+    importState = "idle";
+    statusText = "";
     fileName.textContent = file.name;
     textareaValueSet(textarea, currentText);
     render();
@@ -262,6 +316,8 @@ function enhanceCard(card: HTMLElement) {
   textarea.addEventListener("input", () => {
     currentText = textarea.value;
     currentMapping = analyse(currentText).mapping;
+    importState = "idle";
+    statusText = "";
     fileName.textContent = currentText ? "Pasted CSV" : "No CSV chosen";
     render();
   });
@@ -271,17 +327,45 @@ function enhanceCard(card: HTMLElement) {
     const column = select.dataset.csvColumn;
     if (column === undefined) return;
     currentMapping = { ...currentMapping, [Number(column)]: select.value as CsvField };
+    importState = "idle";
+    statusText = "";
     render();
   });
 
-  checkpoint.addEventListener("click", (event) => {
-    const button = (event.target as HTMLElement).closest(".csv-enhancer-confirm");
-    if (!button) return;
-    const canonical = toCanonicalCsv(analyse(currentText, currentMapping).people);
-    textareaValueSet(textarea, canonical);
-    currentText = canonical;
-    currentMapping = analyse(canonical).mapping;
+  checkpoint.addEventListener("click", async (event) => {
+    const target = event.target as HTMLElement;
+    const canonicalButton = target.closest(".csv-enhancer-canonical");
+    const importButton = target.closest(".csv-enhancer-import") as HTMLButtonElement | null;
+    const people = analyse(currentText, currentMapping).people;
+
+    if (canonicalButton) {
+      const canonical = toCanonicalCsv(people);
+      textareaValueSet(textarea, canonical);
+      currentText = canonical;
+      currentMapping = analyse(canonical).mapping;
+      statusText = "Checked CSV copied into the import box.";
+      render();
+      return;
+    }
+
+    if (!importButton || !people.length || importState === "importing") return;
+    importState = "importing";
+    statusText = "Importing clients...";
     render();
+    try {
+      const result = await importCheckedPeople(people);
+      const imported = Number(result.imported ?? people.length);
+      const updated = Number(result.updated ?? 0);
+      const skipped = Number(result.skipped ?? 0);
+      importState = "imported";
+      statusText = `${imported} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ""}. Reloading client list...`;
+      render();
+      window.setTimeout(() => window.location.reload(), 700);
+    } catch (error) {
+      importState = "error";
+      statusText = `Import failed: ${error instanceof Error ? error.message.slice(0, 180) : "Unknown error"}`;
+      render();
+    }
   });
 }
 
