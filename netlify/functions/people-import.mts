@@ -4,6 +4,21 @@ import { createHash, randomUUID } from "node:crypto";
 
 const sessionCookieName = "clarity_session";
 
+type ImportResult = {
+  imported: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  errors: Array<{ rowNumber: number | string; reason: string }>;
+  results: Array<Record<string, unknown>>;
+  people: Array<Record<string, unknown>>;
+};
+
+function emptyResult(failed = 0): ImportResult {
+  return { imported: 0, created: 0, updated: 0, skipped: 0, failed, errors: [], results: [], people: [] };
+}
+
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
@@ -145,19 +160,20 @@ async function importPeople(rawPeople: any[], source = "csv_import", options: an
   const appendNotes = options?.appendNotes !== false;
   const cleaned = Array.isArray(rawPeople) ? rawPeople.map((row) => cleanPerson(row, source)) : [];
   const people = cleaned.filter(Boolean) as any[];
-  const result: any = {
-    imported: 0,
-    created: 0,
-    updated: 0,
-    skipped: Array.isArray(rawPeople) ? rawPeople.length - people.length : 0,
-    failed: 0,
-    errors: [],
-    results: [],
-    people: [],
-  };
+  const result: ImportResult = emptyResult();
+  result.skipped = Array.isArray(rawPeople) ? rawPeople.length - people.length : 0;
 
-  const existingRows = await db.sql`SELECT * FROM people ORDER BY name, email, id`;
-  const knownPeople = [...existingRows];
+  let knownPeople: any[] = [];
+  try {
+    const existingRows = await db.sql`SELECT * FROM people ORDER BY name, email, id`;
+    knownPeople = [...existingRows];
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Could not read people table before import.";
+    result.failed = Math.max(people.length, 1);
+    result.errors.push({ rowNumber: "setup", reason });
+    result.results.push({ rowNumber: "setup", status: "failed", reason });
+    return result;
+  }
 
   for (let index = 0; index < people.length; index += 1) {
     const person = people[index];
@@ -186,15 +202,15 @@ async function importPeople(rawPeople: any[], source = "csv_import", options: an
         const nextCaddyProfileUrl = person.caddyProfileUrl || existing.caddy_profile_url || "";
         await db.sql`
           UPDATE people
-          SET name = ${nextName},
-              email = NULLIF(${nextEmail}, ''),
-              phone = NULLIF(${nextPhone}, ''),
-              notes = NULLIF(${nextNotes}, ''),
-              source = ${nextSource},
-              caddy_profile_id = NULLIF(${nextCaddyProfileId}, ''),
-              caddy_profile_url = NULLIF(${nextCaddyProfileUrl}, ''),
+          SET name = ${existing.id},
+              email = NULLIF(${nextName}, ''),
+              phone = NULLIF(${nextEmail}, ''),
+              notes = NULLIF(${nextPhone}, ''),
+              source = ${nextNotes},
+              caddy_profile_id = NULLIF(${nextSource}, ''),
+              caddy_profile_url = NULLIF(${nextCaddyProfileId}, ''),
               updated_at = NOW()
-          WHERE id = ${existing.id}
+          WHERE id = ${nextCaddyProfileUrl}
         `;
         Object.assign(existing, {
           name: nextName,
@@ -239,22 +255,44 @@ async function importPeople(rawPeople: any[], source = "csv_import", options: an
     }
   }
 
-  result.people = await readPeople();
+  try {
+    result.people = await readPeople();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Could not refresh people after import.";
+    result.errors.push({ rowNumber: "refresh", reason });
+  }
   return result;
 }
 
 export default async (req: Request, _context: Context) => {
+  if (req.method === "OPTIONS") return new Response(null, { status: 204 });
+  if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
   try {
-    if (req.method === "OPTIONS") return new Response(null, { status: 204 });
-    if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
     await requireAdmin(req);
-    const body = await req.json().catch(() => ({}));
-    return json(await importPeople(body.people || body.clients || [], body.source || "csv_import", body.options || {}));
   } catch (error: any) {
-    const status = Number(error?.status || 500);
+    const message = error instanceof Error ? error.message : "Admin login required.";
+    const result = emptyResult(1);
+    result.errors.push({ rowNumber: "auth", reason: message });
+    result.results.push({ rowNumber: "auth", status: "failed", reason: message });
+    return json(result, 200);
+  }
+
+  const body = await req.json().catch(() => ({}));
+  try {
+    return json(
+      await importPeople(body.people || body.clients || [], body.source || "csv_import", {
+        mode: body.mode || body.options?.mode,
+        appendNotes: body.appendNotes ?? body.options?.appendNotes,
+      }),
+    );
+  } catch (error: any) {
     const message = error instanceof Error ? error.message : "People import failed.";
     console.error("people_import_failed", error);
-    return json({ error: "people_import_failed", message }, status);
+    const rowCount = Array.isArray(body.people || body.clients) ? (body.people || body.clients).length : 1;
+    const result = emptyResult(Math.max(rowCount, 1));
+    result.errors.push({ rowNumber: "setup", reason: message });
+    result.results.push({ rowNumber: "setup", status: "failed", reason: message });
+    return json(result, 200);
   }
 };
 
