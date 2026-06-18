@@ -73,25 +73,16 @@ async function ensurePeopleTables() {
     ON people (LOWER(email))
     WHERE email IS NOT NULL AND email <> ''
   `;
-  await db().sql`
-    CREATE TABLE IF NOT EXISTS admin_sessions (
-      id TEXT PRIMARY KEY,
-      token_hash TEXT UNIQUE NOT NULL,
-      user_id TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
 }
 
 async function requireAdmin(req: Request) {
   const token = parseCookies(req)[sessionCookieName] || "";
   if (!token) return false;
   const rows = await db().sql`
-    SELECT id
-    FROM admin_sessions
-    WHERE token_hash = ${hashToken(token)}
-      AND expires_at > NOW()
+    SELECT admin_users.id, admin_users.email, admin_sessions.expires_at
+    FROM admin_sessions JOIN admin_users ON admin_users.id = admin_sessions.user_id
+    WHERE admin_sessions.token_hash = ${hashToken(token)}
+      AND admin_sessions.expires_at > NOW()
     LIMIT 1
   `;
   return rows.length > 0;
