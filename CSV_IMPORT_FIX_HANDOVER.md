@@ -100,3 +100,22 @@ After deploy, test:
 6. Import selected clients.
 7. Re-import the same CSV and confirm it updates/skips instead of creating duplicates.
 8. Log out or expire the session and confirm import buttons are disabled with a clear admin access message.
+
+## 2026-06-18 White Screen Runtime Fix
+
+After the Netlify registry fix, the live app rendered a white screen with:
+
+```txt
+Cannot read properties of null (reading 'toLowerCase')
+```
+
+Root cause: live Supabase/API data can contain `null` for client/contact fields even though the React types expected strings. The app then called `.toLowerCase()` / `.trim()` during initial client list memoisation, crashing the whole app before render.
+
+Fixes applied:
+
+- Added `safeText()` and `safeTrim()` helpers.
+- Made client matching/search/header normalisation null-safe.
+- Added `cleanPerson()` / `cleanPeople()` and sanitised people arrays before storing them in React state.
+- Made selected-client notification recipient matching null-safe.
+- Made Caddy profile URL generation null-safe.
+- Confirmed `npm run build` passes.

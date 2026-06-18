@@ -786,6 +786,16 @@ function getDefaultSyncBaseUrl() {
   return window.location.origin;
 }
 
+function safeText(value: unknown) {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function safeTrim(value: unknown) {
+  return safeText(value).trim();
+}
+
 type ClientMatchInput = {
   name?: string;
   firstName?: string;
@@ -796,21 +806,21 @@ type ClientMatchInput = {
 
 type MatchableClient = Pick<Person, "name" | "email" | "phone">;
 
-function normalizeMatchText(value = "") {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+function normalizeMatchText(value: unknown = "") {
+  return safeText(value).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function normalizePhoneDigits(value = "") {
-  return value.replace(/\D/g, "");
+function normalizePhoneDigits(value: unknown = "") {
+  return safeText(value).replace(/\D/g, "");
 }
 
-function canonicalPhoneKey(value = "") {
+function canonicalPhoneKey(value: unknown = "") {
   const digits = normalizePhoneDigits(value);
   if (digits.startsWith("64") && digits.length >= 9) return `0${digits.slice(2)}`;
   return digits;
 }
 
-function phoneVariants(value = "") {
+function phoneVariants(value: unknown = "") {
   const digits = normalizePhoneDigits(value);
   const variants = new Set<string>();
   if (digits) variants.add(digits);
@@ -857,7 +867,7 @@ function phoneValuesMatch(source = "", query = "", exact = false) {
 }
 
 function bookingInputName(input: ClientMatchInput) {
-  return (input.name ?? [input.firstName, input.lastName].filter(Boolean).join(" ")).trim();
+  return safeTrim(input.name ?? [input.firstName, input.lastName].filter(Boolean).join(" "));
 }
 
 function splitClientName(name: string) {
@@ -910,13 +920,13 @@ function clientMatchesSearchTerm(client: Pick<Person, "name" | "email" | "phone"
   return clientSearchText(client).includes(rawTerm) || clientMatchesInput(client, { name: term, email: term, phone: term });
 }
 
-function clientKey(name = "", email = "", phone = "") {
+function clientKey(name: unknown = "", email: unknown = "", phone: unknown = "") {
   const normalizedEmail = normalizeMatchText(email);
   if (normalizedEmail) return `email:${normalizedEmail}`;
   return `name:${normalizeMatchText(name)}|phone:${canonicalPhoneKey(phone)}`;
 }
 
-function clientNotificationKeys(name = "", email = "", phone = "") {
+function clientNotificationKeys(name: unknown = "", email: unknown = "", phone: unknown = "") {
   return new Set(
     [
       normalizeMatchText(email) ? `email:${normalizeMatchText(email)}` : "",
@@ -930,16 +940,20 @@ function caddyProfileUrl(
   person: Pick<Person, "name" | "email" | "caddyProfileUrl" | "caddyProfileId">,
   workspaceUrl = CADDY_APP_URL,
 ) {
-  if (person.caddyProfileUrl.trim()) return person.caddyProfileUrl.trim();
+  const profileUrl = safeTrim(person.caddyProfileUrl);
+  const profileId = safeTrim(person.caddyProfileId);
+  const email = safeTrim(person.email);
+  const name = safeTrim(person.name);
+  if (profileUrl) return profileUrl;
   const url = new URL(workspaceUrl || CADDY_APP_URL);
-  if (person.caddyProfileId.trim()) url.searchParams.set("profile", person.caddyProfileId.trim());
-  if (person.email.trim()) url.searchParams.set("email", person.email.trim());
-  if (person.name.trim()) url.searchParams.set("name", person.name.trim());
+  if (profileId) url.searchParams.set("profile", profileId);
+  if (email) url.searchParams.set("email", email);
+  if (name) url.searchParams.set("name", name);
   return url.toString();
 }
 
 function clientSearchText(client: Pick<Person, "name" | "email" | "phone" | "notes">) {
-  return [client.name, client.email, client.phone, client.notes].join(" ").toLowerCase();
+  return [client.name, client.email, client.phone, client.notes].map(safeText).join(" ").toLowerCase();
 }
 
 function editorFromClient(client: ClientSummary): ClientEditor {
@@ -980,8 +994,8 @@ function parseDelimitedLine(line: string) {
   return cells;
 }
 
-function normalizeImportHeader(header: string) {
-  return header.toLowerCase().replace(/[^a-z0-9]/g, "");
+function normalizeImportHeader(header: unknown) {
+  return safeText(header).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function parseCsvRecords(text: string) {
@@ -1056,15 +1070,15 @@ function autoMapCsvHeaders(headers: string[]): CsvImportMapping {
 }
 
 function valueAt(row: string[], index: number) {
-  return index >= 0 ? String(row[index] || "").trim() : "";
+  return index >= 0 ? safeTrim(row[index]) : "";
 }
 
-function normalizePhoneForMatch(phone: string) {
-  return phone.replace(/[^0-9+]/g, "").replace(/^00/, "+");
+function normalizePhoneForMatch(phone: unknown) {
+  return safeText(phone).replace(/[^0-9+]/g, "").replace(/^00/, "+");
 }
 
-function normalizeNameForMatch(name: string) {
-  return name.toLowerCase().replace(/\s+/g, " ").trim();
+function normalizeNameForMatch(name: unknown) {
+  return safeText(name).toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function isValidImportEmail(email: string) {
@@ -1072,7 +1086,7 @@ function isValidImportEmail(email: string) {
 }
 
 function importedDaysNote(days: string) {
-  const clean = days.trim();
+  const clean = safeTrim(days);
   return clean ? `Imported CSV field: Days Since Last Appointment: ${clean}` : "";
 }
 
@@ -1093,7 +1107,11 @@ function buildCsvClientImport(text: string, existingPeople: Person[] = []): CsvI
   const mapping = hasHeader ? firstRowMapping : autoMapCsvHeaders(headers);
   const dataRows = hasHeader ? records.slice(1) : records;
   const seen = new Set<string>();
-  const existingByEmail = new Map(existingPeople.filter((person) => person.email).map((person) => [person.email.toLowerCase(), person]));
+  const existingByEmail = new Map(
+    existingPeople
+      .filter((person) => safeTrim(person.email))
+      .map((person) => [safeTrim(person.email).toLowerCase(), person]),
+  );
   const existingByPhone = new Map(
     existingPeople
       .map((person) => [normalizePhoneForMatch(person.phone), person] as const)
@@ -1297,6 +1315,28 @@ function cleanEmail(value: unknown, fallback: string) {
   if (typeof value !== "string") return fallback;
   const email = value.trim().toLowerCase().slice(0, 180);
   return email.includes("@") ? email : fallback;
+}
+
+function cleanPerson(person?: Partial<Person>, index = 0): Person {
+  const name = safeTrim(person?.name).slice(0, 180);
+  const email = cleanEmail(person?.email, "");
+  const phone = safeTrim(person?.phone).slice(0, 80);
+  return {
+    id: safeTrim(person?.id) || `person-${index + 1}`,
+    name,
+    email,
+    phone,
+    notes: safeTrim(person?.notes).slice(0, 4000),
+    source: safeTrim(person?.source) || "client",
+    caddyProfileId: safeTrim(person?.caddyProfileId).slice(0, 180),
+    caddyProfileUrl: safeTrim(person?.caddyProfileUrl).slice(0, 500),
+    createdAt: safeTrim(person?.createdAt) || undefined,
+    updatedAt: safeTrim(person?.updatedAt) || undefined,
+  };
+}
+
+function cleanPeople(peopleList?: Partial<Person>[]): Person[] {
+  return Array.isArray(peopleList) ? peopleList.map((person, index) => cleanPerson(person, index)) : [];
 }
 
 function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
@@ -2251,7 +2291,7 @@ function App() {
     };
     if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
     if (Array.isArray(data.items)) setItems(data.items);
-    if (Array.isArray(data.people)) setPeople(data.people);
+    if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
     if (Array.isArray(data.notifications)) setNotifications(data.notifications);
     if (Array.isArray(data.services)) setServices(cleanServices(data.services));
     if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
@@ -2495,15 +2535,16 @@ function App() {
     if (!selectedClient) return [];
     const keys = clientNotificationKeys(selectedClient.name, selectedClient.email, selectedClient.phone);
     const appointmentIds = new Set(selectedClientAppointments.map((appointment) => appointment.id));
-    const clientEmail = selectedClient.email.trim().toLowerCase();
+    const clientEmail = safeTrim(selectedClient.email).toLowerCase();
     return notifications
       .filter((notification) => {
-        const isClientFacing = notification.kind.includes("client") || Boolean(clientEmail && notification.recipient.toLowerCase() === clientEmail);
+        const recipientEmail = safeTrim(notification.recipient).toLowerCase();
+        const isClientFacing = notification.kind.includes("client") || Boolean(clientEmail && recipientEmail === clientEmail);
         if (!isClientFacing || notification.kind.includes("admin")) return false;
         return (
           keys.has(notification.personKey) ||
           appointmentIds.has(notification.calendarItemId) ||
-          Boolean(clientEmail && notification.recipient.toLowerCase() === clientEmail)
+          Boolean(clientEmail && recipientEmail === clientEmail)
         );
       })
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
@@ -4157,7 +4198,7 @@ function App() {
         throw new Error(data.message || "Your admin session has expired. Please log in again, then return to this page.");
       }
       if (!response.ok) throw new Error(data.message || data.error || "People import failed");
-      if (Array.isArray(data.people)) setPeople(data.people);
+      if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
       const summary: CsvImportSummary = {
         created: Number(data.created ?? data.imported ?? 0),
         updated: Number(data.updated ?? 0),
@@ -4317,7 +4358,7 @@ function App() {
       }
       if (!response.ok) throw new Error("Client save failed");
       const result = (await response.json()) as PeopleUpdateResult;
-      if (Array.isArray(result.people)) setPeople(result.people);
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       if (result.person?.id) setSelectedClientId(result.person.id);
       setIsAddingClient(false);
       setClientEditMode(false);
