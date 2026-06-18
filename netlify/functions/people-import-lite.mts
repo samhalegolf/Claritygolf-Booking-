@@ -4,6 +4,17 @@ import { createHash, randomUUID } from "node:crypto";
 
 const sessionCookieName = "clarity_session";
 
+type CleanPerson = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  notes: string;
+  source: string;
+  caddyProfileId: string;
+  caddyProfileUrl: string;
+};
+
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
@@ -86,7 +97,7 @@ async function requireAdmin(req: Request) {
   return rows.length > 0;
 }
 
-function cleanPerson(person: any, index: number) {
+function cleanPerson(person: any): CleanPerson | null {
   const name = cleanString(person?.name || [person?.firstName, person?.lastName].filter(Boolean).join(" "), "", 180);
   const email = cleanString(person?.email, "", 180).toLowerCase();
   if (!name && !email) return null;
@@ -102,86 +113,102 @@ function cleanPerson(person: any, index: number) {
   };
 }
 
+async function findExistingPersonId(person: CleanPerson) {
+  if (person.email) {
+    const rows = await db().sql`
+      SELECT id
+      FROM people
+      WHERE LOWER(email) = LOWER(${person.email})
+      LIMIT 1
+    `;
+    if (rows[0]?.id) return String(rows[0].id);
+  }
+
+  if (person.phone) {
+    const rows = await db().sql`
+      SELECT id
+      FROM people
+      WHERE LOWER(name) = LOWER(${person.name})
+        AND phone = ${person.phone}
+      LIMIT 1
+    `;
+    if (rows[0]?.id) return String(rows[0].id);
+  }
+
+  if (person.id) {
+    const rows = await db().sql`
+      SELECT id
+      FROM people
+      WHERE id = ${person.id}
+      LIMIT 1
+    `;
+    if (rows[0]?.id) return String(rows[0].id);
+  }
+
+  return "";
+}
+
+async function upsertPerson(person: CleanPerson) {
+  const existingId = await findExistingPersonId(person);
+
+  if (existingId) {
+    await db().sql`
+      UPDATE people
+      SET name = COALESCE(NULLIF(${person.name}, ''), name),
+          email = COALESCE(NULLIF(${person.email}, ''), email),
+          phone = COALESCE(NULLIF(${person.phone}, ''), phone),
+          notes = COALESCE(NULLIF(${person.notes}, ''), notes),
+          source = COALESCE(NULLIF(${person.source}, ''), source),
+          caddy_profile_id = COALESCE(NULLIF(${person.caddyProfileId}, ''), caddy_profile_id),
+          caddy_profile_url = COALESCE(NULLIF(${person.caddyProfileUrl}, ''), caddy_profile_url),
+          updated_at = NOW()
+      WHERE id = ${existingId}
+    `;
+    return "updated" as const;
+  }
+
+  await db().sql`
+    INSERT INTO people (
+      id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
+    ) VALUES (
+      ${person.id || `csv-${randomUUID()}`},
+      ${person.name},
+      NULLIF(${person.email}, ''),
+      NULLIF(${person.phone}, ''),
+      NULLIF(${person.notes}, ''),
+      ${person.source},
+      NULLIF(${person.caddyProfileId}, ''),
+      NULLIF(${person.caddyProfileUrl}, ''),
+      NOW(),
+      NOW()
+    )
+  `;
+  return "imported" as const;
+}
+
 async function importPeople(rawPeople: any[]) {
-  const people = Array.isArray(rawPeople) ? rawPeople.map(cleanPerson).filter(Boolean) : [];
+  const people = Array.isArray(rawPeople) ? rawPeople.map(cleanPerson).filter(Boolean) as CleanPerson[] : [];
   const result = {
     imported: 0,
     updated: 0,
     skipped: Array.isArray(rawPeople) ? rawPeople.length - people.length : 0,
+    errors: [] as Array<{ name: string; message: string }>,
   };
 
-  const client = await db().pool.connect();
-  try {
-    await client.query("BEGIN");
-    for (const person of people) {
-      let existingId = "";
-      if (person.email) {
-        const existing = await client.query("SELECT id FROM people WHERE LOWER(email) = LOWER($1) LIMIT 1", [person.email]);
-        existingId = existing.rows[0]?.id || "";
-      }
-      if (!existingId && person.phone) {
-        const existing = await client.query(
-          "SELECT id FROM people WHERE LOWER(name) = LOWER($1) AND phone = $2 LIMIT 1",
-          [person.name, person.phone],
-        );
-        existingId = existing.rows[0]?.id || "";
-      }
-      if (!existingId && person.id) {
-        const existing = await client.query("SELECT id FROM people WHERE id = $1 LIMIT 1", [person.id]);
-        existingId = existing.rows[0]?.id || "";
-      }
-
-      if (existingId) {
-        await client.query(
-          `UPDATE people
-           SET name = COALESCE(NULLIF($2, ''), name),
-               email = COALESCE(NULLIF($3, ''), email),
-               phone = COALESCE(NULLIF($4, ''), phone),
-               notes = COALESCE(NULLIF($5, ''), notes),
-               source = COALESCE(NULLIF($6, ''), source),
-               caddy_profile_id = COALESCE(NULLIF($7, ''), caddy_profile_id),
-               caddy_profile_url = COALESCE(NULLIF($8, ''), caddy_profile_url),
-               updated_at = NOW()
-           WHERE id = $1`,
-          [
-            existingId,
-            person.name,
-            person.email,
-            person.phone,
-            person.notes,
-            person.source,
-            person.caddyProfileId,
-            person.caddyProfileUrl,
-          ],
-        );
-        result.updated += 1;
-      } else {
-        await client.query(
-          `INSERT INTO people (
-             id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
-           ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), NOW())`,
-          [
-            person.id || randomUUID(),
-            person.name,
-            person.email,
-            person.phone,
-            person.notes,
-            person.source,
-            person.caddyProfileId,
-            person.caddyProfileUrl,
-          ],
-        );
-        result.imported += 1;
-      }
+  for (const person of people) {
+    try {
+      const action = await upsertPerson(person);
+      result[action] += 1;
+    } catch (error) {
+      result.skipped += 1;
+      result.errors.push({
+        name: person.name || person.email || person.phone || "Unknown client",
+        message: error instanceof Error ? error.message : "Import failed",
+      });
     }
-    await client.query("COMMIT");
-    return result;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
   }
+
+  return result;
 }
 
 export default async function handler(req: Request) {
