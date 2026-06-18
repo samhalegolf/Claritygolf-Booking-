@@ -4832,124 +4832,136 @@ button {
   font-weight: 800;
 }
 
-/* 2026-06 booking hardening: mobile layout, appointment colours, current day, iframe safety */
-.calendar-item.appointment {
-  border-left-color: var(--service-colour, var(--coach-primary));
-  box-shadow: inset 4px 0 0 var(--service-colour, var(--coach-primary)), 0 18px 34px rgba(0, 0, 0, 0.22);
+.csv-import-card {
+  gap: 16px;
 }
-.day-column.today,
-.calendar-day.today {
-  background: linear-gradient(180deg, rgba(31, 211, 109, 0.11), rgba(31, 211, 109, 0.02));
+
+.csv-auth-state {
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
 }
-.day-column.today::before {
-  content: "Today";
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  display: inline-flex;
-  margin: 4px 6px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  border: 1px solid rgba(31, 211, 109, 0.35);
-  background: rgba(4, 18, 10, 0.72);
-  color: var(--coach-primary);
-  font-size: 0.68rem;
-  font-weight: 800;
+
+.csv-auth-state.verified {
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.csv-auth-state.blocked {
+  background: rgba(255, 174, 0, 0.12);
+}
+
+.csv-input-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.32fr);
+}
+
+.csv-upload-box {
+  align-content: start;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 18px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.csv-upload-box span,
+.csv-preview-note,
+.csv-stage-card p,
+.csv-import-toolbar span,
+.csv-preview-row em {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.csv-stage-card,
+.csv-import-summary {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.csv-import-toolbar {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.compact-field {
+  min-width: 220px;
+}
+
+.csv-preview-table {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  max-height: 460px;
+  overflow: auto;
+}
+
+.csv-preview-row {
+  align-items: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 64px minmax(120px, 1.1fr) minmax(100px, 0.8fr) minmax(130px, 1fr) minmax(120px, 1fr) 80px minmax(160px, 1.2fr);
+  padding: 10px 12px;
+}
+
+.csv-preview-row + .csv-preview-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.csv-preview-head {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 0.78rem;
   letter-spacing: 0.04em;
+  position: sticky;
   text-transform: uppercase;
+  top: 0;
+  z-index: 1;
 }
-.colour-field input[type="color"] {
-  min-height: 44px;
-  padding: 4px;
+
+.csv-preview-row span:last-child {
+  display: grid;
+  gap: 2px;
 }
-.settings-save {
-  transition: opacity 160ms ease, transform 160ms ease;
+
+.status-invalid,
+.status-duplicate,
+.status-failed {
+  background: rgba(255, 89, 89, 0.1);
 }
-.email-status-list,
-.receipt-card,
-.notification-card,
-.booking-confirmed-summary,
-.public-booking-card,
-.selected-card,
-.data-card {
-  min-width: 0;
-  overflow-wrap: anywhere;
+
+.status-warning {
+  background: rgba(255, 174, 0, 0.1);
 }
-.email-status-list span,
-.receipt-card span,
-.receipt-card p,
-.notification-card p,
-.notification-card code,
-.sync-output code,
-.embed-code code {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+
+.status-will_update {
+  background: rgba(80, 160, 255, 0.1);
 }
-@media (max-width: 760px) {
-  html, body, #root {
-    max-width: 100%;
-    overflow-x: hidden;
-  }
-  .app-shell,
-  .module-page,
-  .settings-grid,
-  .booking-layout,
-  .calendar-shell,
-  .public-booking-shell,
-  .widget-preview,
-  .booking-popup-card,
-  .selected-card,
-  .data-card {
-    max-width: 100%;
-    min-width: 0;
-  }
-  .settings-tabs {
-    display: grid;
+
+.csv-final-actions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.csv-import-summary ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 860px) {
+  .csv-input-grid {
     grid-template-columns: 1fr;
-    gap: 8px;
   }
-  .settings-tabs button,
-  .primary-button,
-  .outline-button,
-  .confirm-booking,
-  .calendar-add-actions a,
-  .calendar-add-actions button {
-    min-height: 44px;
+
+  .csv-preview-row {
+    grid-template-columns: 46px minmax(140px, 1fr) minmax(130px, 1fr);
+    min-width: 760px;
   }
-  .service-form-row,
-  .settings-summary-grid,
-  .sync-actions,
-  .calendar-add-actions,
-  .embed-actions {
-    grid-template-columns: 1fr !important;
-    flex-wrap: wrap;
-  }
-  .calendar-add-actions > *,
-  .sync-actions > *,
-  .embed-actions > * {
-    width: 100%;
-    justify-content: center;
-  }
-  .calendar-grid-wrap,
-  .calendar-grid,
-  .week-grid {
-    overflow-x: hidden;
-  }
-  .calendar-item {
-    left: max(2px, var(--mobile-left, 2px));
-    width: calc(100% - 4px);
-    padding-inline: 8px;
-  }
-  .selected-card,
-  .booking-popup-card {
-    border-radius: 22px 22px 0 0;
-  }
-  .widget-preview iframe {
-    width: 100%;
-    min-height: 760px;
-  }
-}
-.day-lane.today {
-  background: linear-gradient(180deg, rgba(31, 211, 109, 0.10), rgba(31, 211, 109, 0.015));
 }

@@ -112,8 +112,8 @@ function parseJsonSetting<T>(settings: Record<string, string>, key: string, fall
 
 function rowToItem(row: any) {
   return {
-    id: row.id || "",
-    kind: row.kind || "appointment",
+    id: row.id,
+    kind: row.kind,
     week: Number(row.week ?? 0),
     day: Number(row.day ?? 0),
     start: Number(row.start ?? 0),
@@ -124,21 +124,6 @@ function rowToItem(row: any) {
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
-  };
-}
-
-function rowToPerson(row: any) {
-  return {
-    id: row.id || "",
-    name: row.name || row.email || row.phone || "Client",
-    email: row.email || "",
-    phone: row.phone || "",
-    notes: row.notes || "",
-    source: row.source || "",
-    caddyProfileId: row.caddy_profile_id || "",
-    caddyProfileUrl: row.caddy_profile_url || "",
-    createdAt: row.created_at || "",
-    updatedAt: row.updated_at || "",
   };
 }
 
@@ -169,9 +154,9 @@ function personFromItem(item: ReturnType<typeof itemToRow>) {
   return {
     id: item.email ? `email-${Buffer.from(item.email).toString("base64url")}` : `person-${randomUUID()}`,
     name: name || item.email || item.phone || "Client",
-    email: item.email || "",
-    phone: item.phone || "",
-    notes: item.note || "",
+    email: item.email,
+    phone: item.phone,
+    notes: item.note,
     source: "appointment",
     caddy_profile_id: null,
     caddy_profile_url: null,
@@ -222,9 +207,9 @@ async function readState() {
     items: itemRows.map(rowToItem),
     services: parseJsonSetting(settings, "servicesJson", defaultServices),
     availability: parseJsonSetting(settings, "availabilityJson", defaultAvailability),
-    people: peopleRows.map(rowToPerson),
+    people: peopleRows,
     notifications: notificationRows.map((row: any) => ({
-      id: row.id || "",
+      id: row.id,
       personKey: row.person_key || "",
       calendarItemId: row.calendar_item_id || "",
       recipient: row.recipient || "",

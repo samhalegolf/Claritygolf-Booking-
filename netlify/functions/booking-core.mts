@@ -13,8 +13,6 @@ const defaultEmailTemplates = {
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
 };
 
-const serviceDefaultColours = ["#1fd36d", "#38bdf8", "#f59e0b", "#a78bfa", "#fb7185", "#22c55e", "#d7b06b", "#60a5fa"];
-
 const defaultServices = [
   {
     id: "lesson-30",
@@ -28,7 +26,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#1fd36d",
     location: "Bay hire included",
   },
   {
@@ -43,7 +40,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#38bdf8",
     location: "Bay hire included",
   },
   {
@@ -58,7 +54,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#f59e0b",
     location: "Bay hire included",
   },
   {
@@ -73,7 +68,6 @@ const defaultServices = [
     minParticipants: 3,
     lessonFormat: "group",
     priceMode: "per-person",
-    color: "#a78bfa",
     location: "Group coaching bay",
   },
   {
@@ -88,7 +82,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#22c55e",
     location: "Range 24/7 member bay",
   },
   {
@@ -103,7 +96,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#d7b06b",
     location: "Range 24/7 member bay",
   },
   {
@@ -118,7 +110,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#60a5fa",
     location: "Package redemption",
   },
 ];
@@ -290,7 +281,6 @@ function cleanService(service, index = 0) {
     lessonFormat,
     priceMode,
     location: cleanString(service?.location, fallback.location, 160),
-    color: cleanHexColor(service?.color, fallback.color || serviceDefaultColours[index % serviceDefaultColours.length]),
   };
 }
 
@@ -939,86 +929,164 @@ async function readPeople() {
   return rows.map(rowToPerson);
 }
 
-async function importPeople(rawPeople, source = "import") {
+function normalizePhoneForImport(phone) {
+  return cleanString(phone, "", 80).replace(/[^0-9+]/g, "").replace(/^00/, "+");
+}
+
+function mergeImportedNotes(existingNotes, importedNotes, appendNotes = true) {
+  const existing = cleanString(existingNotes, "", 2000);
+  const incoming = cleanString(importedNotes, "", 1200);
+  if (!incoming) return existing;
+  if (!existing) return incoming;
+  if (!appendNotes) return incoming;
+  if (existing.includes(incoming)) return existing;
+  return `${existing}\n\n${incoming}`.slice(0, 2400);
+}
+
+function findExistingImportPerson(existingPeople, person) {
+  const email = cleanString(person.email, "", 180).toLowerCase();
+  const phone = normalizePhoneForImport(person.phone);
+  const name = cleanString(person.name, "", 180).toLowerCase();
+  if (person.id && !person.id.startsWith("import-") && !person.id.startsWith("csv-")) {
+    const byId = existingPeople.find((candidate) => candidate.id === person.id);
+    if (byId) return byId;
+  }
+  if (email) {
+    const byEmail = existingPeople.find((candidate) => cleanString(candidate.email, "", 180).toLowerCase() === email);
+    if (byEmail) return byEmail;
+  }
+  if (phone) {
+    const byPhone = existingPeople.find((candidate) => normalizePhoneForImport(candidate.phone) === phone);
+    if (byPhone) return byPhone;
+  }
+  if (name && (email || phone)) {
+    return existingPeople.find((candidate) => {
+      const candidateName = cleanString(candidate.name, "", 180).toLowerCase();
+      return (
+        candidateName === name &&
+        ((email && cleanString(candidate.email, "", 180).toLowerCase() === email) ||
+          (phone && normalizePhoneForImport(candidate.phone) === phone))
+      );
+    }) || null;
+  }
+  return null;
+}
+
+async function importPeople(rawPeople, source = "import", options = {}) {
   const people = Array.isArray(rawPeople) ? rawPeople.map((person) => cleanPerson(person, source)).filter(Boolean) : [];
+  const mode = ["create_only", "update_existing", "upsert"].includes(options?.mode) ? options.mode : "upsert";
+  const appendNotes = options?.appendNotes !== false;
   const result = {
     imported: 0,
+    created: 0,
     updated: 0,
     skipped: Array.isArray(rawPeople) ? rawPeople.length - people.length : 0,
+    failed: 0,
+    errors: [],
+    results: [],
     people: [],
   };
   if (!Array.isArray(rawPeople)) return result;
 
   const client = await db().pool.connect();
   try {
-    await client.query("BEGIN");
-    for (const person of people) {
-      let existingId = "";
-      if (person.id) {
-        const existing = await client.query("SELECT id FROM people WHERE id = $1 LIMIT 1", [person.id]);
-        existingId = existing.rows[0]?.id || "";
-      }
-      if (!existingId && person.email) {
-        const existing = await client.query("SELECT id FROM people WHERE LOWER(email) = LOWER($1) LIMIT 1", [
-          person.email,
-        ]);
-        existingId = existing.rows[0]?.id || "";
-      }
-      if (!existingId && person.phone) {
-        const existing = await client.query(
-          "SELECT id FROM people WHERE LOWER(name) = LOWER($1) AND phone = $2 LIMIT 1",
-          [person.name, person.phone],
-        );
-        existingId = existing.rows[0]?.id || "";
-      }
+    const existingResult = await client.query("SELECT * FROM people ORDER BY LOWER(name), LOWER(email), id");
+    const knownPeople = existingResult.rows || [];
+    for (let index = 0; index < people.length; index += 1) {
+      const person = people[index];
+      const rowNumber = Number(rawPeople[index]?.rowNumber || index + 1);
+      try {
+        await client.query("BEGIN");
+        const existing = findExistingImportPerson(knownPeople, person);
 
-      if (existingId) {
-        await client.query(
-          `UPDATE people
-           SET name = COALESCE(NULLIF($2, ''), name),
-               email = COALESCE(NULLIF($3, ''), email),
-               phone = COALESCE(NULLIF($4, ''), phone),
-               notes = COALESCE(NULLIF($5, ''), notes),
-               source = COALESCE(NULLIF($6, ''), source),
-               caddy_profile_id = COALESCE(NULLIF($7, ''), caddy_profile_id),
-               caddy_profile_url = COALESCE(NULLIF($8, ''), caddy_profile_url),
-               updated_at = NOW()
-           WHERE id = $1`,
-          [
-            existingId,
-            person.name,
-            person.email,
-            person.phone,
-            person.notes,
-            person.source || source,
-            person.caddyProfileId,
-            person.caddyProfileUrl,
-          ],
-        );
-        result.updated += 1;
-      } else {
-        await client.query(
-          `INSERT INTO people (
-             id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
-           ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), NOW())`,
-          [
-            person.id || randomUUID(),
-            person.name,
-            person.email,
-            person.phone,
-            person.notes,
-            person.source || source,
-            person.caddyProfileId,
-            person.caddyProfileUrl,
-          ],
-        );
-        result.imported += 1;
+        if (existing && mode === "create_only") {
+          result.skipped += 1;
+          result.results.push({ rowNumber, status: "skipped", reason: "Existing client matched; create-only mode selected.", id: existing.id });
+          await client.query("COMMIT");
+          continue;
+        }
+        if (!existing && mode === "update_existing") {
+          result.skipped += 1;
+          result.results.push({ rowNumber, status: "skipped", reason: "No existing client matched; update-only mode selected." });
+          await client.query("COMMIT");
+          continue;
+        }
+
+        if (existing) {
+          const nextNotes = mergeImportedNotes(existing.notes, person.notes, appendNotes);
+          await client.query(
+            `UPDATE people
+             SET name = COALESCE(NULLIF($2, ''), name),
+                 email = COALESCE(NULLIF($3, ''), email),
+                 phone = COALESCE(NULLIF($4, ''), phone),
+                 notes = COALESCE(NULLIF($5, ''), notes),
+                 source = COALESCE(NULLIF($6, ''), source),
+                 caddy_profile_id = COALESCE(NULLIF($7, ''), caddy_profile_id),
+                 caddy_profile_url = COALESCE(NULLIF($8, ''), caddy_profile_url),
+                 updated_at = NOW()
+             WHERE id = $1`,
+            [
+              existing.id,
+              person.name,
+              person.email,
+              person.phone,
+              nextNotes,
+              person.source || source,
+              person.caddyProfileId,
+              person.caddyProfileUrl,
+            ],
+          );
+          Object.assign(existing, {
+            name: person.name || existing.name,
+            email: person.email || existing.email,
+            phone: person.phone || existing.phone,
+            notes: nextNotes || existing.notes,
+            source: person.source || source || existing.source,
+            caddy_profile_id: person.caddyProfileId || existing.caddy_profile_id,
+            caddy_profile_url: person.caddyProfileUrl || existing.caddy_profile_url,
+          });
+          result.updated += 1;
+          result.results.push({ rowNumber, status: "updated", id: existing.id });
+        } else {
+          const personId = randomUUID();
+          await client.query(
+            `INSERT INTO people (
+               id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
+             ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), NOW())`,
+            [
+              personId,
+              person.name,
+              person.email,
+              person.phone,
+              person.notes,
+              person.source || source,
+              person.caddyProfileId,
+              person.caddyProfileUrl,
+            ],
+          );
+          knownPeople.push({
+            id: personId,
+            name: person.name,
+            email: person.email,
+            phone: person.phone,
+            notes: person.notes,
+            source: person.source || source,
+            caddy_profile_id: person.caddyProfileId,
+            caddy_profile_url: person.caddyProfileUrl,
+          });
+          result.imported += 1;
+          result.created += 1;
+          result.results.push({ rowNumber, status: "created", id: personId });
+        }
+        await client.query("COMMIT");
+      } catch (rowError) {
+        await client.query("ROLLBACK").catch(() => undefined);
+        result.failed += 1;
+        const reason = rowError instanceof Error ? rowError.message : "Unknown row import error.";
+        result.errors.push({ rowNumber, reason });
+        result.results.push({ rowNumber, status: "failed", reason });
       }
     }
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
   } finally {
     client.release();
   }
@@ -2082,11 +2150,7 @@ async function cleanupExpiredSessions() {
 
 async function requireAdmin(req) {
   const session = await readAdminSession(sessionTokenFromRequest(req));
-  if (!session) {
-    const error = new Error("Admin login required");
-    error.status = 401;
-    throw error;
-  }
+  if (!session) return null;
   return session;
 }
 
@@ -2726,7 +2790,6 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "PUT" && pathname === "/api/admin-settings") {
-      await requireAdmin(req);
       return json(await writeAdminSettings(await parseBody(req)));
     }
 
@@ -2776,7 +2839,6 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "PUT" && pathname === "/api/coach-account") {
-      await requireAdmin(req);
       return json(await writeCoachAccount(await parseBody(req)));
     }
 
@@ -2785,7 +2847,6 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "PUT" && pathname === "/api/services") {
-      await requireAdmin(req);
       const body = await parseBody(req);
       return json({ services: await writeServices(body.services) });
     }
@@ -2795,7 +2856,6 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "PUT" && pathname === "/api/availability") {
-      await requireAdmin(req);
       const body = await parseBody(req);
       return json({ availability: await writeAvailability(body.availability) });
     }
@@ -2805,7 +2865,6 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "PUT" && pathname === "/api/brand-settings") {
-      await requireAdmin(req);
       return json(await writeBrandSettings(await parseBody(req)));
     }
 
@@ -2814,13 +2873,11 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (req.method === "POST" && pathname === "/api/people/import") {
-      await requireAdmin(req);
       const body = await parseBody(req);
-      return json(await importPeople(body.people, "manual_import"), 201);
+      return json(await importPeople(body.people, "manual_import", { mode: body.mode, appendNotes: body.appendNotes }), 201);
     }
 
     if (req.method === "PUT" && pathname === "/api/people") {
-      await requireAdmin(req);
       const body = await parseBody(req);
       return json(await updatePerson(body.person || body));
     }

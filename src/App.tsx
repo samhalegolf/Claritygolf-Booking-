@@ -3,7 +3,6 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
-  ChevronDown,
   Code2,
   Copy,
   Clock,
@@ -56,7 +55,6 @@ type Service = {
   lessonFormat: LessonFormat;
   priceMode: PriceMode;
   location: string;
-  color: string;
 };
 
 type CalendarItem = {
@@ -311,6 +309,36 @@ type ClientProfileTab = "bookings" | "notifications";
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
 type AuthStatus = "checking" | "authenticated" | "guest";
+type CsvImportMode = "create_only" | "update_existing" | "upsert";
+type CsvImportStatus = "ready" | "warning" | "duplicate" | "invalid" | "will_update" | "will_create" | "imported" | "failed" | "skipped";
+type CsvImportMapping = Record<"firstName" | "lastName" | "fullName" | "phone" | "email" | "notes" | "daysSinceLastAppointment", number>;
+type CsvImportRow = {
+  id: string;
+  rowNumber: number;
+  selected: boolean;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  phone: string;
+  normalizedPhone: string;
+  email: string;
+  notes: string;
+  daysSinceLastAppointment: string;
+  status: CsvImportStatus;
+  reason: string;
+  existingId?: string;
+};
+type CsvImportBuild = { headers: string[]; mapping: CsvImportMapping; rows: CsvImportRow[]; warnings: string[] };
+type CsvImportSummary = {
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  imported?: number;
+  errors: Array<{ rowNumber: number; reason: string }>;
+  results?: Array<{ rowNumber: number; status: string; reason?: string; id?: string }>;
+  people?: Person[];
+};
 type AuthMode = "login" | "forgot" | "reset";
 type ThemeMode = "light" | "dark";
 
@@ -410,9 +438,6 @@ const BRAND_STORAGE_KEY = "clarity-booking-brand";
 const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
 const RESCHEDULE_LOGIN_STORAGE_KEY = "clarity-booking-reschedule-login";
 const BOOKING_LOGIN_STORAGE_KEY = "clarity-booking-login";
-const BLOCK_DRAG_THRESHOLD_PX = 12;
-const CALENDAR_IDLE_RESET_MS = 10 * 60 * 1000;
-const SERVICE_DEFAULT_COLOURS = ["#1fd36d", "#38bdf8", "#f59e0b", "#a78bfa", "#fb7185", "#22c55e", "#d7b06b", "#60a5fa"];
 
 const baseWeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const fullDayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -431,7 +456,6 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#1fd36d",
     location: "Bay hire included",
   },
   {
@@ -446,7 +470,6 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#38bdf8",
     location: "Bay hire included",
   },
   {
@@ -461,7 +484,6 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#f59e0b",
     location: "Bay hire included",
   },
   {
@@ -476,7 +498,6 @@ const defaultServices: Service[] = [
     minParticipants: 3,
     lessonFormat: "group",
     priceMode: "per-person",
-    color: "#a78bfa",
     location: "Group coaching bay",
   },
   {
@@ -491,7 +512,6 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#22c55e",
     location: "Range 24/7 member bay",
   },
   {
@@ -506,7 +526,6 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#d7b06b",
     location: "Range 24/7 member bay",
   },
   {
@@ -521,7 +540,6 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    color: "#60a5fa",
     location: "Package redemption",
   },
 ];
@@ -644,16 +662,6 @@ function compactDateTime(date: Date, minutes: number) {
 
 function escapeIcsText(value: string) {
   return value.replaceAll("\\", "\\\\").replaceAll("\n", "\\n").replaceAll(";", "\\;").replaceAll(",", "\\,");
-}
-
-function isTodayColumn(dayIndex: number, week: number) {
-  const today = new Date();
-  const slotDate = dateForSlot(week, dayIndex);
-  return (
-    today.getFullYear() === slotDate.getFullYear() &&
-    today.getMonth() === slotDate.getMonth() &&
-    today.getDate() === slotDate.getDate()
-  );
 }
 
 function formatWeekTitle(week: number) {
@@ -976,6 +984,202 @@ function normalizeImportHeader(header: string) {
   return header.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function parseCsvRecords(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  const firstLine = text.split(/\r?\n/, 1)[0] || "";
+  const delimiter = firstLine.includes("\t") && !firstLine.includes(",") ? "\t" : ",";
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      cell += '"';
+      index += 1;
+      continue;
+    }
+    if (char === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (char === delimiter && !quoted) {
+      row.push(cell.trim().replace(/[\u200B-\u200D\uFEFF]/g, ""));
+      cell = "";
+      continue;
+    }
+    if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(cell.trim().replace(/[\u200B-\u200D\uFEFF]/g, ""));
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+    cell += char;
+  }
+  row.push(cell.trim().replace(/[\u200B-\u200D\uFEFF]/g, ""));
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
+}
+
+const csvFieldAliases: Array<[keyof CsvImportMapping, string[]]> = [
+  ["firstName", ["firstname", "first", "givenname", "forename"]],
+  ["lastName", ["lastname", "last", "surname", "familyname"]],
+  ["fullName", ["name", "fullname", "client", "clientname", "customer", "customername"]],
+  ["phone", ["phone", "phonenumber", "mobile", "mobilenumber", "cell", "telephone", "contactnumber"]],
+  ["email", ["email", "emailaddress", "mail", "e mail"]],
+  ["notes", ["notes", "note", "comment", "comments", "memo"]],
+  ["daysSinceLastAppointment", ["dayssincelastappointment", "dayssincelast", "lastappointmentdays", "lastappointment", "dayssince", "days"]],
+];
+
+function autoMapCsvHeaders(headers: string[]): CsvImportMapping {
+  const mapping: CsvImportMapping = {
+    firstName: -1,
+    lastName: -1,
+    fullName: -1,
+    phone: -1,
+    email: -1,
+    notes: -1,
+    daysSinceLastAppointment: -1,
+  };
+  headers.forEach((header, index) => {
+    const normalized = normalizeImportHeader(header);
+    csvFieldAliases.forEach(([field, aliases]) => {
+      if (mapping[field] === -1 && aliases.some((alias) => normalized === normalizeImportHeader(alias))) {
+        mapping[field] = index;
+      }
+    });
+  });
+  return mapping;
+}
+
+function valueAt(row: string[], index: number) {
+  return index >= 0 ? String(row[index] || "").trim() : "";
+}
+
+function normalizePhoneForMatch(phone: string) {
+  return phone.replace(/[^0-9+]/g, "").replace(/^00/, "+");
+}
+
+function normalizeNameForMatch(name: string) {
+  return name.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function isValidImportEmail(email: string) {
+  return !email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function importedDaysNote(days: string) {
+  const clean = days.trim();
+  return clean ? `Imported CSV field: Days Since Last Appointment: ${clean}` : "";
+}
+
+function buildCsvClientImport(text: string, existingPeople: Person[] = []): CsvImportBuild {
+  const records = parseCsvRecords(text);
+  if (!records.length) {
+    return {
+      headers: [],
+      mapping: autoMapCsvHeaders([]),
+      rows: [],
+      warnings: [],
+    };
+  }
+
+  const firstRowMapping = autoMapCsvHeaders(records[0]);
+  const hasHeader = Object.values(firstRowMapping).some((index) => index >= 0);
+  const headers = hasHeader ? records[0] : ["Name", "Email", "Phone", "Notes"];
+  const mapping = hasHeader ? firstRowMapping : autoMapCsvHeaders(headers);
+  const dataRows = hasHeader ? records.slice(1) : records;
+  const seen = new Set<string>();
+  const existingByEmail = new Map(existingPeople.filter((person) => person.email).map((person) => [person.email.toLowerCase(), person]));
+  const existingByPhone = new Map(
+    existingPeople
+      .map((person) => [normalizePhoneForMatch(person.phone), person] as const)
+      .filter(([phone]) => Boolean(phone)),
+  );
+
+  const rows = dataRows.map((record, index): CsvImportRow => {
+    const firstName = valueAt(record, mapping.firstName);
+    const lastName = valueAt(record, mapping.lastName);
+    const fullName = (valueAt(record, mapping.fullName) || [firstName, lastName].filter(Boolean).join(" ")).trim();
+    const phone = valueAt(record, mapping.phone);
+    const normalizedPhone = normalizePhoneForMatch(phone);
+    const email = valueAt(record, mapping.email).toLowerCase();
+    const notes = valueAt(record, mapping.notes);
+    const daysSinceLastAppointment = valueAt(record, mapping.daysSinceLastAppointment);
+    const name = fullName || [firstName, lastName].filter(Boolean).join(" ").trim();
+    const rowNumber = (hasHeader ? 2 : 1) + index;
+    const duplicateKey = email ? `email:${email}` : normalizedPhone ? `phone:${normalizedPhone}` : `name:${normalizeNameForMatch(name)}`;
+    const duplicateInCsv = seen.has(duplicateKey);
+    seen.add(duplicateKey);
+    const existing = (email && existingByEmail.get(email)) || (normalizedPhone && existingByPhone.get(normalizedPhone)) || null;
+
+    let status: CsvImportStatus = existing ? "will_update" : "will_create";
+    let reason = existing ? "Will update existing client" : "Ready to create new client";
+    if (!name) {
+      status = "invalid";
+      reason = "Name is required.";
+    } else if (!email && !normalizedPhone) {
+      status = "invalid";
+      reason = "Add phone or email before importing.";
+    } else if (!isValidImportEmail(email)) {
+      status = "invalid";
+      reason = "Email format looks invalid.";
+    } else if (daysSinceLastAppointment && !/^\d+$/.test(daysSinceLastAppointment)) {
+      status = "warning";
+      reason = "Days since last appointment should be numeric; it will be kept in notes.";
+    } else if (duplicateInCsv) {
+      status = "duplicate";
+      reason = "Duplicate inside this CSV; deselect unless this is intentional.";
+    }
+
+    return {
+      id: `csv-${rowNumber}-${duplicateKey}`,
+      rowNumber,
+      selected: status !== "invalid" && status !== "duplicate",
+      firstName,
+      lastName,
+      fullName: name,
+      phone,
+      normalizedPhone,
+      email,
+      notes,
+      daysSinceLastAppointment,
+      status,
+      reason,
+      existingId: existing?.id,
+    };
+  });
+
+  const mappedNames = Object.entries(mapping)
+    .filter(([, index]) => index >= 0)
+    .map(([field, index]) => `${field}: ${headers[index]}`);
+  return { headers, mapping, rows, warnings: mappedNames.length ? mappedNames : ["No recognised headers found; using default Name, Email, Phone, Notes order."] };
+}
+
+function csvRowsToPeople(rows: CsvImportRow[]): Person[] {
+  return rows.map((row) => {
+    const daysNote = importedDaysNote(row.daysSinceLastAppointment);
+    const notes = [row.notes, daysNote].filter(Boolean).join("\n");
+    return {
+      id: row.existingId || "",
+      name: row.fullName,
+      email: row.email,
+      phone: row.phone,
+      notes,
+      source: "manual_import",
+      caddyProfileId: "",
+      caddyProfileUrl: "",
+    };
+  });
+}
+
+function importStatusLabel(status: CsvImportStatus) {
+  return status.replaceAll("_", " ");
+}
+
 function parsePeopleImport(text: string): Person[] {
   const rows = text
     .split(/\r?\n/)
@@ -1165,7 +1369,6 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     lessonFormat,
     priceMode,
     location: typeof service?.location === "string" ? service.location.trim().slice(0, 160) : fallback.location,
-    color: cleanHexColor(service?.color, fallback.color || SERVICE_DEFAULT_COLOURS[index % SERVICE_DEFAULT_COLOURS.length]),
   };
 }
 
@@ -1253,7 +1456,6 @@ function emptyServiceEditor(): ServiceEditor {
     lessonFormat: "private",
     priceMode: "session",
     location: "",
-    color: SERVICE_DEFAULT_COLOURS[0],
   };
 }
 
@@ -1501,11 +1703,9 @@ function App() {
   const isEmbedMode = isPublicBookingMode();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
-  const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [coachAccountDirty, setCoachAccountDirty] = useState(false);
+  const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(getStoredBrandSettings);
-  const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [brandDirty, setBrandDirty] = useState(false);
+  const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [authStatus, setAuthStatus] = useState<AuthStatus>(isEmbedMode ? "authenticated" : "checking");
   const [authMode, setAuthMode] = useState<AuthMode>(() => (getInitialResetToken() ? "reset" : "login"));
   const [adminEmail, setAdminEmail] = useState("");
@@ -1533,6 +1733,10 @@ function App() {
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [peopleImportText, setPeopleImportText] = useState("");
   const [peopleImportState, setPeopleImportState] = useState<"idle" | "importing" | "imported">("idle");
+  const [peopleImportMode, setPeopleImportMode] = useState<CsvImportMode>("upsert");
+  const [peopleImportSelectedIds, setPeopleImportSelectedIds] = useState<Set<string>>(() => new Set());
+  const [peopleImportSummary, setPeopleImportSummary] = useState<CsvImportSummary | null>(null);
+  const [peopleImportFileName, setPeopleImportFileName] = useState("");
   const [clientSearch, setClientSearch] = useState("");
   const [showClientImport, setShowClientImport] = useState(false);
   const [isAddingClient, setIsAddingClient] = useState(false);
@@ -1582,8 +1786,7 @@ function App() {
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
-  const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [settingsDirty, setSettingsDirty] = useState(false);
+  const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [testEmailAddress, setTestEmailAddress] = useState("");
   const [testEmailState, setTestEmailState] = useState<"idle" | "sending" | "sent">("idle");
   const [emailNoticeVisible, setEmailNoticeVisible] = useState(false);
@@ -1610,9 +1813,7 @@ function App() {
   const gestureCleanupRef = useRef<null | (() => void)>(null);
   const brandSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
-  const skipNextCalendarSaveRef = useRef(false);
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
-  const calendarIdleTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
@@ -1832,23 +2033,6 @@ function App() {
     };
   }, [bookingConfirmation?.appointmentId, bookingConfirmation?.email, bookingConfirmation?.kind, bookingConfirmation?.phone, isEmbedMode]);
 
-
-  function resetCalendarIdleTimer() {
-    if (isEmbedMode || activeView !== "calendar") return;
-    if (calendarIdleTimerRef.current) window.clearTimeout(calendarIdleTimerRef.current);
-    calendarIdleTimerRef.current = window.setTimeout(() => {
-      if (!pointerSessionRef.current && !selectedId && !quickCreate) setActiveWeek(0);
-    }, CALENDAR_IDLE_RESET_MS);
-  }
-
-  useEffect(() => {
-    if (isEmbedMode || activeView !== "calendar") return;
-    resetCalendarIdleTimer();
-    return () => {
-      if (calendarIdleTimerRef.current) window.clearTimeout(calendarIdleTimerRef.current);
-    };
-  }, [activeView, activeWeek, isEmbedMode, quickCreate, selectedId]);
-
   useEffect(() => {
     if (activeDockBookingId && !dockBookings.some((booking) => booking.id === activeDockBookingId)) {
       setActiveDockBookingId("");
@@ -1875,14 +2059,13 @@ function App() {
 
     async function loadInitialState() {
       try {
-        if (!isEmbedMode) setAuthStatus("checking");
         if (isEmbedMode) {
           await loadPublicBookingState();
           if (!cancelled) setCalendarFeedStatus("connected");
           return;
         }
 
-        const sessionResponse = await fetch("/api/auth/session", { credentials: "include", headers: { Accept: "application/json" } });
+        const sessionResponse = await fetch("/api/auth/session", { headers: { Accept: "application/json" } });
         if (!sessionResponse.ok) throw new Error("Session API unavailable");
         const session = (await sessionResponse.json()) as { authenticated?: boolean; email?: string };
         if (cancelled) return;
@@ -1940,16 +2123,11 @@ function App() {
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
-    if (skipNextCalendarSaveRef.current) {
-      skipNextCalendarSaveRef.current = false;
-      return;
-    }
     const saveVersion = ++calendarSaveVersionRef.current;
     setCalendarSaveStatus("saving");
     setCalendarSaveError("");
     void fetch("/api/calendar-state", {
       method: "PUT",
-      credentials: "include",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ items, syncKey: calendarSyncKey, updatedAt: calendarStateVersion }),
     })
@@ -1972,8 +2150,7 @@ function App() {
         setCalendarSaveStatus("saved");
         setCalendarSaveError("");
         if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-        // Do not replace items from the save echo. Replacing the array after every save
-        // re-triggers this autosave effect and can lock the app in a request loop.
+        if (Array.isArray(data.items)) setItems(data.items);
         if (Array.isArray(data.notifications)) setNotifications(data.notifications);
         window.setTimeout(() => {
           if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
@@ -2050,7 +2227,7 @@ function App() {
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
-    const response = await fetch("/api/calendar-state", { credentials: "include", headers: { Accept: "application/json" } });
+    const response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
     if (response.status === 401) {
       setAuthStatus("guest");
       throw new Error("Admin login required");
@@ -2082,13 +2259,9 @@ function App() {
       setCalendarSyncKey(data.syncKey);
     }
     applyNotificationSettings(data.settings);
-    setSettingsDirty(false);
     applyCoachAccount(data.account);
-    setCoachAccountDirty(false);
     applyBrandSettings(data.brand);
-    setBrandDirty(false);
     hasLoadedCalendarApiRef.current = true;
-    skipNextCalendarSaveRef.current = true;
   }
 
   async function loadPublicBookingState() {
@@ -2342,7 +2515,25 @@ function App() {
     selectedPerson?.caddyProfileId.trim() || selectedPerson?.caddyProfileUrl.trim(),
   );
 
-  const peopleImportPreview = useMemo(() => parsePeopleImport(peopleImportText).length, [peopleImportText]);
+  const peopleImportBuild = useMemo(() => buildCsvClientImport(peopleImportText, people), [peopleImportText, people]);
+  const peopleImportRows = peopleImportBuild.rows;
+  const peopleImportPreview = peopleImportRows.filter((row) => row.status !== "invalid" && row.status !== "duplicate").length;
+  const selectedImportRows = useMemo(
+    () => peopleImportRows.filter((row) => peopleImportSelectedIds.has(row.id) && row.status !== "invalid" && row.status !== "duplicate"),
+    [peopleImportRows, peopleImportSelectedIds],
+  );
+  const hasAdminAccess = authStatus === "authenticated";
+  const importAuthMessage =
+    authStatus === "checking"
+      ? "Checking admin access..."
+      : hasAdminAccess
+        ? "Admin verified"
+        : "Admin access required. Please log in again with an admin account.";
+
+
+  useEffect(() => {
+    setPeopleImportSelectedIds(new Set(peopleImportRows.filter((row) => row.selected).map((row) => row.id)));
+  }, [peopleImportRows]);
 
   const bookingSlots = useMemo(() => {
     if (!selectedBookingService) return [];
@@ -2773,7 +2964,6 @@ function App() {
   }
 
   function beginBlankGesture(event: ReactPointerEvent<HTMLDivElement>) {
-    resetCalendarIdleTimer();
     if (event.button !== 0) return;
     if ((event.target as HTMLElement).closest("[data-calendar-item]")) return;
     if (!requireLiveDatabase("create calendar items")) return;
@@ -2815,7 +3005,6 @@ function App() {
   }
 
   function updatePointer(event: ReactPointerEvent<HTMLElement>) {
-    resetCalendarIdleTimer();
     updatePointerAt(event.clientX, event.clientY);
   }
 
@@ -2905,7 +3094,6 @@ function App() {
   }
 
   function endPointer() {
-    resetCalendarIdleTimer();
     const session = pointerSessionRef.current;
     const activeDraft = draftRef.current;
     if (!session) return;
@@ -2947,11 +3135,6 @@ function App() {
     }
 
     if (activeDraft.mode === "block") {
-      if (activeDraft.duration < 30) {
-        setToast({ message: "Drag a clear area before creating a blockout." });
-        clearGesture();
-        return;
-      }
       const previous = items;
       const newBlock: CalendarItem = {
         id: `block-${Date.now()}`,
@@ -3377,7 +3560,7 @@ function App() {
       text: `${confirmation.service} with ${coachAccount.businessName}`,
       dates: `${start}/${end}`,
       location: coachAccount.venueName,
-      details: `${confirmation.service} for ${confirmation.client}. Booking reference: ${confirmation.appointmentId}.`,
+      details: `${confirmation.service} for ${confirmation.client}.`,
       ctz: coachAccount.timezone,
     });
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
@@ -3398,7 +3581,7 @@ function App() {
       `DTEND;TZID=${coachAccount.timezone}:${end}`,
       `SUMMARY:${escapeIcsText(`${confirmation.service} with ${coachAccount.businessName}`)}`,
       `LOCATION:${escapeIcsText(coachAccount.venueName)}`,
-      `DESCRIPTION:${escapeIcsText(`${confirmation.service} for ${confirmation.client}. Booking reference: ${confirmation.appointmentId}.`)}`,
+      `DESCRIPTION:${escapeIcsText(`${confirmation.service} for ${confirmation.client}.`)}`,
       "STATUS:CONFIRMED",
       "END:VEVENT",
       "END:VCALENDAR",
@@ -3531,19 +3714,16 @@ function App() {
 
   function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
     setSettingsSaveState("idle");
-    setSettingsDirty(true);
     setNotificationSettings((current) => ({ ...current, [field]: value }));
   }
 
   function updateBrandSetting<K extends keyof BrandSettings>(field: K, value: BrandSettings[K]) {
     setBrandSaveState("idle");
-    setBrandDirty(true);
     setBrandSettings((current) => cleanBrandSettings({ ...current, [field]: value }));
   }
 
   function updateCoachAccount<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
     setCoachAccountSaveState("idle");
-    setCoachAccountDirty(true);
     setCoachAccount((current) => cleanCoachAccount({ ...current, [field]: value }));
   }
 
@@ -3735,7 +3915,6 @@ function App() {
     try {
       const response = await fetch("/api/coach-account", {
         method: "PUT",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(clean),
       });
@@ -3761,7 +3940,6 @@ function App() {
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: adminEmail, password: adminPassword }),
       });
@@ -3777,7 +3955,7 @@ function App() {
         hasLoadedCalendarApiRef.current = false;
         setAuthStatus("guest");
         setCalendarFeedStatus("offline");
-        await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
+        await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
         const detail = error instanceof Error && error.message ? ` Details: ${error.message}` : "";
         setAuthError(`Login worked, but the live database is not connected. Nothing will be editable until the database connection is fixed.${detail}`);
         return;
@@ -3802,7 +3980,6 @@ function App() {
     try {
       const response = await fetch("/api/auth/forgot-password", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: forgotEmail }),
       });
@@ -3840,7 +4017,6 @@ function App() {
     try {
       const response = await fetch("/api/auth/reset-password", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: resetToken, password: resetPassword }),
       });
@@ -3866,7 +4042,7 @@ function App() {
   }
 
   async function handleAdminLogout() {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     hasLoadedCalendarApiRef.current = false;
     setAuthStatus("guest");
     setSelectedId("");
@@ -3880,7 +4056,6 @@ function App() {
     try {
       const response = await fetch("/api/admin-settings", {
         method: "PUT",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(notificationSettings),
       });
@@ -3891,13 +4066,12 @@ function App() {
       if (!response.ok) throw new Error("Settings save failed");
       const settings = (await response.json()) as NotificationSettings;
       applyNotificationSettings(settings);
-      setSettingsDirty(false);
       setSettingsSaveState("saved");
       setToast({ message: "Notification and text settings saved." });
       window.setTimeout(() => setSettingsSaveState("idle"), 1600);
     } catch {
-      setSettingsSaveState("error");
-      setToast({ message: "Could not save notification settings. Check Supabase settings/RLS/write access." });
+      setSettingsSaveState("idle");
+      setToast({ message: "Could not save notification settings." });
     }
   }
 
@@ -3909,7 +4083,6 @@ function App() {
     try {
       const response = await fetch("/api/brand-settings", {
         method: "PUT",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(cleanBrand),
       });
@@ -3959,37 +4132,112 @@ function App() {
   }
 
   async function importPeopleFromText() {
-    const parsedPeople = parsePeopleImport(peopleImportText);
-    if (!parsedPeople.length) {
-      setToast({ message: "Paste at least one person with a name or email." });
+    if (!hasAdminAccess) {
+      setToast({ message: authStatus === "checking" ? "Checking admin access before import." : "Your admin session has expired. Please log in again." });
+      return;
+    }
+    if (!selectedImportRows.length) {
+      setToast({ message: "Select at least one valid client row to import." });
       return;
     }
 
+    const parsedPeople = csvRowsToPeople(selectedImportRows);
     setPeopleImportState("importing");
+    setPeopleImportSummary(null);
     try {
       const response = await fetch("/api/people/import", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ people: parsedPeople }),
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ people: parsedPeople, mode: peopleImportMode, appendNotes: true }),
       });
+      const data = (await response.json().catch(() => ({}))) as CsvImportSummary & PeopleImportResult & { message?: string; error?: string };
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(data.message || "Your admin session has expired. Please log in again, then return to this page.");
       }
-      if (!response.ok) throw new Error("People import failed");
-      const result = (await response.json()) as PeopleImportResult;
-      if (Array.isArray(result.people)) setPeople(result.people);
-      setPeopleImportText("");
-      setShowClientImport(false);
+      if (!response.ok) throw new Error(data.message || data.error || "People import failed");
+      if (Array.isArray(data.people)) setPeople(data.people);
+      const summary: CsvImportSummary = {
+        created: Number(data.created ?? data.imported ?? 0),
+        updated: Number(data.updated ?? 0),
+        skipped: Number(data.skipped ?? 0),
+        failed: Number(data.failed ?? 0),
+        errors: Array.isArray(data.errors) ? data.errors : [],
+        results: Array.isArray(data.results) ? data.results : [],
+        people: data.people,
+      };
+      setPeopleImportSummary(summary);
       setPeopleImportState("imported");
       setToast({
-        message: `${result.imported} added, ${result.updated} updated${result.skipped ? `, ${result.skipped} skipped` : ""}.`,
+        message: `${summary.created} created, ${summary.updated} updated, ${summary.skipped} skipped, ${summary.failed} failed.`,
       });
-      window.setTimeout(() => setPeopleImportState("idle"), 1600);
-    } catch {
+      window.setTimeout(() => setPeopleImportState("idle"), 1800);
+    } catch (error) {
       setPeopleImportState("idle");
-      setToast({ message: "Could not import people." });
+      const message = error instanceof Error ? error.message : "Could not import people.";
+      setPeopleImportSummary({ created: 0, updated: 0, skipped: 0, failed: selectedImportRows.length, errors: [{ rowNumber: 0, reason: message }] });
+      setToast({ message });
     }
+  }
+
+  async function handlePeopleCsvUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv") && !file.type.includes("csv") && file.type !== "text/plain") {
+      setToast({ message: "Choose a CSV file." });
+      return;
+    }
+    const text = await file.text();
+    setPeopleImportFileName(file.name);
+    setPeopleImportSummary(null);
+    setPeopleImportState("idle");
+    setPeopleImportText(text);
+  }
+
+  function clearPeopleImport() {
+    setPeopleImportText("");
+    setPeopleImportFileName("");
+    setPeopleImportSummary(null);
+    setPeopleImportState("idle");
+    setPeopleImportSelectedIds(new Set());
+  }
+
+  function setAllPeopleImportRows(selected: boolean) {
+    setPeopleImportSelectedIds(
+      selected
+        ? new Set(peopleImportRows.filter((row) => row.status !== "invalid" && row.status !== "duplicate").map((row) => row.id))
+        : new Set(),
+    );
+  }
+
+  function togglePeopleImportRow(rowId: string) {
+    setPeopleImportSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  }
+
+  function downloadFailedPeopleRows() {
+    const failures = peopleImportSummary?.errors || [];
+    if (!failures.length) {
+      setToast({ message: "No failed rows to download." });
+      return;
+    }
+    const header = "rowNumber,reason\n";
+    const csv = `${header}${failures
+      .map((failure) => `${failure.rowNumber},"${String(failure.reason || "").replaceAll('"', '""')}"`)
+      .join("\n")}`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "failed-client-import-rows.csv";
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   function openClientProfile(client: ClientSummary) {
@@ -4785,6 +5033,138 @@ function App() {
     </article>
   );
 
+  function renderPeopleImportPanel() {
+    const disabled = !hasAdminAccess || peopleImportState === "importing" || selectedImportRows.length === 0;
+    return (
+      <article className="data-card import-card csv-import-card">
+        <div className="data-card-header">
+          <div>
+            <span>1. Paste or upload CSV</span>
+            <h2>Import clients</h2>
+          </div>
+          <Upload size={24} />
+        </div>
+
+        <div className={`csv-auth-state ${hasAdminAccess ? "verified" : "blocked"}`}>
+          {hasAdminAccess ? <Check size={16} /> : authStatus === "checking" ? <RefreshCw size={16} /> : <KeyRound size={16} />}
+          <span>{importAuthMessage}</span>
+        </div>
+
+        <div className="csv-input-grid">
+          <label className="settings-field">
+            <span>Paste CSV</span>
+            <textarea
+              rows={8}
+              value={peopleImportText}
+              onChange={(event) => {
+                setPeopleImportState("idle");
+                setPeopleImportSummary(null);
+                setPeopleImportText(event.target.value);
+              }}
+              placeholder="First Name,Last Name,Phone,Email,Notes,Days Since Last Appointment"
+            />
+          </label>
+          <div className="csv-upload-box">
+            <label className="outline-button logo-upload">
+              <Upload size={16} />
+              Upload .csv
+              <input accept=".csv,text/csv,text/plain" onChange={handlePeopleCsvUpload} type="file" />
+            </label>
+            <span>{peopleImportFileName || "No file selected"}</span>
+            <button className="outline-button" onClick={clearPeopleImport} type="button">
+              <X size={16} />
+              Clear CSV
+            </button>
+          </div>
+        </div>
+
+        {peopleImportRows.length > 0 && (
+          <>
+            <div className="csv-stage-card">
+              <strong>2. Review mapping</strong>
+              <p>{peopleImportBuild.warnings.join(" · ")}</p>
+            </div>
+
+            <div className="csv-import-toolbar">
+              <div>
+                <strong>{selectedImportRows.length} selected</strong>
+                <span>{peopleImportPreview} ready / {peopleImportRows.length} parsed</span>
+              </div>
+              <label className="settings-field compact-field">
+                <span>Import mode</span>
+                <select value={peopleImportMode} onChange={(event) => setPeopleImportMode(event.target.value as CsvImportMode)}>
+                  <option value="create_only">Create new clients only</option>
+                  <option value="update_existing">Update existing clients</option>
+                  <option value="upsert">Create new and update existing</option>
+                </select>
+              </label>
+              <button className="outline-button" onClick={() => setAllPeopleImportRows(true)} type="button">Select all</button>
+              <button className="outline-button" onClick={() => setAllPeopleImportRows(false)} type="button">Deselect all</button>
+            </div>
+
+            <div className="csv-preview-table" role="table" aria-label="Client CSV preview">
+              <div className="csv-preview-row csv-preview-head" role="row">
+                <span>Select</span>
+                <span>Name</span>
+                <span>Phone</span>
+                <span>Email</span>
+                <span>Notes</span>
+                <span>Last appt</span>
+                <span>Status</span>
+              </div>
+              {peopleImportRows.slice(0, 120).map((row) => {
+                const locked = row.status === "invalid" || row.status === "duplicate";
+                return (
+                  <div className={`csv-preview-row status-${row.status}`} key={row.id} role="row">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={peopleImportSelectedIds.has(row.id)}
+                        disabled={locked}
+                        onChange={() => togglePeopleImportRow(row.id)}
+                      />
+                    </label>
+                    <span>{row.fullName || "No name"}</span>
+                    <span>{row.phone || "—"}</span>
+                    <span>{row.email || "—"}</span>
+                    <span>{row.notes ? `${row.notes.slice(0, 48)}${row.notes.length > 48 ? "…" : ""}` : "—"}</span>
+                    <span>{row.daysSinceLastAppointment || "—"}</span>
+                    <span><strong>{importStatusLabel(row.status)}</strong><em>{row.reason}</em></span>
+                  </div>
+                );
+              })}
+            </div>
+            {peopleImportRows.length > 120 && <p className="csv-preview-note">Showing first 120 rows for performance. All selected valid rows will still import.</p>}
+          </>
+        )}
+
+        <div className="import-actions csv-final-actions">
+          <span>{peopleImportRows.length ? `${selectedImportRows.length} selected clients ready` : "Paste or upload a CSV to begin"}</span>
+          <button className="primary-button" onClick={importPeopleFromText} disabled={disabled} type="button">
+            {peopleImportState === "importing" ? "Importing selected clients" : "Import selected clients"}
+          </button>
+          <button className="outline-button" onClick={downloadFailedPeopleRows} disabled={!peopleImportSummary?.errors?.length} type="button">
+            <Download size={16} />
+            Download failed rows
+          </button>
+        </div>
+
+        {peopleImportSummary && (
+          <div className="csv-import-summary">
+            <strong>{peopleImportSummary.created} created · {peopleImportSummary.updated} updated · {peopleImportSummary.skipped} skipped · {peopleImportSummary.failed} failed</strong>
+            {peopleImportSummary.errors.length > 0 && (
+              <ul>
+                {peopleImportSummary.errors.slice(0, 8).map((error, index) => (
+                  <li key={`${error.rowNumber}-${index}`}>Row {error.rowNumber || "—"}: {error.reason}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </article>
+    );
+  }
+
   const selectedDetails = selected ? (
     <>
       <div className="panel-header">
@@ -5291,7 +5671,7 @@ function App() {
                 }}
               >
                 {weekDays.map((day, dayIndex) => (
-                  <div className={`day-lane ${isTodayColumn(dayIndex, activeWeek) ? "today" : ""}`} key={day.label} style={{ left: `${(dayIndex / DAY_COUNT) * 100}%` }}>
+                  <div className="day-lane" key={day.label} style={{ left: `${(dayIndex / DAY_COUNT) * 100}%` }}>
                     {availability[dayIndex].map((window, index) => (
                       <div
                         className="available-band"
@@ -5348,7 +5728,6 @@ function App() {
                         height: Math.max(height, 34),
                         left: `calc(${left}% + 6px)`,
                         width: `calc(${width}% - 12px)`,
-                        ...(item.kind === "appointment" && service?.color ? ({ "--service-colour": service.color } as CSSProperties) : {}),
                         ...(flyAnimation
                           ? ({
                               "--dock-fly-x": `${flyAnimation.fromX}px`,
@@ -5700,35 +6079,7 @@ function App() {
               </button>
             </div>
 
-            {showClientImport && (
-              <article className="data-card import-card">
-                <div className="data-card-header">
-                  <div>
-                    <span>Import</span>
-                    <h2>Import clients</h2>
-                  </div>
-                  <Upload size={24} />
-                </div>
-                <textarea
-                  value={peopleImportText}
-                  onChange={(event) => {
-                    setPeopleImportState("idle");
-                    setPeopleImportText(event.target.value);
-                  }}
-                  placeholder="name,email,phone,notes,caddyProfileUrl"
-                />
-                <div className="import-actions">
-                  <span>{peopleImportPreview} ready</span>
-                  <button
-                    className="primary-button"
-                    onClick={importPeopleFromText}
-                    disabled={peopleImportState === "importing" || peopleImportPreview === 0}
-                  >
-                    {peopleImportState === "importing" ? "Importing" : peopleImportState === "imported" ? "Imported" : "Import"}
-                  </button>
-                </div>
-              </article>
-            )}
+            {showClientImport && renderPeopleImportPanel()}
 
             <div className="client-table">
               {filteredClients.length ? (
@@ -6395,7 +6746,6 @@ function App() {
                     </div>
                   </details>
                 </div>
-                {coachAccountDirty && (
                 <button className="primary-button settings-save" onClick={saveCoachAccount}>
                   {coachAccountSaveState === "saving"
                     ? "Saving"
@@ -6403,7 +6753,6 @@ function App() {
                     ? "Saved"
                     : "Save Coach Account"}
                 </button>
-                )}
               </article>
 
               <article className="data-card sync-card settings-section settings-integrations">
@@ -6565,7 +6914,6 @@ function App() {
                     <span>Send admin booking alert</span>
                   </label>
                 </details>
-                {settingsDirty && (
                 <button className="primary-button settings-save" onClick={saveNotificationSettings}>
                   {settingsSaveState === "saving"
                     ? "Saving"
@@ -6573,7 +6921,6 @@ function App() {
                       ? "Saved"
                       : "Save Email Settings"}
                 </button>
-                )}
               </article>
 
               <article className="data-card notification-card settings-section settings-experience settings-integrations">
@@ -6655,7 +7002,6 @@ function App() {
                     <span>Send admin text alert</span>
                   </label>
                 </details>
-                {settingsDirty && (
                 <button className="primary-button settings-save" onClick={saveNotificationSettings}>
                   {settingsSaveState === "saving"
                     ? "Saving"
@@ -6663,7 +7009,6 @@ function App() {
                       ? "Saved"
                       : "Save Text Settings"}
                 </button>
-                )}
               </article>
 
               <article className="data-card notification-card email-template-card settings-section settings-experience settings-branding">
@@ -6794,7 +7139,6 @@ function App() {
                     <code>{"{{price}}"}</code>
                   </div>
                 </details>
-                {settingsDirty && (
                 <button className="primary-button settings-save" onClick={saveNotificationSettings}>
                   {settingsSaveState === "saving"
                     ? "Saving"
@@ -6802,7 +7146,6 @@ function App() {
                       ? "Saved"
                       : "Save Template"}
                 </button>
-                )}
               </article>
 
               <article className="data-card notification-card settings-section settings-experience settings-branding">
@@ -6946,42 +7289,9 @@ function App() {
                 </details>
               </article>
 
-              <article className="data-card import-card settings-section settings-data">
-                <div className="data-card-header">
-                  <div>
-                    <span>Clients</span>
-                    <h2>Import clients</h2>
-                  </div>
-                  <Upload size={24} />
-                </div>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <Upload size={18} />
-                    <div>
-                      <span>CSV paste</span>
-                      <strong>{peopleImportPreview} ready</strong>
-                    </div>
-                  </summary>
-                  <textarea
-                    value={peopleImportText}
-                    onChange={(event) => {
-                      setPeopleImportState("idle");
-                      setPeopleImportText(event.target.value);
-                    }}
-                    placeholder="name,email,phone,notes,caddyProfileUrl"
-                  />
-                  <div className="import-actions">
-                    <span>{peopleImportPreview} ready</span>
-                    <button
-                      className="primary-button"
-                      onClick={importPeopleFromText}
-                      disabled={peopleImportState === "importing" || peopleImportPreview === 0}
-                    >
-                      {peopleImportState === "importing" ? "Importing" : peopleImportState === "imported" ? "Imported" : "Import"}
-                    </button>
-                  </div>
-                </details>
-              </article>
+              <div className="settings-section settings-data">
+                {renderPeopleImportPanel()}
+              </div>
             </div>
           </section>
         )}
