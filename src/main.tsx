@@ -6,6 +6,7 @@ import "./compact-iframe.css";
 import "./compact-iframe-polish.css";
 import "./client-csv-import.css";
 import "./csv-import-enhancer.css";
+import "./import-lite-fetch-redirect";
 import "./csv-import-enhancer";
 
 createRoot(document.getElementById("root")!).render(
