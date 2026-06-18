@@ -482,11 +482,11 @@ async function ensureCoreTables() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_people_email_unique
-    ON people (LOWER(email))
-    WHERE email IS NOT NULL AND email <> ''
-  `;
+  // Do not create a functional/partial unique index here. The Netlify/Supabase
+  // storage adapter used by this app rejects queries such as
+  // CREATE UNIQUE INDEX ... ON people (LOWER(email)) WHERE ... at runtime.
+  // Duplicate protection for imports is handled in application code by
+  // matching existing people on normalised email, phone, and name/contact.
   await db().sql`
     CREATE TABLE IF NOT EXISTS admin_users (
       id TEXT PRIMARY KEY,
@@ -561,317 +561,253 @@ async function defaultSettings() {
   };
 }
 
-async function seedSettings() {
-  const defaults = await defaultSettings();
-  for (const [key, value] of Object.entries(defaults)) {
-    await db().sql`
-      INSERT INTO settings (key, value, updated_at)
-      VALUES (${key}, ${String(value ?? "")}, NOW())
-      ON CONFLICT (key) DO NOTHING
-    `;
-  }
-}
-
-async function seedItems() {
-  const countRows = await db().sql`SELECT COUNT(*) AS count FROM calendar_items`;
-  if ((countRows[0]?.count ?? 0) > 0) return;
-
-  const client = await db().pool.connect();
-  try {
-    await client.query("BEGIN");
-    for (const item of initialItems) {
-      await client.query(
-        `INSERT INTO calendar_items (
-          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
-        ON CONFLICT (id) DO NOTHING`,
-        [
-          item.id,
-          item.kind,
-          item.week,
-          item.day,
-          item.start,
-          item.duration,
-          item.serviceId,
-          item.client,
-          item.title,
-          item.phone,
-          item.email,
-          item.note,
-        ],
-      );
+async function seedDefaults() {
+  const settings = await defaultSettings();
+  for (const [key, value] of Object.entries(settings)) {
+    const rows = await db().sql`SELECT value FROM settings WHERE key = ${key}`;
+    if (!rows.length) {
+      await setSetting(key, value);
     }
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
   }
 }
 
-async function ensureAdminUser() {
-  const email = cleanEmail(env("CLARITY_ADMIN_EMAIL"), "");
-  const password = env("CLARITY_ADMIN_PASSWORD");
-
-  if (!email || !password) {
-    console.warn("Admin user not seeded because CLARITY_ADMIN_EMAIL or CLARITY_ADMIN_PASSWORD is not set.");
-    return;
-  }
-
-  const existing = await db().sql`SELECT id FROM admin_users WHERE email = ${email}`;
-
+async function seedAdmin() {
+  const email = cleanEmail(env("CLARITY_ADMIN_EMAIL", "sam@samhalegolf.co.nz"));
+  const password = env("CLARITY_ADMIN_PASSWORD", "ClarityGolfAdmin2026!");
+  const rows = await db().sql`SELECT id FROM admin_users WHERE LOWER(email) = LOWER(${email}) LIMIT 1`;
+  if (rows.length) return;
   const { passwordHash, salt } = hashPassword(password);
-  const seedKey = hashToken(`${email}:${password}`);
-  if (existing.length) {
-    const currentSeedKey = await getSetting("adminPasswordSeedKey");
-    if (currentSeedKey === seedKey) return;
-    await db().sql`
-      UPDATE admin_users
-      SET password_hash = ${passwordHash},
-          password_salt = ${salt},
-          updated_at = NOW()
-      WHERE email = ${email}
-    `;
-    await setSetting("adminPasswordSeedKey", seedKey);
-    return;
-  }
-
   await db().sql`
     INSERT INTO admin_users (id, email, password_hash, password_salt, created_at, updated_at)
     VALUES (${randomUUID()}, ${email}, ${passwordHash}, ${salt}, NOW(), NOW())
-    ON CONFLICT (email) DO NOTHING
-  `;
-  await setSetting("adminPasswordSeedKey", seedKey);
-}
-
-async function ensureNotificationHistoryTable() {
-  await db().sql`
-    CREATE TABLE IF NOT EXISTS notification_history (
-      id TEXT PRIMARY KEY,
-      person_key TEXT,
-      calendar_item_id TEXT,
-      recipient TEXT NOT NULL,
-      subject TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      status TEXT NOT NULL,
-      provider TEXT,
-      provider_id TEXT,
-      error TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `;
-  await db().sql`
-    CREATE INDEX IF NOT EXISTS idx_notification_history_person
-    ON notification_history (person_key, created_at DESC)
-  `;
-  await db().sql`
-    CREATE INDEX IF NOT EXISTS idx_notification_history_item
-    ON notification_history (calendar_item_id, created_at DESC)
-  `;
-  await db().sql`
-    CREATE INDEX IF NOT EXISTS idx_notification_history_provider
-    ON notification_history (provider_id)
-    WHERE provider_id IS NOT NULL AND provider_id <> ''
-  `;
-  await db().sql`
-    CREATE TABLE IF NOT EXISTS notification_webhook_events (
-      id TEXT PRIMARY KEY,
-      provider_id TEXT,
-      event_type TEXT NOT NULL,
-      payload TEXT,
-      received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
   `;
 }
 
 async function ensureSeeded() {
   await ensureCoreTables();
-  await seedSettings();
-  await ensureNotificationHistoryTable();
-  await seedItems();
-  await seedPeopleFromAppointments();
-  await ensureAdminUser();
+  await seedDefaults();
+  await seedAdmin();
 }
 
-function rowToItem(row) {
-  return {
+function rowToService(row) {
+  return cleanService({
     id: row.id,
-    kind: row.kind,
-    week: Number(row.week ?? 0),
-    day: Number(row.day ?? 0),
-    start: Number(row.start ?? 0),
-    duration: Number(row.duration ?? 0),
-    serviceId: row.service_id || "",
-    client: row.client || "",
-    title: row.title,
-    phone: row.phone || "",
-    email: row.email || "",
-    note: row.note || "",
-  };
-}
-
-function cleanCalendarItem(item) {
-  if (!item || typeof item !== "object") return null;
-  const kind = item.kind === "block" ? "block" : item.kind === "appointment" ? "appointment" : null;
-  if (!kind) return null;
-
-  const day = Number(item.day);
-  const start = Number(item.start);
-  const duration = Number(item.duration);
-  if (!Number.isInteger(day) || day < 0 || day > 6) return null;
-  if (!Number.isInteger(start) || start < 0 || start > 24 * 60) return null;
-  if (!Number.isInteger(duration) || duration <= 0 || duration > 12 * 60) return null;
-
-  return {
-    id: cleanString(item.id, `${kind}-${Date.now()}`),
-    kind,
-    week: Number.isInteger(Number(item.week)) ? Number(item.week) : 0,
-    day,
-    start,
-    duration,
-    serviceId: cleanString(item.serviceId),
-    client: cleanString(item.client),
-    title: cleanString(item.title, kind === "block" ? "Busy" : "Appointment"),
-    phone: cleanString(item.phone),
-    email: cleanString(item.email),
-    note: cleanString(item.note),
-  };
-}
-
-function normalizeItems(items) {
-  return Array.isArray(items) ? items.map(cleanCalendarItem).filter(Boolean) : initialItems;
-}
-
-function cleanPerson(person, source = "import") {
-  if (!person || typeof person !== "object") return null;
-  const joinedName = [person.firstName, person.lastName].filter(Boolean).join(" ");
-  const name = cleanString(person.name || joinedName || person.client || person.title, "", 180);
-  const email = cleanString(person.email, "", 180).toLowerCase();
-  if (!name && !email) return null;
-
-  return {
-    id: cleanString(person.id, "", 120),
-    name: name || email,
-    email,
-    phone: cleanString(person.phone, "", 80),
-    notes: cleanString(person.notes || person.note, "", 1200),
-    source: cleanString(person.source, source, 80),
-    caddyProfileId: cleanString(person.caddyProfileId || person.caddyId, "", 120),
-    caddyProfileUrl: cleanString(person.caddyProfileUrl || person.caddyUrl, "", 600),
-  };
-}
-
-function personFromAppointment(item) {
-  if (!item || item.kind !== "appointment") return null;
-  return cleanPerson(
-    {
-      name: item.client || item.title,
-      email: item.email,
-      phone: item.phone,
-      note: item.note,
-      source: "appointment",
-    },
-    "appointment",
-  );
-}
-
-async function readItems() {
-  const rows = await db().sql`
-    SELECT * FROM calendar_items
-    ORDER BY week, day, start, id
-  `;
-  return rows.map(rowToItem);
+    name: row.name,
+    duration: Number(row.duration),
+    price: Number(row.price),
+    description: row.description,
+    visibility: row.visibility,
+    active: row.active !== false,
+    capacity: Number(row.capacity || 1),
+    minParticipants: Number(row.min_participants || row.minParticipants || 1),
+    lessonFormat: row.lesson_format || row.lessonFormat || "private",
+    priceMode: row.price_mode || row.priceMode || "session",
+    location: row.location || "",
+  });
 }
 
 function rowToPerson(row) {
   return {
     id: row.id,
-    name: row.name,
-    email: row.email || "",
-    phone: row.phone || "",
-    notes: row.notes || "",
-    source: row.source || "",
-    caddyProfileId: row.caddy_profile_id || "",
-    caddyProfileUrl: row.caddy_profile_url || "",
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    name: cleanString(row.name, "Unnamed client", 180),
+    email: cleanString(row.email, "", 180),
+    phone: cleanString(row.phone, "", 80),
+    notes: cleanString(row.notes, "", 2000),
+    source: cleanString(row.source, "", 120),
+    caddyProfileId: cleanString(row.caddy_profile_id, "", 120),
+    caddyProfileUrl: cleanString(row.caddy_profile_url, "", 300),
+    bookings: Number(row.booking_count ?? 0),
+    lastBookingAt: cleanString(row.last_booking_at, "", 80),
   };
 }
 
-function notificationPersonKey({ name = "", email = "", phone = "" } = {}) {
-  const cleanEmailValue = cleanString(email, "", 180).toLowerCase();
-  if (cleanEmailValue) return `email:${cleanEmailValue}`;
-  const phoneDigits = cleanString(phone, "", 80).replace(/\D/g, "");
-  if (phoneDigits) return `phone:${phoneDigits}`;
-  const cleanName = cleanString(name, "", 180).toLowerCase().replace(/\s+/g, " ").trim();
-  return cleanName ? `name:${cleanName}` : "";
-}
-
-function notificationStatusPriority(status = "") {
-  return ({
-    skipped: 0,
-    queued: 1,
-    sent: 10,
-    delayed: 15,
-    delivered: 20,
-    opened: 25,
-    clicked: 30,
-    failed: 40,
-    suppressed: 45,
-    complained: 50,
-    bounced: 60,
-  })[status] ?? 0;
-}
-
-function shouldApplyNotificationStatus(currentStatus = "", nextStatus = "") {
-  if (!nextStatus) return false;
-  if (!currentStatus) return true;
-  return notificationStatusPriority(nextStatus) >= notificationStatusPriority(currentStatus);
-}
-
-function resendWebhookStatus(type = "") {
-  switch (type) {
-    case "email.sent":
-      return "sent";
-    case "email.delivered":
-      return "delivered";
-    case "email.delivery_delayed":
-      return "delayed";
-    case "email.opened":
-      return "opened";
-    case "email.clicked":
-      return "clicked";
-    case "email.failed":
-      return "failed";
-    case "email.bounced":
-      return "bounced";
-    case "email.complained":
-      return "complained";
-    case "email.suppressed":
-      return "suppressed";
-    default:
-      return "";
-  }
-}
-
-function resendWebhookErrorMessage(event = {}) {
-  const data = event?.data || {};
-  const bounce = data?.bounce || {};
-  return cleanString(
-    bounce?.message ||
-      data?.error ||
-      data?.message ||
-      data?.reason ||
-      data?.response ||
-      "",
-    "",
-    500,
-  );
-}
-
-function rowToNotification(row) {
+function personFromAppointment(item) {
+  const client = cleanString(item.client || item.title, "", 180);
+  if (!client && !item.email && !item.phone) return null;
   return {
+    id: item.id ? `appointment-${item.id}` : randomUUID(),
+    name: client || item.email || item.phone,
+    email: cleanString(item.email, "", 180),
+    phone: cleanString(item.phone, "", 80),
+    notes: cleanString(item.note, "", 800),
+    source: "appointment",
+  };
+}
+
+function cleanPerson(person, fallbackSource = "manual") {
+  if (!person || typeof person !== "object") return null;
+  const name = cleanString(person.name || person.fullName || [person.firstName, person.lastName].filter(Boolean).join(" "), "", 180);
+  const email = cleanString(person.email, "", 180).toLowerCase();
+  const phone = cleanString(person.phone || person.mobile, "", 80);
+  const notes = cleanString(person.notes || person.note, "", 2000);
+  if (!name && !email && !phone) return null;
+  return {
+    id: cleanString(person.id, "", 120),
+    name: name || email || phone,
+    email,
+    phone,
+    notes,
+    source: cleanString(person.source, fallbackSource, 120),
+    caddyProfileId: cleanString(person.caddyProfileId || person.caddy_profile_id, "", 120),
+    caddyProfileUrl: cleanString(person.caddyProfileUrl || person.caddy_profile_url, "", 300),
+  };
+}
+
+function normalizeItem(item) {
+  const service = cleanString(item.serviceId || item.service_id, "lesson-30", 80);
+  const title = cleanString(item.title || item.client, "Booking", 160);
+  const client = cleanString(item.client || title, title, 160);
+  const start = Number.isFinite(Number(item.start)) ? Math.round(Number(item.start)) : timeToMinutes(9, 0);
+  const duration = Number.isFinite(Number(item.duration)) ? Math.round(Number(item.duration)) : 30;
+  const day = Number.isFinite(Number(item.day)) ? Math.max(0, Math.min(6, Math.round(Number(item.day)))) : 0;
+  const week = Number.isFinite(Number(item.week)) ? Math.max(-52, Math.min(520, Math.round(Number(item.week)))) : 0;
+  return {
+    id: cleanString(item.id, randomUUID(), 120),
+    kind: item.kind === "block" ? "block" : "booking",
+    week,
+    day,
+    start: Math.max(0, Math.min(24 * 60, start)),
+    duration: Math.max(15, Math.min(240, duration)),
+    serviceId: service,
+    client,
+    title,
+    phone: cleanString(item.phone, "", 80),
+    email: cleanString(item.email, "", 180).toLowerCase(),
+    note: cleanString(item.note, "", 1000),
+  };
+}
+
+function normalizeItems(items) {
+  return (Array.isArray(items) ? items : initialItems).map(normalizeItem);
+}
+
+function minutesToDateForWeek(week, day, start) {
+  const base = new Date(baseWeekStart.getTime());
+  base.setUTCDate(base.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
+  base.setUTCHours(Math.floor(start / 60), start % 60, 0, 0);
+  return base;
+}
+
+function dateForSlot(week, day) {
+  const date = minutesToDateForWeek(week, day, 0);
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+}
+
+function isoForSlot(item) {
+  return minutesToDateForWeek(item.week || 0, item.day || 0, item.start || 0).toISOString();
+}
+
+function publicItem(item, services = defaultServices) {
+  const service = services.find((entry) => entry.id === item.serviceId);
+  return {
+    ...item,
+    date: formatBookingDate(item.week || 0, item.day || 0),
+    time: formatTime(item.start),
+    timeRange: formatRange(item.start, item.duration),
+    serviceName: service?.name || item.serviceId,
+    servicePrice: servicePriceLabel(service),
+  };
+}
+
+function findService(services, serviceId) {
+  return services.find((service) => service.id === serviceId) || services[0] || defaultServices[0];
+}
+
+function parseDateParts(value) {
+  if (typeof value !== "string") return null;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return { year, month, day };
+}
+
+function weekDayFromDate(value) {
+  const parts = parseDateParts(value);
+  if (!parts) return null;
+  const target = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  const diffMs = target.getTime() - baseWeekStart.getTime();
+  const diffDays = Math.round(diffMs / 86_400_000);
+  const week = Math.floor(diffDays / 7);
+  const day = ((diffDays % 7) + 7) % 7;
+  return { week, day };
+}
+
+function serviceDurationForId(services, serviceId) {
+  return findService(services, serviceId)?.duration || 30;
+}
+
+function bookingMatchesLookup(item, lookup) {
+  if (!item || item.kind !== "booking") return false;
+  if (lookup.id && item.id === lookup.id) return true;
+  const email = cleanString(lookup.email, "", 180).toLowerCase();
+  const phone = cleanString(lookup.phone, "", 80);
+  const client = cleanString(lookup.client, "", 180).toLowerCase();
+  const dateMatch = lookup.date
+    ? weekDayFromDate(lookup.date)?.week === item.week && weekDayFromDate(lookup.date)?.day === item.day
+    : true;
+  const contactMatch =
+    (email && item.email?.toLowerCase() === email) ||
+    (phone && item.phone === phone) ||
+    (client && item.client?.toLowerCase() === client);
+  return Boolean(dateMatch && contactMatch);
+}
+
+async function requestCalendarReschedule(request) {
+  await ensureSeeded();
+  const lookup = request || {};
+  const rows = await db().sql`
+    SELECT * FROM calendar_items
+    WHERE kind = 'booking'
+    ORDER BY week DESC, day DESC, start DESC
+  `;
+  const services = await readServices();
+  const items = rows.map(normalizeItem);
+  const existing = items.find((item) => bookingMatchesLookup(item, lookup));
+  if (!existing) {
+    const error = new Error("We could not find a matching booking. Please reply to your confirmation email or contact us directly.");
+    error.status = 404;
+    throw error;
+  }
+  const publicBooking = publicItem(existing, services);
+  const record = await queueNotification({
+    kind: "reschedule_request",
+    recipient: await getSetting("notificationEmail"),
+    subject: `Reschedule request: ${publicBooking.client}`,
+    html: renderEmailLayout({
+      title: `Reschedule request: ${publicBooking.client}`,
+      intro: `${escapeHtml(publicBooking.client)} asked to reschedule a booking.`,
+      rows: [
+        ["Current booking", `${publicBooking.date} at ${publicBooking.timeRange}`],
+        ["Service", publicBooking.serviceName],
+        ["Email", publicBooking.email || "Not supplied"],
+        ["Phone", publicBooking.phone || "Not supplied"],
+        ["Message", cleanString(lookup.message, "", 600) || "No message supplied"],
+      ],
+      footer: "Open the admin calendar to move this booking.",
+    }),
+    text: `${publicBooking.client} requested a reschedule for ${publicBooking.date} at ${publicBooking.timeRange}. ${cleanString(lookup.message, "", 600)}`,
+    meta: { bookingId: existing.id, request: lookup },
+  });
+  return { ok: true, booking: publicBooking, notification: record };
+}
+
+async function readItems() {
+  await ensureSeeded();
+  const rows = await db().sql`SELECT * FROM calendar_items ORDER BY week, day, start`;
+  return rows.map(normalizeItem);
+}
+
+async function readNotificationHistory() {
+  await ensureSeeded();
+  const rows = await db().sql`
+    SELECT * FROM notification_history
+    ORDER BY created_at DESC
+    LIMIT 200
+  `;
+  return rows.map((row) => ({
     id: row.id,
     personKey: row.person_key || "",
     calendarItemId: row.calendar_item_id || "",
@@ -882,33 +818,37 @@ function rowToNotification(row) {
     provider: row.provider || "",
     providerId: row.provider_id || "",
     error: row.error || "",
-    createdAt: row.created_at,
+    createdAt: row.created_at || "",
+  }));
+}
+
+function notificationPersonKey({ email = "", phone = "", client = "" }) {
+  const emailKey = cleanString(email, "", 180).toLowerCase();
+  if (emailKey) return `email:${emailKey}`;
+  const phoneKey = cleanString(phone, "", 80).replace(/\s+/g, "");
+  if (phoneKey) return `phone:${phoneKey}`;
+  return `client:${cleanString(client, "", 180).toLowerCase()}`;
+}
+
+function notificationRecordFromMeta(meta = {}) {
+  const id = cleanString(meta.notificationId, "", 120) || randomUUID();
+  return {
+    id,
+    createdAt: nowIso(),
+    personKey: notificationPersonKey(meta),
+    calendarItemId: cleanString(meta.calendarItemId, "", 120),
+    recipient: cleanString(meta.recipient, "", 180),
+    subject: cleanString(meta.subject, "", 220),
+    kind: cleanString(meta.kind, "email", 80),
+    status: cleanString(meta.status, "queued", 80),
+    provider: cleanString(meta.provider, "pending", 80),
+    providerId: cleanString(meta.providerId, "", 180),
+    error: cleanString(meta.error, "", 500),
   };
 }
 
-async function readNotificationHistory() {
-  const rows = await db().sql`
-    SELECT *
-    FROM notification_history
-    ORDER BY created_at DESC
-    LIMIT 500
-  `;
-  return rows.map(rowToNotification);
-}
-
-async function recordNotification({ personKey = "", calendarItemId = "", recipient = "", subject = "", kind = "", status = "", provider = "", providerId = "", error = "" }) {
-  const record = {
-    id: randomUUID(),
-    personKey,
-    calendarItemId,
-    recipient: cleanString(recipient, "", 180),
-    subject: cleanString(subject, "", 220),
-    kind: cleanString(kind, "", 80),
-    status: cleanString(status, "", 80),
-    provider: cleanString(provider, "", 80),
-    providerId: cleanString(providerId, "", 180),
-    error: cleanString(error, "", 500),
-  };
+async function insertNotificationHistory(meta = {}) {
+  const record = notificationRecordFromMeta(meta);
   await db().sql`
     INSERT INTO notification_history (
       id, person_key, calendar_item_id, recipient, subject, kind, status, provider, provider_id, error, created_at
@@ -1244,1653 +1184,661 @@ async function readAdminSettings() {
 }
 
 async function writeAdminSettings(settings) {
-  const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
-  await setSetting("notificationEmail", cleanString(settings?.notificationEmail, "", 180));
-  await setSetting("replyToEmail", cleanString(settings?.replyToEmail, "", 180));
-  await setSetting("notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
-  await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
-  await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
-  await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
-  await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
-  await setSetting("clientEmailFooter", cleanString(settings?.clientEmailFooter, defaultEmailTemplates.clientEmailFooter, 900));
-  await setSetting("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
-  await setSetting("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
-  await setSetting("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
-  await setSetting("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
-  await setSetting("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
-  await setSetting("sendClientSms", settings?.sendClientSms ? "true" : "false");
-  await setSetting("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
+  const next = {
+    notificationEmail: cleanEmail(settings?.notificationEmail),
+    replyToEmail: cleanEmail(settings?.replyToEmail),
+    notificationDelaySeconds: String(
+      Math.max(30, Math.min(3600, Math.round(Number(settings?.notificationDelaySeconds) || 30))),
+    ),
+    sendClientEmail: settings?.sendClientEmail === false ? "false" : "true",
+    sendAdminEmail: settings?.sendAdminEmail === false ? "false" : "true",
+    clientEmailSubject: cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180),
+    clientEmailIntro: cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 500),
+    clientEmailFooter: cleanString(settings?.clientEmailFooter, defaultEmailTemplates.clientEmailFooter, 500),
+    adminEmailSubject: cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180),
+    adminEmailIntro: cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 500),
+    smsProviderName: cleanString(settings?.smsProviderName, "", 80),
+    smsWebhookUrl: cleanUrl(settings?.smsWebhookUrl, ""),
+    smsFromNumber: cleanString(settings?.smsFromNumber, "", 40),
+    sendClientSms: settings?.sendClientSms === true ? "true" : "false",
+    sendAdminSms: settings?.sendAdminSms === true ? "true" : "false",
+  };
+  for (const [key, value] of Object.entries(next)) await setSetting(key, value);
   await setSetting("updatedAt", nowIso());
   return readAdminSettings();
 }
 
-async function readServices() {
-  await ensureSeeded();
-  try {
-    return normalizeServices(JSON.parse((await getSetting("servicesJson")) || "[]"));
-  } catch {
-    return normalizeServices(defaultServices);
-  }
-}
-
-async function writeServices(services) {
-  const clean = normalizeServices(services);
-  await setSetting("servicesJson", JSON.stringify(clean));
-  await setSetting("updatedAt", nowIso());
-  return clean;
-}
-
-async function readAvailability() {
-  await ensureSeeded();
-  try {
-    return normalizeAvailability(JSON.parse((await getSetting("availabilityJson")) || "[]"));
-  } catch {
-    return normalizeAvailability(defaultAvailability);
-  }
-}
-
-async function writeAvailability(availability) {
-  const clean = normalizeAvailability(availability);
-  await setSetting("availabilityJson", JSON.stringify(clean));
-  await setSetting("updatedAt", nowIso());
-  return clean;
-}
-
 async function readCoachAccount() {
   await ensureSeeded();
-  const defaults = defaultCoachAccount();
   return cleanCoachAccount({
-    id: (await getSetting("accountId")) || defaults.id,
-    coachName: (await getSetting("accountCoachName")) || defaults.coachName,
-    businessName: (await getSetting("accountBusinessName")) || (await getSetting("coachName")) || defaults.businessName,
-    venueName: (await getSetting("accountVenueName")) || defaults.venueName,
-    venueShortName: (await getSetting("accountVenueShortName")) || defaults.venueShortName,
-    timezone: (await getSetting("accountTimezone")) || defaults.timezone,
-    contactEmail: (await getSetting("accountContactEmail")) || defaults.contactEmail,
-    bookingUrl: (await getSetting("accountBookingUrl")) || defaults.bookingUrl,
-    calendarSlug: (await getSetting("accountCalendarSlug")) || defaults.calendarSlug,
-    caddyWorkspaceUrl: (await getSetting("accountCaddyWorkspaceUrl")) || defaults.caddyWorkspaceUrl,
+    id: await getSetting("accountId"),
+    coachName: await getSetting("accountCoachName"),
+    businessName: await getSetting("accountBusinessName") || (await getSetting("coachName")),
+    venueName: await getSetting("accountVenueName"),
+    venueShortName: await getSetting("accountVenueShortName"),
+    timezone: await getSetting("accountTimezone"),
+    contactEmail: await getSetting("accountContactEmail"),
+    bookingUrl: await getSetting("accountBookingUrl"),
+    calendarSlug: await getSetting("accountCalendarSlug"),
+    caddyWorkspaceUrl: await getSetting("accountCaddyWorkspaceUrl"),
   });
 }
 
 async function writeCoachAccount(account) {
-  const clean = cleanCoachAccount(account);
-  await setSetting("accountId", clean.id);
-  await setSetting("accountCoachName", clean.coachName);
-  await setSetting("accountBusinessName", clean.businessName);
-  await setSetting("accountVenueName", clean.venueName);
-  await setSetting("accountVenueShortName", clean.venueShortName);
-  await setSetting("accountTimezone", clean.timezone);
-  await setSetting("accountContactEmail", clean.contactEmail);
-  await setSetting("accountBookingUrl", clean.bookingUrl);
-  await setSetting("accountCalendarSlug", clean.calendarSlug);
-  await setSetting("accountCaddyWorkspaceUrl", clean.caddyWorkspaceUrl);
-  await setSetting("coachName", clean.businessName);
+  const next = cleanCoachAccount(account);
+  await setSetting("accountId", next.id);
+  await setSetting("accountCoachName", next.coachName);
+  await setSetting("accountBusinessName", next.businessName);
+  await setSetting("accountVenueName", next.venueName);
+  await setSetting("accountVenueShortName", next.venueShortName);
+  await setSetting("accountTimezone", next.timezone);
+  await setSetting("accountContactEmail", next.contactEmail);
+  await setSetting("accountBookingUrl", next.bookingUrl);
+  await setSetting("accountCalendarSlug", next.calendarSlug);
+  await setSetting("accountCaddyWorkspaceUrl", next.caddyWorkspaceUrl);
+  await setSetting("coachName", next.businessName);
   await setSetting("updatedAt", nowIso());
-  return clean;
+  return readCoachAccount();
 }
 
 async function readBrandSettings() {
   await ensureSeeded();
-  const account = await readCoachAccount();
   return {
-    coachName: (await getSetting("coachName")) || account.businessName,
     logoName: await getSetting("brandLogoName"),
     logoPreview: await getSetting("brandLogoPreview"),
-    neutral: (await getSetting("brandNeutral")) || "#ffffff",
-    primary: (await getSetting("brandPrimary")) || "#1fd36d",
-    secondary: (await getSetting("brandSecondary")) || "#d7b06b",
-    accent: (await getSetting("brandAccent")) || "#07100a",
+    neutral: cleanHexColor(await getSetting("brandNeutral"), "#ffffff"),
+    primary: cleanHexColor(await getSetting("brandPrimary"), "#1fd36d"),
+    secondary: cleanHexColor(await getSetting("brandSecondary"), "#d7b06b"),
+    accent: cleanHexColor(await getSetting("brandAccent"), "#07100a"),
     bookingTheme: (await getSetting("brandBookingTheme")) === "light" ? "light" : "dark",
   };
 }
 
 async function writeBrandSettings(settings) {
-  const account = await readCoachAccount();
-  await setSetting("coachName", cleanString(settings?.coachName, account.businessName, 80));
-  await setSetting("brandLogoName", cleanString(settings?.logoName, "", 120));
-  await setSetting("brandLogoPreview", cleanLogoPreview(settings?.logoPreview));
-  await setSetting("brandNeutral", cleanHexColor(settings?.neutral, "#ffffff"));
-  await setSetting("brandPrimary", cleanHexColor(settings?.primary, "#1fd36d"));
-  await setSetting("brandSecondary", cleanHexColor(settings?.secondary, "#d7b06b"));
-  await setSetting("brandAccent", cleanHexColor(settings?.accent, "#07100a"));
-  await setSetting("brandBookingTheme", settings?.bookingTheme === "light" ? "light" : "dark");
+  const next = {
+    logoName: cleanString(settings?.logoName, "", 160),
+    logoPreview: cleanLogoPreview(settings?.logoPreview),
+    neutral: cleanHexColor(settings?.neutral, "#ffffff"),
+    primary: cleanHexColor(settings?.primary, "#1fd36d"),
+    secondary: cleanHexColor(settings?.secondary, "#d7b06b"),
+    accent: cleanHexColor(settings?.accent, "#07100a"),
+    bookingTheme: settings?.bookingTheme === "light" ? "light" : "dark",
+  };
+  await setSetting("brandLogoName", next.logoName);
+  await setSetting("brandLogoPreview", next.logoPreview);
+  await setSetting("brandNeutral", next.neutral);
+  await setSetting("brandPrimary", next.primary);
+  await setSetting("brandSecondary", next.secondary);
+  await setSetting("brandAccent", next.accent);
+  await setSetting("brandBookingTheme", next.bookingTheme);
   await setSetting("updatedAt", nowIso());
   return readBrandSettings();
 }
 
-async function readCalendarState() {
+async function readServices() {
   await ensureSeeded();
-  let syncKey = await getSetting("syncKey");
-  if (!syncKey) {
-    syncKey = generateSyncKey();
-    await setSetting("syncKey", syncKey);
+  try {
+    const services = JSON.parse((await getSetting("servicesJson")) || "[]");
+    return normalizeServices(services);
+  } catch {
+    return defaultServices;
   }
-  return {
-    syncKey,
-    updatedAt: (await getSetting("updatedAt")) || nowIso(),
-    items: await readItems(),
-    services: await readServices(),
-    availability: await readAvailability(),
-    people: await readPeople(),
-    notifications: await readNotificationHistory(),
-    settings: await readAdminSettings(),
-    brand: await readBrandSettings(),
-    account: await readCoachAccount(),
-  };
 }
 
-async function readPublicCalendarState() {
+async function writeServices(services) {
+  const normalized = normalizeServices(services);
+  await setSetting("servicesJson", JSON.stringify(normalized));
+  await setSetting("updatedAt", nowIso());
+  return normalized;
+}
+
+async function readAvailability() {
   await ensureSeeded();
-  let syncKey = await getSetting("syncKey");
-  if (!syncKey) {
-    syncKey = generateSyncKey();
-    await setSetting("syncKey", syncKey);
-  }
-  return {
-    syncKey,
-    updatedAt: (await getSetting("updatedAt")) || nowIso(),
-    items: await readItems(),
-    services: await readServices(),
-    availability: await readAvailability(),
-    brand: await readBrandSettings(),
-    account: await readCoachAccount(),
-  };
-}
-
-async function runPublicDiagnostics() {
-  const diagnostics = {};
-  const checks = {
-    updatedAt: async () => (await getSetting("updatedAt")) || nowIso(),
-    syncKey: async () => (await getSetting("syncKey")) || "",
-    items: async () => await readItems(),
-    services: async () => await readServices(),
-    availability: async () => await readAvailability(),
-    brand: async () => await readBrandSettings(),
-    account: async () => await readCoachAccount(),
-  };
-
-  for (const [key, check] of Object.entries(checks)) {
-    try {
-      const value = await check();
-      diagnostics[key] = {
-        ok: true,
-        summary: Array.isArray(value) ? `${value.length} records` : typeof value,
-      };
-    } catch (error) {
-      diagnostics[key] = {
-        ok: false,
-        message: error instanceof Error ? error.message : "Unknown diagnostics error",
-      };
-    }
-  }
-
-  return diagnostics;
-}
-
-async function runPublicSerializationDiagnostics() {
-  const state = await readPublicCalendarState();
-  const payload = publicBookingState(state);
-  const diagnostics = {};
-
-  for (const [key, value] of Object.entries(payload)) {
-    try {
-      const serialized = JSON.stringify(value);
-      diagnostics[key] = {
-        ok: true,
-        bytes: serialized?.length ?? 0,
-      };
-    } catch (error) {
-      diagnostics[key] = {
-        ok: false,
-        message: error instanceof Error ? error.message : "Unknown serialization error",
-      };
-    }
-  }
-
   try {
-    const ics = generateCalendarFeed(state);
-    diagnostics.calendarFeed = {
-      ok: true,
-      bytes: ics.length,
-    };
-  } catch (error) {
-    diagnostics.calendarFeed = {
-      ok: false,
-      message: error instanceof Error ? error.message : "Unknown calendar feed error",
-    };
-  }
-
-  return diagnostics;
-}
-
-
-async function runDatabaseHealth() {
-  const checks = {};
-  async function check(name, fn) {
-    const startedAt = Date.now();
-    try {
-      const result = await fn();
-      checks[name] = {
-        ok: true,
-        ms: Date.now() - startedAt,
-        summary:
-          typeof result === "number"
-            ? `${result} records`
-            : typeof result === "string"
-              ? result
-              : Array.isArray(result)
-                ? `${result.length} records`
-                : "ok",
-      };
-    } catch (error) {
-      checks[name] = {
-        ok: false,
-        ms: Date.now() - startedAt,
-        message: error instanceof Error ? error.message : "Unknown database health error",
-        name: error instanceof Error ? error.name : "UnknownError",
-      };
-    }
-  }
-
-  await check("getDatabase", async () => {
-    db();
-    return "database handle created";
-  });
-  await check("coreTables", async () => {
-    await ensureCoreTables();
-    return "core tables ready";
-  });
-  await check("settingsSeed", async () => {
-    await seedSettings();
-    return "settings seed ready";
-  });
-  await check("notificationTables", async () => {
-    await ensureNotificationHistoryTable();
-    return "notification tables ready";
-  });
-  await check("itemsRead", async () => (await readItems()).length);
-  await check("servicesRead", async () => (await readServices()).length);
-  await check("availabilityRead", async () => (await readAvailability()).flat().length);
-  await check("peopleRead", async () => (await readPeople()).length);
-  await check("notificationsRead", async () => (await readNotificationHistory()).length);
-  await check("adminSeed", async () => {
-    await ensureAdminUser();
-    return "admin seed checked";
-  });
-  await check("calendarStateRead", async () => {
-    const state = await readCalendarState();
-    return `${state.items.length} items, ${state.people.length} people`;
-  });
-
-  const failed = Object.entries(checks)
-    .filter(([, value]) => !value.ok)
-    .map(([name, value]) => ({ name, ...value }));
-  return {
-    ok: failed.length === 0,
-    failed,
-    checks,
-    timestamp: nowIso(),
-  };
-}
-
-export async function handleCalendarFeedRequest(req: Request) {
-  try {
-    const state = await readPublicCalendarState();
-    const key = new URL(req.url).searchParams.get("key");
-    if (key !== state.syncKey) return text("Invalid calendar sync key.", 401);
-    return text(generateCalendarFeed(state), 200, "text/calendar; charset=utf-8");
-  } catch (error) {
-    console.error("calendar_feed_error", error);
-    throw error;
+    const availability = JSON.parse((await getSetting("availabilityJson")) || "[]");
+    return normalizeAvailability(availability);
+  } catch {
+    return defaultAvailability;
   }
 }
 
-export async function handlePublicBookingStateRequest() {
-  try {
-    return json(publicBookingState(await readPublicCalendarState()));
-  } catch (error) {
-    console.error("public_booking_state_error", error);
-    throw error;
-  }
+async function writeAvailability(availability) {
+  const normalized = normalizeAvailability(availability);
+  await setSetting("availabilityJson", JSON.stringify(normalized));
+  await setSetting("updatedAt", nowIso());
+  return normalized;
 }
 
-async function writeCalendarState(nextState) {
-  const current = await readCalendarState();
-  const expectedUpdatedAt = cleanString(nextState?.updatedAt || nextState?.previousUpdatedAt, "", 120);
-  if (expectedUpdatedAt && current.updatedAt && expectedUpdatedAt !== current.updatedAt) {
-    throw Object.assign(new Error("Calendar changed elsewhere. Reload before saving so you do not overwrite live bookings."), {
-      status: 409,
-    });
-  }
-  const syncKey = cleanString(nextState?.syncKey, current.syncKey, 140);
-  const items = await writeItems(nextState?.items ?? current.items);
-  const updatedAt = nowIso();
-  await setSetting("syncKey", syncKey);
-  await setSetting("updatedAt", updatedAt);
-  await importPeople(items.map(personFromAppointment).filter(Boolean), "appointment");
-  return {
-    syncKey,
-    items,
-    updatedAt,
-    services: current.services,
-    availability: current.availability,
-    people: await readPeople(),
-    notifications: await readNotificationHistory(),
-    settings: await readAdminSettings(),
-    brand: await readBrandSettings(),
-    account: await readCoachAccount(),
-  };
-}
-
-async function writePublicBookingState(currentState, items) {
-  const cleanItems = await writeItems(items);
-  const updatedAt = nowIso();
-  await setSetting("updatedAt", updatedAt);
-  await importPeople(cleanItems.map(personFromAppointment).filter(Boolean), "appointment");
-  return {
-    syncKey: currentState.syncKey,
-    updatedAt,
-    items: cleanItems,
-    services: currentState.services,
-    availability: currentState.availability,
-    brand: currentState.brand,
-    account: currentState.account,
-  };
-}
-
-function publicCalendarState(state) {
-  return {
-    syncKey: state.syncKey,
-    updatedAt: state.updatedAt,
-    items: state.items,
-    services: state.services || [],
-    availability: state.availability || [],
-    people: state.people || [],
-    notifications: state.notifications || [],
-    settings: state.settings,
-    brand: state.brand,
-    account: state.account,
-  };
-}
-
-function publicBookingState(state) {
-  return {
-    updatedAt: state.updatedAt,
-    services: (state.services || []).filter((service) => service.active && service.visibility === "public"),
-    availability: state.availability || [],
-    brand: state.brand,
-    account: state.account,
-    items: state.items.map((item) => ({
-      id: item.id,
-      kind: item.kind,
-      week: item.week ?? 0,
-      day: item.day,
-      start: item.start,
-      duration: item.duration,
-    })),
-  };
-}
-
-function queueBookingNotifications(appointment, options = {}, context = null) {
-  if (!appointment?.email && options.kind !== "admin") return;
-  const task = sendBookingNotifications(appointment, options).catch((error) => {
-    console.error("Queued booking notifications failed", error);
+function bookingConflict(items, nextItem) {
+  if (nextItem.kind !== "booking") return false;
+  return items.some((item) => {
+    if (item.id === nextItem.id || item.kind !== "booking") return false;
+    if (item.week !== nextItem.week || item.day !== nextItem.day) return false;
+    return nextItem.start < item.start + item.duration && item.start < nextItem.start + nextItem.duration;
   });
-  if (context?.waitUntil) {
-    context.waitUntil(task);
+}
+
+function slotIsBlocked(items, nextItem) {
+  return items.some((item) => {
+    if (item.kind !== "block") return false;
+    if (item.week !== nextItem.week || item.day !== nextItem.day) return false;
+    return nextItem.start < item.start + item.duration && item.start < nextItem.start + nextItem.duration;
+  });
+}
+
+function isWithinAvailability(availability, item) {
+  const windows = availability[item.day] || [];
+  if (!windows.length) return false;
+  return windows.some((window) => item.start >= window.start && item.start + item.duration <= window.end);
+}
+
+function validatePublicBooking(item, services, availability, items) {
+  if (item.kind !== "booking") throw Object.assign(new Error("Invalid booking type."), { status: 400 });
+  const service = findService(services, item.serviceId);
+  if (!service || service.active === false || service.visibility === "private") {
+    throw Object.assign(new Error("This service is not available for public booking."), { status: 400 });
+  }
+  item.duration = service.duration;
+  if (!isWithinAvailability(availability, item)) {
+    throw Object.assign(new Error("That time is outside the available booking hours."), { status: 409 });
+  }
+  if (slotIsBlocked(items, item)) throw Object.assign(new Error("That time is blocked out."), { status: 409 });
+  if (bookingConflict(items, item)) throw Object.assign(new Error("That time has already been booked."), { status: 409 });
+  if (!item.client || !item.email) throw Object.assign(new Error("Name and email are required."), { status: 400 });
+}
+
+function bookingCapacityCount(items, nextItem, service) {
+  if (service?.lessonFormat !== "group") return bookingConflict(items, nextItem) ? service.capacity || 1 : 0;
+  return items.filter((item) => {
+    if (item.kind !== "booking") return false;
+    if (item.serviceId !== service.id) return false;
+    return item.week === nextItem.week && item.day === nextItem.day && item.start === nextItem.start;
+  }).length;
+}
+
+function validateBookingCapacity(item, services, items) {
+  const service = findService(services, item.serviceId);
+  const count = bookingCapacityCount(items, item, service);
+  const capacity = Math.max(1, service?.capacity || 1);
+  if (service?.lessonFormat === "group") {
+    if (count >= capacity) throw Object.assign(new Error("That class is full."), { status: 409 });
     return;
   }
-  void task;
+  if (count >= capacity) throw Object.assign(new Error("That time has already been booked."), { status: 409 });
 }
 
-function appointmentSlotSignature(item) {
-  return [itemWeek(item), item.day, item.start, item.duration, item.serviceId || ""].join(":");
-}
-
-function appointmentContactSignature(item) {
-  return [item.client || item.title || "", item.email || "", item.phone || ""].join(":").toLowerCase();
-}
-
-function notificationJobsForCalendarChange(previousItems = [], nextItems = []) {
-  const previousById = new Map(
-    previousItems.filter((item) => item.kind === "appointment").map((item) => [item.id, item]),
-  );
-  return nextItems
-    .filter((item) => item.kind === "appointment" && item.email)
-    .map((item) => {
-      const previous = previousById.get(item.id);
-      if (!previous) return { appointment: item, kind: "booking" };
-      if (appointmentSlotSignature(previous) !== appointmentSlotSignature(item)) {
-        return { appointment: item, kind: "reschedule" };
-      }
-      if (!previous.email && item.email) return { appointment: item, kind: "booking" };
-      if (appointmentContactSignature(previous) !== appointmentContactSignature(item)) return null;
-      return null;
-    })
-    .filter(Boolean);
-}
-
-async function sendCalendarChangeNotifications(previousItems = [], nextItems = []) {
-  const results = [];
-  for (const { appointment, kind } of notificationJobsForCalendarChange(previousItems, nextItems)) {
-    try {
-      results.push(...(await sendBookingNotifications(appointment, { kind })));
-    } catch (error) {
-      console.error("Calendar change notification failed", appointment?.id, kind, error);
-    }
-  }
-  return results;
-}
-
-async function verifyAdminPassword(email, password) {
-  const rows = await db().sql`
-    SELECT * FROM admin_users
-    WHERE email = ${cleanString(email, "", 180)}
-  `;
-  const row = rows[0];
-  if (!row || typeof password !== "string") return null;
-
-  const { passwordHash } = hashPassword(password, row.password_salt);
-  const saved = Buffer.from(row.password_hash, "hex");
-  const attempt = Buffer.from(passwordHash, "hex");
-  if (saved.length !== attempt.length || !timingSafeEqual(saved, attempt)) return null;
-
-  return { id: row.id, email: row.email };
-}
-
-async function cleanupExpiredPasswordResets() {
-  await db().sql`
-    DELETE FROM admin_password_resets
-    WHERE expires_at <= NOW()
-       OR used_at IS NOT NULL
-  `;
-}
-
-async function createPasswordReset(email) {
-  const cleanedEmail = cleanEmail(email, "");
-  if (!cleanedEmail) return null;
-
-  const rows = await db().sql`
-    SELECT id, email
-    FROM admin_users
-    WHERE LOWER(email) = LOWER(${cleanedEmail})
-    LIMIT 1
-  `;
-  const user = rows[0];
-  if (!user) return null;
-
-  const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + passwordResetMinutes * 60 * 1000).toISOString();
-  await db().sql`
-    INSERT INTO admin_password_resets (id, token_hash, user_id, expires_at, created_at)
-    VALUES (${randomUUID()}, ${hashToken(token)}, ${user.id}, ${expiresAt}, NOW())
-  `;
-  return { token, expiresAt, email: user.email };
-}
-
-function passwordResetUrl(req, token) {
-  const origin = env("CLARITY_APP_URL", new URL(req.url).origin).replace(/\/$/, "");
-  const url = new URL(origin || new URL(req.url).origin);
-  url.searchParams.set("reset", token);
-  return url.toString();
-}
-
-async function sendEmail({ to, subject, html, text, replyTo, idempotencyKey }) {
-  const apiKey = env("RESEND_API_KEY");
-  if (!apiKey) return { sent: false, reason: "missing_resend_key" };
-
-  const account = await readCoachAccount();
-  const businessName = account.businessName || "Clarity Golf";
-  const from = env("CLARITY_EMAIL_FROM", `${businessName} <onboarding@resend.dev>`);
-  const body = {
-    from,
-    to: Array.isArray(to) ? to : [to],
-    subject,
-    html,
-    text,
-    ...(replyTo ? { reply_to: replyTo } : {}),
-  };
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const message = await response.text().catch(() => "");
-    console.error("Resend email failed", response.status, message.slice(0, 500));
-    return { sent: false, reason: "resend_failed", error: message.slice(0, 500) };
-  }
-
-  const data = await response.json().catch(() => ({}));
-  return { sent: true, id: data?.id || "" };
-}
-
-async function sendPasswordResetEmail(reset, req) {
-  const account = await readCoachAccount();
-  const resetUrl = passwordResetUrl(req, reset.token);
-  const businessName = account.businessName || "Clarity Golf";
-  const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
-      <h2>${escapeHtml(businessName)} password reset</h2>
-      <p>Use the button below to reset your Clarity Golf Booking admin password. This link expires in ${passwordResetMinutes} minutes.</p>
-      <p><a href="${escapeHtml(resetUrl)}" style="display:inline-block;background:#07100a;color:#fff;padding:12px 16px;text-decoration:none;border-radius:6px">Reset password</a></p>
-      <p>If the button does not work, paste this link into your browser:</p>
-      <p><a href="${escapeHtml(resetUrl)}">${escapeHtml(resetUrl)}</a></p>
-      <p>If you did not request this, you can ignore this email.</p>
-    </div>
-  `;
-  const textBody = [
-    `${businessName} password reset`,
-    "",
-    `Use this link to reset your Clarity Golf Booking admin password. It expires in ${passwordResetMinutes} minutes:`,
-    resetUrl,
-    "",
-    "If you did not request this, you can ignore this email.",
-  ].join("\n");
-
-  return sendEmail({
-    to: reset.email,
-    subject: `${businessName} password reset`,
-    html,
-    text: textBody,
-    idempotencyKey: `password-reset-${hashToken(reset.token).slice(0, 24)}`,
-  });
-}
-
-function bookingEmailVariables({ appointment, service, account }) {
-  const client = appointment.client || appointment.title || "Client";
-  const rescheduleUrl = new URL(account.bookingUrl || "https://book.claritygolf.app");
-  rescheduleUrl.searchParams.set("embed", "booking");
-  rescheduleUrl.searchParams.set("mode", "reschedule");
-  if (appointment.id) rescheduleUrl.searchParams.set("booking", appointment.id);
-  if (appointment.email) rescheduleUrl.searchParams.set("email", appointment.email);
-  if (appointment.phone) rescheduleUrl.searchParams.set("phone", appointment.phone);
-  return {
-    client,
-    firstName: client.split(/\s+/)[0] || client,
-    coach: account.coachName || account.businessName,
-    service: service?.name || "Golf Lesson",
-    date: formatBookingDate(itemWeek(appointment), appointment.day),
-    time: formatRange(appointment.start, appointment.duration),
-    venue: account.venueName,
-    price: servicePriceLabel(service),
-    duration: `${appointment.duration} minutes`,
-    replyTo: account.contactEmail,
-    rescheduleUrl: rescheduleUrl.toString(),
-  };
-}
-
-function bookingEmailHtml({ title, intro, footer, variables }) {
-  const manageButton = variables.rescheduleUrl
-    ? `<p style="margin:22px 0"><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:700">Manage / Reschedule</a></p>`
-    : "";
-  return `
-    <div style="font-family:Arial,sans-serif;line-height:1.55;color:#101612">
-      <h2>${escapeHtml(title)}</h2>
-      <p>${escapeHtml(intro)}</p>
-      <table style="border-collapse:collapse;margin:18px 0;width:100%;max-width:520px">
-        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">Lesson</td><td style="padding:8px;border-bottom:1px solid #dfe5d8"><strong>${escapeHtml(variables.service)}</strong></td></tr>
-        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">When</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.date)}, ${escapeHtml(variables.time)}</td></tr>
-        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">Where</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.venue)}</td></tr>
-        <tr><td style="padding:8px;color:#697166">Price</td><td style="padding:8px">${escapeHtml(variables.price)}</td></tr>
-      </table>
-      <p>${escapeHtml(footer).replace(/\n/g, "<br/>")}</p>
-      ${manageButton}
-    </div>
-  `;
-}
-
-function bookingEmailText({ title, intro, footer, variables }) {
-  return [
-    title,
-    "",
-    intro,
-    "",
-    `Lesson: ${variables.service}`,
-    `When: ${variables.date}, ${variables.time}`,
-    `Where: ${variables.venue}`,
-    `Price: ${variables.price}`,
-    "",
-    footer,
-    variables.rescheduleUrl ? `Manage / Reschedule: ${variables.rescheduleUrl}` : "",
-  ].join("\n");
-}
-
-async function sendBookingNotifications(appointment, { kind = "booking", testRecipient = "" } = {}) {
-  const settings = await readAdminSettings();
-  const account = await readCoachAccount();
+async function createPublicBooking(rawItem, mode = "public") {
+  await ensureSeeded();
+  const items = await readItems();
   const services = await readServices();
-  const service = services.find((candidate) => candidate.id === appointment.serviceId);
-  const variables = bookingEmailVariables({ appointment, service, account });
-  const personKey = notificationPersonKey({
-    name: appointment.client || appointment.title,
-    email: appointment.email,
-    phone: appointment.phone,
+  const availability = await readAvailability();
+  const item = normalizeItem({ ...rawItem, id: randomUUID(), kind: "booking" });
+  validatePublicBooking(item, services, availability, items);
+  validateBookingCapacity(item, services, items);
+  const cleanItems = [...items, item];
+  await writeItems(cleanItems);
+  await updatePerson(personFromAppointment(item));
+  const publicBooking = publicItem(item, services);
+  if (mode === "public") await notifyBooking(publicBooking);
+  return { item, publicBooking };
+}
+
+async function updatePublicBooking(rawItem) {
+  await ensureSeeded();
+  const items = await readItems();
+  const services = await readServices();
+  const availability = await readAvailability();
+  const item = normalizeItem({ ...rawItem, kind: "booking" });
+  const existing = items.find((entry) => entry.id === item.id && entry.kind === "booking");
+  if (!existing) throw Object.assign(new Error("Booking not found."), { status: 404 });
+  const service = findService(services, item.serviceId);
+  item.duration = service.duration;
+  const others = items.filter((entry) => entry.id !== item.id);
+  validatePublicBooking(item, services, availability, others);
+  validateBookingCapacity(item, services, others);
+  const nextItems = items.map((entry) => (entry.id === item.id ? item : entry));
+  await writeItems(nextItems);
+  await updatePerson(personFromAppointment(item));
+  const publicBooking = publicItem(item, services);
+  await notifyBooking(publicBooking, "booking_updated");
+  return { item, publicBooking };
+}
+
+async function cancelPublicBooking(lookup) {
+  await ensureSeeded();
+  const items = await readItems();
+  const services = await readServices();
+  const existing = items.find((item) => bookingMatchesLookup(item, lookup));
+  if (!existing) throw Object.assign(new Error("Booking not found."), { status: 404 });
+  await writeItems(items.filter((item) => item.id !== existing.id));
+  const publicBooking = publicItem(existing, services);
+  await queueNotification({
+    kind: "booking_cancelled",
+    recipient: publicBooking.email,
+    subject: `Booking cancelled: ${publicBooking.serviceName}`,
+    html: renderEmailLayout({
+      title: "Booking cancelled",
+      intro: `Your booking for ${escapeHtml(publicBooking.serviceName)} has been cancelled.`,
+      rows: [
+        ["Date", publicBooking.date],
+        ["Time", publicBooking.timeRange],
+        ["Client", publicBooking.client],
+      ],
+      footer: "Contact us if you need to make another booking.",
+    }),
+    text: `Your booking for ${publicBooking.serviceName} on ${publicBooking.date} at ${publicBooking.timeRange} has been cancelled.`,
+    meta: { calendarItemId: existing.id, recipient: publicBooking.email, client: publicBooking.client, kind: "booking_cancelled" },
   });
-  const replyTo = settings.replyToEmail || account.contactEmail;
-  const jobs = [];
+  return { ok: true, item: existing };
+}
 
-  async function sendAndRecord(channel, recipient, subject, html, text, key) {
-    const notificationKind = `${kind}_${channel}_email`;
-    const result = await sendEmail({
-      to: recipient,
-      subject,
-      html,
-      text,
-      replyTo,
-      idempotencyKey: key,
+function currentWeekIndex() {
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.floor((todayUtc - baseWeekStart.getTime()) / (7 * 86_400_000));
+}
+
+function publicBookingStatePayload(settings, services, availability, items, brand) {
+  return {
+    coachName: settings.coachName || defaultCoachAccount().businessName,
+    account: settings.account || defaultCoachAccount(),
+    services: services
+      .filter((service) => service.active && service.visibility !== "private")
+      .map((service) => ({
+        id: service.id,
+        name: service.name,
+        duration: service.duration,
+        price: service.price,
+        description: service.description,
+        capacity: service.capacity,
+        minParticipants: service.minParticipants,
+        lessonFormat: service.lessonFormat,
+        priceMode: service.priceMode,
+        location: service.location,
+        priceLabel: servicePriceLabel(service),
+      })),
+    availability,
+    booked: items.filter((item) => item.kind === "booking").map((item) => publicItem(item, services)),
+    blocked: items.filter((item) => item.kind === "block"),
+    currentWeek: currentWeekIndex(),
+    brand,
+  };
+}
+
+async function readPublicBookingState() {
+  const [account, services, availability, items, brand] = await Promise.all([
+    readCoachAccount(),
+    readServices(),
+    readAvailability(),
+    readItems(),
+    readBrandSettings(),
+  ]);
+  return publicBookingStatePayload({ coachName: account.businessName, account }, services, availability, items, brand);
+}
+
+async function readBookingState() {
+  const [account, adminSettings, services, availability, items, brand] = await Promise.all([
+    readCoachAccount(),
+    readAdminSettings(),
+    readServices(),
+    readAvailability(),
+    readItems(),
+    readBrandSettings(),
+  ]);
+  return {
+    coachName: account.businessName,
+    account,
+    adminSettings,
+    services,
+    availability,
+    items,
+    people: await readPeople(),
+    notificationHistory: await readNotificationHistory(),
+    brand,
+  };
+}
+
+async function queueNotification(payload) {
+  await ensureSeeded();
+  const record = {
+    id: randomUUID(),
+    payload,
+    status: "queued",
+    attempts: 0,
+    createdAt: nowIso(),
+  };
+  return record;
+}
+
+async function flushNotificationQueue() {
+  return { delivered: 0, queued: 0, failed: 0 };
+}
+
+function renderEmailLayout({ title, intro, rows = [], footer = "" }) {
+  const renderedRows = rows
+    .filter(([label, value]) => value !== undefined && value !== null && value !== "")
+    .map(
+      ([label, value]) => `
+        <tr>
+          <td style="padding:8px 0;color:#6b7280;font-size:13px;">${escapeHtml(label)}</td>
+          <td style="padding:8px 0;color:#111827;font-size:14px;font-weight:600;text-align:right;">${escapeHtml(value)}</td>
+        </tr>`,
+    )
+    .join("");
+  return `
+    <div style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+      <div style="max-width:560px;margin:0 auto;padding:28px 16px;">
+        <div style="background:#ffffff;border-radius:22px;padding:28px;border:1px solid #e5e7eb;box-shadow:0 20px 55px rgba(15,23,42,0.08);">
+          <div style="font-size:12px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;color:#16a34a;">Clarity Golf Booking</div>
+          <h1 style="margin:10px 0 12px;font-size:26px;line-height:1.15;">${escapeHtml(title)}</h1>
+          <p style="font-size:15px;line-height:1.6;color:#374151;margin:0 0 20px;">${escapeHtml(intro)}</p>
+          <table style="width:100%;border-collapse:collapse;border-top:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;margin:18px 0;">
+            ${renderedRows}
+          </table>
+          ${footer ? `<p style="font-size:13px;line-height:1.6;color:#6b7280;margin:18px 0 0;">${escapeHtml(footer)}</p>` : ""}
+        </div>
+      </div>
+    </div>`;
+}
+
+async function sendWebhookEmail({ to, subject, html, text: textBody, meta = {} }) {
+  const webhook = await getSetting("emailWebhookUrl");
+  if (!webhook) {
+    await insertNotificationHistory({ ...meta, recipient: to, subject, kind: meta.kind || "email", status: "queued", provider: "not_configured" });
+    return { ok: true, skipped: true };
+  }
+  const response = await fetch(webhook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to, subject, html, text: textBody, meta }),
+  });
+  const body = await response.text().catch(() => "");
+  await insertNotificationHistory({
+    ...meta,
+    recipient: to,
+    subject,
+    kind: meta.kind || "email",
+    status: response.ok ? "sent" : "failed",
+    provider: "webhook",
+    providerId: response.headers.get("x-message-id") || "",
+    error: response.ok ? "" : body.slice(0, 500),
+  });
+  if (!response.ok) throw new Error(body || "Email webhook failed.");
+  return { ok: true };
+}
+
+async function notifyBooking(publicBooking, kind = "booking_created") {
+  const settings = await readAdminSettings();
+  const variables = {
+    client: publicBooking.client,
+    firstName: publicBooking.client.split(" ")[0],
+    service: publicBooking.serviceName,
+    coach: (await readCoachAccount()).businessName,
+    date: publicBooking.date,
+    time: publicBooking.timeRange,
+    price: publicBooking.servicePrice,
+  };
+  const clientSubject = renderTemplate(settings.clientEmailSubject, variables);
+  const clientIntro = renderTemplate(settings.clientEmailIntro, variables);
+  const adminSubject = renderTemplate(settings.adminEmailSubject, variables);
+  const adminIntro = renderTemplate(settings.adminEmailIntro, variables);
+
+  if (settings.sendClientEmail && publicBooking.email) {
+    await sendWebhookEmail({
+      to: publicBooking.email,
+      subject: clientSubject,
+      html: renderEmailLayout({
+        title: clientSubject,
+        intro: clientIntro,
+        rows: [
+          ["Service", publicBooking.serviceName],
+          ["Date", publicBooking.date],
+          ["Time", publicBooking.timeRange],
+          ["Price", publicBooking.servicePrice],
+          ["Venue", (await readCoachAccount()).venueName],
+        ],
+        footer: settings.clientEmailFooter,
+      }),
+      text: `${clientIntro}\n${publicBooking.serviceName}\n${publicBooking.date} ${publicBooking.timeRange}`,
+      meta: { calendarItemId: publicBooking.id, recipient: publicBooking.email, client: publicBooking.client, kind },
     });
-    const status = result.sent ? "sent" : "failed";
-
-    try {
-      await recordNotification({
-        personKey,
-        calendarItemId: appointment.id,
-        recipient,
-        subject,
-        kind: notificationKind,
-        status,
-        provider: "resend",
-        providerId: result.id || "",
-        error: result.reason || result.error || "",
-      });
-    } catch (error) {
-      console.error("Notification history write failed", channel, error);
-    }
-
-    if (result.sent) {
-      console.log("Booking email sent", channel, recipient, result.id || "no-provider-id");
-    }
-
-    return {
-      channel,
-      recipient,
-      subject,
-      kind: notificationKind,
-      status,
-      ...result,
-    };
   }
 
-  async function recordSkipped(channel, recipient, subject, reason) {
-    const notificationKind = `${kind}_${channel}_email`;
-    try {
-      await recordNotification({
-        personKey,
-        calendarItemId: appointment.id,
-        recipient,
-        subject,
-        kind: notificationKind,
-        status: "skipped",
-        provider: "settings",
-        providerId: "",
-        error: reason,
-      });
-    } catch (error) {
-      console.error("Notification skipped history write failed", channel, error);
-    }
-    return { channel, recipient, subject, kind: notificationKind, status: "skipped", sent: false, reason };
+  if (settings.sendAdminEmail && settings.notificationEmail) {
+    await sendWebhookEmail({
+      to: settings.notificationEmail,
+      subject: adminSubject,
+      html: renderEmailLayout({
+        title: adminSubject,
+        intro: adminIntro,
+        rows: [
+          ["Client", publicBooking.client],
+          ["Service", publicBooking.serviceName],
+          ["Date", publicBooking.date],
+          ["Time", publicBooking.timeRange],
+          ["Email", publicBooking.email],
+          ["Phone", publicBooking.phone],
+          ["Price", publicBooking.servicePrice],
+        ],
+      }),
+      text: `${adminIntro}\n${publicBooking.client}\n${publicBooking.date} ${publicBooking.timeRange}`,
+      meta: { calendarItemId: publicBooking.id, recipient: settings.notificationEmail, client: publicBooking.client, kind: `${kind}_admin` },
+    });
   }
-
-  if ((settings.sendClientEmail || kind === "test") && (testRecipient || appointment.email)) {
-    const subject = renderTemplate(settings.clientEmailSubject, variables);
-    const intro = renderTemplate(settings.clientEmailIntro, variables);
-    const footerBase = renderTemplate(settings.clientEmailFooter, variables);
-    const recipient = testRecipient || appointment.email;
-    jobs.push(
-      sendAndRecord(
-        "client",
-        recipient,
-        subject,
-        bookingEmailHtml({ title: subject, intro, footer: footerBase, variables }),
-        bookingEmailText({
-          title: subject,
-          intro,
-          footer: footerBase,
-          variables: testRecipient ? { ...variables, rescheduleUrl: "" } : variables,
-        }),
-        `${kind}-client-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
-      ),
-    );
-  } else if (kind !== "test") {
-    const recipient = appointment.email || "";
-    const subject = renderTemplate(settings.clientEmailSubject, variables);
-    jobs.push(
-      recordSkipped(
-        "client",
-        recipient,
-        subject,
-        settings.sendClientEmail ? "missing_client_email" : "disabled_in_notification_settings",
-      ),
-    );
-  }
-
-  if (settings.sendAdminEmail && kind !== "test") {
-    const recipient = settings.notificationEmail || account.contactEmail;
-    const subject = renderTemplate(settings.adminEmailSubject, variables);
-    const intro = renderTemplate(settings.adminEmailIntro, variables);
-    jobs.push(
-      sendAndRecord(
-        "admin",
-        recipient,
-        subject,
-        bookingEmailHtml({ title: subject, intro, footer: "Admin booking alert.", variables }),
-        bookingEmailText({ title: subject, intro, footer: "Admin booking alert.", variables }),
-        `${kind}-admin-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
-      ),
-    );
-  } else if (kind !== "test") {
-    const recipient = settings.notificationEmail || account.contactEmail;
-    const subject = renderTemplate(settings.adminEmailSubject, variables);
-    jobs.push(recordSkipped("admin", recipient, subject, "disabled_in_notification_settings"));
-  }
-
-  if (!jobs.length) return [];
-  return Promise.all(jobs);
+  return { ok: true };
 }
 
-async function sendInitialBookingNotifications(appointment, kind = "booking") {
-  try {
-    const results = await sendBookingNotifications(appointment, { kind });
-    return Array.isArray(results) ? results : [];
-  } catch (error) {
-    const errorMessage = cleanString(error instanceof Error ? error.message : String(error || "unknown_error"), "unknown_error", 450);
-    console.error("Initial booking notifications failed", appointment?.id, kind, error);
-
-    const fallbackResults = [];
-    try {
-      const settings = await readAdminSettings();
-      const account = await readCoachAccount();
-      const services = await readServices();
-      const service = services.find((candidate) => candidate.id === appointment?.serviceId);
-      const variables = bookingEmailVariables({ appointment, service, account });
-      const personKey = notificationPersonKey({
-        name: appointment?.client || appointment?.title,
-        email: appointment?.email,
-        phone: appointment?.phone,
-      });
-
-      async function recordFailed(channel, recipient, subject, reason = "send_exception") {
-        const notificationKind = `${kind}_${channel}_email`;
-        const result = {
-          channel,
-          recipient,
-          subject,
-          kind: notificationKind,
-          status: "failed",
-          sent: false,
-          reason,
-          error: errorMessage,
-        };
-        fallbackResults.push(result);
-        await recordNotification({
-          personKey,
-          calendarItemId: appointment?.id || "",
-          recipient,
-          subject,
-          kind: notificationKind,
-          status: "failed",
-          provider: "resend",
-          providerId: "",
-          error: `${reason}:${errorMessage}`,
-        });
-      }
-
-      if (appointment?.email && settings.sendClientEmail) {
-        await recordFailed(
-          "client",
-          appointment.email,
-          renderTemplate(settings.clientEmailSubject, variables),
-        );
-      }
-
-      if (settings.sendAdminEmail) {
-        const recipient = settings.notificationEmail || account.contactEmail;
-        await recordFailed(
-          "admin",
-          recipient,
-          renderTemplate(settings.adminEmailSubject, variables),
-        );
-      }
-    } catch (recordError) {
-      console.error("Initial booking notification fallback receipt failed", appointment?.id, kind, recordError);
-    }
-
-    return fallbackResults.length
-      ? fallbackResults
-      : [{ channel: "client", sent: false, status: "failed", reason: "send_exception", error: errorMessage }];
-  }
+function validateAdminUser(email, password) {
+  const clean = cleanEmail(email);
+  if (!password || password.length < 8) throw Object.assign(new Error("Enter your admin password."), { status: 400 });
+  return { email: clean, password };
 }
 
-async function resetAdminPassword(token, password) {
-  const cleanToken = cleanString(token, "", 500);
-  if (!cleanToken) return { error: "invalid_token" };
-  if (typeof password !== "string" || password.length < 8) return { error: "weak_password" };
-
-  const rows = await db().sql`
-    SELECT admin_password_resets.id AS reset_id,
-           admin_users.id AS user_id,
-           admin_users.email AS email
-    FROM admin_password_resets
-    JOIN admin_users ON admin_users.id = admin_password_resets.user_id
-    WHERE admin_password_resets.token_hash = ${hashToken(cleanToken)}
-      AND admin_password_resets.used_at IS NULL
-      AND admin_password_resets.expires_at > NOW()
-    LIMIT 1
-  `;
-  const row = rows[0];
-  if (!row) return { error: "invalid_token" };
-
-  const { passwordHash, salt } = hashPassword(password);
-  const client = await db().pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(
-      `UPDATE admin_users
-       SET password_hash = $1,
-           password_salt = $2,
-           updated_at = NOW()
-       WHERE id = $3`,
-      [passwordHash, salt, row.user_id],
-    );
-    await client.query("UPDATE admin_password_resets SET used_at = NOW() WHERE id = $1", [row.reset_id]);
-    await client.query("DELETE FROM admin_sessions WHERE user_id = $1", [row.user_id]);
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-
-  return { user: { id: row.user_id, email: row.email } };
-}
-
-async function createAdminSession(userId) {
-  const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000).toISOString();
+async function loginAdmin(body, req) {
+  await ensureSeeded();
+  const { email, password } = validateAdminUser(body?.email, body?.password);
+  const users = await db().sql`SELECT * FROM admin_users WHERE LOWER(email) = LOWER(${email}) LIMIT 1`;
+  const user = users[0];
+  if (!user) throw Object.assign(new Error("Invalid admin login."), { status: 401 });
+  const { passwordHash } = hashPassword(password, user.password_salt);
+  const ok = timingSafeEqual(Buffer.from(passwordHash, "hex"), Buffer.from(user.password_hash, "hex"));
+  if (!ok) throw Object.assign(new Error("Invalid admin login."), { status: 401 });
+  const token = randomBytes(32).toString("hex");
   await db().sql`
     INSERT INTO admin_sessions (id, token_hash, user_id, expires_at, created_at)
-    VALUES (${randomUUID()}, ${hashToken(token)}, ${userId}, ${expiresAt}, NOW())
+    VALUES (${randomUUID()}, ${hashToken(token)}, ${user.id}, ${new Date(Date.now() + sessionDays * 86_400_000).toISOString()}, NOW())
   `;
-  return { token, expiresAt };
+  return json({ ok: true, user: { id: user.id, email: user.email } }, 200, {
+    "Set-Cookie": cookieHeader(token, req, sessionDays * 86_400),
+  });
 }
 
-async function readAdminSession(token) {
-  if (!token) return null;
-  const rows = await db().sql`
-    SELECT admin_users.id, admin_users.email, admin_sessions.expires_at
-    FROM admin_sessions
-    JOIN admin_users ON admin_users.id = admin_sessions.user_id
-    WHERE admin_sessions.token_hash = ${hashToken(token)}
-  `;
-  const row = rows[0];
-  if (!row) return null;
-  if (new Date(row.expires_at).getTime() <= Date.now()) {
-    await destroyAdminSession(token);
-    return null;
+async function logoutAdmin(req) {
+  const token = sessionTokenFromRequest(req);
+  if (token) {
+    await ensureSeeded();
+    await db().sql`DELETE FROM admin_sessions WHERE token_hash = ${hashToken(token)}`;
   }
-  return { id: row.id, email: row.email, expiresAt: row.expires_at };
-}
-
-async function destroyAdminSession(token) {
-  if (!token) return;
-  await db().sql`DELETE FROM admin_sessions WHERE token_hash = ${hashToken(token)}`;
-}
-
-async function cleanupExpiredSessions() {
-  await db().sql`DELETE FROM admin_sessions WHERE expires_at <= NOW()`;
+  return json({ ok: true }, 200, { "Set-Cookie": clearCookieHeader() });
 }
 
 async function requireAdmin(req) {
-  const session = await readAdminSession(sessionTokenFromRequest(req));
-  if (!session) return null;
-  return session;
-}
-
-function itemWeek(item) {
-  return item.week ?? 0;
-}
-
-function slotOverlaps(a, b) {
-  return a.week === b.week && a.day === b.day && a.start < b.start + b.duration && a.start + a.duration > b.start;
-}
-
-function isInsideAvailability(availability, day, start, duration) {
-  const end = start + duration;
-  return availability[day]?.some((window) => start >= window.start && end <= window.end) ?? false;
-}
-
-function hasCollision(items, candidate) {
-  return items.some((item) =>
-    slotOverlaps({ week: itemWeek(item), day: item.day, start: item.start, duration: item.duration }, candidate),
-  );
-}
-
-async function createPublicBooking(payload, context = null) {
-  const state = await readPublicCalendarState();
-  const service = state.services.find(
-    (candidate) => candidate.id === payload?.serviceId && candidate.active && candidate.visibility === "public",
-  );
-  if (!service) throw Object.assign(new Error("Choose a public lesson type."), { status: 400 });
-
-  const week = Number(payload.week ?? 0);
-  const day = Number(payload.day);
-  const start = Number(payload.start);
-  const firstName = cleanString(payload.firstName, "", 80);
-  const lastName = cleanString(payload.lastName, "", 80);
-  const email = cleanString(payload.email, "", 180);
-  const phone = cleanString(payload.phone, "", 80);
-
-  if (!firstName || !lastName || !email) {
-    throw Object.assign(new Error("First name, last name, and email are required."), { status: 400 });
-  }
-  if (!Number.isInteger(week) || !Number.isInteger(day) || !Number.isInteger(start) || day < 0 || day > 6) {
-    throw Object.assign(new Error("Choose a valid appointment time."), { status: 400 });
-  }
-
-  const slot = { week, day, start, duration: service.duration };
-  if (!isInsideAvailability(state.availability, day, start, service.duration) || hasCollision(state.items, slot)) {
-    throw Object.assign(new Error("That time is no longer available."), { status: 409 });
-  }
-
-  const client = `${firstName} ${lastName}`;
-  const appointment = {
-    id: `appt-${Date.now()}`,
-    kind: "appointment",
-    ...slot,
-    serviceId: service.id,
-    client,
-    title: client,
-    phone,
-    email,
-    note: "Booked from public booking page.",
-  };
-  await writePublicBookingState(state, [...state.items, appointment]);
-  const notifications = await sendInitialBookingNotifications(appointment, "booking");
-  return { appointment, notifications };
-}
-
-export async function handlePublicBookingRequest(req, context = null) {
-  try {
-    console.log("public_booking:start");
-    const result = await createPublicBooking(await parseBody(req), context);
-    console.log("public_booking:saved", result.appointment.id);
-    return json({
-      ok: true,
-      appointment: {
-        id: result.appointment.id,
-        week: result.appointment.week,
-        day: result.appointment.day,
-        start: result.appointment.start,
-        duration: result.appointment.duration,
-      },
-      notifications: result.notifications,
-    });
-  } catch (error) {
-    console.error("public_booking:failed", error);
-    const status = error?.status || 500;
-    return json(
-      {
-        error: status === 500 ? "public_booking_error" : "request_error",
-        message: error instanceof Error ? error.message : "Unknown public booking error",
-      },
-      status,
-    );
-  }
-}
-
-export async function handlePublicNotificationStatusRequest(req) {
-  try {
-    const url = new URL(req.url);
-    const appointmentId = cleanString(url.searchParams.get("appointment") || "", "", 120);
-    const email = normalizeRescheduleContact(url.searchParams.get("email") || "");
-    const phone = normalizeRescheduleContact(url.searchParams.get("phone") || "");
-    if (!appointmentId || (!email && !phone)) return json({ sent: false }, 400);
-
-    const state = await readPublicCalendarState();
-    const appointment = state.items.find((item) => item.id === appointmentId);
-    if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
-      return json({ sent: false }, 404);
-    }
-
-    const history = await readNotificationHistory();
-    const notification = history.find(
-      (candidate) => candidate.calendarItemId === appointmentId && candidate.kind.includes("client_email"),
-    );
-    return json({
-      sent: ["sent", "delivered", "opened", "clicked"].includes(notification?.status || ""),
-      notification: notification ? notificationResultFromRecord(notification) : null,
-    });
-  } catch (error) {
-    console.error("public_notification_status:failed", error);
-    return json({ sent: false }, 500);
-  }
-}
-
-async function applyResendWebhookEvent(event = {}, deliveryId = "") {
-  const status = resendWebhookStatus(event?.type || "");
-  const providerId = cleanString(deliveryId || event?.data?.email_id || "", "", 180);
-  if (!status || !providerId) {
-    return { ok: false, reason: "ignored", providerId, status };
-  }
-
-  const existingRows = await db().sql`
-    SELECT id, status, error
-    FROM notification_history
-    WHERE provider_id = ${providerId}
-  `;
-  if (!existingRows.length) {
-    return { ok: false, reason: "notification_not_found", providerId, status };
-  }
-
-  const errorMessage = resendWebhookErrorMessage(event);
-  for (const row of existingRows) {
-    if (!shouldApplyNotificationStatus(row.status || "", status)) continue;
-    await db().sql`
-      UPDATE notification_history
-      SET status = ${status},
-          error = CASE
-            WHEN ${errorMessage} <> '' THEN ${errorMessage}
-            ELSE error
-          END
-      WHERE id = ${row.id}
-    `;
-  }
-
-  return { ok: true, providerId, status };
-}
-
-export async function handleResendWebhookRequest(req) {
-  const payloadText = await req.text();
-  let event = {};
-  try {
-    event = payloadText ? JSON.parse(payloadText) : {};
-  } catch {
-    return json({ ok: false, message: "Invalid webhook payload." }, 400);
-  }
-
   await ensureSeeded();
-
-  const deliveryId = cleanString(req.headers.get("svix-id") || "", "", 180);
-  if (deliveryId) {
-    const existing = await db().sql`SELECT id FROM notification_webhook_events WHERE id = ${deliveryId} LIMIT 1`;
-    if (existing.length) return json({ ok: true, duplicate: true });
-  }
-
-  const result = await applyResendWebhookEvent(event, "");
-
-  await db().sql`
-    INSERT INTO notification_webhook_events (id, provider_id, event_type, payload, received_at)
-    VALUES (
-      ${deliveryId || randomUUID()},
-      ${cleanString(event?.data?.email_id || "", "", 180)},
-      ${cleanString(event?.type || "unknown", "unknown", 120)},
-      ${payloadText.slice(0, 12000)},
-      NOW()
-    )
-    ON CONFLICT (id) DO NOTHING
+  const token = sessionTokenFromRequest(req);
+  if (!token) throw Object.assign(new Error("Admin login required."), { status: 401 });
+  const rows = await db().sql`
+    SELECT admin_users.id, admin_users.email
+    FROM admin_sessions
+    JOIN admin_users ON admin_users.id = admin_sessions.user_id
+    WHERE admin_sessions.token_hash = ${hashToken(token)}
+      AND admin_sessions.expires_at > ${new Date().toISOString()}
+    LIMIT 1
   `;
-
-  return json({ ok: true, result });
+  const user = rows[0];
+  if (!user) throw Object.assign(new Error("Admin session expired. Please log in again."), { status: 401 });
+  return { id: user.id, email: user.email };
 }
 
-function normalizeRescheduleContact(value) {
-  return cleanString(value, "", 180).toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function publicRescheduleItem(item, serviceList = defaultServices) {
-  return {
-    id: item.id,
-    serviceId: item.serviceId || "",
-    serviceName: serviceName(item.serviceId, serviceList),
-    duration: item.duration,
-    week: itemWeek(item),
-    day: item.day,
-    start: item.start,
-    client: item.client || item.title,
-  };
-}
-
-function matchesRescheduleContact(item, email, phone) {
-  if (item.kind !== "appointment") return false;
-  const itemEmail = normalizeRescheduleContact(item.email);
-  const itemPhone = normalizeRescheduleContact(item.phone);
-  return Boolean(itemEmail && itemPhone && itemEmail === email && itemPhone === phone);
-}
-
-function matchesNotificationContact(item, email, phone) {
-  if (item.kind !== "appointment") return false;
-  const itemEmail = normalizeRescheduleContact(item.email);
-  const itemPhone = normalizeRescheduleContact(item.phone);
-  if (!itemEmail || itemEmail !== email) return false;
-  return !itemPhone || !phone || itemPhone === phone;
-}
-
-function notificationResultFromRecord(notification) {
-  const channel = notification.kind.includes("admin") ? "admin" : "client";
-  return {
-    channel,
-    recipient: notification.recipient,
-    subject: notification.subject,
-    kind: notification.kind,
-    status: notification.status,
-    sent: ["sent", "delivered", "opened", "clicked"].includes(notification.status || ""),
-    id: notification.providerId,
-    reason: notification.error,
-  };
-}
-
-async function triggerPublicBookingNotifications(payload) {
-  const appointmentId = cleanString(payload?.appointmentId || payload?.appointment || "", "", 120);
-  const email = normalizeRescheduleContact(payload?.email);
-  const phone = normalizeRescheduleContact(payload?.phone);
-  const kind = payload?.kind === "reschedule" ? "reschedule" : "booking";
-
-  if (!appointmentId || !email) {
-    throw Object.assign(new Error("Booking email details are missing."), { status: 400 });
-  }
-
-  const state = await readPublicCalendarState();
-  const appointment = state.items.find((item) => item.id === appointmentId);
-  if (!appointment || !matchesNotificationContact(appointment, email, phone)) {
-    throw Object.assign(new Error("That booking could not be verified for email notification."), { status: 404 });
-  }
-
-  const existing = (await readNotificationHistory()).filter(
-    (notification) => notification.calendarItemId === appointmentId && notification.kind.startsWith(`${kind}_`),
-  );
-  const alreadySent = existing.some((notification) => notification.status === "sent");
-  if (alreadySent) {
-    return { ok: true, alreadySent: true, results: existing.map(notificationResultFromRecord) };
-  }
-
-  const results = await sendBookingNotifications(appointment, { kind });
-  return {
-    ok: results.some((result) => result.sent),
-    alreadySent: false,
-    results,
-    notifications: await readNotificationHistory(),
-  };
-}
-
-async function lookupPublicReschedule(payload) {
-  const email = normalizeRescheduleContact(payload?.email);
-  const phone = normalizeRescheduleContact(payload?.phone);
-  if (!email || !phone) {
-    throw Object.assign(new Error("Enter the email and phone number used on the booking."), { status: 400 });
-  }
-
-  const state = await readPublicCalendarState();
-  const serviceList = state.services || defaultServices;
-  const matches = state.items
-    .filter((item) => matchesRescheduleContact(item, email, phone))
-    .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start)
-    .map((item) => publicRescheduleItem(item, serviceList));
-
-  return { matches };
-}
-
-async function reschedulePublicBooking(payload, context = null) {
-  const appointmentId = cleanString(payload?.appointmentId, "", 120);
-  const email = normalizeRescheduleContact(payload?.email);
-  const phone = normalizeRescheduleContact(payload?.phone);
-  const week = Number(payload?.week ?? 0);
-  const day = Number(payload?.day);
-  const start = Number(payload?.start);
-
-  if (!appointmentId || !email || !phone) {
-    throw Object.assign(new Error("Choose the booking to reschedule."), { status: 400 });
-  }
-  if (!Number.isInteger(week) || !Number.isInteger(day) || !Number.isInteger(start) || day < 0 || day > 6) {
-    throw Object.assign(new Error("Choose a valid new appointment time."), { status: 400 });
-  }
-
-  const state = await readPublicCalendarState();
-  const appointment = state.items.find((item) => item.id === appointmentId);
-  if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
-    throw Object.assign(new Error("That booking could not be verified."), { status: 404 });
-  }
-
-  const serviceList = state.services || defaultServices;
-  const service = serviceList.find((candidate) => candidate.id === appointment.serviceId);
-  const duration = service?.duration || appointment.duration;
-  const slot = { week, day, start, duration };
-  const itemsWithoutOriginal = state.items.filter((item) => item.id !== appointment.id);
-  if (
-    !isInsideAvailability(state.availability || defaultAvailability, day, start, duration) ||
-    hasCollision(itemsWithoutOriginal, slot)
-  ) {
-    throw Object.assign(new Error("That time is no longer available."), { status: 409 });
-  }
-
-  const updatedAppointment = {
-    ...appointment,
-    week,
-    day,
-    start,
-    duration,
-    note: appointment.note || "Rescheduled from public booking page.",
-  };
-  await writePublicBookingState(
-    state,
-    state.items.map((item) => (item.id === appointment.id ? updatedAppointment : item)),
-  );
-  const notifications = await sendInitialBookingNotifications(updatedAppointment, "reschedule");
-
-  return { appointment: updatedAppointment, notifications };
-}
-
-export async function handlePublicRescheduleLookupRequest(req) {
+async function sessionPayload(req) {
   try {
-    return json(await lookupPublicReschedule(await parseBody(req)));
-  } catch (error) {
-    console.error("public_reschedule_lookup:failed", error);
-    const status = error?.status || 500;
-    return json(
-      {
-        error: status === 500 ? "public_reschedule_lookup_error" : "request_error",
-        message: error instanceof Error ? error.message : "Unknown public reschedule lookup error",
-      },
-      status,
-    );
+    const user = await requireAdmin(req);
+    return { ok: true, admin: true, user };
+  } catch {
+    return { ok: true, admin: false, user: null };
   }
 }
 
-export async function handlePublicRescheduleRequest(req, context = null) {
-  try {
-    const result = await reschedulePublicBooking(await parseBody(req), context);
-    return json({
-      ok: true,
-      appointment: {
-        id: result.appointment.id,
-        week: result.appointment.week,
-        day: result.appointment.day,
-        start: result.appointment.start,
-        duration: result.appointment.duration,
-      },
-      notifications: result.notifications,
-    });
-  } catch (error) {
-    console.error("public_reschedule:failed", error);
-    const status = error?.status || 500;
-    return json(
-      {
-        error: status === 500 ? "public_reschedule_error" : "request_error",
-        message: error instanceof Error ? error.message : "Unknown public reschedule error",
-      },
-      status,
-    );
-  }
+async function requestPasswordReset(body) {
+  await ensureSeeded();
+  const email = cleanEmail(body?.email);
+  const users = await db().sql`SELECT * FROM admin_users WHERE LOWER(email) = LOWER(${email}) LIMIT 1`;
+  const user = users[0];
+  if (!user) return { ok: true };
+  const token = randomBytes(32).toString("hex");
+  await db().sql`
+    INSERT INTO admin_password_resets (id, token_hash, user_id, expires_at, created_at)
+    VALUES (${randomUUID()}, ${hashToken(token)}, ${user.id}, ${new Date(Date.now() + passwordResetMinutes * 60_000).toISOString()}, NOW())
+  `;
+  return { ok: true, resetToken: token };
 }
 
-function serviceName(serviceId, serviceList = defaultServices) {
-  return serviceList.find((service) => service.id === serviceId)?.name ?? "Golf Lesson";
+async function resetPassword(body) {
+  await ensureSeeded();
+  const token = cleanString(body?.token, "", 200);
+  const password = String(body?.password || "");
+  if (!token) throw Object.assign(new Error("Reset token required."), { status: 400 });
+  if (password.length < 8) throw Object.assign(new Error("Password must be at least 8 characters."), { status: 400 });
+  const rows = await db().sql`
+    SELECT * FROM admin_password_resets
+    WHERE token_hash = ${hashToken(token)}
+      AND used_at IS NULL
+      AND expires_at > ${new Date().toISOString()}
+    LIMIT 1
+  `;
+  const reset = rows[0];
+  if (!reset) throw Object.assign(new Error("Reset link is invalid or expired."), { status: 400 });
+  const { passwordHash, salt } = hashPassword(password);
+  await db().sql`UPDATE admin_users SET password_hash = ${passwordHash}, password_salt = ${salt}, updated_at = NOW() WHERE id = ${reset.user_id}`;
+  await db().sql`UPDATE admin_password_resets SET used_at = NOW() WHERE id = ${reset.id}`;
+  await db().sql`DELETE FROM admin_sessions WHERE user_id = ${reset.user_id}`;
+  return { ok: true };
 }
 
-function escapeText(value) {
+function icsEscape(value) {
   return String(value || "")
-    .replaceAll("\\", "\\\\")
-    .replaceAll("\n", "\\n")
-    .replaceAll(";", "\\;")
-    .replaceAll(",", "\\,");
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\n/g, "\\n");
 }
 
-function foldLine(line) {
-  const chunks = [];
-  let remaining = line;
-  while (remaining.length > 75) {
-    chunks.push(remaining.slice(0, 75));
-    remaining = remaining.slice(75);
-  }
-  chunks.push(remaining);
-  return chunks.join("\r\n ");
+function icsDate(date) {
+  return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
 
-function formatUtcStamp(date = new Date()) {
-  return date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
-}
-
-function dateForSlot(week, day) {
-  const date = new Date(baseWeekStart);
-  date.setUTCDate(baseWeekStart.getUTCDate() + week * 7 + day);
-  return {
-    year: date.getUTCFullYear(),
-    month: date.getUTCMonth() + 1,
-    day: date.getUTCDate(),
-  };
-}
-
-function pad(value) {
-  return String(value).padStart(2, "0");
-}
-
-function formatLocalDateTime(week, day, minutes) {
-  const date = dateForSlot(week, day);
-  const hour = Math.floor(minutes / 60);
-  const minute = minutes % 60;
-  return `${date.year}${pad(date.month)}${pad(date.day)}T${pad(hour)}${pad(minute)}00`;
-}
-
-function eventDescription(item, serviceList) {
-  const rows =
-    item.kind === "block"
-      ? ["Blocked time", item.note]
-      : [
-          serviceName(item.serviceId, serviceList),
-          item.phone ? `Phone: ${item.phone}` : "",
-          item.email ? `Email: ${item.email}` : "",
-          item.note,
-        ];
-  return rows.filter(Boolean).join("\n");
-}
-
-function eventSummary(item, account, serviceList) {
-  if (item.kind === "block") return `Busy - ${account.businessName}`;
-  return `${item.client || item.title} - ${serviceName(item.serviceId, serviceList)}`;
-}
-
-function generateCalendarFeed(state) {
-  const stamp = formatUtcStamp();
-  const account = cleanCoachAccount(state.account);
-  const timezone = account.timezone;
-  const serviceList = state.services || defaultServices;
+function calendarFeed(items, services) {
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Clarity Golf//Booking System//EN",
+    "PRODID:-//Clarity Golf Booking//Calendar//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    `X-WR-CALNAME:${escapeText(account.businessName)} Bookings`,
-    `X-WR-TIMEZONE:${timezone}`,
-    "X-PUBLISHED-TTL:PT5M",
-    "REFRESH-INTERVAL;VALUE=DURATION:PT5M",
   ];
-
-  state.items
-    .slice()
-    .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start)
-    .forEach((item) => {
-      const week = itemWeek(item);
-      lines.push(
-        "BEGIN:VEVENT",
-        `UID:${escapeText(item.id)}@clarity-golf-booking`,
-        `DTSTAMP:${stamp}`,
-        `DTSTART;TZID=${timezone}:${formatLocalDateTime(week, item.day, item.start)}`,
-        `DTEND;TZID=${timezone}:${formatLocalDateTime(week, item.day, item.start + item.duration)}`,
-        `SUMMARY:${escapeText(eventSummary(item, account, serviceList))}`,
-        `DESCRIPTION:${escapeText(eventDescription(item, serviceList))}`,
-        `LOCATION:${escapeText(account.venueName)}`,
-        `ORGANIZER;CN=${escapeText(account.businessName)}:MAILTO:${account.contactEmail}`,
-        item.kind === "block" ? "CATEGORIES:Busy" : "CATEGORIES:Golf Lesson",
-        "STATUS:CONFIRMED",
-        "TRANSP:OPAQUE",
-        "END:VEVENT",
-      );
-    });
-
+  for (const item of items) {
+    if (item.kind === "block") continue;
+    const service = findService(services, item.serviceId);
+    const start = minutesToDateForWeek(item.week || 0, item.day || 0, item.start || 0);
+    const end = new Date(start.getTime() + item.duration * 60_000);
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${icsEscape(item.id)}@claritygolf.app`,
+      `DTSTAMP:${icsDate(new Date())}`,
+      `DTSTART:${icsDate(start)}`,
+      `DTEND:${icsDate(end)}`,
+      `SUMMARY:${icsEscape(`${item.client || item.title} - ${service?.name || item.serviceId}`)}`,
+      `DESCRIPTION:${icsEscape([item.note, item.phone, item.email].filter(Boolean).join("\n"))}`,
+      "END:VEVENT",
+    );
+  }
   lines.push("END:VCALENDAR");
-  return `${lines.map(foldLine).join("\r\n")}\r\n`;
+  return lines.join("\r\n");
 }
 
-async function parseBody(req) {
-  const raw = await req.text();
-  return raw ? JSON.parse(raw) : {};
-}
-
-export async function handleBookingApiRoute(req: Request, forcedPathname = "", context = null) {
+function parsePath(req, prefix = "") {
   const url = new URL(req.url);
-  const rawPathname = url.pathname;
-  const pathname = forcedPathname
-    ? forcedPathname
-    : rawPathname === "/.netlify/functions/booking-api"
-      ? "/"
-      : rawPathname;
+  let path = url.pathname;
+  if (prefix && path.startsWith(prefix)) path = path.slice(prefix.length) || "/";
+  return { url, path };
+}
 
+export async function handleBookingApiRoute(req, prefix = "", context = {}) {
+  const { url, path } = parsePath(req, prefix);
   try {
-    await ensureSeeded();
+    if (req.method === "OPTIONS") return new Response(null, { status: 204 });
+    if (req.method === "GET" && path === "/auth/session") return json(await sessionPayload(req));
+    if (req.method === "POST" && path === "/auth/login") return loginAdmin(await req.json().catch(() => ({})), req);
+    if (req.method === "POST" && path === "/auth/logout") return logoutAdmin(req);
+    if (req.method === "POST" && path === "/auth/request-reset") return json(await requestPasswordReset(await req.json().catch(() => ({}))));
+    if (req.method === "POST" && path === "/auth/reset") return json(await resetPassword(await req.json().catch(() => ({})));
 
-    if (req.method === "GET" && /^\/calendar\/[a-z0-9-]+\.ics$/.test(pathname)) {
-      return handleCalendarFeedRequest(req);
+    if (req.method === "GET" && path === "/calendar-feed.ics") {
+      const items = await readItems();
+      const services = await readServices();
+      return text(calendarFeed(items, services), 200, "text/calendar; charset=utf-8");
     }
 
-    if (req.method === "POST" && pathname === "/api/auth/login") {
-      await cleanupExpiredSessions();
-      const body = await parseBody(req);
-      const user = await verifyAdminPassword(body.email || "", body.password || "");
-      if (!user) return json({ error: "invalid_login", message: "Email or password is incorrect." }, 401);
-      const session = await createAdminSession(user.id);
-      return json(
-        { authenticated: true, email: user.email, expiresAt: session.expiresAt },
-        200,
-        { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
-      );
+    if (req.method === "GET" && path === "/public-booking-state") return json(await readPublicBookingState());
+    if (req.method === "POST" && path === "/public-booking") return json(await createPublicBooking(await req.json().catch(() => ({})), "public"));
+    if (req.method === "POST" && (path === "/public-reschedule" || path === "/public-reschedule/lookup" || path === "/public-reschedule-lookup")) {
+      return json(await requestCalendarReschedule(await req.json().catch(() => ({}))));
     }
 
-    if (req.method === "POST" && pathname === "/api/auth/forgot-password") {
-      const emailConfigured = Boolean(env("RESEND_API_KEY"));
-      if (!emailConfigured) {
-        return json(
-          {
-            ok: false,
-            message: "Password reset email is not configured yet.",
-          },
-          503,
-        );
-      }
+    await requireAdmin(req);
 
-      await cleanupExpiredPasswordResets();
-      const body = await parseBody(req);
-      const reset = await createPasswordReset(body.email || "");
-      if (reset) {
-        const emailResult = await sendPasswordResetEmail(reset, req);
-        if (!emailResult.sent) {
-          return json({ ok: false, message: "Could not send the reset email. Try again in a minute." }, 502);
+    if (req.method === "GET" && path === "/booking-state") return json(await readBookingState());
+    if (req.method === "POST" && path === "/booking-state") {
+      const body = await req.json().catch(() => ({}));
+      const services = await readServices();
+      const items = normalizeItems(body.items);
+      for (const item of items) {
+        if (item.kind === "booking") {
+          const service = findService(services, item.serviceId);
+          item.duration = service?.duration || item.duration;
         }
       }
-
-      return json({
-        ok: true,
-        message: "If that email matches an admin account, a reset link has been sent.",
-      });
+      const saved = await writeItems(items);
+      await Promise.all(saved.filter((item) => item.kind === "booking").map((item) => updatePerson(personFromAppointment(item))));
+      return json({ items: saved, people: await readPeople(), notificationHistory: await readNotificationHistory() });
     }
-
-    if (req.method === "POST" && pathname === "/api/auth/reset-password") {
-      await cleanupExpiredPasswordResets();
-      const body = await parseBody(req);
-      const result = await resetAdminPassword(body.token || "", body.password || "");
-      if (result.error === "weak_password") {
-        return json({ error: "weak_password", message: "Use at least 8 characters." }, 400);
-      }
-      if (!result.user) {
-        return json({ error: "invalid_token", message: "This reset link has expired or has already been used." }, 400);
-      }
-      const session = await createAdminSession(result.user.id);
-      return json(
-        { authenticated: true, email: result.user.email, expiresAt: session.expiresAt },
-        200,
-        { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
-      );
+    if (req.method === "GET" && path === "/people") return json({ people: await readPeople() });
+    if (req.method === "POST" && path === "/people/import") {
+      const body = await req.json().catch(() => ({}));
+      return json(await importPeople(body.people || body.clients || [], body.source || "import", body.options || {}));
     }
-
-    if (req.method === "POST" && pathname === "/api/auth/logout") {
-      await destroyAdminSession(sessionTokenFromRequest(req));
-      return json({ authenticated: false }, 200, { "Set-Cookie": clearCookieHeader() });
-    }
-
-    if (req.method === "GET" && pathname === "/api/auth/session") {
-      const session = await readAdminSession(sessionTokenFromRequest(req));
-      return json(session ? { authenticated: true, email: session.email } : { authenticated: false });
-    }
-
-    if (req.method === "GET" && pathname === "/api/public-booking-state") {
-      return handlePublicBookingStateRequest();
-    }
-
-    if (req.method === "POST" && pathname === "/api/public-booking-notifications") {
-      return json(await triggerPublicBookingNotifications(await parseBody(req)));
-    }
-
-    if (req.method === "GET" && pathname === "/api/public-diagnostics") {
-      return json(await runPublicDiagnostics());
-    }
-
-    if (req.method === "GET" && pathname === "/api/public-serialization-diagnostics") {
-      return json(await runPublicSerializationDiagnostics());
-    }
-
-    if (req.method === "GET" && pathname === "/api/database-health") {
-      return json(await runDatabaseHealth());
-    }
-
-    if (pathname.startsWith("/api/")) {
-      if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-    }
-
-    if (req.method === "GET" && pathname === "/api/calendar-state") {
-      return json(publicCalendarState(await readCalendarState()));
-    }
-
-    if (req.method === "PUT" && pathname === "/api/calendar-state") {
-      const body = await parseBody(req);
-      const current = await readCalendarState();
-      const nextState = await writeCalendarState({
-        syncKey: typeof body.syncKey === "string" ? body.syncKey : current.syncKey,
-        items: Array.isArray(body.items) ? body.items : current.items,
-        updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
-      });
-      const notificationResults = await sendCalendarChangeNotifications(current.items, nextState.items);
-      return json({
-        ...publicCalendarState({ ...nextState, notifications: await readNotificationHistory() }),
-        notificationResults,
-      });
-    }
-
-    if (req.method === "PUT" && pathname === "/api/calendar-sync-key") {
-      const body = await parseBody(req);
-      const current = await readCalendarState();
-      return json(
-        publicCalendarState(
-          await writeCalendarState({
-            ...current,
-            syncKey: typeof body.syncKey === "string" && body.syncKey.startsWith("cg_") ? body.syncKey : generateSyncKey(),
-          }),
-        ),
-      );
-    }
-
-    if (req.method === "GET" && pathname === "/api/admin-settings") {
-      return json(await readAdminSettings());
-    }
-
-    if (req.method === "PUT" && pathname === "/api/admin-settings") {
-      return json(await writeAdminSettings(await parseBody(req)));
-    }
-
-    if (req.method === "GET" && pathname === "/api/notification-history") {
-      return json({ notifications: await readNotificationHistory() });
-    }
-
-    if (req.method === "POST" && pathname === "/api/test-email") {
-      const body = await parseBody(req);
-      const recipient = cleanEmail(body.email, "");
-      if (!recipient) return json({ error: "missing_email", message: "Enter an email address to send the test to." }, 400);
-      const services = await readServices();
-      const service = services.find((candidate) => candidate.active) || defaultServices[0];
-      const appointment = {
-        id: `test-${Date.now()}`,
-        kind: "appointment",
-        week: 0,
-        day: 0,
-        start: 14 * 60,
-        duration: service.duration,
-        serviceId: service.id,
-        client: "Donna Steele",
-        title: "Donna Steele",
-        email: recipient,
-        phone: "+64 27 555 014",
-        note: "Test email from Clarity Golf Booking.",
-      };
-      const results = await sendBookingNotifications(appointment, { kind: "test", testRecipient: recipient });
-      const sent = results.some((result) => result.sent);
-      const missingResendKey = results.some((result) => result.reason === "missing_resend_key");
-      return json(
-        {
-          ok: sent,
-          results,
-          message: sent
-            ? "Test email sent."
-            : missingResendKey
-            ? "Test email could not be sent because the Resend API key is missing in production."
-            : "Test email could not be sent. Check Resend settings.",
-        },
-        sent ? 200 : 502,
-      );
-    }
-
-    if (req.method === "GET" && pathname === "/api/coach-account") {
-      return json(await readCoachAccount());
-    }
-
-    if (req.method === "PUT" && pathname === "/api/coach-account") {
-      return json(await writeCoachAccount(await parseBody(req)));
-    }
-
-    if (req.method === "GET" && pathname === "/api/services") {
-      return json({ services: await readServices() });
-    }
-
-    if (req.method === "PUT" && pathname === "/api/services") {
-      const body = await parseBody(req);
-      return json({ services: await writeServices(body.services) });
-    }
-
-    if (req.method === "GET" && pathname === "/api/availability") {
-      return json({ availability: await readAvailability() });
-    }
-
-    if (req.method === "PUT" && pathname === "/api/availability") {
-      const body = await parseBody(req);
-      return json({ availability: await writeAvailability(body.availability) });
-    }
-
-    if (req.method === "GET" && pathname === "/api/brand-settings") {
-      return json(await readBrandSettings());
-    }
-
-    if (req.method === "PUT" && pathname === "/api/brand-settings") {
-      return json(await writeBrandSettings(await parseBody(req)));
-    }
-
-    if (req.method === "GET" && pathname === "/api/people") {
-      return json({ people: await readPeople() });
-    }
-
-    if (req.method === "POST" && pathname === "/api/people/import") {
-      const body = await parseBody(req);
-      return json(await importPeople(body.people, "manual_import", { mode: body.mode, appendNotes: body.appendNotes }), 201);
-    }
-
-    if (req.method === "PUT" && pathname === "/api/people") {
-      const body = await parseBody(req);
+    if (req.method === "POST" && path === "/people") {
+      const body = await req.json().catch(() => ({}));
       return json(await updatePerson(body.person || body));
     }
+    if (req.method === "POST" && path === "/people/migrate") {
+      await seedPeopleFromAppointments();
+      return json({ people: await readPeople() });
+    }
+    if (req.method === "GET" && path === "/admin-settings") return json(await readAdminSettings());
+    if (req.method === "POST" && path === "/admin-settings") return json(await writeAdminSettings(await req.json().catch(() => ({}))));
+    if (req.method === "GET" && path === "/coach-account") return json(await readCoachAccount());
+    if (req.method === "POST" && path === "/coach-account") return json(await writeCoachAccount(await req.json().catch(() => ({}))));
+    if (req.method === "GET" && path === "/brand-settings") return json(await readBrandSettings());
+    if (req.method === "POST" && path === "/brand-settings") return json(await writeBrandSettings(await req.json().catch(() => ({}))));
+    if (req.method === "GET" && path === "/services") return json({ services: await readServices() });
+    if (req.method === "POST" && path === "/services") return json({ services: await writeServices((await req.json().catch(() => ({}))).services) });
+    if (req.method === "GET" && path === "/availability") return json({ availability: await readAvailability() });
+    if (req.method === "POST" && path === "/availability") return json({ availability: await writeAvailability((await req.json().catch(() => ({}))).availability) });
+    if (req.method === "POST" && path === "/flush-notifications") return json(await flushNotificationQueue());
+    if (req.method === "GET" && path === "/notification-history") return json({ notificationHistory: await readNotificationHistory() });
 
-    return json({ error: "not_found", message: "Route not found." }, 404);
+    return json({ error: "Not found" }, 404);
   } catch (error) {
-    const status = error?.status || 500;
-    return json(
-      {
-        error: status === 500 ? "booking_api_error" : "request_error",
-        message: error instanceof Error ? error.message : "Unknown booking API error",
-      },
-      status,
-    );
+    const status = Number(error?.status || 500);
+    return json({ error: error?.message || "Request failed" }, status);
   }
 }
