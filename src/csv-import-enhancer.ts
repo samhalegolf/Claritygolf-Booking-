@@ -30,6 +30,15 @@ const fieldOptions: Array<{ value: CsvField; label: string }> = [
   { value: "caddyProfileId", label: "Caddy profile ID" },
 ];
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function normaliseHeader(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -79,32 +88,14 @@ function parseCsv(text: string) {
 function inferField(header: string, index: number, samples: string[]): CsvField {
   const key = normaliseHeader(header);
   const direct = new Map<string, CsvField>([
-    ["name", "name"],
-    ["fullname", "name"],
-    ["client", "name"],
-    ["customer", "name"],
-    ["customername", "name"],
-    ["firstname", "firstName"],
-    ["first", "firstName"],
-    ["givenname", "firstName"],
-    ["lastname", "lastName"],
-    ["surname", "lastName"],
-    ["last", "lastName"],
-    ["email", "email"],
-    ["emailaddress", "email"],
-    ["mail", "email"],
-    ["phone", "phone"],
-    ["mobile", "phone"],
-    ["cell", "phone"],
-    ["telephone", "phone"],
-    ["notes", "notes"],
-    ["note", "notes"],
-    ["comment", "notes"],
-    ["comments", "notes"],
-    ["caddyprofileurl", "caddyProfileUrl"],
-    ["caddyurl", "caddyProfileUrl"],
-    ["caddyprofileid", "caddyProfileId"],
-    ["caddyid", "caddyProfileId"],
+    ["name", "name"], ["fullname", "name"], ["client", "name"], ["customer", "name"], ["customername", "name"],
+    ["firstname", "firstName"], ["first", "firstName"], ["givenname", "firstName"],
+    ["lastname", "lastName"], ["surname", "lastName"], ["last", "lastName"],
+    ["email", "email"], ["emailaddress", "email"], ["mail", "email"],
+    ["phone", "phone"], ["mobile", "phone"], ["cell", "phone"], ["telephone", "phone"],
+    ["notes", "notes"], ["note", "notes"], ["comment", "notes"], ["comments", "notes"],
+    ["caddyprofileurl", "caddyProfileUrl"], ["caddyurl", "caddyProfileUrl"],
+    ["caddyprofileid", "caddyProfileId"], ["caddyid", "caddyProfileId"],
   ]);
   if (direct.has(key)) return direct.get(key) || "";
   if (key.includes("email")) return "email";
@@ -165,9 +156,7 @@ function analyse(text: string, manualMapping: Record<number, CsvField> = {}): Cs
     .filter(Boolean) as CsvPerson[];
 
   const warnings: string[] = [];
-  if (!Object.values(mapping).some((field) => field === "name" || field === "firstName" || field === "lastName")) {
-    warnings.push("No name column detected. Email will be used as name where possible.");
-  }
+  if (!Object.values(mapping).some((field) => field === "name" || field === "firstName" || field === "lastName")) warnings.push("No name column detected. Email will be used as name where possible.");
   if (!Object.values(mapping).includes("email")) warnings.push("No email column detected.");
   if (people.some((person) => !person.email)) warnings.push("Some clients do not have an email address.");
   if (!people.length) warnings.push("No importable clients found yet.");
@@ -199,11 +188,7 @@ function csvCell(value: string) {
 function toCanonicalCsv(people: CsvPerson[]) {
   return [
     "name,email,phone,notes,caddyProfileUrl,caddyProfileId",
-    ...people.map((person) =>
-      [person.name, person.email, person.phone, person.notes, person.caddyProfileUrl, person.caddyProfileId]
-        .map(csvCell)
-        .join(","),
-    ),
+    ...people.map((person) => [person.name, person.email, person.phone, person.notes, person.caddyProfileUrl, person.caddyProfileId].map(csvCell).join(",")),
   ].join("\n");
 }
 
@@ -215,17 +200,21 @@ function textareaValueSet(textarea: HTMLTextAreaElement, value: string) {
 }
 
 async function importCheckedPeople(people: CsvPerson[]) {
-  const response = await fetch("/api/people/import", {
+  const response = await fetch("/api/people/import-lite", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ people: peoplePayload(people) }),
   });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(text || `${response.status} ${response.statusText}`);
+  const text = await response.text().catch(() => "");
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { message: text };
   }
-  return response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || data?.error || text || `${response.status} ${response.statusText}`);
+  return data;
 }
 
 function enhanceCard(card: HTMLElement) {
@@ -265,38 +254,27 @@ function enhanceCard(card: HTMLElement) {
     checkpoint.hidden = !currentText;
     if (!currentText) return;
     const importLabel = importState === "importing" ? "Importing..." : importState === "imported" ? "Imported" : "Import checked clients";
+    const preview = analysis.people.slice(0, 5).map((person) => `
+      <div><strong>${escapeHtml(person.name)}</strong><span>${escapeHtml([person.email, person.phone].filter(Boolean).join(" · ") || "No email or phone")}</span></div>
+    `).join("");
     checkpoint.innerHTML = `
-      <div class="csv-enhancer-summary">
-        <strong>${analysis.people.length} clients ready</strong>
-        <span>${analysis.hasHeader ? "Header row detected" : "No header row detected"}</span>
-      </div>
-      ${analysis.warnings.length ? `<div class="csv-enhancer-warnings">${analysis.warnings.map((warning) => `<span>${warning}</span>`).join("")}</div>` : ""}
+      <div class="csv-enhancer-summary"><strong>${analysis.people.length} clients ready</strong><span>${analysis.hasHeader ? "Header row detected" : "No header row detected"}</span></div>
+      ${analysis.warnings.length ? `<div class="csv-enhancer-warnings">${analysis.warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("")}</div>` : ""}
       <div class="csv-enhancer-grid">
-        ${analysis.headers
-          .map(
-            (header, index) => `
-              <label>
-                <span>${header || `Column ${index + 1}`}</span>
-                <select data-csv-column="${index}">
-                  ${fieldOptions.map((option) => `<option value="${option.value}"${analysis.mapping[index] === option.value ? " selected" : ""}>${option.label}</option>`).join("")}
-                </select>
-                <em>${analysis.rows.slice(0, 2).map((row) => row[index]).filter(Boolean).join(" / ") || "No sample"}</em>
-              </label>
-            `,
-          )
-          .join("")}
+        ${analysis.headers.map((header, index) => `
+          <label>
+            <span>${escapeHtml(header || `Column ${index + 1}`)}</span>
+            <select data-csv-column="${index}">${fieldOptions.map((option) => `<option value="${option.value}"${analysis.mapping[index] === option.value ? " selected" : ""}>${option.label}</option>`).join("")}</select>
+            <em>${escapeHtml(analysis.rows.slice(0, 2).map((row) => row[index]).filter(Boolean).join(" / ") || "No sample")}</em>
+          </label>
+        `).join("")}
       </div>
-      <div class="csv-enhancer-preview">
-        ${analysis.people
-          .slice(0, 5)
-          .map((person) => `<div><strong>${person.name}</strong><span>${[person.email, person.phone].filter(Boolean).join(" · ") || "No email or phone"}</span></div>`)
-          .join("")}
-      </div>
+      <div class="csv-enhancer-preview">${preview}</div>
       <div class="csv-enhancer-actions">
         <button class="outline-button csv-enhancer-canonical" type="button"${analysis.people.length ? "" : " disabled"}>Use checked CSV in box</button>
         <button class="primary-button csv-enhancer-import" type="button"${analysis.people.length && importState !== "importing" ? "" : " disabled"}>${importLabel}</button>
       </div>
-      ${statusText ? `<div class="csv-enhancer-status">${statusText}</div>` : ""}
+      ${statusText ? `<div class="csv-enhancer-status">${escapeHtml(statusText)}</div>` : ""}
     `;
   }
 
@@ -354,16 +332,17 @@ function enhanceCard(card: HTMLElement) {
     render();
     try {
       const result = await importCheckedPeople(people);
-      const imported = Number(result.imported ?? people.length);
+      const imported = Number(result.imported ?? 0);
       const updated = Number(result.updated ?? 0);
       const skipped = Number(result.skipped ?? 0);
+      const errors = Array.isArray(result.errors) ? result.errors.length : 0;
       importState = "imported";
-      statusText = `${imported} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ""}. Reloading client list...`;
+      statusText = `${imported} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ""}${errors ? `, ${errors} row errors` : ""}. Reloading client list...`;
       render();
-      window.setTimeout(() => window.location.reload(), 700);
+      window.setTimeout(() => window.location.reload(), 900);
     } catch (error) {
       importState = "error";
-      statusText = `Import failed: ${error instanceof Error ? error.message.slice(0, 180) : "Unknown error"}`;
+      statusText = `Import failed: ${error instanceof Error ? error.message.slice(0, 220) : "Unknown error"}`;
       render();
     }
   });
