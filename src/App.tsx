@@ -357,6 +357,7 @@ type AuthMode = "login" | "forgot" | "reset";
 type ThemeMode = "light" | "dark";
 
 type NotificationSettings = {
+  emailNotificationsEnabled: boolean;
   notificationEmail: string;
   replyToEmail: string;
   notificationDelaySeconds: number;
@@ -1110,7 +1111,7 @@ const defaultCoachAccount: CoachAccount = {
   venueName: "The Range 24/7 - Three Kings",
   venueShortName: "The Range 24/7",
   timezone: "Pacific/Auckland",
-  contactEmail: "sam@samhalegolf.co.nz",
+  contactEmail: "",
   bookingUrl: "https://book.claritygolf.app",
   calendarSlug: "sam-hale-golf",
   caddyWorkspaceUrl: CADDY_APP_URL,
@@ -1524,8 +1525,9 @@ async function analyzeLogoFile(file: File): Promise<BrandSettings> {
 }
 
 const defaultNotificationSettings: NotificationSettings = {
-  notificationEmail: "sam@samhalegolf.co.nz",
-  replyToEmail: "sam@samhalegolf.co.nz",
+  emailNotificationsEnabled: true,
+  notificationEmail: "",
+  replyToEmail: "",
   notificationDelaySeconds: 30,
   sendClientEmail: true,
   sendAdminEmail: true,
@@ -1977,7 +1979,7 @@ function App() {
     void fetch("/api/calendar-state", {
       method: "PUT",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ items, syncKey: calendarSyncKey, updatedAt: calendarStateVersion }),
+      body: JSON.stringify({ items, replaceItems: true, syncKey: calendarSyncKey, updatedAt: calendarStateVersion }),
     })
       .then(async (response) => {
         if (calendarSaveVersionRef.current !== saveVersion) return;

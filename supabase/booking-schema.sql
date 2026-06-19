@@ -1,5 +1,5 @@
--- Run this once in Supabase SQL Editor for the clarity-caddie project
--- before deploying the Supabase-backed booking functions.
+-- Run this once in the Supabase project used by Clarity Booking before
+-- deploying the Supabase-backed booking functions.
 
 create table if not exists public.settings (
   key text primary key,

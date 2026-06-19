@@ -222,6 +222,7 @@ async function readState() {
       createdAt: row.created_at || "",
     })),
     settings: {
+      emailNotificationsEnabled: settings.emailNotificationsEnabled !== "false",
       notificationEmail: settings.notificationEmail || "",
       replyToEmail: settings.replyToEmail || "",
       notificationDelaySeconds: Number(settings.notificationDelaySeconds || 30),
@@ -254,7 +255,7 @@ async function readState() {
       venueName: settings.accountVenueName || env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
       venueShortName: settings.accountVenueShortName || env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
       timezone: settings.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
-      contactEmail: settings.accountContactEmail || env("CLARITY_CONTACT_EMAIL", "sam@samhalegolf.co.nz"),
+      contactEmail: settings.accountContactEmail || env("CLARITY_CONTACT_EMAIL", ""),
       bookingUrl: settings.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
       calendarSlug: settings.accountCalendarSlug || "sam-hale-golf",
       caddyWorkspaceUrl: settings.accountCaddyWorkspaceUrl || env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
@@ -264,6 +265,7 @@ async function readState() {
 
 async function writeState(body: any) {
   const hasItemsPayload = Object.prototype.hasOwnProperty.call(body || {}, "items");
+  const shouldReplaceItems = body?.replaceItems === true || body?.itemsOperation === "replace";
   const rows = uniqueById(Array.isArray(body?.items) ? body.items.map(itemToRow) : []);
   if (hasItemsPayload && rows.length) {
     await supabase("calendar_items", {
@@ -274,7 +276,7 @@ async function writeState(body: any) {
     });
 
     const keepIds = postgrestQuotedList(rows.map((row) => row.id));
-    if (keepIds) {
+    if (shouldReplaceItems && keepIds) {
       await supabase("calendar_items", {
         method: "DELETE",
         query: `id=not.in.(${keepIds})`,
@@ -302,6 +304,7 @@ async function writeState(body: any) {
   if (body?.settings && typeof body.settings === "object") {
     const nextSettings = body.settings as Record<string, unknown>;
     const settingKeys = [
+      "emailNotificationsEnabled",
       "notificationEmail",
       "replyToEmail",
       "notificationDelaySeconds",

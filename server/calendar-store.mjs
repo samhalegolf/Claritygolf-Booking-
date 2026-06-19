@@ -166,7 +166,7 @@ function cleanSlug(value, fallback = "sam-hale-golf") {
   return slug || fallback;
 }
 
-function cleanEmail(value, fallback = "sam@samhalegolf.co.nz") {
+function cleanEmail(value, fallback = "") {
   const email = cleanString(value, "", 180).toLowerCase();
   return email.includes("@") ? email : fallback;
 }
@@ -343,7 +343,7 @@ function defaultCoachAccount() {
     venueName: process.env.CLARITY_VENUE_NAME || "The Range 24/7 - Three Kings",
     venueShortName: process.env.CLARITY_VENUE_SHORT_NAME || "The Range 24/7",
     timezone: process.env.CLARITY_TIMEZONE || "Pacific/Auckland",
-    contactEmail: process.env.CLARITY_CONTACT_EMAIL || "sam@samhalegolf.co.nz",
+    contactEmail: process.env.CLARITY_CONTACT_EMAIL || "",
     bookingUrl: process.env.CLARITY_BOOKING_URL || "https://book.claritygolf.app",
     calendarSlug: process.env.CLARITY_CALENDAR_SLUG || "sam-hale-golf",
     caddyWorkspaceUrl: process.env.CLARITY_CADDY_WORKSPACE_URL || "https://caddy.claritygolf.app",
@@ -437,8 +437,8 @@ function defaultSettings() {
   const account = defaultCoachAccount();
   return {
     syncKey: process.env.CLARITY_CALENDAR_SYNC_KEY || generateSyncKey(),
-    notificationEmail: process.env.CLARITY_NOTIFICATION_EMAIL || "sam@samhalegolf.co.nz",
-    replyToEmail: process.env.CLARITY_REPLY_TO_EMAIL || "sam@samhalegolf.co.nz",
+    notificationEmail: process.env.CLARITY_NOTIFICATION_EMAIL || "",
+    replyToEmail: process.env.CLARITY_REPLY_TO_EMAIL || "",
     notificationDelaySeconds: "30",
     sendClientEmail: "true",
     sendAdminEmail: "true",

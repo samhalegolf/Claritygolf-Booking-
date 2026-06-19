@@ -137,6 +137,14 @@ function env(name, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
 }
 
+function hasOwn(source, key) {
+  return Object.prototype.hasOwnProperty.call(source || {}, key);
+}
+
+function emailNotificationsGloballyDisabled() {
+  return ["0", "false", "off", "disabled", "no"].includes(env("EMAIL_NOTIFICATIONS_ENABLED", "").trim().toLowerCase());
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -224,7 +232,7 @@ function servicePriceLabel(service) {
   return `NZ$${service.price}.00${service.priceMode === "per-person" ? " pp" : ""}`;
 }
 
-function cleanEmail(value, fallback = "sam@samhalegolf.co.nz") {
+function cleanEmail(value, fallback = "") {
   const email = cleanString(value, "", 180).toLowerCase();
   return email.includes("@") ? email : fallback;
 }
@@ -334,7 +342,7 @@ function defaultCoachAccount() {
     venueName: env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
     venueShortName: env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
     timezone: env("CLARITY_TIMEZONE", "Pacific/Auckland"),
-    contactEmail: env("CLARITY_CONTACT_EMAIL", "sam@samhalegolf.co.nz"),
+    contactEmail: env("CLARITY_CONTACT_EMAIL", ""),
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
     calendarSlug: env("CLARITY_CALENDAR_SLUG", "sam-hale-golf"),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
@@ -522,8 +530,8 @@ async function defaultSettings() {
   const account = defaultCoachAccount();
   return {
     syncKey: env("CLARITY_CALENDAR_SYNC_KEY") || generateSyncKey(),
-    notificationEmail: env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz"),
-    replyToEmail: env("CLARITY_REPLY_TO_EMAIL", "sam@samhalegolf.co.nz"),
+    notificationEmail: env("CLARITY_NOTIFICATION_EMAIL", ""),
+    replyToEmail: env("CLARITY_REPLY_TO_EMAIL", ""),
     notificationDelaySeconds: "30",
     sendClientEmail: "true",
     sendAdminEmail: "true",
@@ -1100,17 +1108,32 @@ async function updatePerson(rawPerson) {
   }
 }
 
-async function writeItems(items) {
+async function writeItems(items, options = {}) {
   const cleanItems = normalizeItems(items);
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM calendar_items");
+    if (options.clearItems === true) {
+      await client.query("DELETE FROM calendar_items");
+    }
     for (const item of cleanItems) {
       await client.query(
         `INSERT INTO calendar_items (
           id, kind, week, day, start, duration, service_id, client, title, phone, email, note, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          kind = EXCLUDED.kind,
+          week = EXCLUDED.week,
+          day = EXCLUDED.day,
+          start = EXCLUDED.start,
+          duration = EXCLUDED.duration,
+          service_id = EXCLUDED.service_id,
+          client = EXCLUDED.client,
+          title = EXCLUDED.title,
+          phone = EXCLUDED.phone,
+          email = EXCLUDED.email,
+          note = EXCLUDED.note,
+          updated_at = NOW()`,
         [
           item.id,
           item.kind,
@@ -1127,6 +1150,9 @@ async function writeItems(items) {
         ],
       );
     }
+    if (options.replaceItems === true && cleanItems.length) {
+      await client.query("DELETE FROM calendar_items WHERE NOT (id = ANY($1::text[]))", [cleanItems.map((item) => item.id)]);
+    }
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -1134,7 +1160,7 @@ async function writeItems(items) {
   } finally {
     client.release();
   }
-  return cleanItems;
+  return readItems();
 }
 
 async function seedPeopleFromAppointments() {
@@ -1147,6 +1173,7 @@ async function readAdminSettings() {
   await ensureSeeded();
   const delaySeconds = Number((await getSetting("notificationDelaySeconds")) || 30);
   return {
+    emailNotificationsEnabled: (await getSetting("emailNotificationsEnabled")) !== "false",
     notificationEmail: await getSetting("notificationEmail"),
     replyToEmail: await getSetting("replyToEmail"),
     notificationDelaySeconds: Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30,
@@ -1166,22 +1193,25 @@ async function readAdminSettings() {
 }
 
 async function writeAdminSettings(settings) {
-  const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
-  await setSetting("notificationEmail", cleanString(settings?.notificationEmail, "", 180));
-  await setSetting("replyToEmail", cleanString(settings?.replyToEmail, "", 180));
-  await setSetting("notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
-  await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
-  await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
-  await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
-  await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
-  await setSetting("clientEmailFooter", cleanString(settings?.clientEmailFooter, defaultEmailTemplates.clientEmailFooter, 900));
-  await setSetting("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
-  await setSetting("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
-  await setSetting("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
-  await setSetting("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
-  await setSetting("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
-  await setSetting("sendClientSms", settings?.sendClientSms ? "true" : "false");
-  await setSetting("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
+  if (hasOwn(settings, "emailNotificationsEnabled")) await setSetting("emailNotificationsEnabled", settings?.emailNotificationsEnabled ? "true" : "false");
+  if (hasOwn(settings, "notificationEmail")) await setSetting("notificationEmail", cleanString(settings?.notificationEmail, "", 180));
+  if (hasOwn(settings, "replyToEmail")) await setSetting("replyToEmail", cleanString(settings?.replyToEmail, "", 180));
+  if (hasOwn(settings, "notificationDelaySeconds")) {
+    const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
+    await setSetting("notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
+  }
+  if (hasOwn(settings, "sendClientEmail")) await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
+  if (hasOwn(settings, "sendAdminEmail")) await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
+  if (hasOwn(settings, "clientEmailSubject")) await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
+  if (hasOwn(settings, "clientEmailIntro")) await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
+  if (hasOwn(settings, "clientEmailFooter")) await setSetting("clientEmailFooter", cleanString(settings?.clientEmailFooter, defaultEmailTemplates.clientEmailFooter, 900));
+  if (hasOwn(settings, "adminEmailSubject")) await setSetting("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
+  if (hasOwn(settings, "adminEmailIntro")) await setSetting("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
+  if (hasOwn(settings, "smsProviderName")) await setSetting("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
+  if (hasOwn(settings, "smsWebhookUrl")) await setSetting("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
+  if (hasOwn(settings, "smsFromNumber")) await setSetting("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
+  if (hasOwn(settings, "sendClientSms")) await setSetting("sendClientSms", settings?.sendClientSms ? "true" : "false");
+  if (hasOwn(settings, "sendAdminSms")) await setSetting("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
   await setSetting("updatedAt", nowIso());
   return readAdminSettings();
 }
@@ -1486,7 +1516,10 @@ async function writeCalendarState(nextState) {
     });
   }
   const syncKey = cleanString(nextState?.syncKey, current.syncKey, 140);
-  const items = await writeItems(nextState?.items ?? current.items);
+  const items = await writeItems(nextState?.items ?? current.items, {
+    replaceItems: nextState?.replaceItems === true || nextState?.itemsOperation === "replace",
+    clearItems: nextState?.clearItems === true,
+  });
   const updatedAt = nowIso();
   await setSetting("syncKey", syncKey);
   await setSetting("updatedAt", updatedAt);
@@ -1659,6 +1692,8 @@ function passwordResetUrl(req, token) {
 }
 
 async function sendEmail({ to, subject, html, text, replyTo, idempotencyKey }) {
+  if (emailNotificationsGloballyDisabled()) return { sent: false, reason: "email_notifications_disabled" };
+
   const apiKey = env("RESEND_API_KEY");
   if (!apiKey) return { sent: false, reason: "missing_resend_key" };
 
@@ -2685,6 +2720,9 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
       const nextState = await writeCalendarState({
         syncKey: typeof body.syncKey === "string" ? body.syncKey : current.syncKey,
         items: Array.isArray(body.items) ? body.items : current.items,
+        replaceItems: body.replaceItems === true,
+        clearItems: body.clearItems === true,
+        itemsOperation: body.itemsOperation,
         updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
       });
       const notificationResults = await sendCalendarChangeNotifications(current.items, nextState.items);
@@ -2711,7 +2749,7 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
       return json(await readAdminSettings());
     }
 
-    if (req.method === "PUT" && pathname === "/api/admin-settings") {
+    if ((req.method === "PUT" || req.method === "POST") && pathname === "/api/admin-settings") {
       return json(await writeAdminSettings(await parseBody(req)));
     }
 
