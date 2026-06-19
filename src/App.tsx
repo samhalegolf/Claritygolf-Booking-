@@ -136,6 +136,50 @@ type ClientSummary = Person & {
   last: CalendarItem | null;
 };
 
+
+function safeText(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : value == null ? fallback : String(value);
+}
+
+function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
+  return {
+    id: safeText(person.id),
+    name: safeText(person.name),
+    email: safeText(person.email),
+    phone: safeText(person.phone),
+    notes: safeText(person.notes),
+    source: safeText(person.source),
+    caddyProfileId: safeText(person.caddyProfileId),
+    caddyProfileUrl: safeText(person.caddyProfileUrl),
+    createdAt: typeof person.createdAt === "string" ? person.createdAt : undefined,
+    updatedAt: typeof person.updatedAt === "string" ? person.updatedAt : undefined,
+  };
+}
+
+function cleanPeople(people: unknown[]): Person[] {
+  return people.map((person) => cleanPerson((person ?? {}) as Partial<Person>));
+}
+
+function cleanNotificationRecord(notification: Partial<NotificationRecord> & { id?: unknown } = {}): NotificationRecord {
+  return {
+    id: safeText(notification.id),
+    personKey: safeText(notification.personKey),
+    calendarItemId: safeText(notification.calendarItemId),
+    recipient: safeText(notification.recipient),
+    subject: safeText(notification.subject),
+    kind: safeText(notification.kind),
+    status: safeText(notification.status),
+    provider: safeText(notification.provider),
+    providerId: safeText(notification.providerId),
+    error: safeText(notification.error),
+    createdAt: safeText(notification.createdAt),
+  };
+}
+
+function cleanNotificationRecords(notifications: unknown[]): NotificationRecord[] {
+  return notifications.map((notification) => cleanNotificationRecord((notification ?? {}) as Partial<NotificationRecord>));
+}
+
 type PeopleImportResult = {
   imported: number;
   updated: number;
@@ -796,21 +840,21 @@ type ClientMatchInput = {
 
 type MatchableClient = Pick<Person, "name" | "email" | "phone">;
 
-function normalizeMatchText(value = "") {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+function normalizeMatchText(value: unknown = "") {
+  return safeText(value).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function normalizePhoneDigits(value = "") {
-  return value.replace(/\D/g, "");
+function normalizePhoneDigits(value: unknown = "") {
+  return safeText(value).replace(/\D/g, "");
 }
 
-function canonicalPhoneKey(value = "") {
+function canonicalPhoneKey(value: unknown = "") {
   const digits = normalizePhoneDigits(value);
   if (digits.startsWith("64") && digits.length >= 9) return `0${digits.slice(2)}`;
   return digits;
 }
 
-function phoneVariants(value = "") {
+function phoneVariants(value: unknown = "") {
   const digits = normalizePhoneDigits(value);
   const variants = new Set<string>();
   if (digits) variants.add(digits);
@@ -857,11 +901,11 @@ function phoneValuesMatch(source = "", query = "", exact = false) {
 }
 
 function bookingInputName(input: ClientMatchInput) {
-  return (input.name ?? [input.firstName, input.lastName].filter(Boolean).join(" ")).trim();
+  return safeText(input.name ?? [input.firstName, input.lastName].filter(Boolean).join(" ")).trim();
 }
 
 function splitClientName(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const parts = safeText(name).trim().split(/\s+/).filter(Boolean);
   return {
     firstName: parts[0] ?? "",
     lastName: parts.slice(1).join(" "),
@@ -905,7 +949,7 @@ function findClientMatch<T extends MatchableClient>(clients: T[], input: ClientM
 }
 
 function clientMatchesSearchTerm(client: Pick<Person, "name" | "email" | "phone" | "notes">, term: string) {
-  const rawTerm = term.trim().toLowerCase();
+  const rawTerm = safeText(term).trim().toLowerCase();
   if (!rawTerm) return true;
   return clientSearchText(client).includes(rawTerm) || clientMatchesInput(client, { name: term, email: term, phone: term });
 }
@@ -930,16 +974,20 @@ function caddyProfileUrl(
   person: Pick<Person, "name" | "email" | "caddyProfileUrl" | "caddyProfileId">,
   workspaceUrl = CADDY_APP_URL,
 ) {
-  if (person.caddyProfileUrl.trim()) return person.caddyProfileUrl.trim();
+  const caddyProfileUrlValue = safeText(person.caddyProfileUrl).trim();
+  const caddyProfileIdValue = safeText(person.caddyProfileId).trim();
+  const emailValue = safeText(person.email).trim();
+  const nameValue = safeText(person.name).trim();
+  if (caddyProfileUrlValue) return caddyProfileUrlValue;
   const url = new URL(workspaceUrl || CADDY_APP_URL);
-  if (person.caddyProfileId.trim()) url.searchParams.set("profile", person.caddyProfileId.trim());
-  if (person.email.trim()) url.searchParams.set("email", person.email.trim());
-  if (person.name.trim()) url.searchParams.set("name", person.name.trim());
+  if (caddyProfileIdValue) url.searchParams.set("profile", caddyProfileIdValue);
+  if (emailValue) url.searchParams.set("email", emailValue);
+  if (nameValue) url.searchParams.set("name", nameValue);
   return url.toString();
 }
 
 function clientSearchText(client: Pick<Person, "name" | "email" | "phone" | "notes">) {
-  return [client.name, client.email, client.phone, client.notes].join(" ").toLowerCase();
+  return [client.name, client.email, client.phone, client.notes].map((value) => safeText(value)).join(" ").toLowerCase();
 }
 
 function editorFromClient(client: ClientSummary): ClientEditor {
@@ -2051,8 +2099,8 @@ function App() {
     };
     if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
     if (Array.isArray(data.items)) setItems(data.items);
-    if (Array.isArray(data.people)) setPeople(data.people);
-    if (Array.isArray(data.notifications)) setNotifications(data.notifications);
+    if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
+    if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     if (Array.isArray(data.services)) setServices(cleanServices(data.services));
     if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
     if (typeof data.syncKey === "string" && data.syncKey.startsWith("cg_")) {
@@ -2295,24 +2343,24 @@ function App() {
     if (!selectedClient) return [];
     const keys = clientNotificationKeys(selectedClient.name, selectedClient.email, selectedClient.phone);
     const appointmentIds = new Set(selectedClientAppointments.map((appointment) => appointment.id));
-    const clientEmail = selectedClient.email.trim().toLowerCase();
+    const clientEmail = safeText(selectedClient.email).trim().toLowerCase();
     return notifications
       .filter((notification) => {
-        const isClientFacing = notification.kind.includes("client") || Boolean(clientEmail && notification.recipient.toLowerCase() === clientEmail);
+        const isClientFacing = notification.kind.includes("client") || Boolean(clientEmail && safeText(notification.recipient).toLowerCase() === clientEmail);
         if (!isClientFacing || notification.kind.includes("admin")) return false;
         return (
           keys.has(notification.personKey) ||
           appointmentIds.has(notification.calendarItemId) ||
-          Boolean(clientEmail && notification.recipient.toLowerCase() === clientEmail)
+          Boolean(clientEmail && safeText(notification.recipient).toLowerCase() === clientEmail)
         );
       })
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   }, [notifications, selectedClient, selectedClientAppointments]);
   const hasSelectedClientCaddyProfile = Boolean(
-    selectedClient?.caddyProfileId.trim() || selectedClient?.caddyProfileUrl.trim(),
+    safeText(selectedClient?.caddyProfileId).trim() || safeText(selectedClient?.caddyProfileUrl).trim(),
   );
   const hasSelectedPersonCaddyProfile = Boolean(
-    selectedPerson?.caddyProfileId.trim() || selectedPerson?.caddyProfileUrl.trim(),
+    safeText(selectedPerson?.caddyProfileId).trim() || safeText(selectedPerson?.caddyProfileUrl).trim(),
   );
 
   const peopleImportPreview = useMemo(() => parsePeopleImport(peopleImportText).length, [peopleImportText]);
@@ -3933,7 +3981,7 @@ function App() {
       }
       if (!response.ok) throw new Error("People import failed");
       const result = (await response.json()) as PeopleImportResult;
-      if (Array.isArray(result.people)) setPeople(result.people);
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       setPeopleImportText("");
       setShowClientImport(false);
       setPeopleImportState("imported");
@@ -4024,7 +4072,7 @@ function App() {
       }
       if (!response.ok) throw new Error("Client save failed");
       const result = (await response.json()) as PeopleUpdateResult;
-      if (Array.isArray(result.people)) setPeople(result.people);
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       if (result.person?.id) setSelectedClientId(result.person.id);
       setIsAddingClient(false);
       setClientEditMode(false);
