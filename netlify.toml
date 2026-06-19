@@ -13,4 +13,3 @@
 
 [build.environment]
   NODE_VERSION = "24"
-  NPM_CONFIG_REGISTRY = "https://registry.npmjs.org/"

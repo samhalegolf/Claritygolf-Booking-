@@ -232,6 +232,11 @@ async function readState() {
       clientEmailFooter: settings.clientEmailFooter || "Need to move your booking? Reply to this email and we will help.",
       adminEmailSubject: settings.adminEmailSubject || "New booking: {{client}}",
       adminEmailIntro: settings.adminEmailIntro || "{{client}} booked {{service}} for {{date}} at {{time}}.",
+      smsProviderName: settings.smsProviderName || "",
+      smsWebhookUrl: settings.smsWebhookUrl || "",
+      smsFromNumber: settings.smsFromNumber || "",
+      sendClientSms: settings.sendClientSms === "true",
+      sendAdminSms: settings.sendAdminSms === "true",
     },
     brand: {
       logoName: settings.brandLogoName || "",
