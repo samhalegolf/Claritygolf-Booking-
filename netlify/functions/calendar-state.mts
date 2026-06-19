@@ -222,8 +222,8 @@ async function readState() {
       createdAt: row.created_at || "",
     })),
     settings: {
-      notificationEmail: settings.notificationEmail || env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz"),
-      replyToEmail: settings.replyToEmail || env("CLARITY_REPLY_TO_EMAIL", "sam@samhalegolf.co.nz"),
+      notificationEmail: settings.notificationEmail || "",
+      replyToEmail: settings.replyToEmail || "",
       notificationDelaySeconds: Number(settings.notificationDelaySeconds || 30),
       sendClientEmail: settings.sendClientEmail !== "false",
       sendAdminEmail: settings.sendAdminEmail !== "false",
@@ -263,8 +263,9 @@ async function readState() {
 }
 
 async function writeState(body: any) {
+  const hasItemsPayload = Object.prototype.hasOwnProperty.call(body || {}, "items");
   const rows = uniqueById(Array.isArray(body?.items) ? body.items.map(itemToRow) : []);
-  if (rows.length) {
+  if (hasItemsPayload && rows.length) {
     await supabase("calendar_items", {
       method: "POST",
       query: "on_conflict=id",
@@ -294,9 +295,34 @@ async function writeState(body: any) {
         body: people,
       });
     }
-  } else {
+  } else if (hasItemsPayload && body?.clearItems === true) {
     await supabase("calendar_items", { method: "DELETE", query: "id=not.is.null", prefer: "return=minimal" });
   }
+
+  if (body?.settings && typeof body.settings === "object") {
+    const nextSettings = body.settings as Record<string, unknown>;
+    const settingKeys = [
+      "notificationEmail",
+      "replyToEmail",
+      "notificationDelaySeconds",
+      "sendClientEmail",
+      "sendAdminEmail",
+      "clientEmailSubject",
+      "clientEmailIntro",
+      "clientEmailFooter",
+      "adminEmailSubject",
+      "adminEmailIntro",
+      "smsProviderName",
+      "smsWebhookUrl",
+      "smsFromNumber",
+      "sendClientSms",
+      "sendAdminSms",
+    ];
+    for (const key of settingKeys) {
+      if (Object.prototype.hasOwnProperty.call(nextSettings, key)) await setSetting(key, String(nextSettings[key] ?? ""));
+    }
+  }
+
   if (typeof body?.syncKey === "string") await setSetting("syncKey", body.syncKey);
   await setSetting("updatedAt", nowIso());
   return readState();
