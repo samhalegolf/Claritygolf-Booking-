@@ -181,3 +181,13 @@ test("the catch-all API excludes every dedicated notification, import and webhoo
     assert.match(source, new RegExp(`"${path.replaceAll("/", "\\/")}"`));
   }
 });
+
+test("login screen does not wait on automatic browser-session restoration", async () => {
+  const source = await readFile(resolve(root, "src/App.tsx"), "utf8");
+  assert.match(source, /useState<AuthStatus>\(isEmbedMode \? "authenticated" : "guest"\)/);
+  const start = source.indexOf("async function loadInitialState");
+  const end = source.indexOf("async function refreshNotificationHistory", start);
+  const block = source.slice(start, end);
+  assert.match(block, /Automatic browser-session restoration is temporarily disabled/);
+  assert.doesNotMatch(block, /fetch\("\/api\/auth\/session"/);
+});

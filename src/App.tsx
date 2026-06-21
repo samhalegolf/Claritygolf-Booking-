@@ -1581,7 +1581,7 @@ function App() {
   const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(getStoredBrandSettings);
   const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [authStatus, setAuthStatus] = useState<AuthStatus>(isEmbedMode ? "authenticated" : "checking");
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(isEmbedMode ? "authenticated" : "guest");
   const [authMode, setAuthMode] = useState<AuthMode>(() => (getInitialResetToken() ? "reset" : "login"));
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
@@ -1945,22 +1945,14 @@ function App() {
           return;
         }
 
-        const sessionResponse = await fetch("/api/auth/session", { headers: { Accept: "application/json" } });
-        if (!sessionResponse.ok) throw new Error("Session API unavailable");
-        const session = (await sessionResponse.json()) as { authenticated?: boolean; email?: string };
-        if (cancelled) return;
-
-        if (!session.authenticated) {
+        // Automatic browser-session restoration is temporarily disabled.
+        // The previous startup request could remain pending and leave the login
+        // screen stuck on “Checking”. Server-side authentication is unchanged:
+        // the coach must still sign in before any protected API can be used.
+        if (!cancelled) {
           setAuthStatus("guest");
           setCalendarFeedStatus("offline");
-          return;
         }
-
-        if (session.email) setAdminEmail(session.email);
-        await loadAdminCalendarState();
-        if (cancelled) return;
-        setAuthStatus("authenticated");
-        setCalendarFeedStatus("connected");
       } catch {
         if (!cancelled) {
           hasLoadedCalendarApiRef.current = false;

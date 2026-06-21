@@ -1,6 +1,6 @@
 {
-  "release": "production-reliability-repair-2026-06-21",
-  "tests": 17,
+  "release": "production-reliability-repair-auth-session-bypass-2026-06-22",
+  "tests": 18,
   "netlifyFunctionBundles": 23,
   "includes": [
     "public-booking-email-delivery",
@@ -12,5 +12,7 @@
     "selected-client-lock",
     "password-reset-login-session-logout",
     "dedicated-api-route-exclusions"
-  ]
+  ],
+  "authStartupMode": "manual-login",
+  "notes": "Automatic browser-session restoration disabled; protected APIs still require login."
 }

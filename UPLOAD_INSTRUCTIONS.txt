@@ -1,0 +1,1 @@
+Extract this ZIP and copy its CONTENTS into the ROOT of the existing GitHub repository, preserving the src/, public/, and tests/ folders. Replace the existing files when prompted. Do not upload the ZIP itself as a repository file.
