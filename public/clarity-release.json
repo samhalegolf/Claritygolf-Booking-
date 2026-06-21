@@ -1,0 +1,13 @@
+{
+  "release": "production-reliability-repair-2026-06-21",
+  "source": "samhalegolf/Claritygolf-Booking-",
+  "checks": 20,
+  "includes": [
+    "calendar-save-concurrency",
+    "existing-client-email-merge",
+    "final-booking-cancellation",
+    "login-and-password-reset",
+    "booking-email-background-delivery",
+    "selected-client-suggestion-lock"
+  ]
+}
