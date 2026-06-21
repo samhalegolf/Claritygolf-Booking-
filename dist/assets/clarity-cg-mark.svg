@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Clarity Golf CG mark</title>
+  <desc id="desc">Editable vector CG logo with a continuous inner G and emphasized green center dot.</desc>
+  <defs>
+    <style>
+      .green { stroke: #00633a; fill: none; stroke-linecap: butt; stroke-linejoin: miter; }
+      .inner { stroke: var(--cg-inner, #ffffff); fill: none; stroke-linecap: butt; stroke-linejoin: miter; }
+      .dot { fill: #00633a; }
+    </style>
+  </defs>
+  <path class="green" stroke-width="78" d="M382 151A164 164 0 1 0 382 361"/>
+  <path class="inner" stroke-width="42" d="M330 196A94 94 0 1 0 330 318"/>
+  <path class="inner" stroke-width="36" d="M255 256H376"/>
+  <circle class="dot" cx="255" cy="256" r="20"/>
+</svg>

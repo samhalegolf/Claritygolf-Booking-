@@ -2344,7 +2344,7 @@ function notificationResultFromRecord(notification) {
   };
 }
 
-async function triggerPublicBookingNotifications(payload) {
+export async function triggerPublicBookingNotifications(payload) {
   const appointmentId = cleanString(payload?.appointmentId || payload?.appointment || "", "", 120);
   const email = normalizeRescheduleContact(payload?.email);
   const phone = normalizeRescheduleContact(payload?.phone);
@@ -2375,6 +2375,23 @@ async function triggerPublicBookingNotifications(payload) {
     results,
     notifications: await readNotificationHistory(),
   };
+}
+
+export async function handlePublicBookingNotificationsRequest(req) {
+  try {
+    if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+    return json(await triggerPublicBookingNotifications(await parseBody(req)));
+  } catch (error) {
+    console.error("public_booking_notifications:failed", error);
+    const status = error?.status || 500;
+    return json(
+      {
+        error: status === 500 ? "public_booking_notifications_error" : "request_error",
+        message: error instanceof Error ? error.message : "Unknown booking notification error",
+      },
+      status,
+    );
+  }
 }
 
 async function lookupPublicReschedule(payload) {

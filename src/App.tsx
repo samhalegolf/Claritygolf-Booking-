@@ -2264,9 +2264,9 @@ function App() {
     phone: bookingForm.phone,
   };
   const bookingClientHasInput = hasClientMatchInput(bookingClientInput);
-  const bookingClientSuggestion = useMemo(() => {
+  const bookingExactClientMatch = useMemo(() => {
     if (isEmbedMode || !bookingClientHasInput) return null;
-    return findClientMatch(clients, bookingClientInput);
+    return findClientMatch(clients, bookingClientInput, true);
   }, [
     isEmbedMode,
     bookingClientHasInput,
@@ -2276,6 +2276,20 @@ function App() {
     bookingForm.email,
     bookingForm.phone,
   ]);
+  const bookingClientSuggestion = useMemo(() => {
+    if (isEmbedMode || !bookingClientHasInput || bookingExactClientMatch) return null;
+    return findClientMatch(clients, bookingClientInput);
+  }, [
+    isEmbedMode,
+    bookingClientHasInput,
+    bookingExactClientMatch,
+    clients,
+    bookingForm.firstName,
+    bookingForm.lastName,
+    bookingForm.email,
+    bookingForm.phone,
+  ]);
+  const showBookingClientSuggestion = Boolean(bookingClientSuggestion && bookingClientHasInput);
 
   const notificationsByAppointment = useMemo(() => {
     const byAppointment = new Map<string, NotificationRecord[]>();
@@ -3538,7 +3552,7 @@ function App() {
   }
 
   function handleBookingMatchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
-    if ((event.key === "Tab" || event.key === "ArrowRight") && bookingClientSuggestion) {
+    if ((event.key === "Tab" || event.key === "ArrowRight") && showBookingClientSuggestion && bookingClientSuggestion) {
       event.preventDefault();
       applyBookingClient(bookingClientSuggestion);
     }
@@ -4099,9 +4113,7 @@ function App() {
       setToast({ message: "Choose a lesson time before confirming." });
       return;
     }
-    const matchedClient = isEmbedMode
-      ? null
-      : findClientMatch(clients, bookingClientInput, true) ?? bookingClientSuggestion;
+    const matchedClient = isEmbedMode ? null : bookingExactClientMatch ?? bookingClientSuggestion;
     const matchedName = splitClientName(matchedClient?.name ?? "");
     const firstName = bookingForm.firstName.trim() || matchedName.firstName;
     const lastName = bookingForm.lastName.trim() || matchedName.lastName;
@@ -4710,7 +4722,7 @@ function App() {
               type="email"
             />
           </div>
-          {bookingClientSuggestion && bookingClientHasInput && (
+          {showBookingClientSuggestion && bookingClientSuggestion && (
             <button
               className="client-match-prompt booking-client-match"
               onClick={() => applyBookingClient(bookingClientSuggestion)}
@@ -5968,7 +5980,7 @@ function App() {
                     type="email"
                   />
                 </div>
-                {bookingClientSuggestion && bookingClientHasInput && (
+                {showBookingClientSuggestion && bookingClientSuggestion && (
                   <button
                     className="client-match-prompt booking-client-match"
                     onClick={() => applyBookingClient(bookingClientSuggestion)}
