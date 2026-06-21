@@ -80,16 +80,7 @@ export default async function handler(req: Request) {
 
   const token = parseCookies(req)[sessionCookieName] || "";
 
-  // Temporary production safety switch. Manual login remains enabled and still
-  // creates the secure cookie used by the protected calendar/settings APIs.
-  // Page refreshes simply return to the login form until this flag is set to 1.
-  if (!autoSessionRestoreEnabled()) {
-    return json(
-      { authenticated: false, autoSessionRestoreDisabled: true },
-      200,
-      token ? { "Set-Cookie": clearSessionCookie() } : {},
-    );
-  }
+ 
 
   if (!token) return json({ authenticated: false });
 
