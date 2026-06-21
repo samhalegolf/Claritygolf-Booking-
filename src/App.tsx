@@ -961,6 +961,27 @@ function clientKey(name = "", email = "", phone = "") {
   return `name:${normalizeMatchText(name)}|phone:${canonicalPhoneKey(phone)}`;
 }
 
+function calendarItemsFingerprint(items: CalendarItem[]) {
+  return JSON.stringify(
+    items
+      .map((item) => ({
+        id: safeText(item.id),
+        kind: item.kind,
+        week: itemWeek(item),
+        day: Number(item.day),
+        start: Number(item.start),
+        duration: Number(item.duration),
+        serviceId: safeText(item.serviceId),
+        client: safeText(item.client),
+        title: safeText(item.title),
+        phone: safeText(item.phone),
+        email: safeText(item.email).trim().toLowerCase(),
+        note: safeText(item.note),
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  );
+}
+
 function clientNotificationKeys(name = "", email = "", phone = "") {
   return new Set(
     [
@@ -1603,6 +1624,7 @@ function App() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [quickCreate, setQuickCreate] = useState<QuickCreateState | null>(null);
   const [quickClientSearch, setQuickClientSearch] = useState("");
+  const [quickSelectedClientId, setQuickSelectedClientId] = useState("");
   const [quickMatchField, setQuickMatchField] = useState<"name" | "phone" | "email">("name");
   const [dockBookings, setDockBookings] = useState<PendingBooking[]>([]);
   const [flyingBooking, setFlyingBooking] = useState<DockFlight | null>(null);
@@ -1663,7 +1685,15 @@ function App() {
   const gestureCleanupRef = useRef<null | (() => void)>(null);
   const brandSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
+  const calendarStateVersionRef = useRef("");
+  const lastPersistedCalendarFingerprintRef = useRef("");
+  const calendarSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const calendarSaveConflictRef = useRef(false);
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!quickCreate && quickSelectedClientId) setQuickSelectedClientId("");
+  }, [quickCreate, quickSelectedClientId]);
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
@@ -1973,16 +2003,67 @@ function App() {
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
+
+    const itemsSnapshot = items.map((item) => ({ ...item }));
+    const fingerprint = calendarItemsFingerprint(itemsSnapshot);
+    if (fingerprint === lastPersistedCalendarFingerprintRef.current || calendarSaveConflictRef.current) return;
+
     const saveVersion = ++calendarSaveVersionRef.current;
     setCalendarSaveStatus("saving");
     setCalendarSaveError("");
-    void fetch("/api/calendar-state", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ items, replaceItems: true, syncKey: calendarSyncKey, updatedAt: calendarStateVersion }),
-    })
-      .then(async (response) => {
-        if (calendarSaveVersionRef.current !== saveVersion) return;
+
+    async function verifyLiveSnapshot() {
+      const response = await fetch("/api/calendar-state", {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        message?: string;
+        updatedAt?: string;
+        items?: CalendarItem[];
+      };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data.message || "Admin login expired. Sign in again before editing the calendar.");
+      }
+      if (!response.ok) return false;
+      if (typeof data.updatedAt === "string") {
+        calendarStateVersionRef.current = data.updatedAt;
+        setCalendarStateVersion(data.updatedAt);
+      }
+      const matches = Array.isArray(data.items) && calendarItemsFingerprint(data.items) === fingerprint;
+      if (matches) lastPersistedCalendarFingerprintRef.current = fingerprint;
+      return matches;
+    }
+
+    async function runSave() {
+      if (calendarSaveConflictRef.current) return;
+      try {
+        let response: Response;
+        try {
+          response = await fetch("/api/calendar-state", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            cache: "no-store",
+            body: JSON.stringify({
+              items: itemsSnapshot,
+              replaceItems: true,
+              syncKey: calendarSyncKey,
+              updatedAt: calendarStateVersionRef.current,
+            }),
+          });
+        } catch (networkError) {
+          if (await verifyLiveSnapshot().catch(() => false)) {
+            response = new Response(JSON.stringify({ updatedAt: calendarStateVersionRef.current }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            });
+          } else {
+            throw networkError;
+          }
+        }
+
         const data = (await response.json().catch(() => ({}))) as {
           message?: string;
           error?: string;
@@ -1995,29 +2076,52 @@ function App() {
           setAuthStatus("guest");
           throw new Error(data.message || "Admin login expired. Sign in again before editing the calendar.");
         }
-        if (!response.ok) throw new Error(data.message || data.error || "Calendar save failed.");
-        setCalendarFeedStatus("connected");
-        setCalendarSaveStatus("saved");
-        setCalendarSaveError("");
-        if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-        if (Array.isArray(data.items)) setItems(data.items);
+        if (!response.ok) {
+          const recovered = response.status >= 500 || response.status === 409
+            ? await verifyLiveSnapshot().catch(() => false)
+            : false;
+          if (!recovered) {
+            if (response.status === 409) calendarSaveConflictRef.current = true;
+            throw new Error(data.message || data.error || "Calendar save failed.");
+          }
+        }
+
+        if (typeof data.updatedAt === "string") {
+          calendarStateVersionRef.current = data.updatedAt;
+          setCalendarStateVersion(data.updatedAt);
+        }
+        lastPersistedCalendarFingerprintRef.current = fingerprint;
         if (Array.isArray(data.notifications)) setNotifications(data.notifications);
-        window.setTimeout(() => {
-          if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
-        }, 1800);
-        window.setTimeout(() => void refreshNotificationHistory(), 1500);
-        window.setTimeout(() => void refreshNotificationHistory(), 8000);
-        window.setTimeout(() => void refreshNotificationHistory(), 35000);
-      })
-      .catch((error) => {
+
         if (calendarSaveVersionRef.current === saveVersion) {
-          const message = error instanceof Error ? error.message : "Calendar save failed.";
+          setCalendarFeedStatus("connected");
+          setCalendarSaveStatus("saved");
+          setCalendarSaveError("");
+          window.setTimeout(() => {
+            if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
+          }, 1800);
+          window.setTimeout(() => void refreshNotificationHistory(), 1500);
+          window.setTimeout(() => void refreshNotificationHistory(), 8000);
+          window.setTimeout(() => void refreshNotificationHistory(), 35000);
+        }
+      } catch (error) {
+        // A real concurrency conflict must remain visible even when another
+        // local edit was queued behind the request that detected it.
+        if (calendarSaveConflictRef.current || calendarSaveVersionRef.current === saveVersion) {
+          const baseMessage = error instanceof Error ? error.message : "Calendar save failed.";
+          const message = calendarSaveConflictRef.current
+            ? `${baseMessage} Reload the calendar before making more changes.`
+            : baseMessage;
           setCalendarFeedStatus("offline");
           setCalendarSaveStatus("failed");
           setCalendarSaveError(message);
           setToast({ message: `Calendar did not save: ${message}` });
         }
-      });
+      }
+    }
+
+    const queuedSave = calendarSaveQueueRef.current.catch(() => undefined).then(runSave);
+    calendarSaveQueueRef.current = queuedSave.then(() => undefined, () => undefined);
   }, [authStatus, calendarSyncKey, isEmbedMode, items]);
 
   useEffect(() => {
@@ -2099,8 +2203,15 @@ function App() {
       account?: Partial<CoachAccount>;
       updatedAt?: string;
     };
-    if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-    if (Array.isArray(data.items)) setItems(data.items);
+    if (typeof data.updatedAt === "string") {
+      calendarStateVersionRef.current = data.updatedAt;
+      setCalendarStateVersion(data.updatedAt);
+    }
+    if (Array.isArray(data.items)) {
+      lastPersistedCalendarFingerprintRef.current = calendarItemsFingerprint(data.items);
+      setItems(data.items);
+    }
+    calendarSaveConflictRef.current = false;
     if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
     if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     if (Array.isArray(data.services)) setServices(cleanServices(data.services));
@@ -2126,8 +2237,15 @@ function App() {
       account?: Partial<CoachAccount>;
       updatedAt?: string;
     };
-    if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-    if (Array.isArray(data.items)) setItems(data.items);
+    if (typeof data.updatedAt === "string") {
+      calendarStateVersionRef.current = data.updatedAt;
+      setCalendarStateVersion(data.updatedAt);
+    }
+    if (Array.isArray(data.items)) {
+      lastPersistedCalendarFingerprintRef.current = calendarItemsFingerprint(data.items);
+      setItems(data.items);
+    }
+    calendarSaveConflictRef.current = false;
     if (Array.isArray(data.notifications)) setNotifications(data.notifications);
     if (Array.isArray(data.services)) setServices(cleanServices(data.services));
     if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
@@ -2237,6 +2355,10 @@ function App() {
     if (!clientSearchTerm) return null;
     return findClientMatch(clients, { name: clientSearchTerm, email: clientSearchTerm, phone: clientSearchTerm });
   }, [clientSearchTerm, clients]);
+  const quickSelectedClient = useMemo(
+    () => (quickSelectedClientId ? clients.find((client) => client.id === quickSelectedClientId) ?? null : null),
+    [clients, quickSelectedClientId],
+  );
   const quickClientInput = {
     name: quickClientSearch,
     email: quickCreate?.email ?? "",
@@ -2244,9 +2366,12 @@ function App() {
   };
   const quickClientHasInput = hasClientMatchInput(quickClientInput);
   const quickClientSuggestion = useMemo(() => {
-    if (!quickClientHasInput) return null;
+    // Once the coach has deliberately selected a person, do not immediately
+    // offer a different fuzzy match (the Jo Booth loop). Manual edits clear the
+    // selected id below and re-enable suggestions.
+    if (quickSelectedClient || !quickClientHasInput) return null;
     return findClientMatch(clients, quickClientInput);
-  }, [quickClientHasInput, clients, quickClientSearch, quickCreate?.email, quickCreate?.phone]);
+  }, [quickSelectedClient, quickClientHasInput, clients, quickClientSearch, quickCreate?.email, quickCreate?.phone]);
   const quickClientSuggestionApplied = Boolean(
     quickClientSuggestion &&
       normalizeMatchText(quickClientSearch) === normalizeMatchText(quickClientSuggestion.name) &&
@@ -2255,7 +2380,7 @@ function App() {
         normalizeMatchText(quickClientSuggestion.email) === normalizeMatchText(quickCreate?.email ?? "")),
   );
   const showQuickClientSuggestion = Boolean(
-    quickClientSuggestion && quickClientHasInput && !quickClientSuggestionApplied,
+    !quickSelectedClient && quickClientSuggestion && quickClientHasInput && !quickClientSuggestionApplied,
   );
   const bookingClientInput = {
     firstName: bookingForm.firstName,
@@ -3064,10 +3189,11 @@ function App() {
   }
 
   function resolveQuickClient() {
-    return findClientMatch(clients, quickClientInput, true) ?? quickClientSuggestion ?? null;
+    return quickSelectedClient ?? findClientMatch(clients, quickClientInput, true) ?? quickClientSuggestion ?? null;
   }
 
   function applyQuickClient(client: ClientSummary) {
+    setQuickSelectedClientId(client.id);
     setQuickClientSearch(client.name);
     setQuickCreate((current) =>
       current
@@ -3105,6 +3231,14 @@ function App() {
   }
 
   function updateQuickCreateField(field: "phone" | "email" | "note", value: string) {
+    if (quickSelectedClient && field !== "note") {
+      const selectedValue = field === "email" ? quickSelectedClient.email : quickSelectedClient.phone;
+      const stillMatches =
+        field === "email"
+          ? normalizeMatchText(value) === normalizeMatchText(selectedValue)
+          : phoneValuesMatch(value, selectedValue, true);
+      if (!stillMatches) setQuickSelectedClientId("");
+    }
     setQuickCreate((current) => (current ? { ...current, [field]: value, error: "" } : current));
   }
 
@@ -3125,11 +3259,15 @@ function App() {
           }
         : current,
     );
-    if (matchedClient) setQuickClientSearch(matchedClient.name);
+    if (matchedClient) {
+      setQuickSelectedClientId(matchedClient.id);
+      setQuickClientSearch(matchedClient.name);
+    }
     setQuickMatchField("name");
   }
 
   function backToQuickServiceChoice() {
+    setQuickSelectedClientId("");
     setQuickCreate((current) =>
       current ? { ...current, serviceId: "", phone: "", email: "", note: "", error: "" } : current,
     );
@@ -3170,6 +3308,7 @@ function App() {
     setSelectedId("");
     setQuickCreate(null);
     setQuickClientSearch("");
+    setQuickSelectedClientId("");
   }
 
   function createBlockFromQuick() {
@@ -5508,8 +5647,15 @@ function App() {
                             autoComplete="name"
                             onFocus={() => setQuickMatchField("name")}
                             onChange={(event) => {
+                              const value = event.target.value;
                               setQuickMatchField("name");
-                              setQuickClientSearch(event.target.value);
+                              if (
+                                quickSelectedClient &&
+                                normalizeMatchText(value) !== normalizeMatchText(quickSelectedClient.name)
+                              ) {
+                                setQuickSelectedClientId("");
+                              }
+                              setQuickClientSearch(value);
                               setQuickCreate((current) => (current ? { ...current, error: "" } : current));
                             }}
                             onKeyDown={(event) => {

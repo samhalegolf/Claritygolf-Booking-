@@ -130,15 +130,21 @@ export default async function handler(req: Request) {
     }
 
     let user = await findAdminUser(email);
-    const matchesStoredPassword = user ? verifyPassword(password, user.password_hash, user.password_salt) : false;
-    const matchesEnvPassword = Boolean(adminPassword && password === adminPassword);
+    const hasStoredPassword = Boolean(
+      user && user.password_hash && user.password_salt && user.password_hash !== "pending" && user.password_salt !== "pending",
+    );
 
-    if (!matchesStoredPassword && !matchesEnvPassword) {
-      return json({ error: "invalid_login", message: "Email or password is incorrect." }, 401);
-    }
-
-    if (!user || matchesEnvPassword) {
-      await upsertAdminUser(adminEmail, adminPassword || password);
+    if (hasStoredPassword) {
+      // Once a stored password exists (including after reset), it is the only
+      // login truth. The environment password must never overwrite it again.
+      if (!verifyPassword(password, user.password_hash, user.password_salt)) {
+        return json({ error: "invalid_login", message: "Email or password is incorrect." }, 401);
+      }
+    } else {
+      if (!adminPassword || password !== adminPassword) {
+        return json({ error: "invalid_login", message: "Email or password is incorrect." }, 401);
+      }
+      await upsertAdminUser(adminEmail, adminPassword);
       user = await findAdminUser(email);
     }
 

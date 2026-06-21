@@ -25,9 +25,13 @@ export const config: Config = {
     "/api/public-booking-state",
     "/api/public-notification-status",
     "/api/public-booking",
+    "/api/public-booking-notifications",
     "/api/public-reschedule",
     "/api/public-reschedule-lookup",
     "/api/public-reschedule/lookup",
+    "/api/people/import",
+    "/api/people/import-lite",
     "/api/people/migrate",
+    "/api/resend-webhook",
   ],
 };

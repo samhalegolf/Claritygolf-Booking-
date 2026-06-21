@@ -50,6 +50,13 @@ export default async function handler(req: Request) {
     await supabase("admin_password_resets", { method: "PATCH", query: `id=eq.${encodeURIComponent(reset.id)}`, prefer: "return=minimal", body: { used_at: new Date().toISOString() } });
     const users = await supabase("admin_users", { query: `select=id,email&id=eq.${encodeURIComponent(reset.user_id)}&limit=1` });
     const user = users[0];
+    // Revoke old browser sessions after a password reset, then create exactly
+    // one fresh session for this response.
+    await supabase("admin_sessions", {
+      method: "DELETE",
+      query: `user_id=eq.${encodeURIComponent(reset.user_id)}`,
+      prefer: "return=minimal",
+    });
     const sessionToken = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000).toISOString();
     await supabase("admin_sessions", { method: "POST", prefer: "return=minimal", body: [{ id: randomUUID(), token_hash: hashToken(sessionToken), user_id: reset.user_id, expires_at: expiresAt, created_at: new Date().toISOString() }] });

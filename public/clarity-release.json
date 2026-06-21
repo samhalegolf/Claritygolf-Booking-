@@ -1,0 +1,16 @@
+{
+  "release": "production-reliability-repair-2026-06-21",
+  "tests": 17,
+  "netlifyFunctionBundles": 23,
+  "includes": [
+    "public-booking-email-delivery",
+    "coach-booking-reschedule-cancellation-email-delivery",
+    "duplicate-client-email-merge",
+    "serialized-calendar-save",
+    "final-booking-cancellation",
+    "mobile-save-verification",
+    "selected-client-lock",
+    "password-reset-login-session-logout",
+    "dedicated-api-route-exclusions"
+  ]
+}

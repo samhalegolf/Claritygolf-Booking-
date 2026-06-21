@@ -627,30 +627,17 @@ async function ensureAdminUser() {
     return;
   }
 
+  // Environment credentials are an initial bootstrap only. Never rewrite an
+  // existing password here: doing so would silently undo a successful reset.
   const existing = await db().sql`SELECT id FROM admin_users WHERE email = ${email}`;
+  if (existing.length) return;
 
   const { passwordHash, salt } = hashPassword(password);
-  const seedKey = hashToken(`${email}:${password}`);
-  if (existing.length) {
-    const currentSeedKey = await getSetting("adminPasswordSeedKey");
-    if (currentSeedKey === seedKey) return;
-    await db().sql`
-      UPDATE admin_users
-      SET password_hash = ${passwordHash},
-          password_salt = ${salt},
-          updated_at = NOW()
-      WHERE email = ${email}
-    `;
-    await setSetting("adminPasswordSeedKey", seedKey);
-    return;
-  }
-
   await db().sql`
     INSERT INTO admin_users (id, email, password_hash, password_salt, created_at, updated_at)
     VALUES (${randomUUID()}, ${email}, ${passwordHash}, ${salt}, NOW(), NOW())
     ON CONFLICT (email) DO NOTHING
   `;
-  await setSetting("adminPasswordSeedKey", seedKey);
 }
 
 async function ensureNotificationHistoryTable() {
@@ -1150,8 +1137,14 @@ async function writeItems(items, options = {}) {
         ],
       );
     }
-    if (options.replaceItems === true && cleanItems.length) {
-      await client.query("DELETE FROM calendar_items WHERE NOT (id = ANY($1::text[]))", [cleanItems.map((item) => item.id)]);
+    if (options.replaceItems === true) {
+      if (cleanItems.length) {
+        await client.query("DELETE FROM calendar_items WHERE NOT (id = ANY($1::text[]))", [cleanItems.map((item) => item.id)]);
+      } else {
+        // A full replacement with an empty list means the final appointment was
+        // cancelled. The old length guard left that last row in production.
+        await client.query("DELETE FROM calendar_items");
+      }
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -1608,22 +1601,32 @@ function appointmentContactSignature(item) {
 }
 
 function notificationJobsForCalendarChange(previousItems = [], nextItems = []) {
-  const previousById = new Map(
-    previousItems.filter((item) => item.kind === "appointment").map((item) => [item.id, item]),
-  );
-  return nextItems
-    .filter((item) => item.kind === "appointment" && item.email)
-    .map((item) => {
-      const previous = previousById.get(item.id);
-      if (!previous) return { appointment: item, kind: "booking" };
-      if (appointmentSlotSignature(previous) !== appointmentSlotSignature(item)) {
-        return { appointment: item, kind: "reschedule" };
-      }
-      if (!previous.email && item.email) return { appointment: item, kind: "booking" };
-      if (appointmentContactSignature(previous) !== appointmentContactSignature(item)) return null;
-      return null;
-    })
-    .filter(Boolean);
+  const previousAppointments = previousItems.filter((item) => item.kind === "appointment");
+  const nextAppointments = nextItems.filter((item) => item.kind === "appointment");
+  const previousById = new Map(previousAppointments.map((item) => [item.id, item]));
+  const nextIds = new Set(nextAppointments.map((item) => item.id));
+  const jobs = [];
+
+  for (const item of nextAppointments) {
+    const previous = previousById.get(item.id);
+    if (!previous) {
+      jobs.push({ appointment: item, kind: "booking" });
+      continue;
+    }
+    if (appointmentSlotSignature(previous) !== appointmentSlotSignature(item)) {
+      jobs.push({ appointment: item, kind: "reschedule" });
+      continue;
+    }
+    if (!previous.email && item.email) jobs.push({ appointment: item, kind: "booking" });
+  }
+
+  // A removed appointment is a real cancellation. Notify from the previous
+  // snapshot because the row no longer exists in the next state.
+  for (const previous of previousAppointments) {
+    if (!nextIds.has(previous.id)) jobs.push({ appointment: previous, kind: "cancellation" });
+  }
+
+  return jobs;
 }
 
 async function sendCalendarChangeNotifications(previousItems = [], nextItems = []) {
@@ -1824,7 +1827,36 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
   const account = await readCoachAccount();
   const services = await readServices();
   const service = services.find((candidate) => candidate.id === appointment.serviceId);
-  const variables = bookingEmailVariables({ appointment, service, account });
+  const baseVariables = bookingEmailVariables({ appointment, service, account });
+  const variables = kind === "cancellation" ? { ...baseVariables, rescheduleUrl: "" } : baseVariables;
+  const clientSubjectTemplate =
+    kind === "reschedule"
+      ? "Your {{service}} has been rescheduled"
+      : kind === "cancellation"
+        ? "Your {{service}} has been cancelled"
+        : settings.clientEmailSubject;
+  const clientIntroTemplate =
+    kind === "reschedule"
+      ? "Hi {{firstName}}, your booking with {{coach}} has been moved to the new time below."
+      : kind === "cancellation"
+        ? "Hi {{firstName}}, your booking with {{coach}} has been cancelled."
+        : settings.clientEmailIntro;
+  const clientFooterTemplate =
+    kind === "cancellation"
+      ? "Reply to this email if you need help arranging another lesson."
+      : settings.clientEmailFooter;
+  const adminSubjectTemplate =
+    kind === "reschedule"
+      ? "Booking rescheduled: {{client}}"
+      : kind === "cancellation"
+        ? "Booking cancelled: {{client}}"
+        : settings.adminEmailSubject;
+  const adminIntroTemplate =
+    kind === "reschedule"
+      ? "{{client}}'s {{service}} is now booked for {{date}} at {{time}}."
+      : kind === "cancellation"
+        ? "{{client}}'s {{service}} on {{date}} at {{time}} was cancelled."
+        : settings.adminEmailIntro;
   const personKey = notificationPersonKey({
     name: appointment.client || appointment.title,
     email: appointment.email,
@@ -1896,9 +1928,9 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
   }
 
   if ((settings.sendClientEmail || kind === "test") && (testRecipient || appointment.email)) {
-    const subject = renderTemplate(settings.clientEmailSubject, variables);
-    const intro = renderTemplate(settings.clientEmailIntro, variables);
-    const footerBase = renderTemplate(settings.clientEmailFooter, variables);
+    const subject = renderTemplate(clientSubjectTemplate, variables);
+    const intro = renderTemplate(clientIntroTemplate, variables);
+    const footerBase = renderTemplate(clientFooterTemplate, variables);
     const recipient = testRecipient || appointment.email;
     jobs.push(
       sendAndRecord(
@@ -1917,7 +1949,7 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
     );
   } else if (kind !== "test") {
     const recipient = appointment.email || "";
-    const subject = renderTemplate(settings.clientEmailSubject, variables);
+    const subject = renderTemplate(clientSubjectTemplate, variables);
     jobs.push(
       recordSkipped(
         "client",
@@ -1930,8 +1962,8 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
 
   if (settings.sendAdminEmail && kind !== "test") {
     const recipient = settings.notificationEmail || account.contactEmail;
-    const subject = renderTemplate(settings.adminEmailSubject, variables);
-    const intro = renderTemplate(settings.adminEmailIntro, variables);
+    const subject = renderTemplate(adminSubjectTemplate, variables);
+    const intro = renderTemplate(adminIntroTemplate, variables);
     jobs.push(
       sendAndRecord(
         "admin",
@@ -1944,7 +1976,7 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
     );
   } else if (kind !== "test") {
     const recipient = settings.notificationEmail || account.contactEmail;
-    const subject = renderTemplate(settings.adminEmailSubject, variables);
+    const subject = renderTemplate(adminSubjectTemplate, variables);
     jobs.push(recordSkipped("admin", recipient, subject, "disabled_in_notification_settings"));
   }
 

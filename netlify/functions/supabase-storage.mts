@@ -32,6 +32,30 @@ function cleanRow(row) {
   );
 }
 
+function postgrestQuotedList(values) {
+  return values
+    .map((value) => `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`)
+    .join(",");
+}
+
+function mergePersonRows(existing, incoming) {
+  if (!existing) return incoming;
+  return cleanRow({
+    ...existing,
+    ...incoming,
+    id: existing.id,
+    name: incoming.name || existing.name,
+    email: incoming.email || existing.email || null,
+    phone: incoming.phone || existing.phone || null,
+    notes: incoming.notes || existing.notes || null,
+    source: incoming.source || existing.source || null,
+    caddy_profile_id: incoming.caddy_profile_id || existing.caddy_profile_id || null,
+    caddy_profile_url: incoming.caddy_profile_url || existing.caddy_profile_url || null,
+    created_at: existing.created_at || incoming.created_at || nowIso(),
+    updated_at: nowIso(),
+  });
+}
+
 class SupabaseRestStore {
   constructor() {
     this.url = env("SUPABASE_URL").replace(/\/$/, "");
@@ -104,7 +128,7 @@ class SupabaseRestStore {
 
   async query(sqlText, values = []) {
     const sql = normalizeSql(sqlText);
-    if (!sql || sql.startsWith("create table") || sql.startsWith("create index") || sql.startsWith("alter table")) {
+    if (!sql || sql.startsWith("create table") || sql.startsWith("create index") || sql.startsWith("create unique index") || sql.startsWith("alter table")) {
       return [];
     }
     if (sql === "begin" || sql === "commit" || sql === "rollback") {
@@ -135,6 +159,14 @@ class SupabaseRestStore {
       await this.delete("calendar_items", "id=not.is.null");
       return { rows: [] };
     }
+    if (sql.startsWith("delete from calendar_items where not (id = any")) {
+      const ids = Array.isArray(values[0]) ? values[0].filter(Boolean) : [];
+      await this.delete(
+        "calendar_items",
+        ids.length ? `id=not.in.(${postgrestQuotedList(ids)})` : "id=not.is.null",
+      );
+      return { rows: [] };
+    }
     if (sql.includes("insert into calendar_items")) {
       await this.upsert("calendar_items", [calendarItemFromParams(values)], "id");
       return { rows: [] };
@@ -152,7 +184,7 @@ class SupabaseRestStore {
       return { rows };
     }
     if (sql === "select id from people where lower(email) = lower($1) limit 1") {
-      const rows = await this.select("people", `select=id&email=eq.${encodeFilter(String(values[0] || "").toLowerCase())}&limit=1`);
+      const rows = await this.select("people", `select=id&email=ilike.${encodeFilter(String(values[0] || "").toLowerCase())}&limit=1`);
       return { rows };
     }
     if (sql === "select id from people where lower(name) = lower($1) and phone = $2 limit 1") {
@@ -160,12 +192,22 @@ class SupabaseRestStore {
       return { rows };
     }
     if (sql.includes("insert into people")) {
-      const row = personFromParams(values);
+      let row = personFromParams(values);
+      if (row.email) {
+        const existing = await this.select(
+          "people",
+          `select=*&email=ilike.${encodeFilter(String(row.email).toLowerCase())}&limit=1`,
+        );
+        row = mergePersonRows(existing[0], row);
+      }
       await this.upsert("people", [row], "id");
       return { rows: [] };
     }
     if (sql.startsWith("update people")) {
-      await this.update("people", `id=eq.${encodeFilter(values[0])}`, personPatchFromParams(values));
+      const patch = sql.includes("coalesce(nullif")
+        ? personMergePatchFromParams(values)
+        : personPatchFromParams(values);
+      await this.update("people", `id=eq.${encodeFilter(values[0])}`, patch);
       return { rows: [] };
     }
     if (sql === "select * from people where id = $1 limit 1") {
@@ -350,6 +392,20 @@ function personPatchFromParams(values) {
     caddy_profile_url: caddy_profile_url || null,
     updated_at: nowIso(),
   };
+}
+
+function personMergePatchFromParams(values) {
+  const [, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url] = values;
+  return cleanRow({
+    ...(name ? { name } : {}),
+    ...(email ? { email } : {}),
+    ...(phone ? { phone } : {}),
+    ...(notes ? { notes } : {}),
+    ...(source ? { source } : {}),
+    ...(caddy_profile_id ? { caddy_profile_id } : {}),
+    ...(caddy_profile_url ? { caddy_profile_url } : {}),
+    updated_at: nowIso(),
+  });
 }
 
 class SupabaseClientShim {

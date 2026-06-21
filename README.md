@@ -1,41 +1,65 @@
-# Clarity Booking Admin Settings / Lesson Persistence Fix
+# Clarity Golf Booking — production reliability repair
 
-This bundle is for the **Clarity Booking** app/site, not Clarity Caddie.
+This is a clean, GitHub-ready source bundle for the **Clarity Golf Booking** Netlify project.
 
-It keeps the existing Supabase project approach. You do not need separate Supabase projects for Booking and Caddie as long as the Booking app has the tables in `supabase/booking-schema.sql` and the Netlify site points at the right Supabase URL/service role key.
+## Repairs included
 
-## What Changed
+- The coach calendar and public booking flow now use the same `booking-core` storage and notification pipeline.
+- Existing people are resolved by normalized email before upsert, preventing Supabase `409 / 23505` duplicate-email failures.
+- Saving a full empty calendar now deletes the final appointment, so **Cancel lesson** works when it removes the last item.
+- Calendar writes are serialized in the browser and use the latest `updatedAt` version.
+- Save responses no longer feed their item snapshot back into React and restart autosave.
+- Interrupted/mobile responses are checked against live state before a false **SAVE FAILED** warning is shown.
+- A genuine stale-state conflict blocks further writes until reload rather than overwriting a newer public booking.
+- A deliberately selected quick-booking client stays selected; another fuzzy match such as Jo Booth is not shown again unless identifying fields are manually changed.
+- Coach-created bookings, reschedules and cancellations use the notification engine.
+- Login uses the stored password once an account exists, so an environment password cannot silently undo a password reset.
+- Password reset revokes older sessions and creates one fresh session.
+- The repository root is documented as the only deployable source.
 
-- `/api/admin-settings` is handled by a dedicated Supabase-backed Netlify Function.
-- `GET`, `PUT`, and `POST /api/admin-settings` return JSON instead of falling through to the old catch-all route.
-- Admin/email/text settings saves are merge-safe, so partial payloads do not reset missing saved values.
-- Calendar lesson writes are upsert-first.
-- Missing/empty `items` payloads do not delete existing lessons.
-- Full calendar replacement now requires an explicit `replaceItems: true` or `itemsOperation: "replace"` payload.
-- Clearing every lesson still requires `clearItems: true`.
-- Email sending respects `EMAIL_NOTIFICATIONS_ENABLED=0` as a hard production safety switch.
+## Validation
 
-## Supabase
+Run:
 
-Run `supabase/booking-schema.sql` once in the Supabase project used by Clarity Booking if those tables do not already exist.
+```bash
+npm ci
+npm test
+npm run check:functions
+npm run build
+```
+
+The included validation runs **17 automated tests** and bundles/imports **23 Netlify functions**. It exercises the real calendar and auth handlers against an in-memory Supabase REST mock, including public booking email delivery, coach booking/reschedule/cancellation email delivery, duplicate-email reuse, final-item cancellation, stale-write protection, login, password reset, session validation and logout.
 
 ## Required Netlify environment variables
 
-Production needs:
+Confirm these exist on the `clarity-golf-booking` site:
 
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `EMAIL_NOTIFICATIONS_ENABLED=0` while migration/testing should not send email
+```text
+SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+CLARITY_ADMIN_EMAIL
+CLARITY_ADMIN_PASSWORD
+RESEND_API_KEY
+CLARITY_EMAIL_FROM
+CLARITY_NOTIFICATION_EMAIL
+CLARITY_REPLY_TO_EMAIL
+CLARITY_APP_URL=https://claritygolf.app
+EMAIL_NOTIFICATIONS_ENABLED=1
+```
 
-`SUPABASE_SERVICE_ROLE_KEY` must be the real service role key, not the anon/public key.
+Do not put secret values into GitHub.
 
-Leave `CLARITY_ADMIN_EMAIL` alone unless you intend to change the admin login identity.
+## Deploy
 
-## First Checks After Deploy
+Extract this ZIP and push its **contents** into the root of the existing GitHub repository. Do not commit the ZIP itself or place the project inside another folder.
 
-1. `GET /api/public-booking-state?debug=ping` returns 200 JSON.
-2. `GET /api/admin-settings` returns 200 JSON while logged in as admin.
-3. `POST /api/admin-settings` persists the changed settings while logged in as admin.
-4. Create a test lesson, refresh, and confirm it stays.
-5. Save unrelated settings and confirm existing lessons are not removed.
-6. Keep `EMAIL_NOTIFICATIONS_ENABLED=0` until real email sending is approved.
+Netlify settings should remain:
+
+```text
+Build command: npm run build
+Publish directory: dist
+Functions directory: netlify/functions
+Node: 24
+```
+
+After Netlify publishes, verify `/clarity-release.json`, then test login, one existing-client save, one edit, and one cancellation.
