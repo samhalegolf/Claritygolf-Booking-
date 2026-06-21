@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.netlify/
+.function-check/
+*.sqlite
+*.sqlite-*
+.DS_Store
