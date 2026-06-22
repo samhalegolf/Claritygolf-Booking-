@@ -30,9 +30,10 @@ function createPool() {
 
   return new Pool({
     connectionString,
-    max: Number(env("DATABASE_POOL_MAX", "3")),
-    idleTimeoutMillis: Number(env("DATABASE_IDLE_TIMEOUT_MS", "10000")),
-    connectionTimeoutMillis: Number(env("DATABASE_CONNECTION_TIMEOUT_MS", "8000")),
+    max: Number(env("DATABASE_POOL_MAX", "1")),
+    idleTimeoutMillis: Number(env("DATABASE_IDLE_TIMEOUT_MS", "1000")),
+    connectionTimeoutMillis: Number(env("DATABASE_CONNECTION_TIMEOUT_MS", "5000")),
+    allowExitOnIdle: true,
     ssl: env("DATABASE_SSL", "true").toLowerCase() === "false" ? false : { rejectUnauthorized: false },
   });
 }
