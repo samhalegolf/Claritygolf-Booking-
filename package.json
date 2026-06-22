@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc && vite build",
+    "build": "node scripts/patch-login-gate.mjs && tsc && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "start": "node server/app-server.mjs",
     "serve:full": "npm run build && node server/app-server.mjs",
     "test": "NODE_NO_WARNINGS=1 node --experimental-strip-types --test tests/*.test.mjs",
-    "prebuild": "node scripts/patch-login-gate.mjs && npm test && npm run check:functions",
+    "prebuild": "npm test && npm run check:functions",
     "check:functions": "node scripts/check-functions.mjs"
   },
   "dependencies": {
