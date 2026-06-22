@@ -11,7 +11,7 @@ function parseCookies(req: Request) {
   const cookieHeaderValue = req.headers.get("cookie") || "";
   return Object.fromEntries(cookieHeaderValue.split(";").map((pair) => pair.trim()).filter(Boolean).map((pair) => {
     const index = pair.indexOf("=");
-    return index === -1 ? [decodeURIComponent(pair), ""] : [decodeURIComponent(pair.slice(index + 1))];
+    return index === -1 ? [decodeURIComponent(pair), ""] : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
   }));
 }
 async function requireAdmin(req: Request) {
@@ -39,8 +39,9 @@ export default async function handler(req: Request) {
     if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required.", supabaseEnv: supabaseEnvStatus() }, 401);
     const url = new URL(req.url);
     const smokeId = `smoke-${randomUUID()}`;
+    const supabaseEnv = supabaseEnvStatus();
     const steps = [
-      { name: "supabase_env", ok: supabaseEnvStatus().SUPABASE_URL && (supabaseEnvStatus().SUPABASE_SERVICE_ROLE_KEY || supabaseEnvStatus().SUPABASE_SERVICE_KEY), value: supabaseEnvStatus() },
+      { name: "supabase_env", ok: supabaseEnv.SUPABASE_URL && (supabaseEnv.SUPABASE_SERVICE_ROLE_KEY || supabaseEnv.SUPABASE_SERVICE_KEY), value: supabaseEnv },
       await checkStep("supabase_settings_read", () => supabaseRequest("settings", { purpose: "Supabase smoke test", query: "select=key,value&limit=1" })),
       await checkStep("supabase_calendar_read", () => supabaseRequest("calendar_items", { purpose: "Supabase smoke test", query: "select=id&limit=1" })),
       await checkStep("supabase_people_read", () => supabaseRequest("people", { purpose: "Supabase smoke test", query: "select=id&limit=1" })),
