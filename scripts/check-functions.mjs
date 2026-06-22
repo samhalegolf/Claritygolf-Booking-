@@ -28,6 +28,11 @@ try {
     format: "esm",
     target: "node24",
     packages: "bundle",
+    // Keep pg external for this import smoke-check. Bundling pg into ESM
+    // rewrites its CommonJS require('events') calls and fails before the
+    // function can be inspected. Netlify still bundles/deploys the function
+    // normally; this script only verifies handler/config exports.
+    external: ["pg"],
     logLevel: "warning",
   });
 
