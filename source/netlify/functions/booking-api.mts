@@ -14,6 +14,9 @@ export const config: Config = {
   excludedPath: [
     "/api/auth/login",
     "/api/auth/session",
+    "/api/auth/forgot-password",
+    "/api/auth/reset-password",
+    "/api/auth/change-password",
     "/api/calendar-state",
     "/api/notification-history",
     "/api/test-email",

@@ -1137,6 +1137,21 @@ export async function resetAdminPassword(token, password) {
   return { user: { id: row.user_id, email: row.email } };
 }
 
+export async function changeAdminPassword(session, currentPassword, nextPassword) {
+  if (!session?.email) return { error: "unauthorized" };
+  if (typeof nextPassword !== "string" || nextPassword.length < 8) return { error: "weak_password" };
+  const user = await verifyAdminPassword(session.email, currentPassword || "");
+  if (!user) return { error: "invalid_current_password" };
+
+  const { passwordHash, salt } = hashPassword(nextPassword);
+  const database = getDb();
+  database
+    .prepare("UPDATE admin_users SET password_hash = ?, password_salt = ?, updated_at = ? WHERE id = ?")
+    .run(passwordHash, salt, nowIso(), user.id);
+  database.prepare("DELETE FROM admin_sessions WHERE user_id = ?").run(user.id);
+  return { user };
+}
+
 export async function createAdminSession(userId) {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000).toISOString();

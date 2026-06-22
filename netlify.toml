@@ -1,4 +1,7 @@
+# Root Netlify config for the GitHub-ready handover package.
+# The active app lives in source/.
 [build]
+  base = "source"
   command = "npm run build"
   publish = "dist"
 

@@ -10,8 +10,42 @@ const defaultServices = [
   { id: "group-clinic", name: "Group Golf Clinic", duration: 90, price: 55, description: "Small-group coaching session with shared practice goals", visibility: "public", active: true, capacity: 6, minParticipants: 3, lessonFormat: "group", priceMode: "per-person", location: "Group coaching bay" },
   { id: "member-30", name: "30min Golf Lesson (Range 24/7 Member)", duration: 30, price: 90, description: "Bay hire is deducted from membership account", visibility: "public", active: true, capacity: 1, minParticipants: 1, lessonFormat: "private", priceMode: "session", location: "Range 24/7 member bay" },
   { id: "member-60", name: "1 Hour Golf Lesson (Range 24/7 Member)", duration: 60, price: 160, description: "Bay hire is deducted from membership account", visibility: "public", active: true, capacity: 1, minParticipants: 1, lessonFormat: "private", priceMode: "session", location: "Range 24/7 member bay" },
-  { id: "package-60", name: "1 hour Lesson - 5 Lesson Package", duration: 60, price: 130, description: "Private package redemption rate", visibility: "private", active: true, capacity: 1, minParticipants: 1, lessonFormat: "private", priceMode: "session", location: "Package redemption" },
+  {
+    id: "package-60",
+    name: "1 hour Lesson - 5 Lesson Package",
+    duration: 60,
+    price: 650,
+    description: "Five one-hour lessons tracked as a package.",
+    visibility: "private",
+    active: true,
+    capacity: 1,
+    minParticipants: 1,
+    lessonFormat: "package",
+    priceMode: "session",
+    location: "Package allowance",
+    packageAllowance: 5,
+    packageCoverageMode: "upfront",
+    packageCoversServiceId: "lesson-60",
+  },
 ];
+
+const defaultInvoiceSettings = {
+  enabled: true,
+  showBillingWorkspace: true,
+  prefix: "INV",
+  nextNumber: 1001,
+  currency: "NZD",
+  taxName: "GST",
+  taxNumber: "",
+  taxRate: 15,
+  bankAccount: "",
+  paymentTermsDays: 7,
+  businessAddress: "",
+  headerText: "",
+  footerText: "Thank you for training with Sam Hale Golf.",
+  paymentInstructions: "Please pay by bank transfer and use the invoice number as reference.",
+  customFields: [],
+};
 
 const defaultAvailability = [
   [{ start: 990, end: 1200 }],
@@ -111,6 +145,7 @@ function parseJsonSetting<T>(settings: Record<string, string>, key: string, fall
 }
 
 function rowToItem(row: any) {
+  const status = ["completed", "cancelled", "no_show"].includes(row.status) ? row.status : "booked";
   return {
     id: row.id,
     kind: row.kind,
@@ -124,6 +159,7 @@ function rowToItem(row: any) {
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
+    status,
   };
 }
 
@@ -142,6 +178,10 @@ function itemToRow(item: any) {
     phone: cleanString(item?.phone, "", 80) || null,
     email: cleanString(item?.email, "", 180).toLowerCase() || null,
     note: cleanString(item?.note, "", 1200) || null,
+    status:
+      item?.status === "completed" || item?.status === "cancelled" || item?.status === "no_show"
+        ? item.status
+        : "booked",
     created_at: nowIso(),
     updated_at: nowIso(),
   };
@@ -253,6 +293,7 @@ async function readState() {
       bookingUrl: settings.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
       calendarSlug: settings.accountCalendarSlug || "sam-hale-golf",
       caddyWorkspaceUrl: settings.accountCaddyWorkspaceUrl || env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
+      invoiceSettings: parseJsonSetting(settings, "accountInvoiceSettingsJson", defaultInvoiceSettings),
     },
   };
 }
@@ -306,7 +347,16 @@ export default async function handler(req: Request) {
   try {
     if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
     if (req.method === "GET") return json(await readState());
-    if (req.method === "PUT") return json(await writeState(await parseBody(req)));
+    if (req.method === "PUT") {
+      const body = await parseBody(req);
+      if (!Array.isArray(body?.items)) {
+        return json(
+          { error: "invalid_calendar_state", message: "PUT /api/calendar-state requires body.items to be an array." },
+          400,
+        );
+      }
+      return json(await writeState(body));
+    }
     return json({ error: "method_not_allowed" }, 405);
   } catch (error) {
     console.error("calendar_state:failed", error);

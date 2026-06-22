@@ -1,3 +1,13 @@
+// Documentation-only guardrail: this direct Supabase helper is part of the
+// active source/ app's Supabase-backed persistence path.
+// source/package.json also intentionally aliases @netlify/database to
+// source/netlify/functions/local-db, where booking-core.mts reaches Supabase
+// through a getDatabase() compatibility shim.
+// Keep this direct helper and the local-db Supabase adapter in sync until a
+// later explicit refactor consolidates adapter imports. Do not mistake
+// @netlify/database or local-db naming for Netlify Database or SQLite-backed
+// production persistence; production persistence is Supabase REST using
+// SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY / SUPABASE_SERVICE_KEY.
 function env(name, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
 }

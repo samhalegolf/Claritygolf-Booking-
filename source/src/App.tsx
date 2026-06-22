@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   ArrowRight,
+  BarChart3,
   CalendarDays,
   Check,
   Code2,
@@ -9,23 +10,28 @@ import {
   Download,
   Eye,
   ExternalLink,
+  FileText,
   GripVertical,
   ImagePlus,
   KeyRound,
+  LayoutDashboard,
   Link2,
   LogOut,
   Mail,
   MapPin,
   Moon,
+  Package,
   Palette,
   Phone,
   Plus,
   RefreshCw,
   ScissorsLineDashed,
   Search,
+  Send,
   Settings,
   Sparkles,
   Sun,
+  Trash2,
   Upload,
   User,
   X,
@@ -39,8 +45,10 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 
-type LessonFormat = "private" | "group";
+type LessonFormat = "private" | "group" | "package";
 type PriceMode = "session" | "per-person";
+type PackageCoverageMode = "upfront" | "lesson-by-lesson";
+type BookingStatus = "booked" | "completed" | "cancelled" | "no_show";
 
 type Service = {
   id: string;
@@ -55,6 +63,9 @@ type Service = {
   lessonFormat: LessonFormat;
   priceMode: PriceMode;
   location: string;
+  packageAllowance?: number;
+  packageCoverageMode?: PackageCoverageMode;
+  packageCoversServiceId?: string;
 };
 
 type CalendarItem = {
@@ -70,6 +81,7 @@ type CalendarItem = {
   phone?: string;
   email?: string;
   note?: string;
+  status?: BookingStatus;
 };
 
 type PendingBooking = {
@@ -214,7 +226,8 @@ type Toast = {
   undo?: () => void;
 };
 
-type View = "calendar" | "clients" | "services" | "availability" | "booking" | "settings";
+type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings";
+type BillingSection = "none" | "dashboard" | "new-invoice" | "reports";
 type SettingsTab =
   | "none"
   | "services"
@@ -312,6 +325,12 @@ type AuthStatus = "checking" | "authenticated" | "guest";
 type AuthMode = "login" | "forgot" | "reset";
 type ThemeMode = "light" | "dark";
 
+type PasswordChangeForm = {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+};
+
 type NotificationSettings = {
   notificationEmail: string;
   replyToEmail: string;
@@ -350,6 +369,33 @@ type BrandSettings = {
   bookingTheme: ThemeMode;
 };
 
+type InvoiceCustomFieldPlacement = "header" | "bill-to" | "payment" | "footer";
+
+type InvoiceCustomField = {
+  id: string;
+  label: string;
+  value: string;
+  placement: InvoiceCustomFieldPlacement;
+};
+
+type InvoiceSettings = {
+  enabled: boolean;
+  showBillingWorkspace: boolean;
+  prefix: string;
+  nextNumber: number;
+  currency: string;
+  taxName: string;
+  taxNumber: string;
+  taxRate: number;
+  bankAccount: string;
+  paymentTermsDays: number;
+  businessAddress: string;
+  headerText: string;
+  footerText: string;
+  paymentInstructions: string;
+  customFields: InvoiceCustomField[];
+};
+
 type CoachAccount = {
   id: string;
   coachName: string;
@@ -361,6 +407,45 @@ type CoachAccount = {
   bookingUrl: string;
   calendarSlug: string;
   caddyWorkspaceUrl: string;
+  invoiceSettings: InvoiceSettings;
+};
+
+type BillingCatalogKind = "service" | "product" | "package" | "lesson-type";
+
+type BillingCatalogItem = {
+  id: string;
+  kind: BillingCatalogKind;
+  name: string;
+  description: string;
+  price: number;
+  taxRate: number;
+  sourceServiceId?: string;
+};
+
+type InvoiceLineSource = "manual" | "catalog" | "booking_snapshot" | "package_sale";
+
+type InvoiceLine = {
+  id: string;
+  source: InvoiceLineSource;
+  sourceId?: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  taxRate: number;
+};
+
+type InvoiceDraft = {
+  payerName: string;
+  payerEmail: string;
+  payerPhone: string;
+  invoiceDate: string;
+  dueDate: string;
+  reference: string;
+  discountLabel: string;
+  discountAmount: number;
+  message: string;
+  lineSearch: string;
+  lines: InvoiceLine[];
 };
 
 type SlotCandidate = {
@@ -408,10 +493,29 @@ const BRAND_STORAGE_KEY = "clarity-booking-brand";
 const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
 const RESCHEDULE_LOGIN_STORAGE_KEY = "clarity-booking-reschedule-login";
 const BOOKING_LOGIN_STORAGE_KEY = "clarity-booking-login";
+const DEFAULT_TAX_RATE = 15;
 
 const baseWeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const fullDayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const baseWeekStart = new Date(2026, 5, 1);
+
+const defaultInvoiceSettings: InvoiceSettings = {
+  enabled: true,
+  showBillingWorkspace: true,
+  prefix: "INV",
+  nextNumber: 1001,
+  currency: "NZD",
+  taxName: "GST",
+  taxNumber: "",
+  taxRate: DEFAULT_TAX_RATE,
+  bankAccount: "",
+  paymentTermsDays: 7,
+  businessAddress: "",
+  headerText: "",
+  footerText: "Thank you for training with Sam Hale Golf.",
+  paymentInstructions: "Please pay by bank transfer and use the invoice number as reference.",
+  customFields: [],
+};
 
 const defaultServices: Service[] = [
   {
@@ -502,15 +606,18 @@ const defaultServices: Service[] = [
     id: "package-60",
     name: "1 hour Lesson - 5 Lesson Package",
     duration: 60,
-    price: 130,
-    description: "Private package redemption rate",
+    price: 650,
+    description: "Five one-hour lessons tracked as a package.",
     visibility: "private",
     active: true,
     capacity: 1,
     minParticipants: 1,
-    lessonFormat: "private",
+    lessonFormat: "package",
     priceMode: "session",
-    location: "Package redemption",
+    location: "Package allowance",
+    packageAllowance: 5,
+    packageCoverageMode: "upfront",
+    packageCoversServiceId: "lesson-60",
   },
 ];
 
@@ -651,6 +758,8 @@ function sectionTitle(view: View) {
       return "Availability";
     case "booking":
       return "Booking Page";
+    case "billing":
+      return "Billing";
     case "settings":
       return "Settings";
     default:
@@ -1044,6 +1153,7 @@ const defaultCoachAccount: CoachAccount = {
   bookingUrl: "https://book.claritygolf.app",
   calendarSlug: "sam-hale-golf",
   caddyWorkspaceUrl: CADDY_APP_URL,
+  invoiceSettings: defaultInvoiceSettings,
 };
 
 function cleanHexColor(value: unknown, fallback: string) {
@@ -1081,6 +1191,68 @@ function cleanEmail(value: unknown, fallback: string) {
   return email.includes("@") ? email : fallback;
 }
 
+function cleanInvoiceCustomField(field?: Partial<InvoiceCustomField>, index = 0): InvoiceCustomField | null {
+  const label = typeof field?.label === "string" ? field.label.trim().slice(0, 80) : "";
+  const value = typeof field?.value === "string" ? field.value.trim().slice(0, 180) : "";
+  if (!label && !value) return null;
+  const placement: InvoiceCustomFieldPlacement =
+    field?.placement === "bill-to" || field?.placement === "payment" || field?.placement === "footer"
+      ? field.placement
+      : "header";
+  return {
+    id: typeof field?.id === "string" && field.id.trim() ? field.id.trim().slice(0, 80) : `field-${index + 1}`,
+    label: label || "Custom field",
+    value,
+    placement,
+  };
+}
+
+function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): InvoiceSettings {
+  const taxRate = Number(settings?.taxRate ?? defaultInvoiceSettings.taxRate);
+  const paymentTermsDays = Number(settings?.paymentTermsDays ?? defaultInvoiceSettings.paymentTermsDays);
+  const nextNumber = Number(settings?.nextNumber ?? defaultInvoiceSettings.nextNumber);
+  const customFields = Array.isArray(settings?.customFields)
+    ? settings.customFields
+        .map((field, index) => cleanInvoiceCustomField(field, index))
+        .filter((field): field is InvoiceCustomField => Boolean(field))
+        .slice(0, 12)
+    : [];
+  return {
+    enabled: settings?.enabled !== false,
+    showBillingWorkspace: settings?.showBillingWorkspace !== false,
+    prefix:
+      typeof settings?.prefix === "string" && settings.prefix.trim()
+        ? settings.prefix.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 12)
+        : defaultInvoiceSettings.prefix,
+    nextNumber: Number.isFinite(nextNumber) ? clamp(Math.round(nextNumber), 1, 999999) : defaultInvoiceSettings.nextNumber,
+    currency:
+      typeof settings?.currency === "string" && settings.currency.trim()
+        ? settings.currency.trim().toUpperCase().slice(0, 8)
+        : defaultInvoiceSettings.currency,
+    taxName:
+      typeof settings?.taxName === "string" && settings.taxName.trim()
+        ? settings.taxName.trim().slice(0, 24)
+        : defaultInvoiceSettings.taxName,
+    taxNumber: typeof settings?.taxNumber === "string" ? settings.taxNumber.trim().slice(0, 80) : "",
+    taxRate: Number.isFinite(taxRate) ? clamp(taxRate, 0, 30) : defaultInvoiceSettings.taxRate,
+    bankAccount: typeof settings?.bankAccount === "string" ? settings.bankAccount.trim().slice(0, 120) : "",
+    paymentTermsDays: Number.isFinite(paymentTermsDays)
+      ? clamp(Math.round(paymentTermsDays), 0, 120)
+      : defaultInvoiceSettings.paymentTermsDays,
+    businessAddress: typeof settings?.businessAddress === "string" ? settings.businessAddress.trim().slice(0, 400) : "",
+    headerText: typeof settings?.headerText === "string" ? settings.headerText.trim().slice(0, 280) : "",
+    footerText:
+      typeof settings?.footerText === "string" && settings.footerText.trim()
+        ? settings.footerText.trim().slice(0, 400)
+        : defaultInvoiceSettings.footerText,
+    paymentInstructions:
+      typeof settings?.paymentInstructions === "string" && settings.paymentInstructions.trim()
+        ? settings.paymentInstructions.trim().slice(0, 400)
+        : defaultInvoiceSettings.paymentInstructions,
+    customFields,
+  };
+}
+
 function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
   const businessName =
     typeof account?.businessName === "string" && account.businessName.trim()
@@ -1112,6 +1284,7 @@ function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
     bookingUrl: cleanUrl(account?.bookingUrl, defaultCoachAccount.bookingUrl),
     calendarSlug: cleanSlug(account?.calendarSlug, cleanSlug(businessName, defaultCoachAccount.calendarSlug)),
     caddyWorkspaceUrl: cleanUrl(account?.caddyWorkspaceUrl, defaultCoachAccount.caddyWorkspaceUrl),
+    invoiceSettings: cleanInvoiceSettings(account?.invoiceSettings),
   };
 }
 
@@ -1124,7 +1297,8 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
   const duration = Number.isFinite(Number(service?.duration)) ? Number(service?.duration) : fallback.duration;
   const price = Number.isFinite(Number(service?.price)) ? Number(service?.price) : fallback.price;
   const capacity = Number.isFinite(Number(service?.capacity)) ? Number(service?.capacity) : fallback.capacity || 1;
-  const lessonFormat: LessonFormat = service?.lessonFormat === "group" ? "group" : "private";
+  const lessonFormat: LessonFormat =
+    service?.lessonFormat === "package" ? "package" : service?.lessonFormat === "group" ? "group" : "private";
   const cleanCapacity = clamp(Math.round(capacity), lessonFormat === "group" ? 2 : 1, 24);
   const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
     ? Number(service?.minParticipants)
@@ -1135,6 +1309,11 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     lessonFormat === "group" ? clamp(Math.round(rawMinParticipants), 2, cleanCapacity) : 1;
   const priceMode: PriceMode =
     lessonFormat === "group" && service?.priceMode === "per-person" ? "per-person" : "session";
+  const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
+    ? clamp(Math.round(Number(service?.packageAllowance)), 1, 100)
+    : Math.max(1, fallback.packageAllowance ?? 5);
+  const packageCoverageMode: PackageCoverageMode =
+    service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
   return {
     id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
     name,
@@ -1144,13 +1323,19 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
       typeof service?.description === "string"
         ? service.description.trim().slice(0, 240)
         : fallback.description,
-    visibility: service?.visibility === "private" ? "private" : "public",
+    visibility: lessonFormat === "package" || service?.visibility === "private" ? "private" : "public",
     active: service?.active !== false,
     capacity: cleanCapacity,
     minParticipants,
     lessonFormat,
     priceMode,
     location: typeof service?.location === "string" ? service.location.trim().slice(0, 160) : fallback.location,
+    packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
+    packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
+    packageCoversServiceId:
+      lessonFormat === "package" && typeof service?.packageCoversServiceId === "string"
+        ? service.packageCoversServiceId.trim().slice(0, 120)
+        : undefined,
   };
 }
 
@@ -1176,6 +1361,7 @@ function servicePriceLabel(service?: { price: number; priceMode?: PriceMode } | 
 }
 
 function serviceCapacityLabel(service: Pick<Service, "capacity" | "lessonFormat" | "minParticipants">) {
+  if (service.lessonFormat === "package") return "Package";
   if (service.lessonFormat === "group") return `${service.minParticipants}-${service.capacity} clients`;
   return `${service.capacity} client${service.capacity === 1 ? "" : "s"}`;
 }
@@ -1217,6 +1403,58 @@ function notificationTimeLabel(createdAt = "") {
   return Number.isNaN(time.getTime()) ? "" : time.toLocaleString();
 }
 
+function dateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysInputValue(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return dateInputValue(date);
+}
+
+function formatMoney(amount: number, currency = "NZD") {
+  return new Intl.NumberFormat("en-NZ", {
+    style: "currency",
+    currency: currency || "NZD",
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
+function parseMoneyInput(value: string) {
+  const normalised = value.replace(/,/g, "").replace(/[^0-9.]/g, "");
+  const firstDot = normalised.indexOf(".");
+  const cleaned =
+    firstDot === -1
+      ? normalised
+      : `${normalised.slice(0, firstDot + 1)}${normalised.slice(firstDot + 1).replace(/\./g, "")}`;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseQuantityInput(value: string) {
+  return Math.max(0, Math.round(parseMoneyInput(value)));
+}
+
+function emptyInvoiceDraft(settings = defaultInvoiceSettings): InvoiceDraft {
+  return {
+    payerName: "",
+    payerEmail: "",
+    payerPhone: "",
+    invoiceDate: dateInputValue(),
+    dueDate: addDaysInputValue(settings.paymentTermsDays),
+    reference: "",
+    discountLabel: "",
+    discountAmount: 0,
+    message: "Thanks for your work on the lesson programme. Invoice attached below.",
+    lineSearch: "",
+    lines: [],
+  };
+}
+
 function emailResultTone(result?: Pick<EmailSendResult, "sent" | "status" | "reason" | "error"> | null) {
   if (!result) return "pending";
   if (result.sent || result.status === "sent") return "sent";
@@ -1238,6 +1476,9 @@ function emptyServiceEditor(): ServiceEditor {
     lessonFormat: "private",
     priceMode: "session",
     location: "",
+    packageAllowance: 5,
+    packageCoverageMode: "upfront",
+    packageCoversServiceId: "",
   };
 }
 
@@ -1502,6 +1743,13 @@ function App() {
   const [resetConfirmPassword, setResetConfirmPassword] = useState("");
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [resetState, setResetState] = useState<"idle" | "saving">("idle");
+  const [passwordChangeForm, setPasswordChangeForm] = useState<PasswordChangeForm>({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [passwordChangeState, setPasswordChangeState] = useState<"idle" | "saving" | "saved">("idle");
+  const [passwordChangeMessage, setPasswordChangeMessage] = useState("");
   const [items, setItems] = useState<CalendarItem[]>(initialItems);
   const [services, setServices] = useState<Service[]>(defaultServices);
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
@@ -1526,6 +1774,41 @@ function App() {
   const [selectedId, setSelectedId] = useState("");
   const [activeView, setActiveView] = useState<View>(getInitialView);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
+  const [billingSection, setBillingSection] = useState<BillingSection>("none");
+  const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
+    emptyInvoiceDraft(getStoredCoachAccount().invoiceSettings),
+  );
+  const [invoiceCustomerSearch, setInvoiceCustomerSearch] = useState("");
+  const [showInvoiceLinePicker, setShowInvoiceLinePicker] = useState(false);
+  const [confirmedInvoiceNumber, setConfirmedInvoiceNumber] = useState("");
+  const [sentInvoiceNumber, setSentInvoiceNumber] = useState("");
+  const [voidedInvoiceNumbers, setVoidedInvoiceNumbers] = useState<string[]>([]);
+  const [catalogItems, setCatalogItems] = useState<BillingCatalogItem[]>([
+    {
+      id: "catalog-swing-review",
+      kind: "service",
+      name: "Remote Swing Review",
+      description: "Video review and written practice notes",
+      price: 75,
+      taxRate: defaultInvoiceSettings.taxRate,
+    },
+    {
+      id: "catalog-bay-hire",
+      kind: "product",
+      name: "Bay Hire",
+      description: "Simulator bay hire add-on",
+      price: 30,
+      taxRate: defaultInvoiceSettings.taxRate,
+    },
+  ]);
+  const [catalogEditor, setCatalogEditor] = useState<BillingCatalogItem>({
+    id: "",
+    kind: "service",
+    name: "",
+    description: "",
+    price: 0,
+    taxRate: defaultInvoiceSettings.taxRate,
+  });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pointerSession, setPointerSession] = useState<PointerSession>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -1607,8 +1890,10 @@ function App() {
       Boolean(flyingBooking) ||
       pointerSession?.mode === "place" ||
       (pointerSession?.mode === "move" && Boolean(floatingDrag)));
-  const appointmentServices = services.filter((service) => service.active);
-  const publicServices = services.filter((service) => service.active && service.visibility === "public");
+  const packageServices = services.filter((service) => service.active && service.lessonFormat === "package");
+  const bookableServices = services.filter((service) => service.active && service.lessonFormat !== "package");
+  const appointmentServices = bookableServices;
+  const publicServices = bookableServices.filter((service) => service.visibility === "public");
   const quickCreateServices = publicServices.slice(0, 4);
   const quickCreateService = quickCreate?.serviceId
     ? appointmentServices.find((service) => service.id === quickCreate.serviceId) ?? null
@@ -1621,6 +1906,11 @@ function App() {
   const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;" loading="lazy"></iframe>`;
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
   const caddyWorkspaceUrl = coachAccount.caddyWorkspaceUrl || CADDY_APP_URL;
+  const invoiceSettings = coachAccount.invoiceSettings;
+  const invoiceNumber = `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`;
+  const billingWorkspaceEnabled = invoiceSettings.enabled && invoiceSettings.showBillingWorkspace;
+  const hasMissingInvoiceCoachSettings =
+    !invoiceSettings.bankAccount.trim() || !invoiceSettings.taxNumber.trim() || !invoiceSettings.businessAddress.trim();
   const bookingBrandName = (brandSettings.coachName || coachAccount.businessName).trim();
   const bookingBrandWords = bookingBrandName.split(/\s+/);
   const bookingBrandPrimary = bookingBrandWords.slice(0, -1).join(" ") || bookingBrandName;
@@ -1653,6 +1943,70 @@ function App() {
     [brandSettings],
   );
   const emailTemplateService = publicServices[0] ?? appointmentServices[0] ?? null;
+  const completedAppointments = useMemo(
+    () =>
+      items
+        .filter((item) => item.kind === "appointment" && item.status === "completed")
+        .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start),
+    [items],
+  );
+  const completedUninvoicedCount = completedAppointments.length;
+  const invoiceLineSubtotal = invoiceDraft.lines.reduce(
+    (total, line) => total + Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0),
+    0,
+  );
+  const invoiceDiscountTotal = Math.min(invoiceLineSubtotal, Math.max(0, Number(invoiceDraft.discountAmount) || 0));
+  const invoiceTaxableSubtotal = Math.max(0, invoiceLineSubtotal - invoiceDiscountTotal);
+  const invoiceTaxTotal = invoiceTaxableSubtotal * (Math.max(0, Number(invoiceSettings.taxRate) || 0) / 100);
+  const invoiceTotal = invoiceTaxableSubtotal + invoiceTaxTotal;
+  const activeInvoiceNumber = confirmedInvoiceNumber || invoiceNumber;
+  const latestVoidedInvoiceNumber = voidedInvoiceNumbers[voidedInvoiceNumbers.length - 1] || "";
+  const invoiceDiscountLabel = invoiceDraft.discountLabel.trim() || "Discount / coupon";
+  const invoiceEmailSubject = `${activeInvoiceNumber} from ${coachAccount.businessName}`;
+  const invoiceEmailBody = [
+    invoiceDraft.message,
+    "",
+    `Invoice: ${activeInvoiceNumber}`,
+    `Total: ${formatMoney(invoiceTotal, invoiceSettings.currency)}`,
+    `Due: ${invoiceDraft.dueDate}`,
+    invoiceSettings.paymentInstructions,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+    invoiceDraft.payerEmail,
+  )}&su=${encodeURIComponent(invoiceEmailSubject)}&body=${encodeURIComponent(invoiceEmailBody)}`;
+  const invoiceSearchTerm = invoiceDraft.lineSearch.trim().toLowerCase();
+  const invoiceCatalogOptions = useMemo(() => {
+    const lessonOptions: BillingCatalogItem[] = services
+      .filter((service) => service.active)
+      .map((service) => ({
+        id: `service-${service.id}`,
+        kind: service.lessonFormat === "package" ? "package" : "lesson-type",
+        name: service.name,
+        description: service.description || service.location,
+        price: service.price,
+        taxRate: invoiceSettings.taxRate,
+        sourceServiceId: service.id,
+      }));
+    return [...lessonOptions, ...catalogItems];
+  }, [catalogItems, invoiceSettings.taxRate, services]);
+  const visibleInvoiceCatalogOptions = invoiceCatalogOptions
+    .filter((item) => {
+      if (!invoiceSearchTerm) return false;
+      return [item.name, item.description, item.kind].join(" ").toLowerCase().includes(invoiceSearchTerm);
+    })
+    .slice(0, 8);
+  const hasInvoiceCustomer = Boolean(invoiceDraft.payerName.trim() || invoiceDraft.payerEmail.trim());
+  const invoiceCustomerSearchTerm = invoiceCustomerSearch.trim().toLowerCase();
+  const invoiceCustomerMatches = invoiceCustomerSearchTerm
+    ? people
+        .filter((person) =>
+          [person.name, person.email, person.phone].join(" ").toLowerCase().includes(invoiceCustomerSearchTerm),
+        )
+        .slice(0, 6)
+    : [];
+  const invoiceCustomerCreateLabel = invoiceCustomerSearch.trim();
   const emailTemplateVariables = {
     business: coachAccount.businessName,
     client: "Donna Steele",
@@ -2925,10 +3279,11 @@ function App() {
         clearGesture();
         return;
       }
-      const item: CalendarItem = {
-        id: `appt-${Date.now()}`,
-        kind: "appointment",
-        week: activeDraft.week,
+	      const item: CalendarItem = {
+	        id: `appt-${Date.now()}`,
+	        kind: "appointment",
+	        status: "booked",
+	        week: activeDraft.week,
         day: activeDraft.day,
         start: activeDraft.start,
         duration: activeDraft.duration,
@@ -3069,10 +3424,11 @@ function App() {
       setQuickCreate((current) => (current ? { ...current, error: "That time is already occupied." } : current));
       return;
     }
-    const item: CalendarItem = {
-      id: `appt-${Date.now()}`,
-      kind: "appointment",
-      title: clientName,
+	    const item: CalendarItem = {
+	      id: `appt-${Date.now()}`,
+	      kind: "appointment",
+	      status: "booked",
+	      title: clientName,
       client: clientName,
       serviceId: quickCreateService.id,
       ...candidate,
@@ -3121,10 +3477,11 @@ function App() {
       return;
     }
     const previous = items;
-    const item: CalendarItem = {
-      id: `appt-${Date.now()}`,
-      kind: "appointment",
-      title: "New client",
+	    const item: CalendarItem = {
+	      id: `appt-${Date.now()}`,
+	      kind: "appointment",
+	      status: "booked",
+	      title: "New client",
       client: "New client",
       serviceId,
       ...candidate,
@@ -3199,10 +3556,11 @@ function App() {
       return false;
     }
 
-    const item: CalendarItem = {
-      id: `appt-${Date.now()}`,
-      kind: "appointment",
-      week: candidate.week,
+	    const item: CalendarItem = {
+	      id: `appt-${Date.now()}`,
+	      kind: "appointment",
+	      status: "booked",
+	      week: candidate.week,
       day: candidate.day,
       start: candidate.start,
       duration: candidate.duration,
@@ -3271,7 +3629,16 @@ function App() {
     setActiveView(view);
     setQuickCreate(null);
     if (view === "settings") setSettingsTab("none");
+    if (view === "billing") setBillingSection("none");
     if (view !== "calendar") setSelectedId("");
+  }
+
+  function openInvoiceCoachSettings() {
+    setActiveView("settings");
+    setSettingsTab("account");
+    setBillingSection("none");
+    setSelectedId("");
+    setQuickCreate(null);
   }
 
   function updateBookingForm(field: keyof BookingForm, value: string) {
@@ -3487,10 +3854,78 @@ function App() {
     setCoachAccount((current) => cleanCoachAccount({ ...current, [field]: value }));
   }
 
+  function updateInvoiceSettings<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
+    setCoachAccountSaveState("idle");
+    setCoachAccount((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          [field]: value,
+        },
+      }),
+    );
+  }
+
+  function updateInvoiceCustomField<K extends keyof InvoiceCustomField>(id: string, field: K, value: InvoiceCustomField[K]) {
+    setCoachAccountSaveState("idle");
+    setCoachAccount((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: current.invoiceSettings.customFields.map((customField) =>
+            customField.id === id ? { ...customField, [field]: value } : customField,
+          ),
+        },
+      }),
+    );
+  }
+
+  function addInvoiceCustomField() {
+    setCoachAccountSaveState("idle");
+    setCoachAccount((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: [
+            ...current.invoiceSettings.customFields,
+            { id: `field-${Date.now()}`, label: "Reference", value: "", placement: "header" },
+          ],
+        },
+      }),
+    );
+  }
+
+  function removeInvoiceCustomField(id: string) {
+    setCoachAccountSaveState("idle");
+    setCoachAccount((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: current.invoiceSettings.customFields.filter((field) => field.id !== id),
+        },
+      }),
+    );
+  }
+
   function updateServiceEditor<K extends keyof ServiceEditor>(field: K, value: ServiceEditor[K]) {
     setServiceSaveState("idle");
     setServiceEditor((current) => {
       const next = { ...current, [field]: value };
+      if (next.lessonFormat === "package") {
+        return {
+          ...next,
+          visibility: "private",
+          capacity: 1,
+          minParticipants: 1,
+          priceMode: "session",
+          packageAllowance: clamp(Math.round(Number(next.packageAllowance) || 5), 1, 100),
+          packageCoverageMode: next.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront",
+        };
+      }
       if (next.lessonFormat === "group") {
         const capacity = clamp(Math.round(Number(next.capacity) || 2), 2, 24);
         return {
@@ -3523,6 +3958,205 @@ function App() {
     });
     setShowServiceEditor(true);
     setServiceSaveState("idle");
+  }
+
+  function updateAppointmentStatus(itemId: string, status: BookingStatus) {
+    const previous = items;
+    setItems((current) =>
+      current.map((item) => (item.id === itemId && item.kind === "appointment" ? { ...item, status } : item)),
+    );
+    setToast({
+      message: `Lesson marked ${status.replace("_", "-")}.`,
+      undo: () => setItems(previous),
+    });
+  }
+
+  function markInvoiceDraftDirty() {
+    if (confirmedInvoiceNumber && sentInvoiceNumber === confirmedInvoiceNumber) {
+      const voidedNumber = confirmedInvoiceNumber;
+      setVoidedInvoiceNumbers((current) => (current.includes(voidedNumber) ? current : [...current, voidedNumber]));
+      setSentInvoiceNumber("");
+      setConfirmedInvoiceNumber("");
+      setToast({ message: `${voidedNumber} voided. Edits will use ${invoiceNumber}.` });
+      return;
+    }
+  }
+
+  function updateInvoiceDraft<K extends keyof InvoiceDraft>(field: K, value: InvoiceDraft[K]) {
+    if (field !== "lineSearch") markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function selectInvoiceCustomer(customer: Pick<Person, "name" | "email" | "phone">) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      payerName: customer.name,
+      payerEmail: customer.email,
+      payerPhone: customer.phone || "",
+    }));
+    setInvoiceCustomerSearch("");
+  }
+
+  function createInvoiceCustomerFromSearch() {
+    const value = invoiceCustomerSearch.trim();
+    if (!value) {
+      setToast({ message: "Search or type a customer name first." });
+      return;
+    }
+    const isEmail = value.includes("@");
+    selectInvoiceCustomer({
+      name: isEmail ? value.split("@")[0] : value,
+      email: isEmail ? value : "",
+      phone: "",
+    });
+  }
+
+  function clearInvoiceCustomer() {
+    markInvoiceDraftDirty();
+    setInvoiceCustomerSearch(invoiceDraft.payerName || invoiceDraft.payerEmail);
+    setInvoiceDraft((current) => ({
+      ...current,
+      payerName: "",
+      payerEmail: "",
+      payerPhone: "",
+    }));
+  }
+
+  function updateInvoiceLine(id: string, field: keyof InvoiceLine, value: string | number) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lines: current.lines.map((line) => (line.id === id ? { ...line, [field]: value } : line)),
+    }));
+  }
+
+  function addManualInvoiceLine() {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lines: [
+        ...current.lines,
+        {
+          id: `line-${Date.now()}`,
+          source: "manual",
+          description: current.lineSearch.trim(),
+          quantity: 1,
+          unitPrice: 0,
+          taxRate: invoiceSettings.taxRate,
+        },
+      ],
+      lineSearch: "",
+    }));
+    setShowInvoiceLinePicker(false);
+  }
+
+  function removeInvoiceLine(id: string) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lines: current.lines.filter((line) => line.id !== id),
+    }));
+  }
+
+  function addCatalogInvoiceLine(item: BillingCatalogItem) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lineSearch: "",
+      lines: [
+        ...current.lines.filter((line) => line.description.trim() || line.unitPrice > 0),
+        {
+          id: `line-${Date.now()}`,
+          source: item.kind === "package" ? "package_sale" : "catalog",
+          sourceId: item.sourceServiceId || item.id,
+          description: item.name,
+          quantity: 1,
+          unitPrice: item.price,
+          taxRate: item.taxRate,
+        },
+      ],
+    }));
+    setShowInvoiceLinePicker(false);
+  }
+
+  function addCompletedBookingLine(item: CalendarItem) {
+    const service = itemService(item, services);
+    markInvoiceDraftDirty();
+    setInvoiceCustomerSearch("");
+    setInvoiceDraft((current) => ({
+      ...current,
+      payerName: current.payerName || item.client || item.title,
+      payerEmail: current.payerEmail || item.email || "",
+      payerPhone: current.payerPhone || item.phone || "",
+      lines: [
+        ...current.lines.filter((line) => line.description.trim() || line.unitPrice > 0),
+        {
+          id: `line-${Date.now()}`,
+          source: "booking_snapshot",
+          sourceId: item.id,
+          description: `${service?.name ?? item.title} - ${item.client || item.title}`,
+          quantity: 1,
+          unitPrice: service?.price ?? 0,
+          taxRate: invoiceSettings.taxRate,
+        },
+      ],
+    }));
+    setShowInvoiceLinePicker(false);
+    setBillingSection("new-invoice");
+  }
+
+  function addCatalogItem() {
+    const name = catalogEditor.name.trim();
+    if (!name) {
+      setToast({ message: "Name the product or service before adding it." });
+      return;
+    }
+    const item: BillingCatalogItem = {
+      ...catalogEditor,
+      id: catalogEditor.id || `catalog-${Date.now()}`,
+      name,
+      description: catalogEditor.description.trim(),
+      price: Math.max(0, Math.round(Number(catalogEditor.price) || 0)),
+      taxRate: clamp(Number(catalogEditor.taxRate) || 0, 0, 30),
+    };
+    setCatalogItems((current) =>
+      current.some((candidate) => candidate.id === item.id)
+        ? current.map((candidate) => (candidate.id === item.id ? item : candidate))
+        : [...current, item],
+    );
+    setCatalogEditor({ id: "", kind: "service", name: "", description: "", price: 0, taxRate: invoiceSettings.taxRate });
+    setToast({ message: `${item.name} added to invoice products and services.` });
+  }
+
+  function resetInvoiceDraft() {
+    setInvoiceDraft(emptyInvoiceDraft(invoiceSettings));
+    setInvoiceCustomerSearch("");
+    setShowInvoiceLinePicker(false);
+    setConfirmedInvoiceNumber("");
+    setSentInvoiceNumber("");
+  }
+
+  function issueInvoiceDraft() {
+    if (!invoiceDraft.payerName.trim()) {
+      setToast({ message: "Choose or enter a payer before issuing." });
+      return;
+    }
+    if (!invoiceDraft.lines.some((line) => line.description.trim() && Number(line.unitPrice) > 0)) {
+      setToast({ message: "Add at least one invoice line before issuing." });
+      return;
+    }
+    const issuedNumber = invoiceNumber;
+    setConfirmedInvoiceNumber(issuedNumber);
+    setSentInvoiceNumber("");
+    updateInvoiceSettings("nextNumber", invoiceSettings.nextNumber + 1);
+    setToast({ message: `${issuedNumber} confirmed. Delivery actions are ready.` });
+  }
+
+  function markConfirmedInvoiceSent() {
+    if (!confirmedInvoiceNumber) return;
+    setSentInvoiceNumber(confirmedInvoiceNumber);
+    setToast({ message: `${confirmedInvoiceNumber} marked sent.` });
   }
 
   async function persistServices(nextServices: Service[], message = "Lesson types saved.") {
@@ -4111,10 +4745,11 @@ function App() {
       return;
     }
 
-    const item: CalendarItem = {
-      id: `appt-${Date.now()}`,
-      kind: "appointment",
-      ...candidate,
+	    const item: CalendarItem = {
+	      id: `appt-${Date.now()}`,
+	      kind: "appointment",
+	      status: "booked",
+	      ...candidate,
       serviceId: selectedBookingService.id,
       client,
       title: client,
@@ -4221,16 +4856,24 @@ function App() {
               <div className="service-form-row">
                 <label className="settings-field">
                   <span>Lesson format</span>
-                  <select
-                    value={serviceEditor.lessonFormat}
-                    onChange={(event) =>
-                      updateServiceEditor("lessonFormat", event.target.value === "group" ? "group" : "private")
-                    }
-                  >
-                    <option value="private">Private lesson</option>
-                    <option value="group">Group lesson</option>
-                  </select>
-                </label>
+	                  <select
+	                    value={serviceEditor.lessonFormat}
+	                    onChange={(event) =>
+	                      updateServiceEditor(
+	                        "lessonFormat",
+	                        event.target.value === "package"
+	                          ? "package"
+	                          : event.target.value === "group"
+	                            ? "group"
+	                            : "private",
+	                      )
+	                    }
+	                  >
+	                    <option value="private">Private lesson</option>
+	                    <option value="group">Group lesson</option>
+	                    <option value="package">Package</option>
+	                  </select>
+	                </label>
                 <label className="settings-field">
                   <span>Visibility</span>
                   <select
@@ -4296,10 +4939,10 @@ function App() {
                   </select>
                 </label>
               </div>
-              <div className="service-form-row">
-                {serviceEditor.lessonFormat === "group" && (
-                  <label className="settings-field">
-                    <span>Minimum group</span>
+	              <div className="service-form-row">
+	                {serviceEditor.lessonFormat === "group" && (
+	                  <label className="settings-field">
+	                    <span>Minimum group</span>
                     <input
                       value={serviceEditor.minParticipants}
                       min={2}
@@ -4307,32 +4950,80 @@ function App() {
                       step={1}
                       onChange={(event) => updateServiceEditor("minParticipants", Number(event.target.value))}
                       type="number"
-                    />
-                  </label>
-                )}
-                <label className="settings-field">
-                  <span>{serviceEditor.lessonFormat === "group" ? "Maximum group" : "Capacity"}</span>
-                  <input
-                    value={serviceEditor.capacity}
-                    min={serviceEditor.lessonFormat === "group" ? 2 : 1}
-                    max={24}
-                    step={1}
-                    onChange={(event) => updateServiceEditor("capacity", Number(event.target.value))}
-                    type="number"
-                  />
-                </label>
-                <label className="settings-field">
-                  <span>Location note</span>
+	                    />
+	                  </label>
+	                )}
+	                {serviceEditor.lessonFormat !== "package" && (
+	                  <label className="settings-field">
+	                    <span>{serviceEditor.lessonFormat === "group" ? "Maximum group" : "Capacity"}</span>
+	                    <input
+	                      value={serviceEditor.capacity}
+	                      min={serviceEditor.lessonFormat === "group" ? 2 : 1}
+	                      max={24}
+	                      step={1}
+	                      onChange={(event) => updateServiceEditor("capacity", Number(event.target.value))}
+	                      type="number"
+	                    />
+	                  </label>
+	                )}
+	                <label className="settings-field">
+	                  <span>Location note</span>
                   <input
                     value={serviceEditor.location}
                     onChange={(event) => updateServiceEditor("location", event.target.value)}
                     placeholder={coachAccount.venueShortName}
                   />
-                </label>
-              </div>
-              <label className="settings-toggle">
-                <input
-                  checked={serviceEditor.active}
+	                </label>
+	              </div>
+	              {serviceEditor.lessonFormat === "package" && (
+	                <div className="service-form-row">
+	                  <label className="settings-field">
+	                    <span>Allowance</span>
+	                    <input
+	                      value={serviceEditor.packageAllowance ?? 5}
+	                      min={1}
+	                      max={100}
+	                      step={1}
+	                      onChange={(event) => updateServiceEditor("packageAllowance", Number(event.target.value))}
+	                      type="number"
+	                    />
+	                  </label>
+	                  <label className="settings-field">
+	                    <span>Coverage style</span>
+	                    <select
+	                      value={serviceEditor.packageCoverageMode ?? "upfront"}
+	                      onChange={(event) =>
+	                        updateServiceEditor(
+	                          "packageCoverageMode",
+	                          event.target.value === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront",
+	                        )
+	                      }
+	                    >
+	                      <option value="upfront">Paid upfront</option>
+	                      <option value="lesson-by-lesson">Lesson-by-lesson</option>
+	                    </select>
+	                  </label>
+	                  <label className="settings-field">
+	                    <span>Covers lesson type</span>
+	                    <select
+	                      value={serviceEditor.packageCoversServiceId ?? ""}
+	                      onChange={(event) => updateServiceEditor("packageCoversServiceId", event.target.value)}
+	                    >
+	                      <option value="">Any matching lesson</option>
+	                      {services
+	                        .filter((service) => service.lessonFormat !== "package")
+	                        .map((service) => (
+	                          <option key={service.id} value={service.id}>
+	                            {service.name}
+	                          </option>
+	                        ))}
+	                    </select>
+	                  </label>
+	                </div>
+	              )}
+	              <label className="settings-toggle">
+	                <input
+	                  checked={serviceEditor.active}
                   onChange={(event) => updateServiceEditor("active", event.target.checked)}
                   type="checkbox"
                 />
@@ -4358,13 +5049,19 @@ function App() {
             {services.map((service) => (
               <article className={`service-row ${service.active ? "" : "is-archived"}`} key={service.id}>
                 <button className="service-row-main" onClick={() => editService(service)} type="button">
-                  <span>
-                    {service.active ? "Active" : "Archived"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
-                    {service.lessonFormat === "group" ? "Group" : "Private"}
-                  </span>
-                  <strong>{service.name}</strong>
-                  {service.description && <em>{service.description}</em>}
-                </button>
+	                  <span>
+	                    {service.active ? "Active" : "Archived"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
+	                    {service.lessonFormat === "package" ? "Package" : service.lessonFormat === "group" ? "Group" : "Private"}
+	                  </span>
+	                  <strong>{service.name}</strong>
+	                  {service.description && <em>{service.description}</em>}
+	                  {service.lessonFormat === "package" && (
+	                    <em>
+	                      {service.packageAllowance ?? 5} slots ·{" "}
+	                      {service.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "paid upfront"}
+	                    </em>
+	                  )}
+	                </button>
                 <div className="service-row-meta">
                   <strong>{servicePriceLabel(service)}</strong>
                   <span>{service.duration} min</span>
@@ -4752,13 +5449,31 @@ function App() {
         )}
       </div>
 
-      <div className="service-summary">
-        <span>Price</span>
-        <strong>{servicePriceLabel(selectedService)}</strong>
-        <p>{selectedService?.description ?? selected.note}</p>
-      </div>
+	      <div className="service-summary">
+	        <span>Price</span>
+	        <strong>{servicePriceLabel(selectedService)}</strong>
+	        <p>{selectedService?.description ?? selected.note}</p>
+	      </div>
 
-      {selected.kind === "appointment" && selectedPerson && hasSelectedPersonCaddyProfile && (
+	      {selected.kind === "appointment" && (
+	        <div className="lesson-status-panel">
+	          <span>Status</span>
+	          <div className="lesson-status-options" role="group" aria-label="Lesson status">
+	            {(["booked", "completed", "cancelled", "no_show"] as BookingStatus[]).map((status) => (
+	              <button
+	                className={(selected.status ?? "booked") === status ? "active" : ""}
+	                key={status}
+	                onClick={() => updateAppointmentStatus(selected.id, status)}
+	                type="button"
+	              >
+	                {status === "no_show" ? "No-show" : status[0].toUpperCase() + status.slice(1)}
+	              </button>
+	            ))}
+	          </div>
+	        </div>
+	      )}
+
+	      {selected.kind === "appointment" && selectedPerson && hasSelectedPersonCaddyProfile && (
         <div className="linked-profile">
           <div>
             <span>Shared profile</span>
@@ -5034,6 +5749,12 @@ function App() {
             <User size={18} />
             Clients
           </button>
+          {billingWorkspaceEnabled && (
+            <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
+              <FileText size={18} />
+              Billing
+            </button>
+          )}
           <button className={activeView === "settings" ? "active" : ""} onClick={() => switchView("settings")}>
             <Settings size={18} />
             Settings
@@ -5056,9 +5777,9 @@ function App() {
               <span>
                 {appointments} appointments · {blocks} blocked {blocks === 1 ? "time" : "times"}
               </span>
-            ) : (
+            ) : activeView !== "billing" ? (
               <span>{settingsLocationLine}</span>
-            )}
+            ) : null}
           </div>
           {activeView === "calendar" && (
             <div className="top-actions">
@@ -5270,7 +5991,9 @@ function App() {
                       key={item.id}
                       className={`calendar-item ${item.kind} ${selectedId === item.id ? "selected" : ""} ${
                         invalid ? "invalid" : ""
-                      } ${flyAnimation ? "just-placed-from-dock" : ""} ${
+                      } ${item.kind === "appointment" ? `status-${item.status ?? "booked"}` : ""} ${
+                        flyAnimation ? "just-placed-from-dock" : ""
+                      } ${
                         pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
                       }`}
                       aria-label={tooltipRows.join(", ")}
@@ -5687,6 +6410,598 @@ function App() {
                 </div>
               )}
             </div>
+          </section>
+        )}
+
+        {!isEmbedMode && activeView === "billing" && (
+          <section className="module-page billing-page">
+            <div className="settings-tabs billing-tabs" role="tablist" aria-label="Billing sections">
+              <button
+                className={billingSection === "dashboard" ? "active" : ""}
+                onClick={() => setBillingSection("dashboard")}
+                role="tab"
+                aria-selected={billingSection === "dashboard"}
+                type="button"
+              >
+                <LayoutDashboard size={16} />
+                Dashboard
+              </button>
+              <button
+                className={billingSection === "new-invoice" ? "active" : ""}
+                onClick={() => setBillingSection("new-invoice")}
+                role="tab"
+                aria-selected={billingSection === "new-invoice"}
+                type="button"
+              >
+                <FileText size={16} />
+                New Invoice
+              </button>
+              <button
+                className={billingSection === "reports" ? "active" : ""}
+                onClick={() => setBillingSection("reports")}
+                role="tab"
+                aria-selected={billingSection === "reports"}
+                type="button"
+              >
+                <BarChart3 size={16} />
+                Reports
+              </button>
+            </div>
+
+            {billingSection === "dashboard" && (
+              <div className="billing-dashboard">
+                <div className="billing-dashboard-grid">
+                  <article className="data-card">
+                    <div className="data-card-header">
+                      <div>
+                        <span>Invoices</span>
+                        <h2>Draft workspace</h2>
+                      </div>
+                      <FileText size={24} />
+                    </div>
+                    <p>Manual invoice entry is ready, with lesson type, package, product, and completed-booking line sources.</p>
+                    <button className="primary-button" onClick={() => setBillingSection("new-invoice")} type="button">
+                      <Plus size={16} />
+                      New Invoice
+                    </button>
+                  </article>
+                  <article className="data-card">
+                    <div className="data-card-header">
+                      <div>
+                        <span>Completed Bookings</span>
+                        <h2>Ready to pull</h2>
+                      </div>
+                      <CalendarDays size={24} />
+                    </div>
+                    <div className="completed-booking-list compact">
+                      {completedAppointments.length ? (
+                        completedAppointments.slice(0, 4).map((item) => {
+                          const service = itemService(item, services);
+                          const days = buildWeekDays(itemWeek(item));
+                          return (
+                            <button key={item.id} onClick={() => addCompletedBookingLine(item)} type="button">
+                              <span>
+                                <strong>{item.client || item.title}</strong>
+                                <em>
+                                  {service?.name ?? "Lesson"} · {days[item.day].label}, {formatTime(item.start)}
+                                </em>
+                              </span>
+                              <Plus size={16} />
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <p>No completed bookings yet. Mark a lesson completed from the appointment details panel.</p>
+                      )}
+                    </div>
+                  </article>
+                  <article className="data-card">
+                    <div className="data-card-header">
+                      <div>
+                        <span>Products & Services</span>
+                        <h2>{catalogItems.length} invoice-only items</h2>
+                      </div>
+                      <Package size={24} />
+                    </div>
+                    <p>These live in Billing and do not affect the public booking calendar.</p>
+                    <button className="outline-button" onClick={() => setBillingSection("new-invoice")} type="button">
+                      Manage in New Invoice
+                    </button>
+                  </article>
+                </div>
+              </div>
+            )}
+
+            {billingSection === "new-invoice" && (
+              <div className="billing-builder invoice-builder-layout">
+                <article className="invoice-document-card" aria-label="Invoice editor">
+                  <div className="invoice-document-header">
+                    <div className="invoice-brand-block">
+                      <div className="invoice-logo-mark">
+                        {brandSettings.logoPreview ? (
+                          <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
+                        ) : (
+                          <strong>{bookingBrandWords.map((word) => word[0]).join("").slice(0, 3).toUpperCase()}</strong>
+                        )}
+                      </div>
+                      <div>
+                        <strong>{coachAccount.businessName}</strong>
+                        <span>{coachAccount.contactEmail}</span>
+                        {invoiceSettings.businessAddress && <span>{invoiceSettings.businessAddress}</span>}
+                      </div>
+                    </div>
+                    <div className="invoice-title-block">
+                      <span>Invoice</span>
+                      <h2>{activeInvoiceNumber}</h2>
+                      {sentInvoiceNumber === confirmedInvoiceNumber && confirmedInvoiceNumber ? <em>Sent</em> : confirmedInvoiceNumber ? <em>Confirmed</em> : <em>Draft</em>}
+                    </div>
+                  </div>
+                  {(hasMissingInvoiceCoachSettings || latestVoidedInvoiceNumber) && (
+                    <div className="invoice-document-alerts">
+                      {latestVoidedInvoiceNumber && <span>{latestVoidedInvoiceNumber} voided</span>}
+                      {hasMissingInvoiceCoachSettings && (
+                        <button className="outline-button small-action" onClick={openInvoiceCoachSettings} type="button">
+                          <Settings size={15} />
+                          Coach Account
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {invoiceSettings.headerText && <p className="invoice-template-note">{invoiceSettings.headerText}</p>}
+
+                  <section className="invoice-section">
+                    <div className="invoice-section-heading">
+                      <span>Customer</span>
+                    </div>
+                    {hasInvoiceCustomer ? (
+                      <div className="invoice-customer-settled">
+                        <div>
+                          <span>Bill to</span>
+                          <strong>{invoiceDraft.payerName || invoiceDraft.payerEmail}</strong>
+                          {invoiceDraft.payerEmail && <em>{invoiceDraft.payerEmail}</em>}
+                          {invoiceDraft.payerPhone && <em>{invoiceDraft.payerPhone}</em>}
+                        </div>
+                        <button className="outline-button small-action" onClick={clearInvoiceCustomer} type="button">
+                          Change
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="invoice-customer-search">
+                        <label className="settings-field">
+                          <span>Find or create customer</span>
+                          <input
+                            value={invoiceCustomerSearch}
+                            onChange={(event) => setInvoiceCustomerSearch(event.target.value)}
+                            placeholder="Search name, email, or phone"
+                          />
+                        </label>
+                        {(invoiceCustomerMatches.length > 0 || invoiceCustomerCreateLabel) && (
+                          <div className="invoice-customer-results">
+                            {invoiceCustomerMatches.map((person) => (
+                              <button key={person.id} onClick={() => selectInvoiceCustomer(person)} type="button">
+                                <span>
+                                  <strong>{person.name}</strong>
+                                  <em>{person.email || person.phone || "No contact saved"}</em>
+                                </span>
+                                <Plus size={16} />
+                              </button>
+                            ))}
+                            {invoiceCustomerCreateLabel && (
+                              <button onClick={createInvoiceCustomerFromSearch} type="button">
+                                <span>
+                                  <strong>Create new customer</strong>
+                                  <em>{invoiceCustomerCreateLabel}</em>
+                                </span>
+                                <Plus size={16} />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="invoice-section">
+                    <div className="invoice-section-heading">
+                      <span>Invoice details</span>
+                    </div>
+                    <div className="invoice-form-grid invoice-detail-grid">
+                      <label className="settings-field">
+                        <span>Invoice date</span>
+                        <input
+                          value={invoiceDraft.invoiceDate}
+                          onChange={(event) => updateInvoiceDraft("invoiceDate", event.target.value)}
+                          type="date"
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Due date</span>
+                        <input
+                          value={invoiceDraft.dueDate}
+                          onChange={(event) => updateInvoiceDraft("dueDate", event.target.value)}
+                          type="date"
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Currency</span>
+                        <input value={invoiceSettings.currency} readOnly />
+                      </label>
+                      <label className="settings-field">
+                        <span>Reference</span>
+                        <input
+                          value={invoiceDraft.reference}
+                          onChange={(event) => updateInvoiceDraft("reference", event.target.value)}
+                          placeholder="Optional"
+                        />
+                      </label>
+                    </div>
+                  </section>
+
+                  <div className="invoice-custom-fields">
+                    {invoiceSettings.customFields
+                      .filter((field) => field.placement === "header" || field.placement === "bill-to")
+                      .map((field) => (
+                        <span key={field.id}>
+                          <strong>{field.label}</strong>
+                          {field.value || "Not set"}
+                        </span>
+                      ))}
+                  </div>
+
+                  <section className="invoice-section invoice-items-section">
+                    <div className="invoice-section-heading invoice-items-heading">
+                      <div>
+                        <span>Items</span>
+                        <strong>{invoiceDraft.lines.length ? `${invoiceDraft.lines.length} line item${invoiceDraft.lines.length === 1 ? "" : "s"}` : "No items yet"}</strong>
+                      </div>
+                      <button
+                        className="outline-button"
+                        onClick={() => {
+                          updateInvoiceDraft("lineSearch", "");
+                          setShowInvoiceLinePicker((current) => !current);
+                        }}
+                        type="button"
+                      >
+                        <Plus size={16} />
+                        Add line item
+                      </button>
+                    </div>
+
+                    {showInvoiceLinePicker && (
+                      <div className="invoice-line-picker">
+                        <div className="invoice-line-search">
+                          <label className="settings-field">
+                            <span>Find or add item</span>
+                            <input
+                              value={invoiceDraft.lineSearch}
+                              onChange={(event) => updateInvoiceDraft("lineSearch", event.target.value)}
+                              placeholder="Search lesson types, packages, products, services..."
+                              autoFocus
+                            />
+                          </label>
+                          <button className="outline-button" onClick={addManualInvoiceLine} type="button">
+                            <Plus size={16} />
+                            Add Custom
+                          </button>
+                          <button
+                            className="icon-button"
+                            onClick={() => {
+                              updateInvoiceDraft("lineSearch", "");
+                              setShowInvoiceLinePicker(false);
+                            }}
+                            aria-label="Close line item search"
+                            type="button"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+
+                        {visibleInvoiceCatalogOptions.length > 0 && (
+                          <div className="invoice-option-list">
+                            {visibleInvoiceCatalogOptions.map((item) => (
+                              <button key={item.id} onClick={() => addCatalogInvoiceLine(item)} type="button">
+                                <span>
+                                  <strong>{item.name}</strong>
+                                  <em>
+                                    {item.kind.replace("-", " ")} - {formatMoney(item.price, invoiceSettings.currency)}
+                                  </em>
+                                </span>
+                                <Plus size={16} />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="invoice-document-lines" aria-label="Invoice lines">
+                      <div className="invoice-document-line-head">
+                        <span>Item</span>
+                        <span>Qty</span>
+                        <span>Unit price</span>
+                        <span>Amount</span>
+                        <span />
+                      </div>
+                      {invoiceDraft.lines.map((line) => (
+                        <div className="invoice-document-line-row" key={line.id}>
+                        <label className="settings-field">
+                          <span>Line item</span>
+                          <input
+                            value={line.description}
+                            onChange={(event) => updateInvoiceLine(line.id, "description", event.target.value)}
+                            placeholder="Lesson, package, product, or service"
+                          />
+                        </label>
+                        <label className="settings-field">
+                          <span>Qty</span>
+                          <input
+                            value={line.quantity}
+                            inputMode="numeric"
+                            onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
+                            type="text"
+                          />
+                        </label>
+                        <label className="settings-field">
+                          <span>Unit price</span>
+                          <input
+                            value={line.unitPrice}
+                            inputMode="decimal"
+                            onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
+                            type="text"
+                          />
+                        </label>
+                        <strong>{formatMoney(line.quantity * line.unitPrice, invoiceSettings.currency)}</strong>
+                        <button
+                          className="invoice-line-delete-tab"
+                          onClick={() => removeInvoiceLine(line.id)}
+                          aria-label="Delete line item"
+                          title="Delete line item"
+                          type="button"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                      {!invoiceDraft.lines.length && (
+                        <div className="invoice-empty-line">
+                          <span>Use Add line item or pull a completed booking.</span>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="invoice-section invoice-settlement-section">
+                    <div className="invoice-note-block">
+                      <label className="settings-field">
+                        <span>Customer note</span>
+                        <textarea
+                          value={invoiceDraft.message}
+                          onChange={(event) => updateInvoiceDraft("message", event.target.value)}
+                          rows={3}
+                        />
+                      </label>
+                      <div className="invoice-payment-block">
+                        <span>Payment</span>
+                        <p>{invoiceSettings.paymentInstructions}</p>
+                        {invoiceSettings.bankAccount && <strong>{invoiceSettings.bankAccount}</strong>}
+                        {invoiceSettings.taxNumber && <em>{invoiceSettings.taxName} No. {invoiceSettings.taxNumber}</em>}
+                        {invoiceSettings.customFields
+                          .filter((field) => field.placement === "payment")
+                          .map((field) => (
+                            <em key={field.id}>
+                              {field.label}: {field.value || "Not set"}
+                            </em>
+                          ))}
+                      </div>
+                    </div>
+
+                    <div className="invoice-total-box">
+                      <div className="invoice-discount-controls">
+                        <label className="settings-field">
+                          <span>Discount / coupon</span>
+                          <input
+                            value={invoiceDraft.discountLabel}
+                            onChange={(event) => updateInvoiceDraft("discountLabel", event.target.value)}
+                            placeholder="Optional"
+                          />
+                        </label>
+                        <label className="settings-field">
+                          <span>Amount</span>
+                          <input
+                            value={invoiceDraft.discountAmount}
+                            inputMode="decimal"
+                            onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
+                            type="text"
+                          />
+                        </label>
+                      </div>
+                      <div className="invoice-total-lines">
+                        <span>
+                          <em>Subtotal</em>
+                          <strong>{formatMoney(invoiceLineSubtotal, invoiceSettings.currency)}</strong>
+                        </span>
+                        {(invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim()) && (
+                          <span>
+                            <em>{invoiceDiscountLabel}</em>
+                            <strong>-{formatMoney(invoiceDiscountTotal, invoiceSettings.currency)}</strong>
+                          </span>
+                        )}
+                        <span>
+                          <em>{invoiceSettings.taxName} ({invoiceSettings.taxRate}%)</em>
+                          <strong>{formatMoney(invoiceTaxTotal, invoiceSettings.currency)}</strong>
+                        </span>
+                        <span className="invoice-grand-total">
+                          <em>Total</em>
+                          <strong>{formatMoney(invoiceTotal, invoiceSettings.currency)}</strong>
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <div className="invoice-custom-fields invoice-footer-fields">
+                    {invoiceSettings.customFields
+                      .filter((field) => field.placement === "footer")
+                      .map((field) => (
+                        <span key={field.id}>
+                          <strong>{field.label}</strong>
+                          {field.value || "Not set"}
+                        </span>
+                      ))}
+                  </div>
+                  <p className="invoice-footer">{invoiceSettings.footerText}</p>
+
+                  <div className="invoice-actions invoice-bottom-actions">
+                    <button className="outline-button" onClick={resetInvoiceDraft} type="button">
+                      Reset Draft
+                    </button>
+                    {confirmedInvoiceNumber && (
+                      <>
+                        <button className="outline-button" onClick={() => setToast({ message: "PDF download hooks into this invoice preview next." })} type="button">
+                          <Download size={16} />
+                          Download PDF
+                        </button>
+                        <button
+                          className="outline-button"
+                          disabled={sentInvoiceNumber === confirmedInvoiceNumber}
+                          onClick={markConfirmedInvoiceSent}
+                          type="button"
+                        >
+                          <Send size={16} />
+                          {sentInvoiceNumber === confirmedInvoiceNumber ? "Sent" : "Send Email"}
+                        </button>
+                        <a className="outline-button" href={gmailComposeUrl} target="_blank" rel="noreferrer">
+                          <Mail size={16} />
+                          Gmail Draft
+                        </a>
+                      </>
+                    )}
+                    <button className="primary-button" disabled={Boolean(confirmedInvoiceNumber)} onClick={issueInvoiceDraft} type="button">
+                      {confirmedInvoiceNumber ? "Invoice Confirmed" : "Confirm Invoice"}
+                    </button>
+                  </div>
+                </article>
+
+                <aside className="invoice-side-panel">
+                  <section className="data-card completed-bookings-card">
+                    <div className="data-card-header">
+                      <div>
+                        <span>Calendar Pull</span>
+                        <h2>Completed bookings</h2>
+                      </div>
+                      <CalendarDays size={24} />
+                    </div>
+                    <div className="completed-booking-list">
+                      {completedAppointments.length ? (
+                        completedAppointments.map((item) => {
+                          const service = itemService(item, services);
+                          const days = buildWeekDays(itemWeek(item));
+                          return (
+                            <button key={item.id} onClick={() => addCompletedBookingLine(item)} type="button">
+                              <span>
+                                <strong>{item.client || item.title}</strong>
+                                <em>
+                                  {service?.name ?? "Lesson"} - {days[item.day].label}, {formatRange(item.start, item.duration)}
+                                </em>
+                              </span>
+                              <Plus size={16} />
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <p>Mark bookings completed from the calendar to pull them into invoices.</p>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="data-card completed-bookings-card">
+                    <div className="data-card-header">
+                      <div>
+                        <span>Catalog</span>
+                        <h2>Products & Services</h2>
+                      </div>
+                      <Package size={24} />
+                    </div>
+                    <div className="billing-catalog-editor">
+                      <label className="settings-field">
+                        <span>Name</span>
+                        <input
+                          value={catalogEditor.name}
+                          onChange={(event) => setCatalogEditor((current) => ({ ...current, name: event.target.value }))}
+                          placeholder="Product or service"
+                        />
+                      </label>
+                      <div className="service-form-row">
+                        <label className="settings-field">
+                          <span>Kind</span>
+                          <select
+                            value={catalogEditor.kind}
+                            onChange={(event) =>
+                              setCatalogEditor((current) => ({
+                                ...current,
+                                kind: event.target.value === "product" ? "product" : "service",
+                              }))
+                            }
+                          >
+                            <option value="service">Service</option>
+                            <option value="product">Product</option>
+                          </select>
+                        </label>
+                        <label className="settings-field">
+                          <span>Price</span>
+                          <input
+                            value={catalogEditor.price}
+                            inputMode="decimal"
+                            onChange={(event) => setCatalogEditor((current) => ({ ...current, price: parseMoneyInput(event.target.value) }))}
+                            type="text"
+                          />
+                        </label>
+                      </div>
+                      <button className="outline-button" onClick={addCatalogItem} type="button">
+                        <Plus size={16} />
+                        Add Product/Service
+                      </button>
+                    </div>
+                  </section>
+                </aside>
+              </div>
+            )}
+
+            {billingSection === "reports" && (
+              <div className="billing-reports">
+                <article className="data-card">
+                  <span>Revenue</span>
+                  <h2>By item source</h2>
+                  <div className="settings-summary-grid">
+                    <span>
+                      <strong>{services.filter((service) => service.lessonFormat !== "package").length}</strong>
+                      lesson types
+                    </span>
+                    <span>
+                      <strong>{packageServices.length}</strong>
+                      package types
+                    </span>
+                    <span>
+                      <strong>{catalogItems.length}</strong>
+                      products/services
+                    </span>
+                  </div>
+                </article>
+                <article className="data-card">
+                  <span>Reconciliation</span>
+                  <h2>Package dots coming next</h2>
+                  <p>
+                    Reports will read completed bookings, invoice-linked coverage, and manual coverage to classify green,
+                    blue, orange, grey, and red package slots.
+                  </p>
+                </article>
+                <article className="data-card">
+                  <span>Uninvoiced</span>
+                  <h2>{completedUninvoicedCount} completed lessons</h2>
+                  <p>These are ready to pull into a manual invoice without making calendar pull the only workflow.</p>
+                </article>
+              </div>
+            )}
           </section>
         )}
 
@@ -6291,9 +7606,9 @@ function App() {
                     </div>
                   </details>
 
-                  <details className="settings-subsection">
-                    <summary className="settings-subsection-title">
-                      <Link2 size={18} />
+	                  <details className="settings-subsection">
+	                    <summary className="settings-subsection-title">
+	                      <Link2 size={18} />
                       <div>
                         <span>Connected apps</span>
                         <strong>Booking and Caddy</strong>
@@ -6324,10 +7639,214 @@ function App() {
                           onChange={(event) => updateCoachAccount("caddyWorkspaceUrl", event.target.value)}
                         />
                       </label>
-                    </div>
-                  </details>
-                </div>
-                <button className="primary-button settings-save" onClick={saveCoachAccount}>
+	                    </div>
+	                  </details>
+
+	                  <details className="settings-subsection" open>
+	                    <summary className="settings-subsection-title">
+	                      <FileText size={18} />
+	                      <div>
+	                        <span>Invoicing</span>
+	                        <strong>
+	                          {invoiceSettings.prefix}-{String(invoiceSettings.nextNumber).padStart(4, "0")} next
+	                        </strong>
+	                      </div>
+	                    </summary>
+	                    <div className="settings-summary-grid">
+	                      <span>
+	                        <strong>{invoiceSettings.enabled ? "On" : "Off"}</strong>
+	                        engine
+	                      </span>
+	                      <span>
+	                        <strong>{invoiceSettings.currency}</strong>
+	                        currency
+	                      </span>
+	                      <span>
+	                        <strong>{invoiceSettings.taxRate}%</strong>
+	                        {invoiceSettings.taxName}
+	                      </span>
+	                    </div>
+	                    <div className="service-form-row">
+	                      <label className="settings-toggle">
+	                        <input
+	                          checked={invoiceSettings.enabled}
+	                          onChange={(event) => updateInvoiceSettings("enabled", event.target.checked)}
+	                          type="checkbox"
+	                        />
+	                        <span>Enable invoicing</span>
+	                      </label>
+	                      <label className="settings-toggle">
+	                        <input
+	                          checked={invoiceSettings.showBillingWorkspace}
+	                          onChange={(event) => updateInvoiceSettings("showBillingWorkspace", event.target.checked)}
+	                          type="checkbox"
+	                        />
+	                        <span>Show Billing workspace</span>
+	                      </label>
+	                    </div>
+	                    <div className="service-form-row">
+	                      <label className="settings-field">
+	                        <span>Invoice prefix</span>
+	                        <input
+	                          value={invoiceSettings.prefix}
+	                          onChange={(event) => updateInvoiceSettings("prefix", event.target.value)}
+	                        />
+	                      </label>
+	                      <label className="settings-field">
+	                        <span>Start / next number</span>
+	                        <input
+	                          value={invoiceSettings.nextNumber}
+	                          min={1}
+	                          step={1}
+	                          onChange={(event) => updateInvoiceSettings("nextNumber", Number(event.target.value))}
+	                          type="number"
+	                        />
+	                      </label>
+	                      <label className="settings-field">
+	                        <span>Currency</span>
+	                        <input
+	                          value={invoiceSettings.currency}
+	                          onChange={(event) => updateInvoiceSettings("currency", event.target.value)}
+	                        />
+	                      </label>
+	                    </div>
+	                    <div className="service-form-row">
+	                      <label className="settings-field">
+	                        <span>Tax label</span>
+	                        <input
+	                          value={invoiceSettings.taxName}
+	                          onChange={(event) => updateInvoiceSettings("taxName", event.target.value)}
+	                        />
+	                      </label>
+	                      <label className="settings-field">
+	                        <span>Tax number</span>
+	                        <input
+	                          value={invoiceSettings.taxNumber}
+	                          onChange={(event) => updateInvoiceSettings("taxNumber", event.target.value)}
+	                          placeholder="GST / tax number"
+	                        />
+	                      </label>
+	                      <label className="settings-field">
+	                        <span>Tax rate</span>
+	                        <input
+	                          value={invoiceSettings.taxRate}
+	                          min={0}
+	                          max={30}
+	                          step={0.5}
+	                          onChange={(event) => updateInvoiceSettings("taxRate", Number(event.target.value))}
+	                          type="number"
+	                        />
+	                      </label>
+	                    </div>
+	                    <div className="service-form-row">
+	                      <label className="settings-field">
+	                        <span>Bank account</span>
+	                        <input
+	                          value={invoiceSettings.bankAccount}
+	                          onChange={(event) => updateInvoiceSettings("bankAccount", event.target.value)}
+	                        />
+	                      </label>
+	                      <label className="settings-field">
+	                        <span>Payment terms days</span>
+	                        <input
+	                          value={invoiceSettings.paymentTermsDays}
+	                          min={0}
+	                          max={120}
+	                          step={1}
+	                          onChange={(event) => updateInvoiceSettings("paymentTermsDays", Number(event.target.value))}
+	                          type="number"
+	                        />
+	                      </label>
+	                    </div>
+	                    <label className="settings-field">
+	                      <span>Business address</span>
+	                      <textarea
+	                        value={invoiceSettings.businessAddress}
+	                        onChange={(event) => updateInvoiceSettings("businessAddress", event.target.value)}
+	                        rows={2}
+	                      />
+	                    </label>
+	                    <div className="service-form-row">
+	                      <label className="settings-field">
+	                        <span>Header text</span>
+	                        <textarea
+	                          value={invoiceSettings.headerText}
+	                          onChange={(event) => updateInvoiceSettings("headerText", event.target.value)}
+	                          rows={2}
+	                        />
+	                      </label>
+	                      <label className="settings-field">
+	                        <span>Footer text</span>
+	                        <textarea
+	                          value={invoiceSettings.footerText}
+	                          onChange={(event) => updateInvoiceSettings("footerText", event.target.value)}
+	                          rows={2}
+	                        />
+	                      </label>
+	                    </div>
+	                    <label className="settings-field">
+	                      <span>Payment instructions</span>
+	                      <textarea
+	                        value={invoiceSettings.paymentInstructions}
+	                        onChange={(event) => updateInvoiceSettings("paymentInstructions", event.target.value)}
+	                        rows={2}
+	                      />
+	                    </label>
+	                    <div className="custom-field-list">
+	                      <div className="services-topline">
+	                        <div>
+	                          <span>Custom fields</span>
+	                          <h2>Invoice fields</h2>
+	                        </div>
+	                        <button className="outline-button" onClick={addInvoiceCustomField} type="button">
+	                          <Plus size={16} />
+	                          Add Field
+	                        </button>
+	                      </div>
+	                      {invoiceSettings.customFields.map((field) => (
+	                        <div className="custom-field-row" key={field.id}>
+	                          <label className="settings-field">
+	                            <span>Label</span>
+	                            <input
+	                              value={field.label}
+	                              onChange={(event) => updateInvoiceCustomField(field.id, "label", event.target.value)}
+	                            />
+	                          </label>
+	                          <label className="settings-field">
+	                            <span>Value</span>
+	                            <input
+	                              value={field.value}
+	                              onChange={(event) => updateInvoiceCustomField(field.id, "value", event.target.value)}
+	                            />
+	                          </label>
+	                          <label className="settings-field">
+	                            <span>Placement</span>
+	                            <select
+	                              value={field.placement}
+	                              onChange={(event) =>
+	                                updateInvoiceCustomField(field.id, "placement", event.target.value as InvoiceCustomFieldPlacement)
+	                              }
+	                            >
+	                              <option value="header">Header</option>
+	                              <option value="bill-to">Bill-to block</option>
+	                              <option value="payment">Payment block</option>
+	                              <option value="footer">Footer</option>
+	                            </select>
+	                          </label>
+	                          <button
+	                            className="icon-button"
+	                            onClick={() => removeInvoiceCustomField(field.id)}
+	                            type="button"
+	                            aria-label="Remove custom field"
+	                          >
+	                            <Trash2 size={16} />
+	                          </button>
+	                        </div>
+	                      ))}
+	                    </div>
+	                  </details>
+	                </div>
+	                <button className="primary-button settings-save" onClick={saveCoachAccount}>
                   {coachAccountSaveState === "saving"
                     ? "Saving"
                     : coachAccountSaveState === "saved"

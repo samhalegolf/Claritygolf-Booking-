@@ -13,6 +13,24 @@ const defaultEmailTemplates = {
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
 };
 
+const defaultInvoiceSettings = {
+  enabled: true,
+  showBillingWorkspace: true,
+  prefix: "INV",
+  nextNumber: 1001,
+  currency: "NZD",
+  taxName: "GST",
+  taxNumber: "",
+  taxRate: 15,
+  bankAccount: "",
+  paymentTermsDays: 7,
+  businessAddress: "",
+  headerText: "",
+  footerText: "Thank you for training with Sam Hale Golf.",
+  paymentInstructions: "Please pay by bank transfer and use the invoice number as reference.",
+  customFields: [],
+};
+
 const defaultServices = [
   {
     id: "lesson-30",
@@ -108,9 +126,12 @@ const defaultServices = [
     active: true,
     capacity: 1,
     minParticipants: 1,
-    lessonFormat: "private",
+    lessonFormat: "package",
     priceMode: "session",
     location: "Package redemption",
+    packageAllowance: 5,
+    packageCoverageMode: "upfront",
+    packageCoversServiceId: "lesson-60",
   },
 ];
 
@@ -180,6 +201,14 @@ function text(value, status = 200, contentType = "text/plain; charset=utf-8") {
 function cleanString(value, fallback = "", max = 600) {
   if (typeof value !== "string") return fallback;
   return value.trim().slice(0, max);
+}
+
+function safeJsonParse(value, fallback) {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function cleanSlug(value, fallback = "sam-hale-golf") {
@@ -258,7 +287,7 @@ function cleanService(service, index = 0) {
   const duration = Number.isFinite(Number(service?.duration)) ? Number(service.duration) : fallback.duration;
   const price = Number.isFinite(Number(service?.price)) ? Number(service.price) : fallback.price;
   const capacity = Number.isFinite(Number(service?.capacity)) ? Number(service.capacity) : fallback.capacity || 1;
-  const lessonFormat = service?.lessonFormat === "group" ? "group" : "private";
+  const lessonFormat = service?.lessonFormat === "package" ? "package" : service?.lessonFormat === "group" ? "group" : "private";
   const cleanCapacity = Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
   const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
     ? Number(service.minParticipants)
@@ -268,19 +297,26 @@ function cleanService(service, index = 0) {
   const minParticipants =
     lessonFormat === "group" ? Math.max(2, Math.min(cleanCapacity, Math.round(rawMinParticipants))) : 1;
   const priceMode = lessonFormat === "group" && service?.priceMode === "per-person" ? "per-person" : "session";
+  const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
+    ? Math.max(1, Math.min(100, Math.round(Number(service.packageAllowance))))
+    : Math.max(1, fallback.packageAllowance || 5);
   return {
     id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
     name,
     duration: Math.max(15, Math.min(240, Math.round(duration))),
     price: Math.max(0, Math.round(price)),
     description: cleanString(service?.description, fallback.description, 240),
-    visibility: service?.visibility === "private" ? "private" : "public",
+    visibility: lessonFormat === "package" || service?.visibility === "private" ? "private" : "public",
     active: service?.active !== false,
     capacity: cleanCapacity,
     minParticipants,
     lessonFormat,
     priceMode,
     location: cleanString(service?.location, fallback.location, 160),
+    packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
+    packageCoverageMode:
+      lessonFormat === "package" && service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : lessonFormat === "package" ? "upfront" : undefined,
+    packageCoversServiceId: lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) : undefined,
   };
 }
 
@@ -338,6 +374,46 @@ function defaultCoachAccount() {
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
     calendarSlug: env("CLARITY_CALENDAR_SLUG", "sam-hale-golf"),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
+    invoiceSettings: defaultInvoiceSettings,
+  };
+}
+
+function cleanInvoiceCustomField(field, index = 0) {
+  const label = cleanString(field?.label, "", 80);
+  const value = cleanString(field?.value, "", 180);
+  if (!label && !value) return null;
+  const placement = ["bill-to", "payment", "footer"].includes(field?.placement) ? field.placement : "header";
+  return {
+    id: cleanString(field?.id, `field-${index + 1}`, 80),
+    label: label || "Custom field",
+    value,
+    placement,
+  };
+}
+
+function cleanInvoiceSettings(settings = {}) {
+  const nextNumber = Number(settings?.nextNumber ?? defaultInvoiceSettings.nextNumber);
+  const taxRate = Number(settings?.taxRate ?? defaultInvoiceSettings.taxRate);
+  const paymentTermsDays = Number(settings?.paymentTermsDays ?? defaultInvoiceSettings.paymentTermsDays);
+  const customFields = Array.isArray(settings?.customFields)
+    ? settings.customFields.map(cleanInvoiceCustomField).filter(Boolean).slice(0, 12)
+    : [];
+  return {
+    enabled: settings?.enabled !== false,
+    showBillingWorkspace: settings?.showBillingWorkspace !== false,
+    prefix: cleanString(settings?.prefix, defaultInvoiceSettings.prefix, 12).toUpperCase().replace(/[^A-Z0-9-]/g, "") || defaultInvoiceSettings.prefix,
+    nextNumber: Number.isFinite(nextNumber) ? Math.max(1, Math.min(999999, Math.round(nextNumber))) : defaultInvoiceSettings.nextNumber,
+    currency: cleanString(settings?.currency, defaultInvoiceSettings.currency, 8).toUpperCase(),
+    taxName: cleanString(settings?.taxName, defaultInvoiceSettings.taxName, 24),
+    taxNumber: cleanString(settings?.taxNumber, "", 80),
+    taxRate: Number.isFinite(taxRate) ? Math.max(0, Math.min(30, taxRate)) : defaultInvoiceSettings.taxRate,
+    bankAccount: cleanString(settings?.bankAccount, "", 120),
+    paymentTermsDays: Number.isFinite(paymentTermsDays) ? Math.max(0, Math.min(120, Math.round(paymentTermsDays))) : defaultInvoiceSettings.paymentTermsDays,
+    businessAddress: cleanString(settings?.businessAddress, "", 400),
+    headerText: cleanString(settings?.headerText, "", 280),
+    footerText: cleanString(settings?.footerText, defaultInvoiceSettings.footerText, 400),
+    paymentInstructions: cleanString(settings?.paymentInstructions, defaultInvoiceSettings.paymentInstructions, 400),
+    customFields,
   };
 }
 
@@ -356,6 +432,7 @@ function cleanCoachAccount(account) {
     bookingUrl: cleanUrl(account?.bookingUrl, defaults.bookingUrl),
     calendarSlug: cleanSlug(account?.calendarSlug, cleanSlug(businessName, defaults.calendarSlug)),
     caddyWorkspaceUrl: cleanUrl(account?.caddyWorkspaceUrl, defaults.caddyWorkspaceUrl),
+    invoiceSettings: cleanInvoiceSettings(account?.invoiceSettings),
   };
 }
 
@@ -455,15 +532,17 @@ async function ensureCoreTables() {
       start INTEGER NOT NULL,
       duration INTEGER NOT NULL,
       service_id TEXT,
-      client TEXT,
-      title TEXT NOT NULL,
-      phone TEXT,
-      email TEXT,
-      note TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
+	      client TEXT,
+	      title TEXT NOT NULL,
+	      phone TEXT,
+	      email TEXT,
+	      note TEXT,
+	      status TEXT NOT NULL DEFAULT 'booked',
+	      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	    )
+	  `;
+  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
   await db().sql`
     CREATE INDEX IF NOT EXISTS idx_calendar_items_slot
     ON calendar_items (week, day, start)
@@ -544,10 +623,11 @@ async function defaultSettings() {
     accountVenueShortName: account.venueShortName,
     accountTimezone: account.timezone,
     accountContactEmail: account.contactEmail,
-    accountBookingUrl: account.bookingUrl,
-    accountCalendarSlug: account.calendarSlug,
-    accountCaddyWorkspaceUrl: account.caddyWorkspaceUrl,
-    coachName: account.businessName,
+	    accountBookingUrl: account.bookingUrl,
+	    accountCalendarSlug: account.calendarSlug,
+	    accountCaddyWorkspaceUrl: account.caddyWorkspaceUrl,
+	    accountInvoiceSettingsJson: JSON.stringify(account.invoiceSettings),
+	    coachName: account.businessName,
     servicesJson: JSON.stringify(defaultServices),
     availabilityJson: JSON.stringify(defaultAvailability),
     brandLogoName: "",
@@ -579,13 +659,13 @@ async function seedItems() {
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
-    for (const item of initialItems) {
-      await client.query(
-        `INSERT INTO calendar_items (
-          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
-        ON CONFLICT (id) DO NOTHING`,
-        [
+	    for (const item of initialItems) {
+	      await client.query(
+	        `INSERT INTO calendar_items (
+	          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
+	        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+	        ON CONFLICT (id) DO NOTHING`,
+	        [
           item.id,
           item.kind,
           item.week,
@@ -595,11 +675,12 @@ async function seedItems() {
           item.serviceId,
           item.client,
           item.title,
-          item.phone,
-          item.email,
-          item.note,
-        ],
-      );
+	          item.phone,
+	          item.email,
+	          item.note,
+	          item.status || "booked",
+	        ],
+	      );
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -695,6 +776,7 @@ async function ensureSeeded() {
 }
 
 function rowToItem(row) {
+  const status = ["completed", "cancelled", "no_show"].includes(row.status) ? row.status : "booked";
   return {
     id: row.id,
     kind: row.kind,
@@ -708,6 +790,7 @@ function rowToItem(row) {
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
+    status,
   };
 }
 
@@ -723,7 +806,7 @@ function cleanCalendarItem(item) {
   if (!Number.isInteger(start) || start < 0 || start > 24 * 60) return null;
   if (!Number.isInteger(duration) || duration <= 0 || duration > 12 * 60) return null;
 
-  return {
+	  return {
     id: cleanString(item.id, `${kind}-${Date.now()}`),
     kind,
     week: Number.isInteger(Number(item.week)) ? Number(item.week) : 0,
@@ -733,11 +816,15 @@ function cleanCalendarItem(item) {
     serviceId: cleanString(item.serviceId),
     client: cleanString(item.client),
     title: cleanString(item.title, kind === "block" ? "Busy" : "Appointment"),
-    phone: cleanString(item.phone),
-    email: cleanString(item.email),
-    note: cleanString(item.note),
-  };
-}
+	    phone: cleanString(item.phone),
+	    email: cleanString(item.email),
+	    note: cleanString(item.note),
+	    status:
+	      item.status === "completed" || item.status === "cancelled" || item.status === "no_show"
+	        ? item.status
+	        : "booked",
+	  };
+	}
 
 function normalizeItems(items) {
   return Array.isArray(items) ? items.map(cleanCalendarItem).filter(Boolean) : initialItems;
@@ -1106,12 +1193,12 @@ async function writeItems(items) {
   try {
     await client.query("BEGIN");
     await client.query("DELETE FROM calendar_items");
-    for (const item of cleanItems) {
-      await client.query(
-        `INSERT INTO calendar_items (
-          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`,
-        [
+	    for (const item of cleanItems) {
+	      await client.query(
+	        `INSERT INTO calendar_items (
+	          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
+	        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())`,
+	        [
           item.id,
           item.kind,
           item.week ?? 0,
@@ -1121,11 +1208,12 @@ async function writeItems(items) {
           item.serviceId || "",
           item.client || "",
           item.title,
-          item.phone || "",
-          item.email || "",
-          item.note || "",
-        ],
-      );
+	          item.phone || "",
+	          item.email || "",
+	          item.note || "",
+	          item.status || "booked",
+	        ],
+	      );
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -1229,11 +1317,12 @@ async function readCoachAccount() {
     venueShortName: (await getSetting("accountVenueShortName")) || defaults.venueShortName,
     timezone: (await getSetting("accountTimezone")) || defaults.timezone,
     contactEmail: (await getSetting("accountContactEmail")) || defaults.contactEmail,
-    bookingUrl: (await getSetting("accountBookingUrl")) || defaults.bookingUrl,
-    calendarSlug: (await getSetting("accountCalendarSlug")) || defaults.calendarSlug,
-    caddyWorkspaceUrl: (await getSetting("accountCaddyWorkspaceUrl")) || defaults.caddyWorkspaceUrl,
-  });
-}
+	    bookingUrl: (await getSetting("accountBookingUrl")) || defaults.bookingUrl,
+	    calendarSlug: (await getSetting("accountCalendarSlug")) || defaults.calendarSlug,
+	    caddyWorkspaceUrl: (await getSetting("accountCaddyWorkspaceUrl")) || defaults.caddyWorkspaceUrl,
+	    invoiceSettings: safeJsonParse((await getSetting("accountInvoiceSettingsJson")) || "", defaults.invoiceSettings),
+	  });
+	}
 
 async function writeCoachAccount(account) {
   const clean = cleanCoachAccount(account);
@@ -1244,10 +1333,11 @@ async function writeCoachAccount(account) {
   await setSetting("accountVenueShortName", clean.venueShortName);
   await setSetting("accountTimezone", clean.timezone);
   await setSetting("accountContactEmail", clean.contactEmail);
-  await setSetting("accountBookingUrl", clean.bookingUrl);
-  await setSetting("accountCalendarSlug", clean.calendarSlug);
-  await setSetting("accountCaddyWorkspaceUrl", clean.caddyWorkspaceUrl);
-  await setSetting("coachName", clean.businessName);
+	  await setSetting("accountBookingUrl", clean.bookingUrl);
+	  await setSetting("accountCalendarSlug", clean.calendarSlug);
+	  await setSetting("accountCaddyWorkspaceUrl", clean.caddyWorkspaceUrl);
+	  await setSetting("accountInvoiceSettingsJson", JSON.stringify(clean.invoiceSettings));
+	  await setSetting("coachName", clean.businessName);
   await setSetting("updatedAt", nowIso());
   return clean;
 }
@@ -1539,7 +1629,7 @@ function publicCalendarState(state) {
 function publicBookingState(state) {
   return {
     updatedAt: state.updatedAt,
-    services: (state.services || []).filter((service) => service.active && service.visibility === "public"),
+	    services: (state.services || []).filter((service) => service.active && service.visibility === "public" && service.lessonFormat !== "package"),
     availability: state.availability || [],
     brand: state.brand,
     account: state.account,
@@ -2034,6 +2124,36 @@ async function resetAdminPassword(token, password) {
   return { user: { id: row.user_id, email: row.email } };
 }
 
+async function changeAdminPassword(session, currentPassword, nextPassword) {
+  if (!session?.email) return { error: "unauthorized" };
+  if (typeof nextPassword !== "string" || nextPassword.length < 8) return { error: "weak_password" };
+  const user = await verifyAdminPassword(session.email, currentPassword || "");
+  if (!user) return { error: "invalid_current_password" };
+
+  const { passwordHash, salt } = hashPassword(nextPassword);
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE admin_users
+       SET password_hash = $1,
+           password_salt = $2,
+           updated_at = NOW()
+       WHERE id = $3`,
+      [passwordHash, salt, user.id],
+    );
+    await client.query("DELETE FROM admin_sessions WHERE user_id = $1", [user.id]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return { user };
+}
+
 async function createAdminSession(userId) {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000).toISOString();
@@ -2098,7 +2218,7 @@ function hasCollision(items, candidate) {
 async function createPublicBooking(payload, context = null) {
   const state = await readPublicCalendarState();
   const service = state.services.find(
-    (candidate) => candidate.id === payload?.serviceId && candidate.active && candidate.visibility === "public",
+    (candidate) => candidate.id === payload?.serviceId && candidate.active && candidate.visibility === "public" && candidate.lessonFormat !== "package",
   );
   if (!service) throw Object.assign(new Error("Choose a public lesson type."), { status: 400 });
 
@@ -2133,6 +2253,7 @@ async function createPublicBooking(payload, context = null) {
     phone,
     email,
     note: "Booked from public booking page.",
+    status: "booked",
   };
   await writePublicBookingState(state, [...state.items, appointment]);
   const notifications = await sendInitialBookingNotifications(appointment, "booking");
@@ -2632,6 +2753,28 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
       }
       if (!result.user) {
         return json({ error: "invalid_token", message: "This reset link has expired or has already been used." }, 400);
+      }
+      const session = await createAdminSession(result.user.id);
+      return json(
+        { authenticated: true, email: result.user.email, expiresAt: session.expiresAt },
+        200,
+        { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
+      );
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/change-password") {
+      const currentSession = await requireAdmin(req);
+      if (!currentSession) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+      const body = await parseBody(req);
+      const result = await changeAdminPassword(currentSession, body.currentPassword || "", body.newPassword || "");
+      if (result.error === "weak_password") {
+        return json({ error: "weak_password", message: "Use at least 8 characters." }, 400);
+      }
+      if (result.error === "invalid_current_password") {
+        return json({ error: "invalid_current_password", message: "Current password is incorrect." }, 400);
+      }
+      if (!result.user) {
+        return json({ error: "change_password_failed", message: "Could not change password." }, 400);
       }
       const session = await createAdminSession(result.user.id);
       return json(

@@ -1,3 +1,13 @@
+// Documentation-only guardrail: this is the Supabase REST implementation used
+// by the local @netlify/database compatibility package.
+// source/package.json maps @netlify/database to source/netlify/functions/local-db,
+// and index.mjs re-exports getSupabaseDatabase() as getDatabase().
+// Despite the local-db folder name, this is not an active local production
+// database; production persistence is Supabase-backed through SUPABASE_URL and
+// SUPABASE_SERVICE_ROLE_KEY / SUPABASE_SERVICE_KEY.
+// booking-core.mts reaches this adapter through @netlify/database. Some other
+// functions may still import direct Supabase helpers and should be kept in sync
+// until a later explicit adapter-consolidation refactor.
 function env(name, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
 }

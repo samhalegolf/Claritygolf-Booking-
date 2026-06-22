@@ -1,6 +1,7 @@
 import {
   cleanupExpiredPasswordResets,
   cleanupExpiredSessions,
+  changeAdminPassword,
   createAdminSession,
   createPasswordReset,
   createPublicBooking,
@@ -298,6 +299,33 @@ export function calendarApiMiddleware() {
         }
         if (!result.user) {
           sendJson(res, 400, { error: "invalid_token", message: "This reset link has expired or has already been used." });
+          return;
+        }
+        const session = await createAdminSession(result.user.id);
+        sendJson(
+          res,
+          200,
+          { authenticated: true, email: result.user.email, expiresAt: session.expiresAt },
+          { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
+        );
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/api/auth/change-password") {
+        const currentSession = await requireAdmin(req, res);
+        if (!currentSession) return;
+        const body = await readJsonBody(req);
+        const result = await changeAdminPassword(currentSession, body.currentPassword || "", body.newPassword || "");
+        if (result.error === "weak_password") {
+          sendJson(res, 400, { error: "weak_password", message: "Use at least 8 characters." });
+          return;
+        }
+        if (result.error === "invalid_current_password") {
+          sendJson(res, 400, { error: "invalid_current_password", message: "Current password is incorrect." });
+          return;
+        }
+        if (!result.user) {
+          sendJson(res, 400, { error: "change_password_failed", message: "Could not change password." });
           return;
         }
         const session = await createAdminSession(result.user.id);
