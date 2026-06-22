@@ -1,6 +1,6 @@
 import pg from "pg";
 
-const { Pool } = pg;
+const { Client } = pg;
 
 function env(name, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -19,34 +19,62 @@ function databaseUrl() {
   return env("DATABASE_URL") || env("NETLIFY_DATABASE_URL") || env("POSTGRES_URL") || env("SUPABASE_DB_URL");
 }
 
-let cachedDatabase = null;
-let cachedPool = null;
-
-function createPool() {
+function createClient() {
   const connectionString = databaseUrl();
   if (!connectionString) {
     throw new Error("Database is not configured. Set DATABASE_URL in Netlify environment variables.");
   }
 
-  return new Pool({
+  return new Client({
     connectionString,
-    max: Number(env("DATABASE_POOL_MAX", "1")),
-    idleTimeoutMillis: Number(env("DATABASE_IDLE_TIMEOUT_MS", "1000")),
     connectionTimeoutMillis: Number(env("DATABASE_CONNECTION_TIMEOUT_MS", "5000")),
-    allowExitOnIdle: true,
+    query_timeout: Number(env("DATABASE_QUERY_TIMEOUT_MS", "10000")),
+    statement_timeout: Number(env("DATABASE_STATEMENT_TIMEOUT_MS", "10000")),
     ssl: env("DATABASE_SSL", "true").toLowerCase() === "false" ? false : { rejectUnauthorized: false },
   });
 }
 
+async function runQuery(text, values = []) {
+  const client = createClient();
+  await client.connect();
+  try {
+    const result = await client.query(text, values);
+    return result.rows;
+  } finally {
+    await client.end().catch(() => {});
+  }
+}
+
+class SingleUseClient {
+  constructor(client) {
+    this.client = client;
+  }
+
+  async query(text, values = []) {
+    return this.client.query(text, values);
+  }
+
+  release() {
+    void this.client.end().catch(() => {});
+  }
+}
+
+let cachedDatabase = null;
+
 export function getDatabase() {
-  if (!cachedPool) cachedPool = createPool();
   if (!cachedDatabase) {
     cachedDatabase = {
       sql(strings, ...values) {
         const built = buildSql(strings, values);
-        return cachedPool.query(built.text, built.values).then((result) => result.rows);
+        return runQuery(built.text, built.values);
       },
-      pool: cachedPool,
+      pool: {
+        async connect() {
+          const client = createClient();
+          await client.connect();
+          return new SingleUseClient(client);
+        },
+      },
     };
   }
   return cachedDatabase;
