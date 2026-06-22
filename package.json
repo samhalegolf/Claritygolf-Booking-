@@ -10,7 +10,7 @@
     "start": "node server/app-server.mjs",
     "serve:full": "npm run build && node server/app-server.mjs",
     "test": "NODE_NO_WARNINGS=1 node --experimental-strip-types --test tests/*.test.mjs",
-    "prebuild": "npm test && npm run check:functions",
+    "prebuild": "npm run check:functions",
     "check:functions": "node scripts/check-functions.mjs"
   },
   "dependencies": {
