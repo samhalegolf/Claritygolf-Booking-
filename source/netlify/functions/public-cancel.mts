@@ -192,7 +192,7 @@ export default async function handler(req: Request) {
         duration: result.appointment.duration,
       },
       ...(result.stateItems ? { state: { items: result.stateItems } } : {}),
-      notifications: result.notifications,
+      notifications: result.notifications.filter((notification: any) => notification?.channel === "client"),
     });
   } catch (error: any) {
     console.error("public_cancel:failed", error);

@@ -1849,7 +1849,7 @@ const defaultNotificationSettings: NotificationSettings = {
   sendAdminEmail: true,
   clientEmailSubject: "Your {{service}} is confirmed",
   clientEmailIntro: "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
-  clientEmailFooter: "Need to move your booking? Reply to this email and we will help.",
+  clientEmailFooter: "We look forward to seeing you.",
   adminEmailSubject: "New booking: {{client}}",
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
   smsProviderName: "",
@@ -7673,27 +7673,23 @@ function App() {
                   </em>
                   <p>{coachAccount.venueName}</p>
                 </div>
-                {bookingConfirmation.notifications.length > 0 && (
+                {bookingConfirmation.notifications.some((result) => result.channel === "client") && (
                   <div className="email-status-list">
-                    {bookingConfirmation.notifications.map((result, index) => {
-                      const tone = emailResultTone(result);
-                      const channelLabel =
-                        result.channel === "admin"
-                          ? "Admin notification"
-                          : result.channel === "coach"
-                            ? "Coach notification"
-                            : "Client email";
-                      return (
-                        <div className={`email-status ${tone}`} key={`${result.channel}-${index}`}>
-                          {tone === "sent" ? <Check size={17} /> : tone === "failed" ? <X size={17} /> : <Mail size={17} />}
-                          <span>
-                            {channelLabel}: {tone === "sent" ? "sent" : tone}
-                            {result.recipient ? ` to ${result.recipient}` : ""}
-                            {result.reason || result.error ? ` · ${(result.reason || result.error || "").replaceAll("_", " ")}` : ""}
-                          </span>
-                        </div>
-                      );
-                    })}
+                    {bookingConfirmation.notifications
+                      .filter((result) => result.channel === "client")
+                      .map((result, index) => {
+                        const tone = emailResultTone(result);
+                        return (
+                          <div className={`email-status ${tone}`} key={`client-${index}`}>
+                            {tone === "sent" ? <Check size={17} /> : tone === "failed" ? <X size={17} /> : <Mail size={17} />}
+                            <span>
+                              Client email: {tone === "sent" ? "sent" : tone}
+                              {result.recipient ? ` to ${result.recipient}` : ""}
+                              {result.reason || result.error ? ` · ${(result.reason || result.error || "").replaceAll("_", " ")}` : ""}
+                            </span>
+                          </div>
+                        );
+                      })}
                   </div>
                 )}
                 {bookingConfirmation.kind !== "cancelled" && (

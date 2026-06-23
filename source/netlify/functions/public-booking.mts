@@ -130,7 +130,7 @@ export default async function handler(req: Request) {
         start: result.appointment.start,
         duration: result.appointment.duration,
       },
-      notifications: result.notifications,
+      notifications: result.notifications.filter((notification: any) => notification?.channel === "client"),
     });
   } catch (error: any) {
     console.error("public_booking:failed", error);

@@ -51,6 +51,7 @@ export const config: Config = {
     "/api/public-notification-status",
     "/api/public-booking",
     "/api/public-booking-notifications",
+    "/api/public-calendar-invite",
     "/api/public-cancel",
     "/api/public-reschedule",
     "/api/public-reschedule-lookup",

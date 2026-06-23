@@ -170,6 +170,14 @@ function cleanString(value: unknown, fallback = "", max = 600) {
     : fallback;
 }
 
+function modernClientEmailFooter(value: unknown) {
+  const fallback = "We look forward to seeing you.";
+  const footer = cleanString(value, fallback, 900);
+  return /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i.test(footer)
+    ? fallback
+    : footer;
+}
+
 function parseCookies(req: Request) {
   const cookieHeaderValue = req.headers.get("cookie") || "";
   return Object.fromEntries(
@@ -669,9 +677,7 @@ async function readState() {
       clientEmailIntro:
         settings.clientEmailIntro ||
         "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
-      clientEmailFooter:
-        settings.clientEmailFooter ||
-        "Need to move your booking? Reply to this email and we will help.",
+      clientEmailFooter: modernClientEmailFooter(settings.clientEmailFooter),
       adminEmailSubject: settings.adminEmailSubject || "New booking: {{client}}",
       adminEmailIntro:
         settings.adminEmailIntro ||

@@ -6,7 +6,7 @@ const sessionCookieName = "clarity_session";
 const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
   clientEmailIntro: "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
-  clientEmailFooter: "Need to move your booking? Reply to this email and we will help.",
+  clientEmailFooter: "We look forward to seeing you.",
   adminEmailSubject: "New booking: {{client}}",
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
 };
@@ -36,6 +36,13 @@ function cleanString(value: unknown, fallback = "", max = 600) {
 
 function cleanEmail(value: unknown, fallback = "") {
   return cleanString(value, fallback, 180).toLowerCase();
+}
+
+function modernClientEmailFooter(value: unknown) {
+  const footer = cleanString(value, defaultEmailTemplates.clientEmailFooter, 900);
+  return /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i.test(footer)
+    ? defaultEmailTemplates.clientEmailFooter
+    : footer;
 }
 
 function hasOwn(source: unknown, key: string) {
@@ -119,7 +126,7 @@ async function readAdminSettings() {
     sendAdminEmail: settings.sendAdminEmail !== "false",
     clientEmailSubject: settings.clientEmailSubject || defaultEmailTemplates.clientEmailSubject,
     clientEmailIntro: settings.clientEmailIntro || defaultEmailTemplates.clientEmailIntro,
-    clientEmailFooter: settings.clientEmailFooter || defaultEmailTemplates.clientEmailFooter,
+    clientEmailFooter: modernClientEmailFooter(settings.clientEmailFooter),
     adminEmailSubject: settings.adminEmailSubject || defaultEmailTemplates.adminEmailSubject,
     adminEmailIntro: settings.adminEmailIntro || defaultEmailTemplates.adminEmailIntro,
     smsProviderName: settings.smsProviderName || "",
@@ -144,7 +151,7 @@ async function writeAdminSettings(settings: any) {
   if (hasOwn(settings, "sendAdminEmail")) await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
   if (hasOwn(settings, "clientEmailSubject")) await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
   if (hasOwn(settings, "clientEmailIntro")) await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
-  if (hasOwn(settings, "clientEmailFooter")) await setSetting("clientEmailFooter", cleanString(settings?.clientEmailFooter, defaultEmailTemplates.clientEmailFooter, 900));
+  if (hasOwn(settings, "clientEmailFooter")) await setSetting("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
   if (hasOwn(settings, "adminEmailSubject")) await setSetting("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
   if (hasOwn(settings, "adminEmailIntro")) await setSetting("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
   if (hasOwn(settings, "smsProviderName")) await setSetting("smsProviderName", cleanString(settings?.smsProviderName, "", 80));

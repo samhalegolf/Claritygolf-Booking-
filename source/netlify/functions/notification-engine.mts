@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
 type BookingAction = "booking" | "rescheduled" | "cancelled" | "updated" | "reminder" | "test";
+type NotificationChannel = "client" | "coach" | "admin";
 
 type NotifyInput = {
   action?: BookingAction;
@@ -23,6 +24,15 @@ function cleanText(value: unknown, fallback = "", max = 800) {
 function cleanEmail(value: unknown, fallback = "") {
   const email = cleanText(value, "", 180).toLowerCase();
   return email.includes("@") ? email : fallback;
+}
+
+function cleanUrl(value: unknown, fallback: string) {
+  const candidate = cleanText(value, fallback, 700);
+  try {
+    return new URL(candidate).toString();
+  } catch {
+    return fallback;
+  }
 }
 
 function hash(value: unknown) {
@@ -73,6 +83,10 @@ async function settingRows() {
 async function readSettings() {
   const rows = await settingRows();
   const s = Object.fromEntries(rows.map((row: any) => [row.key, row.value]));
+  const siteUrl = cleanUrl(
+    env("URL") || env("DEPLOY_PRIME_URL") || env("CLARITY_SITE_URL", "https://claritygolf.app"),
+    "https://claritygolf.app/",
+  );
   return {
     notificationEmail: cleanEmail(s.notificationEmail, env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz")),
     coachEmail: cleanEmail(s.coachEmail, env("CLARITY_COACH_EMAIL", "")),
@@ -82,7 +96,7 @@ async function readSettings() {
     sendAdminEmail: s.sendAdminEmail !== "false",
     clientEmailSubject: s.clientEmailSubject || "Your {{service}} is confirmed",
     clientEmailIntro: s.clientEmailIntro || "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
-    clientEmailFooter: s.clientEmailFooter || "Need to move your booking? Reply to this email and we will help.",
+    clientEmailFooter: s.clientEmailFooter || "We look forward to seeing you.",
     adminEmailSubject: s.adminEmailSubject || "New booking: {{client}}",
     adminEmailIntro: s.adminEmailIntro || "{{client}} booked {{service}} for {{date}} at {{time}}.",
     rescheduleClientSubject: s.rescheduleClientSubject || "Your {{service}} has been rescheduled",
@@ -95,19 +109,46 @@ async function readSettings() {
     businessName: s.accountBusinessName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
     coachName: s.accountCoachName || env("CLARITY_COACH_NAME", "Sam Hale"),
     venueName: s.accountVenueName || env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
+    timezone: s.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
+    bookingUrl: cleanUrl(s.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"), "https://book.claritygolf.app/"),
+    siteUrl,
     contactEmail: cleanEmail(s.accountContactEmail, env("CLARITY_CONTACT_EMAIL", "sam@samhalegolf.co.nz")),
   };
 }
 
 async function readServices() {
   const rows = await supabase("settings", { query: "select=key,value&key=eq.servicesJson&limit=1" }).catch(() => []);
-  try { return rows[0]?.value ? JSON.parse(rows[0].value) : []; } catch { return []; }
+  try {
+    return rows[0]?.value ? JSON.parse(rows[0].value) : [];
+  } catch {
+    return [];
+  }
+}
+
+function slotDate(week = 0, day = 0) {
+  const date = new Date(baseWeekStart);
+  date.setUTCDate(baseWeekStart.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
+  return date;
 }
 
 function slotDateLabel(week = 0, day = 0) {
-  const date = new Date(baseWeekStart);
-  date.setUTCDate(baseWeekStart.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
-  return date.toLocaleDateString("en-NZ", { weekday: "long", month: "short", day: "numeric" });
+  return slotDate(week, day).toLocaleDateString("en-NZ", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function pad(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function compactLocalDateTime(week = 0, day = 0, minutes = 0) {
+  const date = slotDate(week, day);
+  const hour = Math.floor(Number(minutes || 0) / 60);
+  const minute = Number(minutes || 0) % 60;
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}T${pad(hour)}${pad(minute)}00`;
 }
 
 function timeLabel(minutes = 0) {
@@ -119,7 +160,9 @@ function timeLabel(minutes = 0) {
   return `${hour}:${String(mins).padStart(2, "0")} ${period}`;
 }
 
-function rangeLabel(start = 0, duration = 0) { return `${timeLabel(start)}-${timeLabel(Number(start || 0) + Number(duration || 0))}`; }
+function rangeLabel(start = 0, duration = 0) {
+  return `${timeLabel(start)}-${timeLabel(Number(start || 0) + Number(duration || 0))}`;
+}
 
 function normaliseAppointment(raw: any = {}) {
   const client = cleanText(raw.client, cleanText(raw.title, [raw.firstName, raw.lastName].filter(Boolean).join(" "), 160), 160);
@@ -137,12 +180,58 @@ function normaliseAppointment(raw: any = {}) {
     email: cleanEmail(raw.email, ""),
     note: cleanText(raw.note || raw.notes, "", 1200),
     status:
-      raw.status === "completed" ||
-      raw.status === "cancelled" ||
-      raw.status === "no_show"
+      raw.status === "completed" || raw.status === "cancelled" || raw.status === "no_show"
         ? raw.status
         : "booked",
   };
+}
+
+function rescheduleUrlFor(appt: any, settings: any) {
+  if (!appt?.id) return "";
+  try {
+    const url = new URL(settings.bookingUrl || "https://book.claritygolf.app");
+    url.searchParams.set("embed", "booking");
+    url.searchParams.set("mode", "reschedule");
+    url.searchParams.set("booking", appt.id);
+    if (appt.email) url.searchParams.set("email", appt.email);
+    if (appt.phone) url.searchParams.set("phone", appt.phone);
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function googleCalendarUrlFor(appt: any, serviceName: string, settings: any, rescheduleUrl: string) {
+  const start = compactLocalDateTime(appt.week, appt.day, appt.start);
+  const end = compactLocalDateTime(appt.week, appt.day, Number(appt.start || 0) + Number(appt.duration || 0));
+  const details = [
+    `${serviceName} for ${appt.client || appt.title || "Client"}.`,
+    rescheduleUrl ? `Manage or reschedule: ${rescheduleUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: `${serviceName} with ${settings.coachName || settings.businessName}`,
+    dates: `${start}/${end}`,
+    details,
+    location: settings.venueName,
+    ctz: settings.timezone || "Pacific/Auckland",
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function appleCalendarUrlFor(appt: any, settings: any) {
+  if (!appt?.id) return "";
+  try {
+    const url = new URL("/api/public-calendar-invite", settings.siteUrl || "https://claritygolf.app");
+    url.searchParams.set("booking", appt.id);
+    if (appt.email) url.searchParams.set("email", appt.email);
+    if (appt.phone) url.searchParams.set("phone", appt.phone);
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 async function recordNotification(row: any) {
@@ -150,19 +239,21 @@ async function recordNotification(row: any) {
     await supabase("notification_history", {
       method: "POST",
       prefer: "return=minimal",
-      body: [{
-        id: randomUUID(),
-        person_key: cleanText(row.personKey, "", 220),
-        calendar_item_id: cleanText(row.calendarItemId, "", 180),
-        recipient: cleanEmail(row.recipient, cleanText(row.recipient, "", 180)),
-        subject: cleanText(row.subject, "", 220),
-        kind: cleanText(row.kind, "", 100),
-        status: cleanText(row.status, "", 80),
-        provider: cleanText(row.provider, "", 80),
-        provider_id: cleanText(row.providerId, "", 180),
-        error: cleanText(row.error, "", 1000),
-        created_at: new Date().toISOString(),
-      }],
+      body: [
+        {
+          id: randomUUID(),
+          person_key: cleanText(row.personKey, "", 220),
+          calendar_item_id: cleanText(row.calendarItemId, "", 180),
+          recipient: cleanEmail(row.recipient, cleanText(row.recipient, "", 180)),
+          subject: cleanText(row.subject, "", 220),
+          kind: cleanText(row.kind, "", 100),
+          status: cleanText(row.status, "", 80),
+          provider: cleanText(row.provider, "", 80),
+          provider_id: cleanText(row.providerId, "", 180),
+          error: cleanText(row.error, "", 1000),
+          created_at: new Date().toISOString(),
+        },
+      ],
     });
   } catch (error) {
     console.error("notification_engine:history_failed", error);
@@ -177,12 +268,35 @@ async function sendEmail(message: { to: string; subject: string; html: string; t
   const from = env("CLARITY_EMAIL_FROM", `${settings.businessName} <onboarding@resend.dev>`);
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "Idempotency-Key": message.idempotencyKey },
-    body: JSON.stringify({ from, to: [message.to], subject: message.subject, html: message.html, text: message.text, ...(message.replyTo ? { reply_to: message.replyTo } : {}) }),
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": message.idempotencyKey,
+    },
+    body: JSON.stringify({
+      from,
+      to: [message.to],
+      subject: message.subject,
+      html: message.html,
+      text: message.text,
+      ...(message.replyTo ? { reply_to: message.replyTo } : {}),
+    }),
   });
   const responseText = await response.text().catch(() => "");
-  if (!response.ok) return { sent: false, reason: "resend_failed", error: responseText.slice(0, 1000), status: response.status };
-  try { const data = responseText ? JSON.parse(responseText) : {}; return { sent: true, id: data?.id || "" }; } catch { return { sent: true, id: "" }; }
+  if (!response.ok) {
+    return {
+      sent: false,
+      reason: "resend_failed",
+      error: responseText.slice(0, 1000),
+      status: response.status,
+    };
+  }
+  try {
+    const data = responseText ? JSON.parse(responseText) : {};
+    return { sent: true, id: data?.id || "" };
+  } catch {
+    return { sent: true, id: "" };
+  }
 }
 
 function actionLabels(action: BookingAction) {
@@ -190,10 +304,12 @@ function actionLabels(action: BookingAction) {
   if (action === "cancelled") return { title: "Booking cancelled", clientSubject: "Your golf lesson has been cancelled", adminSubject: "Booking cancelled" };
   if (action === "updated") return { title: "Booking updated", clientSubject: "Your golf lesson booking was updated", adminSubject: "Booking updated" };
   if (action === "reminder") return { title: "Booking reminder", clientSubject: "Reminder: your golf lesson is coming up", adminSubject: "Booking reminder" };
+  if (action === "test") return { title: "Booking email test", clientSubject: "Clarity Golf booking email test", adminSubject: "Clarity Golf booking email test" };
   return { title: "Booking confirmed", clientSubject: "Your golf lesson is confirmed", adminSubject: "New booking" };
 }
 
 function variablesFor(action: BookingAction, appt: any, previous: any, serviceName: string, settings: any) {
+  const rescheduleUrl = rescheduleUrlFor(appt, settings);
   return {
     client: appt.client || appt.title,
     firstName: String(appt.client || appt.title || "Client").split(/\s+/)[0] || "Client",
@@ -208,6 +324,9 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
     phone: appt.phone || "Not supplied",
     email: appt.email || "Not supplied",
     action,
+    rescheduleUrl,
+    googleCalendarUrl: googleCalendarUrlFor(appt, serviceName, settings, rescheduleUrl),
+    appleCalendarUrl: appleCalendarUrlFor(appt, settings),
   };
 }
 
@@ -220,14 +339,103 @@ function templateSubjects(action: BookingAction, settings: any, variables: Recor
   return { client: render(settings.clientEmailSubject, variables), admin: render(settings.adminEmailSubject, variables) };
 }
 
-function bodyFor(action: BookingAction, appt: any, previous: any, serviceName: string, settings: any, variables: Record<string, string>) {
+function clientIntro(action: BookingAction, settings: any, variables: Record<string, string>) {
+  if (action === "booking") return render(settings.clientEmailIntro, variables);
+  if (action === "rescheduled") return `Thanks ${variables.firstName}, your new lesson time is confirmed.`;
+  if (action === "cancelled") return `Your ${variables.service} booking has been cancelled.`;
+  if (action === "updated") return `Your ${variables.service} booking details have been updated.`;
+  if (action === "reminder") return `A reminder for your upcoming ${variables.service}.`;
+  return "This is a test of your booking email template.";
+}
+
+function clientFooter(action: BookingAction, settings: any, variables: Record<string, string>) {
+  const rendered = action === "booking" ? render(settings.clientEmailFooter, variables).trim() : "";
+  const isLegacyChangeFooter = /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i.test(rendered);
+  if (rendered && !isLegacyChangeFooter) return rendered;
+  if (action === "cancelled") return "If this cancellation was unexpected, reply to this email and we will help.";
+  if (action === "test") return "Email delivery is working.";
+  return "We look forward to seeing you.";
+}
+
+function detailTable(rows: Array<[string, string]>) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:20px 0;width:100%;max-width:560px">${rows
+    .filter(([, value]) => Boolean(value))
+    .map(
+      ([label, value], index, array) =>
+        `<tr><td style="padding:9px 10px;border-bottom:${index === array.length - 1 ? "0" : "1px solid #dfe5d8"};color:#697166;width:105px;vertical-align:top">${escapeHtml(label)}</td><td style="padding:9px 10px;border-bottom:${index === array.length - 1 ? "0" : "1px solid #dfe5d8"};color:#101612;vertical-align:top">${escapeHtml(value)}</td></tr>`,
+    )
+    .join("")}</table>`;
+}
+
+function clientActionButtonsHtml(action: BookingAction, variables: Record<string, string>) {
+  if (action === "cancelled" || action === "test") return "";
+  const manageButton = variables.rescheduleUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 14px"><tr><td><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">Manage / Reschedule</a></td></tr></table>`
+    : "";
+  const calendarButtons = variables.googleCalendarUrl || variables.appleCalendarUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 22px"><tr>${
+        variables.googleCalendarUrl
+          ? `<td style="padding:0 8px 8px 0"><a href="${escapeHtml(variables.googleCalendarUrl)}" style="display:inline-block;border:1px solid #cfd8ca;color:#101612;padding:10px 13px;text-decoration:none;border-radius:7px;font-weight:600"><span style="font-size:15px;vertical-align:-1px;margin-right:6px">&#128197;</span>Google Calendar</a></td>`
+          : ""
+      }${
+        variables.appleCalendarUrl
+          ? `<td style="padding:0 0 8px 0"><a href="${escapeHtml(variables.appleCalendarUrl)}" style="display:inline-block;border:1px solid #cfd8ca;color:#101612;padding:10px 13px;text-decoration:none;border-radius:7px;font-weight:600"><span style="font-size:15px;vertical-align:-1px;margin-right:6px">&#128467;&#65039;</span>Apple Calendar</a></td>`
+          : ""
+      }</tr></table>`
+    : "";
+  return `${manageButton}${calendarButtons}`;
+}
+
+function clientActionButtonsText(action: BookingAction, variables: Record<string, string>) {
+  if (action === "cancelled" || action === "test") return [];
+  return [
+    variables.rescheduleUrl ? `Manage / Reschedule: ${variables.rescheduleUrl}` : "",
+    variables.googleCalendarUrl ? `Google Calendar: ${variables.googleCalendarUrl}` : "",
+    variables.appleCalendarUrl ? `Apple Calendar: ${variables.appleCalendarUrl}` : "",
+  ].filter(Boolean);
+}
+
+function bodyFor(
+  action: BookingAction,
+  appt: any,
+  previous: any,
+  serviceName: string,
+  settings: any,
+  variables: Record<string, string>,
+  channel: NotificationChannel,
+) {
   const labels = actionLabels(action);
-  const intro = action === "booking" ? render(settings.clientEmailIntro, variables) : labels.title;
-  const previousLine = previous ? `Previous time: ${variables.previousDate}, ${variables.previousTime}` : "";
-  const rows = [`Client: ${variables.client}`, `Service: ${serviceName}`, `Date: ${variables.date}`, `Time: ${variables.time}`, previousLine, `Phone: ${variables.phone}`, `Email: ${variables.email}`, `Venue: ${variables.venue}`, `Booking ID: ${appt.id}`].filter(Boolean);
-  const htmlRows = rows.map((line) => `<p style="margin:6px 0">${escapeHtml(line)}</p>`).join("");
-  const footer = action === "booking" ? render(settings.clientEmailFooter, variables) : "Reply to this email if you need help.";
-  return { html: `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#111"><h2>${escapeHtml(labels.title)}</h2><p>${escapeHtml(intro)}</p>${htmlRows}<p>${escapeHtml(footer)}</p></div>`, text: [labels.title, "", intro, "", ...rows, "", footer].join("\n") };
+  const isClient = channel === "client";
+  const previousValue = previous ? `${variables.previousDate}, ${variables.previousTime}` : "";
+  const rows: Array<[string, string]> = isClient
+    ? [
+        ["Lesson", serviceName],
+        ["When", `${variables.date}, ${variables.time}`],
+        ["Previous", previousValue],
+        ["Where", variables.venue],
+      ]
+    : [
+        ["Client", variables.client],
+        ["Lesson", serviceName],
+        ["When", `${variables.date}, ${variables.time}`],
+        ["Previous", previousValue],
+        ["Phone", variables.phone],
+        ["Email", variables.email],
+        ["Where", variables.venue],
+        ["Booking ID", appt.id],
+      ];
+  const intro = isClient ? clientIntro(action, settings, variables) : render(settings.adminEmailIntro, variables);
+  const footer = isClient
+    ? clientFooter(action, settings, variables)
+    : `${channel === "coach" ? "Coach" : "Admin"} booking alert.`;
+  const actionsHtml = isClient ? clientActionButtonsHtml(action, variables) : "";
+  const actionsText = isClient ? clientActionButtonsText(action, variables) : [];
+  const textRows = rows.filter(([, value]) => Boolean(value)).map(([label, value]) => `${label}: ${value}`);
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#101612;max-width:600px"><h2 style="margin:0 0 12px">${escapeHtml(labels.title)}</h2><p style="margin:0 0 14px">${escapeHtml(intro)}</p>${detailTable(rows)}${actionsHtml}<p style="margin:18px 0 0;color:#526054">${escapeHtml(footer).replace(/\n/g, "<br/>")}</p></div>`;
+  const text = [labels.title, "", intro, "", ...textRows, "", ...actionsText, actionsText.length ? "" : "", footer]
+    .filter((line, index, lines) => !(line === "" && lines[index - 1] === ""))
+    .join("\n");
+  return { html, text };
 }
 
 export async function notifyBookingEvent(input: NotifyInput) {
@@ -240,12 +448,11 @@ export async function notifyBookingEvent(input: NotifyInput) {
   const serviceName = cleanText(service?.name, "Golf Lesson", 160);
   const variables = variablesFor(action, appt, previous, serviceName, settings);
   const subjects = templateSubjects(action, settings, variables);
-  const body = bodyFor(action, appt, previous, serviceName, settings, variables);
   const personKey = appt.email ? `email:${appt.email}` : appt.phone ? `phone:${appt.phone}` : `name:${appt.client.toLowerCase()}`;
   const signature = hash({ action, appt, previous, source: input.source }).slice(0, 24);
   const results: any[] = [];
 
-  async function sendAndRecord(channel: "client" | "coach" | "admin", recipient: string, subject: string) {
+  async function sendAndRecord(channel: NotificationChannel, recipient: string, subject: string) {
     const kind = `${action}_${channel}_email`;
     if (!recipient) {
       const skipped = { channel, recipient, subject, kind, status: "skipped", sent: false, reason: "missing_recipient" };
@@ -253,7 +460,15 @@ export async function notifyBookingEvent(input: NotifyInput) {
       await recordNotification({ personKey, calendarItemId: appt.id, recipient, subject, kind, status: "skipped", provider: "settings", error: "missing_recipient" });
       return;
     }
-    const result = await sendEmail({ to: recipient, subject, html: body.html, text: body.text, replyTo: settings.replyToEmail || settings.contactEmail, idempotencyKey: `${kind}-${appt.id}-${signature}` });
+    const body = bodyFor(action, appt, previous, serviceName, settings, variables, channel);
+    const result = await sendEmail({
+      to: recipient,
+      subject,
+      html: body.html,
+      text: body.text,
+      replyTo: settings.replyToEmail || settings.contactEmail,
+      idempotencyKey: `${kind}-${appt.id}-${signature}`,
+    });
     const status = result.sent ? "sent" : "failed";
     const output = { channel, recipient, subject, kind, status, ...result };
     results.push(output);
@@ -269,14 +484,23 @@ export async function notifyBookingEvent(input: NotifyInput) {
     return results;
   }
 
-  if (settings.sendClientEmail || action === "cancelled" || action === "rescheduled") await sendAndRecord("client", appt.email, subjects.client);
-  else await recordNotification({ personKey, calendarItemId: appt.id, recipient: appt.email, subject: subjects.client, kind: `${action}_client_email`, status: "skipped", provider: "settings", error: "disabled_client_email" });
+  if (settings.sendClientEmail || action === "cancelled" || action === "rescheduled") {
+    await sendAndRecord("client", appt.email, subjects.client);
+  } else {
+    await recordNotification({ personKey, calendarItemId: appt.id, recipient: appt.email, subject: subjects.client, kind: `${action}_client_email`, status: "skipped", provider: "settings", error: "disabled_client_email" });
+  }
 
-  if (settings.sendCoachEmail || action === "cancelled" || action === "rescheduled") await sendAndRecord("coach", settings.coachEmail || "", subjects.admin);
-  else await recordNotification({ personKey, calendarItemId: appt.id, recipient: settings.coachEmail || "", subject: subjects.admin, kind: `${action}_coach_email`, status: "skipped", provider: "settings", error: "disabled_coach_email" });
+  if (settings.sendCoachEmail || action === "cancelled" || action === "rescheduled") {
+    await sendAndRecord("coach", settings.coachEmail || "", subjects.admin);
+  } else {
+    await recordNotification({ personKey, calendarItemId: appt.id, recipient: settings.coachEmail || "", subject: subjects.admin, kind: `${action}_coach_email`, status: "skipped", provider: "settings", error: "disabled_coach_email" });
+  }
 
-  if (settings.sendAdminEmail || action === "cancelled" || action === "rescheduled") await sendAndRecord("admin", settings.notificationEmail || settings.contactEmail, subjects.admin);
-  else await recordNotification({ personKey, calendarItemId: appt.id, recipient: settings.notificationEmail || settings.contactEmail, subject: subjects.admin, kind: `${action}_admin_email`, status: "skipped", provider: "settings", error: "disabled_admin_email" });
+  if (settings.sendAdminEmail || action === "cancelled" || action === "rescheduled") {
+    await sendAndRecord("admin", settings.notificationEmail || settings.contactEmail, subjects.admin);
+  } else {
+    await recordNotification({ personKey, calendarItemId: appt.id, recipient: settings.notificationEmail || settings.contactEmail, subject: subjects.admin, kind: `${action}_admin_email`, status: "skipped", provider: "settings", error: "disabled_admin_email" });
+  }
 
   return results;
 }
@@ -289,9 +513,17 @@ export function inferBookingAction(previous: any, next: any): BookingAction | nu
   if (!previous || !next || next.kind !== "appointment") return null;
   if (previous.status !== "cancelled" && next.status === "cancelled") return "cancelled";
   if (previous.status === "cancelled" && next.status !== "cancelled") return "updated";
-  const slotChanged = Number(previous.week ?? 0) !== Number(next.week ?? 0) || Number(previous.day ?? 0) !== Number(next.day ?? 0) || Number(previous.start ?? 0) !== Number(next.start ?? 0) || Number(previous.duration ?? 0) !== Number(next.duration ?? 0);
+  const slotChanged =
+    Number(previous.week ?? 0) !== Number(next.week ?? 0) ||
+    Number(previous.day ?? 0) !== Number(next.day ?? 0) ||
+    Number(previous.start ?? 0) !== Number(next.start ?? 0) ||
+    Number(previous.duration ?? 0) !== Number(next.duration ?? 0);
   if (slotChanged) return "rescheduled";
-  const contactChanged = cleanText(previous.client || previous.title) !== cleanText(next.client || next.title) || cleanEmail(previous.email) !== cleanEmail(next.email) || cleanText(previous.phone) !== cleanText(next.phone) || cleanText(previous.serviceId || previous.service_id) !== cleanText(next.serviceId || next.service_id);
+  const contactChanged =
+    cleanText(previous.client || previous.title) !== cleanText(next.client || next.title) ||
+    cleanEmail(previous.email) !== cleanEmail(next.email) ||
+    cleanText(previous.phone) !== cleanText(next.phone) ||
+    cleanText(previous.serviceId || previous.service_id) !== cleanText(next.serviceId || next.service_id);
   return contactChanged ? "updated" : null;
 }
 

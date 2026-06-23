@@ -19,8 +19,7 @@ const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
   clientEmailIntro:
     "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
-  clientEmailFooter:
-    "Need to move your booking? Reply to this email and we will help.",
+  clientEmailFooter: "We look forward to seeing you.",
   adminEmailSubject: "New booking: {{client}}",
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
 };
@@ -1560,9 +1559,10 @@ async function readAdminSettings() {
     clientEmailIntro:
       (await getSetting("clientEmailIntro")) ||
       defaultEmailTemplates.clientEmailIntro,
-    clientEmailFooter:
+    clientEmailFooter: modernClientEmailFooter(
       (await getSetting("clientEmailFooter")) ||
-      defaultEmailTemplates.clientEmailFooter,
+        defaultEmailTemplates.clientEmailFooter,
+    ),
     adminEmailSubject:
       (await getSetting("adminEmailSubject")) ||
       defaultEmailTemplates.adminEmailSubject,
@@ -1591,7 +1591,7 @@ async function writeAdminSettings(settings) {
   if (hasOwn(settings, "sendAdminEmail")) await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
   if (hasOwn(settings, "clientEmailSubject")) await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
   if (hasOwn(settings, "clientEmailIntro")) await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
-  if (hasOwn(settings, "clientEmailFooter")) await setSetting("clientEmailFooter", cleanString(settings?.clientEmailFooter, defaultEmailTemplates.clientEmailFooter, 900));
+  if (hasOwn(settings, "clientEmailFooter")) await setSetting("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
   if (hasOwn(settings, "adminEmailSubject")) await setSetting("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
   if (hasOwn(settings, "adminEmailIntro")) await setSetting("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
   if (hasOwn(settings, "smsProviderName")) await setSetting("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
@@ -2280,6 +2280,57 @@ async function sendPasswordResetEmail(reset, req) {
   });
 }
 
+function bookingGoogleCalendarUrl({ appointment, service, account, rescheduleUrl }) {
+  const week = itemWeek(appointment);
+  const start = formatLocalDateTime(week, appointment.day, appointment.start);
+  const end = formatLocalDateTime(
+    week,
+    appointment.day,
+    Number(appointment.start || 0) + Number(appointment.duration || 0),
+  );
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: `${service?.name || "Golf Lesson"} with ${account.coachName || account.businessName}`,
+    dates: `${start}/${end}`,
+    details: [
+      `${service?.name || "Golf Lesson"} for ${appointment.client || appointment.title || "Client"}.`,
+      rescheduleUrl ? `Manage or reschedule: ${rescheduleUrl}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    location: account.venueName,
+    ctz: account.timezone || "Pacific/Auckland",
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+function bookingAppleCalendarUrl({ appointment }) {
+  const siteUrl =
+    env("URL") ||
+    env("DEPLOY_PRIME_URL") ||
+    env("CLARITY_SITE_URL", "https://claritygolf.app");
+  try {
+    const url = new URL("/api/public-calendar-invite", siteUrl);
+    url.searchParams.set("booking", appointment.id);
+    if (appointment.email) url.searchParams.set("email", appointment.email);
+    if (appointment.phone) url.searchParams.set("phone", appointment.phone);
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function modernClientEmailFooter(value) {
+  const footer = cleanString(value, "", 900);
+  const legacyChangeFooter =
+    /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i.test(
+      footer,
+    );
+  return footer && !legacyChangeFooter
+    ? footer
+    : "We look forward to seeing you.";
+}
+
 function bookingEmailVariables({ appointment, service, account }) {
   const client = appointment.client || appointment.title || "Client";
   const rescheduleUrl = new URL(
@@ -2304,12 +2355,30 @@ function bookingEmailVariables({ appointment, service, account }) {
     duration: `${appointment.duration} minutes`,
     replyTo: account.contactEmail,
     rescheduleUrl: rescheduleUrl.toString(),
+    googleCalendarUrl: bookingGoogleCalendarUrl({
+      appointment,
+      service,
+      account,
+      rescheduleUrl: rescheduleUrl.toString(),
+    }),
+    appleCalendarUrl: bookingAppleCalendarUrl({ appointment }),
   };
 }
 
 function bookingEmailHtml({ title, intro, footer, variables }) {
   const manageButton = variables.rescheduleUrl
-    ? `<p style="margin:22px 0"><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:700">Manage / Reschedule</a></p>`
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 14px"><tr><td><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:700">Manage / Reschedule</a></td></tr></table>`
+    : "";
+  const calendarButtons = variables.googleCalendarUrl || variables.appleCalendarUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr>${
+        variables.googleCalendarUrl
+          ? `<td style="padding:0 8px 8px 0"><a href="${escapeHtml(variables.googleCalendarUrl)}" style="display:inline-block;border:1px solid #cfd8ca;color:#101612;padding:10px 13px;text-decoration:none;border-radius:7px;font-weight:600"><span style="font-size:15px;vertical-align:-1px;margin-right:6px">&#128197;</span>Google Calendar</a></td>`
+          : ""
+      }${
+        variables.appleCalendarUrl
+          ? `<td style="padding:0 0 8px 0"><a href="${escapeHtml(variables.appleCalendarUrl)}" style="display:inline-block;border:1px solid #cfd8ca;color:#101612;padding:10px 13px;text-decoration:none;border-radius:7px;font-weight:600"><span style="font-size:15px;vertical-align:-1px;margin-right:6px">&#128467;&#65039;</span>Apple Calendar</a></td>`
+          : ""
+      }</tr></table>`
     : "";
   return `
     <div style="font-family:Arial,sans-serif;line-height:1.55;color:#101612">
@@ -2321,8 +2390,9 @@ function bookingEmailHtml({ title, intro, footer, variables }) {
         <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">Where</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.venue)}</td></tr>
         <tr><td style="padding:8px;color:#697166">Price</td><td style="padding:8px">${escapeHtml(variables.price)}</td></tr>
       </table>
-      <p>${escapeHtml(footer).replace(/\n/g, "<br/>")}</p>
       ${manageButton}
+      ${calendarButtons}
+      <p>${escapeHtml(footer).replace(/\n/g, "<br/>")}</p>
     </div>
   `;
 }
@@ -2338,11 +2408,20 @@ function bookingEmailText({ title, intro, footer, variables }) {
     `Where: ${variables.venue}`,
     `Price: ${variables.price}`,
     "",
-    footer,
     variables.rescheduleUrl
       ? `Manage / Reschedule: ${variables.rescheduleUrl}`
       : "",
-  ].join("\n");
+    variables.googleCalendarUrl
+      ? `Google Calendar: ${variables.googleCalendarUrl}`
+      : "",
+    variables.appleCalendarUrl
+      ? `Apple Calendar: ${variables.appleCalendarUrl}`
+      : "",
+    "",
+    footer,
+  ]
+    .filter((line, index, lines) => !(line === "" && lines[index - 1] === ""))
+    .join("\n");
 }
 
 async function sendBookingNotifications(
@@ -2449,8 +2528,18 @@ async function sendBookingNotifications(
   ) {
     const subject = renderTemplate(settings.clientEmailSubject, variables);
     const intro = renderTemplate(settings.clientEmailIntro, variables);
-    const footerBase = renderTemplate(settings.clientEmailFooter, variables);
+    const footerBase = modernClientEmailFooter(
+      renderTemplate(settings.clientEmailFooter, variables),
+    );
     const recipient = testRecipient || appointment.email;
+    const clientVariables = testRecipient
+      ? {
+          ...variables,
+          rescheduleUrl: "",
+          googleCalendarUrl: "",
+          appleCalendarUrl: "",
+        }
+      : variables;
     jobs.push(
       sendAndRecord(
         "client",
@@ -2460,15 +2549,13 @@ async function sendBookingNotifications(
           title: subject,
           intro,
           footer: footerBase,
-          variables,
+          variables: clientVariables,
         }),
         bookingEmailText({
           title: subject,
           intro,
           footer: footerBase,
-          variables: testRecipient
-            ? { ...variables, rescheduleUrl: "" }
-            : variables,
+          variables: clientVariables,
         }),
         `${kind}-client-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
       ),
@@ -2914,7 +3001,7 @@ export async function handlePublicBookingRequest(req, context = null) {
         start: result.appointment.start,
         duration: result.appointment.duration,
       },
-      notifications: result.notifications,
+      notifications: clientNotificationResults(result.notifications),
     });
   } catch (error) {
     console.error("public_booking:failed", error);
@@ -3098,6 +3185,22 @@ function notificationResultFromRecord(notification) {
   };
 }
 
+function clientNotificationResults(results = []) {
+  return results.filter(
+    (result) =>
+      result?.channel === "client" ||
+      cleanString(result?.kind, "", 120).includes("client_email"),
+  );
+}
+
+function clientNotificationRecords(records = [], appointmentId = "") {
+  return records.filter(
+    (record) =>
+      (!appointmentId || record.calendarItemId === appointmentId) &&
+      cleanString(record.kind, "", 120).includes("client_email"),
+  );
+}
+
 async function triggerPublicBookingNotifications(payload) {
   const appointmentId = cleanString(
     payload?.appointmentId || payload?.appointment || "",
@@ -3123,11 +3226,10 @@ async function triggerPublicBookingNotifications(payload) {
     );
   }
 
-  const existing = (await readNotificationHistory()).filter(
-    (notification) =>
-      notification.calendarItemId === appointmentId &&
-      notification.kind.startsWith(`${kind}_`),
-  );
+  const existing = clientNotificationRecords(
+    await readNotificationHistory(),
+    appointmentId,
+  ).filter((notification) => notification.kind.startsWith(`${kind}_`));
   const alreadySent = existing.some(
     (notification) => notification.status === "sent",
   );
@@ -3139,12 +3241,17 @@ async function triggerPublicBookingNotifications(payload) {
     };
   }
 
-  const results = await sendBookingNotifications(appointment, { kind });
+  const results = clientNotificationResults(
+    await sendBookingNotifications(appointment, { kind }),
+  );
   return {
     ok: results.some((result) => result.sent),
     alreadySent: false,
     results,
-    notifications: await readNotificationHistory(),
+    notifications: clientNotificationRecords(
+      await readNotificationHistory(),
+      appointmentId,
+    ),
   };
 }
 
@@ -3326,7 +3433,7 @@ export async function handlePublicRescheduleRequest(req, context = null) {
         start: result.appointment.start,
         duration: result.appointment.duration,
       },
-      notifications: result.notifications,
+      notifications: clientNotificationResults(result.notifications),
     });
   } catch (error) {
     console.error("public_reschedule:failed", error);
@@ -3360,7 +3467,7 @@ export async function handlePublicCancelRequest(req) {
         duration: result.appointment.duration,
       },
       state: { items: result.state.items },
-      notifications: result.notifications,
+      notifications: clientNotificationResults(result.notifications),
     });
   } catch (error) {
     console.error("public_cancel:failed", error);
