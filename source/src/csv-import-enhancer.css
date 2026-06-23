@@ -1,0 +1,23 @@
+.csv-enhancer { display: grid; gap: 12px; margin: 12px 0; }
+.csv-enhancer-uploader { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.csv-enhancer-uploader span { color: var(--muted); font-size: 13px; font-weight: 700; }
+.csv-enhancer-upload input { display: none; }
+.csv-enhancer-checkpoint { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-soft); }
+.csv-enhancer-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.csv-enhancer-summary strong { color: var(--heading); }
+.csv-enhancer-summary span { color: var(--muted); font-size: 11px; font-weight: 850; text-transform: uppercase; }
+.csv-enhancer-warnings { display: grid; gap: 6px; }
+.csv-enhancer-warnings span { padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12px; }
+.csv-enhancer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.csv-enhancer-grid label { display: grid; gap: 6px; }
+.csv-enhancer-grid label > span { color: var(--muted); font-size: 11px; font-weight: 850; text-transform: uppercase; }
+.csv-enhancer-grid select { min-height: 38px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; }
+.csv-enhancer-grid em { min-height: 24px; color: var(--muted); font-size: 12px; font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.csv-enhancer-preview { display: grid; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.csv-enhancer-preview div { display: grid; gap: 3px; padding: 9px 10px; border-bottom: 1px solid var(--border); }
+.csv-enhancer-preview div:last-child { border-bottom: 0; }
+.csv-enhancer-preview strong { color: var(--heading); font-size: 13px; }
+.csv-enhancer-preview span { color: var(--muted); font-size: 12px; }
+.csv-enhancer-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.csv-enhancer-status { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 12px; font-weight: 700; }
+.csv-enhancer-import:disabled { cursor: not-allowed; }

@@ -7,7 +7,7 @@ function requestFromEvent(event: any) {
   const host = event.headers?.host || event.headers?.Host || "claritygolf.app";
   const rawUrl =
     event.rawUrl ||
-    `https://${host}${event.rawPath || event.path || "/api/auth/forgot-password"}${event.rawQuery ? `?${event.rawQuery}` : ""}`;
+    `https://${host}${event.rawPath || event.path || "/api/auth/logout"}${event.rawQuery ? `?${event.rawQuery}` : ""}`;
   const body = ["GET", "HEAD"].includes(method)
     ? undefined
     : event.isBase64Encoded
@@ -25,9 +25,9 @@ async function lambdaResponse(response: Response) {
 }
 
 export async function handler(event: any, context: Context) {
-  return lambdaResponse(await handleBookingApiRoute(requestFromEvent(event), "/api/auth/forgot-password", context));
+  return lambdaResponse(await handleBookingApiRoute(requestFromEvent(event), "/api/auth/logout", context));
 }
 
 export const config: Config = {
-  path: "/api/auth/forgot-password",
+  path: "/api/auth/logout",
 };

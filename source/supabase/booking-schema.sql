@@ -1,5 +1,5 @@
--- Run this once in Supabase SQL Editor for the clarity-caddie project
--- before deploying the Supabase-backed booking functions.
+-- Run this once in the Supabase project used by Clarity Booking before
+-- deploying the Supabase-backed booking functions.
 
 create table if not exists public.settings (
   key text primary key,
@@ -20,23 +20,14 @@ create table if not exists public.calendar_items (
   phone text,
   email text,
   note text,
-  status text not null default 'booked',
+  status text not null default 'booked'
+    check (status in ('booked', 'completed', 'cancelled', 'no_show')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index if not exists idx_calendar_items_slot
   on public.calendar_items (week, day, start);
-
-alter table public.calendar_items
-  add column if not exists status text not null default 'booked';
-
-alter table public.calendar_items
-  drop constraint if exists calendar_items_status_check;
-
-alter table public.calendar_items
-  add constraint calendar_items_status_check
-  check (status in ('booked', 'completed', 'cancelled', 'no_show'));
 
 create table if not exists public.people (
   id text primary key,
@@ -51,9 +42,17 @@ create table if not exists public.people (
   updated_at timestamptz not null default now()
 );
 
-create unique index if not exists idx_people_email_unique
+-- Email is a contact channel, not a person identity. Families, schools and
+-- organisations may legitimately share one address.
+drop index if exists public.idx_people_email_unique;
+
+create index if not exists idx_people_email_lookup
   on public.people (lower(email))
   where email is not null and email <> '';
+
+create index if not exists idx_people_name_phone_lookup
+  on public.people (lower(name), phone)
+  where phone is not null and phone <> '';
 
 create table if not exists public.admin_users (
   id text primary key,

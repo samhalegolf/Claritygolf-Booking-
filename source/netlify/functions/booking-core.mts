@@ -1,5 +1,13 @@
 import { getDatabase } from "@netlify/database";
-import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  scryptSync,
+  timingSafeEqual,
+} from "node:crypto";
+
+import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
 
 const sessionCookieName = "clarity_session";
 const sessionDays = 7;
@@ -8,8 +16,10 @@ const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 let authReadyPromise = null;
 const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
-  clientEmailIntro: "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
-  clientEmailFooter: "Need to move your booking? Reply to this email and we will help.",
+  clientEmailIntro:
+    "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
+  clientEmailFooter:
+    "Need to move your booking? Reply to this email and we will help.",
   adminEmailSubject: "New booking: {{client}}",
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
 };
@@ -28,7 +38,8 @@ const defaultInvoiceSettings = {
   businessAddress: "",
   headerText: "",
   footerText: "Thank you for training with Sam Hale Golf.",
-  paymentInstructions: "Please pay by bank transfer and use the invoice number as reference.",
+  paymentInstructions:
+    "Please pay by bank transfer and use the invoice number as reference.",
   customFields: [],
 };
 
@@ -121,15 +132,15 @@ const defaultServices = [
     id: "package-60",
     name: "1 hour Lesson - 5 Lesson Package",
     duration: 60,
-    price: 130,
-    description: "Private package redemption rate",
+    price: 650,
+    description: "Five one-hour lessons tracked as a package.",
     visibility: "private",
     active: true,
     capacity: 1,
     minParticipants: 1,
     lessonFormat: "package",
     priceMode: "session",
-    location: "Package redemption",
+    location: "Package allowance",
     packageAllowance: 5,
     packageCoverageMode: "upfront",
     packageCoversServiceId: "lesson-60",
@@ -159,6 +170,14 @@ function env(name, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
 }
 
+function hasOwn(source, key) {
+  return Object.prototype.hasOwnProperty.call(source || {}, key);
+}
+
+function emailNotificationsGloballyDisabled() {
+  return ["0", "false", "off", "disabled", "no"].includes(env("EMAIL_NOTIFICATIONS_ENABLED", "").trim().toLowerCase());
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -176,6 +195,15 @@ function safeJsonStringify(value) {
     }
     return current;
   });
+}
+
+function safeJsonParse(value, fallback) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
 }
 
 function json(value, status = 200, extraHeaders = {}) {
@@ -204,14 +232,6 @@ function cleanString(value, fallback = "", max = 600) {
   return value.trim().slice(0, max);
 }
 
-function safeJsonParse(value, fallback) {
-  try {
-    return value ? JSON.parse(value) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 function cleanSlug(value, fallback = "sam-hale-golf") {
   if (typeof value !== "string") return fallback;
   const slug = value
@@ -238,7 +258,9 @@ function formatRange(start, duration) {
 
 function formatBookingDate(week, day) {
   const date = dateForSlot(week, day);
-  return new Date(Date.UTC(date.year, date.month - 1, date.day)).toLocaleDateString("en-NZ", {
+  return new Date(
+    Date.UTC(date.year, date.month - 1, date.day),
+  ).toLocaleDateString("en-NZ", {
     weekday: "long",
     month: "short",
     day: "numeric",
@@ -246,7 +268,10 @@ function formatBookingDate(week, day) {
 }
 
 function renderTemplate(template, variables) {
-  return String(template || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => variables[key] ?? "");
+  return String(template || "").replace(
+    /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g,
+    (_match, key) => variables[key] ?? "",
+  );
 }
 
 function servicePriceLabel(service) {
@@ -254,7 +279,7 @@ function servicePriceLabel(service) {
   return `NZ$${service.price}.00${service.priceMode === "per-person" ? " pp" : ""}`;
 }
 
-function cleanEmail(value, fallback = "sam@samhalegolf.co.nz") {
+function cleanEmail(value, fallback = "") {
   const email = cleanString(value, "", 180).toLowerCase();
   return email.includes("@") ? email : fallback;
 }
@@ -288,7 +313,12 @@ function cleanService(service, index = 0) {
   const duration = Number.isFinite(Number(service?.duration)) ? Number(service.duration) : fallback.duration;
   const price = Number.isFinite(Number(service?.price)) ? Number(service.price) : fallback.price;
   const capacity = Number.isFinite(Number(service?.capacity)) ? Number(service.capacity) : fallback.capacity || 1;
-  const lessonFormat = service?.lessonFormat === "package" ? "package" : service?.lessonFormat === "group" ? "group" : "private";
+  const looksLikePackage =
+    service?.lessonFormat === "package" ||
+    String(service?.id || fallback.id || "").startsWith("package-") ||
+    /package/i.test(name);
+  const lessonFormat =
+    looksLikePackage ? "package" : service?.lessonFormat === "group" ? "group" : "private";
   const cleanCapacity = Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
   const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
     ? Number(service.minParticipants)
@@ -296,18 +326,30 @@ function cleanService(service, index = 0) {
       ? Math.min(2, cleanCapacity)
       : 1;
   const minParticipants =
-    lessonFormat === "group" ? Math.max(2, Math.min(cleanCapacity, Math.round(rawMinParticipants))) : 1;
-  const priceMode = lessonFormat === "group" && service?.priceMode === "per-person" ? "per-person" : "session";
+    lessonFormat === "group"
+      ? Math.max(2, Math.min(cleanCapacity, Math.round(rawMinParticipants)))
+      : 1;
+  const priceMode =
+    lessonFormat === "group" && service?.priceMode === "per-person"
+      ? "per-person"
+      : "session";
   const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
     ? Math.max(1, Math.min(100, Math.round(Number(service.packageAllowance))))
-    : Math.max(1, fallback.packageAllowance || 5);
+    : Math.max(1, fallback.packageAllowance ?? 5);
+  const packageCoverageMode = service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
   return {
-    id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
+    id: cleanSlug(
+      service?.id,
+      cleanSlug(name, `service-${Date.now()}-${index}`),
+    ),
     name,
     duration: Math.max(15, Math.min(240, Math.round(duration))),
     price: Math.max(0, Math.round(price)),
     description: cleanString(service?.description, fallback.description, 240),
-    visibility: lessonFormat === "package" || service?.visibility === "private" ? "private" : "public",
+    visibility:
+      lessonFormat === "package" || service?.visibility === "private"
+        ? "private"
+        : "public",
     active: service?.active !== false,
     capacity: cleanCapacity,
     minParticipants,
@@ -315,14 +357,17 @@ function cleanService(service, index = 0) {
     priceMode,
     location: cleanString(service?.location, fallback.location, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
-    packageCoverageMode:
-      lessonFormat === "package" && service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : lessonFormat === "package" ? "upfront" : undefined,
-    packageCoversServiceId: lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) : undefined,
+    packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
+    packageCoversServiceId:
+      lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
   };
 }
 
 function normalizeServices(serviceList) {
-  const source = Array.isArray(serviceList) && serviceList.length ? serviceList : defaultServices;
+  const source =
+    Array.isArray(serviceList) && serviceList.length
+      ? serviceList
+      : defaultServices;
   const seen = new Set();
   return source.map((service, index) => {
     const clean = cleanService(service, index);
@@ -338,15 +383,27 @@ function normalizeServices(serviceList) {
 }
 
 function normalizeAvailability(availability) {
-  const source = Array.isArray(availability) ? availability : defaultAvailability;
+  const source = Array.isArray(availability)
+    ? availability
+    : defaultAvailability;
   return Array.from({ length: 7 }, (_, day) => {
     const windows = Array.isArray(source[day]) ? source[day] : [];
     return windows
       .map((window) => {
-        const rawStart = Number.isFinite(Number(window?.start)) ? Number(window.start) : timeToMinutes(7, 0);
-        const rawEnd = Number.isFinite(Number(window?.end)) ? Number(window.end) : rawStart + 60;
-        const start = Math.max(timeToMinutes(7, 0), Math.min(timeToMinutes(19, 45), Math.round(rawStart / 15) * 15));
-        const end = Math.max(start + 15, Math.min(timeToMinutes(20, 0), Math.round(rawEnd / 15) * 15));
+        const rawStart = Number.isFinite(Number(window?.start))
+          ? Number(window.start)
+          : timeToMinutes(7, 0);
+        const rawEnd = Number.isFinite(Number(window?.end))
+          ? Number(window.end)
+          : rawStart + 60;
+        const start = Math.max(
+          timeToMinutes(7, 0),
+          Math.min(timeToMinutes(19, 45), Math.round(rawStart / 15) * 15),
+        );
+        const end = Math.max(
+          start + 15,
+          Math.min(timeToMinutes(20, 0), Math.round(rawEnd / 15) * 15),
+        );
         return end > start ? { start, end } : null;
       })
       .filter(Boolean)
@@ -371,19 +428,21 @@ function defaultCoachAccount() {
     venueName: env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
     venueShortName: env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
     timezone: env("CLARITY_TIMEZONE", "Pacific/Auckland"),
-    contactEmail: env("CLARITY_CONTACT_EMAIL", "sam@samhalegolf.co.nz"),
+    contactEmail: env("CLARITY_CONTACT_EMAIL", ""),
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
     calendarSlug: env("CLARITY_CALENDAR_SLUG", "sam-hale-golf"),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
     invoiceSettings: defaultInvoiceSettings,
-  };
-}
+	  };
+	}
 
 function cleanInvoiceCustomField(field, index = 0) {
   const label = cleanString(field?.label, "", 80);
   const value = cleanString(field?.value, "", 180);
   if (!label && !value) return null;
-  const placement = ["bill-to", "payment", "footer"].includes(field?.placement) ? field.placement : "header";
+  const placement = ["bill-to", "payment", "footer"].includes(field?.placement)
+    ? field.placement
+    : "header";
   return {
     id: cleanString(field?.id, `field-${index + 1}`, 80),
     label: label || "Custom field",
@@ -393,49 +452,91 @@ function cleanInvoiceCustomField(field, index = 0) {
 }
 
 function cleanInvoiceSettings(settings = {}) {
-  const nextNumber = Number(settings?.nextNumber ?? defaultInvoiceSettings.nextNumber);
+  const nextNumber = Number(
+    settings?.nextNumber ?? defaultInvoiceSettings.nextNumber,
+  );
   const taxRate = Number(settings?.taxRate ?? defaultInvoiceSettings.taxRate);
-  const paymentTermsDays = Number(settings?.paymentTermsDays ?? defaultInvoiceSettings.paymentTermsDays);
+  const paymentTermsDays = Number(
+    settings?.paymentTermsDays ?? defaultInvoiceSettings.paymentTermsDays,
+  );
   const customFields = Array.isArray(settings?.customFields)
-    ? settings.customFields.map(cleanInvoiceCustomField).filter(Boolean).slice(0, 12)
+    ? settings.customFields
+        .map(cleanInvoiceCustomField)
+        .filter(Boolean)
+        .slice(0, 12)
     : [];
   return {
     enabled: settings?.enabled !== false,
     showBillingWorkspace: settings?.showBillingWorkspace !== false,
-    prefix: cleanString(settings?.prefix, defaultInvoiceSettings.prefix, 12).toUpperCase().replace(/[^A-Z0-9-]/g, "") || defaultInvoiceSettings.prefix,
-    nextNumber: Number.isFinite(nextNumber) ? Math.max(1, Math.min(999999, Math.round(nextNumber))) : defaultInvoiceSettings.nextNumber,
-    currency: cleanString(settings?.currency, defaultInvoiceSettings.currency, 8).toUpperCase(),
+    prefix:
+      cleanString(settings?.prefix, defaultInvoiceSettings.prefix, 12)
+        .toUpperCase()
+        .replace(/[^A-Z0-9-]/g, "") || defaultInvoiceSettings.prefix,
+    nextNumber: Number.isFinite(nextNumber)
+      ? Math.max(1, Math.min(999999, Math.round(nextNumber)))
+      : defaultInvoiceSettings.nextNumber,
+    currency: cleanString(
+      settings?.currency,
+      defaultInvoiceSettings.currency,
+      8,
+    ).toUpperCase(),
     taxName: cleanString(settings?.taxName, defaultInvoiceSettings.taxName, 24),
     taxNumber: cleanString(settings?.taxNumber, "", 80),
-    taxRate: Number.isFinite(taxRate) ? Math.max(0, Math.min(30, taxRate)) : defaultInvoiceSettings.taxRate,
+    taxRate: Number.isFinite(taxRate)
+      ? Math.max(0, Math.min(30, taxRate))
+      : defaultInvoiceSettings.taxRate,
     bankAccount: cleanString(settings?.bankAccount, "", 120),
-    paymentTermsDays: Number.isFinite(paymentTermsDays) ? Math.max(0, Math.min(120, Math.round(paymentTermsDays))) : defaultInvoiceSettings.paymentTermsDays,
+    paymentTermsDays: Number.isFinite(paymentTermsDays)
+      ? Math.max(0, Math.min(120, Math.round(paymentTermsDays)))
+      : defaultInvoiceSettings.paymentTermsDays,
     businessAddress: cleanString(settings?.businessAddress, "", 400),
     headerText: cleanString(settings?.headerText, "", 280),
-    footerText: cleanString(settings?.footerText, defaultInvoiceSettings.footerText, 400),
-    paymentInstructions: cleanString(settings?.paymentInstructions, defaultInvoiceSettings.paymentInstructions, 400),
+    footerText: cleanString(
+      settings?.footerText,
+      defaultInvoiceSettings.footerText,
+      400,
+    ),
+    paymentInstructions: cleanString(
+      settings?.paymentInstructions,
+      defaultInvoiceSettings.paymentInstructions,
+      400,
+    ),
     customFields,
   };
 }
 
 function cleanCoachAccount(account) {
   const defaults = defaultCoachAccount();
-  const businessName = cleanString(account?.businessName, defaults.businessName, 100);
+  const businessName = cleanString(
+    account?.businessName,
+    defaults.businessName,
+    100,
+  );
   const venueName = cleanString(account?.venueName, defaults.venueName, 140);
   return {
     id: cleanSlug(account?.id, defaults.id),
     coachName: cleanString(account?.coachName, defaults.coachName, 100),
     businessName,
     venueName,
-    venueShortName: cleanString(account?.venueShortName, defaults.venueShortName || venueName, 80),
+    venueShortName: cleanString(
+      account?.venueShortName,
+      defaults.venueShortName || venueName,
+      80,
+    ),
     timezone: cleanString(account?.timezone, defaults.timezone, 80),
     contactEmail: cleanEmail(account?.contactEmail, defaults.contactEmail),
     bookingUrl: cleanUrl(account?.bookingUrl, defaults.bookingUrl),
-    calendarSlug: cleanSlug(account?.calendarSlug, cleanSlug(businessName, defaults.calendarSlug)),
-    caddyWorkspaceUrl: cleanUrl(account?.caddyWorkspaceUrl, defaults.caddyWorkspaceUrl),
+    calendarSlug: cleanSlug(
+      account?.calendarSlug,
+      cleanSlug(businessName, defaults.calendarSlug),
+    ),
+    caddyWorkspaceUrl: cleanUrl(
+      account?.caddyWorkspaceUrl,
+      defaults.caddyWorkspaceUrl,
+    ),
     invoiceSettings: cleanInvoiceSettings(account?.invoiceSettings),
-  };
-}
+	  };
+	}
 
 function generateSyncKey() {
   return `cg_${randomUUID().replaceAll("-", "")}`;
@@ -488,7 +589,10 @@ function parseCookies(req) {
         const index = pair.indexOf("=");
         return index === -1
           ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
+          : [
+              decodeURIComponent(pair.slice(0, index)),
+              decodeURIComponent(pair.slice(index + 1)),
+            ];
       }),
   );
 }
@@ -533,12 +637,12 @@ async function ensureCoreTables() {
       start INTEGER NOT NULL,
       duration INTEGER NOT NULL,
       service_id TEXT,
-	      client TEXT,
-	      title TEXT NOT NULL,
+      client TEXT,
+      title TEXT NOT NULL,
 	      phone TEXT,
 	      email TEXT,
 	      note TEXT,
-	      status TEXT NOT NULL DEFAULT 'booked',
+      status TEXT NOT NULL DEFAULT 'booked',
 	      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	    )
@@ -562,10 +666,16 @@ async function ensureCoreTables() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  await db().sql`DROP INDEX IF EXISTS idx_people_email_unique`;
   await db().sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_people_email_unique
+    CREATE INDEX IF NOT EXISTS idx_people_email_lookup
     ON people (LOWER(email))
     WHERE email IS NOT NULL AND email <> ''
+  `;
+  await db().sql`
+    CREATE INDEX IF NOT EXISTS idx_people_name_phone_lookup
+    ON people (LOWER(name), phone)
+    WHERE phone IS NOT NULL AND phone <> ''
   `;
   await db().sql`
     CREATE TABLE IF NOT EXISTS admin_users (
@@ -654,10 +764,12 @@ async function defaultSettings() {
   const account = defaultCoachAccount();
   return {
     syncKey: env("CLARITY_CALENDAR_SYNC_KEY") || generateSyncKey(),
-    notificationEmail: env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz"),
-    replyToEmail: env("CLARITY_REPLY_TO_EMAIL", "sam@samhalegolf.co.nz"),
+    notificationEmail: env("CLARITY_NOTIFICATION_EMAIL", ""),
+    coachEmail: env("CLARITY_COACH_EMAIL", ""),
+    replyToEmail: env("CLARITY_REPLY_TO_EMAIL", ""),
     notificationDelaySeconds: "30",
     sendClientEmail: "true",
+    sendCoachEmail: "true",
     sendAdminEmail: "true",
     clientEmailSubject: defaultEmailTemplates.clientEmailSubject,
     clientEmailIntro: defaultEmailTemplates.clientEmailIntro,
@@ -676,15 +788,16 @@ async function defaultSettings() {
     accountVenueShortName: account.venueShortName,
     accountTimezone: account.timezone,
     accountContactEmail: account.contactEmail,
-	    accountBookingUrl: account.bookingUrl,
-	    accountCalendarSlug: account.calendarSlug,
-	    accountCaddyWorkspaceUrl: account.caddyWorkspaceUrl,
-	    accountInvoiceSettingsJson: JSON.stringify(account.invoiceSettings),
-	    coachName: account.businessName,
+    accountBookingUrl: account.bookingUrl,
+    accountCalendarSlug: account.calendarSlug,
+    accountCaddyWorkspaceUrl: account.caddyWorkspaceUrl,
+    accountInvoiceSettingsJson: JSON.stringify(account.invoiceSettings),
+    coachName: account.businessName,
     servicesJson: JSON.stringify(defaultServices),
     availabilityJson: JSON.stringify(defaultAvailability),
     brandLogoName: "",
     brandLogoPreview: "",
+    brandShowLogo: "false",
     brandNeutral: "#ffffff",
     brandPrimary: "#1fd36d",
     brandSecondary: "#d7b06b",
@@ -706,19 +819,20 @@ async function seedSettings() {
 }
 
 async function seedItems() {
-  const countRows = await db().sql`SELECT COUNT(*) AS count FROM calendar_items`;
+  const countRows = await db()
+    .sql`SELECT COUNT(*) AS count FROM calendar_items`;
   if ((countRows[0]?.count ?? 0) > 0) return;
 
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
-	    for (const item of initialItems) {
-	      await client.query(
-	        `INSERT INTO calendar_items (
-	          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
+    for (const item of initialItems) {
+      await client.query(
+        `INSERT INTO calendar_items (
+          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
 	        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
 	        ON CONFLICT (id) DO NOTHING`,
-	        [
+        [
           item.id,
           item.kind,
           item.week,
@@ -728,12 +842,12 @@ async function seedItems() {
           item.serviceId,
           item.client,
           item.title,
-	          item.phone,
-	          item.email,
-	          item.note,
-	          item.status || "booked",
-	        ],
-	      );
+          item.phone,
+          item.email,
+          item.note,
+          item.status || "booked",
+        ],
+      );
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -749,11 +863,14 @@ async function ensureAdminUser() {
   const password = env("CLARITY_ADMIN_PASSWORD");
 
   if (!email || !password) {
-    console.warn("Admin user not seeded because CLARITY_ADMIN_EMAIL or CLARITY_ADMIN_PASSWORD is not set.");
+    console.warn(
+      "Admin user not seeded because CLARITY_ADMIN_EMAIL or CLARITY_ADMIN_PASSWORD is not set.",
+    );
     return;
   }
 
-  const existing = await db().sql`SELECT id FROM admin_users WHERE email = ${email}`;
+  const existing = await db()
+    .sql`SELECT id FROM admin_users WHERE email = ${email}`;
 
   const { passwordHash, salt } = hashPassword(password);
   const seedKey = hashToken(`${email}:${password}`);
@@ -829,7 +946,9 @@ async function ensureSeeded() {
 }
 
 function rowToItem(row) {
-  const status = ["completed", "cancelled", "no_show"].includes(row.status) ? row.status : "booked";
+  const status = ["completed", "cancelled", "no_show"].includes(row.status)
+    ? row.status
+    : "booked";
   return {
     id: row.id,
     kind: row.kind,
@@ -840,16 +959,21 @@ function rowToItem(row) {
     serviceId: row.service_id || "",
     client: row.client || "",
     title: row.title,
-    phone: row.phone || "",
-    email: row.email || "",
-    note: row.note || "",
-    status,
-  };
-}
+	    phone: row.phone || "",
+	    email: row.email || "",
+	    note: row.note || "",
+    status: status,
+	  };
+	}
 
 function cleanCalendarItem(item) {
   if (!item || typeof item !== "object") return null;
-  const kind = item.kind === "block" ? "block" : item.kind === "appointment" ? "appointment" : null;
+  const kind =
+    item.kind === "block"
+      ? "block"
+      : item.kind === "appointment"
+        ? "appointment"
+        : null;
   if (!kind) return null;
 
   const day = Number(item.day);
@@ -857,9 +981,10 @@ function cleanCalendarItem(item) {
   const duration = Number(item.duration);
   if (!Number.isInteger(day) || day < 0 || day > 6) return null;
   if (!Number.isInteger(start) || start < 0 || start > 24 * 60) return null;
-  if (!Number.isInteger(duration) || duration <= 0 || duration > 12 * 60) return null;
+  if (!Number.isInteger(duration) || duration <= 0 || duration > 12 * 60)
+    return null;
 
-	  return {
+  return {
     id: cleanString(item.id, `${kind}-${Date.now()}`),
     kind,
     week: Number.isInteger(Number(item.week)) ? Number(item.week) : 0,
@@ -869,24 +994,34 @@ function cleanCalendarItem(item) {
     serviceId: cleanString(item.serviceId),
     client: cleanString(item.client),
     title: cleanString(item.title, kind === "block" ? "Busy" : "Appointment"),
-	    phone: cleanString(item.phone),
-	    email: cleanString(item.email),
-	    note: cleanString(item.note),
-	    status:
-	      item.status === "completed" || item.status === "cancelled" || item.status === "no_show"
-	        ? item.status
-	        : "booked",
-	  };
-	}
+    phone: cleanString(item.phone),
+    email: cleanString(item.email),
+    note: cleanString(item.note),
+    status:
+      item.status === "completed" ||
+      item.status === "cancelled" ||
+      item.status === "no_show"
+        ? item.status
+        : "booked",
+  };
+}
 
 function normalizeItems(items) {
-  return Array.isArray(items) ? items.map(cleanCalendarItem).filter(Boolean) : initialItems;
+  return Array.isArray(items)
+    ? items.map(cleanCalendarItem).filter(Boolean)
+    : initialItems;
 }
 
 function cleanPerson(person, source = "import") {
   if (!person || typeof person !== "object") return null;
-  const joinedName = [person.firstName, person.lastName].filter(Boolean).join(" ");
-  const name = cleanString(person.name || joinedName || person.client || person.title, "", 180);
+  const joinedName = [person.firstName, person.lastName]
+    .filter(Boolean)
+    .join(" ");
+  const name = cleanString(
+    person.name || joinedName || person.client || person.title,
+    "",
+    180,
+  );
   const email = cleanString(person.email, "", 180).toLowerCase();
   if (!name && !email) return null;
 
@@ -897,9 +1032,97 @@ function cleanPerson(person, source = "import") {
     phone: cleanString(person.phone, "", 80),
     notes: cleanString(person.notes || person.note, "", 1200),
     source: cleanString(person.source, source, 80),
-    caddyProfileId: cleanString(person.caddyProfileId || person.caddyId, "", 120),
-    caddyProfileUrl: cleanString(person.caddyProfileUrl || person.caddyUrl, "", 600),
+    caddyProfileId: cleanString(
+      person.caddyProfileId || person.caddyId,
+      "",
+      120,
+    ),
+    caddyProfileUrl: cleanString(
+      person.caddyProfileUrl || person.caddyUrl,
+      "",
+      600,
+    ),
   };
+}
+
+function normalizedPersonName(value) {
+  return cleanString(value, "", 180).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function normalizedPersonEmail(value) {
+  return cleanString(value, "", 180).toLowerCase();
+}
+
+function normalizedPersonPhone(value) {
+  return cleanString(value, "", 80).replace(/\D/g, "");
+}
+
+function compatiblePersonMatch(candidate, rows = []) {
+  if (!candidate || !Array.isArray(rows) || !rows.length) return null;
+
+  const candidateId = cleanString(candidate.id, "", 120);
+  if (candidateId && !candidateId.startsWith("appointment-")) {
+    const exactId = rows.find((row) => String(row?.id || "") === candidateId);
+    if (exactId) return exactId;
+  }
+
+  const name = normalizedPersonName(candidate.name);
+  const email = normalizedPersonEmail(candidate.email);
+  const phone = normalizedPersonPhone(candidate.phone);
+
+  if (name && email) {
+    const matches = rows.filter(
+      (row) =>
+        normalizedPersonName(row?.name) === name &&
+        normalizedPersonEmail(row?.email) === email,
+    );
+    const exact = matches.find((row) => {
+      const existingPhone = normalizedPersonPhone(row?.phone);
+      return !phone || !existingPhone || phone === existingPhone;
+    });
+    if (exact) return exact;
+  }
+
+  if (name && phone) {
+    const exact = rows.find(
+      (row) =>
+        normalizedPersonName(row?.name) === name &&
+        normalizedPersonPhone(row?.phone) === phone,
+    );
+    if (exact) return exact;
+  }
+
+  // Use a lone contact-method match only when it is unambiguous and names do
+  // not conflict. Shared family or organisation details must remain separate.
+  if (email) {
+    const matches = rows.filter(
+      (row) => normalizedPersonEmail(row?.email) === email,
+    );
+    if (matches.length === 1) {
+      const only = matches[0];
+      const existingName = normalizedPersonName(only?.name);
+      const existingPhone = normalizedPersonPhone(only?.phone);
+      if (
+        (!name || !existingName || name === existingName) &&
+        (!phone || !existingPhone || phone === existingPhone)
+      ) {
+        return only;
+      }
+    }
+  }
+
+  if (phone) {
+    const matches = rows.filter(
+      (row) => normalizedPersonPhone(row?.phone) === phone,
+    );
+    if (matches.length === 1) {
+      const only = matches[0];
+      const existingName = normalizedPersonName(only?.name);
+      if (!name || !existingName || name === existingName) return only;
+    }
+  }
+
+  return null;
 }
 
 function personFromAppointment(item) {
@@ -944,30 +1167,38 @@ function notificationPersonKey({ name = "", email = "", phone = "" } = {}) {
   if (cleanEmailValue) return `email:${cleanEmailValue}`;
   const phoneDigits = cleanString(phone, "", 80).replace(/\D/g, "");
   if (phoneDigits) return `phone:${phoneDigits}`;
-  const cleanName = cleanString(name, "", 180).toLowerCase().replace(/\s+/g, " ").trim();
+  const cleanName = cleanString(name, "", 180)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
   return cleanName ? `name:${cleanName}` : "";
 }
 
 function notificationStatusPriority(status = "") {
-  return ({
-    skipped: 0,
-    queued: 1,
-    sent: 10,
-    delayed: 15,
-    delivered: 20,
-    opened: 25,
-    clicked: 30,
-    failed: 40,
-    suppressed: 45,
-    complained: 50,
-    bounced: 60,
-  })[status] ?? 0;
+  return (
+    {
+      skipped: 0,
+      queued: 1,
+      sent: 10,
+      delayed: 15,
+      delivered: 20,
+      opened: 25,
+      clicked: 30,
+      failed: 40,
+      suppressed: 45,
+      complained: 50,
+      bounced: 60,
+    }[status] ?? 0
+  );
 }
 
 function shouldApplyNotificationStatus(currentStatus = "", nextStatus = "") {
   if (!nextStatus) return false;
   if (!currentStatus) return true;
-  return notificationStatusPriority(nextStatus) >= notificationStatusPriority(currentStatus);
+  return (
+    notificationStatusPriority(nextStatus) >=
+    notificationStatusPriority(currentStatus)
+  );
 }
 
 function resendWebhookStatus(type = "") {
@@ -1036,7 +1267,17 @@ async function readNotificationHistory() {
   return rows.map(rowToNotification);
 }
 
-async function recordNotification({ personKey = "", calendarItemId = "", recipient = "", subject = "", kind = "", status = "", provider = "", providerId = "", error = "" }) {
+async function recordNotification({
+  personKey = "",
+  calendarItemId = "",
+  recipient = "",
+  subject = "",
+  kind = "",
+  status = "",
+  provider = "",
+  providerId = "",
+  error = "",
+}) {
   const record = {
     id: randomUUID(),
     personKey,
@@ -1070,7 +1311,9 @@ async function readPeople() {
 }
 
 async function importPeople(rawPeople, source = "import") {
-  const people = Array.isArray(rawPeople) ? rawPeople.map((person) => cleanPerson(person, source)).filter(Boolean) : [];
+  const people = Array.isArray(rawPeople)
+    ? rawPeople.map((person) => cleanPerson(person, source)).filter(Boolean)
+    : [];
   const result = {
     imported: 0,
     updated: 0,
@@ -1079,28 +1322,13 @@ async function importPeople(rawPeople, source = "import") {
   };
   if (!Array.isArray(rawPeople)) return result;
 
+  const knownPeople = await readPeople();
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
     for (const person of people) {
-      let existingId = "";
-      if (person.id) {
-        const existing = await client.query("SELECT id FROM people WHERE id = $1 LIMIT 1", [person.id]);
-        existingId = existing.rows[0]?.id || "";
-      }
-      if (!existingId && person.email) {
-        const existing = await client.query("SELECT id FROM people WHERE LOWER(email) = LOWER($1) LIMIT 1", [
-          person.email,
-        ]);
-        existingId = existing.rows[0]?.id || "";
-      }
-      if (!existingId && person.phone) {
-        const existing = await client.query(
-          "SELECT id FROM people WHERE LOWER(name) = LOWER($1) AND phone = $2 LIMIT 1",
-          [person.name, person.phone],
-        );
-        existingId = existing.rows[0]?.id || "";
-      }
+      const existing = compatiblePersonMatch(person, knownPeople);
+      const existingId = existing?.id || "";
 
       if (existingId) {
         await client.query(
@@ -1125,14 +1353,24 @@ async function importPeople(rawPeople, source = "import") {
             person.caddyProfileUrl,
           ],
         );
+        Object.assign(existing, {
+          name: person.name || existing.name,
+          email: person.email || existing.email,
+          phone: person.phone || existing.phone,
+          notes: person.notes || existing.notes,
+          source: person.source || source || existing.source,
+          caddyProfileId: person.caddyProfileId || existing.caddyProfileId,
+          caddyProfileUrl: person.caddyProfileUrl || existing.caddyProfileUrl,
+        });
         result.updated += 1;
       } else {
+        const personId = person.id || randomUUID();
         await client.query(
           `INSERT INTO people (
              id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
            ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), NOW())`,
           [
-            person.id || randomUUID(),
+            personId,
             person.name,
             person.email,
             person.phone,
@@ -1142,6 +1380,7 @@ async function importPeople(rawPeople, source = "import") {
             person.caddyProfileUrl,
           ],
         );
+        knownPeople.push({ ...person, id: personId });
         result.imported += 1;
       }
     }
@@ -1165,29 +1404,18 @@ async function updatePerson(rawPerson) {
     throw error;
   }
 
+  const knownPeople = await readPeople();
+  const existing = compatiblePersonMatch(person, knownPeople);
+  const existingId = existing?.id || "";
+  const personId =
+    existingId ||
+    (person.id && !person.id.startsWith("appointment-")
+      ? person.id
+      : randomUUID());
+
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
-    let existingId = "";
-    if (person.id && !person.id.startsWith("appointment-")) {
-      const existing = await client.query("SELECT id FROM people WHERE id = $1 LIMIT 1", [person.id]);
-      existingId = existing.rows[0]?.id || "";
-    }
-    if (!existingId && person.email) {
-      const existing = await client.query("SELECT id FROM people WHERE LOWER(email) = LOWER($1) LIMIT 1", [
-        person.email,
-      ]);
-      existingId = existing.rows[0]?.id || "";
-    }
-    if (!existingId && person.phone) {
-      const existing = await client.query(
-        "SELECT id FROM people WHERE LOWER(name) = LOWER($1) AND phone = $2 LIMIT 1",
-        [person.name, person.phone],
-      );
-      existingId = existing.rows[0]?.id || "";
-    }
-
-    const personId = existingId || (person.id && !person.id.startsWith("appointment-") ? person.id : randomUUID());
     if (existingId) {
       await client.query(
         `UPDATE people
@@ -1229,7 +1457,10 @@ async function updatePerson(rawPerson) {
       );
     }
 
-    const saved = await client.query("SELECT * FROM people WHERE id = $1 LIMIT 1", [personId]);
+    const saved = await client.query(
+      "SELECT * FROM people WHERE id = $1 LIMIT 1",
+      [personId],
+    );
     await client.query("COMMIT");
     return { person: rowToPerson(saved.rows[0]), people: await readPeople() };
   } catch (error) {
@@ -1240,18 +1471,34 @@ async function updatePerson(rawPerson) {
   }
 }
 
-async function writeItems(items) {
+async function writeItems(items, options = {}) {
   const cleanItems = normalizeItems(items);
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query("DELETE FROM calendar_items");
-	    for (const item of cleanItems) {
-	      await client.query(
-	        `INSERT INTO calendar_items (
-	          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
-	        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())`,
-	        [
+    if (options.clearItems === true) {
+      await client.query("DELETE FROM calendar_items");
+    }
+    for (const item of cleanItems) {
+      await client.query(
+        `INSERT INTO calendar_items (
+          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          kind = EXCLUDED.kind,
+          week = EXCLUDED.week,
+          day = EXCLUDED.day,
+          start = EXCLUDED.start,
+          duration = EXCLUDED.duration,
+          service_id = EXCLUDED.service_id,
+          client = EXCLUDED.client,
+          title = EXCLUDED.title,
+          phone = EXCLUDED.phone,
+          email = EXCLUDED.email,
+          note = EXCLUDED.note,
+          status = EXCLUDED.status,
+          updated_at = NOW()`,
+        [
           item.id,
           item.kind,
           item.week ?? 0,
@@ -1261,12 +1508,15 @@ async function writeItems(items) {
           item.serviceId || "",
           item.client || "",
           item.title,
-	          item.phone || "",
-	          item.email || "",
-	          item.note || "",
-	          item.status || "booked",
-	        ],
-	      );
+          item.phone || "",
+          item.email || "",
+          item.note || "",
+          item.status || "booked",
+        ],
+      );
+    }
+    if (options.replaceItems === true && cleanItems.length) {
+      await client.query("DELETE FROM calendar_items WHERE NOT (id = ANY($1::text[]))", [cleanItems.map((item) => item.id)]);
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -1275,29 +1525,49 @@ async function writeItems(items) {
   } finally {
     client.release();
   }
-  return cleanItems;
+  return readItems();
 }
 
 async function seedPeopleFromAppointments() {
   const countRows = await db().sql`SELECT COUNT(*) AS count FROM people`;
   if ((countRows[0]?.count ?? 0) > 0) return;
-  await importPeople(initialItems.map(personFromAppointment).filter(Boolean), "appointment");
+  await importPeople(
+    initialItems.map(personFromAppointment).filter(Boolean),
+    "appointment",
+  );
 }
 
 async function readAdminSettings() {
   await ensureSeeded();
-  const delaySeconds = Number((await getSetting("notificationDelaySeconds")) || 30);
+  const delaySeconds = Number(
+    (await getSetting("notificationDelaySeconds")) || 30,
+  );
   return {
+    emailNotificationsEnabled: (await getSetting("emailNotificationsEnabled")) !== "false",
     notificationEmail: await getSetting("notificationEmail"),
+    coachEmail: await getSetting("coachEmail"),
     replyToEmail: await getSetting("replyToEmail"),
-    notificationDelaySeconds: Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30,
+    notificationDelaySeconds: Number.isFinite(delaySeconds)
+      ? Math.max(30, Math.min(3600, delaySeconds))
+      : 30,
     sendClientEmail: (await getSetting("sendClientEmail")) !== "false",
+    sendCoachEmail: (await getSetting("sendCoachEmail")) !== "false",
     sendAdminEmail: (await getSetting("sendAdminEmail")) !== "false",
-    clientEmailSubject: (await getSetting("clientEmailSubject")) || defaultEmailTemplates.clientEmailSubject,
-    clientEmailIntro: (await getSetting("clientEmailIntro")) || defaultEmailTemplates.clientEmailIntro,
-    clientEmailFooter: (await getSetting("clientEmailFooter")) || defaultEmailTemplates.clientEmailFooter,
-    adminEmailSubject: (await getSetting("adminEmailSubject")) || defaultEmailTemplates.adminEmailSubject,
-    adminEmailIntro: (await getSetting("adminEmailIntro")) || defaultEmailTemplates.adminEmailIntro,
+    clientEmailSubject:
+      (await getSetting("clientEmailSubject")) ||
+      defaultEmailTemplates.clientEmailSubject,
+    clientEmailIntro:
+      (await getSetting("clientEmailIntro")) ||
+      defaultEmailTemplates.clientEmailIntro,
+    clientEmailFooter:
+      (await getSetting("clientEmailFooter")) ||
+      defaultEmailTemplates.clientEmailFooter,
+    adminEmailSubject:
+      (await getSetting("adminEmailSubject")) ||
+      defaultEmailTemplates.adminEmailSubject,
+    adminEmailIntro:
+      (await getSetting("adminEmailIntro")) ||
+      defaultEmailTemplates.adminEmailIntro,
     smsProviderName: await getSetting("smsProviderName"),
     smsWebhookUrl: await getSetting("smsWebhookUrl"),
     smsFromNumber: await getSetting("smsFromNumber"),
@@ -1307,22 +1577,27 @@ async function readAdminSettings() {
 }
 
 async function writeAdminSettings(settings) {
-  const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
-  await setSetting("notificationEmail", cleanString(settings?.notificationEmail, "", 180));
-  await setSetting("replyToEmail", cleanString(settings?.replyToEmail, "", 180));
-  await setSetting("notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
-  await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
-  await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
-  await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
-  await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
-  await setSetting("clientEmailFooter", cleanString(settings?.clientEmailFooter, defaultEmailTemplates.clientEmailFooter, 900));
-  await setSetting("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
-  await setSetting("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
-  await setSetting("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
-  await setSetting("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
-  await setSetting("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
-  await setSetting("sendClientSms", settings?.sendClientSms ? "true" : "false");
-  await setSetting("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
+  if (hasOwn(settings, "emailNotificationsEnabled")) await setSetting("emailNotificationsEnabled", settings?.emailNotificationsEnabled ? "true" : "false");
+  if (hasOwn(settings, "notificationEmail")) await setSetting("notificationEmail", cleanString(settings?.notificationEmail, "", 180));
+  if (hasOwn(settings, "coachEmail")) await setSetting("coachEmail", cleanString(settings?.coachEmail, "", 180));
+  if (hasOwn(settings, "replyToEmail")) await setSetting("replyToEmail", cleanString(settings?.replyToEmail, "", 180));
+  if (hasOwn(settings, "notificationDelaySeconds")) {
+    const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
+    await setSetting("notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
+  }
+  if (hasOwn(settings, "sendClientEmail")) await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
+  if (hasOwn(settings, "sendCoachEmail")) await setSetting("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
+  if (hasOwn(settings, "sendAdminEmail")) await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
+  if (hasOwn(settings, "clientEmailSubject")) await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
+  if (hasOwn(settings, "clientEmailIntro")) await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
+  if (hasOwn(settings, "clientEmailFooter")) await setSetting("clientEmailFooter", cleanString(settings?.clientEmailFooter, defaultEmailTemplates.clientEmailFooter, 900));
+  if (hasOwn(settings, "adminEmailSubject")) await setSetting("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
+  if (hasOwn(settings, "adminEmailIntro")) await setSetting("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
+  if (hasOwn(settings, "smsProviderName")) await setSetting("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
+  if (hasOwn(settings, "smsWebhookUrl")) await setSetting("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
+  if (hasOwn(settings, "smsFromNumber")) await setSetting("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
+  if (hasOwn(settings, "sendClientSms")) await setSetting("sendClientSms", settings?.sendClientSms ? "true" : "false");
+  if (hasOwn(settings, "sendAdminSms")) await setSetting("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
   await setSetting("updatedAt", nowIso());
   return readAdminSettings();
 }
@@ -1330,7 +1605,9 @@ async function writeAdminSettings(settings) {
 async function readServices() {
   await ensureSeeded();
   try {
-    return normalizeServices(JSON.parse((await getSetting("servicesJson")) || "[]"));
+    return normalizeServices(
+      JSON.parse((await getSetting("servicesJson")) || "[]"),
+    );
   } catch {
     return normalizeServices(defaultServices);
   }
@@ -1346,7 +1623,9 @@ async function writeServices(services) {
 async function readAvailability() {
   await ensureSeeded();
   try {
-    return normalizeAvailability(JSON.parse((await getSetting("availabilityJson")) || "[]"));
+    return normalizeAvailability(
+      JSON.parse((await getSetting("availabilityJson")) || "[]"),
+    );
   } catch {
     return normalizeAvailability(defaultAvailability);
   }
@@ -1365,17 +1644,28 @@ async function readCoachAccount() {
   return cleanCoachAccount({
     id: (await getSetting("accountId")) || defaults.id,
     coachName: (await getSetting("accountCoachName")) || defaults.coachName,
-    businessName: (await getSetting("accountBusinessName")) || (await getSetting("coachName")) || defaults.businessName,
+    businessName:
+      (await getSetting("accountBusinessName")) ||
+      (await getSetting("coachName")) ||
+      defaults.businessName,
     venueName: (await getSetting("accountVenueName")) || defaults.venueName,
-    venueShortName: (await getSetting("accountVenueShortName")) || defaults.venueShortName,
+    venueShortName:
+      (await getSetting("accountVenueShortName")) || defaults.venueShortName,
     timezone: (await getSetting("accountTimezone")) || defaults.timezone,
-    contactEmail: (await getSetting("accountContactEmail")) || defaults.contactEmail,
-	    bookingUrl: (await getSetting("accountBookingUrl")) || defaults.bookingUrl,
-	    calendarSlug: (await getSetting("accountCalendarSlug")) || defaults.calendarSlug,
-	    caddyWorkspaceUrl: (await getSetting("accountCaddyWorkspaceUrl")) || defaults.caddyWorkspaceUrl,
-	    invoiceSettings: safeJsonParse((await getSetting("accountInvoiceSettingsJson")) || "", defaults.invoiceSettings),
-	  });
-	}
+    contactEmail:
+      (await getSetting("accountContactEmail")) || defaults.contactEmail,
+    bookingUrl: (await getSetting("accountBookingUrl")) || defaults.bookingUrl,
+    calendarSlug:
+      (await getSetting("accountCalendarSlug")) || defaults.calendarSlug,
+    caddyWorkspaceUrl:
+      (await getSetting("accountCaddyWorkspaceUrl")) ||
+      defaults.caddyWorkspaceUrl,
+    invoiceSettings: safeJsonParse(
+      (await getSetting("accountInvoiceSettingsJson")) || "",
+      defaults.invoiceSettings,
+    ),
+  });
+}
 
 async function writeCoachAccount(account) {
   const clean = cleanCoachAccount(account);
@@ -1386,11 +1676,14 @@ async function writeCoachAccount(account) {
   await setSetting("accountVenueShortName", clean.venueShortName);
   await setSetting("accountTimezone", clean.timezone);
   await setSetting("accountContactEmail", clean.contactEmail);
-	  await setSetting("accountBookingUrl", clean.bookingUrl);
-	  await setSetting("accountCalendarSlug", clean.calendarSlug);
-	  await setSetting("accountCaddyWorkspaceUrl", clean.caddyWorkspaceUrl);
-	  await setSetting("accountInvoiceSettingsJson", JSON.stringify(clean.invoiceSettings));
-	  await setSetting("coachName", clean.businessName);
+  await setSetting("accountBookingUrl", clean.bookingUrl);
+  await setSetting("accountCalendarSlug", clean.calendarSlug);
+  await setSetting("accountCaddyWorkspaceUrl", clean.caddyWorkspaceUrl);
+  await setSetting(
+    "accountInvoiceSettingsJson",
+    JSON.stringify(clean.invoiceSettings),
+  );
+  await setSetting("coachName", clean.businessName);
   await setSetting("updatedAt", nowIso());
   return clean;
 }
@@ -1402,24 +1695,36 @@ async function readBrandSettings() {
     coachName: (await getSetting("coachName")) || account.businessName,
     logoName: await getSetting("brandLogoName"),
     logoPreview: await getSetting("brandLogoPreview"),
+    showLogo: (await getSetting("brandShowLogo")) === "true",
     neutral: (await getSetting("brandNeutral")) || "#ffffff",
     primary: (await getSetting("brandPrimary")) || "#1fd36d",
     secondary: (await getSetting("brandSecondary")) || "#d7b06b",
     accent: (await getSetting("brandAccent")) || "#07100a",
-    bookingTheme: (await getSetting("brandBookingTheme")) === "light" ? "light" : "dark",
+    bookingTheme:
+      (await getSetting("brandBookingTheme")) === "light" ? "light" : "dark",
   };
 }
 
 async function writeBrandSettings(settings) {
   const account = await readCoachAccount();
-  await setSetting("coachName", cleanString(settings?.coachName, account.businessName, 80));
+  await setSetting(
+    "coachName",
+    cleanString(settings?.coachName, account.businessName, 80),
+  );
   await setSetting("brandLogoName", cleanString(settings?.logoName, "", 120));
   await setSetting("brandLogoPreview", cleanLogoPreview(settings?.logoPreview));
+  await setSetting("brandShowLogo", settings?.showLogo === true ? "true" : "false");
   await setSetting("brandNeutral", cleanHexColor(settings?.neutral, "#ffffff"));
   await setSetting("brandPrimary", cleanHexColor(settings?.primary, "#1fd36d"));
-  await setSetting("brandSecondary", cleanHexColor(settings?.secondary, "#d7b06b"));
+  await setSetting(
+    "brandSecondary",
+    cleanHexColor(settings?.secondary, "#d7b06b"),
+  );
   await setSetting("brandAccent", cleanHexColor(settings?.accent, "#07100a"));
-  await setSetting("brandBookingTheme", settings?.bookingTheme === "light" ? "light" : "dark");
+  await setSetting(
+    "brandBookingTheme",
+    settings?.bookingTheme === "light" ? "light" : "dark",
+  );
   await setSetting("updatedAt", nowIso());
   return readBrandSettings();
 }
@@ -1442,6 +1747,7 @@ async function readCalendarState() {
     settings: await readAdminSettings(),
     brand: await readBrandSettings(),
     account: await readCoachAccount(),
+    googleCalendar: await getGoogleCalendarSyncStatus(),
   };
 }
 
@@ -1480,12 +1786,15 @@ async function runPublicDiagnostics() {
       const value = await check();
       diagnostics[key] = {
         ok: true,
-        summary: Array.isArray(value) ? `${value.length} records` : typeof value,
+        summary: Array.isArray(value)
+          ? `${value.length} records`
+          : typeof value,
       };
     } catch (error) {
       diagnostics[key] = {
         ok: false,
-        message: error instanceof Error ? error.message : "Unknown diagnostics error",
+        message:
+          error instanceof Error ? error.message : "Unknown diagnostics error",
       };
     }
   }
@@ -1508,7 +1817,10 @@ async function runPublicSerializationDiagnostics() {
     } catch (error) {
       diagnostics[key] = {
         ok: false,
-        message: error instanceof Error ? error.message : "Unknown serialization error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown serialization error",
       };
     }
   }
@@ -1522,13 +1834,13 @@ async function runPublicSerializationDiagnostics() {
   } catch (error) {
     diagnostics.calendarFeed = {
       ok: false,
-      message: error instanceof Error ? error.message : "Unknown calendar feed error",
+      message:
+        error instanceof Error ? error.message : "Unknown calendar feed error",
     };
   }
 
   return diagnostics;
 }
-
 
 async function runDatabaseHealth() {
   const checks = {};
@@ -1552,7 +1864,10 @@ async function runDatabaseHealth() {
       checks[name] = {
         ok: false,
         ms: Date.now() - startedAt,
-        message: error instanceof Error ? error.message : "Unknown database health error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown database health error",
         name: error instanceof Error ? error.name : "UnknownError",
       };
     }
@@ -1576,9 +1891,15 @@ async function runDatabaseHealth() {
   });
   await check("itemsRead", async () => (await readItems()).length);
   await check("servicesRead", async () => (await readServices()).length);
-  await check("availabilityRead", async () => (await readAvailability()).flat().length);
+  await check(
+    "availabilityRead",
+    async () => (await readAvailability()).flat().length,
+  );
   await check("peopleRead", async () => (await readPeople()).length);
-  await check("notificationsRead", async () => (await readNotificationHistory()).length);
+  await check(
+    "notificationsRead",
+    async () => (await readNotificationHistory()).length,
+  );
   await check("adminSeed", async () => {
     await ensureAdminUser();
     return "admin seed checked";
@@ -1604,7 +1925,11 @@ export async function handleCalendarFeedRequest(req: Request) {
     const state = await readPublicCalendarState();
     const key = new URL(req.url).searchParams.get("key");
     if (key !== state.syncKey) return text("Invalid calendar sync key.", 401);
-    return text(generateCalendarFeed(state), 200, "text/calendar; charset=utf-8");
+    return text(
+      generateCalendarFeed(state),
+      200,
+      "text/calendar; charset=utf-8",
+    );
   } catch (error) {
     console.error("calendar_feed_error", error);
     throw error;
@@ -1622,18 +1947,45 @@ export async function handlePublicBookingStateRequest() {
 
 async function writeCalendarState(nextState) {
   const current = await readCalendarState();
-  const expectedUpdatedAt = cleanString(nextState?.updatedAt || nextState?.previousUpdatedAt, "", 120);
-  if (expectedUpdatedAt && current.updatedAt && expectedUpdatedAt !== current.updatedAt) {
-    throw Object.assign(new Error("Calendar changed elsewhere. Reload before saving so you do not overwrite live bookings."), {
-      status: 409,
-    });
+  const expectedUpdatedAt = cleanString(
+    nextState?.updatedAt || nextState?.previousUpdatedAt,
+    "",
+    120,
+  );
+  if (
+    expectedUpdatedAt &&
+    current.updatedAt &&
+    expectedUpdatedAt !== current.updatedAt
+  ) {
+    throw Object.assign(
+      new Error(
+        "Calendar changed elsewhere. Reload before saving so you do not overwrite live bookings.",
+      ),
+      {
+        status: 409,
+      },
+    );
   }
   const syncKey = cleanString(nextState?.syncKey, current.syncKey, 140);
-  const items = await writeItems(nextState?.items ?? current.items);
+  const items = await writeItems(nextState?.items ?? current.items, {
+    replaceItems: nextState?.replaceItems === true || nextState?.itemsOperation === "replace",
+    clearItems: nextState?.clearItems === true,
+  });
   const updatedAt = nowIso();
   await setSetting("syncKey", syncKey);
   await setSetting("updatedAt", updatedAt);
   await importPeople(items.map(personFromAppointment).filter(Boolean), "appointment");
+  let googleCalendarSync = null;
+  try {
+    googleCalendarSync = await syncGoogleCalendarIfEnabled();
+  } catch (error) {
+    googleCalendarSync = {
+      ...(await getGoogleCalendarSyncStatus()),
+      ok: false,
+      skipped: false,
+      error: error instanceof Error ? error.message : "Google Calendar sync failed.",
+    };
+  }
   return {
     syncKey,
     items,
@@ -1645,6 +1997,8 @@ async function writeCalendarState(nextState) {
     settings: await readAdminSettings(),
     brand: await readBrandSettings(),
     account: await readCoachAccount(),
+    googleCalendar: await getGoogleCalendarSyncStatus(),
+    googleCalendarSync,
   };
 }
 
@@ -1653,6 +2007,7 @@ async function writePublicBookingState(currentState, items) {
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
   await importPeople(cleanItems.map(personFromAppointment).filter(Boolean), "appointment");
+  await syncGoogleCalendarIfEnabled().catch((error) => console.error("public_booking_state:google_calendar_sync_failed", error));
   return {
     syncKey: currentState.syncKey,
     updatedAt,
@@ -1676,13 +2031,17 @@ function publicCalendarState(state) {
     settings: state.settings,
     brand: state.brand,
     account: state.account,
+    googleCalendar: state.googleCalendar,
+    googleCalendarSync: state.googleCalendarSync,
   };
 }
 
 function publicBookingState(state) {
   return {
     updatedAt: state.updatedAt,
-	    services: (state.services || []).filter((service) => service.active && service.visibility === "public" && service.lessonFormat !== "package"),
+    services: (state.services || []).filter(
+      (service) => service.active && service.visibility === "public" && service.lessonFormat !== "package",
+    ),
     availability: state.availability || [],
     brand: state.brand,
     account: state.account,
@@ -1710,39 +2069,67 @@ function queueBookingNotifications(appointment, options = {}, context = null) {
 }
 
 function appointmentSlotSignature(item) {
-  return [itemWeek(item), item.day, item.start, item.duration, item.serviceId || ""].join(":");
+  return [
+    itemWeek(item),
+    item.day,
+    item.start,
+    item.duration,
+    item.serviceId || "",
+  ].join(":");
 }
 
 function appointmentContactSignature(item) {
-  return [item.client || item.title || "", item.email || "", item.phone || ""].join(":").toLowerCase();
+  return [item.client || item.title || "", item.email || "", item.phone || ""]
+    .join(":")
+    .toLowerCase();
 }
 
 function notificationJobsForCalendarChange(previousItems = [], nextItems = []) {
   const previousById = new Map(
-    previousItems.filter((item) => item.kind === "appointment").map((item) => [item.id, item]),
+    previousItems
+      .filter((item) => item.kind === "appointment")
+      .map((item) => [item.id, item]),
   );
   return nextItems
     .filter((item) => item.kind === "appointment" && item.email)
     .map((item) => {
       const previous = previousById.get(item.id);
       if (!previous) return { appointment: item, kind: "booking" };
-      if (appointmentSlotSignature(previous) !== appointmentSlotSignature(item)) {
+      if (
+        appointmentSlotSignature(previous) !== appointmentSlotSignature(item)
+      ) {
         return { appointment: item, kind: "reschedule" };
       }
-      if (!previous.email && item.email) return { appointment: item, kind: "booking" };
-      if (appointmentContactSignature(previous) !== appointmentContactSignature(item)) return null;
+      if (!previous.email && item.email)
+        return { appointment: item, kind: "booking" };
+      if (
+        appointmentContactSignature(previous) !==
+        appointmentContactSignature(item)
+      )
+        return null;
       return null;
     })
     .filter(Boolean);
 }
 
-async function sendCalendarChangeNotifications(previousItems = [], nextItems = []) {
+async function sendCalendarChangeNotifications(
+  previousItems = [],
+  nextItems = [],
+) {
   const results = [];
-  for (const { appointment, kind } of notificationJobsForCalendarChange(previousItems, nextItems)) {
+  for (const { appointment, kind } of notificationJobsForCalendarChange(
+    previousItems,
+    nextItems,
+  )) {
     try {
       results.push(...(await sendBookingNotifications(appointment, { kind })));
     } catch (error) {
-      console.error("Calendar change notification failed", appointment?.id, kind, error);
+      console.error(
+        "Calendar change notification failed",
+        appointment?.id,
+        kind,
+        error,
+      );
     }
   }
   return results;
@@ -1759,9 +2146,15 @@ async function verifyAdminPassword(email, password) {
   const { passwordHash } = hashPassword(password, row.password_salt);
   const saved = Buffer.from(row.password_hash, "hex");
   const attempt = Buffer.from(passwordHash, "hex");
-  if (saved.length !== attempt.length || !timingSafeEqual(saved, attempt)) return null;
+  if (saved.length !== attempt.length || !timingSafeEqual(saved, attempt))
+    return null;
 
-  return { id: row.id, email: row.email };
+  return {
+    id: row.id,
+    email: row.email,
+    password_hash: row.password_hash,
+    password_salt: row.password_salt,
+  };
 }
 
 async function cleanupExpiredPasswordResets() {
@@ -1786,7 +2179,9 @@ async function createPasswordReset(email) {
   if (!user) return null;
 
   const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + passwordResetMinutes * 60 * 1000).toISOString();
+  const expiresAt = new Date(
+    Date.now() + passwordResetMinutes * 60 * 1000,
+  ).toISOString();
   await db().sql`
     INSERT INTO admin_password_resets (id, token_hash, user_id, expires_at, created_at)
     VALUES (${randomUUID()}, ${hashToken(token)}, ${user.id}, ${expiresAt}, NOW())
@@ -1795,19 +2190,27 @@ async function createPasswordReset(email) {
 }
 
 function passwordResetUrl(req, token) {
-  const origin = env("CLARITY_APP_URL", new URL(req.url).origin).replace(/\/$/, "");
+  const origin = env("CLARITY_APP_URL", new URL(req.url).origin).replace(
+    /\/$/,
+    "",
+  );
   const url = new URL(origin || new URL(req.url).origin);
   url.searchParams.set("reset", token);
   return url.toString();
 }
 
 async function sendEmail({ to, subject, html, text, replyTo, idempotencyKey }) {
+  if (emailNotificationsGloballyDisabled()) return { sent: false, reason: "email_notifications_disabled" };
+
   const apiKey = env("RESEND_API_KEY");
   if (!apiKey) return { sent: false, reason: "missing_resend_key" };
 
   const account = await readCoachAccount();
   const businessName = account.businessName || "Clarity Golf";
-  const from = env("CLARITY_EMAIL_FROM", `${businessName} <onboarding@resend.dev>`);
+  const from = env(
+    "CLARITY_EMAIL_FROM",
+    `${businessName} <onboarding@resend.dev>`,
+  );
   const body = {
     from,
     to: Array.isArray(to) ? to : [to],
@@ -1828,8 +2231,16 @@ async function sendEmail({ to, subject, html, text, replyTo, idempotencyKey }) {
 
   if (!response.ok) {
     const message = await response.text().catch(() => "");
-    console.error("Resend email failed", response.status, message.slice(0, 500));
-    return { sent: false, reason: "resend_failed", error: message.slice(0, 500) };
+    console.error(
+      "Resend email failed",
+      response.status,
+      message.slice(0, 500),
+    );
+    return {
+      sent: false,
+      reason: "resend_failed",
+      error: message.slice(0, 500),
+    };
   }
 
   const data = await response.json().catch(() => ({}));
@@ -1870,12 +2281,16 @@ async function sendPasswordResetEmail(reset, req) {
 
 function bookingEmailVariables({ appointment, service, account }) {
   const client = appointment.client || appointment.title || "Client";
-  const rescheduleUrl = new URL(account.bookingUrl || "https://book.claritygolf.app");
+  const rescheduleUrl = new URL(
+    account.bookingUrl || "https://book.claritygolf.app",
+  );
   rescheduleUrl.searchParams.set("embed", "booking");
   rescheduleUrl.searchParams.set("mode", "reschedule");
   if (appointment.id) rescheduleUrl.searchParams.set("booking", appointment.id);
-  if (appointment.email) rescheduleUrl.searchParams.set("email", appointment.email);
-  if (appointment.phone) rescheduleUrl.searchParams.set("phone", appointment.phone);
+  if (appointment.email)
+    rescheduleUrl.searchParams.set("email", appointment.email);
+  if (appointment.phone)
+    rescheduleUrl.searchParams.set("phone", appointment.phone);
   return {
     client,
     firstName: client.split(/\s+/)[0] || client,
@@ -1923,15 +2338,22 @@ function bookingEmailText({ title, intro, footer, variables }) {
     `Price: ${variables.price}`,
     "",
     footer,
-    variables.rescheduleUrl ? `Manage / Reschedule: ${variables.rescheduleUrl}` : "",
+    variables.rescheduleUrl
+      ? `Manage / Reschedule: ${variables.rescheduleUrl}`
+      : "",
   ].join("\n");
 }
 
-async function sendBookingNotifications(appointment, { kind = "booking", testRecipient = "" } = {}) {
+async function sendBookingNotifications(
+  appointment,
+  { kind = "booking", testRecipient = "" } = {},
+) {
   const settings = await readAdminSettings();
   const account = await readCoachAccount();
   const services = await readServices();
-  const service = services.find((candidate) => candidate.id === appointment.serviceId);
+  const service = services.find(
+    (candidate) => candidate.id === appointment.serviceId,
+  );
   const variables = bookingEmailVariables({ appointment, service, account });
   const personKey = notificationPersonKey({
     name: appointment.client || appointment.title,
@@ -1970,7 +2392,12 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
     }
 
     if (result.sent) {
-      console.log("Booking email sent", channel, recipient, result.id || "no-provider-id");
+      console.log(
+        "Booking email sent",
+        channel,
+        recipient,
+        result.id || "no-provider-id",
+      );
     }
 
     return {
@@ -1998,12 +2425,27 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
         error: reason,
       });
     } catch (error) {
-      console.error("Notification skipped history write failed", channel, error);
+      console.error(
+        "Notification skipped history write failed",
+        channel,
+        error,
+      );
     }
-    return { channel, recipient, subject, kind: notificationKind, status: "skipped", sent: false, reason };
+    return {
+      channel,
+      recipient,
+      subject,
+      kind: notificationKind,
+      status: "skipped",
+      sent: false,
+      reason,
+    };
   }
 
-  if ((settings.sendClientEmail || kind === "test") && (testRecipient || appointment.email)) {
+  if (
+    (settings.sendClientEmail || kind === "test") &&
+    (testRecipient || appointment.email)
+  ) {
     const subject = renderTemplate(settings.clientEmailSubject, variables);
     const intro = renderTemplate(settings.clientEmailIntro, variables);
     const footerBase = renderTemplate(settings.clientEmailFooter, variables);
@@ -2013,12 +2455,19 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
         "client",
         recipient,
         subject,
-        bookingEmailHtml({ title: subject, intro, footer: footerBase, variables }),
+        bookingEmailHtml({
+          title: subject,
+          intro,
+          footer: footerBase,
+          variables,
+        }),
         bookingEmailText({
           title: subject,
           intro,
           footer: footerBase,
-          variables: testRecipient ? { ...variables, rescheduleUrl: "" } : variables,
+          variables: testRecipient
+            ? { ...variables, rescheduleUrl: "" }
+            : variables,
         }),
         `${kind}-client-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
       ),
@@ -2031,9 +2480,34 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
         "client",
         recipient,
         subject,
-        settings.sendClientEmail ? "missing_client_email" : "disabled_in_notification_settings",
+        settings.sendClientEmail
+          ? "missing_client_email"
+          : "disabled_in_notification_settings",
       ),
     );
+  }
+
+  if (settings.sendCoachEmail && kind !== "test") {
+    const recipient = settings.coachEmail || "";
+    const subject = renderTemplate(settings.adminEmailSubject, variables);
+    const intro = renderTemplate(settings.adminEmailIntro, variables);
+    if (recipient) {
+      jobs.push(
+        sendAndRecord(
+          "coach",
+          recipient,
+          subject,
+          bookingEmailHtml({ title: subject, intro, footer: "Coach booking alert.", variables }),
+          bookingEmailText({ title: subject, intro, footer: "Coach booking alert.", variables }),
+          `${kind}-coach-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
+        ),
+      );
+    } else {
+      jobs.push(recordSkipped("coach", "", subject, "missing_coach_email"));
+    }
+  } else if (kind !== "test") {
+    const subject = renderTemplate(settings.adminEmailSubject, variables);
+    jobs.push(recordSkipped("coach", settings.coachEmail || "", subject, "disabled_in_notification_settings"));
   }
 
   if (settings.sendAdminEmail && kind !== "test") {
@@ -2045,15 +2519,32 @@ async function sendBookingNotifications(appointment, { kind = "booking", testRec
         "admin",
         recipient,
         subject,
-        bookingEmailHtml({ title: subject, intro, footer: "Admin booking alert.", variables }),
-        bookingEmailText({ title: subject, intro, footer: "Admin booking alert.", variables }),
+        bookingEmailHtml({
+          title: subject,
+          intro,
+          footer: "Admin booking alert.",
+          variables,
+        }),
+        bookingEmailText({
+          title: subject,
+          intro,
+          footer: "Admin booking alert.",
+          variables,
+        }),
         `${kind}-admin-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
       ),
     );
   } else if (kind !== "test") {
     const recipient = settings.notificationEmail || account.contactEmail;
     const subject = renderTemplate(settings.adminEmailSubject, variables);
-    jobs.push(recordSkipped("admin", recipient, subject, "disabled_in_notification_settings"));
+    jobs.push(
+      recordSkipped(
+        "admin",
+        recipient,
+        subject,
+        "disabled_in_notification_settings",
+      ),
+    );
   }
 
   if (!jobs.length) return [];
@@ -2065,23 +2556,43 @@ async function sendInitialBookingNotifications(appointment, kind = "booking") {
     const results = await sendBookingNotifications(appointment, { kind });
     return Array.isArray(results) ? results : [];
   } catch (error) {
-    const errorMessage = cleanString(error instanceof Error ? error.message : String(error || "unknown_error"), "unknown_error", 450);
-    console.error("Initial booking notifications failed", appointment?.id, kind, error);
+    const errorMessage = cleanString(
+      error instanceof Error ? error.message : String(error || "unknown_error"),
+      "unknown_error",
+      450,
+    );
+    console.error(
+      "Initial booking notifications failed",
+      appointment?.id,
+      kind,
+      error,
+    );
 
     const fallbackResults = [];
     try {
       const settings = await readAdminSettings();
       const account = await readCoachAccount();
       const services = await readServices();
-      const service = services.find((candidate) => candidate.id === appointment?.serviceId);
-      const variables = bookingEmailVariables({ appointment, service, account });
+      const service = services.find(
+        (candidate) => candidate.id === appointment?.serviceId,
+      );
+      const variables = bookingEmailVariables({
+        appointment,
+        service,
+        account,
+      });
       const personKey = notificationPersonKey({
         name: appointment?.client || appointment?.title,
         email: appointment?.email,
         phone: appointment?.phone,
       });
 
-      async function recordFailed(channel, recipient, subject, reason = "send_exception") {
+      async function recordFailed(
+        channel,
+        recipient,
+        subject,
+        reason = "send_exception",
+      ) {
         const notificationKind = `${kind}_${channel}_email`;
         const result = {
           channel,
@@ -2115,6 +2626,14 @@ async function sendInitialBookingNotifications(appointment, kind = "booking") {
         );
       }
 
+      if (settings.sendCoachEmail && settings.coachEmail) {
+        await recordFailed(
+          "coach",
+          settings.coachEmail,
+          renderTemplate(settings.adminEmailSubject, variables),
+        );
+      }
+
       if (settings.sendAdminEmail) {
         const recipient = settings.notificationEmail || account.contactEmail;
         await recordFailed(
@@ -2124,19 +2643,33 @@ async function sendInitialBookingNotifications(appointment, kind = "booking") {
         );
       }
     } catch (recordError) {
-      console.error("Initial booking notification fallback receipt failed", appointment?.id, kind, recordError);
+      console.error(
+        "Initial booking notification fallback receipt failed",
+        appointment?.id,
+        kind,
+        recordError,
+      );
     }
 
     return fallbackResults.length
       ? fallbackResults
-      : [{ channel: "client", sent: false, status: "failed", reason: "send_exception", error: errorMessage }];
+      : [
+          {
+            channel: "client",
+            sent: false,
+            status: "failed",
+            reason: "send_exception",
+            error: errorMessage,
+          },
+        ];
   }
 }
 
 async function resetAdminPassword(token, password) {
   const cleanToken = cleanString(token, "", 500);
   if (!cleanToken) return { error: "invalid_token" };
-  if (typeof password !== "string" || password.length < 8) return { error: "weak_password" };
+  if (typeof password !== "string" || password.length < 8)
+    return { error: "weak_password" };
 
   const rows = await db().sql`
     SELECT admin_password_resets.id AS reset_id,
@@ -2164,8 +2697,13 @@ async function resetAdminPassword(token, password) {
        WHERE id = $3`,
       [passwordHash, salt, row.user_id],
     );
-    await client.query("UPDATE admin_password_resets SET used_at = NOW() WHERE id = $1", [row.reset_id]);
-    await client.query("DELETE FROM admin_sessions WHERE user_id = $1", [row.user_id]);
+    await client.query(
+      "UPDATE admin_password_resets SET used_at = NOW() WHERE id = $1",
+      [row.reset_id],
+    );
+    await client.query("DELETE FROM admin_sessions WHERE user_id = $1", [
+      row.user_id,
+    ]);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -2174,12 +2712,13 @@ async function resetAdminPassword(token, password) {
     client.release();
   }
 
-  return { user: { id: row.user_id, email: row.email } };
+  return { user: { id: row.user_id, email: row.email, password_hash: passwordHash, password_salt: salt } };
 }
 
 async function changeAdminPassword(session, currentPassword, nextPassword) {
   if (!session?.email) return { error: "unauthorized" };
-  if (typeof nextPassword !== "string" || nextPassword.length < 8) return { error: "weak_password" };
+  if (typeof nextPassword !== "string" || nextPassword.length < 8)
+    return { error: "weak_password" };
   const user = await verifyAdminPassword(session.email, currentPassword || "");
   if (!user) return { error: "invalid_current_password" };
 
@@ -2195,7 +2734,9 @@ async function changeAdminPassword(session, currentPassword, nextPassword) {
        WHERE id = $3`,
       [passwordHash, salt, user.id],
     );
-    await client.query("DELETE FROM admin_sessions WHERE user_id = $1", [user.id]);
+    await client.query("DELETE FROM admin_sessions WHERE user_id = $1", [
+      user.id,
+    ]);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -2204,15 +2745,17 @@ async function changeAdminPassword(session, currentPassword, nextPassword) {
     client.release();
   }
 
-  return { user };
+  return { user: { id: user.id, email: user.email, password_hash: passwordHash, password_salt: salt } };
 }
 
-async function createAdminSession(userId) {
+async function createAdminSession(userOrId) {
+  const userId = typeof userOrId === "object" ? userOrId.id : userOrId;
   const token = randomBytes(32).toString("base64url");
+  const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000).toISOString();
   await db().sql`
     INSERT INTO admin_sessions (id, token_hash, user_id, expires_at, created_at)
-    VALUES (${randomUUID()}, ${hashToken(token)}, ${userId}, ${expiresAt}, NOW())
+    VALUES (${randomUUID()}, ${tokenHash}, ${userId}, ${expiresAt}, NOW())
   `;
   return { token, expiresAt };
 }
@@ -2236,7 +2779,8 @@ async function readAdminSession(token) {
 
 async function destroyAdminSession(token) {
   if (!token) return;
-  await db().sql`DELETE FROM admin_sessions WHERE token_hash = ${hashToken(token)}`;
+  const tokenHash = hashToken(token);
+  await db().sql`DELETE FROM admin_sessions WHERE token_hash = ${tokenHash}`;
 }
 
 async function cleanupExpiredSessions() {
@@ -2254,26 +2798,50 @@ function itemWeek(item) {
 }
 
 function slotOverlaps(a, b) {
-  return a.week === b.week && a.day === b.day && a.start < b.start + b.duration && a.start + a.duration > b.start;
+  return (
+    a.week === b.week &&
+    a.day === b.day &&
+    a.start < b.start + b.duration &&
+    a.start + a.duration > b.start
+  );
 }
 
 function isInsideAvailability(availability, day, start, duration) {
   const end = start + duration;
-  return availability[day]?.some((window) => start >= window.start && end <= window.end) ?? false;
+  return (
+    availability[day]?.some(
+      (window) => start >= window.start && end <= window.end,
+    ) ?? false
+  );
 }
 
 function hasCollision(items, candidate) {
   return items.some((item) =>
-    slotOverlaps({ week: itemWeek(item), day: item.day, start: item.start, duration: item.duration }, candidate),
+    slotOverlaps(
+      {
+        week: itemWeek(item),
+        day: item.day,
+        start: item.start,
+        duration: item.duration,
+      },
+      candidate,
+    ),
   );
 }
 
 async function createPublicBooking(payload, context = null) {
   const state = await readPublicCalendarState();
   const service = state.services.find(
-    (candidate) => candidate.id === payload?.serviceId && candidate.active && candidate.visibility === "public" && candidate.lessonFormat !== "package",
+    (candidate) =>
+      candidate.id === payload?.serviceId &&
+      candidate.active &&
+      candidate.visibility === "public" &&
+      candidate.lessonFormat !== "package",
   );
-  if (!service) throw Object.assign(new Error("Choose a public lesson type."), { status: 400 });
+  if (!service)
+    throw Object.assign(new Error("Choose a public lesson type."), {
+      status: 400,
+    });
 
   const week = Number(payload.week ?? 0);
   const day = Number(payload.day);
@@ -2284,15 +2852,31 @@ async function createPublicBooking(payload, context = null) {
   const phone = cleanString(payload.phone, "", 80);
 
   if (!firstName || !lastName || !email) {
-    throw Object.assign(new Error("First name, last name, and email are required."), { status: 400 });
+    throw Object.assign(
+      new Error("First name, last name, and email are required."),
+      { status: 400 },
+    );
   }
-  if (!Number.isInteger(week) || !Number.isInteger(day) || !Number.isInteger(start) || day < 0 || day > 6) {
-    throw Object.assign(new Error("Choose a valid appointment time."), { status: 400 });
+  if (
+    !Number.isInteger(week) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(start) ||
+    day < 0 ||
+    day > 6
+  ) {
+    throw Object.assign(new Error("Choose a valid appointment time."), {
+      status: 400,
+    });
   }
 
   const slot = { week, day, start, duration: service.duration };
-  if (!isInsideAvailability(state.availability, day, start, service.duration) || hasCollision(state.items, slot)) {
-    throw Object.assign(new Error("That time is no longer available."), { status: 409 });
+  if (
+    !isInsideAvailability(state.availability, day, start, service.duration) ||
+    hasCollision(state.items, slot)
+  ) {
+    throw Object.assign(new Error("That time is no longer available."), {
+      status: 409,
+    });
   }
 
   const client = `${firstName} ${lastName}`;
@@ -2306,10 +2890,12 @@ async function createPublicBooking(payload, context = null) {
     phone,
     email,
     note: "Booked from public booking page.",
-    status: "booked",
   };
   await writePublicBookingState(state, [...state.items, appointment]);
-  const notifications = await sendInitialBookingNotifications(appointment, "booking");
+  const notifications = await sendInitialBookingNotifications(
+    appointment,
+    "booking",
+  );
   return { appointment, notifications };
 }
 
@@ -2335,7 +2921,10 @@ export async function handlePublicBookingRequest(req, context = null) {
     return json(
       {
         error: status === 500 ? "public_booking_error" : "request_error",
-        message: error instanceof Error ? error.message : "Unknown public booking error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown public booking error",
       },
       status,
     );
@@ -2345,9 +2934,17 @@ export async function handlePublicBookingRequest(req, context = null) {
 export async function handlePublicNotificationStatusRequest(req) {
   try {
     const url = new URL(req.url);
-    const appointmentId = cleanString(url.searchParams.get("appointment") || "", "", 120);
-    const email = normalizeRescheduleContact(url.searchParams.get("email") || "");
-    const phone = normalizeRescheduleContact(url.searchParams.get("phone") || "");
+    const appointmentId = cleanString(
+      url.searchParams.get("appointment") || "",
+      "",
+      120,
+    );
+    const email = normalizeRescheduleContact(
+      url.searchParams.get("email") || "",
+    );
+    const phone = normalizeRescheduleContact(
+      url.searchParams.get("phone") || "",
+    );
     if (!appointmentId || (!email && !phone)) return json({ sent: false }, 400);
 
     const state = await readPublicCalendarState();
@@ -2358,11 +2955,17 @@ export async function handlePublicNotificationStatusRequest(req) {
 
     const history = await readNotificationHistory();
     const notification = history.find(
-      (candidate) => candidate.calendarItemId === appointmentId && candidate.kind.includes("client_email"),
+      (candidate) =>
+        candidate.calendarItemId === appointmentId &&
+        candidate.kind.includes("client_email"),
     );
     return json({
-      sent: ["sent", "delivered", "opened", "clicked"].includes(notification?.status || ""),
-      notification: notification ? notificationResultFromRecord(notification) : null,
+      sent: ["sent", "delivered", "opened", "clicked"].includes(
+        notification?.status || "",
+      ),
+      notification: notification
+        ? notificationResultFromRecord(notification)
+        : null,
     });
   } catch (error) {
     console.error("public_notification_status:failed", error);
@@ -2372,7 +2975,11 @@ export async function handlePublicNotificationStatusRequest(req) {
 
 async function applyResendWebhookEvent(event = {}, deliveryId = "") {
   const status = resendWebhookStatus(event?.type || "");
-  const providerId = cleanString(deliveryId || event?.data?.email_id || "", "", 180);
+  const providerId = cleanString(
+    deliveryId || event?.data?.email_id || "",
+    "",
+    180,
+  );
   if (!status || !providerId) {
     return { ok: false, reason: "ignored", providerId, status };
   }
@@ -2416,7 +3023,8 @@ export async function handleResendWebhookRequest(req) {
 
   const deliveryId = cleanString(req.headers.get("svix-id") || "", "", 180);
   if (deliveryId) {
-    const existing = await db().sql`SELECT id FROM notification_webhook_events WHERE id = ${deliveryId} LIMIT 1`;
+    const existing = await db()
+      .sql`SELECT id FROM notification_webhook_events WHERE id = ${deliveryId} LIMIT 1`;
     if (existing.length) return json({ ok: true, duplicate: true });
   }
 
@@ -2438,7 +3046,9 @@ export async function handleResendWebhookRequest(req) {
 }
 
 function normalizeRescheduleContact(value) {
-  return cleanString(value, "", 180).toLowerCase().replace(/[^a-z0-9]/g, "");
+  return cleanString(value, "", 180)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function publicRescheduleItem(item, serviceList = defaultServices) {
@@ -2458,7 +3068,9 @@ function matchesRescheduleContact(item, email, phone) {
   if (item.kind !== "appointment") return false;
   const itemEmail = normalizeRescheduleContact(item.email);
   const itemPhone = normalizeRescheduleContact(item.phone);
-  return Boolean(itemEmail && itemPhone && itemEmail === email && itemPhone === phone);
+  return Boolean(
+    itemEmail && itemPhone && itemEmail === email && itemPhone === phone,
+  );
 }
 
 function matchesNotificationContact(item, email, phone) {
@@ -2470,41 +3082,60 @@ function matchesNotificationContact(item, email, phone) {
 }
 
 function notificationResultFromRecord(notification) {
-  const channel = notification.kind.includes("admin") ? "admin" : "client";
+  const channel = notification.kind.includes("admin") ? "admin" : notification.kind.includes("coach") ? "coach" : "client";
   return {
     channel,
     recipient: notification.recipient,
     subject: notification.subject,
     kind: notification.kind,
     status: notification.status,
-    sent: ["sent", "delivered", "opened", "clicked"].includes(notification.status || ""),
+    sent: ["sent", "delivered", "opened", "clicked"].includes(
+      notification.status || "",
+    ),
     id: notification.providerId,
     reason: notification.error,
   };
 }
 
 async function triggerPublicBookingNotifications(payload) {
-  const appointmentId = cleanString(payload?.appointmentId || payload?.appointment || "", "", 120);
+  const appointmentId = cleanString(
+    payload?.appointmentId || payload?.appointment || "",
+    "",
+    120,
+  );
   const email = normalizeRescheduleContact(payload?.email);
   const phone = normalizeRescheduleContact(payload?.phone);
   const kind = payload?.kind === "reschedule" ? "reschedule" : "booking";
 
   if (!appointmentId || !email) {
-    throw Object.assign(new Error("Booking email details are missing."), { status: 400 });
+    throw Object.assign(new Error("Booking email details are missing."), {
+      status: 400,
+    });
   }
 
   const state = await readPublicCalendarState();
   const appointment = state.items.find((item) => item.id === appointmentId);
   if (!appointment || !matchesNotificationContact(appointment, email, phone)) {
-    throw Object.assign(new Error("That booking could not be verified for email notification."), { status: 404 });
+    throw Object.assign(
+      new Error("That booking could not be verified for email notification."),
+      { status: 404 },
+    );
   }
 
   const existing = (await readNotificationHistory()).filter(
-    (notification) => notification.calendarItemId === appointmentId && notification.kind.startsWith(`${kind}_`),
+    (notification) =>
+      notification.calendarItemId === appointmentId &&
+      notification.kind.startsWith(`${kind}_`),
   );
-  const alreadySent = existing.some((notification) => notification.status === "sent");
+  const alreadySent = existing.some(
+    (notification) => notification.status === "sent",
+  );
   if (alreadySent) {
-    return { ok: true, alreadySent: true, results: existing.map(notificationResultFromRecord) };
+    return {
+      ok: true,
+      alreadySent: true,
+      results: existing.map(notificationResultFromRecord),
+    };
   }
 
   const results = await sendBookingNotifications(appointment, { kind });
@@ -2520,14 +3151,19 @@ async function lookupPublicReschedule(payload) {
   const email = normalizeRescheduleContact(payload?.email);
   const phone = normalizeRescheduleContact(payload?.phone);
   if (!email || !phone) {
-    throw Object.assign(new Error("Enter the email and phone number used on the booking."), { status: 400 });
+    throw Object.assign(
+      new Error("Enter the email and phone number used on the booking."),
+      { status: 400 },
+    );
   }
 
   const state = await readPublicCalendarState();
   const serviceList = state.services || defaultServices;
   const matches = state.items
     .filter((item) => matchesRescheduleContact(item, email, phone))
-    .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start)
+    .sort(
+      (a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start,
+    )
     .map((item) => publicRescheduleItem(item, serviceList));
 
   return { matches };
@@ -2542,28 +3178,51 @@ async function reschedulePublicBooking(payload, context = null) {
   const start = Number(payload?.start);
 
   if (!appointmentId || !email || !phone) {
-    throw Object.assign(new Error("Choose the booking to reschedule."), { status: 400 });
+    throw Object.assign(new Error("Choose the booking to reschedule."), {
+      status: 400,
+    });
   }
-  if (!Number.isInteger(week) || !Number.isInteger(day) || !Number.isInteger(start) || day < 0 || day > 6) {
-    throw Object.assign(new Error("Choose a valid new appointment time."), { status: 400 });
+  if (
+    !Number.isInteger(week) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(start) ||
+    day < 0 ||
+    day > 6
+  ) {
+    throw Object.assign(new Error("Choose a valid new appointment time."), {
+      status: 400,
+    });
   }
 
   const state = await readPublicCalendarState();
   const appointment = state.items.find((item) => item.id === appointmentId);
   if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
-    throw Object.assign(new Error("That booking could not be verified."), { status: 404 });
+    throw Object.assign(new Error("That booking could not be verified."), {
+      status: 404,
+    });
   }
 
   const serviceList = state.services || defaultServices;
-  const service = serviceList.find((candidate) => candidate.id === appointment.serviceId);
+  const service = serviceList.find(
+    (candidate) => candidate.id === appointment.serviceId,
+  );
   const duration = service?.duration || appointment.duration;
   const slot = { week, day, start, duration };
-  const itemsWithoutOriginal = state.items.filter((item) => item.id !== appointment.id);
+  const itemsWithoutOriginal = state.items.filter(
+    (item) => item.id !== appointment.id,
+  );
   if (
-    !isInsideAvailability(state.availability || defaultAvailability, day, start, duration) ||
+    !isInsideAvailability(
+      state.availability || defaultAvailability,
+      day,
+      start,
+      duration,
+    ) ||
     hasCollision(itemsWithoutOriginal, slot)
   ) {
-    throw Object.assign(new Error("That time is no longer available."), { status: 409 });
+    throw Object.assign(new Error("That time is no longer available."), {
+      status: 409,
+    });
   }
 
   const updatedAppointment = {
@@ -2576,9 +3235,14 @@ async function reschedulePublicBooking(payload, context = null) {
   };
   await writePublicBookingState(
     state,
-    state.items.map((item) => (item.id === appointment.id ? updatedAppointment : item)),
+    state.items.map((item) =>
+      item.id === appointment.id ? updatedAppointment : item,
+    ),
   );
-  const notifications = await sendInitialBookingNotifications(updatedAppointment, "reschedule");
+  const notifications = await sendInitialBookingNotifications(
+    updatedAppointment,
+    "reschedule",
+  );
 
   return { appointment: updatedAppointment, notifications };
 }
@@ -2591,8 +3255,12 @@ export async function handlePublicRescheduleLookupRequest(req) {
     const status = error?.status || 500;
     return json(
       {
-        error: status === 500 ? "public_reschedule_lookup_error" : "request_error",
-        message: error instanceof Error ? error.message : "Unknown public reschedule lookup error",
+        error:
+          status === 500 ? "public_reschedule_lookup_error" : "request_error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown public reschedule lookup error",
       },
       status,
     );
@@ -2619,7 +3287,10 @@ export async function handlePublicRescheduleRequest(req, context = null) {
     return json(
       {
         error: status === 500 ? "public_reschedule_error" : "request_error",
-        message: error instanceof Error ? error.message : "Unknown public reschedule error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown public reschedule error",
       },
       status,
     );
@@ -2627,7 +3298,10 @@ export async function handlePublicRescheduleRequest(req, context = null) {
 }
 
 function serviceName(serviceId, serviceList = defaultServices) {
-  return serviceList.find((service) => service.id === serviceId)?.name ?? "Golf Lesson";
+  return (
+    serviceList.find((service) => service.id === serviceId)?.name ??
+    "Golf Lesson"
+  );
 }
 
 function escapeText(value) {
@@ -2650,7 +3324,11 @@ function foldLine(line) {
 }
 
 function formatUtcStamp(date = new Date()) {
-  return date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+  return date
+    .toISOString()
+    .replaceAll("-", "")
+    .replaceAll(":", "")
+    .replace(/\.\d{3}Z$/, "Z");
 }
 
 function dateForSlot(week, day) {
@@ -2711,7 +3389,9 @@ function generateCalendarFeed(state) {
 
   state.items
     .slice()
-    .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start)
+    .sort(
+      (a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start,
+    )
     .forEach((item) => {
       const week = itemWeek(item);
       lines.push(
@@ -2740,7 +3420,11 @@ async function parseBody(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-export async function handleBookingApiRoute(req: Request, forcedPathname = "", context = null) {
+export async function handleBookingApiRoute(
+  req: Request,
+  forcedPathname = "",
+  context = null,
+) {
   const url = new URL(req.url);
   const rawPathname = url.pathname;
   const pathname = forcedPathname
@@ -2752,7 +3436,11 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
   try {
     // A browser with no session cookie should reach the login form immediately.
     // Avoid running the full calendar/settings seed path for this read-only check.
-    if (req.method === "GET" && pathname === "/api/auth/session" && !sessionTokenFromRequest(req)) {
+    if (
+      req.method === "GET" &&
+      pathname === "/api/auth/session" &&
+      !sessionTokenFromRequest(req)
+    ) {
       return json({ authenticated: false });
     }
 
@@ -2762,7 +3450,10 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
       await ensureSeeded();
     }
 
-    if (req.method === "GET" && /^\/calendar\/[a-z0-9-]+\.ics$/.test(pathname)) {
+    if (
+      req.method === "GET" &&
+      /^\/calendar\/[a-z0-9-]+\.ics$/.test(pathname)
+    ) {
       return handleCalendarFeedRequest(req);
     }
 
@@ -2770,9 +3461,13 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
       const body = await parseBody(req);
       const user = await verifyAdminPassword(body.email || "", body.password || "");
       if (!user) return json({ error: "invalid_login", message: "Email or password is incorrect." }, 401);
-      const session = await createAdminSession(user.id);
+      const session = await createAdminSession(user);
       return json(
-        { authenticated: true, email: user.email, expiresAt: session.expiresAt },
+        {
+          authenticated: true,
+          email: user.email,
+          expiresAt: session.expiresAt,
+        },
         200,
         { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
       );
@@ -2796,29 +3491,52 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
       if (reset) {
         const emailResult = await sendPasswordResetEmail(reset, req);
         if (!emailResult.sent) {
-          return json({ ok: false, message: "Could not send the reset email. Try again in a minute." }, 502);
+          return json(
+            {
+              ok: false,
+              message: "Could not send the reset email. Try again in a minute.",
+            },
+            502,
+          );
         }
       }
 
       return json({
         ok: true,
-        message: "If that email matches an admin account, a reset link has been sent.",
+        message:
+          "If that email matches an admin account, a reset link has been sent.",
       });
     }
 
     if (req.method === "POST" && pathname === "/api/auth/reset-password") {
       await cleanupExpiredPasswordResets();
       const body = await parseBody(req);
-      const result = await resetAdminPassword(body.token || "", body.password || "");
+      const result = await resetAdminPassword(
+        body.token || "",
+        body.password || "",
+      );
       if (result.error === "weak_password") {
-        return json({ error: "weak_password", message: "Use at least 8 characters." }, 400);
+        return json(
+          { error: "weak_password", message: "Use at least 8 characters." },
+          400,
+        );
       }
       if (!result.user) {
-        return json({ error: "invalid_token", message: "This reset link has expired or has already been used." }, 400);
+        return json(
+          {
+            error: "invalid_token",
+            message: "This reset link has expired or has already been used.",
+          },
+          400,
+        );
       }
-      const session = await createAdminSession(result.user.id);
+      const session = await createAdminSession(result.user);
       return json(
-        { authenticated: true, email: result.user.email, expiresAt: session.expiresAt },
+        {
+          authenticated: true,
+          email: result.user.email,
+          expiresAt: session.expiresAt,
+        },
         200,
         { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
       );
@@ -2826,21 +3544,48 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
 
     if (req.method === "POST" && pathname === "/api/auth/change-password") {
       const currentSession = await requireAdmin(req);
-      if (!currentSession) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+      if (!currentSession)
+        return json(
+          { error: "unauthorized", message: "Admin login required." },
+          401,
+        );
       const body = await parseBody(req);
-      const result = await changeAdminPassword(currentSession, body.currentPassword || "", body.newPassword || "");
+      const result = await changeAdminPassword(
+        currentSession,
+        body.currentPassword || "",
+        body.newPassword || "",
+      );
       if (result.error === "weak_password") {
-        return json({ error: "weak_password", message: "Use at least 8 characters." }, 400);
+        return json(
+          { error: "weak_password", message: "Use at least 8 characters." },
+          400,
+        );
       }
       if (result.error === "invalid_current_password") {
-        return json({ error: "invalid_current_password", message: "Current password is incorrect." }, 400);
+        return json(
+          {
+            error: "invalid_current_password",
+            message: "Current password is incorrect.",
+          },
+          400,
+        );
       }
       if (!result.user) {
-        return json({ error: "change_password_failed", message: "Could not change password." }, 400);
+        return json(
+          {
+            error: "change_password_failed",
+            message: "Could not change password.",
+          },
+          400,
+        );
       }
-      const session = await createAdminSession(result.user.id);
+      const session = await createAdminSession(result.user);
       return json(
-        { authenticated: true, email: result.user.email, expiresAt: session.expiresAt },
+        {
+          authenticated: true,
+          email: result.user.email,
+          expiresAt: session.expiresAt,
+        },
         200,
         { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
       );
@@ -2848,27 +3593,41 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
 
     if (req.method === "POST" && pathname === "/api/auth/logout") {
       await destroyAdminSession(sessionTokenFromRequest(req));
-      return json({ authenticated: false }, 200, { "Set-Cookie": clearCookieHeader() });
+      return json({ authenticated: false }, 200, {
+        "Set-Cookie": clearCookieHeader(),
+      });
     }
 
     if (req.method === "GET" && pathname === "/api/auth/session") {
       const session = await readAdminSession(sessionTokenFromRequest(req));
-      return json(session ? { authenticated: true, email: session.email } : { authenticated: false });
+      return json(
+        session
+          ? { authenticated: true, email: session.email }
+          : { authenticated: false },
+      );
     }
 
     if (req.method === "GET" && pathname === "/api/public-booking-state") {
       return handlePublicBookingStateRequest();
     }
 
-    if (req.method === "POST" && pathname === "/api/public-booking-notifications") {
-      return json(await triggerPublicBookingNotifications(await parseBody(req)));
+    if (
+      req.method === "POST" &&
+      pathname === "/api/public-booking-notifications"
+    ) {
+      return json(
+        await triggerPublicBookingNotifications(await parseBody(req)),
+      );
     }
 
     if (req.method === "GET" && pathname === "/api/public-diagnostics") {
       return json(await runPublicDiagnostics());
     }
 
-    if (req.method === "GET" && pathname === "/api/public-serialization-diagnostics") {
+    if (
+      req.method === "GET" &&
+      pathname === "/api/public-serialization-diagnostics"
+    ) {
       return json(await runPublicSerializationDiagnostics());
     }
 
@@ -2877,7 +3636,11 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     }
 
     if (pathname.startsWith("/api/")) {
-      if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+      if (!(await requireAdmin(req)))
+        return json(
+          { error: "unauthorized", message: "Admin login required." },
+          401,
+        );
     }
 
     if (req.method === "GET" && pathname === "/api/calendar-state") {
@@ -2888,13 +3651,23 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
       const body = await parseBody(req);
       const current = await readCalendarState();
       const nextState = await writeCalendarState({
-        syncKey: typeof body.syncKey === "string" ? body.syncKey : current.syncKey,
+        syncKey:
+          typeof body.syncKey === "string" ? body.syncKey : current.syncKey,
         items: Array.isArray(body.items) ? body.items : current.items,
+        replaceItems: body.replaceItems === true,
+        clearItems: body.clearItems === true,
+        itemsOperation: body.itemsOperation,
         updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
       });
-      const notificationResults = await sendCalendarChangeNotifications(current.items, nextState.items);
+      const notificationResults = await sendCalendarChangeNotifications(
+        current.items,
+        nextState.items,
+      );
       return json({
-        ...publicCalendarState({ ...nextState, notifications: await readNotificationHistory() }),
+        ...publicCalendarState({
+          ...nextState,
+          notifications: await readNotificationHistory(),
+        }),
         notificationResults,
       });
     }
@@ -2906,7 +3679,10 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
         publicCalendarState(
           await writeCalendarState({
             ...current,
-            syncKey: typeof body.syncKey === "string" && body.syncKey.startsWith("cg_") ? body.syncKey : generateSyncKey(),
+            syncKey:
+              typeof body.syncKey === "string" && body.syncKey.startsWith("cg_")
+                ? body.syncKey
+                : generateSyncKey(),
           }),
         ),
       );
@@ -2916,7 +3692,7 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
       return json(await readAdminSettings());
     }
 
-    if (req.method === "PUT" && pathname === "/api/admin-settings") {
+    if ((req.method === "PUT" || req.method === "POST") && pathname === "/api/admin-settings") {
       return json(await writeAdminSettings(await parseBody(req)));
     }
 
@@ -2927,9 +3703,17 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     if (req.method === "POST" && pathname === "/api/test-email") {
       const body = await parseBody(req);
       const recipient = cleanEmail(body.email, "");
-      if (!recipient) return json({ error: "missing_email", message: "Enter an email address to send the test to." }, 400);
+      if (!recipient)
+        return json(
+          {
+            error: "missing_email",
+            message: "Enter an email address to send the test to.",
+          },
+          400,
+        );
       const services = await readServices();
-      const service = services.find((candidate) => candidate.active) || defaultServices[0];
+      const service =
+        services.find((candidate) => candidate.active) || defaultServices[0];
       const appointment = {
         id: `test-${Date.now()}`,
         kind: "appointment",
@@ -2944,9 +3728,14 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
         phone: "+64 27 555 014",
         note: "Test email from Clarity Golf Booking.",
       };
-      const results = await sendBookingNotifications(appointment, { kind: "test", testRecipient: recipient });
+      const results = await sendBookingNotifications(appointment, {
+        kind: "test",
+        testRecipient: recipient,
+      });
       const sent = results.some((result) => result.sent);
-      const missingResendKey = results.some((result) => result.reason === "missing_resend_key");
+      const missingResendKey = results.some(
+        (result) => result.reason === "missing_resend_key",
+      );
       return json(
         {
           ok: sent,
@@ -2954,8 +3743,8 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
           message: sent
             ? "Test email sent."
             : missingResendKey
-            ? "Test email could not be sent because the Resend API key is missing in production."
-            : "Test email could not be sent. Check Resend settings.",
+              ? "Test email could not be sent because the Resend API key is missing in production."
+              : "Test email could not be sent. Check Resend settings.",
         },
         sent ? 200 : 502,
       );
@@ -3015,7 +3804,8 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
     return json(
       {
         error: status === 500 ? "booking_api_error" : "request_error",
-        message: error instanceof Error ? error.message : "Unknown booking API error",
+        message:
+          error instanceof Error ? error.message : "Unknown booking API error",
       },
       status,
     );

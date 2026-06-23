@@ -1,0 +1,127 @@
+.csv-import-uploader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.csv-import-uploader > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.csv-import-checkpoint {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-soft);
+}
+
+.csv-import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.csv-import-summary strong,
+.csv-import-summary span {
+  display: block;
+}
+
+.csv-import-summary strong {
+  color: var(--heading);
+}
+
+.csv-import-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.csv-import-warnings {
+  display: grid;
+  gap: 6px;
+}
+
+.csv-import-warnings span {
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, #f59e0b 42%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, #f59e0b 10%, var(--panel));
+  color: var(--text);
+  font-size: 12px;
+}
+
+.csv-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.csv-mapping-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.csv-mapping-grid label > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.csv-mapping-grid select {
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.csv-mapping-grid em {
+  min-height: 28px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.csv-preview-table {
+  display: grid;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.csv-preview-table div {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.csv-preview-table div:last-child {
+  border-bottom: 0;
+}
+
+.csv-preview-table strong {
+  color: var(--heading);
+  font-size: 13px;
+}
+
+.csv-preview-table span {
+  color: var(--muted);
+  font-size: 12px;
+}

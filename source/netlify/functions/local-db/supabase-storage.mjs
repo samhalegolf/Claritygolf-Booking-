@@ -86,9 +86,22 @@ class SupabaseRestStore {
     return this.request(table, { method: "DELETE", query, prefer: "return=minimal" });
   }
 
+  async savePerson(row) {
+    const email = String(row?.email || "").toLowerCase();
+    if (email) {
+      const existing = await this.select("people", `select=id,email&email=eq.${encodeFilter(email)}&limit=1`);
+      const existingId = existing[0]?.id || "";
+      if (existingId) {
+        await this.upsert("people", [{ ...row, id: existingId, email }], "id");
+        return;
+      }
+    }
+    await this.upsert("people", [{ ...row, email: email || row.email }], "id");
+  }
+
   async query(sqlText, values = []) {
     const sql = normalizeSql(sqlText);
-    if (!sql || sql.startsWith("create table") || sql.startsWith("create index") || sql.startsWith("create unique index") || sql.startsWith("alter table")) return [];
+    if (!sql || sql.startsWith("create table") || sql.startsWith("create index") || sql.startsWith("create unique index") || sql.startsWith("drop index") || sql.startsWith("alter table")) return [];
     if (sql === "begin" || sql === "commit" || sql === "rollback") return { rows: [] };
 
     if (sql.includes("insert into settings")) {
@@ -134,7 +147,7 @@ class SupabaseRestStore {
     }
     if (sql.startsWith("select * from people")) return this.select("people", "select=*&order=name.asc,email.asc,id.asc");
     if (sql.includes("insert into people")) {
-      await this.upsert("people", [personFromParams(values)], "id");
+      await this.savePerson(personFromParams(values));
       return { rows: [] };
     }
     if (sql.startsWith("update people")) {
@@ -144,6 +157,7 @@ class SupabaseRestStore {
 
     if (sql.startsWith("select id from admin_users where email = $1")) return this.select("admin_users", `select=id&email=eq.${encodeFilter(values[0])}`);
     if (sql.startsWith("select * from admin_users where email = $1")) return this.select("admin_users", `select=*&email=eq.${encodeFilter(values[0])}`);
+    if (sql.startsWith("select id, email, password_hash, password_salt from admin_users where id = $1")) return this.select("admin_users", `select=id,email,password_hash,password_salt&id=eq.${encodeFilter(values[0])}&limit=1`);
     if (sql.startsWith("select id, email from admin_users where lower(email) = lower($1)")) return this.select("admin_users", `select=id,email&email=eq.${encodeFilter(String(values[0] || "").toLowerCase())}&limit=1`);
     if (sql.includes("insert into admin_users")) {
       const [id, email, password_hash, password_salt] = values;
@@ -231,8 +245,24 @@ class SupabaseRestStore {
 }
 
 function calendarItemFromParams(values) {
-  const [id, kind, week, day, start, duration, service_id, client, title, phone, email, note] = values;
-  return cleanRow({ id, kind, week, day, start, duration, service_id, client, title, phone, email, note, created_at: nowIso(), updated_at: nowIso() });
+  const [id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status] = values;
+  return cleanRow({
+    id,
+    kind,
+    week,
+    day,
+    start,
+    duration,
+    service_id,
+    client,
+    title,
+    phone,
+    email,
+    note,
+    status: status || "booked",
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  });
 }
 
 function personFromParams(values) {

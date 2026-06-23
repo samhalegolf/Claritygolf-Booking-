@@ -7,6 +7,10 @@ function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
 }
 
+function emailNotificationsGloballyDisabled() {
+  return ["0", "false", "off", "disabled", "no"].includes(env("EMAIL_NOTIFICATIONS_ENABLED", "").trim().toLowerCase());
+}
+
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
@@ -101,6 +105,15 @@ export default async function handler(req: Request) {
     const body = await parseBody(req);
     const recipient = cleanEmail(body.email);
     if (!recipient) return json({ error: "missing_email", message: "Enter an email address to send the test to." }, 400);
+    if (emailNotificationsGloballyDisabled()) {
+      return json(
+        {
+          ok: false,
+          message: "Email notifications are disabled by EMAIL_NOTIFICATIONS_ENABLED.",
+        },
+        503,
+      );
+    }
 
     const apiKey = env("RESEND_API_KEY");
     if (!apiKey) {

@@ -43,6 +43,7 @@ import type {
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
+  TouchEvent as ReactTouchEvent,
 } from "react";
 
 type LessonFormat = "private" | "group" | "package";
@@ -126,6 +127,7 @@ type CalendarHoverPreview = {
   phone: string;
   email: string;
   clientEmailStatus: string;
+  coachEmailStatus: string;
   adminEmailStatus: string;
 };
 
@@ -147,6 +149,50 @@ type ClientSummary = Person & {
   next: CalendarItem | null;
   last: CalendarItem | null;
 };
+
+
+function safeText(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : value == null ? fallback : String(value);
+}
+
+function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
+  return {
+    id: safeText(person.id),
+    name: safeText(person.name),
+    email: safeText(person.email),
+    phone: safeText(person.phone),
+    notes: safeText(person.notes),
+    source: safeText(person.source),
+    caddyProfileId: safeText(person.caddyProfileId),
+    caddyProfileUrl: safeText(person.caddyProfileUrl),
+    createdAt: typeof person.createdAt === "string" ? person.createdAt : undefined,
+    updatedAt: typeof person.updatedAt === "string" ? person.updatedAt : undefined,
+  };
+}
+
+function cleanPeople(people: unknown[]): Person[] {
+  return people.map((person) => cleanPerson((person ?? {}) as Partial<Person>));
+}
+
+function cleanNotificationRecord(notification: Partial<NotificationRecord> & { id?: unknown } = {}): NotificationRecord {
+  return {
+    id: safeText(notification.id),
+    personKey: safeText(notification.personKey),
+    calendarItemId: safeText(notification.calendarItemId),
+    recipient: safeText(notification.recipient),
+    subject: safeText(notification.subject),
+    kind: safeText(notification.kind),
+    status: safeText(notification.status),
+    provider: safeText(notification.provider),
+    providerId: safeText(notification.providerId),
+    error: safeText(notification.error),
+    createdAt: safeText(notification.createdAt),
+  };
+}
+
+function cleanNotificationRecords(notifications: unknown[]): NotificationRecord[] {
+  return notifications.map((notification) => cleanNotificationRecord((notification ?? {}) as Partial<NotificationRecord>));
+}
 
 type PeopleImportResult = {
   imported: number;
@@ -321,6 +367,20 @@ type ClientProfileTab = "bookings" | "notifications";
 
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
+type GoogleCalendarSyncStatus = {
+  configured: boolean;
+  connected: boolean;
+  calendarId: string;
+  autoSync: boolean;
+  accountEmail: string;
+  lastSyncAt: string;
+  lastSyncStatus: string;
+  lastSyncError: string;
+  connectedAt: string;
+  redirectUri: string;
+  scope: string;
+};
+type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting";
 type AuthStatus = "checking" | "authenticated" | "guest";
 type AuthMode = "login" | "forgot" | "reset";
 type ThemeMode = "light" | "dark";
@@ -332,10 +392,13 @@ type PasswordChangeForm = {
 };
 
 type NotificationSettings = {
+  emailNotificationsEnabled: boolean;
   notificationEmail: string;
+  coachEmail: string;
   replyToEmail: string;
   notificationDelaySeconds: number;
   sendClientEmail: boolean;
+  sendCoachEmail: boolean;
   sendAdminEmail: boolean;
   clientEmailSubject: string;
   clientEmailIntro: string;
@@ -362,6 +425,7 @@ type BrandSettings = {
   coachName: string;
   logoName: string;
   logoPreview: string;
+  showLogo: boolean;
   neutral: string;
   primary: string;
   secondary: string;
@@ -471,6 +535,7 @@ type WeekDay = {
   short: string;
   label: string;
   date: number;
+  isToday: boolean;
 };
 
 const START_HOUR = 7;
@@ -485,6 +550,7 @@ const MINUTES_PER_DAY = (END_HOUR - START_HOUR) * 60;
 const GRID_HEIGHT = ((END_HOUR - START_HOUR) * HOUR_HEIGHT);
 const BOOKING_EMBED_PARAM = "embed";
 const BOOKING_EMBED_VALUE = "booking";
+const BOOKING_LOGO_PARAM = "logo";
 const PUBLIC_BOOKING_HOST = "book.claritygolf.app";
 const CLARITY_BOOKING_HOSTS = new Set(["claritygolf.app", "booking.claritygolf.app", PUBLIC_BOOKING_HOST]);
 const CADDY_APP_URL = "https://caddy.claritygolf.app";
@@ -709,7 +775,35 @@ function itemSlot(item: CalendarItem): SlotCandidate {
   return { week: itemWeek(item), day: item.day, start: item.start, duration: item.duration };
 }
 
+function startOfCalendarWeek(value = new Date()) {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  const day = date.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + mondayOffset);
+  return date;
+}
+
+function calendarDateUtcTime(date: Date) {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function isSameCalendarDay(a: Date, b: Date) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function getCurrentWeekOffset() {
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const currentWeekStart = startOfCalendarWeek(new Date());
+  return Math.round((calendarDateUtcTime(currentWeekStart) - calendarDateUtcTime(baseWeekStart)) / weekMs);
+}
+
 function buildWeekDays(week: number): WeekDay[] {
+  const today = new Date();
   return baseWeekDays.map((short, index) => {
     const date = new Date(baseWeekStart);
     date.setDate(baseWeekStart.getDate() + week * 7 + index);
@@ -718,6 +812,7 @@ function buildWeekDays(week: number): WeekDay[] {
       short,
       label: `${fullDayNames[index]}, ${month} ${date.getDate()}`,
       date: date.getDate(),
+      isToday: isSameCalendarDay(date, today),
     };
   });
 }
@@ -769,6 +864,8 @@ function sectionTitle(view: View) {
 
 function getInitialView(): View {
   if (typeof window === "undefined") return "calendar";
+  const requestedView = new URLSearchParams(window.location.search).get("view");
+  if (requestedView === "settings") return "settings";
   return isPublicBookingMode() ? "booking" : "calendar";
 }
 
@@ -837,7 +934,7 @@ function buildRescheduleLink(
   return url.toString();
 }
 
-function getBookingWidgetUrl() {
+function getBookingWidgetUrl(showLogo: boolean) {
   if (typeof window === "undefined") return "";
   const url = new URL(window.location.href);
   if (CLARITY_BOOKING_HOSTS.has(url.hostname)) {
@@ -846,7 +943,17 @@ function getBookingWidgetUrl() {
     url.pathname = "/";
   }
   url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
+  if (showLogo) {
+    url.searchParams.delete(BOOKING_LOGO_PARAM);
+  } else {
+    url.searchParams.set(BOOKING_LOGO_PARAM, "0");
+  }
   return url.toString();
+}
+
+function isBookingLogoHiddenByUrl() {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get(BOOKING_LOGO_PARAM) === "0";
 }
 
 function isPublicBookingMode() {
@@ -875,10 +982,6 @@ type ClientMatchInput = {
 
 type MatchableClient = Pick<Person, "name" | "email" | "phone">;
 
-function safeText(value: unknown) {
-  return typeof value === "string" ? value : value == null ? "" : String(value);
-}
-
 function normalizeMatchText(value: unknown = "") {
   return safeText(value).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -887,13 +990,13 @@ function normalizePhoneDigits(value: unknown = "") {
   return safeText(value).replace(/\D/g, "");
 }
 
-function canonicalPhoneKey(value = "") {
+function canonicalPhoneKey(value: unknown = "") {
   const digits = normalizePhoneDigits(value);
   if (digits.startsWith("64") && digits.length >= 9) return `0${digits.slice(2)}`;
   return digits;
 }
 
-function phoneVariants(value = "") {
+function phoneVariants(value: unknown = "") {
   const digits = normalizePhoneDigits(value);
   const variants = new Set<string>();
   if (digits) variants.add(digits);
@@ -1013,20 +1116,20 @@ function caddyProfileUrl(
   person: Pick<Person, "name" | "email" | "caddyProfileUrl" | "caddyProfileId">,
   workspaceUrl = CADDY_APP_URL,
 ) {
-  const profileUrl = safeText(person.caddyProfileUrl).trim();
-  const profileId = safeText(person.caddyProfileId).trim();
-  const email = safeText(person.email).trim();
-  const name = safeText(person.name).trim();
-  if (profileUrl) return profileUrl;
+  const caddyProfileUrlValue = safeText(person.caddyProfileUrl).trim();
+  const caddyProfileIdValue = safeText(person.caddyProfileId).trim();
+  const emailValue = safeText(person.email).trim();
+  const nameValue = safeText(person.name).trim();
+  if (caddyProfileUrlValue) return caddyProfileUrlValue;
   const url = new URL(workspaceUrl || CADDY_APP_URL);
-  if (profileId) url.searchParams.set("profile", profileId);
-  if (email) url.searchParams.set("email", email);
-  if (name) url.searchParams.set("name", name);
+  if (caddyProfileIdValue) url.searchParams.set("profile", caddyProfileIdValue);
+  if (emailValue) url.searchParams.set("email", emailValue);
+  if (nameValue) url.searchParams.set("name", nameValue);
   return url.toString();
 }
 
 function clientSearchText(client: Pick<Person, "name" | "email" | "phone" | "notes">) {
-  return [client.name, client.email, client.phone, client.notes].map(safeText).join(" ").toLowerCase();
+  return [client.name, client.email, client.phone, client.notes].map((value) => safeText(value)).join(" ").toLowerCase();
 }
 
 function editorFromClient(client: ClientSummary): ClientEditor {
@@ -1135,6 +1238,7 @@ const defaultBrandSettings: BrandSettings = {
   coachName: "Sam Hale Golf",
   logoName: "",
   logoPreview: "",
+  showLogo: false,
   neutral: "#ffffff",
   primary: "#1fd36d",
   secondary: "#d7b06b",
@@ -1149,7 +1253,7 @@ const defaultCoachAccount: CoachAccount = {
   venueName: "The Range 24/7 - Three Kings",
   venueShortName: "The Range 24/7",
   timezone: "Pacific/Auckland",
-  contactEmail: "sam@samhalegolf.co.nz",
+  contactEmail: "",
   bookingUrl: "https://book.claritygolf.app",
   calendarSlug: "sam-hale-golf",
   caddyWorkspaceUrl: CADDY_APP_URL,
@@ -1297,8 +1401,12 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
   const duration = Number.isFinite(Number(service?.duration)) ? Number(service?.duration) : fallback.duration;
   const price = Number.isFinite(Number(service?.price)) ? Number(service?.price) : fallback.price;
   const capacity = Number.isFinite(Number(service?.capacity)) ? Number(service?.capacity) : fallback.capacity || 1;
+  const looksLikePackage =
+    service?.lessonFormat === "package" ||
+    String(service?.id || fallback.id || "").startsWith("package-") ||
+    /package/i.test(name);
   const lessonFormat: LessonFormat =
-    service?.lessonFormat === "package" ? "package" : service?.lessonFormat === "group" ? "group" : "private";
+    looksLikePackage ? "package" : service?.lessonFormat === "group" ? "group" : "private";
   const cleanCapacity = clamp(Math.round(capacity), lessonFormat === "group" ? 2 : 1, 24);
   const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
     ? Number(service?.minParticipants)
@@ -1355,6 +1463,33 @@ function cleanServices(serviceList?: Partial<Service>[]): Service[] {
   });
 }
 
+function calendarItemsFingerprint(itemList?: Partial<CalendarItem>[]) {
+  if (!Array.isArray(itemList)) return "";
+  return JSON.stringify(
+    itemList
+      .map((item) => ({
+        id: item.id || "",
+        kind: item.kind || "",
+        week: Number(item.week ?? 0),
+        day: Number(item.day ?? 0),
+        start: Number(item.start ?? 0),
+        duration: Number(item.duration ?? 0),
+        serviceId: item.serviceId || "",
+        client: item.client || "",
+        title: item.title || "",
+        phone: item.phone || "",
+        email: (item.email || "").toLowerCase(),
+        note: item.note || "",
+        status: item.status || "booked",
+      }))
+      .sort((first, second) => first.id.localeCompare(second.id)),
+  );
+}
+
+function calendarStateFingerprint(itemList: Partial<CalendarItem>[] | undefined, syncKey: string) {
+  return JSON.stringify({ items: calendarItemsFingerprint(itemList), syncKey });
+}
+
 function servicePriceLabel(service?: { price: number; priceMode?: PriceMode } | null) {
   if (!service) return "No charge";
   return `NZ$${service.price}.00${service.priceMode === "per-person" ? " pp" : ""}`;
@@ -1367,6 +1502,7 @@ function serviceCapacityLabel(service: Pick<Service, "capacity" | "lessonFormat"
 }
 
 function notificationKindLabel(kind = "") {
+  if (kind.includes("coach")) return "Coach notification";
   if (kind.includes("admin")) return "Admin notification";
   if (kind.includes("client")) return "Client email";
   if (kind.includes("reschedule")) return "Reschedule email";
@@ -1401,6 +1537,12 @@ function notificationTimeLabel(createdAt = "") {
   if (!createdAt) return "";
   const time = new Date(createdAt);
   return Number.isNaN(time.getTime()) ? "" : time.toLocaleString();
+}
+
+function googleSyncTimeLabel(createdAt = "") {
+  if (!createdAt) return "Not synced yet";
+  const time = new Date(createdAt);
+  return Number.isNaN(time.getTime()) ? "Not synced yet" : time.toLocaleString();
 }
 
 function dateInputValue(date = new Date()) {
@@ -1528,6 +1670,7 @@ function cleanBrandSettings(settings?: Partial<BrandSettings>): BrandSettings {
       typeof settings?.logoPreview === "string" && settings.logoPreview.startsWith("data:image/")
         ? settings.logoPreview
         : "",
+    showLogo: settings?.showLogo === true,
     neutral: cleanHexColor(settings?.neutral, defaultBrandSettings.neutral),
     primary: cleanHexColor(settings?.primary, defaultBrandSettings.primary),
     secondary: cleanHexColor(settings?.secondary, defaultBrandSettings.secondary),
@@ -1684,6 +1827,7 @@ async function analyzeLogoFile(file: File): Promise<BrandSettings> {
       ...defaultBrandSettings,
       logoName: file.name,
       logoPreview: previewCanvas.toDataURL("image/png"),
+      showLogo: true,
       neutral: neutral ? rgbToHex(neutral.r, neutral.g, neutral.b) : defaultBrandSettings.neutral,
       primary: primary ? rgbToHex(primary.r, primary.g, primary.b) : defaultBrandSettings.primary,
       secondary: secondary ? rgbToHex(secondary.r, secondary.g, secondary.b) : defaultBrandSettings.secondary,
@@ -1695,10 +1839,13 @@ async function analyzeLogoFile(file: File): Promise<BrandSettings> {
 }
 
 const defaultNotificationSettings: NotificationSettings = {
-  notificationEmail: "sam@samhalegolf.co.nz",
-  replyToEmail: "sam@samhalegolf.co.nz",
+  emailNotificationsEnabled: true,
+  notificationEmail: "",
+  coachEmail: "",
+  replyToEmail: "",
   notificationDelaySeconds: 30,
   sendClientEmail: true,
+  sendCoachEmail: true,
   sendAdminEmail: true,
   clientEmailSubject: "Your {{service}} is confirmed",
   clientEmailIntro: "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
@@ -1710,6 +1857,20 @@ const defaultNotificationSettings: NotificationSettings = {
   smsFromNumber: "",
   sendClientSms: false,
   sendAdminSms: false,
+};
+
+const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
+  configured: false,
+  connected: false,
+  calendarId: "primary",
+  autoSync: true,
+  accountEmail: "",
+  lastSyncAt: "",
+  lastSyncStatus: "",
+  lastSyncError: "",
+  connectedAt: "",
+  redirectUri: "",
+  scope: "",
 };
 
 const emptyClientEditor: ClientEditor = {
@@ -1735,6 +1896,7 @@ function App() {
   const [adminPassword, setAdminPassword] = useState("");
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [loginState, setLoginState] = useState<"idle" | "signing-in">("idle");
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotState, setForgotState] = useState<"idle" | "sending" | "sent">("idle");
   const [forgotMessage, setForgotMessage] = useState("");
@@ -1821,7 +1983,7 @@ function App() {
   const [placementAnimation, setPlacementAnimation] = useState<PlacementAnimation | null>(null);
   const [floatingDrag, setFloatingDrag] = useState<FloatingDrag | null>(null);
   const [calendarHover, setCalendarHover] = useState<CalendarHoverPreview | null>(null);
-  const [activeWeek, setActiveWeek] = useState(0);
+  const [activeWeek, setActiveWeek] = useState(getCurrentWeekOffset);
   const [edgeCue, setEdgeCue] = useState<null | "prev" | "next">(null);
   const [bookingServiceId, setBookingServiceId] = useState("");
   const [bookingDay, setBookingDay] = useState(0);
@@ -1845,6 +2007,9 @@ function App() {
   const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
   const [calendarSaveError, setCalendarSaveError] = useState("");
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
+  const [calendarDetailMode, setCalendarDetailMode] = useState(false);
+  const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarSyncStatus>(defaultGoogleCalendarStatus);
+  const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
   const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
@@ -1870,11 +2035,15 @@ function App() {
   const pointerKindRef = useRef<globalThis.PointerEvent["pointerType"]>("mouse");
   const dragPreviewMetaRef = useRef<null | { width: number; height: number; offsetX: number; offsetY: number }>(null);
   const lastEdgeNavRef = useRef(0);
+  const lastCalendarTapRef = useRef(0);
+  const suppressBlankGestureUntilRef = useRef(0);
   const edgeCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestureCleanupRef = useRef<null | (() => void)>(null);
   const brandSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
+  const lastPersistedCalendarFingerprintRef = useRef("");
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
+  const pendingQuickCreateRef = useRef<QuickCreateState | null>(null);
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
@@ -1902,8 +2071,8 @@ function App() {
   const visiblePublicServices = selectedBookingService ? [selectedBookingService] : publicServices;
   const selectedRescheduleMatch =
     rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
-  const bookingWidgetUrl = useMemo(getBookingWidgetUrl, []);
-  const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;" loading="lazy"></iframe>`;
+  const bookingWidgetUrl = useMemo(() => getBookingWidgetUrl(brandSettings.showLogo), [brandSettings.showLogo]);
+  const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
   const caddyWorkspaceUrl = coachAccount.caddyWorkspaceUrl || CADDY_APP_URL;
   const invoiceSettings = coachAccount.invoiceSettings;
@@ -1915,6 +2084,7 @@ function App() {
   const bookingBrandWords = bookingBrandName.split(/\s+/);
   const bookingBrandPrimary = bookingBrandWords.slice(0, -1).join(" ") || bookingBrandName;
   const bookingBrandSecondary = bookingBrandWords.length > 1 ? bookingBrandWords.at(-1) : "";
+  const showBookingBrandLogo = brandSettings.showLogo && !isBookingLogoHiddenByUrl();
   const locationLine = coachAccount.venueName;
   const settingsLocationLine = `${coachAccount.venueName} · ${coachAccount.timezone}`;
   const hasSavedRescheduleLogin = Boolean(rescheduleForm.email.trim() && rescheduleForm.phone.trim());
@@ -2032,6 +2202,16 @@ function App() {
     window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
     document.documentElement.style.colorScheme = themeMode;
   }, [themeMode]);
+
+  useEffect(() => {
+    if (!isEmbedMode) return;
+    document.documentElement.classList.add("clarity-embed-mode");
+    document.body.classList.add("clarity-embed-mode");
+    return () => {
+      document.documentElement.classList.remove("clarity-embed-mode");
+      document.body.classList.remove("clarity-embed-mode");
+    };
+  }, [isEmbedMode]);
 
   useEffect(() => {
     window.localStorage.setItem(COACH_ACCOUNT_STORAGE_KEY, JSON.stringify(coachAccount));
@@ -2202,6 +2382,8 @@ function App() {
         let sessionResponse: Response;
         try {
           sessionResponse = await fetch("/api/auth/session", {
+            credentials: "same-origin",
+            cache: "no-store",
             headers: { Accept: "application/json" },
             signal: sessionController.signal,
           });
@@ -2265,57 +2447,156 @@ function App() {
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
+    const requestedFingerprint = calendarStateFingerprint(items, calendarSyncKey);
+    if (requestedFingerprint === lastPersistedCalendarFingerprintRef.current) return;
     const saveVersion = ++calendarSaveVersionRef.current;
+    const payload = JSON.stringify({ items, replaceItems: true, syncKey: calendarSyncKey, updatedAt: calendarStateVersion });
+    const payloadFingerprint = calendarItemsFingerprint(items);
+    let saveReachedServer = false;
+    let sessionExpired = false;
     setCalendarSaveStatus("saving");
     setCalendarSaveError("");
-    void fetch("/api/calendar-state", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ items, syncKey: calendarSyncKey, updatedAt: calendarStateVersion }),
-    })
-      .then(async (response) => {
+
+    const saveTimer = window.setTimeout(() => {
+      const saveRequest = () =>
+        fetch("/api/calendar-state", {
+          method: "PUT",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: payload,
+        });
+      const readLiveState = () =>
+        fetch("/api/calendar-state", {
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+      const retryDelay = (delay = 700) => new Promise((resolve) => window.setTimeout(resolve, delay));
+      const saveWithRetries = async () => {
+        let lastError: unknown;
+        for (const delay of [0, 700, 1400, 2600]) {
+          if (delay) await retryDelay(delay);
+          try {
+            return await saveRequest();
+          } catch (error) {
+            lastError = error;
+          }
+        }
+        throw lastError instanceof Error ? lastError : new Error("Calendar save failed.");
+      };
+
+      void (async () => {
+        let response: Response;
+        let recoveredData: {
+          items?: CalendarItem[];
+          notifications?: NotificationRecord[];
+          updatedAt?: string;
+          googleCalendar?: Partial<GoogleCalendarSyncStatus>;
+        } | null = null;
+        try {
+          response = await saveWithRetries();
+        } catch (networkError) {
+          const liveResponse = await readLiveState().catch(() => null);
+          if (!liveResponse?.ok) throw networkError;
+          recoveredData = (await liveResponse.json().catch(() => ({}))) as {
+            items?: CalendarItem[];
+            notifications?: NotificationRecord[];
+            updatedAt?: string;
+            googleCalendar?: Partial<GoogleCalendarSyncStatus>;
+          };
+          if (calendarItemsFingerprint(recoveredData.items) === payloadFingerprint) {
+            response = liveResponse;
+          } else {
+            recoveredData = null;
+            response = await saveWithRetries();
+          }
+        }
         if (calendarSaveVersionRef.current !== saveVersion) return;
-        const data = (await response.json().catch(() => ({}))) as {
+        let data = (recoveredData ?? (await response.json().catch(() => ({})))) as {
           message?: string;
           error?: string;
           notifications?: NotificationRecord[];
           notificationResults?: EmailSendResult[];
           updatedAt?: string;
           items?: CalendarItem[];
+          googleCalendar?: Partial<GoogleCalendarSyncStatus>;
+          googleCalendarSync?: Partial<GoogleCalendarSyncStatus> & { ok?: boolean; error?: string };
+          syncKey?: string;
+          warnings?: string[];
         };
+        if (!response.ok && response.status >= 500) {
+          await retryDelay(900);
+          response = await saveWithRetries();
+          if (calendarSaveVersionRef.current !== saveVersion) return;
+          data = (await response.json().catch(() => ({}))) as typeof data;
+        }
         if (response.status === 401) {
+          sessionExpired = true;
           setAuthStatus("guest");
           throw new Error(data.message || "Admin login expired. Sign in again before editing the calendar.");
         }
         if (!response.ok) throw new Error(data.message || data.error || "Calendar save failed.");
+        saveReachedServer = true;
         setCalendarFeedStatus("connected");
         setCalendarSaveStatus("saved");
         setCalendarSaveError("");
         if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-        if (Array.isArray(data.items)) setItems(data.items);
-        if (Array.isArray(data.notifications)) setNotifications(data.notifications);
+        const persistedSyncKey = typeof data.syncKey === "string" ? data.syncKey : calendarSyncKey;
+        lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(items, persistedSyncKey);
+        if (typeof data.syncKey === "string" && data.syncKey !== calendarSyncKey) setCalendarSyncKey(data.syncKey);
+        if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+        const clientSyncWarning = Array.isArray(data.warnings)
+          ? data.warnings.find((warning) => typeof warning === "string" && warning.trim())
+          : "";
+        if (clientSyncWarning) setToast({ message: clientSyncWarning });
+        applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar);
+        if (data.googleCalendarSync && data.googleCalendarSync.ok === false && data.googleCalendarSync.error) {
+          setToast({ message: `Saved booking calendar, but Google Calendar did not sync: ${data.googleCalendarSync.error}` });
+        }
         window.setTimeout(() => {
           if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
         }, 1800);
         window.setTimeout(() => void refreshNotificationHistory(), 1500);
         window.setTimeout(() => void refreshNotificationHistory(), 8000);
         window.setTimeout(() => void refreshNotificationHistory(), 35000);
-      })
-      .catch((error) => {
+      })().catch((error) => {
         if (calendarSaveVersionRef.current === saveVersion) {
           const message = error instanceof Error ? error.message : "Calendar save failed.";
-          setCalendarFeedStatus("offline");
+          if (saveReachedServer) {
+            setCalendarFeedStatus("connected");
+            setCalendarSaveStatus("saved");
+            setCalendarSaveError("");
+            setToast({ message: `Calendar saved, but the page could not refresh all save details: ${message}` });
+            window.setTimeout(() => {
+              if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
+            }, 1800);
+            return;
+          }
+          const calmMessage = sessionExpired
+            ? message || "Admin login expired. Sign in again before editing the calendar."
+            : "Your latest calendar change was not saved. Please try again.";
+          setCalendarFeedStatus(sessionExpired ? "offline" : "connected");
           setCalendarSaveStatus("failed");
-          setCalendarSaveError(message);
-          setToast({ message: `Calendar did not save: ${message}` });
+          setCalendarSaveError(calmMessage);
+          setToast({ message: calmMessage });
         }
       });
+
+    }, 650);
+
+    return () => window.clearTimeout(saveTimer);
   }, [authStatus, calendarSyncKey, isEmbedMode, items]);
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || activeView !== "calendar") return;
     const timer = window.setInterval(() => void refreshNotificationHistory(), 15000);
     return () => window.clearInterval(timer);
+  }, [activeView, authStatus, isEmbedMode]);
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || activeView !== "settings") return;
+    void refreshGoogleCalendarStatus();
   }, [activeView, authStatus, isEmbedMode]);
 
   function applyNotificationSettings(settings?: Partial<NotificationSettings>) {
@@ -2333,6 +2614,15 @@ function App() {
 
   function applyBrandSettings(settings?: Partial<BrandSettings>) {
     setBrandSettings(cleanBrandSettings(settings));
+  }
+
+  function applyGoogleCalendarStatus(status?: Partial<GoogleCalendarSyncStatus>) {
+    setGoogleCalendar({
+      ...defaultGoogleCalendarStatus,
+      ...(status ?? {}),
+      calendarId: typeof status?.calendarId === "string" && status.calendarId.trim() ? status.calendarId : "primary",
+      autoSync: status?.autoSync !== false,
+    });
   }
 
 
@@ -2389,12 +2679,17 @@ function App() {
       settings?: Partial<NotificationSettings>;
       brand?: Partial<BrandSettings>;
       account?: Partial<CoachAccount>;
+      googleCalendar?: Partial<GoogleCalendarSyncStatus>;
       updatedAt?: string;
     };
+    const loadedItems = Array.isArray(data.items) ? data.items : [];
+    const loadedSyncKey =
+      typeof data.syncKey === "string" && data.syncKey.startsWith("cg_") ? data.syncKey : calendarSyncKey;
+    lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(loadedItems, loadedSyncKey);
     if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
     if (Array.isArray(data.items)) setItems(data.items);
-    if (Array.isArray(data.people)) setPeople(data.people);
-    if (Array.isArray(data.notifications)) setNotifications(data.notifications);
+    if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
+    if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     if (Array.isArray(data.services)) setServices(cleanServices(data.services));
     if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
     if (typeof data.syncKey === "string" && data.syncKey.startsWith("cg_")) {
@@ -2403,6 +2698,7 @@ function App() {
     applyNotificationSettings(data.settings);
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
+    applyGoogleCalendarStatus(data.googleCalendar);
     hasLoadedCalendarApiRef.current = true;
   }
 
@@ -2437,15 +2733,18 @@ function App() {
       setToast({ message: "Sign in again before editing. The calendar is not connected to the live database." });
       return false;
     }
-    if (calendarFeedStatus !== "connected" || !hasLoadedCalendarApiRef.current) {
+    if (!hasLoadedCalendarApiRef.current) {
       setCalendarSaveStatus("failed");
       setCalendarSaveError("Calendar is not connected to the live database.");
       setToast({ message: `Cannot ${action}: the live database is not connected. Reload and sign in again.` });
       return false;
     }
-    if (calendarSaveStatus === "failed") {
-      setToast({ message: `Cannot ${action}: fix the save error or reload before editing again.` });
-      return false;
+    if (calendarFeedStatus !== "connected") {
+      setCalendarFeedStatus("connected");
+    }
+    if (calendarSaveStatus === "failed" && calendarSaveError === "Calendar is not connected to the live database.") {
+      setCalendarSaveStatus("idle");
+      setCalendarSaveError("");
     }
     return true;
   }
@@ -2603,6 +2902,7 @@ function App() {
     item: CalendarItem,
     service: Service | undefined | null,
     latestClientEmail?: NotificationRecord,
+    latestCoachEmail?: NotificationRecord,
     latestAdminEmail?: NotificationRecord,
   ) {
     if (isEmbedMode || item.kind !== "appointment" || pointerSessionRef.current) return;
@@ -2625,6 +2925,7 @@ function App() {
       phone: item.phone || "",
       email: item.email || "",
       clientEmailStatus: latestClientEmail ? notificationStatusLabel(latestClientEmail) : "No client email receipt yet",
+      coachEmailStatus: latestCoachEmail ? notificationStatusLabel(latestCoachEmail) : "No coach receipt yet",
       adminEmailStatus: latestAdminEmail ? notificationStatusLabel(latestAdminEmail) : "No admin receipt yet",
     });
   }
@@ -2866,6 +3167,31 @@ function App() {
     setQuickCreate(null);
   }
 
+  function toggleCalendarDetailMode() {
+    suppressBlankGestureUntilRef.current = Date.now() + 360;
+    setCalendarDetailMode((current) => !current);
+  }
+
+  function enableCalendarDetailMode() {
+    suppressBlankGestureUntilRef.current = Date.now() + 360;
+    setCalendarDetailMode(true);
+  }
+
+  function handleCalendarTouchStart(event: ReactTouchEvent<HTMLElement>) {
+    const now = Date.now();
+    if (event.touches.length > 1) {
+      enableCalendarDetailMode();
+      return;
+    }
+    if (now - lastCalendarTapRef.current < 320) {
+      event.preventDefault();
+      toggleCalendarDetailMode();
+      lastCalendarTapRef.current = 0;
+      return;
+    }
+    lastCalendarTapRef.current = now;
+  }
+
   function flashEdgeCue(direction: "prev" | "next") {
     setEdgeCue(direction);
     if (edgeCueTimerRef.current) clearTimeout(edgeCueTimerRef.current);
@@ -2888,15 +3214,17 @@ function App() {
     }
   }
 
-  function clearGesture() {
+  function clearGesture(options: { preserveQuickCreate?: boolean } = {}) {
     gestureCleanupRef.current?.();
     gestureCleanupRef.current = null;
     clickPlaceRef.current = null;
     dragPreviewMetaRef.current = null;
+    pendingQuickCreateRef.current = null;
     setFloatingDrag(null);
     setDraftState(null);
     setPointerSessionState(null);
     setMovedState(false);
+    if (!options.preserveQuickCreate) setQuickCreate(null);
   }
 
   function isInsideAvailability(day: number, start: number, duration: number) {
@@ -3089,8 +3417,8 @@ function App() {
 
   function beginBlankGesture(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
+    if (Date.now() < suppressBlankGestureUntilRef.current) return;
     if ((event.target as HTMLElement).closest("[data-calendar-item]")) return;
-    if (!requireLiveDatabase("create calendar items")) return;
     const slot = slotFromPointer(event);
     if (!slot) return;
     pointerStartRef.current = { x: event.clientX, y: event.clientY };
@@ -3099,6 +3427,17 @@ function App() {
     pointerKindRef.current = event.pointerType || "mouse";
     dragPreviewMetaRef.current = null;
     setFloatingDrag(null);
+    pendingQuickCreateRef.current = {
+      day: slot.day,
+      start: slot.start,
+      x: event.clientX,
+      y: event.clientY,
+      serviceId: "",
+      phone: "",
+      email: "",
+      note: "",
+      error: "",
+    };
     clickPlaceRef.current = activeDockBooking
       ? {
           bookingId: activeDockBooking.id,
@@ -3111,19 +3450,7 @@ function App() {
         }
       : null;
     setMovedState(false);
-    setSelectedId("");
-    setQuickCreate({
-      day: slot.day,
-      start: slot.start,
-      x: event.clientX,
-      y: event.clientY,
-      serviceId: "",
-      phone: "",
-      email: "",
-      note: "",
-      error: "",
-    });
-    setPointerSessionState({ mode: "block", day: slot.day, start: slot.start });
+    setPointerSessionState(event.pointerType === "touch" ? null : { mode: "block", day: slot.day, start: slot.start });
     event.currentTarget.setPointerCapture(event.pointerId);
     attachGestureListeners();
   }
@@ -3136,8 +3463,13 @@ function App() {
     pointerClientRef.current = { x: clientX, y: clientY };
     recordPointerTrail(clientX, clientY);
     const session = pointerSessionRef.current;
-    if (!session) return;
-    if (!hasPointerMovedPastThreshold(clientX, clientY)) return;
+    const movedPastThreshold = hasPointerMovedPastThreshold(clientX, clientY);
+    if (!session) {
+      if (pendingQuickCreateRef.current && movedPastThreshold) setMovedState(true);
+      return;
+    }
+    if (!movedPastThreshold) return;
+    pendingQuickCreateRef.current = null;
     handleEdgeNavigation(clientX);
     const insideGrid = isClientInsideGrid(clientX, clientY);
     const slot = insideGrid ? slotFromClient(clientX, clientY) : null;
@@ -3220,8 +3552,36 @@ function App() {
   function endPointer() {
     const session = pointerSessionRef.current;
     const activeDraft = draftRef.current;
+    const pendingQuickCreate = pendingQuickCreateRef.current;
+    const didMove = hasMovedRef.current || hasPointerMovedPastThreshold(pointerClientRef.current.x, pointerClientRef.current.y);
+
+    if (pendingQuickCreate && (!session || session.mode === "block")) {
+      if (!didMove) {
+        const clickPlace = clickPlaceRef.current;
+        if (clickPlace) {
+          const booking = dockBookings.find((candidate) => candidate.id === clickPlace.bookingId);
+          if (booking) placeDockBookingAtCandidate(booking, clickPlace.candidate, { animateFromDock: true });
+          clearGesture();
+          return;
+        }
+        if (requireLiveDatabase("create calendar items")) {
+          setSelectedId("");
+          setQuickCreate(pendingQuickCreate);
+          clearGesture({ preserveQuickCreate: true });
+        } else {
+          clearGesture();
+        }
+        return;
+      }
+      pendingQuickCreateRef.current = null;
+      if (!session) {
+        clearGesture();
+        return;
+      }
+    }
+
     if (!session) return;
-    if (hasMovedRef.current) {
+    if (didMove) {
       suppressItemClickRef.current = true;
       suppressItemClickUntilRef.current = Date.now() + 450;
       window.setTimeout(() => {
@@ -3229,7 +3589,7 @@ function App() {
       }, 450);
     }
 
-    if (!hasMovedRef.current) {
+    if (!didMove) {
       const clickPlace = clickPlaceRef.current;
       clickPlaceRef.current = null;
       if (clickPlace) {
@@ -3259,6 +3619,10 @@ function App() {
     }
 
     if (activeDraft.mode === "block") {
+      if (!requireLiveDatabase("create blocks")) {
+        clearGesture();
+        return;
+      }
       const previous = items;
       const newBlock: CalendarItem = {
         id: `block-${Date.now()}`,
@@ -3289,11 +3653,10 @@ function App() {
         clearGesture();
         return;
       }
-	      const item: CalendarItem = {
-	        id: `appt-${Date.now()}`,
-	        kind: "appointment",
-	        status: "booked",
-	        week: activeDraft.week,
+      const item: CalendarItem = {
+        id: `appt-${Date.now()}`,
+        kind: "appointment",
+        week: activeDraft.week,
         day: activeDraft.day,
         start: activeDraft.start,
         duration: activeDraft.duration,
@@ -3434,11 +3797,10 @@ function App() {
       setQuickCreate((current) => (current ? { ...current, error: "That time is already occupied." } : current));
       return;
     }
-	    const item: CalendarItem = {
-	      id: `appt-${Date.now()}`,
-	      kind: "appointment",
-	      status: "booked",
-	      title: clientName,
+    const item: CalendarItem = {
+      id: `appt-${Date.now()}`,
+      kind: "appointment",
+      title: clientName,
       client: clientName,
       serviceId: quickCreateService.id,
       ...candidate,
@@ -3487,11 +3849,10 @@ function App() {
       return;
     }
     const previous = items;
-	    const item: CalendarItem = {
-	      id: `appt-${Date.now()}`,
-	      kind: "appointment",
-	      status: "booked",
-	      title: "New client",
+    const item: CalendarItem = {
+      id: `appt-${Date.now()}`,
+      kind: "appointment",
+      title: "New client",
       client: "New client",
       serviceId,
       ...candidate,
@@ -3566,11 +3927,10 @@ function App() {
       return false;
     }
 
-	    const item: CalendarItem = {
-	      id: `appt-${Date.now()}`,
-	      kind: "appointment",
-	      status: "booked",
-	      week: candidate.week,
+    const item: CalendarItem = {
+      id: `appt-${Date.now()}`,
+      kind: "appointment",
+      week: candidate.week,
       day: candidate.day,
       start: candidate.start,
       duration: candidate.duration,
@@ -3988,7 +4348,6 @@ function App() {
       setSentInvoiceNumber("");
       setConfirmedInvoiceNumber("");
       setToast({ message: `${voidedNumber} voided. Edits will use ${invoiceNumber}.` });
-      return;
     }
   }
 
@@ -4341,6 +4700,7 @@ function App() {
   async function handleAdminLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthError("");
+    setLoginState("signing-in");
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
@@ -4373,6 +4733,8 @@ function App() {
       setAuthStatus("guest");
       setAuthError("Could not reach the booking server.");
       setCalendarFeedStatus("offline");
+    } finally {
+      setLoginState("idle");
     }
   }
 
@@ -4445,6 +4807,54 @@ function App() {
     }
   }
 
+  function updatePasswordChangeForm<K extends keyof PasswordChangeForm>(field: K, value: PasswordChangeForm[K]) {
+    setPasswordChangeState("idle");
+    setPasswordChangeMessage("");
+    setPasswordChangeForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleChangePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPasswordChangeMessage("");
+    if (passwordChangeForm.newPassword.length < 8) {
+      setPasswordChangeMessage("Use at least 8 characters.");
+      return;
+    }
+    if (passwordChangeForm.newPassword !== passwordChangeForm.confirmPassword) {
+      setPasswordChangeMessage("Those passwords do not match.");
+      return;
+    }
+
+    setPasswordChangeState("saving");
+    try {
+      const response = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentPassword: passwordChangeForm.currentPassword,
+          newPassword: passwordChangeForm.newPassword,
+        }),
+      });
+      const data = (await response.json()) as { authenticated?: boolean; message?: string; email?: string };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data.message || "Admin login required.");
+      }
+      if (!response.ok || !data.authenticated) {
+        setPasswordChangeState("idle");
+        setPasswordChangeMessage(data.message || "Could not change password.");
+        return;
+      }
+      if (data.email) setAdminEmail(data.email);
+      setPasswordChangeForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setPasswordChangeState("saved");
+      setPasswordChangeMessage("Password changed.");
+    } catch (error) {
+      setPasswordChangeState("idle");
+      setPasswordChangeMessage(error instanceof Error ? error.message : "Could not reach the booking server.");
+    }
+  }
+
   async function handleAdminLogout() {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     hasLoadedCalendarApiRef.current = false;
@@ -4479,6 +4889,116 @@ function App() {
     }
   }
 
+  async function refreshGoogleCalendarStatus() {
+    try {
+      const response = await fetch("/api/google-calendar/status", { headers: { Accept: "application/json" } });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) return;
+      applyGoogleCalendarStatus((await response.json()) as Partial<GoogleCalendarSyncStatus>);
+    } catch {
+      // Google Calendar sync is optional; keep the booking calendar usable.
+    }
+  }
+
+  async function connectGoogleCalendar() {
+    setGoogleCalendarAction("connecting");
+    try {
+      const response = await fetch("/api/google-calendar/connect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json()) as { authUrl?: string; message?: string };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok || !data.authUrl) throw new Error(data.message || "Google Calendar connection is not ready.");
+      window.location.assign(data.authUrl);
+    } catch (error) {
+      setGoogleCalendarAction("idle");
+      setToast({ message: error instanceof Error ? error.message : "Could not start Google Calendar connection." });
+    }
+  }
+
+  async function saveGoogleCalendarSettings(next?: Partial<GoogleCalendarSyncStatus>) {
+    const nextStatus = { ...googleCalendar, ...(next ?? {}) };
+    setGoogleCalendar(nextStatus);
+    setGoogleCalendarAction("saving");
+    try {
+      const response = await fetch("/api/google-calendar/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ calendarId: nextStatus.calendarId, autoSync: nextStatus.autoSync }),
+      });
+      const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & { message?: string };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(data.message || "Google Calendar settings did not save.");
+      applyGoogleCalendarStatus(data);
+      setToast({ message: "Google Calendar sync settings saved." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save Google Calendar settings." });
+      void refreshGoogleCalendarStatus();
+    } finally {
+      setGoogleCalendarAction("idle");
+    }
+  }
+
+  async function syncGoogleCalendarNow() {
+    setGoogleCalendarAction("syncing");
+    try {
+      const response = await fetch("/api/google-calendar/sync", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & {
+        ok?: boolean;
+        upserted?: number;
+        deleted?: number;
+        message?: string;
+      };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok || data.ok === false) throw new Error(data.message || data.lastSyncError || "Google Calendar sync failed.");
+      applyGoogleCalendarStatus(data);
+      setToast({ message: `Google Calendar synced${typeof data.upserted === "number" ? ` (${data.upserted} upserted, ${data.deleted ?? 0} deleted)` : ""}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Google Calendar sync failed." });
+      void refreshGoogleCalendarStatus();
+    } finally {
+      setGoogleCalendarAction("idle");
+    }
+  }
+
+  async function disconnectGoogleCalendar() {
+    setGoogleCalendarAction("disconnecting");
+    try {
+      const response = await fetch("/api/google-calendar/disconnect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & { message?: string };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(data.message || "Google Calendar did not disconnect.");
+      applyGoogleCalendarStatus(data);
+      setToast({ message: "Google Calendar disconnected." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not disconnect Google Calendar." });
+    } finally {
+      setGoogleCalendarAction("idle");
+    }
+  }
+
   async function saveBrandSettings(nextBrand = brandSettings, options: { silent?: boolean } = {}) {
     const cleanBrand = cleanBrandSettings(nextBrand);
     const saveVersion = ++brandSaveVersionRef.current;
@@ -4508,6 +5028,15 @@ function App() {
 
   function setBookingCardTheme(nextTheme: ThemeMode) {
     const nextBrand = cleanBrandSettings({ ...brandSettings, bookingTheme: nextTheme });
+    setBrandSaveState("idle");
+    setBrandSettings(nextBrand);
+    if (!isEmbedMode && authStatus === "authenticated") {
+      void saveBrandSettings(nextBrand, { silent: true });
+    }
+  }
+
+  function setBookingLogoVisible(showLogo: boolean) {
+    const nextBrand = cleanBrandSettings({ ...brandSettings, showLogo });
     setBrandSaveState("idle");
     setBrandSettings(nextBrand);
     if (!isEmbedMode && authStatus === "authenticated") {
@@ -4555,7 +5084,7 @@ function App() {
       }
       if (!response.ok) throw new Error("People import failed");
       const result = (await response.json()) as PeopleImportResult;
-      if (Array.isArray(result.people)) setPeople(result.people);
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       setPeopleImportText("");
       setShowClientImport(false);
       setPeopleImportState("imported");
@@ -4646,7 +5175,7 @@ function App() {
       }
       if (!response.ok) throw new Error("Client save failed");
       const result = (await response.json()) as PeopleUpdateResult;
-      if (Array.isArray(result.people)) setPeople(result.people);
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       if (result.person?.id) setSelectedClientId(result.person.id);
       setIsAddingClient(false);
       setClientEditMode(false);
@@ -4755,11 +5284,10 @@ function App() {
       return;
     }
 
-	    const item: CalendarItem = {
-	      id: `appt-${Date.now()}`,
-	      kind: "appointment",
-	      status: "booked",
-	      ...candidate,
+    const item: CalendarItem = {
+      id: `appt-${Date.now()}`,
+      kind: "appointment",
+      ...candidate,
       serviceId: selectedBookingService.id,
       client,
       title: client,
@@ -4866,24 +5394,24 @@ function App() {
               <div className="service-form-row">
                 <label className="settings-field">
                   <span>Lesson format</span>
-	                  <select
-	                    value={serviceEditor.lessonFormat}
-	                    onChange={(event) =>
-	                      updateServiceEditor(
-	                        "lessonFormat",
-	                        event.target.value === "package"
-	                          ? "package"
-	                          : event.target.value === "group"
-	                            ? "group"
-	                            : "private",
-	                      )
-	                    }
-	                  >
-	                    <option value="private">Private lesson</option>
-	                    <option value="group">Group lesson</option>
-	                    <option value="package">Package</option>
-	                  </select>
-	                </label>
+                  <select
+                    value={serviceEditor.lessonFormat}
+                    onChange={(event) =>
+                      updateServiceEditor(
+                        "lessonFormat",
+                        event.target.value === "package"
+                          ? "package"
+                          : event.target.value === "group"
+                            ? "group"
+                            : "private",
+                      )
+                    }
+                  >
+                    <option value="private">Private lesson</option>
+                    <option value="group">Group lesson</option>
+                    <option value="package">Package</option>
+                  </select>
+                </label>
                 <label className="settings-field">
                   <span>Visibility</span>
                   <select
@@ -4921,8 +5449,9 @@ function App() {
                     min={15}
                     max={240}
                     step={15}
+                    inputMode="numeric"
                     onChange={(event) => updateServiceEditor("duration", Number(event.target.value))}
-                    type="number"
+                    type="text"
                   />
                 </label>
                 <label className="settings-field">
@@ -4931,8 +5460,9 @@ function App() {
                     value={serviceEditor.price}
                     min={0}
                     step={1}
+                    inputMode="decimal"
                     onChange={(event) => updateServiceEditor("price", Number(event.target.value))}
-                    type="number"
+                    type="text"
                   />
                 </label>
                 <label className="settings-field">
@@ -4949,91 +5479,94 @@ function App() {
                   </select>
                 </label>
               </div>
-	              <div className="service-form-row">
-	                {serviceEditor.lessonFormat === "group" && (
-	                  <label className="settings-field">
-	                    <span>Minimum group</span>
+              <div className="service-form-row">
+                {serviceEditor.lessonFormat === "group" && (
+                  <label className="settings-field">
+                    <span>Minimum group</span>
                     <input
                       value={serviceEditor.minParticipants}
                       min={2}
                       max={serviceEditor.capacity}
                       step={1}
+                      inputMode="numeric"
                       onChange={(event) => updateServiceEditor("minParticipants", Number(event.target.value))}
-                      type="number"
-	                    />
-	                  </label>
-	                )}
-	                {serviceEditor.lessonFormat !== "package" && (
-	                  <label className="settings-field">
-	                    <span>{serviceEditor.lessonFormat === "group" ? "Maximum group" : "Capacity"}</span>
-	                    <input
-	                      value={serviceEditor.capacity}
-	                      min={serviceEditor.lessonFormat === "group" ? 2 : 1}
-	                      max={24}
-	                      step={1}
-	                      onChange={(event) => updateServiceEditor("capacity", Number(event.target.value))}
-	                      type="number"
-	                    />
-	                  </label>
-	                )}
-	                <label className="settings-field">
-	                  <span>Location note</span>
+                      type="text"
+                    />
+                  </label>
+                )}
+                {serviceEditor.lessonFormat !== "package" && (
+                  <label className="settings-field">
+                    <span>{serviceEditor.lessonFormat === "group" ? "Maximum group" : "Capacity"}</span>
+                    <input
+                      value={serviceEditor.capacity}
+                      min={serviceEditor.lessonFormat === "group" ? 2 : 1}
+                      max={24}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) => updateServiceEditor("capacity", Number(event.target.value))}
+                      type="text"
+                    />
+                  </label>
+                )}
+                <label className="settings-field">
+                  <span>Location note</span>
                   <input
                     value={serviceEditor.location}
                     onChange={(event) => updateServiceEditor("location", event.target.value)}
                     placeholder={coachAccount.venueShortName}
                   />
-	                </label>
-	              </div>
-	              {serviceEditor.lessonFormat === "package" && (
-	                <div className="service-form-row">
-	                  <label className="settings-field">
-	                    <span>Allowance</span>
-	                    <input
-	                      value={serviceEditor.packageAllowance ?? 5}
-	                      min={1}
-	                      max={100}
-	                      step={1}
-	                      onChange={(event) => updateServiceEditor("packageAllowance", Number(event.target.value))}
-	                      type="number"
-	                    />
-	                  </label>
-	                  <label className="settings-field">
-	                    <span>Coverage style</span>
-	                    <select
-	                      value={serviceEditor.packageCoverageMode ?? "upfront"}
-	                      onChange={(event) =>
-	                        updateServiceEditor(
-	                          "packageCoverageMode",
-	                          event.target.value === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront",
-	                        )
-	                      }
-	                    >
-	                      <option value="upfront">Paid upfront</option>
-	                      <option value="lesson-by-lesson">Lesson-by-lesson</option>
-	                    </select>
-	                  </label>
-	                  <label className="settings-field">
-	                    <span>Covers lesson type</span>
-	                    <select
-	                      value={serviceEditor.packageCoversServiceId ?? ""}
-	                      onChange={(event) => updateServiceEditor("packageCoversServiceId", event.target.value)}
-	                    >
-	                      <option value="">Any matching lesson</option>
-	                      {services
-	                        .filter((service) => service.lessonFormat !== "package")
-	                        .map((service) => (
-	                          <option key={service.id} value={service.id}>
-	                            {service.name}
-	                          </option>
-	                        ))}
-	                    </select>
-	                  </label>
-	                </div>
-	              )}
-	              <label className="settings-toggle">
-	                <input
-	                  checked={serviceEditor.active}
+                </label>
+              </div>
+              {serviceEditor.lessonFormat === "package" && (
+                <div className="service-form-row">
+                  <label className="settings-field">
+                    <span>Allowance</span>
+                    <input
+                      value={serviceEditor.packageAllowance ?? 5}
+                      min={1}
+                      max={100}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) => updateServiceEditor("packageAllowance", Number(event.target.value))}
+                      type="text"
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <span>Coverage style</span>
+                    <select
+                      value={serviceEditor.packageCoverageMode ?? "upfront"}
+                      onChange={(event) =>
+                        updateServiceEditor(
+                          "packageCoverageMode",
+                          event.target.value === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront",
+                        )
+                      }
+                    >
+                      <option value="upfront">Paid upfront</option>
+                      <option value="lesson-by-lesson">Lesson-by-lesson</option>
+                    </select>
+                  </label>
+                  <label className="settings-field">
+                    <span>Covers lesson type</span>
+                    <select
+                      value={serviceEditor.packageCoversServiceId ?? ""}
+                      onChange={(event) => updateServiceEditor("packageCoversServiceId", event.target.value)}
+                    >
+                      <option value="">Any matching lesson</option>
+                      {services
+                        .filter((service) => service.lessonFormat !== "package")
+                        .map((service) => (
+                          <option key={service.id} value={service.id}>
+                            {service.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+              )}
+              <label className="settings-toggle">
+                <input
+                  checked={serviceEditor.active}
                   onChange={(event) => updateServiceEditor("active", event.target.checked)}
                   type="checkbox"
                 />
@@ -5059,19 +5592,19 @@ function App() {
             {services.map((service) => (
               <article className={`service-row ${service.active ? "" : "is-archived"}`} key={service.id}>
                 <button className="service-row-main" onClick={() => editService(service)} type="button">
-	                  <span>
-	                    {service.active ? "Active" : "Archived"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
-	                    {service.lessonFormat === "package" ? "Package" : service.lessonFormat === "group" ? "Group" : "Private"}
-	                  </span>
-	                  <strong>{service.name}</strong>
-	                  {service.description && <em>{service.description}</em>}
-	                  {service.lessonFormat === "package" && (
-	                    <em>
-	                      {service.packageAllowance ?? 5} slots ·{" "}
-	                      {service.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "paid upfront"}
-	                    </em>
-	                  )}
-	                </button>
+                  <span>
+                    {service.active ? "Active" : "Archived"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
+                    {service.lessonFormat === "package" ? "Package" : service.lessonFormat === "group" ? "Group" : "Private"}
+                  </span>
+                  <strong>{service.name}</strong>
+                  {service.description && <em>{service.description}</em>}
+                  {service.lessonFormat === "package" && (
+                    <em>
+                      {service.packageAllowance ?? 5} slots ·{" "}
+                      {service.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "paid upfront"}
+                    </em>
+                  )}
+                </button>
                 <div className="service-row-meta">
                   <strong>{servicePriceLabel(service)}</strong>
                   <span>{service.duration} min</span>
@@ -5230,14 +5763,16 @@ function App() {
           </div>
         </summary>
         <div className={`public-booking booking-theme-${brandSettings.bookingTheme}`}>
-      <div className="booking-brand">
-        {brandSettings.logoPreview ? (
+      <div className={`booking-brand ${showBookingBrandLogo ? "" : "booking-brand-subtle"}`}>
+        {showBookingBrandLogo && brandSettings.logoPreview ? (
           <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
-        ) : (
+        ) : showBookingBrandLogo ? (
           <>
             <strong>{bookingBrandPrimary.toUpperCase()}</strong>
             {bookingBrandSecondary && <span>{bookingBrandSecondary.toUpperCase()}</span>}
           </>
+        ) : (
+          <strong>{bookingBrandName}</strong>
         )}
         <em>{coachAccount.venueShortName}</em>
       </div>
@@ -5459,31 +5994,31 @@ function App() {
         )}
       </div>
 
-	      <div className="service-summary">
-	        <span>Price</span>
-	        <strong>{servicePriceLabel(selectedService)}</strong>
-	        <p>{selectedService?.description ?? selected.note}</p>
-	      </div>
+      <div className="service-summary">
+        <span>Price</span>
+        <strong>{servicePriceLabel(selectedService)}</strong>
+        <p>{selectedService?.description ?? selected.note}</p>
+      </div>
 
-	      {selected.kind === "appointment" && (
-	        <div className="lesson-status-panel">
-	          <span>Status</span>
-	          <div className="lesson-status-options" role="group" aria-label="Lesson status">
-	            {(["booked", "completed", "cancelled", "no_show"] as BookingStatus[]).map((status) => (
-	              <button
-	                className={(selected.status ?? "booked") === status ? "active" : ""}
-	                key={status}
-	                onClick={() => updateAppointmentStatus(selected.id, status)}
-	                type="button"
-	              >
-	                {status === "no_show" ? "No-show" : status[0].toUpperCase() + status.slice(1)}
-	              </button>
-	            ))}
-	          </div>
-	        </div>
-	      )}
+      {selected.kind === "appointment" && (
+        <div className="lesson-status-panel">
+          <span>Status</span>
+          <div className="lesson-status-options" role="group" aria-label="Lesson status">
+            {(["booked", "completed", "cancelled", "no_show"] as BookingStatus[]).map((status) => (
+              <button
+                className={(selected.status ?? "booked") === status ? "active" : ""}
+                key={status}
+                onClick={() => updateAppointmentStatus(selected.id, status)}
+                type="button"
+              >
+                {status === "no_show" ? "No-show" : status[0].toUpperCase() + status.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
-	      {selected.kind === "appointment" && selectedPerson && hasSelectedPersonCaddyProfile && (
+      {selected.kind === "appointment" && selectedPerson && hasSelectedPersonCaddyProfile && (
         <div className="linked-profile">
           <div>
             <span>Shared profile</span>
@@ -5690,7 +6225,12 @@ function App() {
           <button
             className="primary-button"
             type="submit"
-            disabled={authStatus === "checking" || forgotState === "sending" || resetState === "saving"}
+            disabled={
+              authStatus === "checking" ||
+              loginState === "signing-in" ||
+              forgotState === "sending" ||
+              resetState === "saving"
+            }
           >
             {authStatus === "checking"
               ? "Checking"
@@ -5704,7 +6244,9 @@ function App() {
                   ? resetState === "saving"
                     ? "Saving"
                     : "Save New Password"
-                  : "Sign In"}
+                  : loginState === "signing-in"
+                    ? "Signing In"
+                    : "Sign In"}
           </button>
           {authMode === "login" ? (
             <button
@@ -5787,9 +6329,9 @@ function App() {
               <span>
                 {appointments} appointments · {blocks} blocked {blocks === 1 ? "time" : "times"}
               </span>
-            ) : activeView !== "billing" ? (
+            ) : (
               <span>{settingsLocationLine}</span>
-            ) : null}
+            )}
           </div>
           {activeView === "calendar" && (
             <div className="top-actions">
@@ -5797,7 +6339,7 @@ function App() {
                 <ArrowLeft size={16} />
                 Prev
               </button>
-              <button className="outline-button" onClick={() => setActiveWeekState(0)}>
+              <button className="outline-button" onClick={() => setActiveWeekState(getCurrentWeekOffset())}>
                 Today
               </button>
               <button className="outline-button" onClick={() => moveWeek(1)}>
@@ -5890,7 +6432,11 @@ function App() {
         <section
           className={`workspace ${pointerSession?.mode === "place" || activeDockBooking ? "placing-from-dock" : ""}`}
         >
-          <div className="calendar-card">
+          <div
+            className={`calendar-card ${calendarDetailMode ? "calendar-detail-mode" : ""}`}
+            onDoubleClick={toggleCalendarDetailMode}
+            onTouchStart={handleCalendarTouchStart}
+          >
             <div className="calendar-toolbar">
               <h2>{weekTitle}</h2>
               <div className={`calendar-save-pill ${calendarSaveStatus}`}>
@@ -5900,7 +6446,7 @@ function App() {
                     : calendarSaveStatus === "saved"
                       ? "Saved"
                       : calendarSaveStatus === "failed"
-                        ? "Save failed"
+                        ? "Not saved"
                         : calendarFeedStatus === "connected"
                           ? "Live database"
                           : "Not connected"}
@@ -5910,14 +6456,14 @@ function App() {
             </div>
             {calendarSaveStatus === "failed" && (
               <div className="calendar-save-warning">
-                This calendar is not saving to the production database. Do not trust bookings or email receipts until this is fixed.
+                Your latest change was not saved. Please try again; the app will retry when you make another change.
               </div>
             )}
 
             <div className="calendar-header-row">
               <div className="time-gutter" />
               {weekDays.map((day) => (
-                <div className="day-heading" key={day.label}>
+                <div className={`day-heading ${day.isToday ? "today" : ""}`} key={day.label}>
                   <span>{day.short}</span>
                   <strong>{day.date}</strong>
                 </div>
@@ -5987,12 +6533,14 @@ function App() {
                   const flyAnimation = placementAnimation?.itemId === item.id ? placementAnimation : null;
                   const itemNotifications = notificationsByAppointment.get(item.id) ?? [];
                   const latestClientEmail = itemNotifications.find((notification) => notification.kind.includes("client"));
+                  const latestCoachEmail = itemNotifications.find((notification) => notification.kind.includes("coach"));
                   const latestAdminEmail = itemNotifications.find((notification) => notification.kind.includes("admin"));
                   const tooltipRows = [
                     item.client || item.title,
                     service?.name ?? (item.kind === "block" ? "Blocked time" : "Lesson"),
                     formatRange(item.start, item.duration),
                     latestClientEmail ? `Client email: ${notificationStatusLabel(latestClientEmail)}` : "",
+                    latestCoachEmail ? `Coach email: ${notificationStatusLabel(latestCoachEmail)}` : "",
                     latestAdminEmail ? `Admin email: ${notificationStatusLabel(latestAdminEmail)}` : "",
                   ].filter(Boolean);
                   return (
@@ -6001,13 +6549,13 @@ function App() {
                       key={item.id}
                       className={`calendar-item ${item.kind} ${selectedId === item.id ? "selected" : ""} ${
                         invalid ? "invalid" : ""
-                      } ${item.kind === "appointment" ? `status-${item.status ?? "booked"}` : ""} ${
-                        flyAnimation ? "just-placed-from-dock" : ""
-                      } ${
-                        pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
-                      }`}
+	                      } ${flyAnimation ? "just-placed-from-dock" : ""} ${
+	                        pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
+	                      } ${item.kind === "appointment" && item.status ? `status-${item.status}` : ""}`}
                       aria-label={tooltipRows.join(", ")}
-                      onPointerEnter={(event) => showCalendarItemHover(event, item, service, latestClientEmail, latestAdminEmail)}
+                      onPointerEnter={(event) =>
+                        showCalendarItemHover(event, item, service, latestClientEmail, latestCoachEmail, latestAdminEmail)
+                      }
                       onPointerLeave={() => hideCalendarItemHover(item.id)}
                       style={{
                         top,
@@ -6040,7 +6588,7 @@ function App() {
                         <span>{service?.name ?? "Busy"}</span>
                         <em>{formatRange(item.start, item.duration)}</em>
                       </div>
-                      {item.kind === "appointment" && (latestClientEmail || latestAdminEmail) && (
+                      {item.kind === "appointment" && (latestClientEmail || latestCoachEmail || latestAdminEmail) && (
                         <div className="item-email-indicators" aria-label="Email receipt status">
                           {latestClientEmail && (
                             <span
@@ -6048,6 +6596,14 @@ function App() {
                               title={`Client: ${notificationStatusLabel(latestClientEmail)}`}
                             >
                               C
+                            </span>
+                          )}
+                          {latestCoachEmail && (
+                            <span
+                              className={`email-status-dot ${notificationTone(latestCoachEmail.status)}`}
+                              title={`Coach: ${notificationStatusLabel(latestCoachEmail)}`}
+                            >
+                              O
                             </span>
                           )}
                           {latestAdminEmail && (
@@ -6311,6 +6867,7 @@ function App() {
             )}
             <div className="hover-card-receipts">
               <span>{calendarHover.clientEmailStatus}</span>
+              <span>{calendarHover.coachEmailStatus}</span>
               <span>{calendarHover.adminEmailStatus}</span>
             </div>
           </aside>
@@ -6493,7 +7050,7 @@ function App() {
                               <span>
                                 <strong>{item.client || item.title}</strong>
                                 <em>
-                                  {service?.name ?? "Lesson"} · {days[item.day].label}, {formatTime(item.start)}
+                                  {service?.name ?? "Lesson"} - {days[item.day].label}, {formatTime(item.start)}
                                 </em>
                               </span>
                               <Plus size={16} />
@@ -6543,9 +7100,16 @@ function App() {
                     <div className="invoice-title-block">
                       <span>Invoice</span>
                       <h2>{activeInvoiceNumber}</h2>
-                      {sentInvoiceNumber === confirmedInvoiceNumber && confirmedInvoiceNumber ? <em>Sent</em> : confirmedInvoiceNumber ? <em>Confirmed</em> : <em>Draft</em>}
+                      {sentInvoiceNumber === confirmedInvoiceNumber && confirmedInvoiceNumber ? (
+                        <em>Sent</em>
+                      ) : confirmedInvoiceNumber ? (
+                        <em>Confirmed</em>
+                      ) : (
+                        <em>Draft</em>
+                      )}
                     </div>
                   </div>
+
                   {(hasMissingInvoiceCoachSettings || latestVoidedInvoiceNumber) && (
                     <div className="invoice-document-alerts">
                       {latestVoidedInvoiceNumber && <span>{latestVoidedInvoiceNumber} voided</span>}
@@ -6663,7 +7227,11 @@ function App() {
                     <div className="invoice-section-heading invoice-items-heading">
                       <div>
                         <span>Items</span>
-                        <strong>{invoiceDraft.lines.length ? `${invoiceDraft.lines.length} line item${invoiceDraft.lines.length === 1 ? "" : "s"}` : "No items yet"}</strong>
+                        <strong>
+                          {invoiceDraft.lines.length
+                            ? `${invoiceDraft.lines.length} line item${invoiceDraft.lines.length === 1 ? "" : "s"}`
+                            : "No items yet"}
+                        </strong>
                       </div>
                       <button
                         className="outline-button"
@@ -6735,44 +7303,44 @@ function App() {
                       </div>
                       {invoiceDraft.lines.map((line) => (
                         <div className="invoice-document-line-row" key={line.id}>
-                        <label className="settings-field">
-                          <span>Line item</span>
-                          <input
-                            value={line.description}
-                            onChange={(event) => updateInvoiceLine(line.id, "description", event.target.value)}
-                            placeholder="Lesson, package, product, or service"
-                          />
-                        </label>
-                        <label className="settings-field">
-                          <span>Qty</span>
-                          <input
-                            value={line.quantity}
-                            inputMode="numeric"
-                            onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
-                            type="text"
-                          />
-                        </label>
-                        <label className="settings-field">
-                          <span>Unit price</span>
-                          <input
-                            value={line.unitPrice}
-                            inputMode="decimal"
-                            onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
-                            type="text"
-                          />
-                        </label>
-                        <strong>{formatMoney(line.quantity * line.unitPrice, invoiceSettings.currency)}</strong>
-                        <button
-                          className="invoice-line-delete-tab"
-                          onClick={() => removeInvoiceLine(line.id)}
-                          aria-label="Delete line item"
-                          title="Delete line item"
-                          type="button"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    ))}
+                          <label className="settings-field">
+                            <span>Line item</span>
+                            <input
+                              value={line.description}
+                              onChange={(event) => updateInvoiceLine(line.id, "description", event.target.value)}
+                              placeholder="Lesson, package, product, or service"
+                            />
+                          </label>
+                          <label className="settings-field">
+                            <span>Qty</span>
+                            <input
+                              value={line.quantity}
+                              inputMode="numeric"
+                              onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
+                              type="text"
+                            />
+                          </label>
+                          <label className="settings-field">
+                            <span>Unit price</span>
+                            <input
+                              value={line.unitPrice}
+                              inputMode="decimal"
+                              onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
+                              type="text"
+                            />
+                          </label>
+                          <strong>{formatMoney(line.quantity * line.unitPrice, invoiceSettings.currency)}</strong>
+                          <button
+                            className="invoice-line-delete-tab"
+                            onClick={() => removeInvoiceLine(line.id)}
+                            aria-label="Delete line item"
+                            title="Delete line item"
+                            type="button"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      ))}
                       {!invoiceDraft.lines.length && (
                         <div className="invoice-empty-line">
                           <span>Use Add line item or pull a completed booking.</span>
@@ -6838,7 +7406,9 @@ function App() {
                           </span>
                         )}
                         <span>
-                          <em>{invoiceSettings.taxName} ({invoiceSettings.taxRate}%)</em>
+                          <em>
+                            {invoiceSettings.taxName} ({invoiceSettings.taxRate}%)
+                          </em>
                           <strong>{formatMoney(invoiceTaxTotal, invoiceSettings.currency)}</strong>
                         </span>
                         <span className="invoice-grand-total">
@@ -6867,7 +7437,11 @@ function App() {
                     </button>
                     {confirmedInvoiceNumber && (
                       <>
-                        <button className="outline-button" onClick={() => setToast({ message: "PDF download hooks into this invoice preview next." })} type="button">
+                        <button
+                          className="outline-button"
+                          onClick={() => setToast({ message: "PDF download hooks into this invoice preview next." })}
+                          type="button"
+                        >
                           <Download size={16} />
                           Download PDF
                         </button>
@@ -6962,7 +7536,9 @@ function App() {
                           <input
                             value={catalogEditor.price}
                             inputMode="decimal"
-                            onChange={(event) => setCatalogEditor((current) => ({ ...current, price: parseMoneyInput(event.target.value) }))}
+                            onChange={(event) =>
+                              setCatalogEditor((current) => ({ ...current, price: parseMoneyInput(event.target.value) }))
+                            }
                             type="text"
                           />
                         </label>
@@ -7017,14 +7593,16 @@ function App() {
 
         {isEmbedMode && activeView === "booking" && (
           <section className={`public-booking booking-theme-${brandSettings.bookingTheme} module-page`}>
-            <div className="booking-brand">
-              {brandSettings.logoPreview ? (
+            <div className={`booking-brand ${showBookingBrandLogo ? "" : "booking-brand-subtle"}`}>
+              {showBookingBrandLogo && brandSettings.logoPreview ? (
                 <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
-              ) : (
+              ) : showBookingBrandLogo ? (
                 <>
                   <strong>{bookingBrandPrimary.toUpperCase()}</strong>
                   {bookingBrandSecondary && <span>{bookingBrandSecondary.toUpperCase()}</span>}
                 </>
+              ) : (
+                <strong>{bookingBrandName}</strong>
               )}
               <em>{coachAccount.venueShortName}</em>
             </div>
@@ -7063,11 +7641,17 @@ function App() {
                   <div className="email-status-list">
                     {bookingConfirmation.notifications.map((result, index) => {
                       const tone = emailResultTone(result);
+                      const channelLabel =
+                        result.channel === "admin"
+                          ? "Admin notification"
+                          : result.channel === "coach"
+                            ? "Coach notification"
+                            : "Client email";
                       return (
                         <div className={`email-status ${tone}`} key={`${result.channel}-${index}`}>
                           {tone === "sent" ? <Check size={17} /> : tone === "failed" ? <X size={17} /> : <Mail size={17} />}
                           <span>
-                            {result.channel === "admin" ? "Admin notification" : "Client email"}: {tone === "sent" ? "sent" : tone}
+                            {channelLabel}: {tone === "sent" ? "sent" : tone}
                             {result.recipient ? ` to ${result.recipient}` : ""}
                             {result.reason || result.error ? ` · ${(result.reason || result.error || "").replaceAll("_", " ")}` : ""}
                           </span>
@@ -7652,211 +8236,241 @@ function App() {
 	                    </div>
 	                  </details>
 
-	                  <details className="settings-subsection" open>
-	                    <summary className="settings-subsection-title">
-	                      <FileText size={18} />
-	                      <div>
-	                        <span>Invoicing</span>
-	                        <strong>
-	                          {invoiceSettings.prefix}-{String(invoiceSettings.nextNumber).padStart(4, "0")} next
-	                        </strong>
-	                      </div>
-	                    </summary>
-	                    <div className="settings-summary-grid">
-	                      <span>
-	                        <strong>{invoiceSettings.enabled ? "On" : "Off"}</strong>
-	                        engine
-	                      </span>
-	                      <span>
-	                        <strong>{invoiceSettings.currency}</strong>
-	                        currency
-	                      </span>
-	                      <span>
-	                        <strong>{invoiceSettings.taxRate}%</strong>
-	                        {invoiceSettings.taxName}
-	                      </span>
-	                    </div>
-	                    <div className="service-form-row">
-	                      <label className="settings-toggle">
-	                        <input
-	                          checked={invoiceSettings.enabled}
-	                          onChange={(event) => updateInvoiceSettings("enabled", event.target.checked)}
-	                          type="checkbox"
-	                        />
-	                        <span>Enable invoicing</span>
-	                      </label>
-	                      <label className="settings-toggle">
-	                        <input
-	                          checked={invoiceSettings.showBillingWorkspace}
-	                          onChange={(event) => updateInvoiceSettings("showBillingWorkspace", event.target.checked)}
-	                          type="checkbox"
-	                        />
-	                        <span>Show Billing workspace</span>
-	                      </label>
-	                    </div>
-	                    <div className="service-form-row">
-	                      <label className="settings-field">
-	                        <span>Invoice prefix</span>
-	                        <input
-	                          value={invoiceSettings.prefix}
-	                          onChange={(event) => updateInvoiceSettings("prefix", event.target.value)}
-	                        />
-	                      </label>
-	                      <label className="settings-field">
-	                        <span>Start / next number</span>
-	                        <input
-	                          value={invoiceSettings.nextNumber}
-	                          min={1}
-	                          step={1}
-	                          onChange={(event) => updateInvoiceSettings("nextNumber", Number(event.target.value))}
-	                          type="number"
-	                        />
-	                      </label>
-	                      <label className="settings-field">
-	                        <span>Currency</span>
-	                        <input
-	                          value={invoiceSettings.currency}
-	                          onChange={(event) => updateInvoiceSettings("currency", event.target.value)}
-	                        />
-	                      </label>
-	                    </div>
-	                    <div className="service-form-row">
-	                      <label className="settings-field">
-	                        <span>Tax label</span>
-	                        <input
-	                          value={invoiceSettings.taxName}
-	                          onChange={(event) => updateInvoiceSettings("taxName", event.target.value)}
-	                        />
-	                      </label>
-	                      <label className="settings-field">
-	                        <span>Tax number</span>
-	                        <input
-	                          value={invoiceSettings.taxNumber}
-	                          onChange={(event) => updateInvoiceSettings("taxNumber", event.target.value)}
-	                          placeholder="GST / tax number"
-	                        />
-	                      </label>
-	                      <label className="settings-field">
-	                        <span>Tax rate</span>
-	                        <input
-	                          value={invoiceSettings.taxRate}
-	                          min={0}
-	                          max={30}
-	                          step={0.5}
-	                          onChange={(event) => updateInvoiceSettings("taxRate", Number(event.target.value))}
-	                          type="number"
-	                        />
-	                      </label>
-	                    </div>
-	                    <div className="service-form-row">
-	                      <label className="settings-field">
-	                        <span>Bank account</span>
-	                        <input
-	                          value={invoiceSettings.bankAccount}
-	                          onChange={(event) => updateInvoiceSettings("bankAccount", event.target.value)}
-	                        />
-	                      </label>
-	                      <label className="settings-field">
-	                        <span>Payment terms days</span>
-	                        <input
-	                          value={invoiceSettings.paymentTermsDays}
-	                          min={0}
-	                          max={120}
-	                          step={1}
-	                          onChange={(event) => updateInvoiceSettings("paymentTermsDays", Number(event.target.value))}
-	                          type="number"
-	                        />
-	                      </label>
-	                    </div>
-	                    <label className="settings-field">
-	                      <span>Business address</span>
-	                      <textarea
-	                        value={invoiceSettings.businessAddress}
-	                        onChange={(event) => updateInvoiceSettings("businessAddress", event.target.value)}
-	                        rows={2}
-	                      />
-	                    </label>
-	                    <div className="service-form-row">
-	                      <label className="settings-field">
-	                        <span>Header text</span>
-	                        <textarea
-	                          value={invoiceSettings.headerText}
-	                          onChange={(event) => updateInvoiceSettings("headerText", event.target.value)}
-	                          rows={2}
-	                        />
-	                      </label>
-	                      <label className="settings-field">
-	                        <span>Footer text</span>
-	                        <textarea
-	                          value={invoiceSettings.footerText}
-	                          onChange={(event) => updateInvoiceSettings("footerText", event.target.value)}
-	                          rows={2}
-	                        />
-	                      </label>
-	                    </div>
-	                    <label className="settings-field">
-	                      <span>Payment instructions</span>
-	                      <textarea
-	                        value={invoiceSettings.paymentInstructions}
-	                        onChange={(event) => updateInvoiceSettings("paymentInstructions", event.target.value)}
-	                        rows={2}
-	                      />
-	                    </label>
-	                    <div className="custom-field-list">
-	                      <div className="services-topline">
-	                        <div>
-	                          <span>Custom fields</span>
-	                          <h2>Invoice fields</h2>
-	                        </div>
-	                        <button className="outline-button" onClick={addInvoiceCustomField} type="button">
-	                          <Plus size={16} />
-	                          Add Field
-	                        </button>
-	                      </div>
-	                      {invoiceSettings.customFields.map((field) => (
-	                        <div className="custom-field-row" key={field.id}>
-	                          <label className="settings-field">
-	                            <span>Label</span>
-	                            <input
-	                              value={field.label}
-	                              onChange={(event) => updateInvoiceCustomField(field.id, "label", event.target.value)}
-	                            />
-	                          </label>
-	                          <label className="settings-field">
-	                            <span>Value</span>
-	                            <input
-	                              value={field.value}
-	                              onChange={(event) => updateInvoiceCustomField(field.id, "value", event.target.value)}
-	                            />
-	                          </label>
-	                          <label className="settings-field">
-	                            <span>Placement</span>
-	                            <select
-	                              value={field.placement}
-	                              onChange={(event) =>
-	                                updateInvoiceCustomField(field.id, "placement", event.target.value as InvoiceCustomFieldPlacement)
-	                              }
-	                            >
-	                              <option value="header">Header</option>
-	                              <option value="bill-to">Bill-to block</option>
-	                              <option value="payment">Payment block</option>
-	                              <option value="footer">Footer</option>
-	                            </select>
-	                          </label>
-	                          <button
-	                            className="icon-button"
-	                            onClick={() => removeInvoiceCustomField(field.id)}
-	                            type="button"
-	                            aria-label="Remove custom field"
-	                          >
-	                            <Trash2 size={16} />
-	                          </button>
-	                        </div>
-	                      ))}
-	                    </div>
-	                  </details>
-	                </div>
-	                <button className="primary-button settings-save" onClick={saveCoachAccount}>
+                  <details className="settings-subsection">
+                    <summary className="settings-subsection-title">
+                      <KeyRound size={18} />
+                      <div>
+                        <span>Security</span>
+                        <strong>Password</strong>
+                      </div>
+                    </summary>
+                    <form className="security-settings-form" onSubmit={handleChangePassword}>
+                      <label className="settings-field">
+                        <span>Current password</span>
+                        <input
+                          value={passwordChangeForm.currentPassword}
+                          onChange={(event) => updatePasswordChangeForm("currentPassword", event.target.value)}
+                          type="password"
+                          autoComplete="current-password"
+                        />
+                      </label>
+                      <div className="service-form-row">
+                        <label className="settings-field">
+                          <span>New password</span>
+                          <input
+                            value={passwordChangeForm.newPassword}
+                            onChange={(event) => updatePasswordChangeForm("newPassword", event.target.value)}
+                            type="password"
+                            autoComplete="new-password"
+                          />
+                        </label>
+                        <label className="settings-field">
+                          <span>Confirm new password</span>
+                          <input
+                            value={passwordChangeForm.confirmPassword}
+                            onChange={(event) => updatePasswordChangeForm("confirmPassword", event.target.value)}
+                            type="password"
+                            autoComplete="new-password"
+                          />
+                        </label>
+                      </div>
+                      {passwordChangeMessage && (
+                        <div className={passwordChangeState === "saved" ? "auth-success" : "auth-error"}>
+                          {passwordChangeMessage}
+                        </div>
+                      )}
+                      <button className="outline-button" disabled={passwordChangeState === "saving"} type="submit">
+                        {passwordChangeState === "saving" ? "Changing" : "Change Password"}
+                      </button>
+                    </form>
+                  </details>
+
+                  <details className="settings-subsection">
+                    <summary className="settings-subsection-title">
+                      <FileText size={18} />
+                      <div>
+                        <span>Invoicing</span>
+                        <strong>
+                          {invoiceSettings.prefix}-{String(invoiceSettings.nextNumber).padStart(4, "0")} next
+                        </strong>
+                      </div>
+                    </summary>
+                    <div className="service-form-row">
+                      <label className="settings-toggle">
+                        <input
+                          checked={invoiceSettings.enabled}
+                          onChange={(event) => updateInvoiceSettings("enabled", event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span>Enable invoicing</span>
+                      </label>
+                      <label className="settings-toggle">
+                        <input
+                          checked={invoiceSettings.showBillingWorkspace}
+                          onChange={(event) => updateInvoiceSettings("showBillingWorkspace", event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span>Show Billing workspace</span>
+                      </label>
+                    </div>
+                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Invoice prefix</span>
+                        <input
+                          value={invoiceSettings.prefix}
+                          onChange={(event) => updateInvoiceSettings("prefix", event.target.value)}
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Start / next number</span>
+                        <input
+                          value={invoiceSettings.nextNumber}
+                          inputMode="numeric"
+                          onChange={(event) => updateInvoiceSettings("nextNumber", parseQuantityInput(event.target.value))}
+                          type="text"
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Currency</span>
+                        <input
+                          value={invoiceSettings.currency}
+                          onChange={(event) => updateInvoiceSettings("currency", event.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Tax label</span>
+                        <input
+                          value={invoiceSettings.taxName}
+                          onChange={(event) => updateInvoiceSettings("taxName", event.target.value)}
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Tax number</span>
+                        <input
+                          value={invoiceSettings.taxNumber}
+                          onChange={(event) => updateInvoiceSettings("taxNumber", event.target.value)}
+                          placeholder="GST / tax number"
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Tax rate</span>
+                        <input
+                          value={invoiceSettings.taxRate}
+                          inputMode="decimal"
+                          onChange={(event) => updateInvoiceSettings("taxRate", parseMoneyInput(event.target.value))}
+                          type="text"
+                        />
+                      </label>
+                    </div>
+                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Bank account</span>
+                        <input
+                          value={invoiceSettings.bankAccount}
+                          onChange={(event) => updateInvoiceSettings("bankAccount", event.target.value)}
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Payment terms days</span>
+                        <input
+                          value={invoiceSettings.paymentTermsDays}
+                          inputMode="numeric"
+                          onChange={(event) => updateInvoiceSettings("paymentTermsDays", parseQuantityInput(event.target.value))}
+                          type="text"
+                        />
+                      </label>
+                    </div>
+                    <label className="settings-field">
+                      <span>Business address</span>
+                      <textarea
+                        value={invoiceSettings.businessAddress}
+                        onChange={(event) => updateInvoiceSettings("businessAddress", event.target.value)}
+                        rows={2}
+                      />
+                    </label>
+                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Header text</span>
+                        <textarea
+                          value={invoiceSettings.headerText}
+                          onChange={(event) => updateInvoiceSettings("headerText", event.target.value)}
+                          rows={2}
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Footer text</span>
+                        <textarea
+                          value={invoiceSettings.footerText}
+                          onChange={(event) => updateInvoiceSettings("footerText", event.target.value)}
+                          rows={2}
+                        />
+                      </label>
+                    </div>
+                    <label className="settings-field">
+                      <span>Payment instructions</span>
+                      <textarea
+                        value={invoiceSettings.paymentInstructions}
+                        onChange={(event) => updateInvoiceSettings("paymentInstructions", event.target.value)}
+                        rows={2}
+                      />
+                    </label>
+                    <div className="custom-field-list">
+                      <div className="services-topline">
+                        <div>
+                          <span>Custom fields</span>
+                          <h2>Invoice fields</h2>
+                        </div>
+                        <button className="outline-button" onClick={addInvoiceCustomField} type="button">
+                          <Plus size={16} />
+                          Add Field
+                        </button>
+                      </div>
+                      {invoiceSettings.customFields.map((field) => (
+                        <div className="custom-field-row" key={field.id}>
+                          <label className="settings-field">
+                            <span>Label</span>
+                            <input
+                              value={field.label}
+                              onChange={(event) => updateInvoiceCustomField(field.id, "label", event.target.value)}
+                            />
+                          </label>
+                          <label className="settings-field">
+                            <span>Value</span>
+                            <input
+                              value={field.value}
+                              onChange={(event) => updateInvoiceCustomField(field.id, "value", event.target.value)}
+                            />
+                          </label>
+                          <label className="settings-field">
+                            <span>Placement</span>
+                            <select
+                              value={field.placement}
+                              onChange={(event) =>
+                                updateInvoiceCustomField(field.id, "placement", event.target.value as InvoiceCustomFieldPlacement)
+                              }
+                            >
+                              <option value="header">Header</option>
+                              <option value="bill-to">Bill-to block</option>
+                              <option value="payment">Payment block</option>
+                              <option value="footer">Footer</option>
+                            </select>
+                          </label>
+                          <button
+                            className="icon-button"
+                            onClick={() => removeInvoiceCustomField(field.id)}
+                            type="button"
+                            aria-label="Remove custom field"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+                <button className="primary-button settings-save" onClick={saveCoachAccount}>
                   {coachAccountSaveState === "saving"
                     ? "Saving"
                     : coachAccountSaveState === "saved"
@@ -7869,17 +8483,109 @@ function App() {
                 <div className="data-card-header">
                   <div>
                     <span>Google Calendar Sync</span>
-                    <h2>Private iCal feed</h2>
+                    <h2>Direct API and iCal fallback</h2>
                   </div>
                   <KeyRound size={24} />
                 </div>
+
+                <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
+                  <span>Direct Google API</span>
+                  <strong>
+                    {!googleCalendar.configured
+                      ? "Needs OAuth credentials"
+                      : googleCalendar.connected
+                        ? googleCalendar.lastSyncStatus === "failed"
+                          ? "Connected, sync failed"
+                          : "Connected"
+                        : "Ready to connect"}
+                  </strong>
+                  <em>
+                    {googleCalendar.lastSyncError ||
+                      (googleCalendar.connected
+                        ? `${googleCalendar.accountEmail || "Google account"} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`
+                        : googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify.")}
+                  </em>
+                </div>
+
+                <details className="settings-subsection" open>
+                  <summary className="settings-subsection-title">
+                    <Link2 size={18} />
+                    <div>
+                      <span>Direct API sync</span>
+                      <strong>{googleCalendar.calendarId || "primary"}</strong>
+                    </div>
+                  </summary>
+                  <label className="sync-field">
+                    <span>Google calendar ID</span>
+                    <input
+                      value={googleCalendar.calendarId}
+                      onChange={(event) => setGoogleCalendar((current) => ({ ...current, calendarId: event.target.value }))}
+                      placeholder="primary or calendar email"
+                    />
+                  </label>
+                  <label className="settings-toggle">
+                    <input
+                      checked={googleCalendar.autoSync}
+                      onChange={(event) => void saveGoogleCalendarSettings({ autoSync: event.target.checked })}
+                      type="checkbox"
+                    />
+                    <span>Auto-sync bookings and busy blocks after every save</span>
+                  </label>
+                  <div className="sync-meta">
+                    <span>Redirect URI</span>
+                    <code>{googleCalendar.redirectUri || "Set GOOGLE_CALENDAR_REDIRECT_URI or use /api/google-calendar/callback"}</code>
+                  </div>
+                  <div className="sync-actions">
+                    {!googleCalendar.connected ? (
+                      <button
+                        className="primary-button"
+                        disabled={!googleCalendar.configured || googleCalendarAction !== "idle"}
+                        onClick={connectGoogleCalendar}
+                        type="button"
+                      >
+                        <ExternalLink size={16} />
+                        {googleCalendarAction === "connecting" ? "Opening Google" : "Connect Google"}
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          className="primary-button"
+                          disabled={googleCalendarAction !== "idle"}
+                          onClick={syncGoogleCalendarNow}
+                          type="button"
+                        >
+                          <RefreshCw size={16} />
+                          {googleCalendarAction === "syncing" ? "Syncing" : "Sync now"}
+                        </button>
+                        <button
+                          className="outline-button"
+                          disabled={googleCalendarAction !== "idle"}
+                          onClick={() => void saveGoogleCalendarSettings()}
+                          type="button"
+                        >
+                          <Check size={16} />
+                          {googleCalendarAction === "saving" ? "Saving" : "Save settings"}
+                        </button>
+                        <button
+                          className="danger-button"
+                          disabled={googleCalendarAction !== "idle"}
+                          onClick={disconnectGoogleCalendar}
+                          type="button"
+                        >
+                          <X size={16} />
+                          {googleCalendarAction === "disconnecting" ? "Disconnecting" : "Disconnect"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </details>
 
                 <div className={`sync-status ${calendarFeedStatus}`}>
                   <span>Feed endpoint</span>
                   <strong>
                     {calendarFeedStatus === "connected"
                       ? calendarSaveStatus === "failed"
-                        ? "Connected, but save failed"
+                        ? "Connected — save needs retry"
                         : "Connected"
                       : calendarFeedStatus === "checking"
                         ? "Checking"
@@ -7951,6 +8657,10 @@ function App() {
                     customer
                   </span>
                   <span>
+                    <strong>{notificationSettings.sendCoachEmail ? "On" : "Off"}</strong>
+                    coach
+                  </span>
+                  <span>
                     <strong>{notificationSettings.sendAdminEmail ? "On" : "Off"}</strong>
                     admin
                   </span>
@@ -7972,6 +8682,15 @@ function App() {
                     />
                   </label>
                   <label className="settings-field">
+                    <span>Coach email</span>
+                    <input
+                      value={notificationSettings.coachEmail}
+                      onChange={(event) => updateNotificationSetting("coachEmail", event.target.value)}
+                      placeholder="coach@email.co.nz"
+                      type="email"
+                    />
+                  </label>
+                  <label className="settings-field">
                     <span>Reply-to email</span>
                     <input
                       value={notificationSettings.replyToEmail}
@@ -7985,13 +8704,14 @@ function App() {
                       value={notificationSettings.notificationDelaySeconds}
                       min={30}
                       step={5}
+                      inputMode="numeric"
                       onChange={(event) =>
                         updateNotificationSetting(
                           "notificationDelaySeconds",
                           clamp(Number(event.target.value || 30), 30, 3600),
                         )
                       }
-                      type="number"
+                      type="text"
                     />
                   </label>
                 </details>
@@ -8001,7 +8721,11 @@ function App() {
                     <div>
                       <span>Send rules</span>
                       <strong>
-                        {[notificationSettings.sendClientEmail && "Customer", notificationSettings.sendAdminEmail && "Admin"]
+                        {[
+                          notificationSettings.sendClientEmail && "Customer",
+                          notificationSettings.sendCoachEmail && "Coach",
+                          notificationSettings.sendAdminEmail && "Admin",
+                        ]
                           .filter(Boolean)
                           .join(" and ") || "Off"}
                       </strong>
@@ -8014,6 +8738,14 @@ function App() {
                       type="checkbox"
                     />
                     <span>Send client confirmation email</span>
+                  </label>
+                  <label className="settings-toggle">
+                    <input
+                      checked={notificationSettings.sendCoachEmail}
+                      onChange={(event) => updateNotificationSetting("sendCoachEmail", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>Send coach booking alert</span>
                   </label>
                   <label className="settings-toggle">
                     <input
@@ -8317,6 +9049,26 @@ function App() {
                       </span>
                       <span className={brandSettings.bookingTheme === "dark" ? "active" : ""} aria-hidden="true">
                         <Moon size={15} />
+                      </span>
+                    </button>
+                  </div>
+                  <div className="booking-surface-setting">
+                    <div>
+                      <span>Booking logo</span>
+                      <strong>{brandSettings.showLogo ? "Logo shown" : "No logo"}</strong>
+                    </div>
+                    <button
+                      aria-label={`${brandSettings.showLogo ? "Hide" : "Show"} booking logo`}
+                      aria-pressed={brandSettings.showLogo}
+                      className={`theme-switch logo-toggle ${brandSettings.showLogo ? "is-dark" : "is-light"}`}
+                      onClick={() => setBookingLogoVisible(!brandSettings.showLogo)}
+                      type="button"
+                    >
+                      <span className={!brandSettings.showLogo ? "active" : ""} aria-hidden="true">
+                        Off
+                      </span>
+                      <span className={brandSettings.showLogo ? "active" : ""} aria-hidden="true">
+                        On
                       </span>
                     </button>
                   </div>

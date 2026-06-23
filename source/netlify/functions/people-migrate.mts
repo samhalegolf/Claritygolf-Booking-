@@ -31,7 +31,10 @@ function parseCookies(req: Request) {
         const index = pair.indexOf("=");
         return index === -1
           ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
+          : [
+              decodeURIComponent(pair.slice(0, index)),
+              decodeURIComponent(pair.slice(index + 1)),
+            ];
       }),
   );
 }
@@ -47,8 +50,14 @@ async function parseBody(req: Request) {
 
 function cleanPerson(person: any, source = "client_migration") {
   if (!person || typeof person !== "object") return null;
-  const joinedName = [person.firstName, person.lastName].filter(Boolean).join(" ");
-  const name = cleanString(person.name || joinedName || person.client || person.title, "", 180);
+  const joinedName = [person.firstName, person.lastName]
+    .filter(Boolean)
+    .join(" ");
+  const name = cleanString(
+    person.name || joinedName || person.client || person.title,
+    "",
+    180,
+  );
   const email = cleanString(person.email, "", 180).toLowerCase();
   if (!name && !email) return null;
   return {
@@ -58,8 +67,16 @@ function cleanPerson(person: any, source = "client_migration") {
     phone: cleanString(person.phone, "", 80),
     notes: cleanString(person.notes || person.note, "", 1200),
     source: cleanString(person.source, source, 80),
-    caddyProfileId: cleanString(person.caddyProfileId || person.caddyId, "", 120),
-    caddyProfileUrl: cleanString(person.caddyProfileUrl || person.caddyUrl, "", 600),
+    caddyProfileId: cleanString(
+      person.caddyProfileId || person.caddyId,
+      "",
+      120,
+    ),
+    caddyProfileUrl: cleanString(
+      person.caddyProfileUrl || person.caddyUrl,
+      "",
+      600,
+    ),
   };
 }
 
@@ -78,9 +95,21 @@ function personFromAppointment(item: any) {
 }
 
 function keyForPerson(person: any) {
-  if (person.email) return `email:${person.email}`;
-  if (person.phone) return `phone:${person.name.toLowerCase()}:${person.phone}`;
-  return `name:${person.name.toLowerCase()}`;
+  const name = cleanString(person?.name, "", 180)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  const email = cleanString(person?.email, "", 180).toLowerCase();
+  const phone = cleanString(person?.phone, "", 80).replace(/\D/g, "");
+
+  // Contact methods are not a person's identity. Use a composite key so two
+  // family members can share an email or phone without being collapsed.
+  if (name && email) return `name-email:${name}|${email}`;
+  if (name && phone) return `name-phone:${name}|${phone}`;
+  if (email && phone) return `email-phone:${email}|${phone}`;
+  if (email) return `email:${email}`;
+  if (phone) return `phone:${phone}`;
+  return `name:${name}`;
 }
 
 async function requireAdmin(req: Request) {
@@ -111,16 +140,23 @@ async function migrateClients(rawPeople: any[] = []) {
 
   const existingByKey = new Map();
   for (const person of existingPeople) {
-    existingByKey.set(keyForPerson({
-      name: person.name || "",
-      email: person.email || "",
-      phone: person.phone || "",
-    }), person);
+    existingByKey.set(
+      keyForPerson({
+        name: person.name || "",
+        email: person.email || "",
+        phone: person.phone || "",
+      }),
+      person,
+    );
   }
 
   const candidates = [
     ...items.map(personFromAppointment).filter(Boolean),
-    ...(Array.isArray(rawPeople) ? rawPeople.map((person) => cleanPerson(person, "manual_migration")).filter(Boolean) : []),
+    ...(Array.isArray(rawPeople)
+      ? rawPeople
+          .map((person) => cleanPerson(person, "manual_migration"))
+          .filter(Boolean)
+      : []),
   ];
 
   const deduped = new Map();
@@ -199,7 +235,8 @@ async function migrateClients(rawPeople: any[] = []) {
     updated,
     skipped,
     sourceCounts: {
-      appointments: items.filter((item: any) => item.kind === "appointment").length,
+      appointments: items.filter((item: any) => item.kind === "appointment")
+        .length,
       provided: Array.isArray(rawPeople) ? rawPeople.length : 0,
     },
     people,
@@ -208,9 +245,13 @@ async function migrateClients(rawPeople: any[] = []) {
 
 export default async (req: Request, _context: Context) => {
   try {
-    if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+    if (req.method !== "POST")
+      return json({ error: "method_not_allowed" }, 405);
     if (!(await requireAdmin(req))) {
-      return json({ error: "unauthorized", message: "Admin login required." }, 401);
+      return json(
+        { error: "unauthorized", message: "Admin login required." },
+        401,
+      );
     }
     const body = await parseBody(req);
     return json(await migrateClients(body.people), 201);
@@ -219,7 +260,10 @@ export default async (req: Request, _context: Context) => {
     return json(
       {
         error: "people_migrate_failed",
-        message: error instanceof Error ? error.message : "Unknown client migration error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown client migration error",
       },
       500,
     );
