@@ -1,7 +1,8 @@
 import type { Config } from "@netlify/functions";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
+import { notifyBookingEvent } from "./notification-engine.mts";
 
 const defaultServices = [
   { id: "lesson-30", name: "30min Lesson", duration: 30, price: 100, description: "Price Includes Bay Hire", visibility: "public", active: true, capacity: 1, minParticipants: 1, lessonFormat: "private", priceMode: "session", location: "Bay hire included" },
@@ -45,21 +46,92 @@ async function createPublicBooking(payload: any) {
   if (!Number.isInteger(week) || !Number.isInteger(day) || !Number.isInteger(start) || day < 0 || day > 6) throw Object.assign(new Error("Choose a valid appointment time."), { status: 400 });
   const slot = { week, day, start, duration: Number(service.duration || 30) };
   if (!isInsideAvailability(availability, day, start, slot.duration) || items.some((item: any) => slotOverlaps(item, slot))) throw Object.assign(new Error("That time is no longer available."), { status: 409 });
+
   const client = `${firstName} ${lastName}`.trim();
   const id = `appt-${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const row = { id, kind: "appointment", ...slot, service_id: service.id, client, title: client, phone: phone || null, email, note: "Booked from public booking page.", created_at: nowIso(), updated_at: nowIso() };
+  const appointment = {
+    id,
+    kind: "appointment",
+    ...slot,
+    serviceId: service.id,
+    client,
+    title: client,
+    phone,
+    email,
+    note: "Booked from public booking page.",
+    status: "booked",
+  };
+  const row = {
+    id,
+    kind: "appointment",
+    ...slot,
+    service_id: service.id,
+    client,
+    title: client,
+    phone: phone || null,
+    email,
+    note: appointment.note,
+    status: "booked",
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+
+  // The calendar item is authoritative. Client-directory sync and email are
+  // secondary jobs and must never roll back a valid booking.
   await supabase("calendar_items", { method: "POST", query: "on_conflict=id", prefer: "resolution=merge-duplicates,return=minimal", body: [row] });
-  await supabase("people", { method: "POST", query: "on_conflict=id", prefer: "resolution=merge-duplicates,return=minimal", body: [{ id: `email-${Buffer.from(email).toString("base64url")}`, name: client, email, phone: phone || null, notes: row.note, source: "appointment", caddy_profile_id: null, caddy_profile_url: null, created_at: nowIso(), updated_at: nowIso() }] });
+
+  const personIdentity = `${client.toLowerCase().replace(/\s+/g, " ")}|${email}|${phone.replace(/\D/g, "")}`;
+  const personId = `person-${createHash("sha256").update(personIdentity).digest("hex").slice(0, 32)}`;
+  try {
+    await supabase("people", {
+      method: "POST",
+      query: "on_conflict=id",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: [{
+        id: personId,
+        name: client,
+        email,
+        phone: phone || null,
+        notes: row.note,
+        source: "appointment",
+        caddy_profile_id: null,
+        caddy_profile_url: null,
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      }],
+    });
+  } catch (error) {
+    console.warn("public_booking:client_sync_skipped", error);
+  }
+
   await supabase("settings", { method: "POST", query: "on_conflict=key", prefer: "resolution=merge-duplicates,return=minimal", body: [{ key: "updatedAt", value: nowIso(), updated_at: nowIso() }] });
   await syncGoogleCalendarIfEnabled().catch((error) => console.error("public_booking:google_calendar_sync_failed", error));
-  return { id, week, day, start, duration: slot.duration };
+
+  let notifications: any[] = [];
+  try {
+    notifications = await notifyBookingEvent({ action: "booking", appointment, source: "public-booking" });
+  } catch (error) {
+    console.error("public_booking:notification_failed", error);
+  }
+
+  return { appointment, notifications };
 }
 
 export default async function handler(req: Request) {
   try {
     if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-    const appointment = await createPublicBooking(await parseBody(req));
-    return json({ ok: true, appointment, notifications: [] });
+    const result = await createPublicBooking(await parseBody(req));
+    return json({
+      ok: true,
+      appointment: {
+        id: result.appointment.id,
+        week: result.appointment.week,
+        day: result.appointment.day,
+        start: result.appointment.start,
+        duration: result.appointment.duration,
+      },
+      notifications: result.notifications,
+    });
   } catch (error: any) {
     console.error("public_booking:failed", error);
     const status = error?.status || 500;

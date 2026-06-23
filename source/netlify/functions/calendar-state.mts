@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 
 import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
+import { notifyCalendarDiff } from "./notification-engine.mts";
 
 const sessionCookieName = "clarity_session";
 
@@ -848,7 +849,36 @@ export default async function handler(req: Request) {
           400,
         );
       }
-      return json(await writeState(body));
+      const previousState = await readState();
+      const nextState = await writeState(body);
+      let notificationResults: any[] = [];
+      let notificationWarning = "";
+      try {
+        notificationResults = await notifyCalendarDiff(
+          previousState.items,
+          nextState.items,
+        );
+      } catch (error) {
+        notificationWarning =
+          "Calendar saved, but booking alerts could not be processed.";
+        console.error("calendar_state:notification_failed", error);
+      }
+
+      // Notification history is written after the calendar transaction. Read
+      // it again so the UI immediately shows the Resend result without waiting
+      // for the next polling cycle.
+      const refreshedState = await readState();
+      const existingWarnings = Array.isArray(nextState.warnings)
+        ? nextState.warnings
+        : [];
+      return json({
+        ...nextState,
+        notifications: refreshedState.notifications,
+        notificationResults,
+        ...(notificationWarning
+          ? { warnings: [...new Set([...existingWarnings, notificationWarning])] }
+          : {}),
+      });
     }
     return json({ error: "method_not_allowed" }, 405);
   } catch (error) {

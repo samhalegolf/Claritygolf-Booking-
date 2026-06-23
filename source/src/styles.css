@@ -1581,6 +1581,11 @@ button {
   opacity: 0.82;
 }
 
+.public-cancel-booking {
+  width: 100%;
+  margin-top: 10px;
+}
+
 .booking-save-progress {
   position: relative;
   height: 4px;

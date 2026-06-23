@@ -336,7 +336,7 @@ type EmailSendResult = {
 };
 
 type BookingConfirmation = {
-  kind: "booking" | "reschedule";
+  kind: "booking" | "reschedule" | "cancelled";
   appointmentId?: string;
   client: string;
   service: string;
@@ -2266,6 +2266,10 @@ function App() {
       setEmailNoticeVisible(true);
       return;
     }
+    // A cancelled booking has already been removed from the public calendar,
+    // so it cannot be looked up again by the generic notification retry route.
+    // Cancellation sends are completed synchronously by /api/public-cancel.
+    if (bookingConfirmation.kind === "cancelled") return;
 
     let cancelled = false;
     let attempts = 0;
@@ -2824,10 +2828,6 @@ function App() {
     return clients.filter((client) => clientMatchesSearchTerm(client, clientSearchTerm));
   }, [clientSearchTerm, clients]);
 
-  const clientGhostSuggestion = useMemo(() => {
-    if (!clientSearchTerm) return null;
-    return findClientMatch(clients, { name: clientSearchTerm, email: clientSearchTerm, phone: clientSearchTerm });
-  }, [clientSearchTerm, clients]);
   const quickClientInput = {
     name: quickClientSearch,
     email: quickCreate?.email ?? "",
@@ -2867,6 +2867,18 @@ function App() {
     bookingForm.email,
     bookingForm.phone,
   ]);
+  const bookingClientSuggestionApplied = Boolean(
+    bookingClientSuggestion &&
+      normalizeMatchText(bookingInputName(bookingClientInput)) ===
+        normalizeMatchText(bookingClientSuggestion.name) &&
+      (!bookingClientSuggestion.phone ||
+        phoneValuesMatch(bookingClientSuggestion.phone, bookingForm.phone, true)) &&
+      (!bookingClientSuggestion.email ||
+        normalizeMatchText(bookingClientSuggestion.email) === normalizeMatchText(bookingForm.email)),
+  );
+  const showBookingClientSuggestion = Boolean(
+    bookingClientSuggestion && bookingClientHasInput && !bookingClientSuggestionApplied,
+  );
 
   const notificationsByAppointment = useMemo(() => {
     const byAppointment = new Map<string, NotificationRecord[]>();
@@ -3705,10 +3717,6 @@ function App() {
     clearGesture();
   }
 
-  function resolveQuickClient() {
-    return findClientMatch(clients, quickClientInput, true) ?? quickClientSuggestion ?? null;
-  }
-
   function applyQuickClient(client: ClientSummary) {
     setQuickClientSearch(client.name);
     setQuickCreate((current) =>
@@ -3754,20 +3762,16 @@ function App() {
     if (!quickCreate) return;
     const service = appointmentServices.find((candidate) => candidate.id === serviceId);
     if (!service) return;
-    const matchedClient = resolveQuickClient();
     const candidate = { week: activeWeek, day: quickCreate.day, start: quickCreate.start, duration: service.duration };
     setQuickCreate((current) =>
       current
         ? {
             ...current,
             serviceId,
-            phone: current.phone || matchedClient?.phone || "",
-            email: current.email || matchedClient?.email || "",
             error: isValidAppointmentSlot(candidate) ? "" : "That time is already occupied.",
           }
         : current,
     );
-    if (matchedClient) setQuickClientSearch(matchedClient.name);
     setQuickMatchField("name");
   }
 
@@ -3780,9 +3784,8 @@ function App() {
   function confirmQuickAppointment() {
     if (!quickCreate || !quickCreateService) return;
     if (!requireLiveDatabase("create appointments")) return;
-    const matchedClient = resolveQuickClient();
     const typedClientName = quickClientSearch.trim();
-    const clientName = matchedClient?.name || typedClientName;
+    const clientName = typedClientName;
     if (!clientName) {
       setQuickCreate((current) => (current ? { ...current, error: "Add a client name." } : current));
       return;
@@ -3804,8 +3807,8 @@ function App() {
       client: clientName,
       serviceId: quickCreateService.id,
       ...candidate,
-      phone: quickCreate.phone.trim() || matchedClient?.phone || "",
-      email: quickCreate.email.trim() || matchedClient?.email || "",
+      phone: quickCreate.phone.trim(),
+      email: quickCreate.email.trim(),
       note: quickCreate.note.trim(),
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
@@ -4202,11 +4205,75 @@ function App() {
     }
   }
 
-  function handleBookingMatchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
-    if ((event.key === "Tab" || event.key === "ArrowRight") && bookingClientSuggestion) {
-      event.preventDefault();
-      applyBookingClient(bookingClientSuggestion);
+  async function confirmPublicCancellation() {
+    if (!selectedRescheduleMatch) {
+      setToast({ message: "Choose the booking to cancel." });
+      return;
     }
+    const confirmed = window.confirm(
+      `Cancel ${selectedRescheduleMatch.serviceName} for ${selectedRescheduleMatch.client}?`,
+    );
+    if (!confirmed) return;
+
+    setRescheduleState("saving");
+    try {
+      const response = await fetch("/api/public-cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appointmentId: selectedRescheduleMatch.id,
+          email: rescheduleForm.email,
+          phone: rescheduleForm.phone,
+        }),
+      });
+      const data = (await response.json()) as {
+        state?: { items?: CalendarItem[] };
+        message?: string;
+        notifications?: EmailSendResult[];
+      };
+      if (!response.ok) {
+        setToast({ message: data.message || "Could not cancel that booking." });
+        return;
+      }
+
+      const original = selectedRescheduleMatch;
+      if (data.state?.items) {
+        setItems(data.state.items);
+      } else {
+        setItems((current) => current.filter((item) => item.id !== original.id));
+      }
+      const confirmationNotifications = data.notifications ?? [];
+      const originalWeekDays = buildWeekDays(original.week);
+      setBookingConfirmation({
+        kind: "cancelled",
+        appointmentId: original.id,
+        client: original.client,
+        service: original.serviceName,
+        week: original.week,
+        day: original.day,
+        start: original.start,
+        duration: original.duration,
+        dayLabel: originalWeekDays[original.day]?.label ?? fullDayNames[original.day],
+        timeLabel: formatTime(original.start),
+        email: rescheduleForm.email,
+        phone: rescheduleForm.phone,
+        notifications: confirmationNotifications,
+      });
+      setEmailNoticeVisible(
+        confirmationNotifications.some((result) => result.channel === "client" && result.sent),
+      );
+      setRescheduleMatches([]);
+      setSelectedRescheduleId("");
+      setBookingStart(null);
+    } catch {
+      setToast({ message: "Could not cancel that booking. Please try again." });
+    } finally {
+      setRescheduleState("idle");
+    }
+  }
+
+  function handleBookingMatchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") event.currentTarget.blur();
   }
 
   function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
@@ -5188,26 +5255,18 @@ function App() {
     }
   }
 
-  function completeClientSearchSuggestion() {
-    if (!clientGhostSuggestion) return;
-    setClientSearch(clientGhostSuggestion.name);
-    openClientProfile(clientGhostSuggestion);
-  }
-
   async function confirmPublicBooking() {
     if (bookingSubmitState === "saving") return;
     if (!selectedBookingService || bookingStart === null) {
       setToast({ message: "Choose a lesson time before confirming." });
       return;
     }
-    const matchedClient = isEmbedMode
-      ? null
-      : findClientMatch(clients, bookingClientInput, true) ?? bookingClientSuggestion;
-    const matchedName = splitClientName(matchedClient?.name ?? "");
-    const firstName = bookingForm.firstName.trim() || matchedName.firstName;
-    const lastName = bookingForm.lastName.trim() || matchedName.lastName;
-    const phone = bookingForm.phone.trim() || matchedClient?.phone || "";
-    const email = bookingForm.email.trim() || matchedClient?.email || "";
+    // Typed values are authoritative. A saved-client suggestion only changes
+    // the booking after the user explicitly clicks it and fills these fields.
+    const firstName = bookingForm.firstName.trim();
+    const lastName = bookingForm.lastName.trim();
+    const phone = bookingForm.phone.trim();
+    const email = bookingForm.email.trim();
     const client = [firstName, lastName].filter(Boolean).join(" ").trim();
 
     if (!firstName || !lastName || !email) {
@@ -5880,7 +5939,7 @@ function App() {
               type="email"
             />
           </div>
-          {bookingClientSuggestion && bookingClientHasInput && (
+          {bookingClientSuggestion && showBookingClientSuggestion && (
             <button
               className="client-match-prompt booking-client-match"
               onClick={() => applyBookingClient(bookingClientSuggestion)}
@@ -6718,10 +6777,6 @@ function App() {
                               setQuickCreate((current) => (current ? { ...current, error: "" } : current));
                             }}
                             onKeyDown={(event) => {
-                              if ((event.key === "Tab" || event.key === "ArrowRight") && quickClientSuggestion) {
-                                event.preventDefault();
-                                applyQuickClient(quickClientSuggestion);
-                              }
                               if (event.key === "Enter") {
                                 event.preventDefault();
                                 confirmQuickAppointment();
@@ -6746,12 +6801,6 @@ function App() {
                             setQuickMatchField("phone");
                             updateQuickCreateField("phone", event.target.value);
                           }}
-                          onKeyDown={(event) => {
-                            if ((event.key === "Tab" || event.key === "ArrowRight") && quickClientSuggestion) {
-                              event.preventDefault();
-                              applyQuickClient(quickClientSuggestion);
-                            }
-                          }}
                           placeholder="+64"
                         />
                         {quickClientMatchButton("phone")}
@@ -6768,12 +6817,6 @@ function App() {
                           onChange={(event) => {
                             setQuickMatchField("email");
                             updateQuickCreateField("email", event.target.value);
-                          }}
-                          onKeyDown={(event) => {
-                            if ((event.key === "Tab" || event.key === "ArrowRight") && quickClientSuggestion) {
-                              event.preventDefault();
-                              applyQuickClient(quickClientSuggestion);
-                            }
                           }}
                           placeholder="client@email.co.nz"
                           type="email"
@@ -6881,27 +6924,8 @@ function App() {
                 <input
                   value={clientSearch}
                   onChange={(event) => setClientSearch(event.target.value)}
-                  onKeyDown={(event) => {
-                    if ((event.key === "Tab" || event.key === "ArrowRight") && clientGhostSuggestion) {
-                      event.preventDefault();
-                      completeClientSearchSuggestion();
-                    }
-                    if (event.key === "Enter" && filteredClients[0]) {
-                      event.preventDefault();
-                      openClientProfile(filteredClients[0]);
-                    }
-                  }}
                   placeholder="Search clients"
                 />
-                {clientGhostSuggestion && clientSearchTerm && (
-                  <button className="client-ghost" onClick={completeClientSearchSuggestion} type="button">
-                    <span>{clientGhostSuggestion.name}</span>
-                    <em>
-                      {[clientGhostSuggestion.email, clientGhostSuggestion.phone].filter(Boolean).join(" · ") ||
-                        "Open profile"}
-                    </em>
-                  </button>
-                )}
               </div>
               <button
                 className={`outline-button import-client-button${showClientImport ? " active" : ""}`}
@@ -7628,8 +7652,20 @@ function App() {
 
             {bookingConfirmation ? (
               <div className="booking-confirmed">
-                <span>{bookingConfirmation.kind === "booking" ? "Appointment Confirmed" : "Appointment Updated"}</span>
-                <h2>{bookingConfirmation.kind === "booking" ? "Booking confirmed" : "Reschedule confirmed"}</h2>
+                <span>
+                  {bookingConfirmation.kind === "booking"
+                    ? "Appointment Confirmed"
+                    : bookingConfirmation.kind === "cancelled"
+                      ? "Booking Cancelled"
+                      : "Appointment Updated"}
+                </span>
+                <h2>
+                  {bookingConfirmation.kind === "booking"
+                    ? "Booking confirmed"
+                    : bookingConfirmation.kind === "cancelled"
+                      ? "Cancellation confirmed"
+                      : "Reschedule confirmed"}
+                </h2>
                 <div className="booking-confirmed-summary">
                   <strong>{bookingConfirmation.service}</strong>
                   <em>
@@ -7660,22 +7696,24 @@ function App() {
                     })}
                   </div>
                 )}
-                <div className="calendar-add-actions">
-                  <a className="outline-button" href={googleCalendarUrl(bookingConfirmation)} target="_blank" rel="noreferrer">
-                    <CalendarDays size={16} />
-                    Google Calendar
-                  </a>
-                  <button className="outline-button" onClick={() => downloadAppleCalendarInvite(bookingConfirmation)} type="button">
-                    <Download size={16} />
-                    Apple Calendar
-                  </button>
-                  {bookingLoginUrl && (
-                    <a className="outline-button" href={bookingLoginUrl}>
-                      <KeyRound size={16} />
-                      Manage / Reschedule
+                {bookingConfirmation.kind !== "cancelled" && (
+                  <div className="calendar-add-actions">
+                    <a className="outline-button" href={googleCalendarUrl(bookingConfirmation)} target="_blank" rel="noreferrer">
+                      <CalendarDays size={16} />
+                      Google Calendar
                     </a>
-                  )}
-                </div>
+                    <button className="outline-button" onClick={() => downloadAppleCalendarInvite(bookingConfirmation)} type="button">
+                      <Download size={16} />
+                      Apple Calendar
+                    </button>
+                    {bookingLoginUrl && (
+                      <a className="outline-button" href={bookingLoginUrl}>
+                        <KeyRound size={16} />
+                        Manage / Reschedule
+                      </a>
+                    )}
+                  </div>
+                )}
                 <button
                   className="primary-button confirm-booking"
 	                  onClick={() => {
@@ -7685,7 +7723,7 @@ function App() {
 	                  }}
                   type="button"
                 >
-                  Book another lesson
+                  {bookingConfirmation.kind === "cancelled" ? "Back to booking" : "Book another lesson"}
                 </button>
               </div>
             ) : (
@@ -7805,7 +7843,7 @@ function App() {
                     type="email"
                   />
                 </div>
-                {bookingClientSuggestion && bookingClientHasInput && (
+                {bookingClientSuggestion && showBookingClientSuggestion && (
                   <button
                     className="client-match-prompt booking-client-match"
                     onClick={() => applyBookingClient(bookingClientSuggestion)}
@@ -8002,6 +8040,14 @@ function App() {
                       type="button"
                     >
                       {rescheduleState === "saving" ? "Moving..." : "Confirm Reschedule"}
+                    </button>
+                    <button
+                      className="danger-button public-cancel-booking"
+                      disabled={!selectedRescheduleMatch || rescheduleState === "saving"}
+                      onClick={confirmPublicCancellation}
+                      type="button"
+                    >
+                      {rescheduleState === "saving" ? "Working..." : "Cancel Booking"}
                     </button>
                   </div>
                 </>

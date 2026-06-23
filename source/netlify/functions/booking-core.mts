@@ -8,6 +8,7 @@ import {
 } from "node:crypto";
 
 import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
+import { notifyBookingEvent } from "./notification-engine.mts";
 
 const sessionCookieName = "clarity_session";
 const sessionDays = 7;
@@ -3239,12 +3240,58 @@ async function reschedulePublicBooking(payload, context = null) {
       item.id === appointment.id ? updatedAppointment : item,
     ),
   );
-  const notifications = await sendInitialBookingNotifications(
-    updatedAppointment,
-    "reschedule",
-  );
+  let notifications = [];
+  try {
+    notifications = await notifyBookingEvent({
+      action: "rescheduled",
+      appointment: updatedAppointment,
+      previousAppointment: appointment,
+      source: "public-reschedule",
+    });
+  } catch (error) {
+    console.error("public_reschedule:notification_failed", error);
+  }
 
   return { appointment: updatedAppointment, notifications };
+}
+
+async function cancelPublicBooking(payload) {
+  const appointmentId = cleanString(payload?.appointmentId, "", 120);
+  const email = normalizeRescheduleContact(payload?.email);
+  const phone = normalizeRescheduleContact(payload?.phone);
+
+  if (!appointmentId || !email || !phone) {
+    throw Object.assign(new Error("Choose the booking to cancel."), {
+      status: 400,
+    });
+  }
+
+  const state = await readPublicCalendarState();
+  const appointment = state.items.find((item) => item.id === appointmentId);
+  if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
+    throw Object.assign(new Error("That booking could not be verified."), {
+      status: 404,
+    });
+  }
+
+  const nextState = await writePublicBookingState(
+    state,
+    state.items.filter((item) => item.id !== appointment.id),
+  );
+
+  let notifications = [];
+  try {
+    notifications = await notifyBookingEvent({
+      action: "cancelled",
+      appointment,
+      previousAppointment: appointment,
+      source: "public-cancel",
+    });
+  } catch (error) {
+    console.error("public_cancel:notification_failed", error);
+  }
+
+  return { appointment, notifications, state: nextState };
 }
 
 export async function handlePublicRescheduleLookupRequest(req) {
@@ -3291,6 +3338,40 @@ export async function handlePublicRescheduleRequest(req, context = null) {
           error instanceof Error
             ? error.message
             : "Unknown public reschedule error",
+      },
+      status,
+    );
+  }
+}
+
+export async function handlePublicCancelRequest(req) {
+  try {
+    if (req.method !== "POST") {
+      return json({ error: "method_not_allowed" }, 405);
+    }
+    const result = await cancelPublicBooking(await parseBody(req));
+    return json({
+      ok: true,
+      appointment: {
+        id: result.appointment.id,
+        week: result.appointment.week,
+        day: result.appointment.day,
+        start: result.appointment.start,
+        duration: result.appointment.duration,
+      },
+      state: { items: result.state.items },
+      notifications: result.notifications,
+    });
+  } catch (error) {
+    console.error("public_cancel:failed", error);
+    const status = error?.status || 500;
+    return json(
+      {
+        error: status === 500 ? "public_cancel_error" : "request_error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unknown public cancellation error",
       },
       status,
     );
@@ -3618,6 +3699,10 @@ export async function handleBookingApiRoute(
       return json(
         await triggerPublicBookingNotifications(await parseBody(req)),
       );
+    }
+
+    if (req.method === "POST" && pathname === "/api/public-cancel") {
+      return handlePublicCancelRequest(req);
     }
 
     if (req.method === "GET" && pathname === "/api/public-diagnostics") {

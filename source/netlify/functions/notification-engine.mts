@@ -136,6 +136,12 @@ function normaliseAppointment(raw: any = {}) {
     phone: cleanText(raw.phone, "", 80),
     email: cleanEmail(raw.email, ""),
     note: cleanText(raw.note || raw.notes, "", 1200),
+    status:
+      raw.status === "completed" ||
+      raw.status === "cancelled" ||
+      raw.status === "no_show"
+        ? raw.status
+        : "booked",
   };
 }
 
@@ -252,6 +258,10 @@ export async function notifyBookingEvent(input: NotifyInput) {
     const output = { channel, recipient, subject, kind, status, ...result };
     results.push(output);
     await recordNotification({ personKey, calendarItemId: appt.id, recipient, subject, kind, status, provider: "resend", providerId: result.id || "", error: result.reason || result.error || "" });
+    console.log(
+      "notification_engine:result",
+      JSON.stringify({ action, channel, recipient, status, reason: result.reason || "", providerId: result.id || "" }),
+    );
   }
 
   if (action === "test") {
@@ -273,8 +283,12 @@ export async function notifyBookingEvent(input: NotifyInput) {
 
 export function inferBookingAction(previous: any, next: any): BookingAction | null {
   if (!previous && next?.kind === "appointment") return "booking";
-  if (previous?.kind === "appointment" && !next) return "cancelled";
+  if (previous?.kind === "appointment" && !next) {
+    return previous.status === "cancelled" ? null : "cancelled";
+  }
   if (!previous || !next || next.kind !== "appointment") return null;
+  if (previous.status !== "cancelled" && next.status === "cancelled") return "cancelled";
+  if (previous.status === "cancelled" && next.status !== "cancelled") return "updated";
   const slotChanged = Number(previous.week ?? 0) !== Number(next.week ?? 0) || Number(previous.day ?? 0) !== Number(next.day ?? 0) || Number(previous.start ?? 0) !== Number(next.start ?? 0) || Number(previous.duration ?? 0) !== Number(next.duration ?? 0);
   if (slotChanged) return "rescheduled";
   const contactChanged = cleanText(previous.client || previous.title) !== cleanText(next.client || next.title) || cleanEmail(previous.email) !== cleanEmail(next.email) || cleanText(previous.phone) !== cleanText(next.phone) || cleanText(previous.serviceId || previous.service_id) !== cleanText(next.serviceId || next.service_id);
