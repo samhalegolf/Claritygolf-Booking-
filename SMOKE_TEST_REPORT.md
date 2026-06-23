@@ -44,3 +44,13 @@ Production deploy should wait until the manual smoke checklist in `README_DEPLOY
 - `npm ci` passed against `https://registry.npmjs.org/`.
 - `npm run build` passed.
 - The bundled no-cookie `/api/auth/session` check returned `200` with `{ "authenticated": false }` in approximately 20 ms locally.
+
+## Calendar people-save fix — 23 June 2026
+
+- Reproduced the production failure mode from the logged Supabase 409: an appointment generated a new person id for an email already stored under another id.
+- Updated `calendar-state.mts` to resolve appointment people by existing id, case-insensitive email, then name+phone before upsert.
+- Existing `created_at`, Caddy profile fields, source, and existing email are preserved when merging.
+- Added an idempotent migration and schema definition for `calendar_items.status`.
+- Ran a mocked end-to-end `PUT /api/calendar-state` function test for the production failure case: an appointment email already existed under a different person id. The handler returned 200, reused the existing person id, and preserved existing email casing, `created_at`, and Caddy profile metadata.
+- `npm ci`: passed.
+- `npm run build`: passed (`tsc` + Vite production build).

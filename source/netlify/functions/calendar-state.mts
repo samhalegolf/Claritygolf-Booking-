@@ -214,6 +214,76 @@ function uniqueById<T extends { id?: string | null }>(rows: T[]) {
   return [...byId.values()];
 }
 
+function normalizedEmail(value: unknown) {
+  return cleanString(value, "", 180).toLowerCase();
+}
+
+function normalizedNamePhoneKey(person: { name?: unknown; phone?: unknown }) {
+  const name = cleanString(person?.name, "", 180).toLowerCase().replace(/\s+/g, " ").trim();
+  const phone = cleanString(person?.phone, "", 80).replace(/\D/g, "");
+  return name && phone ? `${name}|${phone}` : "";
+}
+
+function mergePersonForUpsert(candidate: any, existing: any | null) {
+  if (!existing) return candidate;
+  return {
+    id: existing.id,
+    name: candidate.name || existing.name,
+    email: existing.email || candidate.email || null,
+    phone: candidate.phone || existing.phone || null,
+    notes: candidate.notes || existing.notes || null,
+    source: existing.source || candidate.source || "appointment",
+    caddy_profile_id: existing.caddy_profile_id || candidate.caddy_profile_id || null,
+    caddy_profile_url: existing.caddy_profile_url || candidate.caddy_profile_url || null,
+    created_at: existing.created_at || candidate.created_at || nowIso(),
+    updated_at: nowIso(),
+  };
+}
+
+async function resolvePeopleForUpsert(candidates: any[]) {
+  if (!candidates.length) return [];
+
+  // Calendar items can refer to a person whose database id predates the
+  // deterministic email-based id used here. Resolve by existing id/email (and
+  // name+phone as a fallback) before upserting so the lower(email) unique index
+  // is never hit with a second id for the same person.
+  const existingRows = await supabase("people", {
+    query: "select=*&limit=10000",
+  });
+
+  const byId = new Map<string, any>();
+  const byEmail = new Map<string, any>();
+  const byNamePhone = new Map<string, any>();
+
+  for (const person of existingRows) {
+    if (person?.id) byId.set(String(person.id), person);
+    const emailKey = normalizedEmail(person?.email);
+    if (emailKey) byEmail.set(emailKey, person);
+    const namePhoneKey = normalizedNamePhoneKey(person || {});
+    if (namePhoneKey) byNamePhone.set(namePhoneKey, person);
+  }
+
+  const resolved: any[] = [];
+  for (const candidate of candidates) {
+    const emailKey = normalizedEmail(candidate?.email);
+    const namePhoneKey = normalizedNamePhoneKey(candidate || {});
+    const existing =
+      (candidate?.id ? byId.get(String(candidate.id)) : null) ||
+      (emailKey ? byEmail.get(emailKey) : null) ||
+      (namePhoneKey ? byNamePhone.get(namePhoneKey) : null) ||
+      null;
+
+    const person = mergePersonForUpsert(candidate, existing);
+    resolved.push(person);
+
+    if (person?.id) byId.set(String(person.id), person);
+    if (emailKey) byEmail.set(emailKey, person);
+    if (namePhoneKey) byNamePhone.set(namePhoneKey, person);
+  }
+
+  return uniqueById(resolved);
+}
+
 function postgrestQuotedList(values: string[]) {
   return values
     .map((value) => `"${String(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`)
@@ -317,11 +387,12 @@ async function writeState(body: any) {
       });
     }
 
-    const people = uniqueById(
+    const peopleCandidates = uniqueById(
       rows
         .map(personFromItem)
         .filter((person): person is NonNullable<ReturnType<typeof personFromItem>> => Boolean(person)),
     );
+    const people = await resolvePeopleForUpsert(peopleCandidates);
     if (people.length) {
       await supabase("people", {
         method: "POST",

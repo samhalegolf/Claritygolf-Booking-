@@ -65,3 +65,7 @@ npm run preview
 ## Important auth-session fix — 23 June 2026
 
 This package includes a fix for the login screen remaining on “Checking session”. Auth routes no longer run the full calendar/settings/people seed path. A browser with no `clarity_session` cookie receives an immediate unauthenticated response, and the frontend falls back to the login form after 8 seconds if the session request cannot complete.
+
+## Calendar people-save fix — 23 June 2026
+
+This package resolves appointment-derived people against existing `people` rows before upsert. An existing case-insensitive email match keeps the existing person id and profile metadata, preventing calendar saves from failing with `idx_people_email_unique` duplicate-key errors. It also includes the idempotent `calendar_items.status` migration/schema update.
