@@ -34,3 +34,13 @@ These require live Netlify/Supabase environment variables and deployed functions
 Ready for Netlify preview deploy after environment variables are set.
 
 Production deploy should wait until the manual smoke checklist in `README_DEPLOY_HANDOFF.md` passes on the preview URL.
+
+## Auth session hotfix — 23 June 2026
+
+- Confirmed the previous package called full app seeding before every `/api/auth/*` request.
+- Added auth-only startup for auth routes.
+- Added an immediate `{ "authenticated": false }` response for `/api/auth/session` when no session cookie is present.
+- Added an 8-second frontend timeout so the login form cannot remain stuck on “Checking session” indefinitely.
+- `npm ci` passed against `https://registry.npmjs.org/`.
+- `npm run build` passed.
+- The bundled no-cookie `/api/auth/session` check returned `200` with `{ "authenticated": false }` in approximately 20 ms locally.

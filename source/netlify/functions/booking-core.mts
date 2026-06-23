@@ -5,6 +5,7 @@ const sessionCookieName = "clarity_session";
 const sessionDays = 7;
 const passwordResetMinutes = 30;
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
+let authReadyPromise = null;
 const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
   clientEmailIntro: "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
@@ -595,6 +596,58 @@ async function ensureCoreTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
+}
+
+async function ensureAuthTables() {
+  await db().sql`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await db().sql`
+    CREATE TABLE IF NOT EXISTS admin_users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      password_salt TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await db().sql`
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT UNIQUE NOT NULL,
+      user_id TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await db().sql`
+    CREATE TABLE IF NOT EXISTS admin_password_resets (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT UNIQUE NOT NULL,
+      user_id TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+}
+
+async function ensureAuthReady() {
+  if (!authReadyPromise) {
+    authReadyPromise = (async () => {
+      await ensureAuthTables();
+      await ensureAdminUser();
+    })().catch((error) => {
+      authReadyPromise = null;
+      throw error;
+    });
+  }
+  await authReadyPromise;
 }
 
 async function defaultSettings() {
@@ -2697,14 +2750,23 @@ export async function handleBookingApiRoute(req: Request, forcedPathname = "", c
       : rawPathname;
 
   try {
-    await ensureSeeded();
+    // A browser with no session cookie should reach the login form immediately.
+    // Avoid running the full calendar/settings seed path for this read-only check.
+    if (req.method === "GET" && pathname === "/api/auth/session" && !sessionTokenFromRequest(req)) {
+      return json({ authenticated: false });
+    }
+
+    if (pathname.startsWith("/api/auth/")) {
+      await ensureAuthReady();
+    } else {
+      await ensureSeeded();
+    }
 
     if (req.method === "GET" && /^\/calendar\/[a-z0-9-]+\.ics$/.test(pathname)) {
       return handleCalendarFeedRequest(req);
     }
 
     if (req.method === "POST" && pathname === "/api/auth/login") {
-      await cleanupExpiredSessions();
       const body = await parseBody(req);
       const user = await verifyAdminPassword(body.email || "", body.password || "");
       if (!user) return json({ error: "invalid_login", message: "Email or password is incorrect." }, 401);

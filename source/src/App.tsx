@@ -2197,7 +2197,17 @@ function App() {
           return;
         }
 
-        const sessionResponse = await fetch("/api/auth/session", { headers: { Accept: "application/json" } });
+        const sessionController = new AbortController();
+        const sessionTimeout = window.setTimeout(() => sessionController.abort(), 8000);
+        let sessionResponse: Response;
+        try {
+          sessionResponse = await fetch("/api/auth/session", {
+            headers: { Accept: "application/json" },
+            signal: sessionController.signal,
+          });
+        } finally {
+          window.clearTimeout(sessionTimeout);
+        }
         if (!sessionResponse.ok) throw new Error("Session API unavailable");
         const session = (await sessionResponse.json()) as { authenticated?: boolean; email?: string };
         if (cancelled) return;

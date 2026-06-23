@@ -61,3 +61,7 @@ npm run preview
 - `calendar-state.mts` remains direct intentionally and has a malformed PUT body guard.
 - `system-smoke.mts`, `test-email.mts`, and `people-migrate.mts` remain direct intentionally.
 - See `source/netlify/functions/PERSISTENCE_MAP.md` for details.
+
+## Important auth-session fix — 23 June 2026
+
+This package includes a fix for the login screen remaining on “Checking session”. Auth routes no longer run the full calendar/settings/people seed path. A browser with no `clarity_session` cookie receives an immediate unauthenticated response, and the frontend falls back to the login form after 8 seconds if the session request cannot complete.
