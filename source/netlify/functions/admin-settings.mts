@@ -5,6 +5,7 @@ const sessionCookieName = "clarity_session";
 const defaultMinBookingNoticeMinutes = 240;
 
 const defaultEmailTemplates = {
+  notificationSubjectLine: "",
   clientEmailSubject: "Your {{service}} is confirmed",
   clientEmailIntro: "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
   clientEmailFooter: "We look forward to seeing you.",
@@ -131,6 +132,7 @@ async function readAdminSettings() {
     sendClientEmail: settings.sendClientEmail !== "false",
     sendCoachEmail: settings.sendCoachEmail !== "false",
     sendAdminEmail: settings.sendAdminEmail !== "false",
+    notificationSubjectLine: cleanString(settings.notificationSubjectLine, defaultEmailTemplates.notificationSubjectLine, 180),
     clientEmailSubject: settings.clientEmailSubject || defaultEmailTemplates.clientEmailSubject,
     clientEmailIntro: settings.clientEmailIntro || defaultEmailTemplates.clientEmailIntro,
     clientEmailFooter: modernClientEmailFooter(settings.clientEmailFooter),
@@ -159,6 +161,7 @@ async function writeAdminSettings(settings: any) {
   if (hasOwn(settings, "sendClientEmail")) await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
   if (hasOwn(settings, "sendCoachEmail")) await setSetting("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
   if (hasOwn(settings, "sendAdminEmail")) await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
+  if (hasOwn(settings, "notificationSubjectLine")) await setSetting("notificationSubjectLine", cleanString(settings?.notificationSubjectLine, "", 180));
   if (hasOwn(settings, "clientEmailSubject")) await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
   if (hasOwn(settings, "clientEmailIntro")) await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
   if (hasOwn(settings, "clientEmailFooter")) await setSetting("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
