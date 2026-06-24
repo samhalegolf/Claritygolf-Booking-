@@ -10,6 +10,14 @@
     return typeof value === "string" ? value.trim().slice(0, 180) : "";
   }
 
+  function escapeAttribute(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+  }
+
   function addStyle() {
     if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement("style");
@@ -147,7 +155,7 @@
       <div class="notification-subject-settings">
         <label class="notification-subject-row">
           <span>Subject line for all email notifications</span>
-          <input data-subject type="text" maxlength="180" placeholder="${DEFAULT_SUBJECT}" value="${initialSubject.replaceAll("&", "&amp;").replaceAll("\"", "&quot;")}" />
+          <input data-subject type="text" maxlength="180" placeholder="${escapeAttribute(DEFAULT_SUBJECT)}" value="${escapeAttribute(initialSubject)}" />
         </label>
         <p class="notification-subject-help">
           This optional subject overrides booking, reschedule, cancellation, update, reminder, coach, admin, and client email subjects. Leave it blank to keep the existing per-notification defaults.
@@ -216,11 +224,11 @@
   }
 
   function findSettingsTarget() {
-    const candidates = Array.from(document.querySelectorAll("article, section, .data-card, .settings-section"));
+    const candidates = Array.from(document.querySelectorAll("article.settings-section, .settings-section, .settings-subsection"));
     return (
       candidates.find((element) => /email|notification/i.test(element.textContent || "")) ||
-      candidates.find((element) => /settings/i.test(element.className || "")) ||
-      document.querySelector("main")
+      candidates.find((element) => element.classList?.contains("settings-section")) ||
+      null
     );
   }
 
