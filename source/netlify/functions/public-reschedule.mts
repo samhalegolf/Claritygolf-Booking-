@@ -4,7 +4,9 @@ import { handlePublicRescheduleRequest } from "./booking-core.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const millisecondsPerDay = 24 * 60 * 60 * 1000;
+const minutesPerDay = 24 * 60;
 const defaultTimezone = "Pacific/Auckland";
+const defaultMinBookingNoticeMinutes = 240;
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -22,6 +24,53 @@ function json(value: unknown, status = 200) {
 
 function cleanString(value: unknown, fallback = "", max = 600) {
   return typeof value === "string" ? value.trim().slice(0, max) : fallback;
+}
+
+function supabaseConfig() {
+  const url = env("SUPABASE_URL").replace(/\/$/, "");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  if (!url || !key) throw new Error("Supabase is not configured.");
+  return { url, key };
+}
+
+async function supabase(table: string, options: { method?: string; query?: string; body?: unknown; prefer?: string } = {}) {
+  const { url, key } = supabaseConfig();
+  const response = await fetch(`${url}/rest/v1/${table}${options.query ? `?${options.query}` : ""}`, {
+    method: options.method || "GET",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      ...(options.prefer ? { Prefer: options.prefer } : {}),
+    },
+    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`Supabase ${options.method || "GET"} ${table} failed ${response.status}: ${text.slice(0, 500)}`);
+  return text ? JSON.parse(text) : [];
+}
+
+function settingMap(rows: Array<{ key: string; value: string }>) {
+  return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+}
+
+async function readBookingRuleSettings() {
+  const rows = await supabase("settings", { query: "select=key,value" });
+  return settingMap(rows);
+}
+
+function cleanMinBookingNoticeMinutes(value: unknown) {
+  const minutes = Number(value ?? defaultMinBookingNoticeMinutes);
+  return Number.isFinite(minutes) ? Math.max(0, Math.min(7 * 24 * 60, Math.round(minutes))) : defaultMinBookingNoticeMinutes;
+}
+
+function bookingNoticeLabel(minutes: number) {
+  if (minutes <= 0) return "a future time";
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hour${hours === 1 ? "" : "s"} ahead`;
+  }
+  return `${minutes} minutes ahead`;
 }
 
 function zonedNowParts(timezone: string) {
@@ -48,13 +97,11 @@ function localDayIndex(year: number, month: number, day: number) {
   return Math.floor((Date.UTC(year, month - 1, day) - Date.UTC(baseWeekStart.getUTCFullYear(), baseWeekStart.getUTCMonth(), baseWeekStart.getUTCDate())) / millisecondsPerDay);
 }
 
-function slotIsInPast(slot: { week: number; day: number; start: number }, timezone: string) {
+function slotIsBeforeMinimumNotice(slot: { week: number; day: number; start: number }, timezone: string, minBookingNoticeMinutes: number) {
   const now = zonedNowParts(timezone);
-  const todayIndex = localDayIndex(now.year, now.month, now.day);
-  const slotIndex = slot.week * 7 + slot.day;
-  if (slotIndex < todayIndex) return true;
-  if (slotIndex > todayIndex) return false;
-  return slot.start <= now.hour * 60 + now.minute;
+  const nowTotal = localDayIndex(now.year, now.month, now.day) * minutesPerDay + now.hour * 60 + now.minute;
+  const slotTotal = (slot.week * 7 + slot.day) * minutesPerDay + slot.start;
+  return slotTotal <= nowTotal || slotTotal < nowTotal + cleanMinBookingNoticeMinutes(minBookingNoticeMinutes);
 }
 
 async function assertRescheduleIsFuture(req: Request) {
@@ -71,8 +118,11 @@ async function assertRescheduleIsFuture(req: Request) {
   const start = Number(payload?.start);
   if (!Number.isInteger(week) || !Number.isInteger(day) || !Number.isInteger(start) || day < 0 || day > 6) return;
 
-  if (!slotIsInPast({ week, day, start }, env("CLARITY_TIMEZONE", defaultTimezone))) return;
-  throw Object.assign(new Error("Choose a future appointment time."), { status: 400 });
+  const settings = await readBookingRuleSettings();
+  const minBookingNoticeMinutes = cleanMinBookingNoticeMinutes(settings.minBookingNoticeMinutes ?? env("CLARITY_MIN_BOOKING_NOTICE_MINUTES", String(defaultMinBookingNoticeMinutes)));
+  const timezone = settings.accountTimezone || env("CLARITY_TIMEZONE", defaultTimezone);
+  if (!slotIsBeforeMinimumNotice({ week, day, start }, timezone, minBookingNoticeMinutes)) return;
+  throw Object.assign(new Error(`Choose a time at least ${bookingNoticeLabel(minBookingNoticeMinutes)}.`), { status: 400 });
 }
 
 export default async (req: Request, context: Context) => {
