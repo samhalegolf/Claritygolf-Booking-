@@ -94,6 +94,7 @@ async function readSettings() {
     sendClientEmail: s.sendClientEmail !== "false",
     sendCoachEmail: s.sendCoachEmail !== "false",
     sendAdminEmail: s.sendAdminEmail !== "false",
+    notificationSubjectLine: cleanText(s.notificationSubjectLine, "", 180),
     clientEmailSubject: s.clientEmailSubject || "Your {{service}} is confirmed",
     clientEmailIntro: s.clientEmailIntro || "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
     clientEmailFooter: s.clientEmailFooter || "We look forward to seeing you.",
@@ -331,6 +332,11 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
 }
 
 function templateSubjects(action: BookingAction, settings: any, variables: Record<string, string>) {
+  const sharedSubject = cleanText(settings.notificationSubjectLine, "", 180);
+  if (sharedSubject) {
+    const subject = render(sharedSubject, variables);
+    return { client: subject, admin: subject };
+  }
   if (action === "rescheduled") return { client: render(settings.rescheduleClientSubject, variables), admin: render(settings.rescheduleAdminSubject, variables) };
   if (action === "cancelled") return { client: render(settings.cancellationClientSubject, variables), admin: render(settings.cancellationAdminSubject, variables) };
   if (action === "updated") return { client: render(settings.updateClientSubject, variables), admin: render(settings.updateAdminSubject, variables) };
