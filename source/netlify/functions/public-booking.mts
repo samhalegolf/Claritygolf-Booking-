@@ -11,9 +11,14 @@ const defaultServices = [
   { id: "group-clinic", name: "Group Golf Clinic", duration: 90, price: 55, description: "Small-group coaching session with shared practice goals", visibility: "public", active: true, capacity: 6, minParticipants: 3, lessonFormat: "group", priceMode: "per-person", location: "Group coaching bay" },
   { id: "member-30", name: "30min Golf Lesson (Range 24/7 Member)", duration: 30, price: 90, description: "Bay hire is deducted from membership account", visibility: "public", active: true, capacity: 1, minParticipants: 1, lessonFormat: "private", priceMode: "session", location: "Range 24/7 member bay" },
   { id: "member-60", name: "1 Hour Golf Lesson (Range 24/7 Member)", duration: 60, price: 160, description: "Bay hire is deducted from membership account", visibility: "public", active: true, capacity: 1, minParticipants: 1, lessonFormat: "private", priceMode: "session", location: "Range 24/7 member bay" },
-  { id: "package-60", name: "1 hour Lesson - 5 Lesson Package", duration: 60, price: 130, description: "Private package redemption rate", visibility: "private", active: true, capacity: 1, minParticipants: 1, lessonFormat: "private", priceMode: "session", location: "Package redemption" },
+  { id: "package-60", name: "1 hour Lesson - 5 Lesson Package", duration: 30, price: 130, description: "Private package redemption rate", visibility: "private", active: true, capacity: 1, minParticipants: 1, lessonFormat: "private", priceMode: "session", location: "Package redemption" },
 ];
 const defaultAvailability = [[{ start: 990, end: 1200 }], [], [{ start: 840, end: 1200 }], [{ start: 420, end: 660 }, { start: 840, end: 990 }], [{ start: 840, end: 960 }], [], [{ start: 900, end: 1080 }]];
+const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
+const millisecondsPerDay = 24 * 60 * 60 * 1000;
+const minutesPerDay = 24 * 60;
+const defaultTimezone = "Pacific/Auckland";
+const defaultMinBookingNoticeMinutes = 240;
 function env(name: string, fallback = "") { return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback; }
 function json(value: unknown, status = 200) { return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } }); }
 function nowIso() { return new Date().toISOString(); }
@@ -27,6 +32,57 @@ function rowToItem(row: any) { return { id: row.id, kind: row.kind, week: Number
 function slotOverlaps(a: any, b: any) { return a.week === b.week && a.day === b.day && a.start < b.start + b.duration && a.start + a.duration > b.start; }
 function isInsideAvailability(availability: any[], day: number, start: number, duration: number) { const end = start + duration; return availability[day]?.some((window: any) => start >= window.start && end <= window.end) ?? false; }
 async function parseBody(req: Request) { const raw = await req.text(); return raw ? JSON.parse(raw) : {}; }
+
+function cleanMinBookingNoticeMinutes(value: unknown) {
+  const minutes = Number(value ?? defaultMinBookingNoticeMinutes);
+  return Number.isFinite(minutes) ? Math.max(0, Math.min(7 * 24 * 60, Math.round(minutes))) : defaultMinBookingNoticeMinutes;
+}
+
+function bookingNoticeLabel(minutes: number) {
+  if (minutes <= 0) return "a future time";
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} hour${hours === 1 ? "" : "s"} ahead`;
+  }
+  return `${minutes} minutes ahead`;
+}
+
+function zonedNowParts(timezone: string) {
+  const zone = cleanString(timezone, defaultTimezone, 80) || defaultTimezone;
+  try {
+    const parts = new Intl.DateTimeFormat("en-NZ", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date());
+    const value = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
+    return { year: value("year"), month: value("month"), day: value("day"), hour: value("hour"), minute: value("minute") };
+  } catch {
+    if (zone !== defaultTimezone) return zonedNowParts(defaultTimezone);
+    throw new Error("Booking timezone could not be checked.");
+  }
+}
+
+function localDayIndex(year: number, month: number, day: number) {
+  return Math.floor((Date.UTC(year, month - 1, day) - Date.UTC(baseWeekStart.getUTCFullYear(), baseWeekStart.getUTCMonth(), baseWeekStart.getUTCDate())) / millisecondsPerDay);
+}
+
+function slotIsBeforeMinimumNotice(slot: { week: number; day: number; start: number }, timezone: string, minBookingNoticeMinutes: number) {
+  const now = zonedNowParts(timezone);
+  const nowTotal = localDayIndex(now.year, now.month, now.day) * minutesPerDay + now.hour * 60 + now.minute;
+  const slotTotal = (slot.week * 7 + slot.day) * minutesPerDay + slot.start;
+  return slotTotal <= nowTotal || slotTotal < nowTotal + cleanMinBookingNoticeMinutes(minBookingNoticeMinutes);
+}
+
+function assertFutureSlot(slot: { week: number; day: number; start: number }, settings: Record<string, string>) {
+  const minBookingNoticeMinutes = cleanMinBookingNoticeMinutes(settings.minBookingNoticeMinutes ?? env("CLARITY_MIN_BOOKING_NOTICE_MINUTES", String(defaultMinBookingNoticeMinutes)));
+  if (!slotIsBeforeMinimumNotice(slot, settings.accountTimezone || env("CLARITY_TIMEZONE", defaultTimezone), minBookingNoticeMinutes)) return;
+  throw Object.assign(new Error(`Choose a time at least ${bookingNoticeLabel(minBookingNoticeMinutes)}.`), { status: 400 });
+}
 
 async function createPublicBooking(payload: any) {
   const [settingsRows, itemRows] = await Promise.all([
@@ -45,6 +101,7 @@ async function createPublicBooking(payload: any) {
   if (!firstName || !lastName || !email) throw Object.assign(new Error("First name, last name, and email are required."), { status: 400 });
   if (!Number.isInteger(week) || !Number.isInteger(day) || !Number.isInteger(start) || day < 0 || day > 6) throw Object.assign(new Error("Choose a valid appointment time."), { status: 400 });
   const slot = { week, day, start, duration: Number(service.duration || 30) };
+  assertFutureSlot(slot, settings);
   if (!isInsideAvailability(availability, day, start, slot.duration) || items.some((item: any) => slotOverlaps(item, slot))) throw Object.assign(new Error("That time is no longer available."), { status: 409 });
 
   const client = `${firstName} ${lastName}`.trim();

@@ -11,6 +11,11 @@ const defaultServices = [
   { id: "package-60", name: "1 hour Lesson - 5 Lesson Package", duration: 60, price: 130, description: "Private package redemption rate", visibility: "private", active: true, capacity: 1, minParticipants: 1, lessonFormat: "private", priceMode: "session", location: "Package redemption" },
 ];
 const defaultAvailability = [[{ start: 990, end: 1200 }], [], [{ start: 840, end: 1200 }], [{ start: 420, end: 660 }, { start: 840, end: 990 }], [{ start: 840, end: 960 }], [], [{ start: 900, end: 1080 }]];
+const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
+const millisecondsPerDay = 24 * 60 * 60 * 1000;
+const minutesPerDay = 24 * 60;
+const defaultTimezone = "Pacific/Auckland";
+const defaultMinBookingNoticeMinutes = 240;
 
 function env(name: string, fallback = "") { return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback; }
 function json(value: unknown, status = 200) { return new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } }); }
@@ -22,6 +27,69 @@ function parseJsonSetting<T>(settings: Record<string, string>, key: string, fall
 function rowToPublicItem(row: any) { return { id: row.id, kind: row.kind, week: Number(row.week ?? 0), day: Number(row.day ?? 0), start: Number(row.start ?? 0), duration: Number(row.duration ?? 0) }; }
 async function setSetting(key: string, value: unknown) { await supabase("settings", { method: "POST", query: "on_conflict=key", prefer: "resolution=merge-duplicates,return=minimal", body: [{ key, value: String(value ?? ""), updated_at: nowIso() }] }); }
 
+function cleanMinBookingNoticeMinutes(value: unknown) {
+  const minutes = Number(value ?? defaultMinBookingNoticeMinutes);
+  return Number.isFinite(minutes) ? Math.max(0, Math.min(7 * 24 * 60, Math.round(minutes))) : defaultMinBookingNoticeMinutes;
+}
+
+function zonedNowParts(timezone: string) {
+  const zone = typeof timezone === "string" && timezone.trim() ? timezone.trim().slice(0, 80) : defaultTimezone;
+  try {
+    const parts = new Intl.DateTimeFormat("en-NZ", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date());
+    const value = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
+    return { year: value("year"), month: value("month"), day: value("day"), hour: value("hour"), minute: value("minute") };
+  } catch {
+    if (zone !== defaultTimezone) return zonedNowParts(defaultTimezone);
+    throw new Error("Booking timezone could not be checked.");
+  }
+}
+
+function localDayIndex(year: number, month: number, day: number) {
+  return Math.floor((Date.UTC(year, month - 1, day) - Date.UTC(baseWeekStart.getUTCFullYear(), baseWeekStart.getUTCMonth(), baseWeekStart.getUTCDate())) / millisecondsPerDay);
+}
+
+function weekDayFromDayIndex(dayIndex: number) {
+  return {
+    week: Math.floor(dayIndex / 7),
+    day: ((dayIndex % 7) + 7) % 7,
+  };
+}
+
+function minimumNoticeBlocks(minBookingNoticeMinutes: number, timezone: string) {
+  const notice = cleanMinBookingNoticeMinutes(minBookingNoticeMinutes);
+  const now = zonedNowParts(timezone);
+  const todayIndex = localDayIndex(now.year, now.month, now.day);
+  const nowTotal = todayIndex * minutesPerDay + now.hour * 60 + now.minute;
+  const noticeEndTotal = nowTotal + notice;
+  const noticeEndDayIndex = Math.floor(noticeEndTotal / minutesPerDay);
+  const blocks = [];
+
+  for (let dayIndex = todayIndex; dayIndex <= noticeEndDayIndex; dayIndex += 1) {
+    const blockStart = dayIndex === todayIndex ? 0 : 0;
+    const blockEnd = dayIndex === noticeEndDayIndex ? noticeEndTotal - dayIndex * minutesPerDay : minutesPerDay;
+    if (blockEnd <= blockStart) continue;
+    const { week, day } = weekDayFromDayIndex(dayIndex);
+    blocks.push({
+      id: `minimum-notice-block-${dayIndex}`,
+      kind: "block",
+      week,
+      day,
+      start: blockStart,
+      duration: blockEnd - blockStart,
+    });
+  }
+
+  return blocks;
+}
+
 async function readPublicBookingState() {
   const [settingsRows, itemRows] = await Promise.all([
     supabase("settings", { query: "select=key,value" }),
@@ -30,6 +98,12 @@ async function readPublicBookingState() {
   const settings = settingMap(settingsRows);
   if (!settings.syncKey) await setSetting("syncKey", env("CLARITY_CALENDAR_SYNC_KEY") || `cg_${randomUUID().replaceAll("-", "")}`);
   const services = parseJsonSetting(settings, "servicesJson", defaultServices);
+  const timezone = settings.accountTimezone || env("CLARITY_TIMEZONE", defaultTimezone);
+  const minBookingNoticeMinutes = cleanMinBookingNoticeMinutes(settings.minBookingNoticeMinutes ?? env("CLARITY_MIN_BOOKING_NOTICE_MINUTES", String(defaultMinBookingNoticeMinutes)));
+  const visibleItems = [
+    ...itemRows.map(rowToPublicItem),
+    ...minimumNoticeBlocks(minBookingNoticeMinutes, timezone),
+  ];
   return {
     updatedAt: settings.updatedAt || nowIso(),
     services: (services || []).filter((service: any) => service?.active && service?.visibility === "public"),
@@ -50,13 +124,16 @@ async function readPublicBookingState() {
       businessName: settings.accountBusinessName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
       venueName: settings.accountVenueName || env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
       venueShortName: settings.accountVenueShortName || env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
-      timezone: settings.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
+      timezone,
       contactEmail: settings.accountContactEmail || env("CLARITY_CONTACT_EMAIL", ""),
       bookingUrl: settings.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
       calendarSlug: settings.accountCalendarSlug || "sam-hale-golf",
       caddyWorkspaceUrl: settings.accountCaddyWorkspaceUrl || env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
     },
-    items: itemRows.map(rowToPublicItem),
+    bookingRules: {
+      minBookingNoticeMinutes,
+    },
+    items: visibleItems,
   };
 }
 
