@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions";
 import { createHash } from "node:crypto";
 
 const sessionCookieName = "clarity_session";
+const defaultMinBookingNoticeMinutes = 240;
 
 const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
@@ -36,6 +37,11 @@ function cleanString(value: unknown, fallback = "", max = 600) {
 
 function cleanEmail(value: unknown, fallback = "") {
   return cleanString(value, fallback, 180).toLowerCase();
+}
+
+function cleanMinBookingNoticeMinutes(value: unknown, fallback = defaultMinBookingNoticeMinutes) {
+  const minutes = Number(value ?? fallback);
+  return Number.isFinite(minutes) ? Math.max(0, Math.min(7 * 24 * 60, Math.round(minutes))) : fallback;
 }
 
 function modernClientEmailFooter(value: unknown) {
@@ -121,6 +127,7 @@ async function readAdminSettings() {
     coachEmail: settings.coachEmail || "",
     replyToEmail: settings.replyToEmail || "",
     notificationDelaySeconds: Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30,
+    minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(settings.minBookingNoticeMinutes ?? env("CLARITY_MIN_BOOKING_NOTICE_MINUTES", String(defaultMinBookingNoticeMinutes))),
     sendClientEmail: settings.sendClientEmail !== "false",
     sendCoachEmail: settings.sendCoachEmail !== "false",
     sendAdminEmail: settings.sendAdminEmail !== "false",
@@ -145,6 +152,9 @@ async function writeAdminSettings(settings: any) {
   if (hasOwn(settings, "notificationDelaySeconds")) {
     const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
     await setSetting("notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
+  }
+  if (hasOwn(settings, "minBookingNoticeMinutes")) {
+    await setSetting("minBookingNoticeMinutes", String(cleanMinBookingNoticeMinutes(settings?.minBookingNoticeMinutes)));
   }
   if (hasOwn(settings, "sendClientEmail")) await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
   if (hasOwn(settings, "sendCoachEmail")) await setSetting("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
