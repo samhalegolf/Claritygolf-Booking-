@@ -224,7 +224,8 @@
   }
 
   function findSettingsTarget() {
-    const candidates = Array.from(document.querySelectorAll("article.settings-section, .settings-section, .settings-subsection"));
+    const candidates = Array.from(document.querySelectorAll("article.settings-section, .settings-section, .data-card"))
+      .filter((element) => !element.classList?.contains("settings-subsection"));
     return (
       candidates.find((element) => /email|notification/i.test(element.textContent || "")) ||
       candidates.find((element) => element.classList?.contains("settings-section")) ||
