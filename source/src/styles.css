@@ -1335,6 +1335,123 @@ button {
   gap: 14px;
 }
 
+.booking-progressive-flow {
+  align-items: start;
+}
+
+.booking-progressive-section {
+  padding: 0;
+  display: grid;
+  gap: 0;
+  border: 1px solid #deded8;
+  background: #fff;
+}
+
+.booking-progressive-title {
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid #deded8;
+  background: #fbfbf9;
+  color: #171717;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  font: inherit;
+}
+
+.booking-progressive-title span {
+  display: block;
+  color: #76736d;
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.booking-progressive-title span:last-child {
+  color: #7a7770;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.booking-progressive-title strong {
+  display: block;
+  margin-top: 4px;
+  color: #171717;
+  font-size: 20px;
+  text-transform: none;
+}
+
+.booking-progressive-title:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.booking-progressive-body {
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.booking-progressive-summary {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.booking-progressive-summary-empty {
+  color: #5d5a54;
+  background: #f7f7f3;
+}
+
+.booking-progressive-summary-empty strong,
+.booking-progressive-summary-empty span {
+  font-style: normal;
+}
+
+.booking-days-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+}
+
+.booking-days {
+  min-width: max(280px, 100%);
+}
+
+.booking-day-marker {
+  color: #5d5a54;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.booking-progressive-section.is-open .booking-progressive-body {
+  display: grid;
+}
+
+.booking-progressive-section:not(.is-open) .booking-progressive-body {
+  display: none;
+}
+
+.booking-progressive-section .booking-progressive-summary,
+.booking-progressive-section .booking-progressive-summary-empty {
+  display: none;
+}
+
+.booking-progressive-section:not(.is-open) .booking-progressive-summary,
+.booking-progressive-section:not(.is-open) .booking-progressive-summary-empty {
+  display: grid;
+}
+
 .booking-card {
   padding: 16px;
 }
@@ -3837,6 +3954,59 @@ button {
   background:
     linear-gradient(90deg, var(--card-outline), color-mix(in srgb, var(--card-outline) 46%, var(--card-vein)));
   opacity: 0.72;
+}
+
+.app-shell .public-booking .booking-progressive-section {
+  --card-vein: var(--coach-secondary);
+  --card-outline: var(--coach-neutral);
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--card-outline) 88%, var(--booking-border));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--card-vein) 26%, transparent), transparent 58%),
+    linear-gradient(180deg, color-mix(in srgb, var(--card-vein) 18%, var(--booking-card)), color-mix(in srgb, var(--card-vein) 8%, var(--booking-card)));
+  color: var(--booking-text);
+  box-shadow: var(--booking-shadow);
+}
+
+.app-shell .public-booking .booking-progressive-section::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background:
+    linear-gradient(90deg, var(--card-outline), color-mix(in srgb, var(--card-outline) 46%, var(--card-vein)));
+  opacity: 0.72;
+}
+
+.app-shell .public-booking .booking-progressive-title {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card-vein) 10%, transparent), transparent),
+    var(--booking-control);
+  color: var(--booking-text);
+  border-bottom-color: color-mix(in srgb, var(--card-outline) 28%, var(--booking-border));
+}
+
+.app-shell .public-booking .booking-progressive-title span {
+  color: var(--booking-muted);
+}
+
+.app-shell .public-booking .booking-progressive-title span:last-child {
+  color: var(--booking-muted);
+}
+
+.app-shell .public-booking .booking-progressive-summary,
+.app-shell .public-booking .booking-progressive-summary-empty {
+  border-top: 1px solid color-mix(in srgb, var(--card-outline) 28%, var(--booking-border));
+  background: var(--booking-card-soft);
+  color: var(--booking-text);
+}
+
+.app-shell .public-booking .booking-progressive-summary-empty {
+  color: var(--booking-muted);
+  background: color-mix(in srgb, var(--booking-control) 52%, transparent);
 }
 
 .app-shell .public-booking .booking-card > span,
