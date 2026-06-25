@@ -131,6 +131,7 @@ type CalendarHoverPreview = {
   itemId: string;
   x: number;
   y: number;
+  kind: "group-session" | "appointment" | "blocked";
   client: string;
   service: string;
   time: string;
@@ -3085,8 +3086,10 @@ function App() {
     latestCoachEmail?: NotificationRecord,
     latestAdminEmail?: NotificationRecord,
   ) {
-    if (isEmbedMode || item.kind !== "appointment" || pointerSessionRef.current) return;
+    if (isEmbedMode || pointerSessionRef.current) return;
     if (event.pointerType === "touch") return;
+    const groupSessionContext = getGroupSessionContext(item);
+    if (!groupSessionContext && item.kind !== "appointment" && item.kind !== "block") return;
     const rect = event.currentTarget.getBoundingClientRect();
     const cardWidth = 304;
     const gap = 14;
@@ -3098,12 +3101,15 @@ function App() {
       itemId: item.id,
       x,
       y,
-      client: item.client || item.title,
-      service: service?.name ?? "Golf lesson",
+      kind: groupSessionContext ? "group-session" : item.kind === "appointment" ? "appointment" : "blocked",
+      client: groupSessionContext ? groupSessionContext.service.name : item.client || item.title,
+      service: groupSessionContext
+        ? `Group Session · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
+        : service?.name ?? "Golf lesson",
       time: `${dateForSlot(itemWeek(item), item.day).toLocaleDateString("en-NZ", { weekday: "long", month: "short", day: "numeric" })}, ${formatRange(item.start, item.duration)}`,
       venue: service?.location || coachAccount.venueShortName || coachAccount.venueName,
-      phone: item.phone || "",
-      email: item.email || "",
+      phone: groupSessionContext ? "" : item.phone || "",
+      email: groupSessionContext ? "" : item.email || "",
       clientEmailStatus: latestClientEmail ? notificationStatusLabel(latestClientEmail) : "No client email receipt yet",
       coachEmailStatus: latestCoachEmail ? notificationStatusLabel(latestCoachEmail) : "No coach receipt yet",
       adminEmailStatus: latestAdminEmail ? notificationStatusLabel(latestAdminEmail) : "No admin receipt yet",
@@ -3282,6 +3288,44 @@ function App() {
 
   function isGroupSessionItem(item: CalendarItem) {
     return isScheduledGroupSessionSlot(item) || isGroupSessionAppointment(item);
+  }
+
+  function getGroupSessionContext(item: CalendarItem) {
+    if (!isGroupSessionItem(item)) return null;
+    const service = itemService(item, services);
+    if (!service || service.lessonFormat !== "group") return null;
+    const week = itemWeek(item);
+    if (!Number.isInteger(week) || !Number.isInteger(item.day) || !Number.isFinite(item.start)) return null;
+    const duration = Number.isFinite(item.duration) && item.duration > 0 ? item.duration : service.duration;
+    if (!isScheduledGroupSessionSlot(item) && !isGroupServiceSlotMatch(service, week, item.day, item.start)) return null;
+    const session: GroupSession = {
+      serviceId: service.id,
+      week,
+      day: item.day,
+      start: item.start,
+      duration,
+    };
+    const candidate = {
+      week: session.week,
+      day: session.day,
+      start: session.start,
+      duration: session.duration,
+    };
+    const attendees = items
+      .filter(
+        (candidateItem) =>
+          candidateItem.kind === "appointment" &&
+          candidateItem.serviceId === service.id &&
+          overlaps(itemSlot(candidateItem), candidate),
+      )
+      .sort((a, b) => (a.client ?? "").localeCompare(b.client ?? ""));
+    return {
+      service,
+      session,
+      attendees,
+      capacity: service.capacity,
+      bookedCount: attendees.length,
+    };
   }
 
   function handleCalendarItemClick(
@@ -6762,7 +6806,15 @@ function App() {
             {selectedGroupSessionAttendees.map((appointment) => (
               <li key={appointment.id}>
                 <strong>{appointment.client || appointment.title}</strong>
-                <span>{[appointment.phone, appointment.email].filter(Boolean).join(" · ")}</span>
+                <span>
+                  {[
+                    appointment.phone,
+                    appointment.email,
+                    appointment.status ? (appointment.status === "no_show" ? "No-show" : appointment.status) : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
               </li>
             ))}
           </ul>
@@ -7228,9 +7280,12 @@ function App() {
                   const latestAdminEmail = itemNotifications.find((notification) => notification.kind.includes("admin"));
                   const scheduledGroupSession = isScheduledGroupSessionSlot(item);
                   const groupSessionItem = isGroupSessionItem(item);
+                  const groupSessionContext = getGroupSessionContext(item);
                   const tooltipRows = [
-                    item.client || item.title,
-                    service?.name ?? (item.kind === "block" ? "Blocked time" : "Lesson"),
+                    groupSessionContext ? "Group Session" : item.client || item.title,
+                    groupSessionContext
+                      ? `Booked: ${groupSessionContext.bookedCount}/${groupSessionContext.capacity}`
+                      : service?.name ?? (item.kind === "block" ? "Blocked time" : "Lesson"),
                     formatRange(item.start, item.duration),
                     latestClientEmail ? `Client email: ${notificationStatusLabel(latestClientEmail)}` : "",
                     latestCoachEmail ? `Coach email: ${notificationStatusLabel(latestCoachEmail)}` : "",
@@ -7321,9 +7376,13 @@ function App() {
                           </button>
                         ) : null}
                         <div className="item-content">
-                        <strong>{item.kind === "appointment" ? item.client || item.title : item.title}</strong>
-                        <span>{service?.name ?? "Busy"}</span>
-                        <em>{formatRange(item.start, item.duration)}</em>
+                        <strong>{groupSessionContext ? groupSessionContext.service.name : item.kind === "appointment" ? item.client || item.title : item.title}</strong>
+                        <span>{groupSessionContext ? "Group Session" : service?.name ?? "Busy"}</span>
+                        <em>
+                          {groupSessionContext
+                            ? `${formatRange(item.start, item.duration)} · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
+                            : formatRange(item.start, item.duration)}
+                        </em>
                       </div>
                       {item.kind === "appointment" && (latestClientEmail || latestCoachEmail || latestAdminEmail) && (
                         <div className="item-email-indicators" aria-label="Email receipt status">
@@ -7568,7 +7627,9 @@ function App() {
             style={{ left: calendarHover.x, top: calendarHover.y }}
             aria-hidden="true"
           >
-            <span className="hover-card-kicker">Appointment</span>
+            <span className="hover-card-kicker">
+              {calendarHover.kind === "group-session" ? "Group Session" : "Appointment"}
+            </span>
             <strong>{calendarHover.client}</strong>
             <em>{calendarHover.service}</em>
             <div className="hover-card-line">
