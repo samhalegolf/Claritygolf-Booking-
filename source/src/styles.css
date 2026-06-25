@@ -1337,6 +1337,7 @@ button {
 
 .booking-progressive-flow {
   align-items: start;
+  gap: 8px;
 }
 
 .booking-progressive-section {
@@ -1349,8 +1350,8 @@ button {
 
 .booking-progressive-title {
   width: 100%;
-  min-height: 52px;
-  padding: 12px 14px;
+  min-height: 38px;
+  padding: 8px 12px;
   border: 0;
   border-bottom: 1px solid #deded8;
   background: #fbfbf9;
@@ -1367,14 +1368,21 @@ button {
 .booking-progressive-title span {
   display: block;
   color: #76736d;
-  font-size: 12px;
-  font-weight: 850;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 680;
+  line-height: 1.2;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.booking-progressive-title-label {
+  opacity: 0.88;
 }
 
 .booking-progressive-title span:last-child {
-  color: #7a7770;
-  font-size: 11px;
+  color: #8a867f;
+  font-size: 10px;
+  font-weight: 560;
   white-space: nowrap;
 }
 
@@ -1392,9 +1400,9 @@ button {
 }
 
 .booking-progressive-body {
-  padding: 16px;
+  padding: 12px;
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .booking-progressive-summary {
@@ -1404,7 +1412,18 @@ button {
   text-align: left;
   display: grid;
   gap: 4px;
-  padding: 12px 14px;
+  padding: 10px 12px;
+}
+
+.booking-progressive-summary strong,
+.booking-progressive-summary-empty strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.booking-progressive-summary span,
+.booking-progressive-summary-empty span {
+  font-size: 12px;
 }
 
 .booking-progressive-summary-empty {
@@ -1450,6 +1469,10 @@ button {
 .booking-progressive-section:not(.is-open) .booking-progressive-summary,
 .booking-progressive-section:not(.is-open) .booking-progressive-summary-empty {
   display: grid;
+}
+
+.booking-progressive-section.is-complete:not(.is-open) .booking-progressive-title {
+  display: none;
 }
 
 .booking-card {
@@ -3991,10 +4014,27 @@ button {
 
 .app-shell .public-booking .booking-progressive-title span {
   color: var(--booking-muted);
+  font-size: 11px;
+  font-weight: 640;
 }
 
 .app-shell .public-booking .booking-progressive-title span:last-child {
-  color: var(--booking-muted);
+  color: color-mix(in srgb, var(--booking-muted) 72%, #fff);
+  font-size: 10px;
+}
+
+.app-shell .public-booking .booking-progressive-title-label {
+  opacity: 0.72;
+}
+
+.app-shell .public-booking .booking-progressive-section.is-complete:not(.is-open) .booking-progressive-title {
+  display: none;
+}
+
+.app-shell .public-booking .booking-progressive-summary,
+.app-shell .public-booking .booking-progressive-summary-empty {
+  padding-top: 11px;
+  padding-bottom: 11px;
 }
 
 .app-shell .public-booking .booking-progressive-summary,

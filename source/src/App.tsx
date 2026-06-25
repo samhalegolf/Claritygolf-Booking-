@@ -6530,8 +6530,8 @@ function App() {
             onClick={() => setPublicBookingSection("appointment")}
             type="button"
           >
-            <span>1. Appointment</span>
-            <span>{isAppointmentStepComplete ? "Done" : "In progress"}</span>
+            <span className="booking-progressive-title-label">1. Appointment</span>
+            <span className="booking-progressive-title-state">{isAppointmentStepComplete ? "Done" : "In progress"}</span>
           </button>
           {isAppointmentSectionOpen ? (
             <div className="booking-progressive-body">
@@ -6586,8 +6586,8 @@ function App() {
             type="button"
             disabled={!isAppointmentStepComplete}
           >
-            <span>2. Date & Time</span>
-            <span>{isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}</span>
+            <span className="booking-progressive-title-label">2. Date & Time</span>
+            <span className="booking-progressive-title-state">{isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}</span>
           </button>
           {isDateTimeSectionOpen ? (
             <div className="booking-progressive-body">
@@ -6670,8 +6670,8 @@ function App() {
             type="button"
             disabled={!isDateTimeStepComplete}
           >
-            <span>3. Your Information</span>
-            <span>
+            <span className="booking-progressive-title-label">3. Your Information</span>
+            <span className="booking-progressive-title-state">
               {isInformationStepComplete ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
             </span>
           </button>
@@ -8716,8 +8716,8 @@ function App() {
                       onClick={() => setPublicBookingSection("appointment")}
                       type="button"
                     >
-                      <span>1. Appointment</span>
-                      <span>{isAppointmentStepComplete ? "Done" : "In progress"}</span>
+                      <span className="booking-progressive-title-label">1. Appointment</span>
+                      <span className="booking-progressive-title-state">{isAppointmentStepComplete ? "Done" : "In progress"}</span>
                     </button>
                     {isAppointmentSectionOpen ? (
                       <div className="booking-progressive-body">
@@ -8772,8 +8772,8 @@ function App() {
                       type="button"
                       disabled={!isAppointmentStepComplete}
                     >
-                      <span>2. Date & Time</span>
-                      <span>
+                      <span className="booking-progressive-title-label">2. Date & Time</span>
+                      <span className="booking-progressive-title-state">
                         {isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}
                       </span>
                     </button>
@@ -8858,10 +8858,10 @@ function App() {
                       type="button"
                       disabled={!isDateTimeStepComplete}
                     >
-                      <span>3. Your Information</span>
-                      <span>
-                        {isInformationStepComplete ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
-                      </span>
+                      <span className="booking-progressive-title-label">3. Your Information</span>
+                      <span className="booking-progressive-title-state">
+              {isInformationStepComplete ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
+            </span>
                     </button>
                     {isInformationSectionOpen ? (
                       <div className="booking-progressive-body">
