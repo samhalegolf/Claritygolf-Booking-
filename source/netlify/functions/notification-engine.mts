@@ -26,6 +26,31 @@ function cleanEmail(value: unknown, fallback = "") {
   return email.includes("@") ? email : fallback;
 }
 
+function emailAddressFromHeader(fromHeader: string) {
+  const rawFrom = cleanText(fromHeader, "", 512);
+  if (!rawFrom) return "";
+  const matched = rawFrom.match(/^\s*(?:"[^"]*"|[^<"]*?)\s*<\s*([^>]+)\s*>\s*$/);
+  if (matched) {
+    const address = cleanEmail(matched[1], "");
+    if (address) return address;
+  }
+  return cleanEmail(rawFrom, "");
+}
+
+function quoteAddressName(name: string) {
+  const trimmed = cleanText(name, "", 160);
+  if (!trimmed) return "";
+  const sanitized = trimmed.replace(/"/g, '\\"');
+  return /[<>"]/.test(trimmed) ? `"${sanitized}"` : sanitized;
+}
+
+function formatFromHeader(name: string, fallbackAddress: string, sourceHeader: string) {
+  const address = emailAddressFromHeader(sourceHeader) || fallbackAddress;
+  if (!address) return "";
+  const quotedName = quoteAddressName(name);
+  return quotedName ? `${quotedName} <${address}>` : address;
+}
+
 function cleanUrl(value: unknown, fallback: string) {
   const candidate = cleanText(value, fallback, 700);
   try {
@@ -91,6 +116,9 @@ async function readSettings() {
     notificationEmail: cleanEmail(s.notificationEmail, env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz")),
     coachEmail: cleanEmail(s.coachEmail, env("CLARITY_COACH_EMAIL", "")),
     replyToEmail: cleanEmail(s.replyToEmail, env("CLARITY_REPLY_TO_EMAIL", env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz"))),
+    googleReviewUrl: cleanUrl(s.googleReviewUrl || "", ""),
+    notificationSubjectLine: cleanText(s.notificationSubjectLine, "", 180),
+    notificationFromName: cleanText(s.notificationFromName, "", 120),
     sendClientEmail: s.sendClientEmail !== "false",
     sendCoachEmail: s.sendCoachEmail !== "false",
     sendAdminEmail: s.sendAdminEmail !== "false",
@@ -265,7 +293,14 @@ async function sendEmail(message: { to: string; subject: string; html: string; t
   if (!apiKey) return { sent: false, reason: "missing_resend_key" };
   if (!cleanEmail(message.to)) return { sent: false, reason: "missing_recipient" };
   const settings = await readSettings();
-  const from = env("CLARITY_EMAIL_FROM", `${settings.businessName} <onboarding@resend.dev>`);
+  const rawFromHeader = env("CLARITY_EMAIL_FROM", `${settings.businessName} <onboarding@resend.dev>`);
+  const fromNameFallback = cleanText(settings.coachName, "", 120) || cleanText(settings.businessName, "", 120) || "Sam Hale Golf";
+  const fromName = cleanText(settings.notificationFromName, "", 120) || fromNameFallback;
+  const from = formatFromHeader(
+    fromName,
+    cleanEmail(rawFromHeader, env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz")),
+    rawFromHeader,
+  );
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -331,6 +366,10 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
 }
 
 function templateSubjects(action: BookingAction, settings: any, variables: Record<string, string>) {
+  const sharedSubjectTemplate = cleanText(settings.notificationSubjectLine, "", 180);
+  const sharedSubject = sharedSubjectTemplate.trim() ? render(sharedSubjectTemplate, variables) : "";
+  if (sharedSubject) return { client: sharedSubject, admin: sharedSubject };
+
   if (action === "rescheduled") return { client: render(settings.rescheduleClientSubject, variables), admin: render(settings.rescheduleAdminSubject, variables) };
   if (action === "cancelled") return { client: render(settings.cancellationClientSubject, variables), admin: render(settings.cancellationAdminSubject, variables) };
   if (action === "updated") return { client: render(settings.updateClientSubject, variables), admin: render(settings.updateAdminSubject, variables) };
@@ -358,22 +397,28 @@ function clientFooter(action: BookingAction, settings: any, variables: Record<st
 }
 
 function detailTable(rows: Array<[string, string]>) {
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:20px 0;width:100%;max-width:560px">${rows
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:14px;">${rows
     .filter(([, value]) => Boolean(value))
     .map(
       ([label, value], index, array) =>
-        `<tr><td style="padding:9px 10px;border-bottom:${index === array.length - 1 ? "0" : "1px solid #dfe5d8"};color:#697166;width:105px;vertical-align:top">${escapeHtml(label)}</td><td style="padding:9px 10px;border-bottom:${index === array.length - 1 ? "0" : "1px solid #dfe5d8"};color:#101612;vertical-align:top">${escapeHtml(value)}</td></tr>`,
+        `<tr><td style="padding:11px 12px;border-bottom:${index === array.length - 1 ? "0" : "1px solid #e3e9df"};color:#667066;vertical-align:top;width:105px">${escapeHtml(label)}</td><td style="padding:11px 12px;border-bottom:${index === array.length - 1 ? "0" : "1px solid #e3e9df"};color:#101612;font-weight:600;vertical-align:top">${escapeHtml(value)}</td></tr>`,
     )
     .join("")}</table>`;
 }
 
-function clientActionButtonsHtml(action: BookingAction, variables: Record<string, string>) {
+function reviewButtonHtml(url: string) {
+  const reviewHref = cleanUrl(url, "");
+  if (!reviewHref) return "";
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr><td><a href="${escapeHtml(reviewHref)}" style="display:inline-block;background:#3b82c4;color:#ffffff;padding:13px 18px;text-decoration:none;border-radius:7px;font-weight:700">Leave a Google Review</a></td></tr></table>`;
+}
+
+function clientActionButtonsHtml(action: BookingAction, variables: Record<string, string>, settings: any) {
   if (action === "cancelled" || action === "test") return "";
   const manageButton = variables.rescheduleUrl
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 14px"><tr><td><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">Manage / Reschedule</a></td></tr></table>`
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 12px"><tr><td><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">Manage / Reschedule</a></td></tr></table>`
     : "";
   const calendarButtons = variables.googleCalendarUrl || variables.appleCalendarUrl
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 22px"><tr>${
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr>${
         variables.googleCalendarUrl
           ? `<td style="padding:0 8px 8px 0"><a href="${escapeHtml(variables.googleCalendarUrl)}" style="display:inline-block;border:1px solid #cfd8ca;color:#101612;padding:10px 13px;text-decoration:none;border-radius:7px;font-weight:600"><span style="font-size:15px;vertical-align:-1px;margin-right:6px">&#128197;</span>Google Calendar</a></td>`
           : ""
@@ -383,15 +428,18 @@ function clientActionButtonsHtml(action: BookingAction, variables: Record<string
           : ""
       }</tr></table>`
     : "";
-  return `${manageButton}${calendarButtons}`;
+  const reviewButton = reviewButtonHtml(settings?.googleReviewUrl || "");
+  return `${manageButton}${calendarButtons}${reviewButton}`;
 }
 
-function clientActionButtonsText(action: BookingAction, variables: Record<string, string>) {
+function clientActionButtonsText(action: BookingAction, variables: Record<string, string>, settings: any) {
   if (action === "cancelled" || action === "test") return [];
+  const reviewUrl = cleanUrl(settings?.googleReviewUrl || "", "");
   return [
     variables.rescheduleUrl ? `Manage / Reschedule: ${variables.rescheduleUrl}` : "",
     variables.googleCalendarUrl ? `Google Calendar: ${variables.googleCalendarUrl}` : "",
     variables.appleCalendarUrl ? `Apple Calendar: ${variables.appleCalendarUrl}` : "",
+    reviewUrl ? `Leave a Google Review: ${reviewUrl}` : "",
   ].filter(Boolean);
 }
 
@@ -428,10 +476,15 @@ function bodyFor(
   const footer = isClient
     ? clientFooter(action, settings, variables)
     : `${channel === "coach" ? "Coach" : "Admin"} booking alert.`;
-  const actionsHtml = isClient ? clientActionButtonsHtml(action, variables) : "";
-  const actionsText = isClient ? clientActionButtonsText(action, variables) : [];
+  const actionsHtml = isClient ? clientActionButtonsHtml(action, variables, settings) : "";
+  const actionsText = isClient ? clientActionButtonsText(action, variables, settings) : [];
   const textRows = rows.filter(([, value]) => Boolean(value)).map(([label, value]) => `${label}: ${value}`);
-  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#101612;max-width:600px"><h2 style="margin:0 0 12px">${escapeHtml(labels.title)}</h2><p style="margin:0 0 14px">${escapeHtml(intro)}</p>${detailTable(rows)}${actionsHtml}<p style="margin:18px 0 0;color:#526054">${escapeHtml(footer).replace(/\n/g, "<br/>")}</p></div>`;
+  const brandName = escapeHtml(settings.businessName || settings.coachName || "Sam Hale Golf");
+  const detailRows = detailTable(rows);
+  const detailsSection = rows.length
+    ? `<p style="margin:0 0 8px;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">Booking details</p><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#f6f9f3;border:1px solid #e6ecdf;border-radius:8px;padding:12px;display:block"><tr><td style="padding:0">${detailRows}</td></tr></table>`
+    : "";
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${brandName}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">${escapeHtml(labels.title)}</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailsSection}</div>${actionsHtml}<p style="margin:16px 0 0;color:#526054">${escapeHtml(footer).replace(/\n/g, "<br/>")}</p><p style="margin:10px 0 0;color:#8e9a8d;font-size:12px">${brandName}</p></div></div></div>`;
   const text = [labels.title, "", intro, "", ...textRows, "", ...actionsText, actionsText.length ? "" : "", footer]
     .filter((line, index, lines) => !(line === "" && lines[index - 1] === ""))
     .join("\n");

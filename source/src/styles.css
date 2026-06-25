@@ -526,6 +526,17 @@ button {
   overflow: visible;
 }
 
+.minimum-notice-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.minimum-notice-presets button {
+  height: 34px;
+  min-width: 95px;
+}
+
 .booking-page-settings .public-booking {
   border: 1px solid var(--border);
   overflow: hidden;
@@ -1977,9 +1988,16 @@ button {
   margin: 0 0 2px;
 }
 
+.field-help {
+  margin: 0;
+  color: #5d5a54;
+  font-size: 12px;
+}
+
 .settings-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 .settings-toggle {
@@ -2033,6 +2051,23 @@ button {
   border: 1px solid var(--border);
   background: var(--panel-soft);
   color: var(--heading);
+  font-size: 12px;
+}
+
+.template-token-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.template-token-button {
+  height: 32px;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+  color: var(--heading);
+  border-radius: 999px;
+  padding: 0 10px;
+  font-family: inherit;
   font-size: 12px;
 }
 

@@ -39,6 +39,23 @@ function cleanEmail(value: unknown, fallback = "") {
   return cleanString(value, fallback, 180).toLowerCase();
 }
 
+function cleanUrl(value: unknown, fallback = "") {
+  const candidate = cleanString(value, "", 700);
+  try {
+    return new URL(candidate).toString();
+  } catch {
+    return fallback;
+  }
+}
+
+function configuredSenderEmailFromEnv(value: unknown) {
+  const source = cleanString(value, "", 500);
+  if (!source) return "";
+  const match = source.match(/<\s*([^>]+)\s*>/);
+  const candidate = match ? match[1] : source;
+  return cleanEmail(candidate, "");
+}
+
 function cleanMinBookingNoticeMinutes(value: unknown, fallback = defaultMinBookingNoticeMinutes) {
   const minutes = Number(value ?? fallback);
   return Number.isFinite(minutes) ? Math.max(0, Math.min(7 * 24 * 60, Math.round(minutes))) : fallback;
@@ -126,6 +143,12 @@ async function readAdminSettings() {
     notificationEmail: settings.notificationEmail || "",
     coachEmail: settings.coachEmail || "",
     replyToEmail: settings.replyToEmail || "",
+    googleReviewUrl: cleanUrl(settings.googleReviewUrl, ""),
+    notificationFromName: cleanString(settings.notificationFromName, "", 120),
+    configuredSenderEmailAddress: configuredSenderEmailFromEnv(
+      env("CLARITY_EMAIL_FROM", env("CLARITY_NOTIFICATION_EMAIL", settings.notificationEmail || "")),
+    ),
+    notificationSubjectLine: cleanString(settings.notificationSubjectLine, "", 180),
     notificationDelaySeconds: Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30,
     minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(settings.minBookingNoticeMinutes ?? env("CLARITY_MIN_BOOKING_NOTICE_MINUTES", String(defaultMinBookingNoticeMinutes))),
     sendClientEmail: settings.sendClientEmail !== "false",
@@ -149,6 +172,9 @@ async function writeAdminSettings(settings: any) {
   if (hasOwn(settings, "notificationEmail")) await setSetting("notificationEmail", cleanEmail(settings?.notificationEmail, ""));
   if (hasOwn(settings, "coachEmail")) await setSetting("coachEmail", cleanEmail(settings?.coachEmail, ""));
   if (hasOwn(settings, "replyToEmail")) await setSetting("replyToEmail", cleanEmail(settings?.replyToEmail, ""));
+  if (hasOwn(settings, "googleReviewUrl")) await setSetting("googleReviewUrl", cleanUrl(settings?.googleReviewUrl, ""));
+  if (hasOwn(settings, "notificationFromName")) await setSetting("notificationFromName", cleanString(settings?.notificationFromName, "", 120));
+  if (hasOwn(settings, "notificationSubjectLine")) await setSetting("notificationSubjectLine", cleanString(settings?.notificationSubjectLine, "", 180));
   if (hasOwn(settings, "notificationDelaySeconds")) {
     const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
     await setSetting("notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
