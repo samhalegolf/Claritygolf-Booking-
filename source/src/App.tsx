@@ -84,6 +84,7 @@ type CalendarItem = {
   day: number;
   start: number;
   duration: number;
+  groupSlot?: boolean;
   serviceId?: string;
   readOnly?: boolean;
   client?: string;
@@ -2903,6 +2904,7 @@ function App() {
             start: schedule.startMinutes,
             duration: service.duration,
             serviceId: service.id,
+            groupSlot: true,
             readOnly: true,
             title: `${service.name} (group)`,
             client: `${service.name} (${service.capacity} places)`,
@@ -3221,6 +3223,7 @@ function App() {
   }
 
   function isScheduledGroupSessionSlot(item: CalendarItem) {
+    if (item.groupSlot) return true;
     const service = itemService(item, services);
     return (
       item.readOnly &&
@@ -3251,7 +3254,11 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     hideCalendarItemHover();
-    return openGroupSessionForItem(item);
+    const opened = openGroupSessionForItem(item);
+    if (!opened) {
+      setToast({ message: "Unable to open group session from this calendar item right now." });
+    }
+    return opened;
   }
 
   const bookingSlots = useMemo(() => {
@@ -7176,22 +7183,21 @@ function App() {
                           hideCalendarItemHover();
                           return;
                         }
-                        if (item.readOnly) return;
+                        if (item.readOnly || groupSessionItem) return;
                         hideCalendarItemHover();
                         beginMove(event, item);
                       }}
                       onPointerUp={(event) => {
-                        if (scheduledGroupSession) {
+                        if (groupSessionItem) {
                           event.preventDefault();
                           handleCalendarItemClick(event, item);
                         }
                       }}
                       onClick={(event) => {
-                        if (scheduledGroupSession) {
-                          return;
-                        }
                         if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
                         if (groupSessionItem) {
+                          event.preventDefault();
+                          event.stopPropagation();
                           handleCalendarItemClick(event, item);
                           return;
                         }
