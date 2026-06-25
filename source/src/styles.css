@@ -1335,8 +1335,126 @@ button {
   gap: 14px;
 }
 
+.booking-progress-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(240px, 1fr));
+  gap: 14px;
+}
+
 .booking-card {
   padding: 16px;
+}
+
+.booking-progress-card.is-open {
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.1),
+    0 0 0 1px color-mix(in srgb, #000 8%, transparent);
+}
+
+.booking-section-header {
+  width: 100%;
+  display: grid;
+  align-items: start;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.booking-section-header span {
+  color: #76736d;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-weight: 800;
+}
+
+.booking-section-header > span:first-child {
+  color: inherit;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-weight: 800;
+}
+
+.booking-section-header-state {
+  margin-top: 4px;
+}
+
+.booking-section-header:disabled {
+  cursor: default;
+}
+
+.booking-section-body {
+  max-height: 0;
+  margin-top: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-3px);
+  transition:
+    max-height 220ms ease,
+    opacity 220ms ease,
+    transform 220ms ease,
+    margin-top 220ms ease;
+}
+
+.booking-section-body.is-open {
+  max-height: 900px;
+  margin-top: 14px;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.booking-section-summary {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 8px;
+  width: 100%;
+  display: block;
+  text-align: left;
+  border: 1px solid #e2e1d9;
+  background: #f7f7f3;
+  color: inherit;
+  cursor: pointer;
+  appearance: none;
+  font: inherit;
+}
+
+.booking-section-summary strong,
+.booking-section-summary span,
+.booking-section-summary em {
+  display: block;
+}
+
+.booking-section-summary strong {
+  margin-bottom: 2px;
+}
+
+.booking-section-summary em {
+  margin-top: 3px;
+  color: #5d5a54;
+  font-style: normal;
+}
+
+.booking-section-summary:disabled {
+  opacity: 0.88;
+  cursor: default;
+}
+
+.booking-progress-card.is-complete .booking-section-summary,
+.booking-progress-card.is-in-progress .booking-section-summary {
+  border-color: #d4d1c8;
+}
+
+.booking-progress-card.is-complete .booking-section-summary::before {
+  content: "✓";
+  margin-bottom: 6px;
+  color: #0f8b5f;
+  font-weight: 800;
 }
 
 .service-picker,
@@ -1492,6 +1610,11 @@ button {
   grid-template-columns: repeat(7, minmax(44px, 1fr));
   gap: 6px;
   margin-top: 14px;
+  min-width: 0;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 2px;
 }
 
 .booking-week-controls {
@@ -1533,6 +1656,20 @@ button {
 .booking-days em {
   display: block;
   font-style: normal;
+}
+
+.booking-days .is-today {
+  border-color: rgba(17, 17, 17, 0.28);
+}
+
+.booking-days .is-today::after {
+  content: "";
+  margin: 4px auto 0;
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #0f8b5f;
 }
 
 .time-slots {
@@ -3839,6 +3976,36 @@ button {
   opacity: 0.72;
 }
 
+.app-shell .public-booking .booking-section-header span {
+  color: color-mix(in srgb, var(--booking-text) 68%, transparent);
+}
+
+.app-shell .public-booking .booking-section-header-state {
+  color: color-mix(in srgb, var(--booking-muted) 88%, transparent);
+}
+
+.app-shell .public-booking .booking-section-summary {
+  border-color: color-mix(in srgb, var(--card-outline) 18%, var(--booking-border));
+  background: var(--booking-card-soft);
+  color: var(--booking-text);
+}
+
+.app-shell .public-booking .booking-section-summary em {
+  color: var(--booking-muted);
+}
+
+.app-shell .public-booking .booking-progress-card.is-complete .booking-section-summary::before {
+  color: color-mix(in srgb, var(--coach-primary) 75%, #fff);
+}
+
+.app-shell .public-booking .booking-days .is-today {
+  border-color: color-mix(in srgb, var(--card-vein) 62%, var(--booking-border));
+}
+
+.app-shell .public-booking .booking-days .is-today::after {
+  background: color-mix(in srgb, var(--coach-primary) 40%, transparent);
+}
+
 .app-shell .public-booking .booking-card > span,
 .app-shell .public-booking .service-picker em,
 .app-shell .public-booking .service-picker small,
@@ -4228,6 +4395,10 @@ button {
   }
 
   .booking-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-progress-columns {
     grid-template-columns: 1fr;
   }
 
