@@ -41,12 +41,19 @@ import type {
   ChangeEvent,
   CSSProperties,
   FormEvent,
+  MouseEvent as ReactMouseEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   TouchEvent as ReactTouchEvent,
 } from "react";
 
 type LessonFormat = "private" | "group" | "package";
+type GroupServiceSchedule = {
+  dayOfWeek: number;
+  startMinutes: number;
+  occurrenceCount: number;
+  active: boolean;
+};
 type PriceMode = "session" | "per-person";
 type PackageCoverageMode = "upfront" | "lesson-by-lesson";
 type BookingStatus = "booked" | "completed" | "cancelled" | "no_show";
@@ -64,6 +71,7 @@ type Service = {
   lessonFormat: LessonFormat;
   priceMode: PriceMode;
   location: string;
+  groupSchedule?: GroupServiceSchedule;
   packageAllowance?: number;
   packageCoverageMode?: PackageCoverageMode;
   packageCoversServiceId?: string;
@@ -76,7 +84,10 @@ type CalendarItem = {
   day: number;
   start: number;
   duration: number;
+  groupSlot?: boolean;
+  syntheticGroupSlot?: boolean;
   serviceId?: string;
+  readOnly?: boolean;
   client?: string;
   title: string;
   phone?: string;
@@ -120,6 +131,7 @@ type CalendarHoverPreview = {
   itemId: string;
   x: number;
   y: number;
+  kind: "group-session" | "appointment" | "blocked";
   client: string;
   service: string;
   time: string;
@@ -520,6 +532,7 @@ type SlotCandidate = {
 };
 
 type QuickCreateState = {
+  week: number;
   day: number;
   start: number;
   x: number;
@@ -529,6 +542,14 @@ type QuickCreateState = {
   email: string;
   note: string;
   error: string;
+};
+
+type GroupSession = {
+  serviceId: string;
+  week: number;
+  day: number;
+  start: number;
+  duration: number;
 };
 
 type WeekDay = {
@@ -542,6 +563,7 @@ const START_HOUR = 7;
 const END_HOUR = 20;
 const HOUR_HEIGHT = 72;
 const SNAP_MINUTES = 15;
+const MAX_GROUP_OCCURRENCE_COUNT = 52;
 const MOUSE_DRAG_THRESHOLD = 10;
 const TOUCH_DRAG_THRESHOLD = 16;
 const EDGE_NAV_ZONE = 26;
@@ -638,6 +660,12 @@ const defaultServices: Service[] = [
     minParticipants: 3,
     lessonFormat: "group",
     priceMode: "per-person",
+    groupSchedule: {
+      dayOfWeek: 2,
+      startMinutes: timeToMinutes(18, 0),
+      occurrenceCount: 8,
+      active: true,
+    },
     location: "Group coaching bay",
   },
   {
@@ -773,6 +801,37 @@ function overlaps(a: SlotCandidate, b: SlotCandidate) {
 
 function itemSlot(item: CalendarItem): SlotCandidate {
   return { week: itemWeek(item), day: item.day, start: item.start, duration: item.duration };
+}
+
+function defaultGroupSchedule(): GroupServiceSchedule {
+  return {
+    dayOfWeek: 2,
+    startMinutes: timeToMinutes(18, 0),
+    occurrenceCount: 8,
+    active: true,
+  };
+}
+
+function cleanGroupSchedule(
+  value: unknown,
+  fallback: GroupServiceSchedule = defaultGroupSchedule(),
+): GroupServiceSchedule {
+  const source = typeof value === "object" && value !== null ? value : {};
+  const rawDay = Number.isFinite(Number((source as Partial<GroupServiceSchedule>).dayOfWeek))
+    ? Number((source as Partial<GroupServiceSchedule>).dayOfWeek)
+    : fallback.dayOfWeek;
+  const rawStart = Number.isFinite(Number((source as Partial<GroupServiceSchedule>).startMinutes))
+    ? Number((source as Partial<GroupServiceSchedule>).startMinutes)
+    : fallback.startMinutes;
+  const rawOccurrence = Number.isFinite(Number((source as Partial<GroupServiceSchedule>).occurrenceCount))
+    ? Number((source as Partial<GroupServiceSchedule>).occurrenceCount)
+    : fallback.occurrenceCount;
+  return {
+    dayOfWeek: clamp(Math.round(rawDay), 0, 6),
+    startMinutes: Math.round(rawStart),
+    occurrenceCount: clamp(Math.round(rawOccurrence), 1, MAX_GROUP_OCCURRENCE_COUNT),
+    active: (source as Partial<GroupServiceSchedule>).active !== false,
+  };
 }
 
 function startOfCalendarWeek(value = new Date()) {
@@ -1422,6 +1481,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     : Math.max(1, fallback.packageAllowance ?? 5);
   const packageCoverageMode: PackageCoverageMode =
     service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
+  const groupSchedule = lessonFormat === "group" ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule) : undefined;
   return {
     id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
     name,
@@ -1444,6 +1504,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
       lessonFormat === "package" && typeof service?.packageCoversServiceId === "string"
         ? service.packageCoversServiceId.trim().slice(0, 120)
         : undefined,
+    groupSchedule,
   };
 }
 
@@ -1581,6 +1642,17 @@ function parseQuantityInput(value: string) {
   return Math.max(0, Math.round(parseMoneyInput(value)));
 }
 
+function parseDraftNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function generateServiceDraftId() {
+  return `service-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function emptyInvoiceDraft(settings = defaultInvoiceSettings): InvoiceDraft {
   return {
     payerName: "",
@@ -1618,6 +1690,7 @@ function emptyServiceEditor(): ServiceEditor {
     lessonFormat: "private",
     priceMode: "session",
     location: "",
+    groupSchedule: defaultGroupSchedule(),
     packageAllowance: 5,
     packageCoverageMode: "upfront",
     packageCoversServiceId: "",
@@ -1917,7 +1990,10 @@ function App() {
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showServiceEditor, setShowServiceEditor] = useState(false);
-  const [serviceSaveState, setServiceSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [serviceSaveState, setServiceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [groupOccurrenceInput, setGroupOccurrenceInput] = useState("");
+  const [groupMinimumInput, setGroupMinimumInput] = useState("");
+  const [groupMaximumInput, setGroupMaximumInput] = useState("");
   const [availability, setAvailability] = useState<AvailabilityWindow[][]>(defaultAvailability);
   const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
@@ -1934,6 +2010,7 @@ function App() {
   const [clientSaveState, setClientSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [clientProfileTab, setClientProfileTab] = useState<ClientProfileTab>("bookings");
   const [selectedId, setSelectedId] = useState("");
+  const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
   const [billingSection, setBillingSection] = useState<BillingSection>("none");
@@ -1945,6 +2022,26 @@ function App() {
   const [confirmedInvoiceNumber, setConfirmedInvoiceNumber] = useState("");
   const [sentInvoiceNumber, setSentInvoiceNumber] = useState("");
   const [voidedInvoiceNumbers, setVoidedInvoiceNumbers] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (serviceEditor.lessonFormat !== "group") {
+      setGroupOccurrenceInput("");
+      setGroupMinimumInput("");
+      setGroupMaximumInput("");
+      return;
+    }
+
+    const baseSchedule = serviceEditor.groupSchedule ?? defaultGroupSchedule();
+    const normalizedCapacity = clamp(Math.round(serviceEditor.capacity), 2, 24);
+    const normalizedMinimum = clamp(Math.round(serviceEditor.minParticipants), 2, normalizedCapacity);
+
+    setGroupOccurrenceInput(
+      String(clamp(Math.round(baseSchedule.occurrenceCount), 1, MAX_GROUP_OCCURRENCE_COUNT)),
+    );
+    setGroupMaximumInput(String(normalizedCapacity));
+    setGroupMinimumInput(String(normalizedMinimum));
+  }, [serviceEditor.id, serviceEditor.lessonFormat]);
+
   const [catalogItems, setCatalogItems] = useState<BillingCatalogItem[]>([
     {
       id: "catalog-swing-review",
@@ -1976,7 +2073,7 @@ function App() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [quickCreate, setQuickCreate] = useState<QuickCreateState | null>(null);
   const [quickClientSearch, setQuickClientSearch] = useState("");
-  const [quickMatchField, setQuickMatchField] = useState<"name" | "phone" | "email">("name");
+  const [quickMatchField, setQuickMatchField] = useState<"name" | "phone" | "email" | "">("");
   const [dockBookings, setDockBookings] = useState<PendingBooking[]>([]);
   const [flyingBooking, setFlyingBooking] = useState<DockFlight | null>(null);
   const [activeDockBookingId, setActiveDockBookingId] = useState("");
@@ -2047,6 +2144,42 @@ function App() {
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
+  const selectedGroupSessionService = selectedGroupSession
+    ? services.find((service) => service.id === selectedGroupSession.serviceId) ?? null
+    : null;
+  const selectedGroupSessionAttendees = useMemo(() => {
+    if (!selectedGroupSession || !selectedGroupSessionService) return [];
+    const candidate = {
+      week: selectedGroupSession.week,
+      day: selectedGroupSession.day,
+      start: selectedGroupSession.start,
+      duration: selectedGroupSession.duration,
+    };
+    return items
+      .filter(
+        (item) =>
+          item.kind === "appointment" &&
+          item.serviceId === selectedGroupSessionService.id &&
+          overlaps(itemSlot(item), candidate),
+      )
+      .sort((a, b) => (a.client ?? "").localeCompare(b.client ?? ""));
+  }, [items, selectedGroupSession, selectedGroupSessionService]);
+  const selectedGroupSessionBookedCount = selectedGroupSessionAttendees.filter((appointment) =>
+    isActiveGroupBooking(appointment.status),
+  ).length;
+  const selectedGroupSessionCapacity = selectedGroupSessionService?.capacity ?? 0;
+  const selectedGroupSessionRemainingSlots = Math.max(0, selectedGroupSessionCapacity - selectedGroupSessionBookedCount);
+  const selectedGroupSessionIsFull = selectedGroupSessionCapacity > 0 && selectedGroupSessionBookedCount >= selectedGroupSessionCapacity;
+  const selectedGroupSessionDate = selectedGroupSession
+    ? dateForSlot(selectedGroupSession.week, selectedGroupSession.day)
+    : null;
+  const selectedGroupSessionLabel = selectedGroupSessionDate
+    ? selectedGroupSessionDate.toLocaleDateString("en-NZ", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      })
+    : "";
   const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek]);
   const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
   const weekItems = useMemo(() => items.filter((item) => itemWeek(item) === activeWeek), [activeWeek, items]);
@@ -2071,6 +2204,10 @@ function App() {
   const visiblePublicServices = selectedBookingService ? [selectedBookingService] : publicServices;
   const selectedRescheduleMatch =
     rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
+  const selectedRescheduleService = selectedRescheduleMatch
+    ? services.find((service) => service.id === selectedRescheduleMatch.serviceId) ?? null
+    : null;
+  const bookingTargetService = bookingMode === "reschedule" ? selectedRescheduleService : selectedBookingService;
   const bookingWidgetUrl = useMemo(() => getBookingWidgetUrl(brandSettings.showLogo), [brandSettings.showLogo]);
   const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
@@ -2753,18 +2890,52 @@ function App() {
     return true;
   }
 
+  const scheduledGroupSlots = useMemo<CalendarItem[]>(() => {
+    const firstWeek = getCurrentWeekOffset();
+    return services
+      .filter((service) => service.lessonFormat === "group" && service.groupSchedule && service.groupSchedule.active && service.active)
+      .flatMap((service) => {
+        const schedule = service.groupSchedule;
+        if (!schedule) return [];
+        const occurrenceCount = clamp(
+          Math.round(schedule.occurrenceCount),
+          1,
+          MAX_GROUP_OCCURRENCE_COUNT,
+        );
+        if (activeWeek < firstWeek || activeWeek >= firstWeek + occurrenceCount) return [];
+          return [
+            {
+              id: `group-slot-${service.id}-${activeWeek}`,
+              kind: "block" as const,
+              week: activeWeek,
+              day: schedule.dayOfWeek,
+              start: schedule.startMinutes,
+              duration: service.duration,
+              serviceId: service.id,
+              syntheticGroupSlot: true,
+              readOnly: true,
+              title: `${service.name} (group)`,
+              client: `${service.name} (${service.capacity} places)`,
+            },
+          ];
+      });
+  }, [activeWeek, services]);
+
   const displayItems = useMemo(() => {
     const floatingItemId = floatingDrag?.itemId ?? "";
     const baseWeekItems = floatingItemId ? weekItems.filter((item) => item.id !== floatingItemId) : weekItems;
-    if (!draft || draft.mode === "block" || draft.mode === "place") return baseWeekItems;
+    if (!draft || draft.mode === "block" || draft.mode === "place") {
+      return [...baseWeekItems, ...scheduledGroupSlots];
+    }
     const withoutMoving = baseWeekItems.filter((item) => item.id !== draft.itemId);
     const movingItem = items.find((item) => item.id === draft.itemId);
-    if (!movingItem || draft.week !== activeWeek) return withoutMoving;
+    if (!movingItem || draft.week !== activeWeek) return [...withoutMoving, ...scheduledGroupSlots];
     return [
       ...withoutMoving,
+      ...scheduledGroupSlots,
       { ...movingItem, week: draft.week, day: draft.day, start: draft.start, duration: draft.duration },
     ];
-  }, [activeWeek, draft, floatingDrag, items, weekItems]);
+  }, [activeWeek, draft, floatingDrag, items, weekItems, scheduledGroupSlots]);
   const floatingItem = floatingDrag ? items.find((item) => item.id === floatingDrag.itemId) : null;
   const floatingService = floatingItem ? itemService(floatingItem, services) : null;
 
@@ -2917,8 +3088,10 @@ function App() {
     latestCoachEmail?: NotificationRecord,
     latestAdminEmail?: NotificationRecord,
   ) {
-    if (isEmbedMode || item.kind !== "appointment" || pointerSessionRef.current) return;
+    if (isEmbedMode || pointerSessionRef.current) return;
     if (event.pointerType === "touch") return;
+    const groupSessionContext = getGroupSessionContext(item);
+    if (!groupSessionContext && item.kind !== "appointment" && item.kind !== "block") return;
     const rect = event.currentTarget.getBoundingClientRect();
     const cardWidth = 304;
     const gap = 14;
@@ -2930,12 +3103,15 @@ function App() {
       itemId: item.id,
       x,
       y,
-      client: item.client || item.title,
-      service: service?.name ?? "Golf lesson",
+      kind: groupSessionContext ? "group-session" : item.kind === "appointment" ? "appointment" : "blocked",
+      client: groupSessionContext ? groupSessionContext.service.name : item.client || item.title,
+      service: groupSessionContext
+        ? `Group Session · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
+        : service?.name ?? "Golf lesson",
       time: `${dateForSlot(itemWeek(item), item.day).toLocaleDateString("en-NZ", { weekday: "long", month: "short", day: "numeric" })}, ${formatRange(item.start, item.duration)}`,
       venue: service?.location || coachAccount.venueShortName || coachAccount.venueName,
-      phone: item.phone || "",
-      email: item.email || "",
+      phone: groupSessionContext ? "" : item.phone || "",
+      email: groupSessionContext ? "" : item.email || "",
       clientEmailStatus: latestClientEmail ? notificationStatusLabel(latestClientEmail) : "No client email receipt yet",
       coachEmailStatus: latestCoachEmail ? notificationStatusLabel(latestCoachEmail) : "No coach receipt yet",
       adminEmailStatus: latestAdminEmail ? notificationStatusLabel(latestAdminEmail) : "No admin receipt yet",
@@ -2972,24 +3148,241 @@ function App() {
 
   const peopleImportPreview = useMemo(() => parsePeopleImport(peopleImportText).length, [peopleImportText]);
 
+  function closeCalendarDetails() {
+    setSelectedId("");
+    setSelectedGroupSession(null);
+  }
+
+  function isGroupServiceSlotMatch(service: Service | null, week: number, day: number, start: number) {
+    if (!service || service.lessonFormat !== "group" || !service.groupSchedule?.active) return false;
+    if (day !== service.groupSchedule.dayOfWeek) return false;
+    if (start !== service.groupSchedule.startMinutes) return false;
+    if (!Number.isInteger(week)) return false;
+    const weekOffset = getCurrentWeekOffset();
+    const occurrenceLimit = clamp(Math.round(service.groupSchedule.occurrenceCount), 1, MAX_GROUP_OCCURRENCE_COUNT);
+    if (week < weekOffset || week >= weekOffset + occurrenceLimit) return false;
+    return true;
+  }
+
+  function openQuickCreateForGroupSlot(item: CalendarItem, anchor: { x: number; y: number }) {
+    const service = services.find((candidate) => candidate.id === item.serviceId);
+    if (!service || service.lessonFormat !== "group") return;
+    const slotWeek = itemWeek(item);
+    if (!isGroupServiceSlotMatch(service, slotWeek, item.day, item.start)) return;
+    const candidate = {
+      week: slotWeek,
+      day: item.day,
+      start: item.start,
+      duration: service.duration,
+    };
+    closeCalendarDetails();
+    setQuickMatchField("name");
+    setQuickClientSearch("");
+    setQuickCreate({
+      week: slotWeek,
+      day: item.day,
+      start: item.start,
+      x: anchor.x,
+      y: anchor.y,
+      serviceId: service.id,
+      phone: "",
+      email: "",
+      note: "",
+      error: quickCreateAvailabilityError(candidate, service),
+    });
+  }
+
+  function openGroupSessionFromSlot(item: CalendarItem): boolean {
+    const failWith = (reason: string) => {
+      setToast({ message: `Unable to open group session: ${reason}` });
+      return false;
+    };
+
+    const serviceId = item.serviceId;
+    if (!serviceId) return failWith("missing serviceId");
+
+    const service = services.find((candidate) => candidate.id === serviceId);
+    if (!service) return failWith("service not found");
+    if (service.lessonFormat !== "group") return failWith("service is not group");
+
+    const week = itemWeek(item);
+    const slotWeek = Number.isInteger(week) ? week : NaN;
+    const slotData = {
+      day: item.day,
+      start: item.start,
+      duration: item.duration,
+    };
+
+    if (item.syntheticGroupSlot || item.groupSlot) {
+      if (!service || !Number.isInteger(slotWeek) || !Number.isInteger(slotData.day) || !Number.isFinite(slotData.start) || !Number.isFinite(slotData.duration)) {
+        return failWith("slot does not match schedule");
+      }
+    } else {
+      if (!service.groupSchedule || !service.groupSchedule.active) return failWith("missing groupSchedule");
+      if (!isGroupServiceSlotMatch(service, slotWeek, slotData.day, slotData.start)) return failWith("slot does not match schedule");
+    }
+
+    const candidateSession: GroupSession = {
+      serviceId,
+      week: slotWeek,
+      day: slotData.day,
+      start: slotData.start,
+      duration: slotData.duration || service.duration,
+    };
+    const sessionService = services.find((candidate) => candidate.id === candidateSession.serviceId);
+    if (!sessionService) return failWith("selectedGroupSessionDetails failed to resolve");
+
+    setSelectedGroupSession(candidateSession);
+    setSelectedId("");
+    setQuickCreate(null);
+    return true;
+  }
+
+  function openGroupSessionForItem(item: CalendarItem) {
+    return openGroupSessionFromSlot(item);
+  }
+
+  function openQuickCreateForGroupSession(anchor: { x: number; y: number }) {
+    if (!selectedGroupSession) return;
+    const service = selectedGroupSessionService;
+    if (!service || service.lessonFormat !== "group") return;
+    const candidate = {
+      week: selectedGroupSession.week,
+      day: selectedGroupSession.day,
+      start: selectedGroupSession.start,
+      duration: selectedGroupSession.duration,
+    };
+    setQuickMatchField("name");
+    setQuickClientSearch("");
+    setQuickCreate({
+      week: candidate.week,
+      day: candidate.day,
+      start: candidate.start,
+      x: anchor.x,
+      y: anchor.y,
+      serviceId: service.id,
+      phone: "",
+      email: "",
+      note: "",
+      error: quickCreateAvailabilityError(candidate, service),
+    });
+  }
+
+  function isScheduledGroupSessionSlot(item: CalendarItem) {
+    if (item.syntheticGroupSlot || item.groupSlot) return true;
+    const service = itemService(item, services);
+    return (
+      item.readOnly &&
+      item.kind === "block" &&
+      service?.lessonFormat === "group" &&
+      isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
+    );
+  }
+
+  function isGroupSessionAppointment(item: CalendarItem) {
+    const service = itemService(item, services);
+    return (
+      item.kind === "appointment" &&
+      service?.lessonFormat === "group" &&
+      isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
+    );
+  }
+
+  function isGroupSessionItem(item: CalendarItem) {
+    return isScheduledGroupSessionSlot(item) || isGroupSessionAppointment(item);
+  }
+
+  function isActiveGroupBooking(status: BookingStatus | undefined) {
+    if (!status) return true;
+    return status === "booked" || status === "completed";
+  }
+
+  function getGroupSessionContext(item: CalendarItem) {
+    if (!isGroupSessionItem(item)) return null;
+    const service = itemService(item, services);
+    if (!service || service.lessonFormat !== "group") return null;
+    const week = itemWeek(item);
+    if (!Number.isInteger(week) || !Number.isInteger(item.day) || !Number.isFinite(item.start)) return null;
+    const duration = Number.isFinite(item.duration) && item.duration > 0 ? item.duration : service.duration;
+    if (!isScheduledGroupSessionSlot(item) && !isGroupServiceSlotMatch(service, week, item.day, item.start)) return null;
+    const session: GroupSession = {
+      serviceId: service.id,
+      week,
+      day: item.day,
+      start: item.start,
+      duration,
+    };
+    const candidate = {
+      week: session.week,
+      day: session.day,
+      start: session.start,
+      duration: session.duration,
+    };
+    const attendees = items
+      .filter(
+        (candidateItem) =>
+          candidateItem.kind === "appointment" &&
+          candidateItem.serviceId === service.id &&
+          overlaps(itemSlot(candidateItem), candidate),
+      )
+      .sort((a, b) => (a.client ?? "").localeCompare(b.client ?? ""));
+    const bookedCount = attendees.filter((appointment) => isActiveGroupBooking(appointment.status)).length;
+    return {
+      service,
+      session,
+      attendees,
+      capacity: service.capacity,
+      bookedCount,
+    };
+  }
+
+  function handleCalendarItemClick(
+    event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
+    item: CalendarItem,
+  ) {
+    if (!isGroupSessionItem(item)) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    hideCalendarItemHover();
+    return openGroupSessionForItem(item);
+  }
+
   const bookingSlots = useMemo(() => {
-    if (!selectedBookingService) return [];
+    if (!bookingTargetService) return [];
+    if (bookingTargetService.lessonFormat === "group") {
+      const slots: number[] = [];
+      const candidate = {
+        week: activeWeek,
+        day: bookingDay,
+        start: bookingTargetService.groupSchedule?.startMinutes ?? 0,
+        duration: bookingTargetService.duration,
+      };
+      const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
+      if (
+        candidate.start === bookingTargetService.groupSchedule?.startMinutes &&
+        isGroupServiceSlotMatch(bookingTargetService, activeWeek, bookingDay, candidate.start) &&
+        !hasCollision(candidate, ignoreId, bookingTargetService)
+      ) {
+        slots.push(candidate.start);
+      }
+      return slots;
+    }
     const windows = availability[bookingDay] ?? [];
     const slots: number[] = [];
     const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
     windows.forEach((window) => {
-      for (let start = window.start; start + selectedBookingService.duration <= window.end; start += 30) {
+      for (let start = window.start; start + bookingTargetService.duration <= window.end; start += 30) {
         const candidate = {
           week: activeWeek,
           day: bookingDay,
           start,
-          duration: selectedBookingService.duration,
+          duration: bookingTargetService.duration,
         };
-        if (!hasCollision(candidate, ignoreId)) slots.push(start);
+        if (!hasCollision(candidate, ignoreId, bookingTargetService)) slots.push(start);
       }
     });
     return slots;
-  }, [activeWeek, bookingDay, bookingMode, selectedBookingService, selectedRescheduleMatch, items]);
+  }, [activeWeek, bookingDay, bookingMode, bookingTargetService, selectedRescheduleMatch, items, availability]);
   const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot === bookingStart);
 
   function slotFromClient(clientX: number, clientY: number) {
@@ -3133,7 +3526,7 @@ function App() {
 
     setItems(items.filter((item) => item.id !== movedItem.id));
     setFloatingDrag(null);
-    setSelectedId("");
+    closeCalendarDetails();
     setFlyingBooking({ ...docked, fromX, fromY });
     window.setTimeout(() => {
       setDockBookings((current) => [...current, docked]);
@@ -3175,7 +3568,7 @@ function App() {
   function setActiveWeekState(nextWeek: number) {
     activeWeekRef.current = nextWeek;
     setActiveWeek(nextWeek);
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
   }
 
@@ -3244,13 +3637,43 @@ function App() {
     return availability[day].some((window) => start >= window.start && end <= window.end);
   }
 
-  function hasCollision(candidate: SlotCandidate, ignoreId?: string) {
+  function hasCollision(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
     const candidateEnd = candidate.start + candidate.duration;
-    return items.some((item) => {
+    const overlappingItems = items.filter((item) => {
       if (item.id === ignoreId || itemWeek(item) !== candidate.week || item.day !== candidate.day) return false;
       const itemEnd = item.start + item.duration;
       return candidate.start < itemEnd && candidateEnd > item.start;
     });
+    if (!service || service.lessonFormat !== "group") {
+      return overlappingItems.length > 0;
+    }
+    const sameServiceCount = overlappingItems.filter(
+      (item) => item.kind === "appointment" && item.serviceId === service.id && isActiveGroupBooking(item.status),
+    ).length;
+    const collidesWithOtherService = overlappingItems.some(
+      (item) => item.kind !== "appointment" || item.serviceId !== service.id,
+    );
+    if (collidesWithOtherService) return true;
+    return sameServiceCount >= service.capacity;
+  }
+
+  function isGroupSlotFull(candidate: SlotCandidate, service?: Service) {
+    if (!service || service.lessonFormat !== "group") return false;
+    const sameServiceCount = items.filter(
+      (item) =>
+        item.kind === "appointment" &&
+        item.serviceId === service.id &&
+        overlaps(itemSlot(item), candidate) &&
+        isActiveGroupBooking(item.status),
+    ).length;
+    return sameServiceCount >= service.capacity;
+  }
+
+  function quickCreateAvailabilityError(candidate: SlotCandidate, service?: Service) {
+    if (!service) return "That service is no longer available.";
+    if (isGroupSlotFull(candidate, service)) return "Group is full.";
+    if (!isValidAppointmentSlot(candidate, undefined, service)) return "That time is already occupied.";
+    return "";
   }
 
   function hasAppointmentCollision(candidate: SlotCandidate, ignoreId?: string) {
@@ -3269,8 +3692,9 @@ function App() {
     });
   }
 
-  function isValidAppointmentSlot(candidate: SlotCandidate, ignoreId?: string) {
+  function isValidAppointmentSlot(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
     if (candidate.start < START_HOUR * 60 || candidate.start + candidate.duration > END_HOUR * 60) return false;
+    if (service?.lessonFormat === "group") return !hasCollision(candidate, ignoreId, service);
     if (hasAppointmentCollision(candidate, ignoreId)) return false;
     return true;
   }
@@ -3440,6 +3864,7 @@ function App() {
     dragPreviewMetaRef.current = null;
     setFloatingDrag(null);
     pendingQuickCreateRef.current = {
+      week: activeWeek,
       day: slot.day,
       start: slot.start,
       x: event.clientX,
@@ -3539,6 +3964,7 @@ function App() {
         setDraftState(null);
         return;
       }
+      const bookingService = services.find((candidate) => candidate.id === session.booking.serviceId);
       const candidate = {
         week: activeWeekRef.current,
         day: slot.day,
@@ -3548,7 +3974,7 @@ function App() {
       setDraftState({
         mode: "place",
         ...candidate,
-        valid: isValidAppointmentSlot(candidate),
+        valid: isValidAppointmentSlot(candidate, undefined, bookingService),
       });
       return;
     }
@@ -3577,7 +4003,7 @@ function App() {
           return;
         }
         if (requireLiveDatabase("create calendar items")) {
-          setSelectedId("");
+          closeCalendarDetails();
           setQuickCreate(pendingQuickCreate);
           clearGesture({ preserveQuickCreate: true });
         } else {
@@ -3647,12 +4073,12 @@ function App() {
         note: "Blocked from calendar drag",
       };
       setItems([...items, newBlock]);
-      setSelectedId("");
+      closeCalendarDetails();
       setToast({
         message: `Blocked ${weekDays[activeDraft.day].short}, ${formatRange(activeDraft.start, activeDraft.duration)}.`,
         undo: () => {
           setItems(previous);
-          setSelectedId("");
+          closeCalendarDetails();
         },
       });
       clearGesture();
@@ -3682,7 +4108,7 @@ function App() {
       setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
       setDockBookings(dockBookings.filter((booking) => booking.id !== session.booking.id));
       setActiveDockBookingId((current) => (current === session.booking.id ? "" : current));
-      setSelectedId("");
+      closeCalendarDetails();
       setToast({ message: `Placed ${session.booking.client} on ${weekDays[item.day].short} at ${formatTime(item.start)}.` });
       clearGesture();
       return;
@@ -3713,7 +4139,7 @@ function App() {
           : item,
     );
     setItems(movedItem.kind === "appointment" ? carveBusyBlocksForAppointment(nextItems, activeDraft) : nextItems);
-    setSelectedId("");
+    closeCalendarDetails();
     clearGesture();
   }
 
@@ -3729,12 +4155,19 @@ function App() {
           }
         : current,
     );
+    setQuickMatchField("");
   }
 
   function quickClientMatchButton(field: "name" | "phone" | "email") {
     if (!quickClientSuggestion || !showQuickClientSuggestion || quickMatchField !== field) return null;
     return (
-      <button className="client-match-prompt quick-field-match" onClick={() => applyQuickClient(quickClientSuggestion)} type="button">
+      <button
+        className="client-match-prompt quick-field-match"
+        onMouseDown={(event) => event.preventDefault()}
+        onTouchStart={(event) => event.preventDefault()}
+        onClick={() => applyQuickClient(quickClientSuggestion)}
+        type="button"
+      >
         <User size={15} />
         <span>
           <strong>{quickClientSuggestion.name}</strong>
@@ -3762,13 +4195,18 @@ function App() {
     if (!quickCreate) return;
     const service = appointmentServices.find((candidate) => candidate.id === serviceId);
     if (!service) return;
-    const candidate = { week: activeWeek, day: quickCreate.day, start: quickCreate.start, duration: service.duration };
+    const candidate = {
+      week: quickCreate.week,
+      day: quickCreate.day,
+      start: quickCreate.start,
+      duration: service.duration,
+    };
     setQuickCreate((current) =>
       current
         ? {
             ...current,
             serviceId,
-            error: isValidAppointmentSlot(candidate) ? "" : "That time is already occupied.",
+            error: quickCreateAvailabilityError(candidate, service),
           }
         : current,
     );
@@ -3791,13 +4229,15 @@ function App() {
       return;
     }
     const candidate = {
-      week: activeWeek,
+      week: quickCreate.week,
       day: quickCreate.day,
       start: quickCreate.start,
       duration: quickCreateService.duration,
     };
-    if (!isValidAppointmentSlot(candidate)) {
-      setQuickCreate((current) => (current ? { ...current, error: "That time is already occupied." } : current));
+    if (!isValidAppointmentSlot(candidate, undefined, quickCreateService)) {
+      setQuickCreate((current) =>
+        current ? { ...current, error: quickCreateAvailabilityError(candidate, quickCreateService) } : current,
+      );
       return;
     }
     const item: CalendarItem = {
@@ -3812,7 +4252,15 @@ function App() {
       note: quickCreate.note.trim(),
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
-    setSelectedId("");
+    if (
+      !selectedGroupSession ||
+      selectedGroupSession.serviceId !== quickCreateService.id ||
+      selectedGroupSession.week !== quickCreate.week ||
+      selectedGroupSession.day !== quickCreate.day ||
+      selectedGroupSession.start !== quickCreate.start
+    ) {
+      setSelectedId("");
+    }
     setQuickCreate(null);
     setQuickClientSearch("");
   }
@@ -3834,7 +4282,7 @@ function App() {
       note: "Quick block",
     };
     setItems([...items, item]);
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
     setToast({
       message: `Blocked ${weekDays[item.day].short}, ${formatRange(item.start, item.duration)}.`,
@@ -3847,7 +4295,7 @@ function App() {
     const service = appointmentServices.find((candidate) => candidate.id === serviceId);
     if (!service) return;
     const candidate = { week: itemWeek(selected), day: selected.day, start: selected.start, duration: service.duration };
-    if (!isValidAppointmentSlot(candidate)) {
+    if (!isValidAppointmentSlot(candidate, undefined, service)) {
       setToast({ message: "That lesson would overlap another appointment." });
       return;
     }
@@ -3864,7 +4312,7 @@ function App() {
       note: "Admin-created inside blocked time.",
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
-    setSelectedId("");
+    closeCalendarDetails();
     setToast({
       message: `Added ${service.name} inside blocked time at ${formatTime(item.start)}.`,
       undo: () => setItems(previous),
@@ -3885,7 +4333,7 @@ function App() {
       email: selected.email,
       note: `Follow-up ${service.name}`,
     };
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
     setFlyingBooking(booking);
     window.setTimeout(() => {
@@ -3907,7 +4355,7 @@ function App() {
     setFloatingDrag(null);
     setActiveDockBookingId(booking.id);
     setMovedState(false);
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
     setPointerSessionState({ mode: "place", booking });
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -3925,7 +4373,7 @@ function App() {
       setToast({ message: "That parked lesson type is no longer available." });
       return false;
     }
-    if (!isValidAppointmentSlot(candidate)) {
+    if (!isValidAppointmentSlot(candidate, undefined, service)) {
       setToast({ message: "That spot is not available. The lesson is still on the shelf." });
       return false;
     }
@@ -3949,7 +4397,7 @@ function App() {
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
     setDockBookings(dockBookings.filter((dockBooking) => dockBooking.id !== booking.id));
     setActiveDockBookingId("");
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
     if (animation) {
       setPlacementAnimation(animation);
@@ -3990,6 +4438,7 @@ function App() {
       top,
       width: popoverWidth,
       maxHeight: availableHeight,
+      zIndex: selectedGroupSession ? 120 : undefined,
     };
   }
 
@@ -4003,14 +4452,14 @@ function App() {
     setQuickCreate(null);
     if (view === "settings") setSettingsTab("none");
     if (view === "billing") setBillingSection("none");
-    if (view !== "calendar") setSelectedId("");
+    if (view !== "calendar") closeCalendarDetails();
   }
 
   function openInvoiceCoachSettings() {
     setActiveView("settings");
     setSettingsTab("account");
     setBillingSection("none");
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
   }
 
@@ -4148,7 +4597,7 @@ function App() {
   }
 
   async function confirmPublicReschedule() {
-    if (!selectedRescheduleMatch || !selectedBookingService || bookingStart === null) {
+    if (!selectedRescheduleMatch || !bookingTargetService || bookingStart === null) {
       setToast({ message: "Choose the booking and the new time." });
       return;
     }
@@ -4356,6 +4805,7 @@ function App() {
         return {
           ...next,
           visibility: "private",
+          groupSchedule: undefined,
           capacity: 1,
           minParticipants: 1,
           priceMode: "session",
@@ -4367,17 +4817,66 @@ function App() {
         const capacity = clamp(Math.round(Number(next.capacity) || 2), 2, 24);
         return {
           ...next,
+          groupSchedule: cleanGroupSchedule(next.groupSchedule, defaultGroupSchedule()),
           capacity,
           minParticipants: clamp(Math.round(Number(next.minParticipants) || 2), 2, capacity),
         };
       }
       return {
         ...next,
+        groupSchedule: undefined,
         capacity: clamp(Math.round(Number(next.capacity) || 1), 1, 24),
         minParticipants: 1,
         priceMode: "session",
       };
     });
+  }
+
+  function normalizeGroupDraftInputs(editor: ServiceEditor) {
+    if (editor.lessonFormat !== "group") {
+      return editor;
+    }
+
+    const schedule = editor.groupSchedule ?? defaultGroupSchedule();
+    const occurrenceCount = clamp(
+      Math.round(parseDraftNumber(groupOccurrenceInput) ?? schedule.occurrenceCount),
+      1,
+      MAX_GROUP_OCCURRENCE_COUNT,
+    );
+    const capacity = clamp(Math.round(parseDraftNumber(groupMaximumInput) ?? editor.capacity), 2, 24);
+    const minParticipants = clamp(Math.round(parseDraftNumber(groupMinimumInput) ?? editor.minParticipants), 2, capacity);
+
+    return {
+      ...editor,
+      capacity,
+      minParticipants,
+      groupSchedule: cleanGroupSchedule({ ...schedule, occurrenceCount }, defaultGroupSchedule()),
+    };
+  }
+
+  function applyGroupDraftInputs() {
+    if (serviceEditor.lessonFormat !== "group") return serviceEditor;
+    const next = normalizeGroupDraftInputs(serviceEditor);
+    setServiceEditor(next);
+    const nextSchedule = next.groupSchedule ?? defaultGroupSchedule();
+    setGroupOccurrenceInput(String(nextSchedule.occurrenceCount));
+    setGroupMaximumInput(String(next.capacity));
+    setGroupMinimumInput(String(next.minParticipants));
+    return next;
+  }
+
+  function updateGroupSchedule<K extends keyof GroupServiceSchedule>(field: K, value: GroupServiceSchedule[K]) {
+    setServiceSaveState("idle");
+    setServiceEditor((current) => ({
+      ...current,
+      groupSchedule: cleanGroupSchedule(
+        {
+          ...(current.groupSchedule ?? {}),
+          [field]: value,
+        },
+        defaultGroupSchedule(),
+      ),
+    }));
   }
 
   function editService(service: Service) {
@@ -4391,6 +4890,7 @@ function App() {
     setEditingServiceId(null);
     setServiceEditor({
       ...emptyServiceEditor(),
+      id: generateServiceDraftId(),
       location: coachAccount.venueShortName,
     });
     setShowServiceEditor(true);
@@ -4406,6 +4906,16 @@ function App() {
       message: `Lesson marked ${status.replace("_", "-")}.`,
       undo: () => setItems(previous),
     });
+  }
+
+  function cancelGroupSessionAttendee(itemId: string) {
+    if (!window.confirm("Cancel this attendee from the group session?")) return;
+    const appointment = items.find((item) => item.id === itemId && item.kind === "appointment");
+    if (!appointment) {
+      setToast({ message: "Could not find that attendee." });
+      return;
+    }
+    updateAppointmentStatus(appointment.id, "cancelled");
   }
 
   function markInvoiceDraftDirty() {
@@ -4595,29 +5105,67 @@ function App() {
     setToast({ message: `${confirmedInvoiceNumber} marked sent.` });
   }
 
-  async function persistServices(nextServices: Service[], message = "Lesson types saved.") {
-    const cleaned = cleanServices(nextServices);
-    setServices(cleaned);
+  async function persistServices(
+    nextServices: Service[],
+    message = "Lesson types saved.",
+    requiredServiceId?: string,
+  ) {
+    const payloadServices = nextServices.map((service) => ({ ...service }));
+    const snapshot = services;
     setServiceSaveState("saving");
     try {
-      const response = await fetch("/api/services", {
+      const response = await fetch("/api/calendar-state", {
         method: "PUT",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ services: cleaned }),
+        cache: "no-store",
+        body: JSON.stringify({
+          items: items,
+          services: payloadServices,
+          syncKey: calendarSyncKey,
+          updatedAt: calendarStateVersion,
+        }),
       });
       if (response.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error("Services save failed");
-      const data = (await response.json()) as { services?: Service[] };
-      if (Array.isArray(data.services)) setServices(cleanServices(data.services));
+      const data = (await response.json().catch(() => null)) as {
+        services?: Service[];
+        message?: string;
+        error?: string;
+        notifications?: NotificationRecord[];
+        warnings?: string[];
+        updatedAt?: string;
+      };
+      if (!response.ok) {
+        const detail = data?.message || data?.error;
+        throw new Error(detail || `Services save failed (${response.status} ${response.statusText})`);
+      }
+      if (!Array.isArray(data?.services)) {
+        throw new Error("Services save response did not return services.");
+      }
+      const persistedServices = cleanServices(data.services);
+      const expectedServiceId = requiredServiceId || payloadServices.at(-1)?.id;
+      const persistedServiceIds = new Set(persistedServices.map((service) => service.id));
+      if (expectedServiceId && !persistedServiceIds.has(expectedServiceId)) {
+        throw new Error("Service did not persist. Reload and try again.");
+      }
+      setServices(persistedServices);
+      if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+      if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+      if (Array.isArray(data.warnings) && data.warnings.length) {
+        const warning = data.warnings.find((candidate) => typeof candidate === "string" && candidate.trim()) ?? "";
+        if (warning) setToast({ message: warning });
+      }
       setServiceSaveState("saved");
       setToast({ message });
       window.setTimeout(() => setServiceSaveState("idle"), 1600);
-    } catch {
-      setServiceSaveState("idle");
-      setToast({ message: "Could not save lesson types." });
+    } catch (error) {
+      setServiceSaveState("error");
+      const reason = error instanceof Error ? error.message : "Could not save lesson types.";
+      setToast({ message: reason });
+      setServices(snapshot);
     }
   }
 
@@ -4626,10 +5174,12 @@ function App() {
       setToast({ message: "Give the lesson type a name before saving." });
       return;
     }
+    const normalizedEditor = serviceEditor.lessonFormat === "group" ? applyGroupDraftInputs() : serviceEditor;
+    const stableServiceId = editingServiceId || normalizedEditor.id || generateServiceDraftId();
     const clean = cleanService(
       {
-        ...serviceEditor,
-        id: editingServiceId ?? serviceEditor.id ?? cleanSlug(serviceEditor.name, `service-${Date.now()}`),
+        ...normalizedEditor,
+        id: stableServiceId,
       },
       services.length,
     );
@@ -4640,7 +5190,11 @@ function App() {
     setEditingServiceId(clean.id);
     setServiceEditor(clean);
     setShowServiceEditor(false);
-    void persistServices(nextServices, exists ? `${clean.name} updated.` : `${clean.name} added.`);
+    void persistServices(
+      nextServices,
+      exists ? `${clean.name} updated.` : `${clean.name} added.`,
+      clean.id,
+    );
   }
 
   function toggleServiceActive(service: Service) {
@@ -4649,6 +5203,7 @@ function App() {
         candidate.id === service.id ? { ...candidate, active: !candidate.active } : candidate,
       ),
       service.active ? `${service.name} archived.` : `${service.name} restored.`,
+      service.id,
     );
   }
 
@@ -4926,7 +5481,7 @@ function App() {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     hasLoadedCalendarApiRef.current = false;
     setAuthStatus("guest");
-    setSelectedId("");
+    closeCalendarDetails();
     setCalendarFeedStatus("offline");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
@@ -5257,7 +5812,7 @@ function App() {
 
   async function confirmPublicBooking() {
     if (bookingSubmitState === "saving") return;
-    if (!selectedBookingService || bookingStart === null) {
+    if (!bookingTargetService || bookingStart === null) {
       setToast({ message: "Choose a lesson time before confirming." });
       return;
     }
@@ -5278,9 +5833,9 @@ function App() {
       week: activeWeek,
       day: bookingDay,
       start: bookingStart,
-      duration: selectedBookingService.duration,
+      duration: bookingTargetService.duration,
     };
-    if (hasCollision(candidate)) {
+    if (hasCollision(candidate, undefined, bookingTargetService)) {
       setToast({ message: "That time has just been taken. Pick another slot." });
       setBookingStart(null);
       return;
@@ -5294,7 +5849,7 @@ function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            serviceId: selectedBookingService.id,
+            serviceId: bookingTargetService.id,
             week: activeWeek,
             day: bookingDay,
             start: bookingStart,
@@ -5322,11 +5877,11 @@ function App() {
           kind: "booking",
           appointmentId: data.appointment?.id,
           client,
-          service: selectedBookingService.name,
+          service: bookingTargetService.name,
           week: activeWeek,
           day: bookingDay,
           start: bookingStart,
-          duration: selectedBookingService.duration,
+          duration: bookingTargetService.duration,
           dayLabel: weekDays[bookingDay].label,
           timeLabel: formatTime(bookingStart),
           email,
@@ -5347,7 +5902,7 @@ function App() {
       id: `appt-${Date.now()}`,
       kind: "appointment",
       ...candidate,
-      serviceId: selectedBookingService.id,
+      serviceId: bookingTargetService.id,
       client,
       title: client,
       phone,
@@ -5356,15 +5911,15 @@ function App() {
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
     if (isEmbedMode) {
-      setSelectedId("");
+      closeCalendarDetails();
     } else {
-      setSelectedId("");
+      closeCalendarDetails();
       setActiveView("calendar");
     }
     setBookingStart(null);
     setBookingForm({ firstName: "", lastName: "", phone: "", email: "" });
     setToast({
-      message: `${client} booked ${selectedBookingService.name} on ${weekDays[item.day].short} at ${formatTime(item.start)}.`,
+      message: `${client} booked ${bookingTargetService.name} on ${weekDays[item.day].short} at ${formatTime(item.start)}.`,
     });
   }
 
@@ -5408,7 +5963,7 @@ function App() {
     if (!requireLiveDatabase("remove calendar items")) return;
     const previous = items;
     setItems(items.filter((item) => item.id !== selected.id));
-    setSelectedId("");
+    closeCalendarDetails();
     setToast({
       message: `${selected.kind === "block" ? "Block" : "Appointment"} removed.`,
       undo: () => setItems(previous),
@@ -5541,28 +6096,90 @@ function App() {
               <div className="service-form-row">
                 {serviceEditor.lessonFormat === "group" && (
                   <label className="settings-field">
-                    <span>Minimum group</span>
+                    <span>Day of week</span>
+                    <select
+                      value={serviceEditor.groupSchedule?.dayOfWeek ?? 2}
+                      onChange={(event) => updateGroupSchedule("dayOfWeek", Number(event.target.value))}
+                    >
+                      {fullDayNames.map((dayName, index) => (
+                        <option key={dayName} value={index}>
+                          {dayName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && (
+                  <label className="settings-field">
+                    <span>Start time</span>
                     <input
-                      value={serviceEditor.minParticipants}
-                      min={2}
-                      max={serviceEditor.capacity}
+                      value={minutesToInputTime(serviceEditor.groupSchedule?.startMinutes ?? timeToMinutes(18, 0))}
+                      inputMode="numeric"
+                      onChange={(event) =>
+                        updateGroupSchedule(
+                          "startMinutes",
+                          inputTimeToMinutes(
+                            event.target.value,
+                            serviceEditor.groupSchedule?.startMinutes ?? timeToMinutes(18, 0),
+                          ),
+                        )
+                      }
+                      type="time"
+                      step={SNAP_MINUTES * 60}
+                    />
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && (
+                  <label className="settings-field">
+                    <span>Generate next</span>
+                    <input
+                      value={groupOccurrenceInput}
+                      min={1}
+                      max={MAX_GROUP_OCCURRENCE_COUNT}
                       step={1}
                       inputMode="numeric"
-                      onChange={(event) => updateServiceEditor("minParticipants", Number(event.target.value))}
+                      onChange={(event) => setGroupOccurrenceInput(event.target.value)}
+                      onBlur={() => void applyGroupDraftInputs()}
                       type="text"
                     />
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && (
+                  <label className="settings-field">
+                    <span>Minimum group</span>
+                    <input
+                      value={groupMinimumInput}
+                      min={2}
+                      max={Number(groupMaximumInput) || 24}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) => setGroupMinimumInput(event.target.value)}
+                      onBlur={() => void applyGroupDraftInputs()}
+                      type="text"
+                    />
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && (
+                  <label className="settings-toggle">
+                    <input
+                      checked={serviceEditor.groupSchedule?.active !== false}
+                      onChange={(event) => updateGroupSchedule("active", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>Enable recurring schedule</span>
                   </label>
                 )}
                 {serviceEditor.lessonFormat !== "package" && (
                   <label className="settings-field">
                     <span>{serviceEditor.lessonFormat === "group" ? "Maximum group" : "Capacity"}</span>
                     <input
-                      value={serviceEditor.capacity}
+                      value={groupMaximumInput}
                       min={serviceEditor.lessonFormat === "group" ? 2 : 1}
                       max={24}
                       step={1}
                       inputMode="numeric"
-                      onChange={(event) => updateServiceEditor("capacity", Number(event.target.value))}
+                      onChange={(event) => setGroupMaximumInput(event.target.value)}
+                      onBlur={() => void applyGroupDraftInputs()}
                       type="text"
                     />
                   </label>
@@ -5634,7 +6251,13 @@ function App() {
             </div>
 
             <button className="primary-button settings-save" onClick={saveEditedService}>
-              {serviceSaveState === "saving" ? "Saving" : serviceSaveState === "saved" ? "Saved" : "Save Lesson Type"}
+              {serviceSaveState === "saving"
+                ? "Saving"
+                : serviceSaveState === "saved"
+                  ? "Saved"
+                  : serviceSaveState === "error"
+                    ? "Not saved"
+                    : "Save Lesson Type"}
             </button>
           </article>
         )}
@@ -6019,11 +6642,11 @@ function App() {
     </article>
   );
 
-  const selectedDetails = selected ? (
+  const selectedAppointmentDetails = selected ? (
     <>
       <div className="panel-header">
         <span>{selected.kind === "block" ? "Blocked Time" : "Appointment"}</span>
-        <button className="icon-button small" onClick={() => setSelectedId("")} aria-label="Close details">
+        <button className="icon-button small" onClick={closeCalendarDetails} aria-label="Close details">
           <X size={17} />
         </button>
       </div>
@@ -6160,6 +6783,135 @@ function App() {
       </div>
     </>
   ) : null;
+
+  const selectedGroupSessionDetails = selectedGroupSession && selectedGroupSessionService ? (
+    <>
+      <div className="panel-header">
+        <span>Group Session</span>
+        <button className="icon-button small" onClick={closeCalendarDetails} aria-label="Close details">
+          <X size={17} />
+        </button>
+      </div>
+      <h2 id="appointment-details-title">{selectedGroupSessionService.name}</h2>
+      <p className="muted">{selectedGroupSessionLabel}</p>
+
+      <div className="info-stack">
+        <div>
+          <Clock size={16} />
+          <span>{`${selectedGroupSessionLabel}, ${formatRange(
+            selectedGroupSession.start,
+            selectedGroupSession.duration,
+          )}`}</span>
+        </div>
+        <div>
+          <MapPin size={16} />
+          <span>{selectedGroupSessionService.location || coachAccount.venueName}</span>
+        </div>
+        <div>
+          <User size={16} />
+          <span>{`${selectedGroupSessionBookedCount} / ${selectedGroupSessionCapacity} booked`}</span>
+        </div>
+        <div>
+          <span>{`Spaces remaining: ${selectedGroupSessionRemainingSlots}`}</span>
+        </div>
+      </div>
+
+      <div className="service-summary">
+        <span>Booked people</span>
+        {selectedGroupSessionAttendees.length === 0 ? (
+          <p>No one is booked yet.</p>
+        ) : (
+          <div className="group-attendee-cards">
+            {selectedGroupSessionAttendees.map((appointment) => (
+              <article
+                key={appointment.id}
+                className="group-attendee-card"
+                style={{
+                  border: "1px solid color-mix(in srgb, var(--muted) 36%, transparent)",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  display: "grid",
+                  gap: 6,
+                  background: "color-mix(in srgb, var(--booking-card) 66%, transparent)",
+                  opacity: isActiveGroupBooking(appointment.status) ? 1 : 0.65,
+                }}
+              >
+                <div className="attendee-card-header" style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                    <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {appointment.client || appointment.title}
+                    </strong>
+                    <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                      {[
+                        appointment.phone,
+                        appointment.email,
+                        appointment.status ? (appointment.status === "no_show" ? "No-show" : appointment.status) : "booked",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    {appointment.note ? (
+                      <span style={{ color: "var(--muted)", fontSize: "0.84rem" }}>Note: {appointment.note}</span>
+                    ) : null}
+                  </div>
+                  <span
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      fontSize: "0.76rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.02em",
+                      border: "1px solid color-mix(in srgb, var(--muted) 36%, transparent)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {appointment.status ? (appointment.status === "no_show" ? "No-show" : appointment.status) : "booked"}
+                  </span>
+                </div>
+                {isActiveGroupBooking(appointment.status) ? (
+                  <div style={{ justifySelf: "end" }}>
+                    <button
+                      type="button"
+                      className="small-button"
+                      onClick={() => cancelGroupSessionAttendee(appointment.id)}
+                    >
+                      Cancel attendee
+                    </button>
+                  </div>
+                ) : (
+                  <span className="muted" style={{ fontSize: "0.82rem" }}>
+                    Cancelled attendee retained for history.
+                  </span>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel-actions">
+        <button
+          className="primary-button"
+          disabled={selectedGroupSessionIsFull}
+          onClick={(event) =>
+            openQuickCreateForGroupSession({
+              x: event.clientX,
+              y: event.clientY,
+            })
+          }
+          type="button"
+        >
+          <Plus size={16} />
+          Add person
+        </button>
+        {selectedGroupSessionIsFull ? <p className="muted">Group is full.</p> : null}
+      </div>
+    </>
+  ) : null;
+
+  const selectedDetails = selectedGroupSessionDetails
+    ? selectedGroupSessionDetails
+    : selectedAppointmentDetails;
 
   if (!isEmbedMode && authStatus !== "authenticated") {
     return (
@@ -6594,9 +7346,14 @@ function App() {
                   const latestClientEmail = itemNotifications.find((notification) => notification.kind.includes("client"));
                   const latestCoachEmail = itemNotifications.find((notification) => notification.kind.includes("coach"));
                   const latestAdminEmail = itemNotifications.find((notification) => notification.kind.includes("admin"));
+                  const scheduledGroupSession = isScheduledGroupSessionSlot(item);
+                  const groupSessionItem = isGroupSessionItem(item);
+                  const groupSessionContext = getGroupSessionContext(item);
                   const tooltipRows = [
-                    item.client || item.title,
-                    service?.name ?? (item.kind === "block" ? "Blocked time" : "Lesson"),
+                    groupSessionContext ? "Group Session" : item.client || item.title,
+                    groupSessionContext
+                      ? `Booked: ${groupSessionContext.bookedCount}/${groupSessionContext.capacity}`
+                      : service?.name ?? (item.kind === "block" ? "Blocked time" : "Lesson"),
                     formatRange(item.start, item.duration),
                     latestClientEmail ? `Client email: ${notificationStatusLabel(latestClientEmail)}` : "",
                     latestCoachEmail ? `Coach email: ${notificationStatusLabel(latestCoachEmail)}` : "",
@@ -6621,6 +7378,7 @@ function App() {
                         height: Math.max(height, 34),
                         left: `calc(${left}% + 6px)`,
                         width: `calc(${width}% - 12px)`,
+                        ...(scheduledGroupSession ? ({ cursor: "pointer" } as CSSProperties) : {}),
                         ...(flyAnimation
                           ? ({
                               "--dock-fly-x": `${flyAnimation.fromX}px`,
@@ -6629,23 +7387,70 @@ function App() {
                           : {}),
                       }}
                       onPointerDown={(event) => {
+                        if (scheduledGroupSession) {
+                          event.stopPropagation();
+                          hideCalendarItemHover();
+                          return;
+                        }
+                        if (item.readOnly || groupSessionItem) return;
                         hideCalendarItemHover();
                         beginMove(event, item);
                       }}
+                      onPointerUp={(event) => {
+                        if (groupSessionItem && !scheduledGroupSession) {
+                          event.preventDefault();
+                          handleCalendarItemClick(event, item);
+                        }
+                      }}
                       onClick={(event) => {
-                        event.stopPropagation();
                         if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
+                        if (groupSessionItem && !scheduledGroupSession) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleCalendarItemClick(event, item);
+                          return;
+                        }
+                        event.stopPropagation();
+                        setSelectedGroupSession(null);
                         setSelectedId(item.id);
                         setQuickCreate(null);
                       }}
+                      onKeyDown={(event) => {
+                        if ((event.key === "Enter" || event.key === " ") && groupSessionItem && !scheduledGroupSession) {
+                          handleCalendarItemClick(event, item);
+                        }
+                      }}
                     >
-                      <div className="item-grip" aria-hidden="true">
-                        <GripVertical size={14} />
-                      </div>
-                      <div className="item-content">
-                        <strong>{item.kind === "appointment" ? item.client || item.title : item.title}</strong>
-                        <span>{service?.name ?? "Busy"}</span>
-                        <em>{formatRange(item.start, item.duration)}</em>
+                      {item.readOnly ? null : (
+                        <div className="item-grip" aria-hidden="true">
+                          <GripVertical size={14} />
+                        </div>
+                        )}
+                        {scheduledGroupSession ? (
+                          <button
+                            type="button"
+                            className="outline-button"
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              openGroupSessionFromSlot(item);
+                            }}
+                          >
+                            Open session
+                          </button>
+                        ) : null}
+                        <div className="item-content">
+                        <strong>{groupSessionContext ? groupSessionContext.service.name : item.kind === "appointment" ? item.client || item.title : item.title}</strong>
+                        <span>{groupSessionContext ? "Group Session" : service?.name ?? "Busy"}</span>
+                        <em>
+                          {groupSessionContext
+                            ? `${formatRange(item.start, item.duration)} · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
+                            : formatRange(item.start, item.duration)}
+                        </em>
                       </div>
                       {item.kind === "appointment" && (latestClientEmail || latestCoachEmail || latestAdminEmail) && (
                         <div className="item-email-indicators" aria-label="Email receipt status">
@@ -6675,11 +7480,13 @@ function App() {
                           )}
                         </div>
                       )}
-                      <button
-                        className="resize-handle"
-                        aria-label="Resize calendar item"
-                        onPointerDown={(event) => beginResize(event, item)}
-                      />
+                      {item.readOnly ? null : (
+                        <button
+                          className="resize-handle"
+                          aria-label="Resize calendar item"
+                          onPointerDown={(event) => beginResize(event, item)}
+                        />
+                      )}
                     </article>
                   );
                 })}
@@ -6770,6 +7577,7 @@ function App() {
                           <input
                             value={quickClientSearch}
                             autoComplete="name"
+                            onBlur={() => setQuickMatchField("")}
                             onFocus={() => setQuickMatchField("name")}
                             onChange={(event) => {
                               setQuickMatchField("name");
@@ -6791,13 +7599,14 @@ function App() {
                     <label>
                       <span>Phone</span>
                       <div className="quick-match-anchor">
-                        <input
-                          value={quickCreate.phone}
-                          autoComplete="tel"
-                          inputMode="tel"
-                          type="tel"
-                          onFocus={() => setQuickMatchField("phone")}
-                          onChange={(event) => {
+                          <input
+                            value={quickCreate.phone}
+                            autoComplete="tel"
+                            inputMode="tel"
+                            type="tel"
+                            onBlur={() => setQuickMatchField("")}
+                            onFocus={() => setQuickMatchField("phone")}
+                            onChange={(event) => {
                             setQuickMatchField("phone");
                             updateQuickCreateField("phone", event.target.value);
                           }}
@@ -6809,12 +7618,13 @@ function App() {
                     <label>
                       <span>Email</span>
                       <div className="quick-match-anchor">
-                        <input
-                          value={quickCreate.email}
-                          autoComplete="email"
-                          inputMode="email"
-                          onFocus={() => setQuickMatchField("email")}
-                          onChange={(event) => {
+                          <input
+                            value={quickCreate.email}
+                            autoComplete="email"
+                            inputMode="email"
+                            onFocus={() => setQuickMatchField("email")}
+                            onBlur={() => setQuickMatchField("")}
+                            onChange={(event) => {
                             setQuickMatchField("email");
                             updateQuickCreateField("email", event.target.value);
                           }}
@@ -6885,7 +7695,9 @@ function App() {
             style={{ left: calendarHover.x, top: calendarHover.y }}
             aria-hidden="true"
           >
-            <span className="hover-card-kicker">Appointment</span>
+            <span className="hover-card-kicker">
+              {calendarHover.kind === "group-session" ? "Group Session" : "Appointment"}
+            </span>
             <strong>{calendarHover.client}</strong>
             <em>{calendarHover.service}</em>
             <div className="hover-card-line">
@@ -9235,7 +10047,7 @@ function App() {
       </main>
 
       {!isEmbedMode && activeView === "calendar" && selectedDetails && (
-        <div className="details-overlay" role="presentation" onPointerDown={() => setSelectedId("")}>
+        <div className="details-overlay" role="presentation" onPointerDown={closeCalendarDetails}>
           <aside
             className="details-panel details-modal"
             role="dialog"
