@@ -2164,8 +2164,10 @@ function App() {
       )
       .sort((a, b) => (a.client ?? "").localeCompare(b.client ?? ""));
   }, [items, selectedGroupSession, selectedGroupSessionService]);
+  const selectedGroupSessionBookedCount = selectedGroupSessionAttendees.filter((appointment) =>
+    isActiveGroupBooking(appointment.status),
+  ).length;
   const selectedGroupSessionCapacity = selectedGroupSessionService?.capacity ?? 0;
-  const selectedGroupSessionBookedCount = selectedGroupSessionAttendees.length;
   const selectedGroupSessionRemainingSlots = Math.max(0, selectedGroupSessionCapacity - selectedGroupSessionBookedCount);
   const selectedGroupSessionIsFull = selectedGroupSessionCapacity > 0 && selectedGroupSessionBookedCount >= selectedGroupSessionCapacity;
   const selectedGroupSessionDate = selectedGroupSession
@@ -3290,6 +3292,11 @@ function App() {
     return isScheduledGroupSessionSlot(item) || isGroupSessionAppointment(item);
   }
 
+  function isActiveGroupBooking(status: BookingStatus | undefined) {
+    if (!status) return true;
+    return status === "booked" || status === "completed";
+  }
+
   function getGroupSessionContext(item: CalendarItem) {
     if (!isGroupSessionItem(item)) return null;
     const service = itemService(item, services);
@@ -3319,12 +3326,13 @@ function App() {
           overlaps(itemSlot(candidateItem), candidate),
       )
       .sort((a, b) => (a.client ?? "").localeCompare(b.client ?? ""));
+    const bookedCount = attendees.filter((appointment) => isActiveGroupBooking(appointment.status)).length;
     return {
       service,
       session,
       attendees,
       capacity: service.capacity,
-      bookedCount: attendees.length,
+      bookedCount,
     };
   }
 
@@ -3640,7 +3648,7 @@ function App() {
       return overlappingItems.length > 0;
     }
     const sameServiceCount = overlappingItems.filter(
-      (item) => item.kind === "appointment" && item.serviceId === service.id,
+      (item) => item.kind === "appointment" && item.serviceId === service.id && isActiveGroupBooking(item.status),
     ).length;
     const collidesWithOtherService = overlappingItems.some(
       (item) => item.kind !== "appointment" || item.serviceId !== service.id,
@@ -3655,7 +3663,8 @@ function App() {
       (item) =>
         item.kind === "appointment" &&
         item.serviceId === service.id &&
-        overlaps(itemSlot(item), candidate),
+        overlaps(itemSlot(item), candidate) &&
+        isActiveGroupBooking(item.status),
     ).length;
     return sameServiceCount >= service.capacity;
   }
@@ -4897,6 +4906,16 @@ function App() {
       message: `Lesson marked ${status.replace("_", "-")}.`,
       undo: () => setItems(previous),
     });
+  }
+
+  function cancelGroupSessionAttendee(itemId: string) {
+    if (!window.confirm("Cancel this attendee from the group session?")) return;
+    const appointment = items.find((item) => item.id === itemId && item.kind === "appointment");
+    if (!appointment) {
+      setToast({ message: "Could not find that attendee." });
+      return;
+    }
+    updateAppointmentStatus(appointment.id, "cancelled");
   }
 
   function markInvoiceDraftDirty() {
@@ -6802,22 +6821,71 @@ function App() {
         {selectedGroupSessionAttendees.length === 0 ? (
           <p>No one is booked yet.</p>
         ) : (
-          <ul className="people-list">
+          <div className="group-attendee-cards">
             {selectedGroupSessionAttendees.map((appointment) => (
-              <li key={appointment.id}>
-                <strong>{appointment.client || appointment.title}</strong>
-                <span>
-                  {[
-                    appointment.phone,
-                    appointment.email,
-                    appointment.status ? (appointment.status === "no_show" ? "No-show" : appointment.status) : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
-              </li>
+              <article
+                key={appointment.id}
+                className="group-attendee-card"
+                style={{
+                  border: "1px solid color-mix(in srgb, var(--muted) 36%, transparent)",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  display: "grid",
+                  gap: 6,
+                  background: "color-mix(in srgb, var(--booking-card) 66%, transparent)",
+                  opacity: isActiveGroupBooking(appointment.status) ? 1 : 0.65,
+                }}
+              >
+                <div className="attendee-card-header" style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                    <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {appointment.client || appointment.title}
+                    </strong>
+                    <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                      {[
+                        appointment.phone,
+                        appointment.email,
+                        appointment.status ? (appointment.status === "no_show" ? "No-show" : appointment.status) : "booked",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    {appointment.note ? (
+                      <span style={{ color: "var(--muted)", fontSize: "0.84rem" }}>Note: {appointment.note}</span>
+                    ) : null}
+                  </div>
+                  <span
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      fontSize: "0.76rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.02em",
+                      border: "1px solid color-mix(in srgb, var(--muted) 36%, transparent)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {appointment.status ? (appointment.status === "no_show" ? "No-show" : appointment.status) : "booked"}
+                  </span>
+                </div>
+                {isActiveGroupBooking(appointment.status) ? (
+                  <div style={{ justifySelf: "end" }}>
+                    <button
+                      type="button"
+                      className="small-button"
+                      onClick={() => cancelGroupSessionAttendee(appointment.id)}
+                    >
+                      Cancel attendee
+                    </button>
+                  </div>
+                ) : (
+                  <span className="muted" style={{ fontSize: "0.82rem" }}>
+                    Cancelled attendee retained for history.
+                  </span>
+                )}
+              </article>
             ))}
-          </ul>
+          </div>
         )}
       </div>
 
