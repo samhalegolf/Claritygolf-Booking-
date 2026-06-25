@@ -1629,6 +1629,13 @@ function parseQuantityInput(value: string) {
   return Math.max(0, Math.round(parseMoneyInput(value)));
 }
 
+function parseDraftNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function emptyInvoiceDraft(settings = defaultInvoiceSettings): InvoiceDraft {
   return {
     payerName: "",
@@ -1967,6 +1974,9 @@ function App() {
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showServiceEditor, setShowServiceEditor] = useState(false);
   const [serviceSaveState, setServiceSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [groupOccurrenceInput, setGroupOccurrenceInput] = useState("");
+  const [groupMinimumInput, setGroupMinimumInput] = useState("");
+  const [groupMaximumInput, setGroupMaximumInput] = useState("");
   const [availability, setAvailability] = useState<AvailabilityWindow[][]>(defaultAvailability);
   const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
@@ -1994,6 +2004,26 @@ function App() {
   const [confirmedInvoiceNumber, setConfirmedInvoiceNumber] = useState("");
   const [sentInvoiceNumber, setSentInvoiceNumber] = useState("");
   const [voidedInvoiceNumbers, setVoidedInvoiceNumbers] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (serviceEditor.lessonFormat !== "group") {
+      setGroupOccurrenceInput("");
+      setGroupMinimumInput("");
+      setGroupMaximumInput("");
+      return;
+    }
+
+    const baseSchedule = serviceEditor.groupSchedule ?? defaultGroupSchedule();
+    const normalizedCapacity = clamp(Math.round(serviceEditor.capacity), 2, 24);
+    const normalizedMinimum = clamp(Math.round(serviceEditor.minParticipants), 2, normalizedCapacity);
+
+    setGroupOccurrenceInput(
+      String(clamp(Math.round(baseSchedule.occurrenceCount), 1, MAX_GROUP_OCCURRENCE_COUNT)),
+    );
+    setGroupMaximumInput(String(normalizedCapacity));
+    setGroupMinimumInput(String(normalizedMinimum));
+  }, [serviceEditor.id, serviceEditor.lessonFormat]);
+
   const [catalogItems, setCatalogItems] = useState<BillingCatalogItem[]>([
     {
       id: "catalog-swing-review",
@@ -4509,6 +4539,39 @@ function App() {
     });
   }
 
+  function normalizeGroupDraftInputs(editor: ServiceEditor) {
+    if (editor.lessonFormat !== "group") {
+      return editor;
+    }
+
+    const schedule = editor.groupSchedule ?? defaultGroupSchedule();
+    const occurrenceCount = clamp(
+      Math.round(parseDraftNumber(groupOccurrenceInput) ?? schedule.occurrenceCount),
+      1,
+      MAX_GROUP_OCCURRENCE_COUNT,
+    );
+    const capacity = clamp(Math.round(parseDraftNumber(groupMaximumInput) ?? editor.capacity), 2, 24);
+    const minParticipants = clamp(Math.round(parseDraftNumber(groupMinimumInput) ?? editor.minParticipants), 2, capacity);
+
+    return {
+      ...editor,
+      capacity,
+      minParticipants,
+      groupSchedule: cleanGroupSchedule({ ...schedule, occurrenceCount }, defaultGroupSchedule()),
+    };
+  }
+
+  function applyGroupDraftInputs() {
+    if (serviceEditor.lessonFormat !== "group") return serviceEditor;
+    const next = normalizeGroupDraftInputs(serviceEditor);
+    setServiceEditor(next);
+    const nextSchedule = next.groupSchedule ?? defaultGroupSchedule();
+    setGroupOccurrenceInput(String(nextSchedule.occurrenceCount));
+    setGroupMaximumInput(String(next.capacity));
+    setGroupMinimumInput(String(next.minParticipants));
+    return next;
+  }
+
   function updateGroupSchedule<K extends keyof GroupServiceSchedule>(field: K, value: GroupServiceSchedule[K]) {
     setServiceSaveState("idle");
     setServiceEditor((current) => ({
@@ -4769,10 +4832,11 @@ function App() {
       setToast({ message: "Give the lesson type a name before saving." });
       return;
     }
+    const normalizedEditor = serviceEditor.lessonFormat === "group" ? applyGroupDraftInputs() : serviceEditor;
     const clean = cleanService(
       {
-        ...serviceEditor,
-        id: editingServiceId ?? serviceEditor.id ?? cleanSlug(serviceEditor.name, `service-${Date.now()}`),
+        ...normalizedEditor,
+        id: editingServiceId ?? normalizedEditor.id ?? cleanSlug(normalizedEditor.name, `service-${Date.now()}`),
       },
       services.length,
     );
@@ -5721,14 +5785,13 @@ function App() {
                   <label className="settings-field">
                     <span>Generate next</span>
                     <input
-                      value={serviceEditor.groupSchedule?.occurrenceCount ?? 8}
+                      value={groupOccurrenceInput}
                       min={1}
                       max={MAX_GROUP_OCCURRENCE_COUNT}
                       step={1}
                       inputMode="numeric"
-                      onChange={(event) =>
-                        updateGroupSchedule("occurrenceCount", Number(event.target.value))
-                      }
+                      onChange={(event) => setGroupOccurrenceInput(event.target.value)}
+                      onBlur={() => void applyGroupDraftInputs()}
                       type="text"
                     />
                   </label>
@@ -5737,12 +5800,13 @@ function App() {
                   <label className="settings-field">
                     <span>Minimum group</span>
                     <input
-                      value={serviceEditor.minParticipants}
+                      value={groupMinimumInput}
                       min={2}
-                      max={serviceEditor.capacity}
+                      max={Number(groupMaximumInput) || 24}
                       step={1}
                       inputMode="numeric"
-                      onChange={(event) => updateServiceEditor("minParticipants", Number(event.target.value))}
+                      onChange={(event) => setGroupMinimumInput(event.target.value)}
+                      onBlur={() => void applyGroupDraftInputs()}
                       type="text"
                     />
                   </label>
@@ -5761,12 +5825,13 @@ function App() {
                   <label className="settings-field">
                     <span>{serviceEditor.lessonFormat === "group" ? "Maximum group" : "Capacity"}</span>
                     <input
-                      value={serviceEditor.capacity}
+                      value={groupMaximumInput}
                       min={serviceEditor.lessonFormat === "group" ? 2 : 1}
                       max={24}
                       step={1}
                       inputMode="numeric"
-                      onChange={(event) => updateServiceEditor("capacity", Number(event.target.value))}
+                      onChange={(event) => setGroupMaximumInput(event.target.value)}
+                      onBlur={() => void applyGroupDraftInputs()}
                       type="text"
                     />
                   </label>
