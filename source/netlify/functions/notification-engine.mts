@@ -91,6 +91,7 @@ async function readSettings() {
     notificationEmail: cleanEmail(s.notificationEmail, env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz")),
     coachEmail: cleanEmail(s.coachEmail, env("CLARITY_COACH_EMAIL", "")),
     replyToEmail: cleanEmail(s.replyToEmail, env("CLARITY_REPLY_TO_EMAIL", env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz"))),
+    notificationSubjectLine: cleanText(s.notificationSubjectLine, "", 180),
     sendClientEmail: s.sendClientEmail !== "false",
     sendCoachEmail: s.sendCoachEmail !== "false",
     sendAdminEmail: s.sendAdminEmail !== "false",
@@ -331,6 +332,10 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
 }
 
 function templateSubjects(action: BookingAction, settings: any, variables: Record<string, string>) {
+  const sharedSubjectTemplate = cleanText(settings.notificationSubjectLine, "", 180);
+  const sharedSubject = sharedSubjectTemplate.trim() ? render(sharedSubjectTemplate, variables) : "";
+  if (sharedSubject) return { client: sharedSubject, admin: sharedSubject };
+
   if (action === "rescheduled") return { client: render(settings.rescheduleClientSubject, variables), admin: render(settings.rescheduleAdminSubject, variables) };
   if (action === "cancelled") return { client: render(settings.cancellationClientSubject, variables), admin: render(settings.cancellationAdminSubject, variables) };
   if (action === "updated") return { client: render(settings.updateClientSubject, variables), admin: render(settings.updateAdminSubject, variables) };

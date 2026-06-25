@@ -408,6 +408,7 @@ type PasswordChangeForm = {
 type NotificationSettings = {
   emailNotificationsEnabled: boolean;
   notificationEmail: string;
+  notificationSubjectLine: string;
   coachEmail: string;
   replyToEmail: string;
   notificationDelaySeconds: number;
@@ -419,6 +420,7 @@ type NotificationSettings = {
   clientEmailFooter: string;
   adminEmailSubject: string;
   adminEmailIntro: string;
+  minBookingNoticeMinutes: number;
   smsProviderName: string;
   smsWebhookUrl: string;
   smsFromNumber: string;
@@ -719,6 +721,18 @@ const defaultServices: Service[] = [
 
 const initialItems: CalendarItem[] = [];
 
+const DEFAULT_MIN_BOOKING_NOTICE_MINUTES = 240;
+const MAX_MIN_BOOKING_NOTICE_MINUTES = 7 * 24 * 60;
+const MIN_BOOKING_NOTICE_PRESETS_HOURS = [0, 1, 2, 4, 24] as const;
+const NOTIFICATION_SUBJECT_TOKENS = [
+  "{{service}}",
+  "{{coach}}",
+  "{{client}}",
+  "{{date}}",
+  "{{time}}",
+  "{{action}}",
+] as const;
+
 const defaultAvailability: AvailabilityWindow[][] = [
   [{ start: timeToMinutes(16, 30), end: timeToMinutes(20, 0) }],
   [],
@@ -742,6 +756,20 @@ function snap(value: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function cleanMinBookingNoticeMinutes(value: number) {
+  return Number.isFinite(value) ? clamp(Math.round(value), 0, MAX_MIN_BOOKING_NOTICE_MINUTES) : DEFAULT_MIN_BOOKING_NOTICE_MINUTES;
+}
+
+function formatBookingNoticeLabel(minutes: number) {
+  const normalized = cleanMinBookingNoticeMinutes(minutes);
+  if (normalized <= 0) return "No buffer";
+  if (normalized % 60 === 0) {
+    const hours = normalized / 60;
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  return `${normalized} minutes`;
 }
 
 function formatTime(minutes: number) {
@@ -1916,6 +1944,7 @@ async function analyzeLogoFile(file: File): Promise<BrandSettings> {
 const defaultNotificationSettings: NotificationSettings = {
   emailNotificationsEnabled: true,
   notificationEmail: "",
+  notificationSubjectLine: "",
   coachEmail: "",
   replyToEmail: "",
   notificationDelaySeconds: 30,
@@ -1927,6 +1956,7 @@ const defaultNotificationSettings: NotificationSettings = {
   clientEmailFooter: "We look forward to seeing you.",
   adminEmailSubject: "New booking: {{client}}",
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
+  minBookingNoticeMinutes: DEFAULT_MIN_BOOKING_NOTICE_MINUTES,
   smsProviderName: "",
   smsWebhookUrl: "",
   smsFromNumber: "",
@@ -2326,11 +2356,17 @@ function App() {
     duration: emailTemplateService ? `${emailTemplateService.duration} minutes` : "60 minutes",
     firstName: "Donna",
     price: servicePriceLabel(emailTemplateService),
+    action: "booking",
     replyTo: notificationSettings.replyToEmail || coachAccount.contactEmail,
     service: emailTemplateService?.name ?? "1 Hour Golf Lesson",
     time: emailTemplateService ? formatRange(14 * 60, emailTemplateService.duration) : "2:00 PM-3:00 PM",
     venue: coachAccount.venueShortName || coachAccount.venueName,
   };
+  const emailSubjectTemplatePreview = notificationSettings.notificationSubjectLine.trim()
+    ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)
+    : "";
+  const minBookingNoticeHours = Math.max(0, Math.round((notificationSettings.minBookingNoticeMinutes / 60) * 100) / 100);
+  const minBookingNoticeSummary = formatBookingNoticeLabel(notificationSettings.minBookingNoticeMinutes);
   const emailTemplateExample = {
     adminIntro: renderTemplate(notificationSettings.adminEmailIntro, emailTemplateVariables),
     adminSubject: renderTemplate(notificationSettings.adminEmailSubject, emailTemplateVariables),
@@ -2748,10 +2784,12 @@ function App() {
 
   function applyNotificationSettings(settings?: Partial<NotificationSettings>) {
     const delaySeconds = Number(settings?.notificationDelaySeconds ?? defaultNotificationSettings.notificationDelaySeconds);
+    const minBookingNoticeMinutes = Number(settings?.minBookingNoticeMinutes ?? defaultNotificationSettings.minBookingNoticeMinutes);
     setNotificationSettings({
       ...defaultNotificationSettings,
       ...(settings ?? {}),
       notificationDelaySeconds: Number.isFinite(delaySeconds) ? clamp(delaySeconds, 30, 3600) : 30,
+      minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(minBookingNoticeMinutes),
     });
   }
 
@@ -2843,6 +2881,15 @@ function App() {
       setCalendarSyncKey(data.syncKey);
     }
     applyNotificationSettings(data.settings);
+    try {
+      const adminSettingsResponse = await fetch("/api/admin-settings", { headers: { Accept: "application/json" } });
+      if (adminSettingsResponse.ok) {
+        const adminSettings = (await adminSettingsResponse.json()) as Partial<NotificationSettings>;
+        applyNotificationSettings(adminSettings);
+      }
+    } catch {
+      // Keep the notification settings from /api/calendar-state if admin settings read fails.
+    }
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
     applyGoogleCalendarStatus(data.googleCalendar);
@@ -4785,6 +4832,15 @@ function App() {
 
   function handleBookingMatchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === "Escape") event.currentTarget.blur();
+  }
+
+  function insertNotificationSubjectToken(token: string) {
+    const next = `${notificationSettings.notificationSubjectLine ?? ""} ${token}`.trim().slice(0, 180);
+    updateNotificationSetting("notificationSubjectLine", next);
+  }
+
+  function updateBookingNoticeHours(hours: number) {
+    updateNotificationSetting("minBookingNoticeMinutes", cleanMinBookingNoticeMinutes(hours * 60));
   }
 
   function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
@@ -6769,6 +6825,49 @@ function App() {
       </div>
 
         </div>
+      </details>
+      <details className="settings-subsection">
+        <summary className="settings-subsection-title">
+          <Clock size={18} />
+          <div>
+            <span>Minimum notice before a public booking</span>
+            <strong>{minBookingNoticeSummary}</strong>
+          </div>
+        </summary>
+        <label className="settings-field">
+          <span>Minimum notice in hours</span>
+          <input
+            type="number"
+            min={0}
+            max={168}
+            step={0.25}
+            value={minBookingNoticeHours}
+            onChange={(event) => updateBookingNoticeHours(Math.max(0, Number(event.target.value || 0)))}
+          />
+        </label>
+        <p className="field-help">Clients can only book or reschedule after that buffer.</p>
+        <div className="minimum-notice-presets" aria-label="Quick notice presets">
+          {MIN_BOOKING_NOTICE_PRESETS_HOURS.map((hours) => (
+            <button
+              className="outline-button"
+              key={hours}
+              onClick={() => updateBookingNoticeHours(hours)}
+              type="button"
+            >
+              {hours === 0 ? "No buffer" : `${hours} hour${hours === 1 ? "" : "s"}`}
+            </button>
+          ))}
+        </div>
+        <button className="outline-button" onClick={() => updateBookingNoticeHours(0)} type="button">
+          Clear buffer
+        </button>
+        <button className="primary-button settings-save" onClick={saveNotificationSettings}>
+          {settingsSaveState === "saving"
+            ? "Saving"
+            : settingsSaveState === "saved"
+              ? "Saved"
+              : "Save minimum notice"}
+        </button>
       </details>
       <details className="settings-subsection">
         <summary className="settings-subsection-title">
@@ -10063,6 +10162,50 @@ function App() {
                       onChange={(event) => updateNotificationSetting("clientEmailFooter", event.target.value)}
                     />
                   </label>
+                </details>
+                <details className="settings-subsection">
+                  <summary className="settings-subsection-title">
+                    <Mail size={18} />
+                    <div>
+                      <span>Email subject override</span>
+                      <strong>
+                        {notificationSettings.notificationSubjectLine.trim() ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables) : "Per-notification defaults"}
+                      </strong>
+                    </div>
+                  </summary>
+                  <label className="settings-field">
+                    <span>Subject template</span>
+                    <input
+                      maxLength={180}
+                      placeholder="Use {{client}}, {{service}}, {{date}}, {{time}}, {{action}}"
+                      value={notificationSettings.notificationSubjectLine}
+                      onChange={(event) =>
+                        updateNotificationSetting("notificationSubjectLine", event.target.value.slice(0, 180))}
+                    />
+                  </label>
+                  <p className="field-help">Blank keeps existing per-notification defaults.</p>
+                  <div className="template-token-controls" aria-label="Subject tokens">
+                    {NOTIFICATION_SUBJECT_TOKENS.map((token) => (
+                      <button className="template-token-button" key={token} onClick={() => insertNotificationSubjectToken(token)} type="button">
+                        {token}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="field-help">
+                    Preview:{" "}
+                    <strong>
+                      {emailSubjectTemplatePreview || "Blank uses existing per-notification defaults."}
+                    </strong>
+                  </p>
+                  <div className="settings-actions">
+                    <button
+                      className="outline-button"
+                      type="button"
+                      onClick={() => updateNotificationSetting("notificationSubjectLine", "")}
+                    >
+                      Clear override
+                    </button>
+                  </div>
                 </details>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
