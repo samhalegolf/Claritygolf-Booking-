@@ -3994,6 +3994,12 @@ button {
   box-shadow: 0 12px 24px rgba(24, 28, 27, 0.06);
 }
 
+.app-shell .public-booking .booking-progressive-section:not(.is-open) {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
 .app-shell .public-booking .booking-progressive-section::before {
   content: none;
 }
