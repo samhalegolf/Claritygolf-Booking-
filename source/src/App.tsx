@@ -305,6 +305,8 @@ type BookingForm = {
 
 type BookingMode = "book" | "reschedule";
 
+type PublicBookingSection = "appointment" | "datetime" | "information";
+
 type RescheduleForm = {
   email: string;
   phone: string;
@@ -2084,7 +2086,9 @@ function App() {
   const [edgeCue, setEdgeCue] = useState<null | "prev" | "next">(null);
   const [bookingServiceId, setBookingServiceId] = useState("");
   const [bookingDay, setBookingDay] = useState(0);
+  const [bookingDaySelected, setBookingDaySelected] = useState(false);
   const [bookingStart, setBookingStart] = useState<number | null>(null);
+  const [openPublicBookingSection, setOpenPublicBookingSection] = useState<PublicBookingSection>("appointment");
   const [bookingForm, setBookingForm] = useState<BookingForm>(
     () => getInitialBookingLogin() ?? { firstName: "", lastName: "", phone: "", email: "" },
   );
@@ -2499,7 +2503,9 @@ function App() {
   useEffect(() => {
     if (bookingServiceId && !publicServices.some((service) => service.id === bookingServiceId)) {
       setBookingServiceId("");
+      setBookingDaySelected(false);
       setBookingStart(null);
+      setOpenPublicBookingSection("appointment");
     }
   }, [bookingServiceId, publicServices]);
 
@@ -3348,7 +3354,7 @@ function App() {
   }
 
   const bookingSlots = useMemo(() => {
-    if (!bookingTargetService) return [];
+    if (!bookingTargetService || !bookingDaySelected) return [];
     if (bookingTargetService.lessonFormat === "group") {
       const slots: number[] = [];
       const candidate = {
@@ -3382,8 +3388,35 @@ function App() {
       }
     });
     return slots;
-  }, [activeWeek, bookingDay, bookingMode, bookingTargetService, selectedRescheduleMatch, items, availability]);
+  }, [activeWeek, bookingDay, bookingDaySelected, bookingMode, bookingTargetService, selectedRescheduleMatch, items, availability]);
   const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot === bookingStart);
+
+  const isAppointmentStepComplete = Boolean(selectedBookingService);
+  const isDateTimeStepComplete = bookingDaySelected && bookingStart !== null;
+  const isInformationStepComplete =
+    isDateTimeStepComplete &&
+    bookingForm.firstName.trim() !== "" &&
+    bookingForm.lastName.trim() !== "" &&
+    bookingForm.email.trim() !== "";
+
+  const isAppointmentSectionOpen = openPublicBookingSection === "appointment";
+  const isDateTimeSectionOpen = openPublicBookingSection === "datetime";
+  const isInformationSectionOpen = openPublicBookingSection === "information";
+
+  const appointmentSummaryName = selectedBookingService
+    ? selectedBookingService.name
+    : "Choose an appointment type";
+  const appointmentSummaryDescription = selectedBookingService?.description?.trim() || "";
+  const appointmentSummaryDuration = selectedBookingService
+    ? `${selectedBookingService.duration} min · ${servicePriceLabel(selectedBookingService)}`
+    : "Select a lesson to continue";
+  const dateTimeSummaryLocation = (selectedBookingService?.location?.trim() || locationLine || "").slice(0, 120);
+  const bookingDaySummary = bookingDaySelected ? weekDays[bookingDay]?.label ?? "" : "No day selected";
+  const dateTimeSummaryLine = isDateTimeStepComplete
+    ? `${bookingDaySummary}, ${formatTime(bookingStart ?? 0)}`
+    : bookingDaySelected
+      ? bookingDaySummary
+      : "Choose a day";
 
   function slotFromClient(clientX: number, clientY: number) {
     const grid = gridRef.current;
@@ -4477,6 +4510,8 @@ function App() {
     setBookingMode(nextMode);
     setBookingConfirmation(null);
     setBookingStart(null);
+    setBookingDaySelected(nextMode === "book" ? false : bookingDaySelected);
+    setOpenPublicBookingSection("appointment");
     setForceRescheduleLogin(nextMode === "reschedule" && showLogin);
     if (nextMode === "book") {
       setSelectedRescheduleId("");
@@ -4492,7 +4527,34 @@ function App() {
     setBookingServiceId(match.serviceId);
     setActiveWeekState(match.week);
     setBookingDay(match.day);
+    setBookingDaySelected(true);
+    setOpenPublicBookingSection("datetime");
     setBookingStart(null);
+  }
+
+  function setPublicBookingSection(section: PublicBookingSection) {
+    setOpenPublicBookingSection(section);
+  }
+
+  function handlePublicBookingServiceSelect(serviceId: string) {
+    const isCurrent = serviceId === bookingServiceId;
+    setBookingServiceId(isCurrent ? "" : serviceId);
+    setBookingDaySelected(false);
+    setBookingStart(null);
+    setOpenPublicBookingSection(isCurrent ? "appointment" : "datetime");
+  }
+
+  function handlePublicBookingDaySelect(dayIndex: number) {
+    setBookingDay(dayIndex);
+    setBookingDaySelected(true);
+    setBookingStart(null);
+    setOpenPublicBookingSection("datetime");
+  }
+
+  function handlePublicBookingTimeSelect(slot: number) {
+    const next = bookingStart === slot ? null : slot;
+    setBookingStart(next);
+    setOpenPublicBookingSection(next === null ? "datetime" : "information");
   }
 
   function describeRescheduleMatch(match: PublicRescheduleMatch) {
@@ -6459,142 +6521,251 @@ function App() {
         <em>{coachAccount.venueShortName}</em>
       </div>
 
-      <div className="booking-columns">
-        <div className="booking-card">
-          <span>Select Appointment</span>
-          <div className="service-picker">
-            {visiblePublicServices.length ? (
-              visiblePublicServices.map((service) => (
-                <button
-                  className={service.id === bookingServiceId ? "selected-service" : ""}
-                  key={service.id}
-                  onClick={() => {
-                    setBookingServiceId(service.id === bookingServiceId ? "" : service.id);
-                    setBookingStart(null);
-                  }}
-                  type="button"
-                >
-                  <strong>{service.name}</strong>
-                  <em>
-                    {service.duration} minutes @ {servicePriceLabel(service)}
-                  </em>
-                  {service.description && <small>{service.description}</small>}
-                </button>
-              ))
-            ) : (
-              <p>No public lesson types are active.</p>
-            )}
-          </div>
-        </div>
-
-        <div className="booking-card">
-          <span>Date & Time</span>
-          <div className="booking-days">
-            {weekDays.map((day, index) => (
-              <button
-                className={bookingDay === index ? "selected-day" : ""}
-                key={day.label}
-                onClick={() => {
-                  setBookingDay(index);
-                  setBookingStart(null);
-                }}
-              >
-                <strong>{day.short}</strong>
-                <em>{day.date}</em>
-              </button>
-            ))}
-          </div>
-          <div className="time-slots">
-            {bookingSlots.length ? (
-              visibleBookingSlots.map((slot) => (
-                <button
-                  className={bookingStart === slot ? "selected-time" : ""}
-                  key={slot}
-                  onClick={() => setBookingStart(bookingStart === slot ? null : slot)}
-                  type="button"
-                >
-                  {formatTime(slot)}
-                </button>
-              ))
-            ) : (
-              <p>
-                {selectedBookingService
-                  ? "No public times available for this day."
-                  : "Choose an appointment type first."}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="booking-card">
-          <span>Your Information</span>
-          <div className="booking-form">
-            <input
-              value={bookingForm.firstName}
-              autoComplete="given-name"
-              onChange={(event) => updateBookingForm("firstName", event.target.value)}
-              onKeyDown={handleBookingMatchKeyDown}
-              placeholder="First name"
-            />
-            <input
-              value={bookingForm.lastName}
-              autoComplete="family-name"
-              onChange={(event) => updateBookingForm("lastName", event.target.value)}
-              onKeyDown={handleBookingMatchKeyDown}
-              placeholder="Last name"
-            />
-            <input
-              value={bookingForm.phone}
-              autoComplete="tel"
-              inputMode="tel"
-              onChange={(event) => updateBookingForm("phone", event.target.value)}
-              onKeyDown={handleBookingMatchKeyDown}
-              placeholder="Phone"
-              type="tel"
-            />
-            <input
-              value={bookingForm.email}
-              autoComplete="email"
-              inputMode="email"
-              onChange={(event) => updateBookingForm("email", event.target.value)}
-              onKeyDown={handleBookingMatchKeyDown}
-              placeholder="Email"
-              type="email"
-            />
-          </div>
-          {bookingClientSuggestion && showBookingClientSuggestion && (
-            <button
-              className="client-match-prompt booking-client-match"
-              onClick={() => applyBookingClient(bookingClientSuggestion)}
-              type="button"
-            >
-              <User size={15} />
-              <span>
-                <strong>{bookingClientSuggestion.name}</strong>
-                <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
-              </span>
-            </button>
-          )}
-          <div className="booking-summary">
-            <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
-            <span>
-              {!selectedBookingService
-                ? "Select a lesson to see available times"
-                : bookingStart === null
-                ? "Choose a time"
-                : `${weekDays[bookingDay].label}, ${formatTime(bookingStart)}`}
-            </span>
-          </div>
-          {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
+      <div className="booking-columns booking-progressive-flow">
+        <section className={`booking-progressive-section ${isAppointmentSectionOpen ? "is-open" : ""} ${
+          isAppointmentStepComplete ? "is-complete" : ""
+        }`}>
           <button
-            className="primary-button confirm-booking"
-            disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving"}
-            onClick={confirmPublicBooking}
+            className="booking-progressive-title"
+            onClick={() => setPublicBookingSection("appointment")}
             type="button"
           >
-            {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
+            <span className="booking-progressive-title-label">1. Appointment</span>
+            <span className="booking-progressive-title-state">{isAppointmentStepComplete ? "Done" : "In progress"}</span>
           </button>
-        </div>
+          {isAppointmentSectionOpen ? (
+            <div className="booking-progressive-body">
+              <div className="service-picker">
+                {visiblePublicServices.length ? (
+                  visiblePublicServices.map((service) => (
+                    <button
+                      className={service.id === bookingServiceId ? "selected-service" : ""}
+                      key={service.id}
+                      onClick={() => handlePublicBookingServiceSelect(service.id)}
+                      type="button"
+                    >
+                      <strong>{service.name}</strong>
+                      <em>
+                        {service.duration} minutes @ {servicePriceLabel(service)}
+                      </em>
+                      {service.description && <small>{service.description}</small>}
+                    </button>
+                  ))
+                ) : (
+                  <p>No public lesson types are active.</p>
+                )}
+              </div>
+            </div>
+          ) : isAppointmentStepComplete ? (
+                    <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("appointment")}
+                      type="button"
+                    >
+                      <strong>{appointmentSummaryName}</strong>
+                      <span>{appointmentSummaryDuration}</span>
+                      {appointmentSummaryDescription ? <small>{appointmentSummaryDescription}</small> : null}
+                    </button>
+                  ) : (
+            <button
+              className="booking-progressive-summary booking-progressive-summary-empty"
+              onClick={() => setPublicBookingSection("appointment")}
+              type="button"
+            >
+              <strong>Appointment not selected</strong>
+              <span>Pick a lesson to continue</span>
+            </button>
+          )}
+        </section>
+
+        <section className={`booking-progressive-section ${isDateTimeSectionOpen ? "is-open" : ""} ${
+          isDateTimeStepComplete ? "is-complete" : ""
+        }`}>
+          <button
+            className="booking-progressive-title"
+            onClick={() => setPublicBookingSection("datetime")}
+            type="button"
+            disabled={!isAppointmentStepComplete}
+          >
+            <span className="booking-progressive-title-label">2. Date & Time</span>
+            <span className="booking-progressive-title-state">{isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}</span>
+          </button>
+          {isDateTimeSectionOpen ? (
+            <div className="booking-progressive-body">
+              <div className="booking-week-controls">
+                <button onClick={() => moveWeek(-1)} type="button">
+                  <ArrowLeft size={15} />
+                  <span>Previous week</span>
+                </button>
+                <strong>{weekTitle}</strong>
+                <button onClick={() => moveWeek(1)} type="button">
+                  <span>Next week</span>
+                  <ArrowRight size={15} />
+                </button>
+              </div>
+              <div className="booking-days-wrap">
+                <div className="booking-days">
+                  {weekDays.map((day, index) => (
+                    <button
+                      className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
+                      key={day.label}
+                      onClick={() => handlePublicBookingDaySelect(index)}
+                      type="button"
+                    >
+                      <strong>{day.short}</strong>
+                      <em>{day.date}</em>
+                      {day.isToday ? <small className="booking-day-marker">Today</small> : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="time-slots">
+                {selectedBookingService ? (
+                  bookingSlots.length ? (
+                    visibleBookingSlots.map((slot) => (
+                      <button
+                        className={bookingStart === slot ? "selected-time" : ""}
+                        key={slot}
+                        onClick={() => handlePublicBookingTimeSelect(slot)}
+                        type="button"
+                      >
+                        {formatTime(slot)}
+                      </button>
+                    ))
+                  ) : (
+                    <p>{bookingDaySelected ? "No public times available for this day." : "Choose a day first."}</p>
+                  )
+                ) : (
+                  <p>Choose an appointment type first.</p>
+                )}
+              </div>
+            </div>
+          ) : isDateTimeStepComplete ? (
+            <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("datetime")}
+                      type="button"
+                    >
+                      <span>{dateTimeSummaryLine}</span>
+                      {dateTimeSummaryLocation ? <small>{dateTimeSummaryLocation}</small> : null}
+                    </button>
+                  ) : (
+            <button
+              className="booking-progressive-summary booking-progressive-summary-empty"
+              onClick={() => setPublicBookingSection("datetime")}
+              type="button"
+              disabled={!isAppointmentStepComplete}
+            >
+              <strong>{isAppointmentStepComplete ? "Date not selected" : "Select appointment first"}</strong>
+              <span>{isAppointmentStepComplete ? "Choose day and time" : "Complete appointment step"}</span>
+            </button>
+          )}
+        </section>
+
+        <section className={`booking-progressive-section ${isInformationSectionOpen ? "is-open" : ""} ${
+          isInformationStepComplete ? "is-complete" : ""
+        }`}>
+          <button
+            className="booking-progressive-title"
+            onClick={() => setPublicBookingSection("information")}
+            type="button"
+            disabled={!isDateTimeStepComplete}
+          >
+            <span className="booking-progressive-title-label">3. Your Information</span>
+            <span className="booking-progressive-title-state">
+              {isInformationStepComplete ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
+            </span>
+          </button>
+          {isInformationSectionOpen ? (
+            <div className="booking-progressive-body">
+              <div className="booking-form">
+                <input
+                  value={bookingForm.firstName}
+                  autoComplete="given-name"
+                  onChange={(event) => updateBookingForm("firstName", event.target.value)}
+                  onKeyDown={handleBookingMatchKeyDown}
+                  placeholder="First name"
+                />
+                <input
+                  value={bookingForm.lastName}
+                  autoComplete="family-name"
+                  onChange={(event) => updateBookingForm("lastName", event.target.value)}
+                  onKeyDown={handleBookingMatchKeyDown}
+                  placeholder="Last name"
+                />
+                <input
+                  value={bookingForm.phone}
+                  autoComplete="tel"
+                  inputMode="tel"
+                  onChange={(event) => updateBookingForm("phone", event.target.value)}
+                  onKeyDown={handleBookingMatchKeyDown}
+                  placeholder="Phone"
+                  type="tel"
+                />
+                <input
+                  value={bookingForm.email}
+                  autoComplete="email"
+                  inputMode="email"
+                  onChange={(event) => updateBookingForm("email", event.target.value)}
+                  onKeyDown={handleBookingMatchKeyDown}
+                  placeholder="Email"
+                  type="email"
+                />
+              </div>
+              {bookingClientSuggestion && showBookingClientSuggestion && (
+                <button
+                  className="client-match-prompt booking-client-match"
+                  onClick={() => applyBookingClient(bookingClientSuggestion)}
+                  type="button"
+                >
+                  <User size={15} />
+                  <span>
+                    <strong>{bookingClientSuggestion.name}</strong>
+                    <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
+                  </span>
+                </button>
+              )}
+              <div className="booking-summary">
+                <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
+                <span>
+                  {!selectedBookingService
+                    ? "Select a lesson to see available times"
+                    : bookingStart === null
+                    ? "Choose a time"
+                    : `${weekDays[bookingDay].label}, ${formatTime(bookingStart)}`}
+                </span>
+              </div>
+              {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
+              <button
+                className="primary-button confirm-booking"
+                disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving"}
+                onClick={confirmPublicBooking}
+                type="button"
+              >
+                {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
+              </button>
+            </div>
+          ) : isInformationStepComplete ? (
+                    <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("information")}
+                      type="button"
+                    >
+                      <strong>Information complete</strong>
+                      <span>Customer details captured</span>
+                    </button>
+                  ) : (
+            <button
+              className="booking-progressive-summary booking-progressive-summary-empty"
+              onClick={() => setPublicBookingSection("information")}
+              type="button"
+              disabled={!isDateTimeStepComplete}
+            >
+              <strong>{isDateTimeStepComplete ? "Customer details missing" : "Complete time step first"}</strong>
+              <span>{isDateTimeStepComplete ? "Enter your details to confirm" : "Lock a time first"}</span>
+            </button>
+          )}
+        </section>
       </div>
 
         </div>
@@ -8535,155 +8706,255 @@ function App() {
                 </button>
               </div>
             ) : (
-            <div className="booking-columns">
+            <div className="booking-columns booking-progressive-flow">
               {bookingMode === "book" ? (
                 <>
-              <div className="booking-card">
-                <span>Select Appointment</span>
-                <div className="service-picker">
-                  {visiblePublicServices.length ? (
-                    visiblePublicServices.map((service) => (
-                      <button
-                        className={service.id === bookingServiceId ? "selected-service" : ""}
-                        key={service.id}
-                        onClick={() => {
-                          setBookingServiceId(service.id === bookingServiceId ? "" : service.id);
-                          setBookingStart(null);
-                        }}
-                        type="button"
-                      >
-                        <strong>{service.name}</strong>
-                        <em>
-                          {service.duration} minutes @ {servicePriceLabel(service)}
-                        </em>
-                        {service.description && <small>{service.description}</small>}
-                      </button>
-                    ))
-                  ) : (
-                    <p>No public lesson types are active.</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="booking-card">
-                <span>Date & Time</span>
-                <div className="booking-week-controls">
-                  <button onClick={() => moveWeek(-1)} type="button">
-                    <ArrowLeft size={15} />
-                    <span>Previous week</span>
-                  </button>
-                  <strong>{weekTitle}</strong>
-                  <button onClick={() => moveWeek(1)} type="button">
-                    <span>Next week</span>
-                    <ArrowRight size={15} />
-                  </button>
-                </div>
-                <div className="booking-days">
-                  {weekDays.map((day, index) => (
+                  <section className={`booking-progressive-section ${isAppointmentSectionOpen ? "is-open" : ""} ${
+                    isAppointmentStepComplete ? "is-complete" : ""
+                  }`}>
                     <button
-                      className={bookingDay === index ? "selected-day" : ""}
-                      key={day.label}
-                      onClick={() => {
-                        setBookingDay(index);
-                        setBookingStart(null);
-                      }}
+                      className="booking-progressive-title"
+                      onClick={() => setPublicBookingSection("appointment")}
+                      type="button"
                     >
-                      <strong>{day.short}</strong>
-                      <em>{day.date}</em>
+                      <span className="booking-progressive-title-label">1. Appointment</span>
+                      <span className="booking-progressive-title-state">{isAppointmentStepComplete ? "Done" : "In progress"}</span>
                     </button>
-                  ))}
-                </div>
-                <div className="time-slots">
-                  {bookingSlots.length ? (
-                    visibleBookingSlots.map((slot) => (
+                    {isAppointmentSectionOpen ? (
+                      <div className="booking-progressive-body">
+                        <div className="service-picker">
+                          {visiblePublicServices.length ? (
+                            visiblePublicServices.map((service) => (
+                              <button
+                                className={service.id === bookingServiceId ? "selected-service" : ""}
+                                key={service.id}
+                                onClick={() => handlePublicBookingServiceSelect(service.id)}
+                                type="button"
+                              >
+                                <strong>{service.name}</strong>
+                                <em>
+                                  {service.duration} minutes @ {servicePriceLabel(service)}
+                                </em>
+                                {service.description && <small>{service.description}</small>}
+                              </button>
+                            ))
+                          ) : (
+                            <p>No public lesson types are active.</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : isAppointmentStepComplete ? (
                       <button
-                        className={bookingStart === slot ? "selected-time" : ""}
-                        key={slot}
-                        onClick={() => setBookingStart(bookingStart === slot ? null : slot)}
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("appointment")}
+                      type="button"
+                    >
+                      <strong>{appointmentSummaryName}</strong>
+                      <span>{appointmentSummaryDuration}</span>
+                      {appointmentSummaryDescription ? <small>{appointmentSummaryDescription}</small> : null}
+                    </button>
+                  ) : (
+                      <button
+                        className="booking-progressive-summary booking-progressive-summary-empty"
+                        onClick={() => setPublicBookingSection("appointment")}
                         type="button"
                       >
-                        {formatTime(slot)}
+                        <strong>Appointment not selected</strong>
+                        <span>Pick a lesson to continue</span>
                       </button>
-                    ))
-                  ) : (
-                    <p>
-                      {selectedBookingService
-                        ? "No public times available for this day."
-                        : "Choose an appointment type first."}
-                    </p>
-                  )}
-                </div>
-              </div>
+                    )}
+                  </section>
 
-              <div className="booking-card">
-                <span>Your Information</span>
-                <div className="booking-form">
-                  <input
-                    value={bookingForm.firstName}
-                    autoComplete="given-name"
-                    onChange={(event) => updateBookingForm("firstName", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="First name"
-                  />
-                  <input
-                    value={bookingForm.lastName}
-                    autoComplete="family-name"
-                    onChange={(event) => updateBookingForm("lastName", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="Last name"
-                  />
-                  <input
-                    value={bookingForm.phone}
-                    autoComplete="tel"
-                    inputMode="tel"
-                    onChange={(event) => updateBookingForm("phone", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="Phone"
-                    type="tel"
-                  />
-                  <input
-                    value={bookingForm.email}
-                    autoComplete="email"
-                    inputMode="email"
-                    onChange={(event) => updateBookingForm("email", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="Email"
-                    type="email"
-                  />
-                </div>
-                {bookingClientSuggestion && showBookingClientSuggestion && (
-                  <button
-                    className="client-match-prompt booking-client-match"
-                    onClick={() => applyBookingClient(bookingClientSuggestion)}
-                    type="button"
-                  >
-                    <User size={15} />
-                    <span>
-                      <strong>{bookingClientSuggestion.name}</strong>
-                      <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
-                    </span>
-                  </button>
-                )}
-                <div className="booking-summary">
-                  <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
-                  <span>
-                    {!selectedBookingService
-                      ? "Select a lesson to see available times"
-                      : bookingStart === null
-                      ? "Choose a time"
-                      : `${weekDays[bookingDay].label}, ${formatTime(bookingStart)}`}
-                  </span>
-                </div>
-                {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
-                <button
-                  className="primary-button confirm-booking"
-                  disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving"}
-                  onClick={confirmPublicBooking}
-                  type="button"
-                >
-                  {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
-                </button>
-              </div>
+                  <section className={`booking-progressive-section ${isDateTimeSectionOpen ? "is-open" : ""} ${
+                    isDateTimeStepComplete ? "is-complete" : ""
+                  }`}>
+                    <button
+                      className="booking-progressive-title"
+                      onClick={() => setPublicBookingSection("datetime")}
+                      type="button"
+                      disabled={!isAppointmentStepComplete}
+                    >
+                      <span className="booking-progressive-title-label">2. Date & Time</span>
+                      <span className="booking-progressive-title-state">
+                        {isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}
+                      </span>
+                    </button>
+                    {isDateTimeSectionOpen ? (
+                      <div className="booking-progressive-body">
+                        <div className="booking-week-controls">
+                          <button onClick={() => moveWeek(-1)} type="button">
+                            <ArrowLeft size={15} />
+                            <span>Previous week</span>
+                          </button>
+                          <strong>{weekTitle}</strong>
+                          <button onClick={() => moveWeek(1)} type="button">
+                            <span>Next week</span>
+                            <ArrowRight size={15} />
+                          </button>
+                        </div>
+                        <div className="booking-days-wrap">
+                          <div className="booking-days">
+                            {weekDays.map((day, index) => (
+                              <button
+                                className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
+                                key={day.label}
+                                onClick={() => handlePublicBookingDaySelect(index)}
+                                type="button"
+                              >
+                                <strong>{day.short}</strong>
+                                <em>{day.date}</em>
+                                {day.isToday ? <small className="booking-day-marker">Today</small> : null}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="time-slots">
+                          {selectedBookingService ? (
+                            bookingSlots.length ? (
+                              visibleBookingSlots.map((slot) => (
+                                <button
+                                  className={bookingStart === slot ? "selected-time" : ""}
+                                  key={slot}
+                                  onClick={() => handlePublicBookingTimeSelect(slot)}
+                                  type="button"
+                                >
+                                  {formatTime(slot)}
+                                </button>
+                              ))
+                            ) : (
+                              <p>{bookingDaySelected ? "No public times available for this day." : "Choose a day first."}</p>
+                            )
+                          ) : (
+                            <p>Choose an appointment type first.</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : isDateTimeStepComplete ? (
+                      <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("datetime")}
+                      type="button"
+                    >
+                      <span>{dateTimeSummaryLine}</span>
+                      {dateTimeSummaryLocation ? <small>{dateTimeSummaryLocation}</small> : null}
+                    </button>
+                  ) : (
+                      <button
+                        className="booking-progressive-summary booking-progressive-summary-empty"
+                        onClick={() => setPublicBookingSection("datetime")}
+                        type="button"
+                        disabled={!isAppointmentStepComplete}
+                      >
+                        <strong>{isAppointmentStepComplete ? "Date not selected" : "Select appointment first"}</strong>
+                        <span>{isAppointmentStepComplete ? "Choose day and time" : "Complete appointment step"}</span>
+                      </button>
+                    )}
+                  </section>
+
+                  <section className={`booking-progressive-section ${isInformationSectionOpen ? "is-open" : ""} ${
+                    isInformationStepComplete ? "is-complete" : ""
+                  }`}>
+                    <button
+                      className="booking-progressive-title"
+                      onClick={() => setPublicBookingSection("information")}
+                      type="button"
+                      disabled={!isDateTimeStepComplete}
+                    >
+                      <span className="booking-progressive-title-label">3. Your Information</span>
+                      <span className="booking-progressive-title-state">
+              {isInformationStepComplete ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
+            </span>
+                    </button>
+                    {isInformationSectionOpen ? (
+                      <div className="booking-progressive-body">
+                        <div className="booking-form">
+                          <input
+                            value={bookingForm.firstName}
+                            autoComplete="given-name"
+                            onChange={(event) => updateBookingForm("firstName", event.target.value)}
+                            onKeyDown={handleBookingMatchKeyDown}
+                            placeholder="First name"
+                          />
+                          <input
+                            value={bookingForm.lastName}
+                            autoComplete="family-name"
+                            onChange={(event) => updateBookingForm("lastName", event.target.value)}
+                            onKeyDown={handleBookingMatchKeyDown}
+                            placeholder="Last name"
+                          />
+                          <input
+                            value={bookingForm.phone}
+                            autoComplete="tel"
+                            inputMode="tel"
+                            onChange={(event) => updateBookingForm("phone", event.target.value)}
+                            onKeyDown={handleBookingMatchKeyDown}
+                            placeholder="Phone"
+                            type="tel"
+                          />
+                          <input
+                            value={bookingForm.email}
+                            autoComplete="email"
+                            inputMode="email"
+                            onChange={(event) => updateBookingForm("email", event.target.value)}
+                            onKeyDown={handleBookingMatchKeyDown}
+                            placeholder="Email"
+                            type="email"
+                          />
+                        </div>
+                        {bookingClientSuggestion && showBookingClientSuggestion && (
+                          <button
+                            className="client-match-prompt booking-client-match"
+                            onClick={() => applyBookingClient(bookingClientSuggestion)}
+                            type="button"
+                          >
+                            <User size={15} />
+                            <span>
+                              <strong>{bookingClientSuggestion.name}</strong>
+                              <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
+                            </span>
+                          </button>
+                        )}
+                        <div className="booking-summary">
+                          <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
+                          <span>
+                            {!selectedBookingService
+                              ? "Select a lesson to see available times"
+                              : bookingStart === null
+                              ? "Choose a time"
+                              : `${weekDays[bookingDay].label}, ${formatTime(bookingStart)}`}
+                          </span>
+                        </div>
+                        {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
+                        <button
+                          className="primary-button confirm-booking"
+                          disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving"}
+                          onClick={confirmPublicBooking}
+                          type="button"
+                        >
+                          {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
+                        </button>
+                      </div>
+                    ) : isInformationStepComplete ? (
+                      <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("information")}
+                      type="button"
+                    >
+                      <strong>Information complete</strong>
+                      <span>Customer details captured</span>
+                    </button>
+                  ) : (
+                      <button
+                        className="booking-progressive-summary booking-progressive-summary-empty"
+                        onClick={() => setPublicBookingSection("information")}
+                        type="button"
+                        disabled={!isDateTimeStepComplete}
+                      >
+                        <strong>{isDateTimeStepComplete ? "Customer details missing" : "Complete time step first"}</strong>
+                        <span>{isDateTimeStepComplete ? "Enter your details to confirm" : "Lock a time first"}</span>
+                      </button>
+                    )}
+                  </section>
                 </>
               ) : (
                 <>

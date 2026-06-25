@@ -1335,6 +1335,150 @@ button {
   gap: 14px;
 }
 
+.booking-progressive-flow {
+  align-items: start;
+  gap: 8px;
+}
+
+.app-shell .public-booking .booking-progressive-flow {
+  gap: 4px;
+}
+
+.booking-progressive-section {
+  padding: 0;
+  display: grid;
+  gap: 0;
+  border: 1px solid #deded8;
+  background: #fff;
+}
+
+.booking-progressive-title {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid #deded8;
+  background: #fbfbf9;
+  color: #171717;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  font: inherit;
+}
+
+.booking-progressive-title span {
+  display: block;
+  color: #76736d;
+  font-size: 11px;
+  font-weight: 680;
+  line-height: 1.2;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.booking-progressive-title-label {
+  opacity: 0.88;
+}
+
+.booking-progressive-title span:last-child {
+  color: #8a867f;
+  font-size: 10px;
+  font-weight: 560;
+  white-space: nowrap;
+}
+
+.booking-progressive-title strong {
+  display: block;
+  margin-top: 4px;
+  color: #171717;
+  font-size: 20px;
+  text-transform: none;
+}
+
+.booking-progressive-title:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.booking-progressive-body {
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.booking-progressive-summary {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.booking-progressive-summary strong,
+.booking-progressive-summary-empty strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.booking-progressive-summary span,
+.booking-progressive-summary-empty span {
+  font-size: 12px;
+}
+
+.booking-progressive-summary-empty {
+  color: #5d5a54;
+  background: #f7f7f3;
+}
+
+.booking-progressive-summary-empty strong,
+.booking-progressive-summary-empty span {
+  font-style: normal;
+}
+
+.booking-days-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 6px;
+}
+
+.booking-days {
+  min-width: max(280px, 100%);
+}
+
+.booking-day-marker {
+  color: #5d5a54;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.booking-progressive-section.is-open .booking-progressive-body {
+  display: grid;
+}
+
+.booking-progressive-section:not(.is-open) .booking-progressive-body {
+  display: none;
+}
+
+.booking-progressive-section .booking-progressive-summary,
+.booking-progressive-section .booking-progressive-summary-empty {
+  display: none;
+}
+
+.booking-progressive-section:not(.is-open) .booking-progressive-summary,
+.booking-progressive-section:not(.is-open) .booking-progressive-summary-empty {
+  display: grid;
+}
+
+.booking-progressive-section.is-complete:not(.is-open) .booking-progressive-title {
+  display: none;
+}
+
 .booking-card {
   padding: 16px;
 }
@@ -3837,6 +3981,76 @@ button {
   background:
     linear-gradient(90deg, var(--card-outline), color-mix(in srgb, var(--card-outline) 46%, var(--card-vein)));
   opacity: 0.72;
+}
+
+.app-shell .public-booking .booking-progressive-section {
+  --card-vein: transparent;
+  --card-outline: var(--booking-border);
+  position: relative;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--booking-border) 90%, var(--booking-card));
+  background: color-mix(in srgb, var(--booking-card) 96%, #ffffff);
+  color: var(--booking-text);
+  box-shadow: 0 12px 24px rgba(24, 28, 27, 0.06);
+}
+
+.app-shell .public-booking .booking-progressive-section:not(.is-open) {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-shell .public-booking .booking-progressive-section::before {
+  content: none;
+}
+
+.app-shell .public-booking .booking-progressive-title {
+  background: transparent;
+  color: var(--booking-text);
+  border: 0;
+  border-bottom: 0;
+  box-shadow: none;
+  min-height: 30px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.app-shell .public-booking .booking-progressive-title span {
+  color: var(--booking-muted);
+  font-size: 10px;
+  font-weight: 560;
+}
+
+.app-shell .public-booking .booking-progressive-title span:last-child {
+  color: color-mix(in srgb, var(--booking-muted) 72%, #fff);
+  font-size: 9px;
+}
+
+.app-shell .public-booking .booking-progressive-title-label {
+  opacity: 0.72;
+}
+
+.app-shell .public-booking .booking-progressive-section.is-complete:not(.is-open) .booking-progressive-title {
+  display: none;
+}
+
+.app-shell .public-booking .booking-progressive-summary,
+.app-shell .public-booking .booking-progressive-summary-empty {
+  padding-top: 11px;
+  padding-bottom: 11px;
+  box-shadow: none;
+}
+
+.app-shell .public-booking .booking-progressive-summary,
+.app-shell .public-booking .booking-progressive-summary-empty {
+  border-top: 0;
+  background: color-mix(in srgb, var(--booking-control) 82%, #ffffff);
+  color: var(--booking-text);
+}
+
+.app-shell .public-booking .booking-progressive-summary-empty {
+  color: var(--booking-muted);
+  background: color-mix(in srgb, var(--booking-control) 75%, transparent);
 }
 
 .app-shell .public-booking .booking-card > span,
