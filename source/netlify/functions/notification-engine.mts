@@ -26,6 +26,31 @@ function cleanEmail(value: unknown, fallback = "") {
   return email.includes("@") ? email : fallback;
 }
 
+function emailAddressFromHeader(fromHeader: string) {
+  const rawFrom = cleanText(fromHeader, "", 512);
+  if (!rawFrom) return "";
+  const matched = rawFrom.match(/^\s*(?:"[^"]*"|[^<"]*?)\s*<\s*([^>]+)\s*>\s*$/);
+  if (matched) {
+    const address = cleanEmail(matched[1], "");
+    if (address) return address;
+  }
+  return cleanEmail(rawFrom, "");
+}
+
+function quoteAddressName(name: string) {
+  const trimmed = cleanText(name, "", 160);
+  if (!trimmed) return "";
+  const sanitized = trimmed.replace(/"/g, '\\"');
+  return /[<>"]/.test(trimmed) ? `"${sanitized}"` : sanitized;
+}
+
+function formatFromHeader(name: string, fallbackAddress: string, sourceHeader: string) {
+  const address = emailAddressFromHeader(sourceHeader) || fallbackAddress;
+  if (!address) return "";
+  const quotedName = quoteAddressName(name);
+  return quotedName ? `${quotedName} <${address}>` : address;
+}
+
 function cleanUrl(value: unknown, fallback: string) {
   const candidate = cleanText(value, fallback, 700);
   try {
@@ -92,6 +117,7 @@ async function readSettings() {
     coachEmail: cleanEmail(s.coachEmail, env("CLARITY_COACH_EMAIL", "")),
     replyToEmail: cleanEmail(s.replyToEmail, env("CLARITY_REPLY_TO_EMAIL", env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz"))),
     notificationSubjectLine: cleanText(s.notificationSubjectLine, "", 180),
+    notificationFromName: cleanText(s.notificationFromName, "", 120),
     sendClientEmail: s.sendClientEmail !== "false",
     sendCoachEmail: s.sendCoachEmail !== "false",
     sendAdminEmail: s.sendAdminEmail !== "false",
@@ -266,7 +292,14 @@ async function sendEmail(message: { to: string; subject: string; html: string; t
   if (!apiKey) return { sent: false, reason: "missing_resend_key" };
   if (!cleanEmail(message.to)) return { sent: false, reason: "missing_recipient" };
   const settings = await readSettings();
-  const from = env("CLARITY_EMAIL_FROM", `${settings.businessName} <onboarding@resend.dev>`);
+  const rawFromHeader = env("CLARITY_EMAIL_FROM", `${settings.businessName} <onboarding@resend.dev>`);
+  const fromNameFallback = cleanText(settings.coachName, "", 120) || cleanText(settings.businessName, "", 120) || "Sam Hale Golf";
+  const fromName = cleanText(settings.notificationFromName, "", 120) || fromNameFallback;
+  const from = formatFromHeader(
+    fromName,
+    cleanEmail(rawFromHeader, env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz")),
+    rawFromHeader,
+  );
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {

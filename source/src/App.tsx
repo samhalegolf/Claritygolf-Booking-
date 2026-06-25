@@ -409,6 +409,8 @@ type NotificationSettings = {
   emailNotificationsEnabled: boolean;
   notificationEmail: string;
   notificationSubjectLine: string;
+  notificationFromName: string;
+  configuredSenderEmailAddress: string;
   coachEmail: string;
   replyToEmail: string;
   notificationDelaySeconds: number;
@@ -1945,6 +1947,8 @@ const defaultNotificationSettings: NotificationSettings = {
   emailNotificationsEnabled: true,
   notificationEmail: "",
   notificationSubjectLine: "",
+  notificationFromName: "",
+  configuredSenderEmailAddress: "",
   coachEmail: "",
   replyToEmail: "",
   notificationDelaySeconds: 30,
@@ -9915,14 +9919,6 @@ function App() {
                     />
                   </label>
                   <label className="settings-field">
-                    <span>Reply-to email</span>
-                    <input
-                      value={notificationSettings.replyToEmail}
-                      onChange={(event) => updateNotificationSetting("replyToEmail", event.target.value)}
-                      placeholder={coachAccount.contactEmail}
-                    />
-                  </label>
-                  <label className="settings-field">
                     <span>Notification delay seconds</span>
                     <input
                       value={notificationSettings.notificationDelaySeconds}
@@ -10109,7 +10105,46 @@ function App() {
                     Admin alert: {emailTemplateExample.adminSubject} - {emailTemplateExample.adminIntro}
                   </em>
                 </div>
-                <details className="settings-subsection" open>
+                <details className="settings-subsection">
+                  <summary className="settings-subsection-title">
+                    <Mail size={18} />
+                    <div>
+                      <span>Email delivery identity</span>
+                      <strong>{notificationSettings.configuredSenderEmailAddress || "Provider-controlled"}</strong>
+                    </div>
+                  </summary>
+                  <label className="settings-field">
+                    <span>Email sender name</span>
+                    <input
+                      placeholder="Sam Hale Golf"
+                      value={notificationSettings.notificationFromName}
+                      maxLength={120}
+                      onChange={(event) =>
+                        updateNotificationSetting("notificationFromName", event.target.value.slice(0, 120))}
+                    />
+                  </label>
+                  <p className="field-help">This is the display name clients see in their inbox.</p>
+                  <label className="settings-field">
+                    <span>Sender email address</span>
+                    <input
+                      value={notificationSettings.configuredSenderEmailAddress}
+                      type="email"
+                      readOnly
+                      disabled
+                      placeholder="Sender address controlled by provider"
+                    />
+                  </label>
+                  <p className="field-help">The sender email address is controlled by your configured email provider/domain.</p>
+                  <label className="settings-field">
+                    <span>Reply-to email</span>
+                    <input
+                      value={notificationSettings.replyToEmail}
+                      onChange={(event) => updateNotificationSetting("replyToEmail", event.target.value)}
+                      placeholder={coachAccount.contactEmail}
+                    />
+                  </label>
+                </details>
+                <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Mail size={18} />
                     <div>
