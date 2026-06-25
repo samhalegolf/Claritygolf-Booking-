@@ -3225,7 +3225,7 @@ function App() {
     if (!sessionService) return failWith("selectedGroupSessionDetails failed to resolve");
 
     setSelectedGroupSession(candidateSession);
-    closeCalendarDetails();
+    setSelectedId("");
     setQuickCreate(null);
     return true;
   }
