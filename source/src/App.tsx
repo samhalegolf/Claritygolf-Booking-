@@ -47,6 +47,12 @@ import type {
 } from "react";
 
 type LessonFormat = "private" | "group" | "package";
+type GroupServiceSchedule = {
+  dayOfWeek: number;
+  startMinutes: number;
+  occurrenceCount: number;
+  active: boolean;
+};
 type PriceMode = "session" | "per-person";
 type PackageCoverageMode = "upfront" | "lesson-by-lesson";
 type BookingStatus = "booked" | "completed" | "cancelled" | "no_show";
@@ -64,6 +70,7 @@ type Service = {
   lessonFormat: LessonFormat;
   priceMode: PriceMode;
   location: string;
+  groupSchedule?: GroupServiceSchedule;
   packageAllowance?: number;
   packageCoverageMode?: PackageCoverageMode;
   packageCoversServiceId?: string;
@@ -77,6 +84,7 @@ type CalendarItem = {
   start: number;
   duration: number;
   serviceId?: string;
+  readOnly?: boolean;
   client?: string;
   title: string;
   phone?: string;
@@ -542,6 +550,7 @@ const START_HOUR = 7;
 const END_HOUR = 20;
 const HOUR_HEIGHT = 72;
 const SNAP_MINUTES = 15;
+const MAX_GROUP_OCCURRENCE_COUNT = 52;
 const MOUSE_DRAG_THRESHOLD = 10;
 const TOUCH_DRAG_THRESHOLD = 16;
 const EDGE_NAV_ZONE = 26;
@@ -638,6 +647,12 @@ const defaultServices: Service[] = [
     minParticipants: 3,
     lessonFormat: "group",
     priceMode: "per-person",
+    groupSchedule: {
+      dayOfWeek: 2,
+      startMinutes: timeToMinutes(18, 0),
+      occurrenceCount: 8,
+      active: true,
+    },
     location: "Group coaching bay",
   },
   {
@@ -773,6 +788,37 @@ function overlaps(a: SlotCandidate, b: SlotCandidate) {
 
 function itemSlot(item: CalendarItem): SlotCandidate {
   return { week: itemWeek(item), day: item.day, start: item.start, duration: item.duration };
+}
+
+function defaultGroupSchedule(): GroupServiceSchedule {
+  return {
+    dayOfWeek: 2,
+    startMinutes: timeToMinutes(18, 0),
+    occurrenceCount: 8,
+    active: true,
+  };
+}
+
+function cleanGroupSchedule(
+  value: unknown,
+  fallback: GroupServiceSchedule = defaultGroupSchedule(),
+): GroupServiceSchedule {
+  const source = typeof value === "object" && value !== null ? value : {};
+  const rawDay = Number.isFinite(Number((source as Partial<GroupServiceSchedule>).dayOfWeek))
+    ? Number((source as Partial<GroupServiceSchedule>).dayOfWeek)
+    : fallback.dayOfWeek;
+  const rawStart = Number.isFinite(Number((source as Partial<GroupServiceSchedule>).startMinutes))
+    ? Number((source as Partial<GroupServiceSchedule>).startMinutes)
+    : fallback.startMinutes;
+  const rawOccurrence = Number.isFinite(Number((source as Partial<GroupServiceSchedule>).occurrenceCount))
+    ? Number((source as Partial<GroupServiceSchedule>).occurrenceCount)
+    : fallback.occurrenceCount;
+  return {
+    dayOfWeek: clamp(Math.round(rawDay), 0, 6),
+    startMinutes: Math.round(rawStart),
+    occurrenceCount: clamp(Math.round(rawOccurrence), 1, MAX_GROUP_OCCURRENCE_COUNT),
+    active: (source as Partial<GroupServiceSchedule>).active !== false,
+  };
 }
 
 function startOfCalendarWeek(value = new Date()) {
@@ -1422,6 +1468,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     : Math.max(1, fallback.packageAllowance ?? 5);
   const packageCoverageMode: PackageCoverageMode =
     service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
+  const groupSchedule = lessonFormat === "group" ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule) : undefined;
   return {
     id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
     name,
@@ -1444,6 +1491,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
       lessonFormat === "package" && typeof service?.packageCoversServiceId === "string"
         ? service.packageCoversServiceId.trim().slice(0, 120)
         : undefined,
+    groupSchedule,
   };
 }
 
@@ -1618,6 +1666,7 @@ function emptyServiceEditor(): ServiceEditor {
     lessonFormat: "private",
     priceMode: "session",
     location: "",
+    groupSchedule: defaultGroupSchedule(),
     packageAllowance: 5,
     packageCoverageMode: "upfront",
     packageCoversServiceId: "",
@@ -2071,6 +2120,10 @@ function App() {
   const visiblePublicServices = selectedBookingService ? [selectedBookingService] : publicServices;
   const selectedRescheduleMatch =
     rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
+  const selectedRescheduleService = selectedRescheduleMatch
+    ? services.find((service) => service.id === selectedRescheduleMatch.serviceId) ?? null
+    : null;
+  const bookingTargetService = bookingMode === "reschedule" ? selectedRescheduleService : selectedBookingService;
   const bookingWidgetUrl = useMemo(() => getBookingWidgetUrl(brandSettings.showLogo), [brandSettings.showLogo]);
   const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
@@ -2753,18 +2806,51 @@ function App() {
     return true;
   }
 
+  const scheduledGroupSlots = useMemo(() => {
+    const firstWeek = getCurrentWeekOffset();
+    return services
+      .filter((service) => service.lessonFormat === "group" && service.groupSchedule && service.groupSchedule.active && service.active)
+      .flatMap((service) => {
+        const schedule = service.groupSchedule;
+        if (!schedule) return [];
+        const occurrenceCount = clamp(
+          Math.round(schedule.occurrenceCount),
+          1,
+          MAX_GROUP_OCCURRENCE_COUNT,
+        );
+        if (activeWeek < firstWeek || activeWeek >= firstWeek + occurrenceCount) return [];
+        return [
+          {
+            id: `group-slot-${service.id}-${activeWeek}`,
+            kind: "block",
+            week: activeWeek,
+            day: schedule.dayOfWeek,
+            start: schedule.startMinutes,
+            duration: service.duration,
+            serviceId: service.id,
+            readOnly: true,
+            title: `${service.name} (group)`,
+            client: `${service.name} (${service.capacity} places)`,
+          },
+        ];
+      });
+  }, [activeWeek, services]);
+
   const displayItems = useMemo(() => {
     const floatingItemId = floatingDrag?.itemId ?? "";
     const baseWeekItems = floatingItemId ? weekItems.filter((item) => item.id !== floatingItemId) : weekItems;
-    if (!draft || draft.mode === "block" || draft.mode === "place") return baseWeekItems;
+    if (!draft || draft.mode === "block" || draft.mode === "place") {
+      return [...baseWeekItems, ...scheduledGroupSlots];
+    }
     const withoutMoving = baseWeekItems.filter((item) => item.id !== draft.itemId);
     const movingItem = items.find((item) => item.id === draft.itemId);
-    if (!movingItem || draft.week !== activeWeek) return withoutMoving;
+    if (!movingItem || draft.week !== activeWeek) return [...withoutMoving, ...scheduledGroupSlots];
     return [
       ...withoutMoving,
+      ...scheduledGroupSlots,
       { ...movingItem, week: draft.week, day: draft.day, start: draft.start, duration: draft.duration },
     ];
-  }, [activeWeek, draft, floatingDrag, items, weekItems]);
+  }, [activeWeek, draft, floatingDrag, items, weekItems, scheduledGroupSlots]);
   const floatingItem = floatingDrag ? items.find((item) => item.id === floatingDrag.itemId) : null;
   const floatingService = floatingItem ? itemService(floatingItem, services) : null;
 
@@ -2972,24 +3058,53 @@ function App() {
 
   const peopleImportPreview = useMemo(() => parsePeopleImport(peopleImportText).length, [peopleImportText]);
 
+  function isGroupServiceSlotMatch(service: Service | null, week: number, day: number, start: number) {
+    if (!service || service.lessonFormat !== "group" || !service.groupSchedule?.active) return false;
+    if (day !== service.groupSchedule.dayOfWeek) return false;
+    if (start !== service.groupSchedule.startMinutes) return false;
+    if (!Number.isInteger(week)) return false;
+    const weekOffset = getCurrentWeekOffset();
+    const occurrenceLimit = clamp(Math.round(service.groupSchedule.occurrenceCount), 1, MAX_GROUP_OCCURRENCE_COUNT);
+    if (week < weekOffset || week >= weekOffset + occurrenceLimit) return false;
+    return true;
+  }
+
   const bookingSlots = useMemo(() => {
-    if (!selectedBookingService) return [];
+    if (!bookingTargetService) return [];
+    if (bookingTargetService.lessonFormat === "group") {
+      const slots: number[] = [];
+      const candidate = {
+        week: activeWeek,
+        day: bookingDay,
+        start: bookingTargetService.groupSchedule?.startMinutes ?? 0,
+        duration: bookingTargetService.duration,
+      };
+      const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
+      if (
+        candidate.start === bookingTargetService.groupSchedule?.startMinutes &&
+        isGroupServiceSlotMatch(bookingTargetService, activeWeek, bookingDay, candidate.start) &&
+        !hasCollision(candidate, ignoreId, bookingTargetService)
+      ) {
+        slots.push(candidate.start);
+      }
+      return slots;
+    }
     const windows = availability[bookingDay] ?? [];
     const slots: number[] = [];
     const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
     windows.forEach((window) => {
-      for (let start = window.start; start + selectedBookingService.duration <= window.end; start += 30) {
+      for (let start = window.start; start + bookingTargetService.duration <= window.end; start += 30) {
         const candidate = {
           week: activeWeek,
           day: bookingDay,
           start,
-          duration: selectedBookingService.duration,
+          duration: bookingTargetService.duration,
         };
-        if (!hasCollision(candidate, ignoreId)) slots.push(start);
+        if (!hasCollision(candidate, ignoreId, bookingTargetService)) slots.push(start);
       }
     });
     return slots;
-  }, [activeWeek, bookingDay, bookingMode, selectedBookingService, selectedRescheduleMatch, items]);
+  }, [activeWeek, bookingDay, bookingMode, bookingTargetService, selectedRescheduleMatch, items, availability]);
   const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot === bookingStart);
 
   function slotFromClient(clientX: number, clientY: number) {
@@ -3244,13 +3359,24 @@ function App() {
     return availability[day].some((window) => start >= window.start && end <= window.end);
   }
 
-  function hasCollision(candidate: SlotCandidate, ignoreId?: string) {
+  function hasCollision(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
     const candidateEnd = candidate.start + candidate.duration;
-    return items.some((item) => {
+    const overlappingItems = items.filter((item) => {
       if (item.id === ignoreId || itemWeek(item) !== candidate.week || item.day !== candidate.day) return false;
       const itemEnd = item.start + item.duration;
       return candidate.start < itemEnd && candidateEnd > item.start;
     });
+    if (!service || service.lessonFormat !== "group") {
+      return overlappingItems.length > 0;
+    }
+    const sameServiceCount = overlappingItems.filter(
+      (item) => item.kind === "appointment" && item.serviceId === service.id,
+    ).length;
+    const collidesWithOtherService = overlappingItems.some(
+      (item) => item.kind !== "appointment" || item.serviceId !== service.id,
+    );
+    if (collidesWithOtherService) return true;
+    return sameServiceCount >= service.capacity;
   }
 
   function hasAppointmentCollision(candidate: SlotCandidate, ignoreId?: string) {
@@ -4148,7 +4274,7 @@ function App() {
   }
 
   async function confirmPublicReschedule() {
-    if (!selectedRescheduleMatch || !selectedBookingService || bookingStart === null) {
+    if (!selectedRescheduleMatch || !bookingTargetService || bookingStart === null) {
       setToast({ message: "Choose the booking and the new time." });
       return;
     }
@@ -4356,6 +4482,7 @@ function App() {
         return {
           ...next,
           visibility: "private",
+          groupSchedule: undefined,
           capacity: 1,
           minParticipants: 1,
           priceMode: "session",
@@ -4367,17 +4494,33 @@ function App() {
         const capacity = clamp(Math.round(Number(next.capacity) || 2), 2, 24);
         return {
           ...next,
+          groupSchedule: cleanGroupSchedule(next.groupSchedule, defaultGroupSchedule()),
           capacity,
           minParticipants: clamp(Math.round(Number(next.minParticipants) || 2), 2, capacity),
         };
       }
       return {
         ...next,
+        groupSchedule: undefined,
         capacity: clamp(Math.round(Number(next.capacity) || 1), 1, 24),
         minParticipants: 1,
         priceMode: "session",
       };
     });
+  }
+
+  function updateGroupSchedule<K extends keyof GroupServiceSchedule>(field: K, value: GroupServiceSchedule[K]) {
+    setServiceSaveState("idle");
+    setServiceEditor((current) => ({
+      ...current,
+      groupSchedule: cleanGroupSchedule(
+        {
+          ...(current.groupSchedule ?? {}),
+          [field]: value,
+        },
+        defaultGroupSchedule(),
+      ),
+    }));
   }
 
   function editService(service: Service) {
@@ -5257,7 +5400,7 @@ function App() {
 
   async function confirmPublicBooking() {
     if (bookingSubmitState === "saving") return;
-    if (!selectedBookingService || bookingStart === null) {
+    if (!bookingTargetService || bookingStart === null) {
       setToast({ message: "Choose a lesson time before confirming." });
       return;
     }
@@ -5278,9 +5421,9 @@ function App() {
       week: activeWeek,
       day: bookingDay,
       start: bookingStart,
-      duration: selectedBookingService.duration,
+      duration: bookingTargetService.duration,
     };
-    if (hasCollision(candidate)) {
+    if (hasCollision(candidate, undefined, bookingTargetService)) {
       setToast({ message: "That time has just been taken. Pick another slot." });
       setBookingStart(null);
       return;
@@ -5294,7 +5437,7 @@ function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            serviceId: selectedBookingService.id,
+            serviceId: bookingTargetService.id,
             week: activeWeek,
             day: bookingDay,
             start: bookingStart,
@@ -5322,11 +5465,11 @@ function App() {
           kind: "booking",
           appointmentId: data.appointment?.id,
           client,
-          service: selectedBookingService.name,
+          service: bookingTargetService.name,
           week: activeWeek,
           day: bookingDay,
           start: bookingStart,
-          duration: selectedBookingService.duration,
+          duration: bookingTargetService.duration,
           dayLabel: weekDays[bookingDay].label,
           timeLabel: formatTime(bookingStart),
           email,
@@ -5347,7 +5490,7 @@ function App() {
       id: `appt-${Date.now()}`,
       kind: "appointment",
       ...candidate,
-      serviceId: selectedBookingService.id,
+      serviceId: bookingTargetService.id,
       client,
       title: client,
       phone,
@@ -5364,7 +5507,7 @@ function App() {
     setBookingStart(null);
     setBookingForm({ firstName: "", lastName: "", phone: "", email: "" });
     setToast({
-      message: `${client} booked ${selectedBookingService.name} on ${weekDays[item.day].short} at ${formatTime(item.start)}.`,
+      message: `${client} booked ${bookingTargetService.name} on ${weekDays[item.day].short} at ${formatTime(item.start)}.`,
     });
   }
 
@@ -5541,6 +5684,57 @@ function App() {
               <div className="service-form-row">
                 {serviceEditor.lessonFormat === "group" && (
                   <label className="settings-field">
+                    <span>Day of week</span>
+                    <select
+                      value={serviceEditor.groupSchedule?.dayOfWeek ?? 2}
+                      onChange={(event) => updateGroupSchedule("dayOfWeek", Number(event.target.value))}
+                    >
+                      {fullDayNames.map((dayName, index) => (
+                        <option key={dayName} value={index}>
+                          {dayName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && (
+                  <label className="settings-field">
+                    <span>Start time</span>
+                    <input
+                      value={minutesToInputTime(serviceEditor.groupSchedule?.startMinutes ?? timeToMinutes(18, 0))}
+                      inputMode="numeric"
+                      onChange={(event) =>
+                        updateGroupSchedule(
+                          "startMinutes",
+                          inputTimeToMinutes(
+                            event.target.value,
+                            serviceEditor.groupSchedule?.startMinutes ?? timeToMinutes(18, 0),
+                          ),
+                        )
+                      }
+                      type="time"
+                      step={SNAP_MINUTES * 60}
+                    />
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && (
+                  <label className="settings-field">
+                    <span>Generate next</span>
+                    <input
+                      value={serviceEditor.groupSchedule?.occurrenceCount ?? 8}
+                      min={1}
+                      max={MAX_GROUP_OCCURRENCE_COUNT}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) =>
+                        updateGroupSchedule("occurrenceCount", Number(event.target.value))
+                      }
+                      type="text"
+                    />
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && (
+                  <label className="settings-field">
                     <span>Minimum group</span>
                     <input
                       value={serviceEditor.minParticipants}
@@ -5551,6 +5745,16 @@ function App() {
                       onChange={(event) => updateServiceEditor("minParticipants", Number(event.target.value))}
                       type="text"
                     />
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && (
+                  <label className="settings-toggle">
+                    <input
+                      checked={serviceEditor.groupSchedule?.active !== false}
+                      onChange={(event) => updateGroupSchedule("active", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>Enable recurring schedule</span>
                   </label>
                 )}
                 {serviceEditor.lessonFormat !== "package" && (
@@ -6629,19 +6833,23 @@ function App() {
                           : {}),
                       }}
                       onPointerDown={(event) => {
+                        if (item.readOnly) return;
                         hideCalendarItemHover();
                         beginMove(event, item);
                       }}
                       onClick={(event) => {
+                        if (item.readOnly) return;
                         event.stopPropagation();
                         if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
                         setSelectedId(item.id);
                         setQuickCreate(null);
                       }}
                     >
-                      <div className="item-grip" aria-hidden="true">
-                        <GripVertical size={14} />
-                      </div>
+                      {item.readOnly ? null : (
+                        <div className="item-grip" aria-hidden="true">
+                          <GripVertical size={14} />
+                        </div>
+                      )}
                       <div className="item-content">
                         <strong>{item.kind === "appointment" ? item.client || item.title : item.title}</strong>
                         <span>{service?.name ?? "Busy"}</span>
@@ -6675,11 +6883,13 @@ function App() {
                           )}
                         </div>
                       )}
-                      <button
-                        className="resize-handle"
-                        aria-label="Resize calendar item"
-                        onPointerDown={(event) => beginResize(event, item)}
-                      />
+                      {item.readOnly ? null : (
+                        <button
+                          className="resize-handle"
+                          aria-label="Resize calendar item"
+                          onPointerDown={(event) => beginResize(event, item)}
+                        />
+                      )}
                     </article>
                   );
                 })}

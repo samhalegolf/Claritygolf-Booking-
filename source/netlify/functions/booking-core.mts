@@ -14,6 +14,7 @@ const sessionCookieName = "clarity_session";
 const sessionDays = 7;
 const passwordResetMinutes = 30;
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
+const MAX_GROUP_OCCURRENCE_COUNT = 52;
 let authReadyPromise = null;
 const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
@@ -99,6 +100,12 @@ const defaultServices = [
     lessonFormat: "group",
     priceMode: "per-person",
     location: "Group coaching bay",
+    groupSchedule: {
+      dayOfWeek: 2,
+      startMinutes: timeToMinutes(18, 0),
+      occurrenceCount: 8,
+      active: true,
+    },
   },
   {
     id: "member-30",
@@ -307,6 +314,31 @@ function cleanLogoPreview(value) {
   return value.slice(0, 180_000);
 }
 
+function cleanGroupSchedule(value, fallback = {}) {
+  const source = typeof value === "object" && value !== null ? value : {};
+  const dayOfWeek = Number.isFinite(Number(source.dayOfWeek))
+    ? Number(source.dayOfWeek)
+    : Number.isFinite(Number(fallback.dayOfWeek))
+      ? Number(fallback.dayOfWeek)
+      : 2;
+  const startMinutes = Number.isFinite(Number(source.startMinutes))
+    ? Number(source.startMinutes)
+    : Number.isFinite(Number(fallback.startMinutes))
+      ? Number(fallback.startMinutes)
+      : timeToMinutes(18, 0);
+  const occurrenceCount = Number.isFinite(Number(source.occurrenceCount))
+    ? Number(source.occurrenceCount)
+    : Number.isFinite(Number(fallback.occurrenceCount))
+      ? Number(fallback.occurrenceCount)
+      : 8;
+  return {
+    dayOfWeek: Math.max(0, Math.min(6, Math.round(dayOfWeek))),
+    startMinutes: Math.round(startMinutes),
+    occurrenceCount: Math.max(1, Math.min(MAX_GROUP_OCCURRENCE_COUNT, Math.round(occurrenceCount))),
+    active: source.active !== false,
+  };
+}
+
 function cleanService(service, index = 0) {
   const fallback = defaultServices[index] ?? defaultServices[0];
   const name = cleanString(service?.name, fallback.name, 120);
@@ -337,6 +369,9 @@ function cleanService(service, index = 0) {
     ? Math.max(1, Math.min(100, Math.round(Number(service.packageAllowance))))
     : Math.max(1, fallback.packageAllowance ?? 5);
   const packageCoverageMode = service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
+  const groupSchedule = lessonFormat === "group"
+    ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule || {})
+    : undefined;
   return {
     id: cleanSlug(
       service?.id,
@@ -360,6 +395,7 @@ function cleanService(service, index = 0) {
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId:
       lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
+    groupSchedule,
   };
 }
 
@@ -2903,8 +2939,41 @@ function isInsideAvailability(availability, day, start, duration) {
   );
 }
 
-function hasCollision(items, candidate) {
-  return items.some((item) =>
+function currentWeekOffset() {
+  const today = new Date();
+  const day = today.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const weekStart = new Date(today);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() + mondayOffset);
+  const weekStartUtc = Date.UTC(
+    weekStart.getFullYear(),
+    weekStart.getMonth(),
+    weekStart.getDate(),
+  );
+  const baseWeekStartUtc = Date.UTC(
+    baseWeekStart.getFullYear(),
+    baseWeekStart.getMonth(),
+    baseWeekStart.getDate(),
+  );
+  return Math.round((weekStartUtc - baseWeekStartUtc) / (7 * 24 * 60 * 60 * 1000));
+}
+
+function isGroupServiceSlotMatch(service, candidate) {
+  if (!service || service.lessonFormat !== "group") return false;
+  if (!service.groupSchedule || service.groupSchedule.active === false) return false;
+  const schedule = service.groupSchedule;
+  if (candidate.day !== schedule.dayOfWeek) return false;
+  if (candidate.start !== schedule.startMinutes) return false;
+  if (!Number.isInteger(candidate.week)) return false;
+  const minWeek = currentWeekOffset();
+  const occurrenceCount = Math.max(1, Math.min(MAX_GROUP_OCCURRENCE_COUNT, Math.round(schedule.occurrenceCount || 1)));
+  if (candidate.week < minWeek || candidate.week >= minWeek + occurrenceCount) return false;
+  return true;
+}
+
+function hasCollision(items, candidate, service) {
+  const overlapping = items.filter((item) =>
     slotOverlaps(
       {
         week: itemWeek(item),
@@ -2915,6 +2984,15 @@ function hasCollision(items, candidate) {
       candidate,
     ),
   );
+  if (!service || service.lessonFormat !== "group") {
+    return overlapping.length > 0;
+  }
+  const sameServiceCount = overlapping.filter((item) => item.serviceId === service.id).length;
+  const blocksOrOtherService = overlapping.some(
+    (item) => item.kind !== "appointment" || item.serviceId !== service.id,
+  );
+  if (blocksOrOtherService) return true;
+  return sameServiceCount >= service.capacity;
 }
 
 async function createPublicBooking(payload, context = null) {
@@ -2958,9 +3036,15 @@ async function createPublicBooking(payload, context = null) {
   }
 
   const slot = { week, day, start, duration: service.duration };
-  if (
+  if (service.lessonFormat === "group") {
+    if (!isGroupServiceSlotMatch(service, slot) || hasCollision(state.items, slot, service)) {
+      throw Object.assign(new Error("That time is no longer available."), {
+        status: 409,
+      });
+    }
+  } else if (
     !isInsideAvailability(state.availability, day, start, service.duration) ||
-    hasCollision(state.items, slot)
+    hasCollision(state.items, slot, service)
   ) {
     throw Object.assign(new Error("That time is no longer available."), {
       status: 409,
@@ -3320,13 +3404,19 @@ async function reschedulePublicBooking(payload, context = null) {
     (item) => item.id !== appointment.id,
   );
   if (
-    !isInsideAvailability(
-      state.availability || defaultAvailability,
-      day,
-      start,
-      duration,
-    ) ||
-    hasCollision(itemsWithoutOriginal, slot)
+    !service ||
+    !service.active ||
+    service.lessonFormat === "package" ||
+    (service.lessonFormat === "group"
+      ? !isGroupServiceSlotMatch(service, slot)
+      : !isInsideAvailability(
+          state.availability || defaultAvailability,
+          day,
+          start,
+          duration,
+        ) ||
+        !Number.isInteger(duration)) ||
+    hasCollision(itemsWithoutOriginal, slot, service)
   ) {
     throw Object.assign(new Error("That time is no longer available."), {
       status: 409,
