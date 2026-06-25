@@ -246,6 +246,7 @@ type BookingForm = {
 };
 
 type BookingMode = "book" | "reschedule";
+type BookingSection = "appointment" | "date-time" | "information";
 
 type RescheduleForm = {
   email: string;
@@ -471,6 +472,7 @@ type WeekDay = {
   short: string;
   label: string;
   date: number;
+  isToday: boolean;
 };
 
 const START_HOUR = 7;
@@ -710,6 +712,7 @@ function itemSlot(item: CalendarItem): SlotCandidate {
 }
 
 function buildWeekDays(week: number): WeekDay[] {
+  const now = new Date();
   return baseWeekDays.map((short, index) => {
     const date = new Date(baseWeekStart);
     date.setDate(baseWeekStart.getDate() + week * 7 + index);
@@ -718,6 +721,7 @@ function buildWeekDays(week: number): WeekDay[] {
       short,
       label: `${fullDayNames[index]}, ${month} ${date.getDate()}`,
       date: date.getDate(),
+      isToday: date.toDateString() === now.toDateString(),
     };
   });
 }
@@ -1824,7 +1828,8 @@ function App() {
   const [activeWeek, setActiveWeek] = useState(0);
   const [edgeCue, setEdgeCue] = useState<null | "prev" | "next">(null);
   const [bookingServiceId, setBookingServiceId] = useState("");
-  const [bookingDay, setBookingDay] = useState(0);
+  const [bookingDay, setBookingDay] = useState<number | null>(null);
+  const [openBookingSection, setOpenBookingSection] = useState<BookingSection>("appointment");
   const [bookingStart, setBookingStart] = useState<number | null>(null);
   const [bookingForm, setBookingForm] = useState<BookingForm>(
     () => getInitialBookingLogin() ?? { firstName: "", lastName: "", phone: "", email: "" },
@@ -1899,7 +1904,6 @@ function App() {
     ? appointmentServices.find((service) => service.id === quickCreate.serviceId) ?? null
     : null;
   const selectedBookingService = publicServices.find((service) => service.id === bookingServiceId) ?? null;
-  const visiblePublicServices = selectedBookingService ? [selectedBookingService] : publicServices;
   const selectedRescheduleMatch =
     rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
   const bookingWidgetUrl = useMemo(getBookingWidgetUrl, []);
@@ -2558,6 +2562,309 @@ function App() {
     bookingForm.email,
     bookingForm.phone,
   ]);
+  const hasBookingContactDetails = Boolean(
+    bookingForm.firstName.trim() && bookingForm.lastName.trim() && bookingForm.email.trim(),
+  );
+  const selectedBookingDayLabel = bookingDay !== null ? weekDays[bookingDay]?.label || "" : "";
+  const selectedBookingTimeLabel = bookingStart === null ? "" : formatTime(bookingStart);
+  const selectedBookingLocation = selectedBookingService?.location || locationLine;
+  const hasDateTimeSelection = Boolean(selectedBookingService && bookingDay !== null && bookingStart !== null);
+  const canConfirmPublicBooking = Boolean(
+    selectedBookingService && bookingDay !== null && bookingStart !== null && hasBookingContactDetails,
+  );
+
+  function selectBookingService(serviceId: string) {
+    const nextServiceId = serviceId === bookingServiceId ? "" : serviceId;
+    setBookingServiceId(nextServiceId);
+    setBookingStart(null);
+    if (nextServiceId) {
+      setOpenBookingSection("date-time");
+    } else {
+      setBookingDay(null);
+      setOpenBookingSection("appointment");
+    }
+  }
+
+  function selectBookingDay(index: number) {
+    setBookingDay((current) => (current === index ? null : index));
+    setBookingStart(null);
+    setOpenBookingSection("date-time");
+  }
+
+  function selectBookingStart(slot: number) {
+    const nextBookingStart = bookingStart === slot ? null : slot;
+    setBookingStart(nextBookingStart);
+    setOpenBookingSection(nextBookingStart === null ? "date-time" : "information");
+  }
+
+  function setOpenBookingSectionState(section: BookingSection) {
+    setOpenBookingSection(section);
+  }
+
+  const publicBookingCards = (showWeekControls: boolean) => {
+    const isAppointmentOpen = openBookingSection === "appointment";
+    const isDateTimeOpen = openBookingSection === "date-time";
+    const isInformationOpen = openBookingSection === "information";
+    const canOpenDateTime = Boolean(selectedBookingService);
+    const canOpenInformation = hasDateTimeSelection;
+
+    return (
+      <div className="booking-progress-columns">
+        <article
+          className={`booking-card booking-progress-card ${isAppointmentOpen ? "is-open" : ""} ${
+            selectedBookingService ? "is-complete" : ""
+          }`}
+        >
+          <button className="booking-section-header" onClick={() => setOpenBookingSectionState("appointment")} type="button">
+            <span>Appointment</span>
+            <span className="booking-section-header-state">
+              {selectedBookingService ? "Selected" : "Choose a lesson"}
+            </span>
+          </button>
+          <div className={`booking-section-body ${isAppointmentOpen ? "is-open" : ""}`}>
+            <div className="service-picker">
+              {publicServices.length ? (
+                publicServices.map((service) => (
+                  <button
+                    className={service.id === bookingServiceId ? "selected-service" : ""}
+                    key={service.id}
+                    onClick={() => {
+                      selectBookingService(service.id);
+                    }}
+                    type="button"
+                  >
+                    <strong>{service.name}</strong>
+                    <em>
+                      {service.duration} minutes @ {servicePriceLabel(service)}
+                    </em>
+                    {service.description && <small>{service.description}</small>}
+                  </button>
+                ))
+              ) : (
+                <p>No public lesson types are active.</p>
+              )}
+            </div>
+          </div>
+          {!isAppointmentOpen && (
+            <button
+              className="booking-section-summary"
+              onClick={() => setOpenBookingSectionState("appointment")}
+              type="button"
+            >
+              {selectedBookingService ? (
+                <>
+                  <strong>{selectedBookingService.name}</strong>
+                  <span>
+                    {selectedBookingService.duration} minutes · {servicePriceLabel(selectedBookingService)}
+                  </span>
+                  {selectedBookingService.description && <em>{selectedBookingService.description}</em>}
+                </>
+              ) : (
+                <strong>Choose a lesson to continue.</strong>
+              )}
+            </button>
+          )}
+        </article>
+
+        <article
+          className={`booking-card booking-progress-card ${isDateTimeOpen ? "is-open" : ""} ${
+            hasDateTimeSelection ? "is-complete" : canOpenDateTime ? "is-in-progress" : ""
+          }`}
+        >
+          <button
+            className="booking-section-header"
+            disabled={!canOpenDateTime}
+            onClick={() => {
+              if (canOpenDateTime) setOpenBookingSectionState("date-time");
+            }}
+            type="button"
+          >
+            <span>Date & Time</span>
+            <span className="booking-section-header-state">
+              {hasDateTimeSelection ? "Complete" : canOpenDateTime ? "Select a day + time" : "Choose appointment first"}
+            </span>
+          </button>
+          <div className={`booking-section-body ${isDateTimeOpen && canOpenDateTime ? "is-open" : ""}`}>
+            {showWeekControls && (
+              <div className="booking-week-controls">
+                <button onClick={() => moveWeek(-1)} type="button">
+                  <ArrowLeft size={15} />
+                  <span>Previous week</span>
+                </button>
+                <strong>{weekTitle}</strong>
+                <button onClick={() => moveWeek(1)} type="button">
+                  <span>Next week</span>
+                  <ArrowRight size={15} />
+                </button>
+              </div>
+            )}
+            <div className="booking-days">
+              {weekDays.map((day, index) => (
+                <button
+                  className={`${bookingDay === index ? "selected-day" : ""} ${day.isToday ? "is-today" : ""}`}
+                  key={day.label}
+                  onClick={() => {
+                    selectBookingDay(index);
+                  }}
+                  type="button"
+                  disabled={!canOpenDateTime}
+                >
+                  <strong>{day.short}</strong>
+                  <em>{day.date}</em>
+                </button>
+              ))}
+            </div>
+            <div className="time-slots">
+              {bookingSlots.length ? (
+                visibleBookingSlots.map((slot) => (
+                  <button
+                    className={bookingStart === slot ? "selected-time" : ""}
+                    key={slot}
+                    onClick={() => selectBookingStart(slot)}
+                    type="button"
+                  >
+                    {formatTime(slot)}
+                  </button>
+                ))
+              ) : (
+                <p>
+                  {bookingDay === null
+                    ? "Select a day to view available times."
+                    : selectedBookingService
+                      ? "No public times available for this day."
+                      : "Choose an appointment type first."}
+                </p>
+              )}
+            </div>
+          </div>
+          {!isDateTimeOpen && (
+            <button
+              className="booking-section-summary"
+              disabled={!canOpenDateTime}
+              onClick={() => {
+                if (canOpenDateTime) setOpenBookingSectionState("date-time");
+              }}
+              type="button"
+            >
+              {hasDateTimeSelection ? (
+                <>
+                  <strong>{selectedBookingDayLabel}</strong>
+                  <span>{selectedBookingTimeLabel}</span>
+                  <em>{selectedBookingLocation}</em>
+                </>
+              ) : (
+                <strong>{canOpenDateTime ? "Choose a day and time." : "Choose an appointment first."}</strong>
+              )}
+            </button>
+          )}
+        </article>
+
+        <article
+          className={`booking-card booking-progress-card ${isInformationOpen ? "is-open" : ""} ${
+            hasBookingContactDetails ? "is-complete" : "is-locked"
+          }`}
+        >
+          <button
+            className="booking-section-header"
+            disabled={!canOpenInformation}
+            onClick={() => {
+              if (canOpenInformation) setOpenBookingSectionState("information");
+            }}
+            type="button"
+          >
+            <span>Your Information</span>
+            <span className="booking-section-header-state">
+              {hasBookingContactDetails ? "Information complete" : canOpenInformation ? "Add contact details" : "Complete date & time first"}
+            </span>
+          </button>
+          {isInformationOpen && canOpenInformation ? (
+            <div className="booking-section-body is-open">
+              <div className="booking-form">
+                <input
+                  value={bookingForm.firstName}
+                  autoComplete="given-name"
+                  onChange={(event) => updateBookingForm("firstName", event.target.value)}
+                  onKeyDown={handleBookingMatchKeyDown}
+                  placeholder="First name"
+                />
+                <input
+                  value={bookingForm.lastName}
+                  autoComplete="family-name"
+                  onChange={(event) => updateBookingForm("lastName", event.target.value)}
+                  onKeyDown={handleBookingMatchKeyDown}
+                  placeholder="Last name"
+                />
+                <input
+                  value={bookingForm.phone}
+                  autoComplete="tel"
+                  inputMode="tel"
+                  onChange={(event) => updateBookingForm("phone", event.target.value)}
+                  onKeyDown={handleBookingMatchKeyDown}
+                  placeholder="Phone"
+                  type="tel"
+                />
+                <input
+                  value={bookingForm.email}
+                  autoComplete="email"
+                  inputMode="email"
+                  onChange={(event) => updateBookingForm("email", event.target.value)}
+                  onKeyDown={handleBookingMatchKeyDown}
+                  placeholder="Email"
+                  type="email"
+                />
+              </div>
+              {bookingClientSuggestion && bookingClientHasInput && (
+                <button
+                  className="client-match-prompt booking-client-match"
+                  onClick={() => applyBookingClient(bookingClientSuggestion)}
+                  type="button"
+                >
+                  <User size={15} />
+                  <span>
+                    <strong>{bookingClientSuggestion.name}</strong>
+                    <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
+                  </span>
+                </button>
+              )}
+              <div className="booking-summary">
+                <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
+                <span>
+                  {selectedBookingService && bookingStart !== null
+                    ? `${selectedBookingDayLabel}, ${selectedBookingTimeLabel}`
+                    : "Choose a time"}
+                </span>
+              </div>
+              {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
+              <button
+                className="primary-button confirm-booking"
+                disabled={!canConfirmPublicBooking || bookingSubmitState === "saving"}
+                onClick={confirmPublicBooking}
+                type="button"
+              >
+                {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
+              </button>
+          </div>
+          ) : (
+            <button
+              className="booking-section-summary"
+              disabled={!canOpenInformation}
+              onClick={() => {
+                if (canOpenInformation) setOpenBookingSectionState("information");
+              }}
+              type="button"
+            >
+              <strong>{hasBookingContactDetails ? "Information complete" : "Contact details needed"}</strong>
+              {canOpenInformation ? (
+                <span>{hasBookingContactDetails ? "Review details above before confirming." : "Add first and last name and email."}</span>
+              ) : (
+                <span>Finish appointment and date/time to unlock contact details.</span>
+              )}
+            </button>
+          )}
+        </article>
+      </div>
+    );
+  };
 
   const notificationsByAppointment = useMemo(() => {
     const byAppointment = new Map<string, NotificationRecord[]>();
@@ -2650,7 +2957,7 @@ function App() {
   const peopleImportPreview = useMemo(() => parsePeopleImport(peopleImportText).length, [peopleImportText]);
 
   const bookingSlots = useMemo(() => {
-    if (!selectedBookingService) return [];
+    if (!selectedBookingService || bookingDay === null) return [];
     const windows = availability[bookingDay] ?? [];
     const slots: number[] = [];
     const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
@@ -3655,6 +3962,8 @@ function App() {
     setBookingMode(nextMode);
     setBookingConfirmation(null);
     setBookingStart(null);
+    setBookingDay(null);
+    setOpenBookingSection("appointment");
     setForceRescheduleLogin(nextMode === "reschedule" && showLogin);
     if (nextMode === "book") {
       setSelectedRescheduleId("");
@@ -3671,6 +3980,7 @@ function App() {
     setActiveWeekState(match.week);
     setBookingDay(match.day);
     setBookingStart(null);
+    setOpenBookingSection("date-time");
   }
 
   function describeRescheduleMatch(match: PublicRescheduleMatch) {
@@ -3775,10 +4085,12 @@ function App() {
   }
 
   async function confirmPublicReschedule() {
-    if (!selectedRescheduleMatch || !selectedBookingService || bookingStart === null) {
+    if (!selectedRescheduleMatch || !selectedBookingService || bookingDay === null || bookingStart === null) {
       setToast({ message: "Choose the booking and the new time." });
       return;
     }
+    const confirmedBookingDay = bookingDay;
+    const confirmedRescheduleDayLabel = weekDays[confirmedBookingDay]?.label ?? "";
 
     setRescheduleState("saving");
     try {
@@ -3790,7 +4102,7 @@ function App() {
           email: rescheduleForm.email,
           phone: rescheduleForm.phone,
           week: activeWeek,
-          day: bookingDay,
+          day: confirmedBookingDay,
           start: bookingStart,
         }),
       });
@@ -3813,10 +4125,10 @@ function App() {
         client: selectedRescheduleMatch.client,
         service: selectedRescheduleMatch.serviceName,
         week: activeWeek,
-        day: bookingDay,
+        day: confirmedBookingDay,
         start: bookingStart,
         duration: selectedRescheduleMatch.duration,
-        dayLabel: weekDays[bookingDay].label,
+        dayLabel: confirmedRescheduleDayLabel,
         timeLabel: formatTime(bookingStart),
         email: rescheduleForm.email,
         phone: rescheduleForm.phone,
@@ -4657,10 +4969,12 @@ function App() {
 
   async function confirmPublicBooking() {
     if (bookingSubmitState === "saving") return;
-    if (!selectedBookingService || bookingStart === null) {
-      setToast({ message: "Choose a lesson time before confirming." });
+    if (!canConfirmPublicBooking || bookingDay === null) {
+      setToast({ message: "Choose a lesson, time, and contact details before confirming." });
       return;
     }
+    const confirmedBookingDay = bookingDay;
+    const confirmedBookingDayLabel = weekDays[confirmedBookingDay]?.label ?? "";
     const matchedClient = isEmbedMode
       ? null
       : findClientMatch(clients, bookingClientInput, true) ?? bookingClientSuggestion;
@@ -4678,7 +4992,7 @@ function App() {
 
     const candidate = {
       week: activeWeek,
-      day: bookingDay,
+      day: confirmedBookingDay,
       start: bookingStart,
       duration: selectedBookingService.duration,
     };
@@ -4698,7 +5012,7 @@ function App() {
           body: JSON.stringify({
             serviceId: selectedBookingService.id,
             week: activeWeek,
-            day: bookingDay,
+            day: confirmedBookingDay,
             start: bookingStart,
             firstName,
             lastName,
@@ -4726,10 +5040,10 @@ function App() {
           client,
           service: selectedBookingService.name,
           week: activeWeek,
-          day: bookingDay,
+          day: confirmedBookingDay,
           start: bookingStart,
           duration: selectedBookingService.duration,
-          dayLabel: weekDays[bookingDay].label,
+          dayLabel: confirmedBookingDayLabel,
           timeLabel: formatTime(bookingStart),
           email,
           phone,
@@ -4767,7 +5081,7 @@ function App() {
     setBookingStart(null);
     setBookingForm({ firstName: "", lastName: "", phone: "", email: "" });
     setToast({
-      message: `${client} booked ${selectedBookingService.name} on ${weekDays[item.day].short} at ${formatTime(item.start)}.`,
+      message: `${client} booked ${selectedBookingService.name} on ${confirmedBookingDayLabel || ""} at ${formatTime(item.start)}.`,
     });
   }
 
@@ -5220,155 +5534,7 @@ function App() {
           </div>
         </summary>
         <div className={`public-booking booking-theme-${brandSettings.bookingTheme}`}>
-      <div className="booking-brand">
-        {brandSettings.logoPreview ? (
-          <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
-        ) : (
-          <>
-            <strong>{bookingBrandPrimary.toUpperCase()}</strong>
-            {bookingBrandSecondary && <span>{bookingBrandSecondary.toUpperCase()}</span>}
-          </>
-        )}
-        <em>{coachAccount.venueShortName}</em>
-      </div>
-
-      <div className="booking-columns">
-        <div className="booking-card">
-          <span>Select Appointment</span>
-          <div className="service-picker">
-            {visiblePublicServices.length ? (
-              visiblePublicServices.map((service) => (
-                <button
-                  className={service.id === bookingServiceId ? "selected-service" : ""}
-                  key={service.id}
-                  onClick={() => {
-                    setBookingServiceId(service.id === bookingServiceId ? "" : service.id);
-                    setBookingStart(null);
-                  }}
-                  type="button"
-                >
-                  <strong>{service.name}</strong>
-                  <em>
-                    {service.duration} minutes @ {servicePriceLabel(service)}
-                  </em>
-                  {service.description && <small>{service.description}</small>}
-                </button>
-              ))
-            ) : (
-              <p>No public lesson types are active.</p>
-            )}
-          </div>
-        </div>
-
-        <div className="booking-card">
-          <span>Date & Time</span>
-          <div className="booking-days">
-            {weekDays.map((day, index) => (
-              <button
-                className={bookingDay === index ? "selected-day" : ""}
-                key={day.label}
-                onClick={() => {
-                  setBookingDay(index);
-                  setBookingStart(null);
-                }}
-              >
-                <strong>{day.short}</strong>
-                <em>{day.date}</em>
-              </button>
-            ))}
-          </div>
-          <div className="time-slots">
-            {bookingSlots.length ? (
-              visibleBookingSlots.map((slot) => (
-                <button
-                  className={bookingStart === slot ? "selected-time" : ""}
-                  key={slot}
-                  onClick={() => setBookingStart(bookingStart === slot ? null : slot)}
-                  type="button"
-                >
-                  {formatTime(slot)}
-                </button>
-              ))
-            ) : (
-              <p>
-                {selectedBookingService
-                  ? "No public times available for this day."
-                  : "Choose an appointment type first."}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="booking-card">
-          <span>Your Information</span>
-          <div className="booking-form">
-            <input
-              value={bookingForm.firstName}
-              autoComplete="given-name"
-              onChange={(event) => updateBookingForm("firstName", event.target.value)}
-              onKeyDown={handleBookingMatchKeyDown}
-              placeholder="First name"
-            />
-            <input
-              value={bookingForm.lastName}
-              autoComplete="family-name"
-              onChange={(event) => updateBookingForm("lastName", event.target.value)}
-              onKeyDown={handleBookingMatchKeyDown}
-              placeholder="Last name"
-            />
-            <input
-              value={bookingForm.phone}
-              autoComplete="tel"
-              inputMode="tel"
-              onChange={(event) => updateBookingForm("phone", event.target.value)}
-              onKeyDown={handleBookingMatchKeyDown}
-              placeholder="Phone"
-              type="tel"
-            />
-            <input
-              value={bookingForm.email}
-              autoComplete="email"
-              inputMode="email"
-              onChange={(event) => updateBookingForm("email", event.target.value)}
-              onKeyDown={handleBookingMatchKeyDown}
-              placeholder="Email"
-              type="email"
-            />
-          </div>
-          {bookingClientSuggestion && bookingClientHasInput && (
-            <button
-              className="client-match-prompt booking-client-match"
-              onClick={() => applyBookingClient(bookingClientSuggestion)}
-              type="button"
-            >
-              <User size={15} />
-              <span>
-                <strong>{bookingClientSuggestion.name}</strong>
-                <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
-              </span>
-            </button>
-          )}
-          <div className="booking-summary">
-            <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
-            <span>
-              {!selectedBookingService
-                ? "Select a lesson to see available times"
-                : bookingStart === null
-                ? "Choose a time"
-                : `${weekDays[bookingDay].label}, ${formatTime(bookingStart)}`}
-            </span>
-          </div>
-          {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
-          <button
-            className="primary-button confirm-booking"
-            disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving"}
-            onClick={confirmPublicBooking}
-            type="button"
-          >
-            {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
-          </button>
-        </div>
-      </div>
+      {publicBookingCards(false)}
 
         </div>
       </details>
@@ -7095,156 +7261,10 @@ function App() {
                 </button>
               </div>
             ) : (
-            <div className="booking-columns">
-              {bookingMode === "book" ? (
-                <>
-              <div className="booking-card">
-                <span>Select Appointment</span>
-                <div className="service-picker">
-                  {visiblePublicServices.length ? (
-                    visiblePublicServices.map((service) => (
-                      <button
-                        className={service.id === bookingServiceId ? "selected-service" : ""}
-                        key={service.id}
-                        onClick={() => {
-                          setBookingServiceId(service.id === bookingServiceId ? "" : service.id);
-                          setBookingStart(null);
-                        }}
-                        type="button"
-                      >
-                        <strong>{service.name}</strong>
-                        <em>
-                          {service.duration} minutes @ {servicePriceLabel(service)}
-                        </em>
-                        {service.description && <small>{service.description}</small>}
-                      </button>
-                    ))
-                  ) : (
-                    <p>No public lesson types are active.</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="booking-card">
-                <span>Date & Time</span>
-                <div className="booking-week-controls">
-                  <button onClick={() => moveWeek(-1)} type="button">
-                    <ArrowLeft size={15} />
-                    <span>Previous week</span>
-                  </button>
-                  <strong>{weekTitle}</strong>
-                  <button onClick={() => moveWeek(1)} type="button">
-                    <span>Next week</span>
-                    <ArrowRight size={15} />
-                  </button>
-                </div>
-                <div className="booking-days">
-                  {weekDays.map((day, index) => (
-                    <button
-                      className={bookingDay === index ? "selected-day" : ""}
-                      key={day.label}
-                      onClick={() => {
-                        setBookingDay(index);
-                        setBookingStart(null);
-                      }}
-                    >
-                      <strong>{day.short}</strong>
-                      <em>{day.date}</em>
-                    </button>
-                  ))}
-                </div>
-                <div className="time-slots">
-                  {bookingSlots.length ? (
-                    visibleBookingSlots.map((slot) => (
-                      <button
-                        className={bookingStart === slot ? "selected-time" : ""}
-                        key={slot}
-                        onClick={() => setBookingStart(bookingStart === slot ? null : slot)}
-                        type="button"
-                      >
-                        {formatTime(slot)}
-                      </button>
-                    ))
-                  ) : (
-                    <p>
-                      {selectedBookingService
-                        ? "No public times available for this day."
-                        : "Choose an appointment type first."}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="booking-card">
-                <span>Your Information</span>
-                <div className="booking-form">
-                  <input
-                    value={bookingForm.firstName}
-                    autoComplete="given-name"
-                    onChange={(event) => updateBookingForm("firstName", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="First name"
-                  />
-                  <input
-                    value={bookingForm.lastName}
-                    autoComplete="family-name"
-                    onChange={(event) => updateBookingForm("lastName", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="Last name"
-                  />
-                  <input
-                    value={bookingForm.phone}
-                    autoComplete="tel"
-                    inputMode="tel"
-                    onChange={(event) => updateBookingForm("phone", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="Phone"
-                    type="tel"
-                  />
-                  <input
-                    value={bookingForm.email}
-                    autoComplete="email"
-                    inputMode="email"
-                    onChange={(event) => updateBookingForm("email", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="Email"
-                    type="email"
-                  />
-                </div>
-                {bookingClientSuggestion && bookingClientHasInput && (
-                  <button
-                    className="client-match-prompt booking-client-match"
-                    onClick={() => applyBookingClient(bookingClientSuggestion)}
-                    type="button"
-                  >
-                    <User size={15} />
-                    <span>
-                      <strong>{bookingClientSuggestion.name}</strong>
-                      <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
-                    </span>
-                  </button>
-                )}
-                <div className="booking-summary">
-                  <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
-                  <span>
-                    {!selectedBookingService
-                      ? "Select a lesson to see available times"
-                      : bookingStart === null
-                      ? "Choose a time"
-                      : `${weekDays[bookingDay].label}, ${formatTime(bookingStart)}`}
-                  </span>
-                </div>
-                {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
-                <button
-                  className="primary-button confirm-booking"
-                  disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving"}
-                  onClick={confirmPublicBooking}
-                  type="button"
-                >
-                  {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
-                </button>
-              </div>
-                </>
+            {bookingMode === "book" ? (
+              <>
+                {publicBookingCards(true)}
+              </>
               ) : (
                 <>
                   {showRescheduleLoginPanel ? (
