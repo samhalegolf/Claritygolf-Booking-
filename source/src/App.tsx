@@ -4385,6 +4385,7 @@ function App() {
       top,
       width: popoverWidth,
       maxHeight: availableHeight,
+      zIndex: selectedGroupSession ? 120 : undefined,
     };
   }
 
