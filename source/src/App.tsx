@@ -5036,10 +5036,13 @@ function App() {
     setToast({ message: `${confirmedInvoiceNumber} marked sent.` });
   }
 
-  async function persistServices(nextServices: Service[], message = "Lesson types saved.") {
-    const cleaned = cleanServices(nextServices);
+  async function persistServices(
+    nextServices: Service[],
+    message = "Lesson types saved.",
+    requiredServiceId?: string,
+  ) {
+    const payloadServices = cleanServices(nextServices);
     const snapshot = services;
-    setServices(cleaned);
     setServiceSaveState("saving");
     try {
       const response = await fetch("/api/services", {
@@ -5047,27 +5050,39 @@ function App() {
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ services: cleaned }),
+        body: JSON.stringify({ services: payloadServices }),
       });
       if (response.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      const data = (await response.json().catch(() => null)) as { services?: Service[]; message?: string; error?: string };
+      const data = (await response.json().catch(() => null)) as {
+        services?: Service[];
+        message?: string;
+        error?: string;
+      };
       if (!response.ok) {
         const detail = data?.message || data?.error;
         throw new Error(detail || `Services save failed (${response.status} ${response.statusText})`);
       }
-      if (!Array.isArray(data?.services)) throw new Error("Services save response did not return services.");
-      setServices(cleanServices(data.services));
+      if (!Array.isArray(data?.services)) {
+        throw new Error("Services save response did not return services.");
+      }
+      const persistedServices = cleanServices(data.services);
+      const expectedServiceId = requiredServiceId || payloadServices.at(-1)?.id;
+      const persistedServiceIds = new Set(persistedServices.map((service) => service.id));
+      if (expectedServiceId && !persistedServiceIds.has(expectedServiceId)) {
+        throw new Error("Service did not persist. Reload and try again.");
+      }
+      setServices(persistedServices);
       setServiceSaveState("saved");
       setToast({ message });
       window.setTimeout(() => setServiceSaveState("idle"), 1600);
     } catch (error) {
-      setServices(snapshot);
       setServiceSaveState("error");
       const reason = error instanceof Error ? error.message : "Could not save lesson types.";
       setToast({ message: reason });
+      setServices(snapshot);
     }
   }
 
@@ -5091,7 +5106,11 @@ function App() {
     setEditingServiceId(clean.id);
     setServiceEditor(clean);
     setShowServiceEditor(false);
-    void persistServices(nextServices, exists ? `${clean.name} updated.` : `${clean.name} added.`);
+    void persistServices(
+      nextServices,
+      exists ? `${clean.name} updated.` : `${clean.name} added.`,
+      clean.id,
+    );
   }
 
   function toggleServiceActive(service: Service) {
@@ -5100,6 +5119,7 @@ function App() {
         candidate.id === service.id ? { ...candidate, active: !candidate.active } : candidate,
       ),
       service.active ? `${service.name} archived.` : `${service.name} restored.`,
+      service.id,
     );
   }
 
