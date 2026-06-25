@@ -1985,7 +1985,7 @@ function App() {
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showServiceEditor, setShowServiceEditor] = useState(false);
-  const [serviceSaveState, setServiceSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [serviceSaveState, setServiceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [groupOccurrenceInput, setGroupOccurrenceInput] = useState("");
   const [groupMinimumInput, setGroupMinimumInput] = useState("");
   const [groupMaximumInput, setGroupMaximumInput] = useState("");
@@ -5038,27 +5038,36 @@ function App() {
 
   async function persistServices(nextServices: Service[], message = "Lesson types saved.") {
     const cleaned = cleanServices(nextServices);
+    const snapshot = services;
     setServices(cleaned);
     setServiceSaveState("saving");
     try {
       const response = await fetch("/api/services", {
         method: "PUT",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
+        cache: "no-store",
         body: JSON.stringify({ services: cleaned }),
       });
       if (response.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error("Services save failed");
-      const data = (await response.json()) as { services?: Service[] };
-      if (Array.isArray(data.services)) setServices(cleanServices(data.services));
+      const data = (await response.json().catch(() => null)) as { services?: Service[]; message?: string; error?: string };
+      if (!response.ok) {
+        const detail = data?.message || data?.error;
+        throw new Error(detail || `Services save failed (${response.status} ${response.statusText})`);
+      }
+      if (!Array.isArray(data?.services)) throw new Error("Services save response did not return services.");
+      setServices(cleanServices(data.services));
       setServiceSaveState("saved");
       setToast({ message });
       window.setTimeout(() => setServiceSaveState("idle"), 1600);
-    } catch {
-      setServiceSaveState("idle");
-      setToast({ message: "Could not save lesson types." });
+    } catch (error) {
+      setServices(snapshot);
+      setServiceSaveState("error");
+      const reason = error instanceof Error ? error.message : "Could not save lesson types.";
+      setToast({ message: reason });
     }
   }
 
@@ -6138,7 +6147,13 @@ function App() {
             </div>
 
             <button className="primary-button settings-save" onClick={saveEditedService}>
-              {serviceSaveState === "saving" ? "Saving" : serviceSaveState === "saved" ? "Saved" : "Save Lesson Type"}
+              {serviceSaveState === "saving"
+                ? "Saving"
+                : serviceSaveState === "saved"
+                  ? "Saved"
+                  : serviceSaveState === "error"
+                    ? "Not saved"
+                    : "Save Lesson Type"}
             </button>
           </article>
         )}
