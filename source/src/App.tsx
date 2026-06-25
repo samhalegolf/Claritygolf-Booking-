@@ -85,6 +85,7 @@ type CalendarItem = {
   start: number;
   duration: number;
   groupSlot?: boolean;
+  syntheticGroupSlot?: boolean;
   serviceId?: string;
   readOnly?: boolean;
   client?: string;
@@ -2895,21 +2896,21 @@ function App() {
           MAX_GROUP_OCCURRENCE_COUNT,
         );
         if (activeWeek < firstWeek || activeWeek >= firstWeek + occurrenceCount) return [];
-        return [
-          {
-            id: `group-slot-${service.id}-${activeWeek}`,
-            kind: "block" as const,
-            week: activeWeek,
-            day: schedule.dayOfWeek,
-            start: schedule.startMinutes,
-            duration: service.duration,
-            serviceId: service.id,
-            groupSlot: true,
-            readOnly: true,
-            title: `${service.name} (group)`,
-            client: `${service.name} (${service.capacity} places)`,
-          },
-        ];
+          return [
+            {
+              id: `group-slot-${service.id}-${activeWeek}`,
+              kind: "block" as const,
+              week: activeWeek,
+              day: schedule.dayOfWeek,
+              start: schedule.startMinutes,
+              duration: service.duration,
+              serviceId: service.id,
+              syntheticGroupSlot: true,
+              readOnly: true,
+              title: `${service.name} (group)`,
+              client: `${service.name} (${service.capacity} places)`,
+            },
+          ];
       });
   }, [activeWeek, services]);
 
@@ -3181,9 +3182,23 @@ function App() {
 
   function openGroupSessionForItem(item: CalendarItem) {
     const service = services.find((candidate) => candidate.id === item.serviceId);
-    if (!service) return false;
+    if (!service) {
+      setToast({ message: "Unable to open group session because the service no longer exists." });
+      return false;
+    }
+    if (service.lessonFormat !== "group") {
+      setToast({ message: "Unable to open group session for a non-group service." });
+      return false;
+    }
+    if (item.syntheticGroupSlot && (!service.groupSchedule || !service.groupSchedule.active)) {
+      setToast({ message: "Unable to open group session because the service schedule is missing or inactive." });
+      return false;
+    }
     const slotWeek = itemWeek(item);
-    if (!isGroupServiceSlotMatch(service, slotWeek, item.day, item.start)) return false;
+    if (!isGroupServiceSlotMatch(service, slotWeek, item.day, item.start)) {
+      setToast({ message: "Unable to open group session: this time no longer matches the active group schedule." });
+      return false;
+    }
     setSelectedGroupSession({
       serviceId: service.id,
       week: slotWeek,
@@ -3223,7 +3238,7 @@ function App() {
   }
 
   function isScheduledGroupSessionSlot(item: CalendarItem) {
-    if (item.groupSlot) return true;
+    if (item.syntheticGroupSlot || item.groupSlot) return true;
     const service = itemService(item, services);
     return (
       item.readOnly &&
@@ -3254,11 +3269,7 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     hideCalendarItemHover();
-    const opened = openGroupSessionForItem(item);
-    if (!opened) {
-      setToast({ message: "Unable to open group session from this calendar item right now." });
-    }
-    return opened;
+    return openGroupSessionForItem(item);
   }
 
   const bookingSlots = useMemo(() => {
@@ -7188,14 +7199,14 @@ function App() {
                         beginMove(event, item);
                       }}
                       onPointerUp={(event) => {
-                        if (groupSessionItem) {
+                        if (groupSessionItem && !scheduledGroupSession) {
                           event.preventDefault();
                           handleCalendarItemClick(event, item);
                         }
                       }}
                       onClick={(event) => {
                         if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
-                        if (groupSessionItem) {
+                        if (groupSessionItem && !scheduledGroupSession) {
                           event.preventDefault();
                           event.stopPropagation();
                           handleCalendarItemClick(event, item);
@@ -7207,19 +7218,34 @@ function App() {
                         setQuickCreate(null);
                       }}
                       onKeyDown={(event) => {
-                        if ((event.key === "Enter" || event.key === " ") && scheduledGroupSession) {
+                        if ((event.key === "Enter" || event.key === " ") && groupSessionItem && !scheduledGroupSession) {
                           handleCalendarItemClick(event, item);
                         }
                       }}
-                      role={scheduledGroupSession ? "button" : undefined}
-                      tabIndex={scheduledGroupSession ? 0 : undefined}
                     >
                       {item.readOnly ? null : (
                         <div className="item-grip" aria-hidden="true">
                           <GripVertical size={14} />
                         </div>
-                      )}
-                      <div className="item-content">
+                        )}
+                        {scheduledGroupSession ? (
+                          <button
+                            type="button"
+                            className="outline-button"
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              openGroupSessionForItem(item);
+                            }}
+                          >
+                            Open session
+                          </button>
+                        ) : null}
+                        <div className="item-content">
                         <strong>{item.kind === "appointment" ? item.client || item.title : item.title}</strong>
                         <span>{service?.name ?? "Busy"}</span>
                         <em>{formatRange(item.start, item.duration)}</em>
