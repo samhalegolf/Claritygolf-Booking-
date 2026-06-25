@@ -41,6 +41,7 @@ import type {
   ChangeEvent,
   CSSProperties,
   FormEvent,
+  MouseEvent as ReactMouseEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   TouchEvent as ReactTouchEvent,
@@ -3227,6 +3228,30 @@ function App() {
       service?.lessonFormat === "group" &&
       isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
     );
+  }
+
+  function isGroupSessionAppointment(item: CalendarItem) {
+    const service = itemService(item, services);
+    return (
+      item.kind === "appointment" &&
+      service?.lessonFormat === "group" &&
+      isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
+    );
+  }
+
+  function isGroupSessionItem(item: CalendarItem) {
+    return isScheduledGroupSessionSlot(item) || isGroupSessionAppointment(item);
+  }
+
+  function handleCalendarItemClick(
+    event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
+    item: CalendarItem,
+  ) {
+    if (!isGroupSessionItem(item)) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    hideCalendarItemHover();
+    return openGroupSessionForItem(item);
   }
 
   const bookingSlots = useMemo(() => {
@@ -7108,6 +7133,8 @@ function App() {
                   const latestClientEmail = itemNotifications.find((notification) => notification.kind.includes("client"));
                   const latestCoachEmail = itemNotifications.find((notification) => notification.kind.includes("coach"));
                   const latestAdminEmail = itemNotifications.find((notification) => notification.kind.includes("admin"));
+                  const scheduledGroupSession = isScheduledGroupSessionSlot(item);
+                  const groupSessionItem = isGroupSessionItem(item);
                   const tooltipRows = [
                     item.client || item.title,
                     service?.name ?? (item.kind === "block" ? "Blocked time" : "Lesson"),
@@ -7135,6 +7162,7 @@ function App() {
                         height: Math.max(height, 34),
                         left: `calc(${left}% + 6px)`,
                         width: `calc(${width}% - 12px)`,
+                        ...(scheduledGroupSession ? ({ cursor: "pointer" } as CSSProperties) : {}),
                         ...(flyAnimation
                           ? ({
                               "--dock-fly-x": `${flyAnimation.fromX}px`,
@@ -7143,36 +7171,42 @@ function App() {
                           : {}),
                       }}
                       onPointerDown={(event) => {
-                        if (isScheduledGroupSessionSlot(item)) {
-                          event.preventDefault();
+                        if (scheduledGroupSession) {
                           event.stopPropagation();
                           hideCalendarItemHover();
-                          openGroupSessionForItem(item);
                           return;
                         }
                         if (item.readOnly) return;
                         hideCalendarItemHover();
                         beginMove(event, item);
                       }}
+                      onPointerUp={(event) => {
+                        if (scheduledGroupSession) {
+                          event.preventDefault();
+                          handleCalendarItemClick(event, item);
+                        }
+                      }}
                       onClick={(event) => {
-                        if (item.readOnly) {
-                          if (openGroupSessionForItem(item)) {
-                            event.stopPropagation();
-                            return;
-                          }
+                        if (scheduledGroupSession) {
+                          return;
+                        }
+                        if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
+                        if (groupSessionItem) {
+                          handleCalendarItemClick(event, item);
                           return;
                         }
                         event.stopPropagation();
-                        if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
-                        const service = itemService(item, services);
-                        if (service?.lessonFormat === "group" && isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)) {
-                          openGroupSessionForItem(item);
-                          return;
-                        }
                         setSelectedGroupSession(null);
                         setSelectedId(item.id);
                         setQuickCreate(null);
                       }}
+                      onKeyDown={(event) => {
+                        if ((event.key === "Enter" || event.key === " ") && scheduledGroupSession) {
+                          handleCalendarItemClick(event, item);
+                        }
+                      }}
+                      role={scheduledGroupSession ? "button" : undefined}
+                      tabIndex={scheduledGroupSession ? 0 : undefined}
                     >
                       {item.readOnly ? null : (
                         <div className="item-grip" aria-hidden="true">
