@@ -5,6 +5,17 @@ import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./goog
 import { notifyCalendarDiff } from "./notification-engine.mts";
 
 const sessionCookieName = "clarity_session";
+const MAX_GROUP_OCCURRENCE_COUNT = 52;
+
+type LessonFormat = "private" | "group" | "package";
+type PriceMode = "session" | "per-person";
+type PackageCoverageMode = "upfront" | "lesson-by-lesson";
+type GroupServiceSchedule = {
+  dayOfWeek: number;
+  startMinutes: number;
+  occurrenceCount: number;
+  active: boolean;
+};
 
 const defaultServices = [
   {
@@ -128,6 +139,122 @@ const defaultInvoiceSettings = {
     "Please pay by bank transfer and use the invoice number as reference.",
   customFields: [],
 };
+
+function timeToMinutes(hour: number, minute: number) {
+  return hour * 60 + minute;
+}
+
+function cleanSlug(value: unknown, fallback: string) {
+  if (typeof value !== "string") return fallback;
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return slug || fallback;
+}
+
+function cleanGroupSchedule(value: unknown, fallback: GroupServiceSchedule = { dayOfWeek: 2, startMinutes: timeToMinutes(18, 0), occurrenceCount: 8, active: true }) {
+  const source = typeof value === "object" && value !== null ? (value as Partial<GroupServiceSchedule>) : {};
+  const dayOfWeek = Number.isFinite(Number(source.dayOfWeek))
+    ? Number(source.dayOfWeek)
+    : Number.isFinite(Number(fallback.dayOfWeek))
+      ? Number(fallback.dayOfWeek)
+      : 2;
+  const startMinutes = Number.isFinite(Number(source.startMinutes))
+    ? Number(source.startMinutes)
+    : Number.isFinite(Number(fallback.startMinutes))
+      ? Number(fallback.startMinutes)
+      : timeToMinutes(18, 0);
+  const occurrenceCount = Number.isFinite(Number(source.occurrenceCount))
+    ? Number(source.occurrenceCount)
+    : Number.isFinite(Number(fallback.occurrenceCount))
+      ? Number(fallback.occurrenceCount)
+      : 8;
+  return {
+    dayOfWeek: Math.max(0, Math.min(6, Math.round(dayOfWeek))),
+    startMinutes: Math.round(startMinutes),
+    occurrenceCount: Math.max(1, Math.min(MAX_GROUP_OCCURRENCE_COUNT, Math.round(occurrenceCount))),
+    active: source.active !== false,
+  };
+}
+
+function cleanService(service?: Record<string, unknown>, index = 0) {
+  const fallback = (defaultServices[index] ?? defaultServices[0]) as any;
+  const name = cleanString(service?.name, fallback.name, 120);
+  const duration = Number.isFinite(Number(service?.duration))
+    ? Number(service?.duration)
+    : fallback.duration;
+  const price = Number.isFinite(Number(service?.price))
+    ? Number(service?.price)
+    : fallback.price;
+  const capacity = Number.isFinite(Number(service?.capacity))
+    ? Number(service?.capacity)
+    : fallback.capacity || 1;
+  const looksLikePackage =
+    service?.lessonFormat === "package" ||
+    String(service?.id || fallback.id || "").startsWith("package-") ||
+    /package/i.test(name);
+  const lessonFormat: LessonFormat = looksLikePackage
+    ? "package"
+    : service?.lessonFormat === "group"
+      ? "group"
+      : "private";
+  const cleanCapacity = Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
+  const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
+    ? Number(service?.minParticipants)
+    : lessonFormat === "group"
+      ? Math.min(2, cleanCapacity)
+      : 1;
+  const minParticipants = lessonFormat === "group"
+    ? Math.max(2, Math.min(cleanCapacity, Math.round(rawMinParticipants)))
+    : 1;
+  const priceMode: PriceMode = lessonFormat === "group" && service?.priceMode === "per-person" ? "per-person" : "session";
+  const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
+    ? Math.max(1, Math.min(100, Math.round(Number(service?.packageAllowance))))
+    : Math.max(1, fallback.packageAllowance ?? 5);
+  const packageCoverageMode: PackageCoverageMode = service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
+  const groupSchedule = lessonFormat === "group"
+    ? cleanGroupSchedule(service?.groupSchedule, (fallback.groupSchedule as GroupServiceSchedule) || { dayOfWeek: 2, startMinutes: timeToMinutes(18, 0), occurrenceCount: 8, active: true })
+    : undefined;
+  return {
+    id: cleanSlug(service?.id as unknown, cleanSlug(name, `service-${Date.now()}-${index}`)),
+    name,
+    duration: Math.max(15, Math.min(240, Math.round(duration))),
+    price: Math.max(0, Math.round(price)),
+    description: cleanString(service?.description, fallback.description, 240),
+    visibility: lessonFormat === "package" || service?.visibility === "private" ? "private" : "public",
+    active: service?.active !== false,
+    capacity: cleanCapacity,
+    minParticipants,
+    lessonFormat,
+    priceMode,
+    location: cleanString(service?.location, fallback.location, 160),
+    packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
+    packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
+    packageCoversServiceId: lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
+    groupSchedule,
+  };
+}
+
+function normalizeServices(serviceList?: unknown[]): unknown[] {
+  const source =
+    Array.isArray(serviceList) && serviceList.length ? serviceList : defaultServices;
+  const seen = new Set<string>();
+  return source.map((service, index) => {
+    const clean = cleanService(service as Record<string, unknown>, index);
+    let id = clean.id;
+    let suffix = 2;
+    while (seen.has(id)) {
+      id = `${clean.id}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(id);
+    return { ...clean, id };
+  });
+}
 
 const defaultAvailability = [
   [{ start: 990, end: 1200 }],
@@ -728,9 +855,14 @@ async function readState() {
 
 async function writeState(body: any) {
   const hasItemsPayload = Object.prototype.hasOwnProperty.call(body || {}, "items");
+  const hasServicesPayload = Object.prototype.hasOwnProperty.call(body || {}, "services");
   const shouldReplaceItems = body?.replaceItems === true || body?.itemsOperation === "replace";
   const rows = uniqueById(Array.isArray(body?.items) ? body.items.map(itemToRow) : []);
   const warnings: string[] = [];
+  if (hasServicesPayload) {
+    const normalizedServices = normalizeServices(body?.services);
+    await setSetting("servicesJson", JSON.stringify(normalizedServices));
+  }
 
   if (hasItemsPayload && rows.length) {
     // Calendar items are the authoritative lesson records. Store them before
@@ -845,7 +977,27 @@ export default async function handler(req: Request) {
     if (req.method === "GET") return json(await readState());
     if (req.method === "PUT") {
       const body = await parseBody(req);
-      if (!Array.isArray(body?.items)) {
+      const hasItemsPayload = Object.prototype.hasOwnProperty.call(body || {}, "items");
+      const hasServicesPayload = Object.prototype.hasOwnProperty.call(body || {}, "services");
+      if (!hasItemsPayload && !hasServicesPayload) {
+        return json(
+          {
+            error: "invalid_calendar_state",
+            message: "PUT /api/calendar-state requires body.items and/or body.services.",
+          },
+          400,
+        );
+      }
+      if (hasServicesPayload && !Array.isArray(body?.services)) {
+        return json(
+          {
+            error: "invalid_calendar_state",
+            message: "PUT /api/calendar-state requires body.services to be an array when present.",
+          },
+          400,
+        );
+      }
+      if (hasItemsPayload && !Array.isArray(body?.items)) {
         return json(
           {
             error: "invalid_calendar_state",

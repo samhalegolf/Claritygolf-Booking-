@@ -5050,12 +5050,17 @@ function App() {
     const snapshot = services;
     setServiceSaveState("saving");
     try {
-      const response = await fetch("/api/services", {
+      const response = await fetch("/api/calendar-state", {
         method: "PUT",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ services: payloadServices }),
+        body: JSON.stringify({
+          items: items,
+          services: payloadServices,
+          syncKey: calendarSyncKey,
+          updatedAt: calendarStateVersion,
+        }),
       });
       if (response.status === 401) {
         setAuthStatus("guest");
@@ -5065,6 +5070,9 @@ function App() {
         services?: Service[];
         message?: string;
         error?: string;
+        notifications?: NotificationRecord[];
+        warnings?: string[];
+        updatedAt?: string;
       };
       if (!response.ok) {
         const detail = data?.message || data?.error;
@@ -5080,6 +5088,12 @@ function App() {
         throw new Error("Service did not persist. Reload and try again.");
       }
       setServices(persistedServices);
+      if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+      if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+      if (Array.isArray(data.warnings) && data.warnings.length) {
+        const warning = data.warnings.find((candidate) => typeof candidate === "string" && candidate.trim()) ?? "";
+        if (warning) setToast({ message: warning });
+      }
       setServiceSaveState("saved");
       setToast({ message });
       window.setTimeout(() => setServiceSaveState("idle"), 1600);
