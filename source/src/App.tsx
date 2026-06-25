@@ -2806,7 +2806,7 @@ function App() {
     return true;
   }
 
-  const scheduledGroupSlots = useMemo(() => {
+  const scheduledGroupSlots = useMemo<CalendarItem[]>(() => {
     const firstWeek = getCurrentWeekOffset();
     return services
       .filter((service) => service.lessonFormat === "group" && service.groupSchedule && service.groupSchedule.active && service.active)
@@ -2822,7 +2822,7 @@ function App() {
         return [
           {
             id: `group-slot-${service.id}-${activeWeek}`,
-            kind: "block",
+            kind: "block" as const,
             week: activeWeek,
             day: schedule.dayOfWeek,
             start: schedule.startMinutes,
