@@ -528,6 +528,7 @@ type SlotCandidate = {
 };
 
 type QuickCreateState = {
+  week: number;
   day: number;
   start: number;
   x: number;
@@ -3104,10 +3105,17 @@ function App() {
     if (!service || service.lessonFormat !== "group") return;
     const slotWeek = itemWeek(item);
     if (!isGroupServiceSlotMatch(service, slotWeek, item.day, item.start)) return;
+    const candidate = {
+      week: slotWeek,
+      day: item.day,
+      start: item.start,
+      duration: service.duration,
+    };
     setSelectedId("");
     setQuickMatchField("name");
     setQuickClientSearch("");
     setQuickCreate({
+      week: slotWeek,
       day: item.day,
       start: item.start,
       x: anchor.x,
@@ -3116,7 +3124,7 @@ function App() {
       phone: "",
       email: "",
       note: "",
-      error: "",
+      error: quickCreateAvailabilityError(candidate, service),
     });
   }
 
@@ -3430,6 +3438,24 @@ function App() {
     return sameServiceCount >= service.capacity;
   }
 
+  function isGroupSlotFull(candidate: SlotCandidate, service?: Service) {
+    if (!service || service.lessonFormat !== "group") return false;
+    const sameServiceCount = items.filter(
+      (item) =>
+        item.kind === "appointment" &&
+        item.serviceId === service.id &&
+        overlaps(itemSlot(item), candidate),
+    ).length;
+    return sameServiceCount >= service.capacity;
+  }
+
+  function quickCreateAvailabilityError(candidate: SlotCandidate, service?: Service) {
+    if (!service) return "That service is no longer available.";
+    if (isGroupSlotFull(candidate, service)) return "Group is full.";
+    if (!isValidAppointmentSlot(candidate, undefined, service)) return "That time is already occupied.";
+    return "";
+  }
+
   function hasAppointmentCollision(candidate: SlotCandidate, ignoreId?: string) {
     const candidateEnd = candidate.start + candidate.duration;
     return items.some((item) => {
@@ -3618,6 +3644,7 @@ function App() {
     dragPreviewMetaRef.current = null;
     setFloatingDrag(null);
     pendingQuickCreateRef.current = {
+      week: activeWeek,
       day: slot.day,
       start: slot.start,
       x: event.clientX,
@@ -3948,13 +3975,18 @@ function App() {
     if (!quickCreate) return;
     const service = appointmentServices.find((candidate) => candidate.id === serviceId);
     if (!service) return;
-    const candidate = { week: activeWeek, day: quickCreate.day, start: quickCreate.start, duration: service.duration };
+    const candidate = {
+      week: quickCreate.week,
+      day: quickCreate.day,
+      start: quickCreate.start,
+      duration: service.duration,
+    };
     setQuickCreate((current) =>
       current
         ? {
             ...current,
             serviceId,
-            error: isValidAppointmentSlot(candidate, undefined, service) ? "" : "That time is already occupied.",
+            error: quickCreateAvailabilityError(candidate, service),
           }
         : current,
     );
@@ -3977,13 +4009,15 @@ function App() {
       return;
     }
     const candidate = {
-      week: activeWeek,
+      week: quickCreate.week,
       day: quickCreate.day,
       start: quickCreate.start,
       duration: quickCreateService.duration,
     };
     if (!isValidAppointmentSlot(candidate, undefined, quickCreateService)) {
-      setQuickCreate((current) => (current ? { ...current, error: "That time is already occupied." } : current));
+      setQuickCreate((current) =>
+        current ? { ...current, error: quickCreateAvailabilityError(candidate, quickCreateService) } : current,
+      );
       return;
     }
     const item: CalendarItem = {
