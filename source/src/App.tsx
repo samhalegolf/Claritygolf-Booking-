@@ -3180,35 +3180,54 @@ function App() {
     });
   }
 
-  function openGroupSessionForItem(item: CalendarItem) {
-    const service = services.find((candidate) => candidate.id === item.serviceId);
-    if (!service) {
-      setToast({ message: "Unable to open group session because the service no longer exists." });
+  function openGroupSessionFromSlot(item: CalendarItem): boolean {
+    const failWith = (reason: string) => {
+      setToast({ message: `Unable to open group session: ${reason}` });
       return false;
-    }
-    if (service.lessonFormat !== "group") {
-      setToast({ message: "Unable to open group session for a non-group service." });
-      return false;
-    }
-    if (item.syntheticGroupSlot && (!service.groupSchedule || !service.groupSchedule.active)) {
-      setToast({ message: "Unable to open group session because the service schedule is missing or inactive." });
-      return false;
-    }
-    const slotWeek = itemWeek(item);
-    if (!isGroupServiceSlotMatch(service, slotWeek, item.day, item.start)) {
-      setToast({ message: "Unable to open group session: this time no longer matches the active group schedule." });
-      return false;
-    }
-    setSelectedGroupSession({
-      serviceId: service.id,
-      week: slotWeek,
+    };
+
+    const serviceId = item.serviceId;
+    if (!serviceId) return failWith("missing serviceId");
+
+    const service = services.find((candidate) => candidate.id === serviceId);
+    if (!service) return failWith("service not found");
+    if (service.lessonFormat !== "group") return failWith("service is not group");
+
+    const week = itemWeek(item);
+    const slotWeek = Number.isInteger(week) ? week : NaN;
+    const slotData = {
       day: item.day,
       start: item.start,
-      duration: service.duration,
-    });
+      duration: item.duration,
+    };
+
+    if (item.syntheticGroupSlot || item.groupSlot) {
+      if (!service || !Number.isInteger(slotWeek) || !Number.isInteger(slotData.day) || !Number.isFinite(slotData.start) || !Number.isFinite(slotData.duration)) {
+        return failWith("slot does not match schedule");
+      }
+    } else {
+      if (!service.groupSchedule || !service.groupSchedule.active) return failWith("missing groupSchedule");
+      if (!isGroupServiceSlotMatch(service, slotWeek, slotData.day, slotData.start)) return failWith("slot does not match schedule");
+    }
+
+    const candidateSession: GroupSession = {
+      serviceId,
+      week: slotWeek,
+      day: slotData.day,
+      start: slotData.start,
+      duration: slotData.duration || service.duration,
+    };
+    const sessionService = services.find((candidate) => candidate.id === candidateSession.serviceId);
+    if (!sessionService) return failWith("selectedGroupSessionDetails failed to resolve");
+
+    setSelectedGroupSession(candidateSession);
     closeCalendarDetails();
     setQuickCreate(null);
     return true;
+  }
+
+  function openGroupSessionForItem(item: CalendarItem) {
+    return openGroupSessionFromSlot(item);
   }
 
   function openQuickCreateForGroupSession(anchor: { x: number; y: number }) {
@@ -7239,7 +7258,7 @@ function App() {
                             onClick={(event) => {
                               event.preventDefault();
                               event.stopPropagation();
-                              openGroupSessionForItem(item);
+                              openGroupSessionFromSlot(item);
                             }}
                           >
                             Open session
