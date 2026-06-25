@@ -39,6 +39,15 @@ function cleanEmail(value: unknown, fallback = "") {
   return cleanString(value, fallback, 180).toLowerCase();
 }
 
+function cleanUrl(value: unknown, fallback = "") {
+  const candidate = cleanString(value, "", 700);
+  try {
+    return new URL(candidate).toString();
+  } catch {
+    return fallback;
+  }
+}
+
 function configuredSenderEmailFromEnv(value: unknown) {
   const source = cleanString(value, "", 500);
   if (!source) return "";
@@ -134,6 +143,7 @@ async function readAdminSettings() {
     notificationEmail: settings.notificationEmail || "",
     coachEmail: settings.coachEmail || "",
     replyToEmail: settings.replyToEmail || "",
+    googleReviewUrl: cleanUrl(settings.googleReviewUrl, ""),
     notificationFromName: cleanString(settings.notificationFromName, "", 120),
     configuredSenderEmailAddress: configuredSenderEmailFromEnv(
       env("CLARITY_EMAIL_FROM", env("CLARITY_NOTIFICATION_EMAIL", settings.notificationEmail || "")),
@@ -162,6 +172,7 @@ async function writeAdminSettings(settings: any) {
   if (hasOwn(settings, "notificationEmail")) await setSetting("notificationEmail", cleanEmail(settings?.notificationEmail, ""));
   if (hasOwn(settings, "coachEmail")) await setSetting("coachEmail", cleanEmail(settings?.coachEmail, ""));
   if (hasOwn(settings, "replyToEmail")) await setSetting("replyToEmail", cleanEmail(settings?.replyToEmail, ""));
+  if (hasOwn(settings, "googleReviewUrl")) await setSetting("googleReviewUrl", cleanUrl(settings?.googleReviewUrl, ""));
   if (hasOwn(settings, "notificationFromName")) await setSetting("notificationFromName", cleanString(settings?.notificationFromName, "", 120));
   if (hasOwn(settings, "notificationSubjectLine")) await setSetting("notificationSubjectLine", cleanString(settings?.notificationSubjectLine, "", 180));
   if (hasOwn(settings, "notificationDelaySeconds")) {

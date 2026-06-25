@@ -410,6 +410,7 @@ type NotificationSettings = {
   notificationEmail: string;
   notificationSubjectLine: string;
   notificationFromName: string;
+  googleReviewUrl: string;
   configuredSenderEmailAddress: string;
   coachEmail: string;
   replyToEmail: string;
@@ -1948,6 +1949,7 @@ const defaultNotificationSettings: NotificationSettings = {
   notificationEmail: "",
   notificationSubjectLine: "",
   notificationFromName: "",
+  googleReviewUrl: "",
   configuredSenderEmailAddress: "",
   coachEmail: "",
   replyToEmail: "",
@@ -2794,6 +2796,7 @@ function App() {
       ...(settings ?? {}),
       notificationDelaySeconds: Number.isFinite(delaySeconds) ? clamp(delaySeconds, 30, 3600) : 30,
       minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(minBookingNoticeMinutes),
+      googleReviewUrl: cleanUrl(settings?.googleReviewUrl, ""),
     });
   }
 
@@ -10143,6 +10146,26 @@ function App() {
                       placeholder={coachAccount.contactEmail}
                     />
                   </label>
+                </details>
+                <details className="settings-subsection">
+                  <summary className="settings-subsection-title">
+                    <ExternalLink size={18} />
+                    <div>
+                      <span>Google review link</span>
+                      <strong>{notificationSettings.googleReviewUrl ? "Configured" : "Not set"}</strong>
+                    </div>
+                  </summary>
+                  <label className="settings-field">
+                    <span>Google review URL</span>
+                    <input
+                      type="url"
+                      value={notificationSettings.googleReviewUrl}
+                      maxLength={700}
+                      onChange={(event) => updateNotificationSetting("googleReviewUrl", event.target.value.slice(0, 700))}
+                      placeholder="direct Google review link"
+                    />
+                  </label>
+                  <p className="field-help">Used for optional review buttons in client emails. Leave blank to hide review links.</p>
                 </details>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
