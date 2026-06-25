@@ -540,6 +540,14 @@ type QuickCreateState = {
   error: string;
 };
 
+type GroupSession = {
+  serviceId: string;
+  week: number;
+  day: number;
+  start: number;
+  duration: number;
+};
+
 type WeekDay = {
   short: string;
   label: string;
@@ -1994,6 +2002,7 @@ function App() {
   const [clientSaveState, setClientSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [clientProfileTab, setClientProfileTab] = useState<ClientProfileTab>("bookings");
   const [selectedId, setSelectedId] = useState("");
+  const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
   const [billingSection, setBillingSection] = useState<BillingSection>("none");
@@ -2127,6 +2136,40 @@ function App() {
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
+  const selectedGroupSessionService = selectedGroupSession
+    ? services.find((service) => service.id === selectedGroupSession.serviceId) ?? null
+    : null;
+  const selectedGroupSessionAttendees = useMemo(() => {
+    if (!selectedGroupSession || !selectedGroupSessionService) return [];
+    const candidate = {
+      week: selectedGroupSession.week,
+      day: selectedGroupSession.day,
+      start: selectedGroupSession.start,
+      duration: selectedGroupSession.duration,
+    };
+    return items
+      .filter(
+        (item) =>
+          item.kind === "appointment" &&
+          item.serviceId === selectedGroupSessionService.id &&
+          overlaps(itemSlot(item), candidate),
+      )
+      .sort((a, b) => (a.client ?? "").localeCompare(b.client ?? ""));
+  }, [items, selectedGroupSession, selectedGroupSessionService]);
+  const selectedGroupSessionCapacity = selectedGroupSessionService?.capacity ?? 0;
+  const selectedGroupSessionBookedCount = selectedGroupSessionAttendees.length;
+  const selectedGroupSessionRemainingSlots = Math.max(0, selectedGroupSessionCapacity - selectedGroupSessionBookedCount);
+  const selectedGroupSessionIsFull = selectedGroupSessionCapacity > 0 && selectedGroupSessionBookedCount >= selectedGroupSessionCapacity;
+  const selectedGroupSessionDate = selectedGroupSession
+    ? dateForSlot(selectedGroupSession.week, selectedGroupSession.day)
+    : null;
+  const selectedGroupSessionLabel = selectedGroupSessionDate
+    ? selectedGroupSessionDate.toLocaleDateString("en-NZ", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      })
+    : "";
   const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek]);
   const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
   const weekItems = useMemo(() => items.filter((item) => itemWeek(item) === activeWeek), [activeWeek, items]);
@@ -3089,6 +3132,11 @@ function App() {
 
   const peopleImportPreview = useMemo(() => parsePeopleImport(peopleImportText).length, [peopleImportText]);
 
+  function closeCalendarDetails() {
+    setSelectedId("");
+    setSelectedGroupSession(null);
+  }
+
   function isGroupServiceSlotMatch(service: Service | null, week: number, day: number, start: number) {
     if (!service || service.lessonFormat !== "group" || !service.groupSchedule?.active) return false;
     if (day !== service.groupSchedule.dayOfWeek) return false;
@@ -3111,13 +3159,56 @@ function App() {
       start: item.start,
       duration: service.duration,
     };
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickMatchField("name");
     setQuickClientSearch("");
     setQuickCreate({
       week: slotWeek,
       day: item.day,
       start: item.start,
+      x: anchor.x,
+      y: anchor.y,
+      serviceId: service.id,
+      phone: "",
+      email: "",
+      note: "",
+      error: quickCreateAvailabilityError(candidate, service),
+    });
+  }
+
+  function openGroupSessionForItem(item: CalendarItem) {
+    const service = services.find((candidate) => candidate.id === item.serviceId);
+    if (!service) return false;
+    const slotWeek = itemWeek(item);
+    if (!isGroupServiceSlotMatch(service, slotWeek, item.day, item.start)) return false;
+    setSelectedGroupSession({
+      serviceId: service.id,
+      week: slotWeek,
+      day: item.day,
+      start: item.start,
+      duration: service.duration,
+    });
+    closeCalendarDetails();
+    setQuickCreate(null);
+    return true;
+  }
+
+  function openQuickCreateForGroupSession(anchor: { x: number; y: number }) {
+    if (!selectedGroupSession) return;
+    const service = selectedGroupSessionService;
+    if (!service || service.lessonFormat !== "group") return;
+    const candidate = {
+      week: selectedGroupSession.week,
+      day: selectedGroupSession.day,
+      start: selectedGroupSession.start,
+      duration: selectedGroupSession.duration,
+    };
+    setQuickMatchField("name");
+    setQuickClientSearch("");
+    setQuickCreate({
+      week: candidate.week,
+      day: candidate.day,
+      start: candidate.start,
       x: anchor.x,
       y: anchor.y,
       serviceId: service.id,
@@ -3307,7 +3398,7 @@ function App() {
 
     setItems(items.filter((item) => item.id !== movedItem.id));
     setFloatingDrag(null);
-    setSelectedId("");
+    closeCalendarDetails();
     setFlyingBooking({ ...docked, fromX, fromY });
     window.setTimeout(() => {
       setDockBookings((current) => [...current, docked]);
@@ -3349,7 +3440,7 @@ function App() {
   function setActiveWeekState(nextWeek: number) {
     activeWeekRef.current = nextWeek;
     setActiveWeek(nextWeek);
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
   }
 
@@ -3783,7 +3874,7 @@ function App() {
           return;
         }
         if (requireLiveDatabase("create calendar items")) {
-          setSelectedId("");
+          closeCalendarDetails();
           setQuickCreate(pendingQuickCreate);
           clearGesture({ preserveQuickCreate: true });
         } else {
@@ -3853,12 +3944,12 @@ function App() {
         note: "Blocked from calendar drag",
       };
       setItems([...items, newBlock]);
-      setSelectedId("");
+      closeCalendarDetails();
       setToast({
         message: `Blocked ${weekDays[activeDraft.day].short}, ${formatRange(activeDraft.start, activeDraft.duration)}.`,
         undo: () => {
           setItems(previous);
-          setSelectedId("");
+          closeCalendarDetails();
         },
       });
       clearGesture();
@@ -3888,7 +3979,7 @@ function App() {
       setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
       setDockBookings(dockBookings.filter((booking) => booking.id !== session.booking.id));
       setActiveDockBookingId((current) => (current === session.booking.id ? "" : current));
-      setSelectedId("");
+      closeCalendarDetails();
       setToast({ message: `Placed ${session.booking.client} on ${weekDays[item.day].short} at ${formatTime(item.start)}.` });
       clearGesture();
       return;
@@ -3919,7 +4010,7 @@ function App() {
           : item,
     );
     setItems(movedItem.kind === "appointment" ? carveBusyBlocksForAppointment(nextItems, activeDraft) : nextItems);
-    setSelectedId("");
+    closeCalendarDetails();
     clearGesture();
   }
 
@@ -4032,7 +4123,15 @@ function App() {
       note: quickCreate.note.trim(),
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
-    setSelectedId("");
+    if (
+      !selectedGroupSession ||
+      selectedGroupSession.serviceId !== quickCreateService.id ||
+      selectedGroupSession.week !== quickCreate.week ||
+      selectedGroupSession.day !== quickCreate.day ||
+      selectedGroupSession.start !== quickCreate.start
+    ) {
+      setSelectedId("");
+    }
     setQuickCreate(null);
     setQuickClientSearch("");
   }
@@ -4054,7 +4153,7 @@ function App() {
       note: "Quick block",
     };
     setItems([...items, item]);
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
     setToast({
       message: `Blocked ${weekDays[item.day].short}, ${formatRange(item.start, item.duration)}.`,
@@ -4084,7 +4183,7 @@ function App() {
       note: "Admin-created inside blocked time.",
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
-    setSelectedId("");
+    closeCalendarDetails();
     setToast({
       message: `Added ${service.name} inside blocked time at ${formatTime(item.start)}.`,
       undo: () => setItems(previous),
@@ -4105,7 +4204,7 @@ function App() {
       email: selected.email,
       note: `Follow-up ${service.name}`,
     };
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
     setFlyingBooking(booking);
     window.setTimeout(() => {
@@ -4127,7 +4226,7 @@ function App() {
     setFloatingDrag(null);
     setActiveDockBookingId(booking.id);
     setMovedState(false);
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
     setPointerSessionState({ mode: "place", booking });
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -4169,7 +4268,7 @@ function App() {
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
     setDockBookings(dockBookings.filter((dockBooking) => dockBooking.id !== booking.id));
     setActiveDockBookingId("");
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
     if (animation) {
       setPlacementAnimation(animation);
@@ -4223,14 +4322,14 @@ function App() {
     setQuickCreate(null);
     if (view === "settings") setSettingsTab("none");
     if (view === "billing") setBillingSection("none");
-    if (view !== "calendar") setSelectedId("");
+    if (view !== "calendar") closeCalendarDetails();
   }
 
   function openInvoiceCoachSettings() {
     setActiveView("settings");
     setSettingsTab("account");
     setBillingSection("none");
-    setSelectedId("");
+    closeCalendarDetails();
     setQuickCreate(null);
   }
 
@@ -5197,7 +5296,7 @@ function App() {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     hasLoadedCalendarApiRef.current = false;
     setAuthStatus("guest");
-    setSelectedId("");
+    closeCalendarDetails();
     setCalendarFeedStatus("offline");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
@@ -5627,9 +5726,9 @@ function App() {
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
     if (isEmbedMode) {
-      setSelectedId("");
+      closeCalendarDetails();
     } else {
-      setSelectedId("");
+      closeCalendarDetails();
       setActiveView("calendar");
     }
     setBookingStart(null);
@@ -5679,7 +5778,7 @@ function App() {
     if (!requireLiveDatabase("remove calendar items")) return;
     const previous = items;
     setItems(items.filter((item) => item.id !== selected.id));
-    setSelectedId("");
+    closeCalendarDetails();
     setToast({
       message: `${selected.kind === "block" ? "Block" : "Appointment"} removed.`,
       undo: () => setItems(previous),
@@ -6352,11 +6451,11 @@ function App() {
     </article>
   );
 
-  const selectedDetails = selected ? (
+  const selectedAppointmentDetails = selected ? (
     <>
       <div className="panel-header">
         <span>{selected.kind === "block" ? "Blocked Time" : "Appointment"}</span>
-        <button className="icon-button small" onClick={() => setSelectedId("")} aria-label="Close details">
+        <button className="icon-button small" onClick={closeCalendarDetails} aria-label="Close details">
           <X size={17} />
         </button>
       </div>
@@ -6493,6 +6592,78 @@ function App() {
       </div>
     </>
   ) : null;
+
+  const selectedGroupSessionDetails = selectedGroupSession && selectedGroupSessionService ? (
+    <>
+      <div className="panel-header">
+        <span>Group Session</span>
+        <button className="icon-button small" onClick={closeCalendarDetails} aria-label="Close details">
+          <X size={17} />
+        </button>
+      </div>
+      <h2 id="appointment-details-title">{selectedGroupSessionService.name}</h2>
+      <p className="muted">{selectedGroupSessionLabel}</p>
+
+      <div className="info-stack">
+        <div>
+          <Clock size={16} />
+          <span>{`${selectedGroupSessionLabel}, ${formatRange(
+            selectedGroupSession.start,
+            selectedGroupSession.duration,
+          )}`}</span>
+        </div>
+        <div>
+          <MapPin size={16} />
+          <span>{selectedGroupSessionService.location || coachAccount.venueName}</span>
+        </div>
+        <div>
+          <User size={16} />
+          <span>{`${selectedGroupSessionBookedCount} / ${selectedGroupSessionCapacity} booked`}</span>
+        </div>
+        <div>
+          <span>{`Spaces remaining: ${selectedGroupSessionRemainingSlots}`}</span>
+        </div>
+      </div>
+
+      <div className="service-summary">
+        <span>Booked people</span>
+        {selectedGroupSessionAttendees.length === 0 ? (
+          <p>No one is booked yet.</p>
+        ) : (
+          <ul className="people-list">
+            {selectedGroupSessionAttendees.map((appointment) => (
+              <li key={appointment.id}>
+                <strong>{appointment.client || appointment.title}</strong>
+                <span>{[appointment.phone, appointment.email].filter(Boolean).join(" · ")}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="panel-actions">
+        <button
+          className="primary-button"
+          disabled={selectedGroupSessionIsFull}
+          onClick={(event) =>
+            openQuickCreateForGroupSession({
+              x: event.clientX,
+              y: event.clientY,
+            })
+          }
+          type="button"
+        >
+          <Plus size={16} />
+          Add person
+        </button>
+        {selectedGroupSessionIsFull ? <p className="muted">Group is full.</p> : null}
+      </div>
+    </>
+  ) : null;
+
+  const selectedDetails = selectedGroupSessionDetails
+    ? selectedGroupSessionDetails
+    : selectedAppointmentDetails;
 
   if (!isEmbedMode && authStatus !== "authenticated") {
     return (
@@ -6968,11 +7139,19 @@ function App() {
                       }}
                       onClick={(event) => {
                         if (item.readOnly) {
-                          openQuickCreateForGroupSlot(item, { x: event.clientX, y: event.clientY });
+                          if (openGroupSessionForItem(item)) {
+                            return;
+                          }
                           return;
                         }
                         event.stopPropagation();
                         if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
+                        const service = itemService(item, services);
+                        if (service?.lessonFormat === "group" && isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)) {
+                          openGroupSessionForItem(item);
+                          return;
+                        }
+                        setSelectedGroupSession(null);
                         setSelectedId(item.id);
                         setQuickCreate(null);
                       }}
@@ -9580,7 +9759,7 @@ function App() {
       </main>
 
       {!isEmbedMode && activeView === "calendar" && selectedDetails && (
-        <div className="details-overlay" role="presentation" onPointerDown={() => setSelectedId("")}>
+        <div className="details-overlay" role="presentation" onPointerDown={closeCalendarDetails}>
           <aside
             className="details-panel details-modal"
             role="dialog"
