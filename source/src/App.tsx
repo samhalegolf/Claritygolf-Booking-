@@ -3219,6 +3219,16 @@ function App() {
     });
   }
 
+  function isScheduledGroupSessionSlot(item: CalendarItem) {
+    const service = itemService(item, services);
+    return (
+      item.readOnly &&
+      item.kind === "block" &&
+      service?.lessonFormat === "group" &&
+      isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
+    );
+  }
+
   const bookingSlots = useMemo(() => {
     if (!bookingTargetService) return [];
     if (bookingTargetService.lessonFormat === "group") {
@@ -7133,6 +7143,13 @@ function App() {
                           : {}),
                       }}
                       onPointerDown={(event) => {
+                        if (isScheduledGroupSessionSlot(item)) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          hideCalendarItemHover();
+                          openGroupSessionForItem(item);
+                          return;
+                        }
                         if (item.readOnly) return;
                         hideCalendarItemHover();
                         beginMove(event, item);
@@ -7140,6 +7157,7 @@ function App() {
                       onClick={(event) => {
                         if (item.readOnly) {
                           if (openGroupSessionForItem(item)) {
+                            event.stopPropagation();
                             return;
                           }
                           return;
