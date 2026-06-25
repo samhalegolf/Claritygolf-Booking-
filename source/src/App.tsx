@@ -1648,6 +1648,10 @@ function parseDraftNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function generateServiceDraftId() {
+  return `service-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function emptyInvoiceDraft(settings = defaultInvoiceSettings): InvoiceDraft {
   return {
     payerName: "",
@@ -4832,6 +4836,7 @@ function App() {
     setEditingServiceId(null);
     setServiceEditor({
       ...emptyServiceEditor(),
+      id: generateServiceDraftId(),
       location: coachAccount.venueShortName,
     });
     setShowServiceEditor(true);
@@ -5041,7 +5046,7 @@ function App() {
     message = "Lesson types saved.",
     requiredServiceId?: string,
   ) {
-    const payloadServices = cleanServices(nextServices);
+    const payloadServices = nextServices.map((service) => ({ ...service }));
     const snapshot = services;
     setServiceSaveState("saving");
     try {
@@ -5092,10 +5097,11 @@ function App() {
       return;
     }
     const normalizedEditor = serviceEditor.lessonFormat === "group" ? applyGroupDraftInputs() : serviceEditor;
+    const stableServiceId = editingServiceId || normalizedEditor.id || generateServiceDraftId();
     const clean = cleanService(
       {
         ...normalizedEditor,
-        id: editingServiceId ?? normalizedEditor.id ?? cleanSlug(normalizedEditor.name, `service-${Date.now()}`),
+        id: stableServiceId,
       },
       services.length,
     );
