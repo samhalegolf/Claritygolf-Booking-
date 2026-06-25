@@ -1340,6 +1340,10 @@ button {
   gap: 8px;
 }
 
+.app-shell .public-booking .booking-progressive-flow {
+  gap: 6px;
+}
+
 .booking-progressive-section {
   padding: 0;
   display: grid;
@@ -3980,16 +3984,14 @@ button {
 }
 
 .app-shell .public-booking .booking-progressive-section {
-  --card-vein: var(--coach-secondary);
-  --card-outline: var(--coach-neutral);
+  --card-vein: transparent;
+  --card-outline: var(--booking-border);
   position: relative;
   overflow: hidden;
-  border-color: color-mix(in srgb, var(--card-outline) 88%, var(--booking-border));
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--card-vein) 26%, transparent), transparent 58%),
-    linear-gradient(180deg, color-mix(in srgb, var(--card-vein) 18%, var(--booking-card)), color-mix(in srgb, var(--card-vein) 8%, var(--booking-card)));
+  border-color: color-mix(in srgb, var(--booking-border) 90%, var(--booking-card));
+  background: color-mix(in srgb, var(--booking-card) 96%, #ffffff);
   color: var(--booking-text);
-  box-shadow: var(--booking-shadow);
+  box-shadow: 0 12px 24px rgba(24, 28, 27, 0.06);
 }
 
 .app-shell .public-booking .booking-progressive-section::before {
@@ -3998,29 +4000,27 @@ button {
   left: 0;
   right: 0;
   top: 0;
-  height: 2px;
-  background:
-    linear-gradient(90deg, var(--card-outline), color-mix(in srgb, var(--card-outline) 46%, var(--card-vein)));
-  opacity: 0.72;
+  height: 1px;
+  background: var(--booking-border);
+  opacity: 0.55;
 }
 
 .app-shell .public-booking .booking-progressive-title {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--card-vein) 10%, transparent), transparent),
-    var(--booking-control);
+    linear-gradient(180deg, var(--booking-control), color-mix(in srgb, var(--booking-control) 65%, var(--booking-card)));
   color: var(--booking-text);
-  border-bottom-color: color-mix(in srgb, var(--card-outline) 28%, var(--booking-border));
+  border-bottom-color: color-mix(in srgb, var(--booking-border) 55%, var(--booking-card));
 }
 
 .app-shell .public-booking .booking-progressive-title span {
   color: var(--booking-muted);
-  font-size: 11px;
-  font-weight: 640;
+  font-size: 10px;
+  font-weight: 560;
 }
 
 .app-shell .public-booking .booking-progressive-title span:last-child {
   color: color-mix(in srgb, var(--booking-muted) 72%, #fff);
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .app-shell .public-booking .booking-progressive-title-label {
@@ -4040,13 +4040,13 @@ button {
 .app-shell .public-booking .booking-progressive-summary,
 .app-shell .public-booking .booking-progressive-summary-empty {
   border-top: 1px solid color-mix(in srgb, var(--card-outline) 28%, var(--booking-border));
-  background: var(--booking-card-soft);
+  background: color-mix(in srgb, var(--booking-control) 82%, #ffffff);
   color: var(--booking-text);
 }
 
 .app-shell .public-booking .booking-progressive-summary-empty {
   color: var(--booking-muted);
-  background: color-mix(in srgb, var(--booking-control) 52%, transparent);
+  background: color-mix(in srgb, var(--booking-control) 75%, transparent);
 }
 
 .app-shell .public-booking .booking-card > span,

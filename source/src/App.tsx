@@ -3406,17 +3406,17 @@ function App() {
   const appointmentSummaryName = selectedBookingService
     ? selectedBookingService.name
     : "Choose an appointment type";
+  const appointmentSummaryDescription = selectedBookingService?.description?.trim() || "";
   const appointmentSummaryDuration = selectedBookingService
     ? `${selectedBookingService.duration} min · ${servicePriceLabel(selectedBookingService)}`
     : "Select a lesson to continue";
+  const dateTimeSummaryLocation = (selectedBookingService?.location?.trim() || locationLine || "").slice(0, 120);
   const bookingDaySummary = bookingDaySelected ? weekDays[bookingDay]?.label ?? "" : "No day selected";
   const dateTimeSummaryLine = isDateTimeStepComplete
     ? `${bookingDaySummary}, ${formatTime(bookingStart ?? 0)}`
     : bookingDaySelected
       ? bookingDaySummary
       : "Choose a day";
-  const informationSummaryName = `${bookingForm.firstName.trim()} ${bookingForm.lastName.trim()}`.trim() || "Guest";
-  const informationSummaryContact = bookingForm.email.trim() || bookingForm.phone.trim() ? "Contact details captured" : "Name only";
 
   function slotFromClient(clientX: number, clientY: number) {
     const grid = gridRef.current;
@@ -6557,15 +6557,16 @@ function App() {
               </div>
             </div>
           ) : isAppointmentStepComplete ? (
-            <button
-              className="booking-summary booking-progressive-summary"
-              onClick={() => setPublicBookingSection("appointment")}
-              type="button"
-            >
-              <strong>{appointmentSummaryName}</strong>
-              <span>{appointmentSummaryDuration}</span>
-            </button>
-          ) : (
+                    <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("appointment")}
+                      type="button"
+                    >
+                      <strong>{appointmentSummaryName}</strong>
+                      <span>{appointmentSummaryDuration}</span>
+                      {appointmentSummaryDescription ? <small>{appointmentSummaryDescription}</small> : null}
+                    </button>
+                  ) : (
             <button
               className="booking-progressive-summary booking-progressive-summary-empty"
               onClick={() => setPublicBookingSection("appointment")}
@@ -6641,14 +6642,14 @@ function App() {
             </div>
           ) : isDateTimeStepComplete ? (
             <button
-              className="booking-summary booking-progressive-summary"
-              onClick={() => setPublicBookingSection("datetime")}
-              type="button"
-            >
-              <strong>{selectedBookingService?.name ?? "Select appointment"}</strong>
-              <span>{dateTimeSummaryLine}</span>
-            </button>
-          ) : (
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("datetime")}
+                      type="button"
+                    >
+                      <span>{dateTimeSummaryLine}</span>
+                      {dateTimeSummaryLocation ? <small>{dateTimeSummaryLocation}</small> : null}
+                    </button>
+                  ) : (
             <button
               className="booking-progressive-summary booking-progressive-summary-empty"
               onClick={() => setPublicBookingSection("datetime")}
@@ -6745,15 +6746,15 @@ function App() {
               </button>
             </div>
           ) : isInformationStepComplete ? (
-            <button
-              className="booking-summary booking-progressive-summary"
-              onClick={() => setPublicBookingSection("information")}
-              type="button"
-            >
-              <strong>{`${informationSummaryName}`}</strong>
-              <span>{informationSummaryContact}</span>
-            </button>
-          ) : (
+                    <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("information")}
+                      type="button"
+                    >
+                      <strong>Information complete</strong>
+                      <span>Customer details captured</span>
+                    </button>
+                  ) : (
             <button
               className="booking-progressive-summary booking-progressive-summary-empty"
               onClick={() => setPublicBookingSection("information")}
@@ -8744,14 +8745,15 @@ function App() {
                       </div>
                     ) : isAppointmentStepComplete ? (
                       <button
-                        className="booking-summary booking-progressive-summary"
-                        onClick={() => setPublicBookingSection("appointment")}
-                        type="button"
-                      >
-                        <strong>{appointmentSummaryName}</strong>
-                        <span>{appointmentSummaryDuration}</span>
-                      </button>
-                    ) : (
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("appointment")}
+                      type="button"
+                    >
+                      <strong>{appointmentSummaryName}</strong>
+                      <span>{appointmentSummaryDuration}</span>
+                      {appointmentSummaryDescription ? <small>{appointmentSummaryDescription}</small> : null}
+                    </button>
+                  ) : (
                       <button
                         className="booking-progressive-summary booking-progressive-summary-empty"
                         onClick={() => setPublicBookingSection("appointment")}
@@ -8829,14 +8831,14 @@ function App() {
                       </div>
                     ) : isDateTimeStepComplete ? (
                       <button
-                        className="booking-summary booking-progressive-summary"
-                        onClick={() => setPublicBookingSection("datetime")}
-                        type="button"
-                      >
-                        <strong>{selectedBookingService?.name ?? "Select appointment"}</strong>
-                        <span>{dateTimeSummaryLine}</span>
-                      </button>
-                    ) : (
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("datetime")}
+                      type="button"
+                    >
+                      <span>{dateTimeSummaryLine}</span>
+                      {dateTimeSummaryLocation ? <small>{dateTimeSummaryLocation}</small> : null}
+                    </button>
+                  ) : (
                       <button
                         className="booking-progressive-summary booking-progressive-summary-empty"
                         onClick={() => setPublicBookingSection("datetime")}
@@ -8934,14 +8936,14 @@ function App() {
                       </div>
                     ) : isInformationStepComplete ? (
                       <button
-                        className="booking-summary booking-progressive-summary"
-                        onClick={() => setPublicBookingSection("information")}
-                        type="button"
-                      >
-                        <strong>{`${informationSummaryName}`}</strong>
-                        <span>{informationSummaryContact}</span>
-                      </button>
-                    ) : (
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("information")}
+                      type="button"
+                    >
+                      <strong>Information complete</strong>
+                      <span>Customer details captured</span>
+                    </button>
+                  ) : (
                       <button
                         className="booking-progressive-summary booking-progressive-summary-empty"
                         onClick={() => setPublicBookingSection("information")}
