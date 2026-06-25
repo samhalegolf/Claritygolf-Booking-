@@ -2055,7 +2055,7 @@ function App() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [quickCreate, setQuickCreate] = useState<QuickCreateState | null>(null);
   const [quickClientSearch, setQuickClientSearch] = useState("");
-  const [quickMatchField, setQuickMatchField] = useState<"name" | "phone" | "email">("name");
+  const [quickMatchField, setQuickMatchField] = useState<"name" | "phone" | "email" | "">("");
   const [dockBookings, setDockBookings] = useState<PendingBooking[]>([]);
   const [flyingBooking, setFlyingBooking] = useState<DockFlight | null>(null);
   const [activeDockBookingId, setActiveDockBookingId] = useState("");
@@ -3099,6 +3099,27 @@ function App() {
     return true;
   }
 
+  function openQuickCreateForGroupSlot(item: CalendarItem, anchor: { x: number; y: number }) {
+    const service = services.find((candidate) => candidate.id === item.serviceId);
+    if (!service || service.lessonFormat !== "group") return;
+    const slotWeek = itemWeek(item);
+    if (!isGroupServiceSlotMatch(service, slotWeek, item.day, item.start)) return;
+    setSelectedId("");
+    setQuickMatchField("name");
+    setQuickClientSearch("");
+    setQuickCreate({
+      day: item.day,
+      start: item.start,
+      x: anchor.x,
+      y: anchor.y,
+      serviceId: service.id,
+      phone: "",
+      email: "",
+      note: "",
+      error: "",
+    });
+  }
+
   const bookingSlots = useMemo(() => {
     if (!bookingTargetService) return [];
     if (bookingTargetService.lessonFormat === "group") {
@@ -3425,8 +3446,9 @@ function App() {
     });
   }
 
-  function isValidAppointmentSlot(candidate: SlotCandidate, ignoreId?: string) {
+  function isValidAppointmentSlot(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
     if (candidate.start < START_HOUR * 60 || candidate.start + candidate.duration > END_HOUR * 60) return false;
+    if (service?.lessonFormat === "group") return !hasCollision(candidate, ignoreId, service);
     if (hasAppointmentCollision(candidate, ignoreId)) return false;
     return true;
   }
@@ -3695,6 +3717,7 @@ function App() {
         setDraftState(null);
         return;
       }
+      const bookingService = services.find((candidate) => candidate.id === session.booking.serviceId);
       const candidate = {
         week: activeWeekRef.current,
         day: slot.day,
@@ -3704,7 +3727,7 @@ function App() {
       setDraftState({
         mode: "place",
         ...candidate,
-        valid: isValidAppointmentSlot(candidate),
+        valid: isValidAppointmentSlot(candidate, undefined, bookingService),
       });
       return;
     }
@@ -3885,12 +3908,19 @@ function App() {
           }
         : current,
     );
+    setQuickMatchField("");
   }
 
   function quickClientMatchButton(field: "name" | "phone" | "email") {
     if (!quickClientSuggestion || !showQuickClientSuggestion || quickMatchField !== field) return null;
     return (
-      <button className="client-match-prompt quick-field-match" onClick={() => applyQuickClient(quickClientSuggestion)} type="button">
+      <button
+        className="client-match-prompt quick-field-match"
+        onMouseDown={(event) => event.preventDefault()}
+        onTouchStart={(event) => event.preventDefault()}
+        onClick={() => applyQuickClient(quickClientSuggestion)}
+        type="button"
+      >
         <User size={15} />
         <span>
           <strong>{quickClientSuggestion.name}</strong>
@@ -3924,7 +3954,7 @@ function App() {
         ? {
             ...current,
             serviceId,
-            error: isValidAppointmentSlot(candidate) ? "" : "That time is already occupied.",
+            error: isValidAppointmentSlot(candidate, undefined, service) ? "" : "That time is already occupied.",
           }
         : current,
     );
@@ -3952,7 +3982,7 @@ function App() {
       start: quickCreate.start,
       duration: quickCreateService.duration,
     };
-    if (!isValidAppointmentSlot(candidate)) {
+    if (!isValidAppointmentSlot(candidate, undefined, quickCreateService)) {
       setQuickCreate((current) => (current ? { ...current, error: "That time is already occupied." } : current));
       return;
     }
@@ -4003,7 +4033,7 @@ function App() {
     const service = appointmentServices.find((candidate) => candidate.id === serviceId);
     if (!service) return;
     const candidate = { week: itemWeek(selected), day: selected.day, start: selected.start, duration: service.duration };
-    if (!isValidAppointmentSlot(candidate)) {
+    if (!isValidAppointmentSlot(candidate, undefined, service)) {
       setToast({ message: "That lesson would overlap another appointment." });
       return;
     }
@@ -4081,7 +4111,7 @@ function App() {
       setToast({ message: "That parked lesson type is no longer available." });
       return false;
     }
-    if (!isValidAppointmentSlot(candidate)) {
+    if (!isValidAppointmentSlot(candidate, undefined, service)) {
       setToast({ message: "That spot is not available. The lesson is still on the shelf." });
       return false;
     }
@@ -6903,7 +6933,10 @@ function App() {
                         beginMove(event, item);
                       }}
                       onClick={(event) => {
-                        if (item.readOnly) return;
+                        if (item.readOnly) {
+                          openQuickCreateForGroupSlot(item, { x: event.clientX, y: event.clientY });
+                          return;
+                        }
                         event.stopPropagation();
                         if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
                         setSelectedId(item.id);
@@ -7045,6 +7078,7 @@ function App() {
                           <input
                             value={quickClientSearch}
                             autoComplete="name"
+                            onBlur={() => setQuickMatchField("")}
                             onFocus={() => setQuickMatchField("name")}
                             onChange={(event) => {
                               setQuickMatchField("name");
@@ -7066,13 +7100,14 @@ function App() {
                     <label>
                       <span>Phone</span>
                       <div className="quick-match-anchor">
-                        <input
-                          value={quickCreate.phone}
-                          autoComplete="tel"
-                          inputMode="tel"
-                          type="tel"
-                          onFocus={() => setQuickMatchField("phone")}
-                          onChange={(event) => {
+                          <input
+                            value={quickCreate.phone}
+                            autoComplete="tel"
+                            inputMode="tel"
+                            type="tel"
+                            onBlur={() => setQuickMatchField("")}
+                            onFocus={() => setQuickMatchField("phone")}
+                            onChange={(event) => {
                             setQuickMatchField("phone");
                             updateQuickCreateField("phone", event.target.value);
                           }}
@@ -7084,12 +7119,13 @@ function App() {
                     <label>
                       <span>Email</span>
                       <div className="quick-match-anchor">
-                        <input
-                          value={quickCreate.email}
-                          autoComplete="email"
-                          inputMode="email"
-                          onFocus={() => setQuickMatchField("email")}
-                          onChange={(event) => {
+                          <input
+                            value={quickCreate.email}
+                            autoComplete="email"
+                            inputMode="email"
+                            onFocus={() => setQuickMatchField("email")}
+                            onBlur={() => setQuickMatchField("")}
+                            onChange={(event) => {
                             setQuickMatchField("email");
                             updateQuickCreateField("email", event.target.value);
                           }}
