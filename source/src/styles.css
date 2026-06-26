@@ -645,6 +645,11 @@ button {
   background: #fff;
 }
 
+.service-screen-checkboxes {
+  display: grid;
+  gap: 6px;
+}
+
 .service-row {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(190px, auto) auto;

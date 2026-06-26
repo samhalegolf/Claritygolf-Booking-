@@ -75,6 +75,7 @@ type Service = {
   packageAllowance?: number;
   packageCoverageMode?: PackageCoverageMode;
   packageCoversServiceId?: string;
+  bookingScreenIds?: string[];
 };
 
 type CalendarItem = {
@@ -582,6 +583,13 @@ const BOOKING_EMBED_VALUE = "booking";
 const BOOKING_LOGO_PARAM = "logo";
 const PUBLIC_BOOKING_HOST = "book.claritygolf.app";
 const CLARITY_BOOKING_HOSTS = new Set(["claritygolf.app", "booking.claritygolf.app", PUBLIC_BOOKING_HOST]);
+const BOOKING_SCREENS = [
+  { id: "main", label: "Main booking screen", slugs: ["/", "/sam-hale-golf"] },
+  { id: "range-three-kings", label: "Range Three Kings", slugs: ["/range-three-kings"] },
+  { id: "group-lessons", label: "Group Lessons", slugs: ["/group-lessons"] },
+  { id: "private-lessons", label: "Private Lessons", slugs: ["/private-lessons"] },
+] as const;
+const BOOKING_SCREEN_IDS = new Set(BOOKING_SCREENS.map((screen) => screen.id));
 const CADDY_APP_URL = "https://caddy.claritygolf.app";
 const THEME_STORAGE_KEY = "clarity-booking-theme";
 const BRAND_STORAGE_KEY = "clarity-booking-brand";
@@ -1032,7 +1040,7 @@ function getBookingWidgetUrl(showLogo: boolean) {
   if (CLARITY_BOOKING_HOSTS.has(url.hostname)) {
     url.protocol = "https:";
     url.hostname = PUBLIC_BOOKING_HOST;
-    url.pathname = "/";
+    url.pathname = normalizeBookingPath(url.pathname);
   }
   url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
   if (showLogo) {
@@ -1054,6 +1062,36 @@ function isPublicBookingMode() {
     window.location.hostname === PUBLIC_BOOKING_HOST ||
     new URLSearchParams(window.location.search).get(BOOKING_EMBED_PARAM) === BOOKING_EMBED_VALUE
   );
+}
+
+function normalizeBookingPath(pathname = "") {
+  const cleaned = pathname.trim().toLowerCase();
+  if (!cleaned || cleaned === "/") return "/";
+  return `/${cleaned.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\/+/g, "/")}`;
+}
+
+function getBookingScreenId(pathname = "") {
+  const normalizedPath = normalizeBookingPath(pathname);
+  for (const screen of BOOKING_SCREENS) {
+    if (screen.slugs.includes(normalizedPath)) return screen.id;
+  }
+  return "main";
+}
+
+function normalizeBookingScreenIds(value: unknown): string[] {
+  const source = Array.isArray(value) ? value : [];
+  const filtered = source
+    .map((candidate) => (typeof candidate === "string" ? candidate.trim() : ""))
+    .filter((candidate) => candidate.length > 0)
+    .filter((candidate) => BOOKING_SCREEN_IDS.has(candidate));
+  const uniq = Array.from(new Set(filtered));
+  return uniq.length ? uniq : ["main"];
+}
+
+function formatBookingScreenLabels(screenIds: string[] = []) {
+  return screenIds
+    .map((screenId) => BOOKING_SCREENS.find((screen) => screen.id === screenId)?.label || screenId)
+    .filter(Boolean);
 }
 
 function getDefaultSyncBaseUrl() {
@@ -1515,6 +1553,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
   const packageCoverageMode: PackageCoverageMode =
     service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
   const groupSchedule = lessonFormat === "group" ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule) : undefined;
+  const bookingScreenIds = normalizeBookingScreenIds(service?.bookingScreenIds);
   return {
     id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
     name,
@@ -1538,6 +1577,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
         ? service.packageCoversServiceId.trim().slice(0, 120)
         : undefined,
     groupSchedule,
+    bookingScreenIds,
   };
 }
 
@@ -1727,6 +1767,7 @@ function emptyServiceEditor(): ServiceEditor {
     packageAllowance: 5,
     packageCoverageMode: "upfront",
     packageCoversServiceId: "",
+    bookingScreenIds: ["main"],
   };
 }
 
@@ -2236,12 +2277,19 @@ function App() {
   const bookableServices = services.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = bookableServices;
   const publicServices = bookableServices.filter((service) => service.visibility === "public");
+  const currentBookingScreenId = getBookingScreenId(typeof window === "undefined" ? "/" : window.location.pathname);
+  const currentScreenPublicServices = publicServices.filter((service) =>
+    (service.bookingScreenIds ?? ["main"]).includes(currentBookingScreenId),
+  );
   const quickCreateServices = publicServices.slice(0, 4);
   const quickCreateService = quickCreate?.serviceId
     ? appointmentServices.find((service) => service.id === quickCreate.serviceId) ?? null
     : null;
-  const selectedBookingService = publicServices.find((service) => service.id === bookingServiceId) ?? null;
-  const visiblePublicServices = selectedBookingService ? [selectedBookingService] : publicServices;
+  const selectedBookingService =
+    bookingMode === "reschedule"
+      ? selectedRescheduleService
+      : currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
+  const visiblePublicServices = selectedBookingService ? [selectedBookingService] : currentScreenPublicServices;
   const selectedRescheduleMatch =
     rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
   const selectedRescheduleService = selectedRescheduleMatch
@@ -2543,13 +2591,13 @@ function App() {
   }, [pointerSession]);
 
   useEffect(() => {
-    if (bookingServiceId && !publicServices.some((service) => service.id === bookingServiceId)) {
+    if (bookingMode !== "reschedule" && bookingServiceId && !currentScreenPublicServices.some((service) => service.id === bookingServiceId)) {
       setBookingServiceId("");
       setBookingDaySelected(false);
       setBookingStart(null);
       setOpenPublicBookingSection("appointment");
     }
-  }, [bookingServiceId, publicServices]);
+  }, [bookingMode, bookingServiceId, currentScreenPublicServices]);
 
   useEffect(() => {
     if (!quickCreate) setQuickClientSearch("");
@@ -4957,6 +5005,15 @@ function App() {
     });
   }
 
+  function updateBookingScreens(screenId: string, checked: boolean) {
+    setServiceSaveState("idle");
+    setServiceEditor((current) => {
+      const currentScreens = Array.isArray(current.bookingScreenIds) ? current.bookingScreenIds : ["main"];
+      const normalized = checked ? [...new Set([...currentScreens, screenId])] : currentScreens.filter((candidate) => candidate !== screenId);
+      return { ...current, bookingScreenIds: normalizeBookingScreenIds(normalized) };
+    });
+  }
+
   function normalizeGroupDraftInputs(editor: ServiceEditor) {
     if (editor.lessonFormat !== "group") {
       return editor;
@@ -5006,7 +5063,10 @@ function App() {
 
   function editService(service: Service) {
     setEditingServiceId(service.id);
-    setServiceEditor({ ...service });
+    setServiceEditor({
+      ...service,
+      bookingScreenIds: service.bookingScreenIds ?? ["main"],
+    });
     setShowServiceEditor(true);
     setServiceSaveState("idle");
   }
@@ -5300,6 +5360,11 @@ function App() {
       return;
     }
     const normalizedEditor = serviceEditor.lessonFormat === "group" ? applyGroupDraftInputs() : serviceEditor;
+    const hasPublicScreen = (normalizedEditor.bookingScreenIds ?? []).length > 0;
+    if (normalizedEditor.visibility === "public" && !hasPublicScreen) {
+      setToast({ message: "Public lesson types must be assigned to at least one booking screen." });
+      return;
+    }
     const stableServiceId = editingServiceId || normalizedEditor.id || generateServiceDraftId();
     const clean = cleanService(
       {
@@ -5322,13 +5387,46 @@ function App() {
     );
   }
 
-  function toggleServiceActive(service: Service) {
+  function deleteService(service: Service) {
+    const hasBookings = items.some((item) => item.serviceId === service.id);
+    if (hasBookings) {
+      setToast({ message: "This lesson type has existing bookings. Remove or reassign those bookings before deleting it." });
+      return;
+    }
+    if (!window.confirm(`Delete ${service.name}? This cannot be undone.`)) return;
+
+    const packageReferenceCount = services.filter(
+      (candidate) => candidate.lessonFormat === "package" && candidate.packageCoversServiceId === service.id,
+    ).length;
+    const nextServices = services
+      .filter((candidate) => candidate.id !== service.id)
+      .map((candidate) =>
+        candidate.lessonFormat === "package" && candidate.packageCoversServiceId === service.id
+          ? { ...candidate, packageCoversServiceId: undefined }
+          : candidate,
+      );
+    if (editingServiceId === service.id) {
+      setEditingServiceId(null);
+      setShowServiceEditor(false);
+      setServiceEditor(emptyServiceEditor());
+    }
+    if (bookingServiceId === service.id) {
+      setBookingServiceId("");
+      setBookingDaySelected(false);
+      setBookingStart(null);
+      setOpenPublicBookingSection("appointment");
+    }
+    if (selectedRescheduleMatch?.serviceId === service.id) {
+      setSelectedRescheduleId("");
+    }
+    const packageSuffix =
+      packageReferenceCount > 0
+        ? ` ${packageReferenceCount} package ${packageReferenceCount === 1 ? "reference was" : "references were"} cleared.`
+        : "";
     void persistServices(
-      services.map((candidate) =>
-        candidate.id === service.id ? { ...candidate, active: !candidate.active } : candidate,
-      ),
-      service.active ? `${service.name} archived.` : `${service.name} restored.`,
-      service.id,
+      nextServices,
+      `${service.name} deleted.${packageSuffix}`,
+      undefined,
     );
   }
 
@@ -6163,6 +6261,24 @@ function App() {
                     <option value="private">Admin only</option>
                   </select>
                 </label>
+                <label className="settings-field">
+                  <span>Show on booking screens</span>
+                  <div className="service-screen-checkboxes">
+                    {BOOKING_SCREENS.map((screen) => (
+                      <label className="settings-toggle" key={screen.id}>
+                        <input
+                          checked={Boolean((serviceEditor.bookingScreenIds ?? ["main"]).includes(screen.id))}
+                          onChange={(event) => updateBookingScreens(screen.id, event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span>{screen.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {serviceEditor.visibility === "private" && (
+                    <p className="field-help">Admin-only lesson types will not appear publicly until visibility is set to Public.</p>
+                  )}
+                </label>
               </div>
               <label className="settings-field">
                 <span>Name</span>
@@ -6401,7 +6517,8 @@ function App() {
                 <button className="service-row-main" onClick={() => editService(service)} type="button">
                   <span>
                     {service.active ? "Active" : "Archived"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
-                    {service.lessonFormat === "package" ? "Package" : service.lessonFormat === "group" ? "Group" : "Private"}
+                    {service.lessonFormat === "package" ? "Package" : service.lessonFormat === "group" ? "Group" : "Private"} ·{" "}
+                    {formatBookingScreenLabels(service.bookingScreenIds ?? ["main"]).join(", ")}
                   </span>
                   <strong>{service.name}</strong>
                   {service.description && <em>{service.description}</em>}
@@ -6420,8 +6537,8 @@ function App() {
                   <button className="outline-button" onClick={() => editService(service)}>
                     Edit
                   </button>
-                  <button className="outline-button" onClick={() => toggleServiceActive(service)}>
-                    {service.active ? "Archive" : "Restore"}
+                  <button className="outline-button" onClick={() => deleteService(service)}>
+                    Delete
                   </button>
                 </div>
               </article>
