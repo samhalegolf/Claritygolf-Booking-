@@ -357,9 +357,15 @@ function cleanBookingScreenIds(value) {
   return cleaned.length ? cleaned : ["main"];
 }
 
+function cleanEditableServiceText(value, fallback = "", max = 600) {
+  if (typeof value === "string") return value.trim().slice(0, max);
+  return fallback;
+}
+
 function cleanService(service, index = 0) {
   const fallback = defaultServices[index] ?? defaultServices[0];
-  const editableFallback = service ? "" : undefined;
+  const descriptionFallback = service ? "" : fallback.description;
+  const locationFallback = service ? "" : fallback.location;
   const name = cleanString(service?.name, fallback.name, 120);
   const duration = Number.isFinite(Number(service?.duration)) ? Number(service.duration) : fallback.duration;
   const price = Number.isFinite(Number(service?.price)) ? Number(service.price) : fallback.price;
@@ -400,7 +406,7 @@ function cleanService(service, index = 0) {
     name,
     duration: Math.max(15, Math.min(240, Math.round(duration))),
     price: Math.max(0, Math.round(price)),
-    description: cleanString(service?.description, editableFallback ?? fallback.description, 240),
+    description: cleanEditableServiceText(service?.description, descriptionFallback, 240),
     visibility:
       lessonFormat === "package" || service?.visibility === "private"
         ? "private"
@@ -410,7 +416,7 @@ function cleanService(service, index = 0) {
     minParticipants,
     lessonFormat,
     priceMode,
-    location: cleanString(service?.location, editableFallback ?? fallback.location, 160),
+    location: cleanEditableServiceText(service?.location, locationFallback, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId:
