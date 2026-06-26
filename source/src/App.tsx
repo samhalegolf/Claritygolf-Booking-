@@ -24,6 +24,7 @@ import {
   Palette,
   Phone,
   Plus,
+  Pencil,
   RefreshCw,
   ScissorsLineDashed,
   Search,
@@ -2098,6 +2099,7 @@ function App() {
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showServiceEditor, setShowServiceEditor] = useState(false);
+  const [pendingDeleteServiceId, setPendingDeleteServiceId] = useState<string | null>(null);
   const [serviceSaveState, setServiceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [groupOccurrenceInput, setGroupOccurrenceInput] = useState("");
   const [groupMinimumInput, setGroupMinimumInput] = useState("");
@@ -5492,10 +5494,10 @@ function App() {
       Boolean((item.client || item.email || item.phone || "").trim()),
     );
     if (hasRealBookings) {
+      setPendingDeleteServiceId(null);
       setToast({ message: "This lesson type has existing bookings. Remove or reassign those bookings before deleting it." });
       return;
     }
-    if (!window.confirm(`Delete ${service.name}? This cannot be undone.`)) return;
 
     const packageReferenceCount = services.filter(
       (candidate) => candidate.lessonFormat === "package" && candidate.packageCoversServiceId === service.id,
@@ -5521,6 +5523,7 @@ function App() {
     if (selectedRescheduleMatch?.serviceId === service.id) {
       setSelectedRescheduleId("");
     }
+    setPendingDeleteServiceId(null);
     const packageSuffix =
       packageReferenceCount > 0
         ? ` ${packageReferenceCount} package ${packageReferenceCount === 1 ? "reference was" : "references were"} cleared.`
@@ -5530,6 +5533,23 @@ function App() {
       `${service.name} deleted.${packageSuffix}`,
       undefined,
     );
+  }
+
+  function requestDeleteService(service: Service) {
+    setPendingDeleteServiceId(service.id);
+  }
+
+  function closeDeleteServiceModal() {
+    setPendingDeleteServiceId(null);
+  }
+
+  function confirmDeleteService() {
+    const service = services.find((candidate) => candidate.id === pendingDeleteServiceId);
+    if (!service) {
+      setPendingDeleteServiceId(null);
+      return;
+    }
+    deleteService(service);
   }
 
   function updateAvailabilityWindow(day: number, index: number, field: keyof AvailabilityWindow, value: number) {
@@ -6665,11 +6685,27 @@ function App() {
                   <span>{service.duration} min</span>
                 </div>
                 <div className="service-row-actions">
-                  <button className="outline-button" onClick={() => editService(service)}>
-                    Edit
+                  <button
+                    className="outline-button service-action-button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      editService(service);
+                    }}
+                    type="button"
+                  >
+                    <Pencil size={15} />
+                    <span>Edit</span>
                   </button>
-                  <button className="outline-button" onClick={() => deleteService(service)}>
-                    Delete
+                  <button
+                    className="danger-button service-action-button service-action-delete"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      requestDeleteService(service);
+                    }}
+                    type="button"
+                  >
+                    <Trash2 size={15} />
+                    <span>Delete</span>
                   </button>
                 </div>
               </article>
@@ -6679,6 +6715,9 @@ function App() {
       </div>
     </div>
   );
+
+  const pendingDeleteService =
+    pendingDeleteServiceId ? services.find((service) => service.id === pendingDeleteServiceId) ?? null : null;
 
   const availabilitySettingsPanel = (
     <div className="settings-section settings-availability">
@@ -10849,6 +10888,36 @@ function App() {
             onPointerDown={(event) => event.stopPropagation()}
           >
             {selectedDetails}
+          </aside>
+        </div>
+      )}
+
+      {!isEmbedMode && pendingDeleteService && (
+        <div className="details-overlay" role="presentation" onPointerDown={closeDeleteServiceModal}>
+          <aside
+            className="details-panel details-modal service-delete-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="service-delete-title"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header">
+              <span>Delete Lesson Type</span>
+              <button className="icon-button small" onClick={closeDeleteServiceModal} aria-label="Close delete confirmation" type="button">
+                <X size={17} />
+              </button>
+            </div>
+            <h2 id="service-delete-title">{pendingDeleteService.name}</h2>
+            <p>Delete {pendingDeleteService.name}? This cannot be undone.</p>
+            <div className="service-delete-actions">
+              <button className="outline-button" onClick={closeDeleteServiceModal} type="button">
+                Cancel
+              </button>
+              <button className="danger-button" onClick={confirmDeleteService} type="button">
+                <Trash2 size={16} />
+                Delete lesson type
+              </button>
+            </div>
           </aside>
         </div>
       )}
