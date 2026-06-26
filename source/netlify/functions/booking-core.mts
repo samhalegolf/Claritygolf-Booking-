@@ -359,6 +359,7 @@ function cleanBookingScreenIds(value) {
 
 function cleanService(service, index = 0) {
   const fallback = defaultServices[index] ?? defaultServices[0];
+  const editableFallback = service ? "" : undefined;
   const name = cleanString(service?.name, fallback.name, 120);
   const duration = Number.isFinite(Number(service?.duration)) ? Number(service.duration) : fallback.duration;
   const price = Number.isFinite(Number(service?.price)) ? Number(service.price) : fallback.price;
@@ -399,7 +400,7 @@ function cleanService(service, index = 0) {
     name,
     duration: Math.max(15, Math.min(240, Math.round(duration))),
     price: Math.max(0, Math.round(price)),
-    description: cleanString(service?.description, fallback.description, 240),
+    description: cleanString(service?.description, editableFallback ?? fallback.description, 240),
     visibility:
       lessonFormat === "package" || service?.visibility === "private"
         ? "private"
@@ -409,7 +410,7 @@ function cleanService(service, index = 0) {
     minParticipants,
     lessonFormat,
     priceMode,
-    location: cleanString(service?.location, fallback.location, 160),
+    location: cleanString(service?.location, editableFallback ?? fallback.location, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId:

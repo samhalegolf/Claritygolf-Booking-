@@ -1553,6 +1553,7 @@ function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
 
 function cleanService(service?: Partial<Service>, index = 0): Service {
   const fallback = defaultServices[index] ?? defaultServices[0];
+  const editableFallback = service ? "" : undefined;
   const name =
     typeof service?.name === "string" && service.name.trim()
       ? service.name.trim().slice(0, 120)
@@ -1591,14 +1592,14 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     description:
       typeof service?.description === "string"
         ? service.description.trim().slice(0, 240)
-        : fallback.description,
+        : (editableFallback ?? fallback.description),
     visibility: lessonFormat === "package" || service?.visibility === "private" ? "private" : "public",
     active: service?.active !== false,
     capacity: cleanCapacity,
     minParticipants,
     lessonFormat,
     priceMode,
-    location: typeof service?.location === "string" ? service.location.trim().slice(0, 160) : fallback.location,
+    location: typeof service?.location === "string" ? service.location.trim().slice(0, 160) : (editableFallback ?? fallback.location),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId:
