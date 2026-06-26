@@ -5489,7 +5489,7 @@ function App() {
       !item.syntheticGroupSlot &&
       !item.groupSlot &&
       !item.readOnly &&
-      Boolean((item.client || item.email || item.phone || item.title || "").trim()),
+      Boolean((item.client || item.email || item.phone || "").trim()),
     );
     if (hasRealBookings) {
       setToast({ message: "This lesson type has existing bookings. Remove or reassign those bookings before deleting it." });
