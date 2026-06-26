@@ -851,11 +851,11 @@ function durationToHeight(minutes: number) {
   return (minutes / 60) * HOUR_HEIGHT;
 }
 
-function itemService(item: CalendarItem, serviceCatalog = defaultServices) {
+function itemService(item: CalendarItem, serviceCatalog = defaultServices): Service | undefined {
   const service = serviceCatalog.find((candidate) => candidate.id === item.serviceId);
   if (service) return service;
   if (!item.serviceId) return undefined;
-  return {
+  const fallbackService: Service = {
     ...defaultServices[0],
     id: item.serviceId,
     name: item.title?.trim() || "Deleted lesson type",
@@ -870,6 +870,7 @@ function itemService(item: CalendarItem, serviceCatalog = defaultServices) {
     groupSchedule: undefined,
     bookingScreenIds: ["main"],
   };
+  return fallbackService;
 }
 
 function itemWeek(item: CalendarItem) {
