@@ -5057,8 +5057,14 @@ function App() {
     setServiceSaveState("idle");
     setServiceEditor((current) => {
       const currentScreens = Array.isArray(current.bookingScreenIds) ? current.bookingScreenIds : ["main"];
-      const normalized = checked ? [...new Set([...currentScreens, screenId])] : currentScreens.filter((candidate) => candidate !== screenId);
-      return { ...current, bookingScreenIds: normalizeBookingScreenIds(normalized) };
+      const nextScreens = checked
+        ? Array.from(new Set([...currentScreens, screenId]))
+        : currentScreens.filter((candidate) => candidate !== screenId);
+      if (current.visibility === "public" && nextScreens.length === 0) {
+        setToast({ message: "Public lesson types need at least one booking screen." });
+        return current;
+      }
+      return { ...current, bookingScreenIds: nextScreens };
     });
   }
 
