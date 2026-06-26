@@ -714,10 +714,22 @@ button {
   justify-content: flex-end;
 }
 
+.service-list-tabs {
+  display: flex;
+  gap: 8px;
+}
+
 .service-action-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.service-list-empty {
+  margin: 0;
+  padding: 14px 0 4px;
+  color: #76736d;
+  font-size: 14px;
 }
 
 .service-action-delete {
