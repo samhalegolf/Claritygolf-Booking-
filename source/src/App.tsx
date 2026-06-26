@@ -75,6 +75,7 @@ type Service = {
   packageAllowance?: number;
   packageCoverageMode?: PackageCoverageMode;
   packageCoversServiceId?: string;
+  bookingScreenIds?: string[];
 };
 
 type CalendarItem = {
@@ -538,6 +539,13 @@ type SlotCandidate = {
   duration: number;
 };
 
+type BookingSlot = {
+  week: number;
+  day: number;
+  start: number;
+  remainingSpots: number;
+};
+
 type QuickCreateState = {
   week: number;
   day: number;
@@ -582,6 +590,24 @@ const BOOKING_EMBED_VALUE = "booking";
 const BOOKING_LOGO_PARAM = "logo";
 const PUBLIC_BOOKING_HOST = "book.claritygolf.app";
 const CLARITY_BOOKING_HOSTS = new Set(["claritygolf.app", "booking.claritygolf.app", PUBLIC_BOOKING_HOST]);
+type BookingScreenDefinition = {
+  id: string;
+  label: string;
+  path: string;
+};
+const BOOKING_SCREENS = [
+  { id: "main", label: "Main booking screen", slugs: ["/", "/sam-hale-golf"] },
+  { id: "range-three-kings", label: "Range Three Kings", slugs: ["/range-three-kings"] },
+  { id: "group-lessons", label: "Group Lessons", slugs: ["/group-lessons"] },
+  { id: "private-lessons", label: "Private Lessons", slugs: ["/private-lessons"] },
+] as const;
+const BOOKING_SCREEN_PATHS: BookingScreenDefinition[] = [
+  { id: "main", label: "Main booking screen", path: "/sam-hale-golf" },
+  { id: "range-three-kings", label: "Range Three Kings", path: "/range-three-kings" },
+  { id: "group-lessons", label: "Group Lessons", path: "/group-lessons" },
+  { id: "private-lessons", label: "Private Lessons", path: "/private-lessons" },
+];
+const BOOKING_SCREEN_IDS: Set<string> = new Set(BOOKING_SCREENS.map((screen) => screen.id));
 const CADDY_APP_URL = "https://caddy.claritygolf.app";
 const THEME_STORAGE_KEY = "clarity-booking-theme";
 const BRAND_STORAGE_KEY = "clarity-booking-brand";
@@ -1026,13 +1052,15 @@ function buildRescheduleLink(
   return url.toString();
 }
 
-function getBookingWidgetUrl(showLogo: boolean) {
+function getBookingScreenPublicUrl(path: string, showLogo: boolean) {
   if (typeof window === "undefined") return "";
   const url = new URL(window.location.href);
   if (CLARITY_BOOKING_HOSTS.has(url.hostname)) {
     url.protocol = "https:";
     url.hostname = PUBLIC_BOOKING_HOST;
-    url.pathname = "/";
+    url.pathname = normalizeBookingPath(path);
+  } else {
+    url.pathname = normalizeBookingPath(path);
   }
   url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
   if (showLogo) {
@@ -1041,6 +1069,15 @@ function getBookingWidgetUrl(showLogo: boolean) {
     url.searchParams.set(BOOKING_LOGO_PARAM, "0");
   }
   return url.toString();
+}
+
+function getBookingScreenIframeCode(path: string, businessName: string, screenName: string, showLogo: boolean) {
+  const bookingScreenUrl = getBookingScreenPublicUrl(path, showLogo);
+  return `<iframe src="${bookingScreenUrl}" title="${businessName} ${screenName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
+}
+
+function getBookingWidgetUrl(showLogo: boolean) {
+  return getBookingScreenPublicUrl("/sam-hale-golf", showLogo);
 }
 
 function isBookingLogoHiddenByUrl() {
@@ -1054,6 +1091,36 @@ function isPublicBookingMode() {
     window.location.hostname === PUBLIC_BOOKING_HOST ||
     new URLSearchParams(window.location.search).get(BOOKING_EMBED_PARAM) === BOOKING_EMBED_VALUE
   );
+}
+
+function normalizeBookingPath(pathname = "") {
+  const cleaned = pathname.trim().toLowerCase();
+  if (!cleaned || cleaned === "/") return "/";
+  return `/${cleaned.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\/+/g, "/")}`;
+}
+
+function getBookingScreenId(pathname = "") {
+  const normalizedPath = normalizeBookingPath(pathname);
+  for (const screen of BOOKING_SCREENS) {
+    if (screen.slugs.includes(normalizedPath)) return screen.id;
+  }
+  return "main";
+}
+
+function normalizeBookingScreenIds(value: unknown): string[] {
+  const source = Array.isArray(value) ? value : [];
+  const filtered = source
+    .map((candidate) => (typeof candidate === "string" ? candidate.trim() : ""))
+    .filter((candidate) => candidate.length > 0)
+    .filter((candidate) => BOOKING_SCREEN_IDS.has(candidate));
+  const uniq = Array.from(new Set(filtered));
+  return uniq.length ? uniq : ["main"];
+}
+
+function formatBookingScreenLabels(screenIds: string[] = []) {
+  return screenIds
+    .map((screenId) => BOOKING_SCREENS.find((screen) => screen.id === screenId)?.label || screenId)
+    .filter(Boolean);
 }
 
 function getDefaultSyncBaseUrl() {
@@ -1515,6 +1582,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
   const packageCoverageMode: PackageCoverageMode =
     service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
   const groupSchedule = lessonFormat === "group" ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule) : undefined;
+  const bookingScreenIds = normalizeBookingScreenIds(service?.bookingScreenIds);
   return {
     id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
     name,
@@ -1538,6 +1606,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
         ? service.packageCoversServiceId.trim().slice(0, 120)
         : undefined,
     groupSchedule,
+    bookingScreenIds,
   };
 }
 
@@ -1727,6 +1796,7 @@ function emptyServiceEditor(): ServiceEditor {
     packageAllowance: 5,
     packageCoverageMode: "upfront",
     packageCoversServiceId: "",
+    bookingScreenIds: ["main"],
   };
 }
 
@@ -2137,6 +2207,16 @@ function App() {
   const [bookingSubmitState, setBookingSubmitState] = useState<"idle" | "saving">("idle");
   const [bookingConfirmation, setBookingConfirmation] = useState<BookingConfirmation | null>(null);
   const [copiedEmbed, setCopiedEmbed] = useState(false);
+  const [selectedBookingScreenId, setSelectedBookingScreenId] = useState(BOOKING_SCREEN_PATHS[0]?.id || "main");
+  const [bookingScreenNames, setBookingScreenNames] = useState<Record<string, string>>(
+    () =>
+      BOOKING_SCREEN_PATHS.reduce<Record<string, string>>((acc, screen) => {
+        acc[screen.id] = screen.label;
+        return acc;
+      }, {}),
+  );
+  const [copiedBookingScreenLinkId, setCopiedBookingScreenLinkId] = useState<string | null>(null);
+  const [copiedBookingScreenIframeId, setCopiedBookingScreenIframeId] = useState<string | null>(null);
   const [syncBaseUrl, setSyncBaseUrl] = useState(getDefaultSyncBaseUrl);
   const [calendarSyncKey, setCalendarSyncKey] = useState(generateSyncKey);
   const [copiedSync, setCopiedSync] = useState<"url" | "key" | null>(null);
@@ -2236,18 +2316,41 @@ function App() {
   const bookableServices = services.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = bookableServices;
   const publicServices = bookableServices.filter((service) => service.visibility === "public");
+  const currentBookingScreenId = getBookingScreenId(typeof window === "undefined" ? "/" : window.location.pathname);
+  const currentScreenPublicServices = publicServices.filter((service) =>
+    (service.bookingScreenIds ?? ["main"]).includes(currentBookingScreenId),
+  );
   const quickCreateServices = publicServices.slice(0, 4);
   const quickCreateService = quickCreate?.serviceId
     ? appointmentServices.find((service) => service.id === quickCreate.serviceId) ?? null
     : null;
-  const selectedBookingService = publicServices.find((service) => service.id === bookingServiceId) ?? null;
-  const visiblePublicServices = selectedBookingService ? [selectedBookingService] : publicServices;
   const selectedRescheduleMatch =
     rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
   const selectedRescheduleService = selectedRescheduleMatch
     ? services.find((service) => service.id === selectedRescheduleMatch.serviceId) ?? null
     : null;
+  const selectedBookingService =
+    bookingMode === "reschedule"
+      ? selectedRescheduleService
+      : currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
+  const visiblePublicServices = selectedBookingService ? [selectedBookingService] : currentScreenPublicServices;
   const bookingTargetService = bookingMode === "reschedule" ? selectedRescheduleService : selectedBookingService;
+  const bookingScreenEmbeds = useMemo(
+    () =>
+      BOOKING_SCREEN_PATHS.map((screen) => ({
+        ...screen,
+        label: bookingScreenNames[screen.id] || screen.label,
+        publicUrl: getBookingScreenPublicUrl(screen.path, brandSettings.showLogo),
+        iframeCode: getBookingScreenIframeCode(
+          screen.path,
+          coachAccount.businessName,
+          bookingScreenNames[screen.id] || screen.label,
+          brandSettings.showLogo,
+        ),
+      })),
+    [bookingScreenNames, brandSettings.showLogo, coachAccount.businessName],
+  );
+  const selectedBookingScreen = bookingScreenEmbeds.find((bookingScreen) => bookingScreen.id === selectedBookingScreenId) ?? bookingScreenEmbeds[0];
   const bookingWidgetUrl = useMemo(() => getBookingWidgetUrl(brandSettings.showLogo), [brandSettings.showLogo]);
   const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
@@ -2543,13 +2646,13 @@ function App() {
   }, [pointerSession]);
 
   useEffect(() => {
-    if (bookingServiceId && !publicServices.some((service) => service.id === bookingServiceId)) {
+    if (bookingMode !== "reschedule" && bookingServiceId && !currentScreenPublicServices.some((service) => service.id === bookingServiceId)) {
       setBookingServiceId("");
       setBookingDaySelected(false);
       setBookingStart(null);
       setOpenPublicBookingSection("appointment");
     }
-  }, [bookingServiceId, publicServices]);
+  }, [bookingMode, bookingServiceId, currentScreenPublicServices]);
 
   useEffect(() => {
     if (!quickCreate) setQuickClientSearch("");
@@ -3407,29 +3510,38 @@ function App() {
     return openGroupSessionForItem(item);
   }
 
-  const bookingSlots = useMemo(() => {
-    if (!bookingTargetService || !bookingDaySelected) return [];
-    if (bookingTargetService.lessonFormat === "group") {
-      const slots: number[] = [];
+  const bookingSlots = useMemo<BookingSlot[]>(() => {
+    if (!bookingTargetService) return [];
+
+    const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
+
+    if (bookingMode === "book" && bookingTargetService.lessonFormat === "group") {
+      const schedule = bookingTargetService.groupSchedule;
+      if (!schedule?.active) return [];
       const candidate = {
         week: activeWeek,
-        day: bookingDay,
-        start: bookingTargetService.groupSchedule?.startMinutes ?? 0,
+        day: schedule.dayOfWeek,
+        start: schedule.startMinutes,
         duration: bookingTargetService.duration,
       };
-      const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
-      if (
-        candidate.start === bookingTargetService.groupSchedule?.startMinutes &&
-        isGroupServiceSlotMatch(bookingTargetService, activeWeek, bookingDay, candidate.start) &&
-        !hasCollision(candidate, ignoreId, bookingTargetService)
-      ) {
-        slots.push(candidate.start);
-      }
-      return slots;
+      if (!isGroupServiceSlotMatch(bookingTargetService, activeWeek, schedule.dayOfWeek, schedule.startMinutes)) return [];
+      if (hasCollision(candidate, ignoreId, bookingTargetService)) return [];
+      const remainingSpots = getGroupSlotRemainingSpots(candidate, bookingTargetService);
+      if (!remainingSpots) return [];
+      return [
+        {
+          week: candidate.week,
+          day: candidate.day,
+          start: candidate.start,
+          remainingSpots,
+        },
+      ];
     }
+
+    if (!bookingDaySelected) return [];
+
     const windows = availability[bookingDay] ?? [];
-    const slots: number[] = [];
-    const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
+    const slots: BookingSlot[] = [];
     windows.forEach((window) => {
       for (let start = window.start; start + bookingTargetService.duration <= window.end; start += 30) {
         const candidate = {
@@ -3438,12 +3550,19 @@ function App() {
           start,
           duration: bookingTargetService.duration,
         };
-        if (!hasCollision(candidate, ignoreId, bookingTargetService)) slots.push(start);
+        if (!hasCollision(candidate, ignoreId, bookingTargetService)) {
+          slots.push({
+            week: candidate.week,
+            day: candidate.day,
+            start: candidate.start,
+            remainingSpots: 0,
+          });
+        }
       }
     });
     return slots;
   }, [activeWeek, bookingDay, bookingDaySelected, bookingMode, bookingTargetService, selectedRescheduleMatch, items, availability]);
-  const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot === bookingStart);
+  const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.start === bookingStart);
 
   const isAppointmentStepComplete = Boolean(selectedBookingService);
   const isDateTimeStepComplete = bookingDaySelected && bookingStart !== null;
@@ -3742,6 +3861,18 @@ function App() {
     );
     if (collidesWithOtherService) return true;
     return sameServiceCount >= service.capacity;
+  }
+
+  function getGroupSlotRemainingSpots(candidate: SlotCandidate, service?: Service) {
+    if (!service || service.lessonFormat !== "group") return 0;
+    const bookedCount = items.filter(
+      (item) =>
+        item.kind === "appointment" &&
+        item.serviceId === service.id &&
+        overlaps(itemSlot(item), candidate) &&
+        isActiveGroupBooking(item.status),
+    ).length;
+    return Math.max(0, service.capacity - bookedCount);
   }
 
   function isGroupSlotFull(candidate: SlotCandidate, service?: Service) {
@@ -4598,6 +4729,8 @@ function App() {
     setOpenPublicBookingSection(isCurrent ? "appointment" : "datetime");
   }
 
+  const isGroupBookingTimeSelection = bookingMode === "book" && bookingTargetService?.lessonFormat === "group";
+
   function handlePublicBookingDaySelect(dayIndex: number) {
     setBookingDay(dayIndex);
     setBookingDaySelected(true);
@@ -4605,8 +4738,12 @@ function App() {
     setOpenPublicBookingSection("datetime");
   }
 
-  function handlePublicBookingTimeSelect(slot: number) {
-    const next = bookingStart === slot ? null : slot;
+  function handlePublicBookingTimeSelect(slot: BookingSlot) {
+    const next = bookingStart === slot.start ? null : slot.start;
+    if (bookingTargetService?.lessonFormat === "group") {
+      setBookingDay(slot.day);
+      setBookingDaySelected(next !== null);
+    }
     setBookingStart(next);
     setOpenPublicBookingSection(next === null ? "datetime" : "information");
   }
@@ -4957,6 +5094,21 @@ function App() {
     });
   }
 
+  function updateBookingScreens(screenId: string, checked: boolean) {
+    setServiceSaveState("idle");
+    setServiceEditor((current) => {
+      const currentScreens = Array.isArray(current.bookingScreenIds) ? current.bookingScreenIds : ["main"];
+      const nextScreens = checked
+        ? Array.from(new Set([...currentScreens, screenId]))
+        : currentScreens.filter((candidate) => candidate !== screenId);
+      if (current.visibility === "public" && nextScreens.length === 0) {
+        setToast({ message: "Public lesson types need at least one booking screen." });
+        return current;
+      }
+      return { ...current, bookingScreenIds: nextScreens };
+    });
+  }
+
   function normalizeGroupDraftInputs(editor: ServiceEditor) {
     if (editor.lessonFormat !== "group") {
       return editor;
@@ -5006,7 +5158,10 @@ function App() {
 
   function editService(service: Service) {
     setEditingServiceId(service.id);
-    setServiceEditor({ ...service });
+    setServiceEditor({
+      ...service,
+      bookingScreenIds: service.bookingScreenIds ?? ["main"],
+    });
     setShowServiceEditor(true);
     setServiceSaveState("idle");
   }
@@ -5300,6 +5455,11 @@ function App() {
       return;
     }
     const normalizedEditor = serviceEditor.lessonFormat === "group" ? applyGroupDraftInputs() : serviceEditor;
+    const hasPublicScreen = (normalizedEditor.bookingScreenIds ?? []).length > 0;
+    if (normalizedEditor.visibility === "public" && !hasPublicScreen) {
+      setToast({ message: "Public lesson types must be assigned to at least one booking screen." });
+      return;
+    }
     const stableServiceId = editingServiceId || normalizedEditor.id || generateServiceDraftId();
     const clean = cleanService(
       {
@@ -5322,13 +5482,46 @@ function App() {
     );
   }
 
-  function toggleServiceActive(service: Service) {
+  function deleteService(service: Service) {
+    const hasBookings = items.some((item) => item.serviceId === service.id);
+    if (hasBookings) {
+      setToast({ message: "This lesson type has existing bookings. Remove or reassign those bookings before deleting it." });
+      return;
+    }
+    if (!window.confirm(`Delete ${service.name}? This cannot be undone.`)) return;
+
+    const packageReferenceCount = services.filter(
+      (candidate) => candidate.lessonFormat === "package" && candidate.packageCoversServiceId === service.id,
+    ).length;
+    const nextServices = services
+      .filter((candidate) => candidate.id !== service.id)
+      .map((candidate) =>
+        candidate.lessonFormat === "package" && candidate.packageCoversServiceId === service.id
+          ? { ...candidate, packageCoversServiceId: undefined }
+          : candidate,
+      );
+    if (editingServiceId === service.id) {
+      setEditingServiceId(null);
+      setShowServiceEditor(false);
+      setServiceEditor(emptyServiceEditor());
+    }
+    if (bookingServiceId === service.id) {
+      setBookingServiceId("");
+      setBookingDaySelected(false);
+      setBookingStart(null);
+      setOpenPublicBookingSection("appointment");
+    }
+    if (selectedRescheduleMatch?.serviceId === service.id) {
+      setSelectedRescheduleId("");
+    }
+    const packageSuffix =
+      packageReferenceCount > 0
+        ? ` ${packageReferenceCount} package ${packageReferenceCount === 1 ? "reference was" : "references were"} cleared.`
+        : "";
     void persistServices(
-      services.map((candidate) =>
-        candidate.id === service.id ? { ...candidate, active: !candidate.active } : candidate,
-      ),
-      service.active ? `${service.name} archived.` : `${service.name} restored.`,
-      service.id,
+      nextServices,
+      `${service.name} deleted.${packageSuffix}`,
+      undefined,
     );
   }
 
@@ -6062,6 +6255,31 @@ function App() {
     });
   }
 
+  function copyBookingScreenValue(value: string, kind: "url" | "iframe", screenId: string) {
+    if (!navigator.clipboard) {
+      setToast({ message: "Copy is not available in this browser. Select the value manually." });
+      return;
+    }
+    const key = `${screenId}-${kind}`;
+    void navigator.clipboard.writeText(value).then(() => {
+      const message = kind === "url" ? "Booking page link copied." : "Squarespace iframe code copied.";
+      setToast({ message });
+      if (kind === "url") {
+        setCopiedBookingScreenLinkId(key);
+        window.setTimeout(() => {
+          setCopiedBookingScreenLinkId((current) => (current === key ? null : current));
+        }, 1600);
+      } else {
+        setCopiedBookingScreenIframeId(key);
+        window.setTimeout(() => {
+          setCopiedBookingScreenIframeId((current) => (current === key ? null : current));
+        }, 1600);
+      }
+    }, () => {
+      setToast({ message: "Copy was blocked by the browser. Select the value manually." });
+    });
+  }
+
   function copySyncText(kind: "url" | "key") {
     if (!navigator.clipboard) {
       setToast({ message: "Copy is not available in this browser. Select the sync value manually." });
@@ -6075,6 +6293,10 @@ function App() {
     }, () => {
       setToast({ message: "Copy was blocked by the browser. Select the sync value manually." });
     });
+  }
+
+  function updateBookingScreenName(screenId: string, nextValue: string) {
+    setBookingScreenNames((previous) => ({ ...previous, [screenId]: nextValue }));
   }
 
   function regenerateSyncKey() {
@@ -6162,6 +6384,24 @@ function App() {
                     <option value="public">Public booking page</option>
                     <option value="private">Admin only</option>
                   </select>
+                </label>
+                <label className="settings-field">
+                  <span>Show on booking screens</span>
+                  <div className="service-screen-checkboxes">
+                    {BOOKING_SCREENS.map((screen) => (
+                      <label className="settings-toggle" key={screen.id}>
+                        <input
+                          checked={Boolean((serviceEditor.bookingScreenIds ?? ["main"]).includes(screen.id))}
+                          onChange={(event) => updateBookingScreens(screen.id, event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span>{screen.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {serviceEditor.visibility === "private" && (
+                    <p className="field-help">Admin-only lesson types will not appear publicly until visibility is set to Public.</p>
+                  )}
                 </label>
               </div>
               <label className="settings-field">
@@ -6401,7 +6641,8 @@ function App() {
                 <button className="service-row-main" onClick={() => editService(service)} type="button">
                   <span>
                     {service.active ? "Active" : "Archived"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
-                    {service.lessonFormat === "package" ? "Package" : service.lessonFormat === "group" ? "Group" : "Private"}
+                    {service.lessonFormat === "package" ? "Package" : service.lessonFormat === "group" ? "Group" : "Private"} ·{" "}
+                    {formatBookingScreenLabels(service.bookingScreenIds ?? ["main"]).join(", ")}
                   </span>
                   <strong>{service.name}</strong>
                   {service.description && <em>{service.description}</em>}
@@ -6420,8 +6661,8 @@ function App() {
                   <button className="outline-button" onClick={() => editService(service)}>
                     Edit
                   </button>
-                  <button className="outline-button" onClick={() => toggleServiceActive(service)}>
-                    {service.active ? "Archive" : "Restore"}
+                  <button className="outline-button" onClick={() => deleteService(service)}>
+                    Delete
                   </button>
                 </div>
               </article>
@@ -6666,37 +6907,50 @@ function App() {
                   <ArrowRight size={15} />
                 </button>
               </div>
-              <div className="booking-days-wrap">
-                <div className="booking-days">
-                  {weekDays.map((day, index) => (
-                    <button
-                      className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
-                      key={day.label}
-                      onClick={() => handlePublicBookingDaySelect(index)}
-                      type="button"
-                    >
-                      <strong>{day.short}</strong>
-                      <em>{day.date}</em>
-                      {day.isToday ? <small className="booking-day-marker">Today</small> : null}
-                    </button>
-                  ))}
+              {!isGroupBookingTimeSelection ? (
+                <div className="booking-days-wrap">
+                  <div className="booking-days">
+                    {weekDays.map((day, index) => (
+                      <button
+                        className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
+                        key={day.label}
+                        onClick={() => handlePublicBookingDaySelect(index)}
+                        type="button"
+                      >
+                        <strong>{day.short}</strong>
+                        <em>{day.date}</em>
+                        {day.isToday ? <small className="booking-day-marker">Today</small> : null}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ) : null}
               <div className="time-slots">
                 {selectedBookingService ? (
                   bookingSlots.length ? (
-                    visibleBookingSlots.map((slot) => (
-                      <button
-                        className={bookingStart === slot ? "selected-time" : ""}
-                        key={slot}
-                        onClick={() => handlePublicBookingTimeSelect(slot)}
-                        type="button"
-                      >
-                        {formatTime(slot)}
-                      </button>
-                    ))
+                    visibleBookingSlots.map((slot) => {
+                      const slotLabel = isGroupBookingTimeSelection
+                        ? `${dateForSlot(slot.week, slot.day).toLocaleDateString("en-NZ", { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
+                        : formatTime(slot.start);
+                      return (
+                        <button
+                          className={bookingStart === slot.start ? "selected-time" : ""}
+                          key={`${slot.week}-${slot.day}-${slot.start}`}
+                          onClick={() => handlePublicBookingTimeSelect(slot)}
+                          type="button"
+                        >
+                          {slotLabel}
+                        </button>
+                      );
+                    })
                   ) : (
-                    <p>{bookingDaySelected ? "No public times available for this day." : "Choose a day first."}</p>
+                    <p>
+                      {isGroupBookingTimeSelection
+                        ? "No upcoming group lesson times are available yet."
+                        : bookingDaySelected
+                          ? "No public times available for this day."
+                          : "Choose a day first."}
+                    </p>
                   )
                 ) : (
                   <p>Choose an appointment type first.</p>
@@ -6876,45 +7130,92 @@ function App() {
               : "Save minimum notice"}
         </button>
       </details>
-      <details className="settings-subsection">
-        <summary className="settings-subsection-title">
-          <Code2 size={18} />
-          <div>
-            <span>Embed</span>
-            <strong>Squarespace iframe</strong>
-          </div>
-        </summary>
-      <div className="embed-panel">
-        <div className="embed-copy">
-          <div>
-            <span>Squarespace Embed</span>
-            <h2>Booking widget iframe</h2>
-          </div>
-          <div className="embed-actions">
-            <button className="outline-button" onClick={copyEmbedCode}>
-              {copiedEmbed ? <Check size={16} /> : <Copy size={16} />}
-              {copiedEmbed ? "Copied" : "Copy iframe"}
-            </button>
-            <a className="outline-button" href={bookingWidgetUrl} target="_blank" rel="noreferrer">
-              <ExternalLink size={16} />
-              Open widget
-            </a>
-          </div>
-        </div>
-
-        <div className="embed-code">
-          <Code2 size={18} />
-          <code>{iframeCode}</code>
-        </div>
-
-        <div className="widget-preview">
-          <div className="preview-bar">
-            <strong>Widget preview</strong>
-            <span>Same booking page, iframe mode</span>
-          </div>
-          <iframe src={bookingWidgetUrl} title={`${coachAccount.businessName} booking widget preview`} />
-        </div>
-      </div>
+              <details className="settings-subsection">
+                <summary className="settings-subsection-title">
+                  <Code2 size={18} />
+                  <div>
+                    <span>Booking screen embeds</span>
+                    <strong>Squarespace iframe</strong>
+                  </div>
+                </summary>
+              <div className="embed-panel">
+                <div className="booking-screen-tabs" role="tablist" aria-label="Booking screen embeds">
+                  {bookingScreenEmbeds.map((bookingScreen) => (
+                    <button
+                      className={`booking-screen-tab ${selectedBookingScreenId === bookingScreen.id ? "active" : ""}`}
+                      key={bookingScreen.id}
+                      onClick={() => setSelectedBookingScreenId(bookingScreen.id)}
+                      type="button"
+                    >
+                      {bookingScreen.label}
+                    </button>
+                  ))}
+                </div>
+                {selectedBookingScreen && (
+                  <div className="booking-screen-embed-card">
+                    <label className="settings-field">
+                      <span>Screen name</span>
+                      <input
+                        value={selectedBookingScreen.label}
+                        onChange={(event) => updateBookingScreenName(selectedBookingScreen.id, event.target.value)}
+                        type="text"
+                      />
+                    </label>
+                    <div className="settings-field">
+                      <span>Slug</span>
+                      <code className="booking-screen-slug">{selectedBookingScreen.path}</code>
+                    </div>
+                    <div className="settings-field">
+                      <span>Public link</span>
+                      <code className="booking-screen-link">{selectedBookingScreen.publicUrl}</code>
+                    </div>
+                    <div className="embed-actions">
+                      <button
+                        className="outline-button"
+                        onClick={() => copyBookingScreenValue(selectedBookingScreen.publicUrl, "url", selectedBookingScreen.id)}
+                        type="button"
+                      >
+                        {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? <Check size={16} /> : <Copy size={16} />}
+                        {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? "Copied link" : "Copy public link"}
+                      </button>
+                      <a className="outline-button" href={selectedBookingScreen.publicUrl} target="_blank" rel="noreferrer">
+                        <ExternalLink size={16} />
+                        Open widget
+                      </a>
+                    </div>
+                    <div className="settings-field">
+                      <span>Iframe embed</span>
+                      <div className="embed-code booking-screen-iframe">
+                        <Code2 size={18} />
+                        <code>{selectedBookingScreen.iframeCode}</code>
+                      </div>
+                    </div>
+                    <div className="embed-actions">
+                      <button
+                        className="outline-button"
+                        onClick={() => copyBookingScreenValue(selectedBookingScreen.iframeCode, "iframe", selectedBookingScreen.id)}
+                        type="button"
+                      >
+                        {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? (
+                          <Check size={16} />
+                        ) : (
+                          <Copy size={16} />
+                        )}
+                        {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? "Copied iframe" : "Copy iframe"}
+                      </button>
+                    </div>
+                    <div className="booking-screen-preview">
+                      <div className="settings-field">
+                        <span>Preview iframe</span>
+                        <iframe
+                          src={selectedBookingScreen.publicUrl}
+                          title={`${coachAccount.businessName} ${selectedBookingScreen.label} preview`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
       </details>
     </article>
   );
@@ -8898,37 +9199,50 @@ function App() {
                             <ArrowRight size={15} />
                           </button>
                         </div>
-                        <div className="booking-days-wrap">
-                          <div className="booking-days">
-                            {weekDays.map((day, index) => (
-                              <button
-                                className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
-                                key={day.label}
-                                onClick={() => handlePublicBookingDaySelect(index)}
-                                type="button"
-                              >
-                                <strong>{day.short}</strong>
-                                <em>{day.date}</em>
-                                {day.isToday ? <small className="booking-day-marker">Today</small> : null}
-                              </button>
-                            ))}
+                        {!isGroupBookingTimeSelection ? (
+                          <div className="booking-days-wrap">
+                            <div className="booking-days">
+                              {weekDays.map((day, index) => (
+                                <button
+                                  className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
+                                  key={day.label}
+                                  onClick={() => handlePublicBookingDaySelect(index)}
+                                  type="button"
+                                >
+                                  <strong>{day.short}</strong>
+                                  <em>{day.date}</em>
+                                  {day.isToday ? <small className="booking-day-marker">Today</small> : null}
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                        </div>
+                        ) : null}
                         <div className="time-slots">
                           {selectedBookingService ? (
                             bookingSlots.length ? (
-                              visibleBookingSlots.map((slot) => (
-                                <button
-                                  className={bookingStart === slot ? "selected-time" : ""}
-                                  key={slot}
-                                  onClick={() => handlePublicBookingTimeSelect(slot)}
-                                  type="button"
-                                >
-                                  {formatTime(slot)}
-                                </button>
-                              ))
+                              visibleBookingSlots.map((slot) => {
+                                const slotLabel = isGroupBookingTimeSelection
+                                  ? `${dateForSlot(slot.week, slot.day).toLocaleDateString("en-NZ", { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
+                                  : formatTime(slot.start);
+                                return (
+                                  <button
+                                    className={bookingStart === slot.start ? "selected-time" : ""}
+                                    key={`${slot.week}-${slot.day}-${slot.start}`}
+                                    onClick={() => handlePublicBookingTimeSelect(slot)}
+                                    type="button"
+                                  >
+                                    {slotLabel}
+                                  </button>
+                                );
+                              })
                             ) : (
-                              <p>{bookingDaySelected ? "No public times available for this day." : "Choose a day first."}</p>
+                              <p>
+                                {isGroupBookingTimeSelection
+                                  ? "No upcoming group lesson times are available yet."
+                                  : bookingDaySelected
+                                    ? "No public times available for this day."
+                                    : "Choose a day first."}
+                              </p>
                             )
                           ) : (
                             <p>Choose an appointment type first.</p>
@@ -9187,11 +9501,11 @@ function App() {
                         bookingSlots.length ? (
                           bookingSlots.map((slot) => (
                             <button
-                              className={bookingStart === slot ? "selected-time" : ""}
-                              key={slot}
-                              onClick={() => setBookingStart(slot)}
+                              className={bookingStart === slot.start ? "selected-time" : ""}
+                              key={`${slot.week}-${slot.day}-${slot.start}`}
+                              onClick={() => setBookingStart(slot.start)}
                             >
-                              {formatTime(slot)}
+                              {formatTime(slot.start)}
                             </button>
                           ))
                         ) : (

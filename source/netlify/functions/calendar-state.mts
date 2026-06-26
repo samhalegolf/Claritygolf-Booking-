@@ -6,6 +6,12 @@ import { notifyCalendarDiff } from "./notification-engine.mts";
 
 const sessionCookieName = "clarity_session";
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
+const BOOKING_SCREEN_IDS = new Set([
+  "main",
+  "range-three-kings",
+  "group-lessons",
+  "private-lessons",
+]);
 
 type LessonFormat = "private" | "group" | "package";
 type PriceMode = "session" | "per-person";
@@ -181,6 +187,18 @@ function cleanGroupSchedule(value: unknown, fallback: GroupServiceSchedule = { d
   };
 }
 
+function cleanBookingScreenIds(value: unknown) {
+  if (!Array.isArray(value)) return ["main"];
+  const cleaned = Array.from(
+    new Set(
+      value
+        .map((candidate) => (typeof candidate === "string" ? candidate.trim() : ""))
+        .filter((candidate) => BOOKING_SCREEN_IDS.has(candidate)),
+    ),
+  );
+  return cleaned.length ? cleaned : ["main"];
+}
+
 function cleanService(service?: Record<string, unknown>, index = 0) {
   const fallback = (defaultServices[index] ?? defaultServices[0]) as any;
   const name = cleanString(service?.name, fallback.name, 120);
@@ -219,6 +237,7 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
   const groupSchedule = lessonFormat === "group"
     ? cleanGroupSchedule(service?.groupSchedule, (fallback.groupSchedule as GroupServiceSchedule) || { dayOfWeek: 2, startMinutes: timeToMinutes(18, 0), occurrenceCount: 8, active: true })
     : undefined;
+  const bookingScreenIds = cleanBookingScreenIds(service?.bookingScreenIds);
   return {
     id: cleanSlug(service?.id as unknown, cleanSlug(name, `service-${Date.now()}-${index}`)),
     name,
@@ -231,6 +250,7 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
     minParticipants,
     lessonFormat,
     priceMode,
+    bookingScreenIds,
     location: cleanString(service?.location, fallback.location, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
@@ -959,6 +979,18 @@ async function writeState(body: any) {
     ...state,
     ...(googleCalendarSync ? { googleCalendarSync } : {}),
     ...(warnings.length ? { warnings: [...new Set(warnings)] } : {}),
+  };
+}
+
+export async function readPublicBookingState() {
+  const state = await readState();
+  return {
+    updatedAt: state.updatedAt,
+    services: state.services || [],
+    availability: state.availability || [],
+    brand: state.brand,
+    account: state.account,
+    items: state.items || [],
   };
 }
 

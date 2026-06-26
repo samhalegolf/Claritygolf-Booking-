@@ -15,6 +15,12 @@ const sessionDays = 7;
 const passwordResetMinutes = 30;
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
+const BOOKING_SCREEN_IDS = new Set([
+  "main",
+  "range-three-kings",
+  "group-lessons",
+  "private-lessons",
+]);
 let authReadyPromise = null;
 const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
@@ -339,6 +345,18 @@ function cleanGroupSchedule(value, fallback = {}) {
   };
 }
 
+function cleanBookingScreenIds(value) {
+  if (!Array.isArray(value)) return ["main"];
+  const cleaned = Array.from(
+    new Set(
+      value
+        .map((candidate) => (typeof candidate === "string" ? candidate.trim() : ""))
+        .filter((candidate) => BOOKING_SCREEN_IDS.has(candidate)),
+    ),
+  );
+  return cleaned.length ? cleaned : ["main"];
+}
+
 function cleanService(service, index = 0) {
   const fallback = defaultServices[index] ?? defaultServices[0];
   const name = cleanString(service?.name, fallback.name, 120);
@@ -372,6 +390,7 @@ function cleanService(service, index = 0) {
   const groupSchedule = lessonFormat === "group"
     ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule || {})
     : undefined;
+  const bookingScreenIds = cleanBookingScreenIds(service?.bookingScreenIds);
   return {
     id: cleanSlug(
       service?.id,
@@ -395,6 +414,7 @@ function cleanService(service, index = 0) {
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId:
       lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
+    bookingScreenIds,
     groupSchedule,
   };
 }
@@ -2073,7 +2093,7 @@ function publicCalendarState(state) {
   };
 }
 
-function publicBookingState(state) {
+export function publicBookingState(state) {
   return {
     updatedAt: state.updatedAt,
     services: (state.services || []).filter(
