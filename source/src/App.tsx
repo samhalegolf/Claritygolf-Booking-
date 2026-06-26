@@ -589,7 +589,7 @@ const BOOKING_SCREENS = [
   { id: "group-lessons", label: "Group Lessons", slugs: ["/group-lessons"] },
   { id: "private-lessons", label: "Private Lessons", slugs: ["/private-lessons"] },
 ] as const;
-const BOOKING_SCREEN_IDS = new Set(BOOKING_SCREENS.map((screen) => screen.id));
+const BOOKING_SCREEN_IDS: Set<string> = new Set(BOOKING_SCREENS.map((screen) => screen.id));
 const CADDY_APP_URL = "https://caddy.claritygolf.app";
 const THEME_STORAGE_KEY = "clarity-booking-theme";
 const BRAND_STORAGE_KEY = "clarity-booking-brand";
@@ -2285,16 +2285,16 @@ function App() {
   const quickCreateService = quickCreate?.serviceId
     ? appointmentServices.find((service) => service.id === quickCreate.serviceId) ?? null
     : null;
-  const selectedBookingService =
-    bookingMode === "reschedule"
-      ? selectedRescheduleService
-      : currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
-  const visiblePublicServices = selectedBookingService ? [selectedBookingService] : currentScreenPublicServices;
   const selectedRescheduleMatch =
     rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
   const selectedRescheduleService = selectedRescheduleMatch
     ? services.find((service) => service.id === selectedRescheduleMatch.serviceId) ?? null
     : null;
+  const selectedBookingService =
+    bookingMode === "reschedule"
+      ? selectedRescheduleService
+      : currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
+  const visiblePublicServices = selectedBookingService ? [selectedBookingService] : currentScreenPublicServices;
   const bookingTargetService = bookingMode === "reschedule" ? selectedRescheduleService : selectedBookingService;
   const bookingWidgetUrl = useMemo(() => getBookingWidgetUrl(brandSettings.showLogo), [brandSettings.showLogo]);
   const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
