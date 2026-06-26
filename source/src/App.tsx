@@ -5483,8 +5483,15 @@ function App() {
   }
 
   function deleteService(service: Service) {
-    const hasBookings = items.some((item) => item.serviceId === service.id);
-    if (hasBookings) {
+    const hasRealBookings = items.some((item) =>
+      item.kind === "appointment" &&
+      item.serviceId === service.id &&
+      !item.syntheticGroupSlot &&
+      !item.groupSlot &&
+      !item.readOnly &&
+      Boolean((item.client || item.email || item.phone || item.title || "").trim()),
+    );
+    if (hasRealBookings) {
       setToast({ message: "This lesson type has existing bookings. Remove or reassign those bookings before deleting it." });
       return;
     }
