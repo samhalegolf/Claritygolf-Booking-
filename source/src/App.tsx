@@ -583,12 +583,23 @@ const BOOKING_EMBED_VALUE = "booking";
 const BOOKING_LOGO_PARAM = "logo";
 const PUBLIC_BOOKING_HOST = "book.claritygolf.app";
 const CLARITY_BOOKING_HOSTS = new Set(["claritygolf.app", "booking.claritygolf.app", PUBLIC_BOOKING_HOST]);
+type BookingScreenDefinition = {
+  id: string;
+  label: string;
+  path: string;
+};
 const BOOKING_SCREENS = [
   { id: "main", label: "Main booking screen", slugs: ["/", "/sam-hale-golf"] },
   { id: "range-three-kings", label: "Range Three Kings", slugs: ["/range-three-kings"] },
   { id: "group-lessons", label: "Group Lessons", slugs: ["/group-lessons"] },
   { id: "private-lessons", label: "Private Lessons", slugs: ["/private-lessons"] },
 ] as const;
+const BOOKING_SCREEN_PATHS: BookingScreenDefinition[] = [
+  { id: "main", label: "Main booking screen", path: "/sam-hale-golf" },
+  { id: "range-three-kings", label: "Range Three Kings", path: "/range-three-kings" },
+  { id: "group-lessons", label: "Group Lessons", path: "/group-lessons" },
+  { id: "private-lessons", label: "Private Lessons", path: "/private-lessons" },
+];
 const BOOKING_SCREEN_IDS: Set<string> = new Set(BOOKING_SCREENS.map((screen) => screen.id));
 const CADDY_APP_URL = "https://caddy.claritygolf.app";
 const THEME_STORAGE_KEY = "clarity-booking-theme";
@@ -1034,13 +1045,15 @@ function buildRescheduleLink(
   return url.toString();
 }
 
-function getBookingWidgetUrl(showLogo: boolean) {
+function getBookingScreenPublicUrl(path: string, showLogo: boolean) {
   if (typeof window === "undefined") return "";
   const url = new URL(window.location.href);
   if (CLARITY_BOOKING_HOSTS.has(url.hostname)) {
     url.protocol = "https:";
     url.hostname = PUBLIC_BOOKING_HOST;
-    url.pathname = normalizeBookingPath(url.pathname);
+    url.pathname = normalizeBookingPath(path);
+  } else {
+    url.pathname = normalizeBookingPath(path);
   }
   url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
   if (showLogo) {
@@ -1049,6 +1062,15 @@ function getBookingWidgetUrl(showLogo: boolean) {
     url.searchParams.set(BOOKING_LOGO_PARAM, "0");
   }
   return url.toString();
+}
+
+function getBookingScreenIframeCode(path: string, businessName: string, showLogo: boolean) {
+  const bookingScreenUrl = getBookingScreenPublicUrl(path, showLogo);
+  return `<iframe src="${bookingScreenUrl}" title="${businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
+}
+
+function getBookingWidgetUrl(showLogo: boolean) {
+  return getBookingScreenPublicUrl("/sam-hale-golf", showLogo);
 }
 
 function isBookingLogoHiddenByUrl() {
@@ -2178,6 +2200,8 @@ function App() {
   const [bookingSubmitState, setBookingSubmitState] = useState<"idle" | "saving">("idle");
   const [bookingConfirmation, setBookingConfirmation] = useState<BookingConfirmation | null>(null);
   const [copiedEmbed, setCopiedEmbed] = useState(false);
+  const [copiedBookingScreenLinkId, setCopiedBookingScreenLinkId] = useState<string | null>(null);
+  const [copiedBookingScreenIframeId, setCopiedBookingScreenIframeId] = useState<string | null>(null);
   const [syncBaseUrl, setSyncBaseUrl] = useState(getDefaultSyncBaseUrl);
   const [calendarSyncKey, setCalendarSyncKey] = useState(generateSyncKey);
   const [copiedSync, setCopiedSync] = useState<"url" | "key" | null>(null);
@@ -2296,6 +2320,15 @@ function App() {
       : currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
   const visiblePublicServices = selectedBookingService ? [selectedBookingService] : currentScreenPublicServices;
   const bookingTargetService = bookingMode === "reschedule" ? selectedRescheduleService : selectedBookingService;
+  const bookingScreenEmbeds = useMemo(
+    () =>
+      BOOKING_SCREEN_PATHS.map((screen) => ({
+        ...screen,
+        publicUrl: getBookingScreenPublicUrl(screen.path, brandSettings.showLogo),
+        iframeCode: getBookingScreenIframeCode(screen.path, coachAccount.businessName, brandSettings.showLogo),
+      })),
+    [brandSettings.showLogo, coachAccount.businessName],
+  );
   const bookingWidgetUrl = useMemo(() => getBookingWidgetUrl(brandSettings.showLogo), [brandSettings.showLogo]);
   const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
@@ -6160,6 +6193,31 @@ function App() {
     });
   }
 
+  function copyBookingScreenValue(value: string, kind: "url" | "iframe", screenId: string) {
+    if (!navigator.clipboard) {
+      setToast({ message: "Copy is not available in this browser. Select the value manually." });
+      return;
+    }
+    const key = `${screenId}-${kind}`;
+    void navigator.clipboard.writeText(value).then(() => {
+      const message = kind === "url" ? "Booking page link copied." : "Squarespace iframe code copied.";
+      setToast({ message });
+      if (kind === "url") {
+        setCopiedBookingScreenLinkId(key);
+        window.setTimeout(() => {
+          setCopiedBookingScreenLinkId((current) => (current === key ? null : current));
+        }, 1600);
+      } else {
+        setCopiedBookingScreenIframeId(key);
+        window.setTimeout(() => {
+          setCopiedBookingScreenIframeId((current) => (current === key ? null : current));
+        }, 1600);
+      }
+    }, () => {
+      setToast({ message: "Copy was blocked by the browser. Select the value manually." });
+    });
+  }
+
   function copySyncText(kind: "url" | "key") {
     if (!navigator.clipboard) {
       setToast({ message: "Copy is not available in this browser. Select the sync value manually." });
@@ -6993,45 +7051,62 @@ function App() {
               : "Save minimum notice"}
         </button>
       </details>
-      <details className="settings-subsection">
-        <summary className="settings-subsection-title">
-          <Code2 size={18} />
-          <div>
-            <span>Embed</span>
-            <strong>Squarespace iframe</strong>
-          </div>
-        </summary>
-      <div className="embed-panel">
-        <div className="embed-copy">
-          <div>
-            <span>Squarespace Embed</span>
-            <h2>Booking widget iframe</h2>
-          </div>
-          <div className="embed-actions">
-            <button className="outline-button" onClick={copyEmbedCode}>
-              {copiedEmbed ? <Check size={16} /> : <Copy size={16} />}
-              {copiedEmbed ? "Copied" : "Copy iframe"}
-            </button>
-            <a className="outline-button" href={bookingWidgetUrl} target="_blank" rel="noreferrer">
-              <ExternalLink size={16} />
-              Open widget
-            </a>
-          </div>
-        </div>
+              <details className="settings-subsection">
+                <summary className="settings-subsection-title">
+                  <Code2 size={18} />
+                  <div>
+                    <span>Booking screen embeds</span>
+                    <strong>Squarespace iframe</strong>
+                  </div>
+                </summary>
+              <div className="embed-panel">
+                {bookingScreenEmbeds.map((bookingScreen) => (
+                  <div className="embed-copy" key={bookingScreen.id}>
+                    <div>
+                      <span>{bookingScreen.label}</span>
+                      <h2>{bookingScreen.publicUrl}</h2>
+                    </div>
+                    <div className="embed-actions">
+                      <button
+                        className="outline-button"
+                        onClick={() => copyBookingScreenValue(bookingScreen.publicUrl, "url", bookingScreen.id)}
+                        type="button"
+                      >
+                        {copiedBookingScreenLinkId === `${bookingScreen.id}-url` ? <Check size={16} /> : <Copy size={16} />}
+                        {copiedBookingScreenLinkId === `${bookingScreen.id}-url` ? "Copied link" : "Copy public link"}
+                      </button>
+                      <button
+                        className="outline-button"
+                        onClick={() => copyBookingScreenValue(bookingScreen.iframeCode, "iframe", bookingScreen.id)}
+                        type="button"
+                      >
+                        {copiedBookingScreenIframeId === `${bookingScreen.id}-iframe` ? (
+                          <Check size={16} />
+                        ) : (
+                          <Copy size={16} />
+                        )}
+                        {copiedBookingScreenIframeId === `${bookingScreen.id}-iframe` ? "Copied iframe" : "Copy iframe"}
+                      </button>
+                      <a className="outline-button" href={bookingScreen.publicUrl} target="_blank" rel="noreferrer">
+                        <ExternalLink size={16} />
+                        Open widget
+                      </a>
+                    </div>
+                    <div className="embed-code">
+                      <Code2 size={18} />
+                      <code>{bookingScreen.iframeCode}</code>
+                    </div>
+                  </div>
+                ))}
 
-        <div className="embed-code">
-          <Code2 size={18} />
-          <code>{iframeCode}</code>
-        </div>
-
-        <div className="widget-preview">
-          <div className="preview-bar">
-            <strong>Widget preview</strong>
-            <span>Same booking page, iframe mode</span>
-          </div>
-          <iframe src={bookingWidgetUrl} title={`${coachAccount.businessName} booking widget preview`} />
-        </div>
-      </div>
+                <div className="widget-preview">
+                  <div className="preview-bar">
+                    <strong>Widget preview</strong>
+                    <span>Same booking page, iframe mode</span>
+                  </div>
+                  <iframe src={bookingWidgetUrl} title={`${coachAccount.businessName} booking widget preview`} />
+                </div>
+              </div>
       </details>
     </article>
   );
