@@ -1064,9 +1064,9 @@ function getBookingScreenPublicUrl(path: string, showLogo: boolean) {
   return url.toString();
 }
 
-function getBookingScreenIframeCode(path: string, businessName: string, showLogo: boolean) {
+function getBookingScreenIframeCode(path: string, businessName: string, screenName: string, showLogo: boolean) {
   const bookingScreenUrl = getBookingScreenPublicUrl(path, showLogo);
-  return `<iframe src="${bookingScreenUrl}" title="${businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
+  return `<iframe src="${bookingScreenUrl}" title="${businessName} ${screenName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
 }
 
 function getBookingWidgetUrl(showLogo: boolean) {
@@ -2200,6 +2200,14 @@ function App() {
   const [bookingSubmitState, setBookingSubmitState] = useState<"idle" | "saving">("idle");
   const [bookingConfirmation, setBookingConfirmation] = useState<BookingConfirmation | null>(null);
   const [copiedEmbed, setCopiedEmbed] = useState(false);
+  const [selectedBookingScreenId, setSelectedBookingScreenId] = useState(BOOKING_SCREEN_PATHS[0]?.id || "main");
+  const [bookingScreenNames, setBookingScreenNames] = useState<Record<string, string>>(
+    () =>
+      BOOKING_SCREEN_PATHS.reduce<Record<string, string>>((acc, screen) => {
+        acc[screen.id] = screen.label;
+        return acc;
+      }, {}),
+  );
   const [copiedBookingScreenLinkId, setCopiedBookingScreenLinkId] = useState<string | null>(null);
   const [copiedBookingScreenIframeId, setCopiedBookingScreenIframeId] = useState<string | null>(null);
   const [syncBaseUrl, setSyncBaseUrl] = useState(getDefaultSyncBaseUrl);
@@ -2324,11 +2332,18 @@ function App() {
     () =>
       BOOKING_SCREEN_PATHS.map((screen) => ({
         ...screen,
+        label: bookingScreenNames[screen.id] || screen.label,
         publicUrl: getBookingScreenPublicUrl(screen.path, brandSettings.showLogo),
-        iframeCode: getBookingScreenIframeCode(screen.path, coachAccount.businessName, brandSettings.showLogo),
+        iframeCode: getBookingScreenIframeCode(
+          screen.path,
+          coachAccount.businessName,
+          bookingScreenNames[screen.id] || screen.label,
+          brandSettings.showLogo,
+        ),
       })),
-    [brandSettings.showLogo, coachAccount.businessName],
+    [bookingScreenNames, brandSettings.showLogo, coachAccount.businessName],
   );
+  const selectedBookingScreen = bookingScreenEmbeds.find((bookingScreen) => bookingScreen.id === selectedBookingScreenId) ?? bookingScreenEmbeds[0];
   const bookingWidgetUrl = useMemo(() => getBookingWidgetUrl(brandSettings.showLogo), [brandSettings.showLogo]);
   const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
@@ -6233,6 +6248,10 @@ function App() {
     });
   }
 
+  function updateBookingScreenName(screenId: string, nextValue: string) {
+    setBookingScreenNames((previous) => ({ ...previous, [screenId]: nextValue }));
+  }
+
   function regenerateSyncKey() {
     setCalendarSyncKey(generateSyncKey());
     setCopiedSync(null);
@@ -7060,52 +7079,82 @@ function App() {
                   </div>
                 </summary>
               <div className="embed-panel">
-                {bookingScreenEmbeds.map((bookingScreen) => (
-                  <div className="embed-copy" key={bookingScreen.id}>
-                    <div>
-                      <span>{bookingScreen.label}</span>
-                      <h2>{bookingScreen.publicUrl}</h2>
+                <div className="booking-screen-tabs" role="tablist" aria-label="Booking screen embeds">
+                  {bookingScreenEmbeds.map((bookingScreen) => (
+                    <button
+                      className={`booking-screen-tab ${selectedBookingScreenId === bookingScreen.id ? "active" : ""}`}
+                      key={bookingScreen.id}
+                      onClick={() => setSelectedBookingScreenId(bookingScreen.id)}
+                      type="button"
+                    >
+                      {bookingScreen.label}
+                    </button>
+                  ))}
+                </div>
+                {selectedBookingScreen && (
+                  <div className="booking-screen-embed-card">
+                    <label className="settings-field">
+                      <span>Screen name</span>
+                      <input
+                        value={selectedBookingScreen.label}
+                        onChange={(event) => updateBookingScreenName(selectedBookingScreen.id, event.target.value)}
+                        type="text"
+                      />
+                    </label>
+                    <div className="settings-field">
+                      <span>Slug</span>
+                      <code className="booking-screen-slug">{selectedBookingScreen.path}</code>
+                    </div>
+                    <div className="settings-field">
+                      <span>Public link</span>
+                      <code className="booking-screen-link">{selectedBookingScreen.publicUrl}</code>
                     </div>
                     <div className="embed-actions">
                       <button
                         className="outline-button"
-                        onClick={() => copyBookingScreenValue(bookingScreen.publicUrl, "url", bookingScreen.id)}
+                        onClick={() => copyBookingScreenValue(selectedBookingScreen.publicUrl, "url", selectedBookingScreen.id)}
                         type="button"
                       >
-                        {copiedBookingScreenLinkId === `${bookingScreen.id}-url` ? <Check size={16} /> : <Copy size={16} />}
-                        {copiedBookingScreenLinkId === `${bookingScreen.id}-url` ? "Copied link" : "Copy public link"}
+                        {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? <Check size={16} /> : <Copy size={16} />}
+                        {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? "Copied link" : "Copy public link"}
                       </button>
-                      <button
-                        className="outline-button"
-                        onClick={() => copyBookingScreenValue(bookingScreen.iframeCode, "iframe", bookingScreen.id)}
-                        type="button"
-                      >
-                        {copiedBookingScreenIframeId === `${bookingScreen.id}-iframe` ? (
-                          <Check size={16} />
-                        ) : (
-                          <Copy size={16} />
-                        )}
-                        {copiedBookingScreenIframeId === `${bookingScreen.id}-iframe` ? "Copied iframe" : "Copy iframe"}
-                      </button>
-                      <a className="outline-button" href={bookingScreen.publicUrl} target="_blank" rel="noreferrer">
+                      <a className="outline-button" href={selectedBookingScreen.publicUrl} target="_blank" rel="noreferrer">
                         <ExternalLink size={16} />
                         Open widget
                       </a>
                     </div>
-                    <div className="embed-code">
-                      <Code2 size={18} />
-                      <code>{bookingScreen.iframeCode}</code>
+                    <div className="settings-field">
+                      <span>Iframe embed</span>
+                      <div className="embed-code booking-screen-iframe">
+                        <Code2 size={18} />
+                        <code>{selectedBookingScreen.iframeCode}</code>
+                      </div>
+                    </div>
+                    <div className="embed-actions">
+                      <button
+                        className="outline-button"
+                        onClick={() => copyBookingScreenValue(selectedBookingScreen.iframeCode, "iframe", selectedBookingScreen.id)}
+                        type="button"
+                      >
+                        {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? (
+                          <Check size={16} />
+                        ) : (
+                          <Copy size={16} />
+                        )}
+                        {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? "Copied iframe" : "Copy iframe"}
+                      </button>
+                    </div>
+                    <div className="booking-screen-preview">
+                      <div className="settings-field">
+                        <span>Preview iframe</span>
+                        <iframe
+                          src={selectedBookingScreen.publicUrl}
+                          title={`${coachAccount.businessName} ${selectedBookingScreen.label} preview`}
+                        />
+                      </div>
                     </div>
                   </div>
-                ))}
-
-                <div className="widget-preview">
-                  <div className="preview-bar">
-                    <strong>Widget preview</strong>
-                    <span>Same booking page, iframe mode</span>
-                  </div>
-                  <iframe src={bookingWidgetUrl} title={`${coachAccount.businessName} booking widget preview`} />
-                </div>
+                )}
               </div>
       </details>
     </article>
