@@ -539,6 +539,13 @@ type SlotCandidate = {
   duration: number;
 };
 
+type BookingSlot = {
+  week: number;
+  day: number;
+  start: number;
+  remainingSpots: number;
+};
+
 type QuickCreateState = {
   week: number;
   day: number;
@@ -3503,29 +3510,38 @@ function App() {
     return openGroupSessionForItem(item);
   }
 
-  const bookingSlots = useMemo(() => {
-    if (!bookingTargetService || !bookingDaySelected) return [];
-    if (bookingTargetService.lessonFormat === "group") {
-      const slots: number[] = [];
+  const bookingSlots = useMemo<BookingSlot[]>(() => {
+    if (!bookingTargetService) return [];
+
+    const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
+
+    if (bookingMode === "book" && bookingTargetService.lessonFormat === "group") {
+      const schedule = bookingTargetService.groupSchedule;
+      if (!schedule?.active) return [];
       const candidate = {
         week: activeWeek,
-        day: bookingDay,
-        start: bookingTargetService.groupSchedule?.startMinutes ?? 0,
+        day: schedule.dayOfWeek,
+        start: schedule.startMinutes,
         duration: bookingTargetService.duration,
       };
-      const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
-      if (
-        candidate.start === bookingTargetService.groupSchedule?.startMinutes &&
-        isGroupServiceSlotMatch(bookingTargetService, activeWeek, bookingDay, candidate.start) &&
-        !hasCollision(candidate, ignoreId, bookingTargetService)
-      ) {
-        slots.push(candidate.start);
-      }
-      return slots;
+      if (!isGroupServiceSlotMatch(bookingTargetService, activeWeek, schedule.dayOfWeek, schedule.startMinutes)) return [];
+      if (hasCollision(candidate, ignoreId, bookingTargetService)) return [];
+      const remainingSpots = getGroupSlotRemainingSpots(candidate, bookingTargetService);
+      if (!remainingSpots) return [];
+      return [
+        {
+          week: candidate.week,
+          day: candidate.day,
+          start: candidate.start,
+          remainingSpots,
+        },
+      ];
     }
+
+    if (!bookingDaySelected) return [];
+
     const windows = availability[bookingDay] ?? [];
-    const slots: number[] = [];
-    const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
+    const slots: BookingSlot[] = [];
     windows.forEach((window) => {
       for (let start = window.start; start + bookingTargetService.duration <= window.end; start += 30) {
         const candidate = {
@@ -3534,12 +3550,19 @@ function App() {
           start,
           duration: bookingTargetService.duration,
         };
-        if (!hasCollision(candidate, ignoreId, bookingTargetService)) slots.push(start);
+        if (!hasCollision(candidate, ignoreId, bookingTargetService)) {
+          slots.push({
+            week: candidate.week,
+            day: candidate.day,
+            start: candidate.start,
+            remainingSpots: 0,
+          });
+        }
       }
     });
     return slots;
   }, [activeWeek, bookingDay, bookingDaySelected, bookingMode, bookingTargetService, selectedRescheduleMatch, items, availability]);
-  const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot === bookingStart);
+  const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.start === bookingStart);
 
   const isAppointmentStepComplete = Boolean(selectedBookingService);
   const isDateTimeStepComplete = bookingDaySelected && bookingStart !== null;
@@ -3838,6 +3861,18 @@ function App() {
     );
     if (collidesWithOtherService) return true;
     return sameServiceCount >= service.capacity;
+  }
+
+  function getGroupSlotRemainingSpots(candidate: SlotCandidate, service?: Service) {
+    if (!service || service.lessonFormat !== "group") return 0;
+    const bookedCount = items.filter(
+      (item) =>
+        item.kind === "appointment" &&
+        item.serviceId === service.id &&
+        overlaps(itemSlot(item), candidate) &&
+        isActiveGroupBooking(item.status),
+    ).length;
+    return Math.max(0, service.capacity - bookedCount);
   }
 
   function isGroupSlotFull(candidate: SlotCandidate, service?: Service) {
@@ -4694,6 +4729,8 @@ function App() {
     setOpenPublicBookingSection(isCurrent ? "appointment" : "datetime");
   }
 
+  const isGroupBookingTimeSelection = bookingMode === "book" && bookingTargetService?.lessonFormat === "group";
+
   function handlePublicBookingDaySelect(dayIndex: number) {
     setBookingDay(dayIndex);
     setBookingDaySelected(true);
@@ -4701,8 +4738,12 @@ function App() {
     setOpenPublicBookingSection("datetime");
   }
 
-  function handlePublicBookingTimeSelect(slot: number) {
-    const next = bookingStart === slot ? null : slot;
+  function handlePublicBookingTimeSelect(slot: BookingSlot) {
+    const next = bookingStart === slot.start ? null : slot.start;
+    if (bookingTargetService?.lessonFormat === "group") {
+      setBookingDay(slot.day);
+      setBookingDaySelected(next !== null);
+    }
     setBookingStart(next);
     setOpenPublicBookingSection(next === null ? "datetime" : "information");
   }
@@ -6866,37 +6907,50 @@ function App() {
                   <ArrowRight size={15} />
                 </button>
               </div>
-              <div className="booking-days-wrap">
-                <div className="booking-days">
-                  {weekDays.map((day, index) => (
-                    <button
-                      className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
-                      key={day.label}
-                      onClick={() => handlePublicBookingDaySelect(index)}
-                      type="button"
-                    >
-                      <strong>{day.short}</strong>
-                      <em>{day.date}</em>
-                      {day.isToday ? <small className="booking-day-marker">Today</small> : null}
-                    </button>
-                  ))}
+              {!isGroupBookingTimeSelection ? (
+                <div className="booking-days-wrap">
+                  <div className="booking-days">
+                    {weekDays.map((day, index) => (
+                      <button
+                        className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
+                        key={day.label}
+                        onClick={() => handlePublicBookingDaySelect(index)}
+                        type="button"
+                      >
+                        <strong>{day.short}</strong>
+                        <em>{day.date}</em>
+                        {day.isToday ? <small className="booking-day-marker">Today</small> : null}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              ) : null}
               <div className="time-slots">
                 {selectedBookingService ? (
                   bookingSlots.length ? (
-                    visibleBookingSlots.map((slot) => (
-                      <button
-                        className={bookingStart === slot ? "selected-time" : ""}
-                        key={slot}
-                        onClick={() => handlePublicBookingTimeSelect(slot)}
-                        type="button"
-                      >
-                        {formatTime(slot)}
-                      </button>
-                    ))
+                    visibleBookingSlots.map((slot) => {
+                      const slotLabel = isGroupBookingTimeSelection
+                        ? `${dateForSlot(slot.week, slot.day).toLocaleDateString("en-NZ", { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
+                        : formatTime(slot.start);
+                      return (
+                        <button
+                          className={bookingStart === slot.start ? "selected-time" : ""}
+                          key={`${slot.week}-${slot.day}-${slot.start}`}
+                          onClick={() => handlePublicBookingTimeSelect(slot)}
+                          type="button"
+                        >
+                          {slotLabel}
+                        </button>
+                      );
+                    })
                   ) : (
-                    <p>{bookingDaySelected ? "No public times available for this day." : "Choose a day first."}</p>
+                    <p>
+                      {isGroupBookingTimeSelection
+                        ? "No upcoming group lesson times are available yet."
+                        : bookingDaySelected
+                          ? "No public times available for this day."
+                          : "Choose a day first."}
+                    </p>
                   )
                 ) : (
                   <p>Choose an appointment type first.</p>
@@ -9145,37 +9199,50 @@ function App() {
                             <ArrowRight size={15} />
                           </button>
                         </div>
-                        <div className="booking-days-wrap">
-                          <div className="booking-days">
-                            {weekDays.map((day, index) => (
-                              <button
-                                className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
-                                key={day.label}
-                                onClick={() => handlePublicBookingDaySelect(index)}
-                                type="button"
-                              >
-                                <strong>{day.short}</strong>
-                                <em>{day.date}</em>
-                                {day.isToday ? <small className="booking-day-marker">Today</small> : null}
-                              </button>
-                            ))}
+                        {!isGroupBookingTimeSelection ? (
+                          <div className="booking-days-wrap">
+                            <div className="booking-days">
+                              {weekDays.map((day, index) => (
+                                <button
+                                  className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
+                                  key={day.label}
+                                  onClick={() => handlePublicBookingDaySelect(index)}
+                                  type="button"
+                                >
+                                  <strong>{day.short}</strong>
+                                  <em>{day.date}</em>
+                                  {day.isToday ? <small className="booking-day-marker">Today</small> : null}
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                        </div>
+                        ) : null}
                         <div className="time-slots">
                           {selectedBookingService ? (
                             bookingSlots.length ? (
-                              visibleBookingSlots.map((slot) => (
-                                <button
-                                  className={bookingStart === slot ? "selected-time" : ""}
-                                  key={slot}
-                                  onClick={() => handlePublicBookingTimeSelect(slot)}
-                                  type="button"
-                                >
-                                  {formatTime(slot)}
-                                </button>
-                              ))
+                              visibleBookingSlots.map((slot) => {
+                                const slotLabel = isGroupBookingTimeSelection
+                                  ? `${dateForSlot(slot.week, slot.day).toLocaleDateString("en-NZ", { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
+                                  : formatTime(slot.start);
+                                return (
+                                  <button
+                                    className={bookingStart === slot.start ? "selected-time" : ""}
+                                    key={`${slot.week}-${slot.day}-${slot.start}`}
+                                    onClick={() => handlePublicBookingTimeSelect(slot)}
+                                    type="button"
+                                  >
+                                    {slotLabel}
+                                  </button>
+                                );
+                              })
                             ) : (
-                              <p>{bookingDaySelected ? "No public times available for this day." : "Choose a day first."}</p>
+                              <p>
+                                {isGroupBookingTimeSelection
+                                  ? "No upcoming group lesson times are available yet."
+                                  : bookingDaySelected
+                                    ? "No public times available for this day."
+                                    : "Choose a day first."}
+                              </p>
                             )
                           ) : (
                             <p>Choose an appointment type first.</p>
@@ -9434,11 +9501,11 @@ function App() {
                         bookingSlots.length ? (
                           bookingSlots.map((slot) => (
                             <button
-                              className={bookingStart === slot ? "selected-time" : ""}
-                              key={slot}
-                              onClick={() => setBookingStart(slot)}
+                              className={bookingStart === slot.start ? "selected-time" : ""}
+                              key={`${slot.week}-${slot.day}-${slot.start}`}
+                              onClick={() => setBookingStart(slot.start)}
                             >
-                              {formatTime(slot)}
+                              {formatTime(slot.start)}
                             </button>
                           ))
                         ) : (
