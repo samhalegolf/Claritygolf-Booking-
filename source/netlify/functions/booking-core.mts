@@ -422,6 +422,7 @@ function cleanService(service, index = 0) {
     packageCoversServiceId:
       lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
     bookingScreenIds,
+    archived: service?.archived === true,
     groupSchedule,
   };
 }
@@ -2104,7 +2105,11 @@ export function publicBookingState(state) {
   return {
     updatedAt: state.updatedAt,
     services: (state.services || []).filter(
-      (service) => service.active && service.visibility === "public" && service.lessonFormat !== "package",
+      (service) =>
+        service.active &&
+        service.archived !== true &&
+        service.visibility === "public" &&
+        service.lessonFormat !== "package",
     ),
     availability: state.availability || [],
     brand: state.brand,
@@ -3028,6 +3033,7 @@ async function createPublicBooking(payload, context = null) {
     (candidate) =>
       candidate.id === payload?.serviceId &&
       candidate.active &&
+      candidate.archived !== true &&
       candidate.visibility === "public" &&
       candidate.lessonFormat !== "package",
   );

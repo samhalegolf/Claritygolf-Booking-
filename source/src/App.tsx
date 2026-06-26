@@ -1,4 +1,5 @@
 import {
+  Archive,
   ArrowLeft,
   ArrowRight,
   BarChart3,
@@ -24,6 +25,7 @@ import {
   Palette,
   Phone,
   Plus,
+  Pencil,
   RefreshCw,
   ScissorsLineDashed,
   Search,
@@ -76,7 +78,14 @@ type Service = {
   packageCoverageMode?: PackageCoverageMode;
   packageCoversServiceId?: string;
   bookingScreenIds?: string[];
+  archived?: boolean;
 };
+
+type ServiceListTab = "active" | "archived";
+type PendingServiceAction =
+  | { serviceId: string; mode: "archive" }
+  | { serviceId: string; mode: "delete" }
+  | null;
 
 type CalendarItem = {
   id: string;
@@ -842,8 +851,26 @@ function durationToHeight(minutes: number) {
   return (minutes / 60) * HOUR_HEIGHT;
 }
 
-function itemService(item: CalendarItem, serviceCatalog = defaultServices) {
-  return serviceCatalog.find((service) => service.id === item.serviceId);
+function itemService(item: CalendarItem, serviceCatalog = defaultServices): Service | undefined {
+  const service = serviceCatalog.find((candidate) => candidate.id === item.serviceId);
+  if (service) return service;
+  if (!item.serviceId) return undefined;
+  const fallbackService: Service = {
+    ...defaultServices[0],
+    id: item.serviceId,
+    name: item.title?.trim() || "Deleted lesson type",
+    description: "",
+    visibility: "private",
+    active: false,
+    archived: true,
+    lessonFormat: "private",
+    packageAllowance: undefined,
+    packageCoverageMode: undefined,
+    packageCoversServiceId: undefined,
+    groupSchedule: undefined,
+    bookingScreenIds: ["main"],
+  };
+  return fallbackService;
 }
 
 function itemWeek(item: CalendarItem) {
@@ -1611,6 +1638,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
         : undefined,
     groupSchedule,
     bookingScreenIds,
+    archived: service?.archived === true,
   };
 }
 
@@ -2102,6 +2130,8 @@ function App() {
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showServiceEditor, setShowServiceEditor] = useState(false);
+  const [serviceListTab, setServiceListTab] = useState<ServiceListTab>("active");
+  const [pendingServiceAction, setPendingServiceAction] = useState<PendingServiceAction>(null);
   const [serviceSaveState, setServiceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [groupOccurrenceInput, setGroupOccurrenceInput] = useState("");
   const [groupMinimumInput, setGroupMinimumInput] = useState("");
@@ -2316,8 +2346,10 @@ function App() {
       Boolean(flyingBooking) ||
       pointerSession?.mode === "place" ||
       (pointerSession?.mode === "move" && Boolean(floatingDrag)));
-  const packageServices = services.filter((service) => service.active && service.lessonFormat === "package");
-  const bookableServices = services.filter((service) => service.active && service.lessonFormat !== "package");
+  const activeServices = services.filter((service) => service.archived !== true);
+  const archivedServices = services.filter((service) => service.archived === true);
+  const packageServices = activeServices.filter((service) => service.active && service.lessonFormat === "package");
+  const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = bookableServices;
   const publicServices = bookableServices.filter((service) => service.visibility === "public");
   const currentBookingScreenId = getBookingScreenId(typeof window === "undefined" ? "/" : window.location.pathname);
@@ -5455,6 +5487,21 @@ function App() {
     }
   }
 
+  function serviceHasRealBookings(service: Service) {
+    return items.some((item) =>
+      item.kind === "appointment" &&
+      item.serviceId === service.id &&
+      !item.syntheticGroupSlot &&
+      !item.groupSlot &&
+      !item.readOnly &&
+      Boolean((item.client || item.email || item.phone || "").trim()),
+    );
+  }
+
+  function canPermanentlyDeleteService(service: Service) {
+    return !serviceHasRealBookings(service);
+  }
+
   function saveEditedService() {
     if (!serviceEditor.name.trim()) {
       setToast({ message: "Give the lesson type a name before saving." });
@@ -5494,12 +5541,12 @@ function App() {
   }
 
   function deleteService(service: Service) {
-    const hasBookings = items.some((item) => item.serviceId === service.id);
-    if (hasBookings) {
+    const hasRealBookings = serviceHasRealBookings(service);
+    if (hasRealBookings) {
+      setPendingServiceAction(null);
       setToast({ message: "This lesson type has existing bookings. Remove or reassign those bookings before deleting it." });
       return;
     }
-    if (!window.confirm(`Delete ${service.name}? This cannot be undone.`)) return;
 
     const packageReferenceCount = services.filter(
       (candidate) => candidate.lessonFormat === "package" && candidate.packageCoversServiceId === service.id,
@@ -5525,6 +5572,7 @@ function App() {
     if (selectedRescheduleMatch?.serviceId === service.id) {
       setSelectedRescheduleId("");
     }
+    setPendingServiceAction(null);
     const packageSuffix =
       packageReferenceCount > 0
         ? ` ${packageReferenceCount} package ${packageReferenceCount === 1 ? "reference was" : "references were"} cleared.`
@@ -5534,6 +5582,58 @@ function App() {
       `${service.name} deleted.${packageSuffix}`,
       undefined,
     );
+  }
+
+  function archiveService(service: Service) {
+    const nextServices = services.map((candidate) =>
+      candidate.id === service.id ? { ...candidate, archived: true } : candidate,
+    );
+    if (editingServiceId === service.id) {
+      setEditingServiceId(null);
+      setShowServiceEditor(false);
+      setServiceEditor(emptyServiceEditor());
+    }
+    if (bookingServiceId === service.id) {
+      setBookingServiceId("");
+      setBookingDaySelected(false);
+      setBookingStart(null);
+      setOpenPublicBookingSection("appointment");
+    }
+    if (selectedRescheduleMatch?.serviceId === service.id) {
+      setSelectedRescheduleId("");
+    }
+    setPendingServiceAction(null);
+    setServiceListTab("archived");
+    void persistServices(nextServices, `${service.name} archived.`, service.id);
+  }
+
+  function restoreService(service: Service) {
+    const nextServices = services.map((candidate) =>
+      candidate.id === service.id ? { ...candidate, archived: false } : candidate,
+    );
+    setServiceListTab("active");
+    void persistServices(nextServices, `${service.name} restored.`, service.id);
+  }
+
+  function requestServiceAction(service: Service, mode: "archive" | "delete") {
+    setPendingServiceAction({ serviceId: service.id, mode });
+  }
+
+  function closeServiceActionModal() {
+    setPendingServiceAction(null);
+  }
+
+  function confirmServiceAction() {
+    const service = services.find((candidate) => candidate.id === pendingServiceAction?.serviceId);
+    if (!service) {
+      setPendingServiceAction(null);
+      return;
+    }
+    if (pendingServiceAction?.mode === "archive") {
+      archiveService(service);
+      return;
+    }
+    deleteService(service);
   }
 
   function updateAvailabilityWindow(day: number, index: number, field: keyof AvailabilityWindow, value: number) {
@@ -6605,7 +6705,7 @@ function App() {
                       onChange={(event) => updateServiceEditor("packageCoversServiceId", event.target.value)}
                     >
                       <option value="">Any matching lesson</option>
-                      {services
+                      {activeServices
                         .filter((service) => service.lessonFormat !== "package")
                         .map((service) => (
                           <option key={service.id} value={service.id}>
@@ -6643,15 +6743,31 @@ function App() {
             <ScissorsLineDashed size={18} />
             <div>
               <span>Lesson types</span>
-              <strong>{services.filter((service) => service.active).length} active</strong>
+              <strong>{activeServices.length} active</strong>
             </div>
           </summary>
+          <div className="service-list-tabs" role="tablist" aria-label="Lesson type status">
+            <button
+              className={`pill ${serviceListTab === "active" ? "active-pill" : ""}`}
+              onClick={() => setServiceListTab("active")}
+              type="button"
+            >
+              Active
+            </button>
+            <button
+              className={`pill ${serviceListTab === "archived" ? "active-pill" : ""}`}
+              onClick={() => setServiceListTab("archived")}
+              type="button"
+            >
+              Archived
+            </button>
+          </div>
           <div className="service-list" aria-label="Lesson types">
-            {services.map((service) => (
+            {(serviceListTab === "active" ? activeServices : archivedServices).map((service) => (
               <article className={`service-row ${service.active ? "" : "is-archived"}`} key={service.id}>
                 <button className="service-row-main" onClick={() => editService(service)} type="button">
                   <span>
-                    {service.active ? "Active" : "Archived"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
+                    {service.archived ? "Archived" : service.active ? "Active" : "Inactive"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
                     {service.lessonFormat === "package" ? "Package" : service.lessonFormat === "group" ? "Group" : "Private"} ·{" "}
                     {formatBookingScreenLabels(service.bookingScreenIds ?? ["main"]).join(", ")}
                   </span>
@@ -6669,20 +6785,88 @@ function App() {
                   <span>{service.duration} min</span>
                 </div>
                 <div className="service-row-actions">
-                  <button className="outline-button" onClick={() => editService(service)}>
-                    Edit
-                  </button>
-                  <button className="outline-button" onClick={() => deleteService(service)}>
-                    Delete
-                  </button>
+                  {service.archived ? (
+                    <>
+                      <button
+                        className="outline-button service-action-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          restoreService(service);
+                        }}
+                        type="button"
+                      >
+                        <RefreshCw size={15} />
+                        <span>Restore</span>
+                      </button>
+                      {canPermanentlyDeleteService(service) ? (
+                        <button
+                          className="danger-button service-action-button service-action-delete"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            requestServiceAction(service, "delete");
+                          }}
+                          type="button"
+                        >
+                          <Trash2 size={15} />
+                          <span>Delete</span>
+                        </button>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="outline-button service-action-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          editService(service);
+                        }}
+                        type="button"
+                      >
+                        <Pencil size={15} />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        className="outline-button service-action-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          requestServiceAction(service, "archive");
+                        }}
+                        type="button"
+                      >
+                        <Archive size={15} />
+                        <span>Archive</span>
+                      </button>
+                      {canPermanentlyDeleteService(service) ? (
+                        <button
+                          className="danger-button service-action-button service-action-delete"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            requestServiceAction(service, "delete");
+                          }}
+                          type="button"
+                        >
+                          <Trash2 size={15} />
+                          <span>Delete</span>
+                        </button>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               </article>
             ))}
+            {!(serviceListTab === "active" ? activeServices : archivedServices).length && (
+              <p className="service-list-empty">
+                {serviceListTab === "active" ? "No active lesson types yet." : "No archived lesson types yet."}
+              </p>
+            )}
           </div>
         </details>
       </div>
     </div>
   );
+
+  const pendingService =
+    pendingServiceAction ? services.find((service) => service.id === pendingServiceAction.serviceId) ?? null : null;
 
   const availabilitySettingsPanel = (
     <div className="settings-section settings-availability">
@@ -10853,6 +11037,48 @@ function App() {
             onPointerDown={(event) => event.stopPropagation()}
           >
             {selectedDetails}
+          </aside>
+        </div>
+      )}
+
+      {!isEmbedMode && pendingService && pendingServiceAction && (
+        <div className="details-overlay" role="presentation" onPointerDown={closeServiceActionModal}>
+          <aside
+            className="details-panel details-modal service-delete-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="service-action-title"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header">
+              <span>{pendingServiceAction.mode === "archive" ? "Archive Lesson Type" : "Permanent Delete"}</span>
+              <button className="icon-button small" onClick={closeServiceActionModal} aria-label="Close lesson type action" type="button">
+                <X size={17} />
+              </button>
+            </div>
+            <h2 id="service-action-title">
+              {pendingServiceAction.mode === "archive"
+                ? `Archive ${pendingService.name}?`
+                : `Permanently delete ${pendingService.name}?`}
+            </h2>
+            <p>
+              {pendingServiceAction.mode === "archive"
+                ? "This will hide the lesson type from active settings and public booking screens, but existing client records and old bookings will keep their lesson name."
+                : "This removes the lesson type completely. Only use this for test or unused lesson types with no client records."}
+            </p>
+            <div className="service-delete-actions">
+              <button className="outline-button" onClick={closeServiceActionModal} type="button">
+                Cancel
+              </button>
+              <button
+                className={pendingServiceAction.mode === "archive" ? "primary-button" : "danger-button"}
+                onClick={confirmServiceAction}
+                type="button"
+              >
+                {pendingServiceAction.mode === "archive" ? <Archive size={16} /> : <Trash2 size={16} />}
+                {pendingServiceAction.mode === "archive" ? "Archive lesson type" : "Permanently delete"}
+              </button>
+            </div>
           </aside>
         </div>
       )}

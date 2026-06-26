@@ -714,6 +714,35 @@ button {
   justify-content: flex-end;
 }
 
+.service-list-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.service-action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.service-list-empty {
+  margin: 0;
+  padding: 14px 0 4px;
+  color: #76736d;
+  font-size: 14px;
+}
+
+.service-action-delete {
+  color: #9b1c1c;
+  border-color: rgba(185, 28, 28, 0.28);
+  background: #fff5f5;
+}
+
+.service-action-delete:hover {
+  background: #fee2e2;
+  border-color: rgba(185, 28, 28, 0.42);
+}
+
 .account-settings-groups {
   display: grid;
   gap: 12px;
@@ -1101,6 +1130,17 @@ button {
 
 .client-profile-modal {
   width: min(520px, calc(100vw - 32px));
+}
+
+.service-delete-modal {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.service-delete-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 24px;
 }
 
 .client-editor,
