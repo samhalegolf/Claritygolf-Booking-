@@ -982,6 +982,18 @@ async function writeState(body: any) {
   };
 }
 
+export async function readPublicBookingState() {
+  const state = await readState();
+  return {
+    updatedAt: state.updatedAt,
+    services: state.services || [],
+    availability: state.availability || [],
+    brand: state.brand,
+    account: state.account,
+    items: state.items || [],
+  };
+}
+
 async function parseBody(req: Request) {
   const raw = await req.text();
   return raw ? JSON.parse(raw) : {};

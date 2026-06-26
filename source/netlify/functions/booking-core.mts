@@ -2093,7 +2093,7 @@ function publicCalendarState(state) {
   };
 }
 
-function publicBookingState(state) {
+export function publicBookingState(state) {
   return {
     updatedAt: state.updatedAt,
     services: (state.services || []).filter(
