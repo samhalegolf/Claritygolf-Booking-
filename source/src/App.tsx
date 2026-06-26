@@ -153,6 +153,8 @@ type Person = {
   source: string;
   caddyProfileId: string;
   caddyProfileUrl: string;
+  emailOptOut?: boolean;
+  packageLessonsRemaining?: number;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -163,12 +165,86 @@ type ClientSummary = Person & {
   last: CalendarItem | null;
 };
 
+type EmailRecipient = ClientSummary & {
+  hasEmailAddress: boolean;
+  isUnsubscribed: boolean;
+  hasFutureBooking: boolean;
+  lastBookingDateLabel: string;
+  lastBookingDateMs: number | null;
+  packageLessonsRemainingValue: number | null;
+  serviceTypes: string[];
+};
+
+type EmailRecipientRow = EmailRecipient & {
+  isSelected: boolean;
+};
+
 
 function safeText(value: unknown, fallback = "") {
   return typeof value === "string" ? value : value == null ? fallback : String(value);
 }
 
-function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
+function parseBooleanLikeValue(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 0 || value === 1) return value === 1;
+    return undefined;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return undefined;
+    if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "off", "n"].includes(normalized)) return false;
+  }
+  return undefined;
+}
+
+function parseNumberValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function findObjectField(source: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) return source[key];
+  }
+  return undefined;
+}
+
+function extractBooleanField(source: Record<string, unknown>, keys: string[]) {
+  const value = findObjectField(source, keys);
+  return parseBooleanLikeValue(value);
+}
+
+function extractNumberField(source: Record<string, unknown>, keys: string[]) {
+  const value = findObjectField(source, keys);
+  return parseNumberValue(value);
+}
+
+function cleanPerson(person: Partial<Person> & { id?: unknown } = {}) {
+  const source = (person ?? {}) as Record<string, unknown>;
+  const emailOptOut = extractBooleanField(source, [
+    "emailOptOut",
+    "doNotEmail",
+    "do_not_email",
+    "unsubscribed",
+    "unsubscribe",
+    "optOutEmail",
+    "isUnsubscribed",
+    "emailOptOutStatus",
+  ]);
+  const packageLessonsRemaining = extractNumberField(source, [
+    "packageLessonsRemaining",
+    "remainingPackageLessons",
+    "remainingLessons",
+    "lessonsRemaining",
+    "packageBalance",
+    "remainingPackageBalance",
+  ]);
   return {
     id: safeText(person.id),
     name: safeText(person.name),
@@ -178,6 +254,8 @@ function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
     source: safeText(person.source),
     caddyProfileId: safeText(person.caddyProfileId),
     caddyProfileUrl: safeText(person.caddyProfileUrl),
+    emailOptOut,
+    packageLessonsRemaining,
     createdAt: typeof person.createdAt === "string" ? person.createdAt : undefined,
     updatedAt: typeof person.updatedAt === "string" ? person.updatedAt : undefined,
   };
@@ -285,7 +363,10 @@ type Toast = {
   undo?: () => void;
 };
 
-type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings";
+type View = "calendar" | "clients" | "client-emails" | "services" | "availability" | "booking" | "billing" | "settings";
+type EmailCampaignType = "review-request" | "haven-t-seen" | "custom";
+type CampaignDateDirection = "before" | "after";
+type CampaignFutureFilter = "all" | "has" | "none";
 type BillingSection = "none" | "dashboard" | "new-invoice" | "reports";
 type SettingsTab =
   | "none"
@@ -941,6 +1022,28 @@ function dateForSlot(week: number, day: number) {
   return date;
 }
 
+function bookingStartDate(item: CalendarItem) {
+  if (!Number.isFinite(item.start) || !Number.isInteger(item.day) || !Number.isFinite(itemWeek(item))) return null;
+  const date = dateForSlot(itemWeek(item), item.day);
+  const dateCopy = new Date(date);
+  dateCopy.setMinutes(dateCopy.getMinutes() + item.start);
+  return dateCopy;
+}
+
+function bookingDateMs(item: CalendarItem | null) {
+  if (!item) return null;
+  const date = bookingStartDate(item);
+  if (!date) return null;
+  return date.getTime();
+}
+
+function bookingDateLabel(item: CalendarItem | null) {
+  if (!item) return "No bookings yet";
+  const date = bookingStartDate(item);
+  if (!date) return "No valid date";
+  return `${date.toLocaleDateString("en-NZ", { weekday: "short", month: "short", day: "numeric" })}, ${formatTime(item.start)}`;
+}
+
 function compactDateTime(date: Date, minutes: number) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -965,6 +1068,8 @@ function sectionTitle(view: View) {
   switch (view) {
     case "clients":
       return "Clients";
+    case "client-emails":
+      return "Client Emails";
     case "services":
       return "Services";
     case "availability":
@@ -984,6 +1089,7 @@ function getInitialView(): View {
   if (typeof window === "undefined") return "calendar";
   const requestedView = new URLSearchParams(window.location.search).get("view");
   if (requestedView === "settings") return "settings";
+  if (requestedView === "client-emails") return "client-emails";
   return isPublicBookingMode() ? "booking" : "calendar";
 }
 
@@ -2111,6 +2217,16 @@ function App() {
   const [peopleImportState, setPeopleImportState] = useState<"idle" | "importing" | "imported">("idle");
   const [clientSearch, setClientSearch] = useState("");
   const [showClientImport, setShowClientImport] = useState(false);
+  const [emailCampaignType, setEmailCampaignType] = useState<EmailCampaignType>("review-request");
+  const [emailDateDirection, setEmailDateDirection] = useState<CampaignDateDirection>("before");
+  const [emailDateThreshold, setEmailDateThreshold] = useState("");
+  const [emailTotalBookingsMin, setEmailTotalBookingsMin] = useState("");
+  const [emailTotalBookingsMax, setEmailTotalBookingsMax] = useState("");
+  const [emailPackageMin, setEmailPackageMin] = useState("");
+  const [emailPackageMax, setEmailPackageMax] = useState("");
+  const [emailHasFutureBooking, setEmailHasFutureBooking] = useState<CampaignFutureFilter>("all");
+  const [emailServiceType, setEmailServiceType] = useState("");
+  const [emailRecipientSelection, setEmailRecipientSelection] = useState<Record<string, boolean>>({});
   const [isAddingClient, setIsAddingClient] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [clientEditMode, setClientEditMode] = useState(false);
@@ -3149,6 +3265,147 @@ function App() {
 
     return Array.from(byKey.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [items, people]);
+
+  const appointmentClients = useMemo(() => {
+    const map = new Map<string, CalendarItem[]>();
+    items
+      .filter((item) => item.kind === "appointment")
+      .forEach((item) => {
+        const key = clientKey(item.client || item.title, item.email ?? "", item.phone ?? "");
+        const existing = map.get(key) ?? [];
+        existing.push(item);
+        map.set(key, existing);
+      });
+    return map;
+  }, [items]);
+
+  const emailCampaignRecipients = useMemo<EmailRecipient[]>(() => {
+    const now = Date.now();
+    return clients.map((client) => {
+      const key = clientKey(client.name, client.email, client.phone);
+      const appointments = appointmentClients.get(key) ?? [];
+      const sortedAppointments = [...appointments].sort((a, b) => {
+        const aDate = bookingDateMs(a) ?? 0;
+        const bDate = bookingDateMs(b) ?? 0;
+        return bDate - aDate;
+      });
+      const latestAppointment = sortedAppointments[0] ?? null;
+      const lastBookingDate = bookingDateMs(latestAppointment);
+      const serviceTypesSet = new Set<string>();
+      let hasFutureBooking = false;
+
+      appointments.forEach((appointment) => {
+        const appointmentService = itemService(appointment, services);
+        serviceTypesSet.add(appointmentService?.name || appointment.title || "Lesson");
+        const appointmentStartMs = bookingDateMs(appointment);
+        if (appointmentStartMs !== null && appointmentStartMs > now) hasFutureBooking = true;
+      });
+
+      return {
+        ...client,
+        hasEmailAddress: Boolean(client.email.trim()),
+        isUnsubscribed: client.emailOptOut === true,
+        hasFutureBooking,
+        lastBookingDateLabel: bookingDateLabel(latestAppointment),
+        lastBookingDateMs: lastBookingDate,
+        packageLessonsRemainingValue:
+          Number.isFinite(client.packageLessonsRemaining ?? NaN) && (client.packageLessonsRemaining as number) >= 0
+            ? client.packageLessonsRemaining
+            : null,
+        serviceTypes: Array.from(serviceTypesSet).sort((a, b) => a.localeCompare(b)),
+      };
+    });
+  }, [appointmentClients, clients, services]);
+
+  const emailCampaignHasUnsubOption = useMemo(
+    () => emailCampaignRecipients.some((recipient) => recipient.emailOptOut !== undefined),
+    [emailCampaignRecipients],
+  );
+  const emailCampaignPackageAvailable = useMemo(
+    () => emailCampaignRecipients.some((recipient) => recipient.packageLessonsRemainingValue !== null),
+    [emailCampaignRecipients],
+  );
+  const emailCampaignAvailableServiceTypes = useMemo(() => {
+    const serviceTypes = new Set<string>();
+    emailCampaignRecipients.forEach((recipient) => {
+      recipient.serviceTypes.forEach((serviceType) => {
+        serviceTypes.add(serviceType);
+      });
+    });
+    return Array.from(serviceTypes).sort((a, b) => a.localeCompare(b));
+  }, [emailCampaignRecipients]);
+  const emailCampaignDateThreshold = useMemo(() => {
+    if (!emailDateThreshold.trim()) return null;
+    const parsed = Date.parse(`${emailDateThreshold}T00:00:00`);
+    return Number.isNaN(parsed) ? null : parsed;
+  }, [emailDateThreshold]);
+  const emailCampaignMinTotal = useMemo(() => parseNumberValue(emailTotalBookingsMin), [emailTotalBookingsMin]);
+  const emailCampaignMaxTotal = useMemo(() => parseNumberValue(emailTotalBookingsMax), [emailTotalBookingsMax]);
+  const emailCampaignMinPackage = useMemo(() => parseNumberValue(emailPackageMin), [emailPackageMin]);
+  const emailCampaignMaxPackage = useMemo(() => parseNumberValue(emailPackageMax), [emailPackageMax]);
+
+  const emailCampaignRecipientRows = useMemo<EmailRecipientRow[]>(() => {
+    const recipientRows = emailCampaignRecipients.filter((recipient) => {
+      if (!recipient.hasEmailAddress) return false;
+      if (emailCampaignHasUnsubOption && recipient.isUnsubscribed) return false;
+      if (emailCampaignDateThreshold !== null) {
+        if (recipient.lastBookingDateMs === null) return false;
+        if (emailDateDirection === "before" && recipient.lastBookingDateMs > emailCampaignDateThreshold) return false;
+        if (emailDateDirection === "after" && recipient.lastBookingDateMs < emailCampaignDateThreshold) return false;
+      }
+      if (emailCampaignMinTotal !== undefined && recipient.count < emailCampaignMinTotal) return false;
+      if (emailCampaignMaxTotal !== undefined && recipient.count > emailCampaignMaxTotal) return false;
+      if (
+        emailCampaignPackageAvailable &&
+        (emailCampaignMinPackage !== undefined || emailCampaignMaxPackage !== undefined)
+      ) {
+        if (recipient.packageLessonsRemainingValue === null) return false;
+        if (emailCampaignMinPackage !== undefined && recipient.packageLessonsRemainingValue < emailCampaignMinPackage) return false;
+        if (emailCampaignMaxPackage !== undefined && recipient.packageLessonsRemainingValue > emailCampaignMaxPackage) return false;
+      }
+      if (emailHasFutureBooking === "has" && !recipient.hasFutureBooking) return false;
+      if (emailHasFutureBooking === "none" && recipient.hasFutureBooking) return false;
+      if (emailServiceType && !recipient.serviceTypes.includes(emailServiceType)) return false;
+      return true;
+    });
+
+    return recipientRows.map((recipient) => ({
+      ...recipient,
+      isSelected: emailRecipientSelection[recipient.id] ?? true,
+    }));
+  }, [
+    emailCampaignDateThreshold,
+    emailCampaignHasUnsubOption,
+    emailCampaignMaxPackage,
+    emailCampaignMaxTotal,
+    emailCampaignMinPackage,
+    emailCampaignMinTotal,
+    emailCampaignPackageAvailable,
+    emailCampaignRecipients,
+    emailDateDirection,
+    emailHasFutureBooking,
+    emailRecipientSelection,
+    emailServiceType,
+  ]);
+
+  const emailCampaignVisibleCount = emailCampaignRecipientRows.length;
+  const emailCampaignSelectedCount = useMemo(
+    () => emailCampaignRecipientRows.filter((recipient) => recipient.isSelected).length,
+    [emailCampaignRecipientRows],
+  );
+
+  useEffect(() => {
+    if (!emailCampaignPackageAvailable) {
+      setEmailPackageMin("");
+      setEmailPackageMax("");
+    }
+  }, [emailCampaignPackageAvailable]);
+
+  useEffect(() => {
+    if (!emailCampaignAvailableServiceTypes.includes(emailServiceType)) {
+      setEmailServiceType("");
+    }
+  }, [emailCampaignAvailableServiceTypes, emailServiceType]);
 
   const selectedPerson = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return null;
@@ -7690,6 +7947,13 @@ function App() {
             <User size={18} />
             Clients
           </button>
+          <button
+            className={activeView === "client-emails" ? "active" : ""}
+            onClick={() => switchView("client-emails")}
+          >
+            <Mail size={18} />
+            Client Emails
+          </button>
           {billingWorkspaceEnabled && (
             <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
               <FileText size={18} />
@@ -7712,7 +7976,9 @@ function App() {
         {!isEmbedMode && (
         <header className="topbar">
           <div>
-            <p className="eyebrow">{activeView === "booking" ? "Public Booking" : activeView}</p>
+            <p className="eyebrow">
+              {activeView === "booking" ? "Public Booking" : activeView === "client-emails" ? "Client Emails" : activeView}
+            </p>
             <h1>{activeView === "calendar" ? locationLine : sectionTitle(activeView)}</h1>
             {activeView === "calendar" ? (
               <span>
@@ -8304,6 +8570,222 @@ function App() {
               <span>{calendarHover.adminEmailStatus}</span>
             </div>
           </aside>
+        )}
+
+        {!isEmbedMode && activeView === "client-emails" && (
+          <section className="module-page client-emails-page">
+            <div className="client-email-header">
+              <div>
+                <span>Campaign</span>
+                <h2>Client Emails / Bulk Email Lite</h2>
+              </div>
+              <div className="client-email-type-selector">
+                {[
+                  { value: "review-request", label: "Review request" },
+                  { value: "haven-t-seen", label: "Haven’t seen you in a while" },
+                  { value: "custom", label: "Custom" },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={emailCampaignType === option.value ? "active" : ""}
+                    onClick={() => setEmailCampaignType(option.value as EmailCampaignType)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {!emailCampaignHasUnsubOption ? (
+              <p className="client-email-warning">
+                Send is currently blocked because unsubscribe / do-not-email fields are not available in the loaded client
+                records.
+              </p>
+            ) : null}
+
+            <div className="client-email-filters">
+              <label>
+                <span>Email safety filters</span>
+                <p>Has email address</p>
+                <div className="client-email-fixed-filter">
+                  <input type="checkbox" checked readOnly disabled />
+                  <em>Only clients with email</em>
+                </div>
+              </label>
+              <label>
+                <span>Do not email</span>
+                <div className="client-email-fixed-filter">
+                  <input type="checkbox" checked={emailCampaignHasUnsubOption} readOnly disabled />
+                  <em>Exclude unsubscribed / do-not-email clients</em>
+                </div>
+              </label>
+              <label>
+                <span>Last booking</span>
+                <div className="client-email-filter-inline">
+                  <select
+                    value={emailDateDirection}
+                    onChange={(event) => setEmailDateDirection(event.target.value as CampaignDateDirection)}
+                  >
+                    <option value="before">Before</option>
+                    <option value="after">After</option>
+                  </select>
+                  <input
+                    type="date"
+                    value={emailDateThreshold}
+                    onChange={(event) => setEmailDateThreshold(event.target.value)}
+                  />
+                </div>
+              </label>
+              <label>
+                <span>Total bookings</span>
+                <div className="client-email-filter-inline">
+                  <input
+                    min="0"
+                    step="1"
+                    value={emailTotalBookingsMin}
+                    onChange={(event) => setEmailTotalBookingsMin(event.target.value)}
+                    placeholder="Min"
+                    type="number"
+                  />
+                  <input
+                    min="0"
+                    step="1"
+                    value={emailTotalBookingsMax}
+                    onChange={(event) => setEmailTotalBookingsMax(event.target.value)}
+                    placeholder="Max"
+                    type="number"
+                  />
+                </div>
+              </label>
+              <label>
+                <span>Remaining package lessons</span>
+                {emailCampaignPackageAvailable ? (
+                  <div className="client-email-filter-inline">
+                    <input
+                      min="0"
+                      step="1"
+                      value={emailPackageMin}
+                      onChange={(event) => setEmailPackageMin(event.target.value)}
+                      placeholder="Min"
+                      type="number"
+                    />
+                    <input
+                      min="0"
+                      step="1"
+                      value={emailPackageMax}
+                      onChange={(event) => setEmailPackageMax(event.target.value)}
+                      placeholder="Max"
+                      type="number"
+                    />
+                  </div>
+                ) : (
+                  <span className="client-email-state-note">Package lesson balance is not available yet.</span>
+                )}
+              </label>
+              <label>
+                <span>Future booking</span>
+                <select
+                  value={emailHasFutureBooking}
+                  onChange={(event) => setEmailHasFutureBooking(event.target.value as CampaignFutureFilter)}
+                >
+                  <option value="all">All</option>
+                  <option value="has">Has future booking</option>
+                  <option value="none">No future booking</option>
+                </select>
+              </label>
+              <label>
+                <span>Service type</span>
+                <select
+                  value={emailServiceType}
+                  onChange={(event) => setEmailServiceType(event.target.value)}
+                  disabled={emailCampaignAvailableServiceTypes.length === 0}
+                >
+                  <option value="">Any</option>
+                  {emailCampaignAvailableServiceTypes.map((serviceType) => (
+                    <option key={serviceType} value={serviceType}>
+                      {serviceType}
+                    </option>
+                  ))}
+                </select>
+                {!emailCampaignAvailableServiceTypes.length ? (
+                  <span className="client-email-state-note">Service type filter is not available yet.</span>
+                ) : null}
+              </label>
+            </div>
+
+            <div className="client-email-actions">
+              <span>
+                {emailCampaignVisibleCount} visible recipients, {emailCampaignSelectedCount} selected
+              </span>
+              <div className="client-email-actions-row">
+                <button className="outline-button" disabled type="button">
+                  Send test
+                </button>
+                <button className="primary-button" disabled type="button">
+                  Send to selected clients
+                </button>
+                <button className="outline-button" disabled type="button">
+                  Save draft
+                </button>
+              </div>
+            </div>
+
+            <div className="client-email-recipient-table-wrap">
+              <table className="client-email-recipient-table">
+                <thead>
+                  <tr>
+                    <th>Selected</th>
+                    <th>Client</th>
+                    <th>Email</th>
+                    <th>Last booking</th>
+                    <th>Total bookings</th>
+                    <th>Remaining package lessons</th>
+                    <th>Future booking</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {emailCampaignRecipientRows.length === 0 ? (
+                    <tr>
+                      <td className="client-email-empty" colSpan={7}>
+                        No recipients match the current filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    emailCampaignRecipientRows.map((recipient) => (
+                      <tr key={recipient.id}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={recipient.isSelected}
+                            onChange={(event) =>
+                              setEmailRecipientSelection((current) => {
+                                if (event.target.checked) {
+                                  const next = { ...current };
+                                  delete next[recipient.id];
+                                  return next;
+                                }
+                                return { ...current, [recipient.id]: false };
+                              })
+                            }
+                          />
+                        </td>
+                        <td>{recipient.name || "Unnamed client"}</td>
+                        <td>{recipient.email}</td>
+                        <td>{recipient.lastBookingDateLabel}</td>
+                        <td>{recipient.count}</td>
+                        <td>
+                          {recipient.packageLessonsRemainingValue === null
+                            ? "Not available yet"
+                            : recipient.packageLessonsRemainingValue}
+                        </td>
+                        <td>{recipient.hasFutureBooking ? "Yes" : "No"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
         )}
 
         {!isEmbedMode && activeView === "clients" && (
