@@ -1551,8 +1551,15 @@ function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
   };
 }
 
+function cleanEditableServiceText(value: unknown, fallback: string, maxLength: number) {
+  if (typeof value === "string") return value.trim().slice(0, maxLength);
+  return fallback;
+}
+
 function cleanService(service?: Partial<Service>, index = 0): Service {
   const fallback = defaultServices[index] ?? defaultServices[0];
+  const descriptionFallback = service ? "" : fallback.description;
+  const locationFallback = service ? "" : fallback.location;
   const name =
     typeof service?.name === "string" && service.name.trim()
       ? service.name.trim().slice(0, 120)
@@ -1588,17 +1595,14 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     name,
     duration: clamp(Math.round(duration), 15, 240),
     price: Math.max(0, Math.round(price)),
-    description:
-      typeof service?.description === "string"
-        ? service.description.trim().slice(0, 240)
-        : fallback.description,
+    description: cleanEditableServiceText(service?.description, descriptionFallback, 240),
     visibility: lessonFormat === "package" || service?.visibility === "private" ? "private" : "public",
     active: service?.active !== false,
     capacity: cleanCapacity,
     minParticipants,
     lessonFormat,
     priceMode,
-    location: typeof service?.location === "string" ? service.location.trim().slice(0, 160) : fallback.location,
+    location: cleanEditableServiceText(service?.location, locationFallback, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId:
@@ -5160,6 +5164,8 @@ function App() {
     setEditingServiceId(service.id);
     setServiceEditor({
       ...service,
+      description: service.description ?? "",
+      location: service.location ?? "",
       bookingScreenIds: service.bookingScreenIds ?? ["main"],
     });
     setShowServiceEditor(true);
@@ -5455,15 +5461,20 @@ function App() {
       return;
     }
     const normalizedEditor = serviceEditor.lessonFormat === "group" ? applyGroupDraftInputs() : serviceEditor;
-    const hasPublicScreen = (normalizedEditor.bookingScreenIds ?? []).length > 0;
-    if (normalizedEditor.visibility === "public" && !hasPublicScreen) {
+    const editableEditor = {
+      ...normalizedEditor,
+      description: typeof normalizedEditor.description === "string" ? normalizedEditor.description : "",
+      location: typeof normalizedEditor.location === "string" ? normalizedEditor.location : "",
+    };
+    const hasPublicScreen = (editableEditor.bookingScreenIds ?? []).length > 0;
+    if (editableEditor.visibility === "public" && !hasPublicScreen) {
       setToast({ message: "Public lesson types must be assigned to at least one booking screen." });
       return;
     }
-    const stableServiceId = editingServiceId || normalizedEditor.id || generateServiceDraftId();
+    const stableServiceId = editingServiceId || editableEditor.id || generateServiceDraftId();
     const clean = cleanService(
       {
-        ...normalizedEditor,
+        ...editableEditor,
         id: stableServiceId,
       },
       services.length,
