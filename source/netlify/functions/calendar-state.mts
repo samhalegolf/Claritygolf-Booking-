@@ -251,6 +251,7 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
     lessonFormat,
     priceMode,
     bookingScreenIds,
+    archived: service?.archived === true,
     location: cleanString(service?.location, fallback.location, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
