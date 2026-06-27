@@ -238,7 +238,11 @@ function hasCustomGroupFlag(service) {
 }
 
 function isCustomGroupService(service) {
-  return Boolean(hasCustomGroupFlag(service) && service?.lessonFormat === "group");
+  return Boolean(hasCustomGroupFlag(service));
+}
+
+function isScheduledGroupService(service) {
+  return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
 }
 
 function customGroupBaseParticipants(service) {
@@ -3202,7 +3206,7 @@ function currentWeekOffset() {
 }
 
 function isGroupServiceSlotMatch(service, candidate) {
-  if (!service || service.lessonFormat !== "group") return false;
+  if (!isScheduledGroupService(service)) return false;
   if (!service.groupSchedule || service.groupSchedule.active === false) return false;
   const schedule = service.groupSchedule;
   if (candidate.day !== schedule.dayOfWeek) return false;
@@ -3226,7 +3230,7 @@ function hasCollision(items, candidate, service) {
       candidate,
     ),
   );
-  if (!service || service.lessonFormat !== "group" || isCustomGroupService(service)) {
+  if (!isScheduledGroupService(service)) {
     return overlapping.length > 0;
   }
   const sameServiceCount = overlapping.filter((item) => item.serviceId === service.id).length;
@@ -3279,7 +3283,7 @@ async function createPublicBooking(payload, context = null) {
   }
 
   const slot = { week, day, start, duration: service.duration };
-  if (service.lessonFormat === "group" && !isCustomGroupService(service)) {
+  if (isScheduledGroupService(service)) {
     if (!isGroupServiceSlotMatch(service, slot) || hasCollision(state.items, slot, service)) {
       throw Object.assign(new Error("That time is no longer available."), {
         status: 409,
@@ -3737,7 +3741,7 @@ async function reschedulePublicBooking(payload, context = null) {
     !service ||
     !service.active ||
     service.lessonFormat === "package" ||
-    (service.lessonFormat === "group"
+    (isScheduledGroupService(service)
       ? !isGroupServiceSlotMatch(service, slot)
       : !isInsideAvailability(
           state.availability || defaultAvailability,

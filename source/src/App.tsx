@@ -203,7 +203,15 @@ function hasCustomGroupFlag(service?: Partial<Service> | null) {
 }
 
 function isCustomGroupService(service?: Partial<Service> | null) {
-  return Boolean(hasCustomGroupFlag(service) && service?.lessonFormat === "group");
+  return Boolean(hasCustomGroupFlag(service));
+}
+
+function isScheduledGroupService(service?: Partial<Service> | null) {
+  return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
+}
+
+function isAppointmentStyleService(service?: Partial<Service> | null) {
+  return Boolean(service && service.lessonFormat !== "package" && !isScheduledGroupService(service));
 }
 
 function serviceEditorFormat(service?: Partial<Service> | null): ServiceEditorFormat {
@@ -1728,7 +1736,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     : Math.max(1, fallback.packageAllowance ?? 5);
   const packageCoverageMode: PackageCoverageMode =
     service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
-  const groupSchedule = lessonFormat === "group" ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule) : undefined;
+  const groupSchedule = lessonFormat === "group" && !customGroup ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule) : undefined;
   const bookingScreenIds = normalizeBookingScreenIds(service?.bookingScreenIds);
   return {
     id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
@@ -2501,7 +2509,7 @@ function App() {
       });
     });
     services.forEach((service) => {
-      if (service.active && service.lessonFormat === "group" && service.groupSchedule?.active) {
+      if (service.active && isScheduledGroupService(service) && service.groupSchedule?.active) {
         points.push(service.groupSchedule.startMinutes, service.groupSchedule.startMinutes + service.duration);
       }
     });
@@ -2597,13 +2605,13 @@ function App() {
   const archivedServices = services.filter((service) => service.archived === true);
   const packageServices = activeServices.filter((service) => service.active && service.lessonFormat === "package");
   const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
-  const appointmentServices = bookableServices;
+  const appointmentServices = activeServices.filter((service) => service.active && isAppointmentStyleService(service));
   const publicServices = bookableServices.filter((service) => service.visibility === "public");
   const currentBookingScreenId = getBookingScreenId(typeof window === "undefined" ? "/" : window.location.pathname);
   const currentScreenPublicServices = publicServices.filter((service) =>
     (service.bookingScreenIds ?? ["main"]).includes(currentBookingScreenId),
   );
-  const quickCreateServices = publicServices.slice(0, 4);
+  const quickCreateServices = appointmentServices;
   const quickCreateService = quickCreate?.serviceId
     ? appointmentServices.find((service) => service.id === quickCreate.serviceId) ?? null
     : null;
@@ -3370,7 +3378,7 @@ function App() {
   const scheduledGroupSlots = useMemo<CalendarItem[]>(() => {
     const firstWeek = getCurrentWeekOffset();
     return services
-      .filter((service) => service.lessonFormat === "group" && service.groupSchedule && service.groupSchedule.active && service.active)
+      .filter((service) => isScheduledGroupService(service) && service.groupSchedule && service.groupSchedule.active && service.active)
       .flatMap((service) => {
         const schedule = service.groupSchedule;
         if (!schedule) return [];
@@ -3637,8 +3645,8 @@ function App() {
     setSelectedGroupSession(null);
   }
 
-  function isGroupServiceSlotMatch(service: Service | null, week: number, day: number, start: number) {
-    if (!service || service.lessonFormat !== "group" || !service.groupSchedule?.active) return false;
+  function isGroupServiceSlotMatch(service: Service | null | undefined, week: number, day: number, start: number) {
+    if (!service || !isScheduledGroupService(service) || !service.groupSchedule?.active) return false;
     if (day !== service.groupSchedule.dayOfWeek) return false;
     if (start !== service.groupSchedule.startMinutes) return false;
     if (!Number.isInteger(week)) return false;
@@ -3650,7 +3658,7 @@ function App() {
 
   function openQuickCreateForGroupSlot(item: CalendarItem, anchor: { x: number; y: number }) {
     const service = services.find((candidate) => candidate.id === item.serviceId);
-    if (!service || service.lessonFormat !== "group") return;
+    if (!service || !isScheduledGroupService(service)) return;
     const slotWeek = itemWeek(item);
     if (!isGroupServiceSlotMatch(service, slotWeek, item.day, item.start)) return;
     const candidate = {
@@ -3687,7 +3695,7 @@ function App() {
 
     const service = services.find((candidate) => candidate.id === serviceId);
     if (!service) return failWith("service not found");
-    if (service.lessonFormat !== "group") return failWith("service is not group");
+    if (!isScheduledGroupService(service)) return failWith("service is not scheduled group");
 
     const week = itemWeek(item);
     const slotWeek = Number.isInteger(week) ? week : NaN;
@@ -3729,7 +3737,7 @@ function App() {
   function openQuickCreateForGroupSession(anchor: { x: number; y: number }) {
     if (!selectedGroupSession) return;
     const service = selectedGroupSessionService;
-    if (!service || service.lessonFormat !== "group") return;
+    if (!service || !isScheduledGroupService(service)) return;
     const candidate = {
       week: selectedGroupSession.week,
       day: selectedGroupSession.day,
@@ -3807,7 +3815,7 @@ function App() {
     return (
       item.readOnly &&
       item.kind === "block" &&
-      service?.lessonFormat === "group" &&
+      isScheduledGroupService(service) &&
       isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
     );
   }
@@ -3816,7 +3824,7 @@ function App() {
     const service = itemService(item, services);
     return (
       item.kind === "appointment" &&
-      service?.lessonFormat === "group" &&
+      isScheduledGroupService(service) &&
       isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
     );
   }
@@ -3833,7 +3841,7 @@ function App() {
   function getGroupSessionContext(item: CalendarItem) {
     if (!isGroupSessionItem(item)) return null;
     const service = itemService(item, services);
-    if (!service || service.lessonFormat !== "group") return null;
+    if (!service || !isScheduledGroupService(service)) return null;
     const week = itemWeek(item);
     if (!Number.isInteger(week) || !Number.isInteger(item.day) || !Number.isFinite(item.start)) return null;
     const duration = Number.isFinite(item.duration) && item.duration > 0 ? item.duration : service.duration;
@@ -3885,7 +3893,7 @@ function App() {
 
     const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
 
-    if (bookingMode === "book" && bookingTargetService.lessonFormat === "group" && !isCustomGroupService(bookingTargetService)) {
+    if (bookingMode === "book" && isScheduledGroupService(bookingTargetService)) {
       const schedule = bookingTargetService.groupSchedule;
       if (!schedule?.active) return [];
       const candidate = {
@@ -4229,7 +4237,7 @@ function App() {
       const itemEnd = item.start + item.duration;
       return candidate.start < itemEnd && candidateEnd > item.start;
     });
-    if (!service || service.lessonFormat !== "group" || isCustomGroupService(service)) {
+    if (!service || !isScheduledGroupService(service)) {
       return overlappingItems.length > 0;
     }
     const sameServiceCount = overlappingItems.filter(
@@ -4243,7 +4251,7 @@ function App() {
   }
 
   function getGroupSlotRemainingSpots(candidate: SlotCandidate, service?: Service) {
-    if (!service || service.lessonFormat !== "group" || isCustomGroupService(service)) return 0;
+    if (!service || !isScheduledGroupService(service)) return 0;
     const bookedCount = items.filter(
       (item) =>
         item.kind === "appointment" &&
@@ -4255,7 +4263,7 @@ function App() {
   }
 
   function isGroupSlotFull(candidate: SlotCandidate, service?: Service) {
-    if (!service || service.lessonFormat !== "group" || isCustomGroupService(service)) return false;
+    if (!service || !isScheduledGroupService(service)) return false;
     const sameServiceCount = items.filter(
       (item) =>
         item.kind === "appointment" &&
@@ -4291,7 +4299,7 @@ function App() {
 
   function isValidAppointmentSlot(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
     if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
-    if (service?.lessonFormat === "group") return !hasCollision(candidate, ignoreId, service);
+    if (isScheduledGroupService(service)) return !hasCollision(candidate, ignoreId, service);
     if (hasAppointmentCollision(candidate, ignoreId)) return false;
     return true;
   }
@@ -5166,7 +5174,7 @@ function App() {
   }
 
   const isGroupBookingTimeSelection =
-    bookingMode === "book" && bookingTargetService?.lessonFormat === "group" && !isCustomGroupService(bookingTargetService);
+    bookingMode === "book" && isScheduledGroupService(bookingTargetService);
 
   function handlePublicBookingDaySelect(dayIndex: number) {
     setBookingDay(dayIndex);
@@ -5177,7 +5185,7 @@ function App() {
 
   function handlePublicBookingTimeSelect(slot: BookingSlot) {
     const next = bookingStart === slot.start ? null : slot.start;
-    if (bookingTargetService?.lessonFormat === "group") {
+    if (isScheduledGroupService(bookingTargetService)) {
       setBookingDay(slot.day);
       setBookingDaySelected(next !== null);
     }
