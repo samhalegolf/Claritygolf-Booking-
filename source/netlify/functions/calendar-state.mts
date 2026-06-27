@@ -8,6 +8,7 @@ const sessionCookieName = "clarity_session";
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
 const ADMIN_NOTIFICATION_DEBOUNCE_MS = 30_000;
 const ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY = "adminNotificationDebounceQueueJson";
+const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const BOOKING_SCREEN_IDS = new Set([
   "main",
   "range-three-kings",
@@ -822,6 +823,62 @@ function parseTimestamp(value: unknown) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
+function slotDateParts(week = 0, day = 0) {
+  const date = new Date(baseWeekStart);
+  date.setUTCDate(baseWeekStart.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
+}
+
+function nowInTimeZoneParts(timeZone = "Pacific/Auckland") {
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-NZ", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date());
+  } catch {
+    parts = new Intl.DateTimeFormat("en-NZ", {
+      timeZone: "Pacific/Auckland",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date());
+  }
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
+  return {
+    year: value("year"),
+    month: value("month"),
+    day: value("day"),
+    minutes: value("hour") * 60 + value("minute"),
+  };
+}
+
+function dateSortValue(parts: { year: number; month: number; day: number }) {
+  return parts.year * 10000 + parts.month * 100 + parts.day;
+}
+
+function isAppointmentInPast(item: any, timeZone = "Pacific/Auckland") {
+  if (!item || item.kind !== "appointment") return false;
+  const slotDate = slotDateParts(Number(item.week ?? 0), Number(item.day ?? 0));
+  const now = nowInTimeZoneParts(timeZone);
+  const slotValue = dateSortValue(slotDate);
+  const nowValue = dateSortValue(now);
+  if (slotValue !== nowValue) return slotValue < nowValue;
+  return Number(item.start ?? 0) < now.minutes;
+}
+
 function cleanPendingAdminNotification(value: any): PendingAdminNotification | null {
   const calendarItemId = cleanString(value?.calendarItemId, "", 180);
   const action =
@@ -865,9 +922,10 @@ async function writePendingAdminNotifications(queue: PendingAdminNotification[])
 async function processAdminNotificationDebounce(
   previousItems: any[] = [],
   nextItems: any[] = [],
-  options: { queueDiffs?: boolean } = {},
+  options: { queueDiffs?: boolean; timeZone?: string } = {},
 ) {
   const now = Date.now();
+  const timeZone = cleanString(options.timeZone, "Pacific/Auckland", 80);
   const queueById = new Map(
     (await readPendingAdminNotifications()).map((entry) => [
       entry.calendarItemId,
@@ -891,6 +949,14 @@ async function processAdminNotificationDebounce(
       if (!action) continue;
 
       const existing = queueById.get(id);
+      if (next && isAppointmentInPast(next, timeZone)) {
+        if (existing) {
+          queueById.delete(id);
+          queueChanged = true;
+        }
+        continue;
+      }
+
       if (action === "booking" && next) {
         queueById.set(id, {
           calendarItemId: id,
@@ -968,6 +1034,7 @@ async function processAdminNotificationDebounce(
     queueById.delete(id);
     queueChanged = true;
     if (!current) continue;
+    if (isAppointmentInPast(current, timeZone)) continue;
     if (appointmentNotificationSignature(current) !== pending.targetSignature) continue;
     if (
       pending.originalPositionSignature &&
@@ -1238,7 +1305,7 @@ export default async function handler(req: Request) {
         notificationResults = await processAdminNotificationDebounce(
           state.items,
           state.items,
-          { queueDiffs: false },
+          { queueDiffs: false, timeZone: state.account?.timezone },
         );
       } catch (error) {
         console.error("calendar_state:notification_debounce_failed", error);
@@ -1287,6 +1354,7 @@ export default async function handler(req: Request) {
         notificationResults = await processAdminNotificationDebounce(
           previousState.items,
           nextState.items,
+          { timeZone: nextState.account?.timezone },
         );
       } catch (error) {
         notificationWarning =

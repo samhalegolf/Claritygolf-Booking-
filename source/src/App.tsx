@@ -631,6 +631,8 @@ const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
 const RESCHEDULE_LOGIN_STORAGE_KEY = "clarity-booking-reschedule-login";
 const BOOKING_LOGIN_STORAGE_KEY = "clarity-booking-login";
 const DEFAULT_TAX_RATE = 15;
+const PAST_ADMIN_LESSON_WARNING =
+  "This lesson is in the past. It will be saved for records only and no emails will be sent.";
 
 const baseWeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const fullDayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -974,6 +976,12 @@ function dateForSlot(week: number, day: number) {
   const date = new Date(baseWeekStart);
   date.setDate(baseWeekStart.getDate() + week * 7 + day);
   return date;
+}
+
+function isSlotInPast(slot: Pick<SlotCandidate, "week" | "day" | "start">) {
+  const slotDate = dateForSlot(slot.week, slot.day);
+  slotDate.setHours(Math.floor(slot.start / 60), slot.start % 60, 0, 0);
+  return slotDate.getTime() < Date.now();
 }
 
 function compactDateTime(date: Date, minutes: number) {
@@ -4157,6 +4165,10 @@ function App() {
     return true;
   }
 
+  function confirmPastAdminLesson(candidate: SlotCandidate) {
+    return !isSlotInPast(candidate) || window.confirm(PAST_ADMIN_LESSON_WARNING);
+  }
+
   function isValidBlockSlot(candidate: SlotCandidate, ignoreId?: string) {
     if (candidate.duration < SNAP_MINUTES) return false;
     if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
@@ -4549,6 +4561,10 @@ function App() {
         clearGesture();
         return;
       }
+      if (!confirmPastAdminLesson(activeDraft)) {
+        clearGesture();
+        return;
+      }
       const item: CalendarItem = {
         id: `appt-${Date.now()}`,
         kind: "appointment",
@@ -4581,6 +4597,11 @@ function App() {
     if (!movedItem) return;
 
     if (sameSlot(movedItem, activeDraft)) {
+      clearGesture();
+      return;
+    }
+
+    if (movedItem.kind === "appointment" && !confirmPastAdminLesson(activeDraft)) {
       clearGesture();
       return;
     }
@@ -4698,6 +4719,7 @@ function App() {
       );
       return;
     }
+    if (!confirmPastAdminLesson(candidate)) return;
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
       kind: "appointment",
@@ -4757,6 +4779,7 @@ function App() {
       setToast({ message: "That lesson would overlap another appointment." });
       return;
     }
+    if (!confirmPastAdminLesson(candidate)) return;
     const previous = items;
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
@@ -4835,6 +4858,7 @@ function App() {
       setToast({ message: "That spot is not available. The lesson is still on the shelf." });
       return false;
     }
+    if (!confirmPastAdminLesson(candidate)) return false;
 
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
