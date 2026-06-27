@@ -2,10 +2,12 @@ import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 
 import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
-import { notifyCalendarDiff } from "./notification-engine.mts";
+import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
 
 const sessionCookieName = "clarity_session";
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
+const ADMIN_NOTIFICATION_DEBOUNCE_MS = 30_000;
+const ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY = "adminNotificationDebounceQueueJson";
 const BOOKING_SCREEN_IDS = new Set([
   "main",
   "range-three-kings",
@@ -16,6 +18,17 @@ const BOOKING_SCREEN_IDS = new Set([
 type LessonFormat = "private" | "group" | "package";
 type PriceMode = "session" | "per-person";
 type PackageCoverageMode = "upfront" | "lesson-by-lesson";
+type AdminDebounceAction = "booking" | "rescheduled" | "updated";
+type PendingAdminNotification = {
+  calendarItemId: string;
+  action: AdminDebounceAction;
+  queuedAt: string;
+  fireAfter: string;
+  originalPositionSignature: string;
+  targetSignature: string;
+  appointment: any;
+  previousAppointment: any | null;
+};
 type GroupServiceSchedule = {
   dayOfWeek: number;
   startMinutes: number;
@@ -773,6 +786,206 @@ async function setSetting(key: string, value: unknown) {
   });
 }
 
+function appointmentPositionSignature(item: any) {
+  if (!item) return "";
+  return JSON.stringify({
+    week: Number(item.week ?? 0),
+    day: Number(item.day ?? 0),
+    start: Number(item.start ?? 0),
+    duration: Number(item.duration ?? 0),
+    serviceId: cleanString(item.serviceId || item.service_id, "", 140),
+  });
+}
+
+function appointmentNotificationSignature(item: any) {
+  if (!item) return "";
+  return JSON.stringify({
+    position: appointmentPositionSignature(item),
+    client: cleanString(item.client || item.title, "", 160),
+    title: cleanString(item.title, "", 160),
+    phone: cleanString(item.phone, "", 80),
+    email: normalizedEmail(item.email),
+    status: cleanString(item.status, "booked", 40),
+  });
+}
+
+function appointmentById(items: any[] = []) {
+  return new Map(
+    items
+      .filter((item) => item?.kind === "appointment" && item?.id)
+      .map((item) => [String(item.id), item]),
+  );
+}
+
+function parseTimestamp(value: unknown) {
+  const timestamp = Date.parse(typeof value === "string" ? value : "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function cleanPendingAdminNotification(value: any): PendingAdminNotification | null {
+  const calendarItemId = cleanString(value?.calendarItemId, "", 180);
+  const action =
+    value?.action === "rescheduled" || value?.action === "updated"
+      ? value.action
+      : value?.action === "booking"
+        ? "booking"
+        : "";
+  if (!calendarItemId || !action || !value?.appointment) return null;
+  return {
+    calendarItemId,
+    action,
+    queuedAt: cleanString(value?.queuedAt, nowIso(), 80),
+    fireAfter: cleanString(value?.fireAfter, nowIso(), 80),
+    originalPositionSignature: cleanString(value?.originalPositionSignature, "", 800),
+    targetSignature: cleanString(value?.targetSignature, "", 1600),
+    appointment: value.appointment,
+    previousAppointment: value.previousAppointment || null,
+  };
+}
+
+async function readPendingAdminNotifications() {
+  const rows = await supabase("settings", {
+    query: `select=value&key=eq.${encodeURIComponent(ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY)}&limit=1`,
+  });
+  try {
+    const parsed = rows[0]?.value ? JSON.parse(rows[0].value) : [];
+    if (!Array.isArray(parsed)) return [] as PendingAdminNotification[];
+    return parsed
+      .map(cleanPendingAdminNotification)
+      .filter((entry): entry is PendingAdminNotification => Boolean(entry));
+  } catch {
+    return [] as PendingAdminNotification[];
+  }
+}
+
+async function writePendingAdminNotifications(queue: PendingAdminNotification[]) {
+  await setSetting(ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY, JSON.stringify(queue));
+}
+
+async function processAdminNotificationDebounce(
+  previousItems: any[] = [],
+  nextItems: any[] = [],
+  options: { queueDiffs?: boolean } = {},
+) {
+  const now = Date.now();
+  const queueById = new Map(
+    (await readPendingAdminNotifications()).map((entry) => [
+      entry.calendarItemId,
+      entry,
+    ]),
+  );
+  const previousById = appointmentById(previousItems);
+  const nextById = appointmentById(nextItems);
+  const results: any[] = [];
+  let queueChanged = false;
+
+  if (options.queueDiffs !== false) {
+    const ids = new Set([...previousById.keys(), ...nextById.keys()]);
+    const queuedAt = nowIso();
+    const fireAfter = new Date(now + ADMIN_NOTIFICATION_DEBOUNCE_MS).toISOString();
+
+    for (const id of ids) {
+      const previous = previousById.get(id);
+      const next = nextById.get(id);
+      const action = inferBookingAction(previous, next);
+      if (!action) continue;
+
+      const existing = queueById.get(id);
+      if (action === "booking" && next) {
+        queueById.set(id, {
+          calendarItemId: id,
+          action: "booking",
+          queuedAt,
+          fireAfter,
+          originalPositionSignature: "",
+          targetSignature: appointmentNotificationSignature(next),
+          appointment: next,
+          previousAppointment: null,
+        });
+        queueChanged = true;
+        continue;
+      }
+
+      if ((action === "rescheduled" || action === "updated") && next) {
+        const originalPrevious = existing?.previousAppointment || previous || null;
+        const originalPositionSignature =
+          existing?.originalPositionSignature ||
+          (previous ? appointmentPositionSignature(previous) : "");
+        if (
+          existing &&
+          originalPositionSignature &&
+          appointmentPositionSignature(next) === originalPositionSignature
+        ) {
+          queueById.delete(id);
+          queueChanged = true;
+          continue;
+        }
+
+        queueById.set(id, {
+          calendarItemId: id,
+          action: existing?.action === "booking" ? "booking" : action,
+          queuedAt,
+          fireAfter,
+          originalPositionSignature,
+          targetSignature: appointmentNotificationSignature(next),
+          appointment: next,
+          previousAppointment: originalPrevious,
+        });
+        queueChanged = true;
+        continue;
+      }
+
+      if (action === "cancelled" && previous) {
+        if (existing?.action === "booking") {
+          queueById.delete(id);
+          queueChanged = true;
+          continue;
+        }
+        if (existing) {
+          queueById.delete(id);
+          queueChanged = true;
+        }
+        results.push(
+          ...(await notifyBookingEvent({
+            action,
+            appointment: previous,
+            previousAppointment: previous,
+            source: "calendar-state",
+          })),
+        );
+      }
+    }
+  }
+
+  for (const [id, pending] of [...queueById.entries()]) {
+    if (parseTimestamp(pending.fireAfter) > now) continue;
+
+    const current = nextById.get(id);
+    queueById.delete(id);
+    queueChanged = true;
+    if (!current) continue;
+    if (appointmentNotificationSignature(current) !== pending.targetSignature) continue;
+    if (
+      pending.originalPositionSignature &&
+      appointmentPositionSignature(current) === pending.originalPositionSignature
+    ) {
+      continue;
+    }
+
+    results.push(
+      ...(await notifyBookingEvent({
+        action: pending.action,
+        appointment: current,
+        previousAppointment: pending.previousAppointment,
+        source: "calendar-state-admin-debounce",
+      })),
+    );
+  }
+
+  if (queueChanged) await writePendingAdminNotifications([...queueById.values()]);
+  return results;
+}
+
 async function readState() {
   const [settingsRows, itemRows, peopleRows, notificationRows] =
     await Promise.all([
@@ -1014,7 +1227,22 @@ export default async function handler(req: Request) {
         { error: "unauthorized", message: "Admin login required." },
         401,
       );
-    if (req.method === "GET") return json(await readState());
+    if (req.method === "GET") {
+      const state = await readState();
+      let notificationResults: any[] = [];
+      try {
+        notificationResults = await processAdminNotificationDebounce(
+          state.items,
+          state.items,
+          { queueDiffs: false },
+        );
+      } catch (error) {
+        console.error("calendar_state:notification_debounce_failed", error);
+      }
+      if (!notificationResults.length) return json(state);
+      const refreshedState = await readState();
+      return json({ ...refreshedState, notificationResults });
+    }
     if (req.method === "PUT") {
       const body = await parseBody(req);
       const hasItemsPayload = Object.prototype.hasOwnProperty.call(body || {}, "items");
@@ -1052,7 +1280,7 @@ export default async function handler(req: Request) {
       let notificationResults: any[] = [];
       let notificationWarning = "";
       try {
-        notificationResults = await notifyCalendarDiff(
+        notificationResults = await processAdminNotificationDebounce(
           previousState.items,
           nextState.items,
         );

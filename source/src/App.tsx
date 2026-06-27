@@ -2881,6 +2881,28 @@ function App() {
     }
   }
 
+  async function processPendingAdminNotifications() {
+    if (isEmbedMode || authStatus !== "authenticated") return;
+    try {
+      const response = await fetch("/api/calendar-state", {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => ({}))) as {
+        notifications?: NotificationRecord[];
+      };
+      if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+    } catch {
+      // Pending admin notification sends are secondary to the saved calendar change.
+    }
+  }
+
   useEffect(() => {
     if (!isEmbedMode || attemptedSavedRescheduleRef.current) return;
     const saved = initialRescheduleLoginRef.current;
@@ -3008,6 +3030,7 @@ function App() {
         }, 1800);
         window.setTimeout(() => void refreshNotificationHistory(), 1500);
         window.setTimeout(() => void refreshNotificationHistory(), 8000);
+        window.setTimeout(() => void processPendingAdminNotifications(), 32000);
         window.setTimeout(() => void refreshNotificationHistory(), 35000);
       })().catch((error) => {
         if (calendarSaveVersionRef.current === saveVersion) {
