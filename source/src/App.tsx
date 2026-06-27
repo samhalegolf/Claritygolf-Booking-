@@ -124,6 +124,8 @@ type PlacementAnimation = {
   fromY: number;
 };
 
+type CalendarViewMode = "full" | "am" | "pm";
+
 type DockFlight = PendingBooking & {
   fromX?: number;
   fromY?: number;
@@ -583,22 +585,27 @@ type WeekDay = {
   isToday: boolean;
 };
 
-const START_HOUR = 7;
-const END_HOUR = 20;
+const DAY_START_MINUTES = 0;
+const DAY_END_MINUTES = 24 * 60;
+const DEFAULT_CALENDAR_START_HOUR = 7;
+const DEFAULT_CALENDAR_END_HOUR = 20;
+const DEFAULT_CALENDAR_START_MINUTES = DEFAULT_CALENDAR_START_HOUR * 60;
+const DEFAULT_CALENDAR_END_MINUTES = DEFAULT_CALENDAR_END_HOUR * 60;
 const HOUR_HEIGHT = 72;
 const SNAP_MINUTES = 15;
+const LAST_TIME_SLOT_MINUTES = DAY_END_MINUTES - SNAP_MINUTES;
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
 const MOUSE_DRAG_THRESHOLD = 10;
 const TOUCH_DRAG_THRESHOLD = 16;
 const EDGE_NAV_ZONE = 26;
 const DAY_COUNT = 7;
-const MINUTES_PER_DAY = (END_HOUR - START_HOUR) * 60;
-const GRID_HEIGHT = ((END_HOUR - START_HOUR) * HOUR_HEIGHT);
 const BOOKING_EMBED_PARAM = "embed";
 const BOOKING_EMBED_VALUE = "booking";
 const BOOKING_LOGO_PARAM = "logo";
 const PUBLIC_BOOKING_HOST = "book.claritygolf.app";
 const CLARITY_BOOKING_HOSTS = new Set(["claritygolf.app", "booking.claritygolf.app", PUBLIC_BOOKING_HOST]);
+const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
+const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
 type BookingScreenDefinition = {
   id: string;
   label: string;
@@ -811,8 +818,9 @@ function formatBookingNoticeLabel(minutes: number) {
 }
 
 function formatTime(minutes: number) {
-  const hour24 = Math.floor(minutes / 60);
-  const mins = minutes % 60;
+  const normalized = ((Math.round(minutes) % DAY_END_MINUTES) + DAY_END_MINUTES) % DAY_END_MINUTES;
+  const hour24 = Math.floor(normalized / 60);
+  const mins = normalized % 60;
   const period = hour24 >= 12 ? "PM" : "AM";
   const hour = hour24 % 12 || 12;
   return `${hour}:${String(mins).padStart(2, "0")} ${period}`;
@@ -843,8 +851,8 @@ function renderTemplate(template: string, variables: Record<string, string>) {
   return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => variables[key] ?? "");
 }
 
-function minutesToTop(minutes: number) {
-  return ((minutes - START_HOUR * 60) / 60) * HOUR_HEIGHT;
+function minutesToTop(minutes: number, gridStartMinutes = DEFAULT_CALENDAR_START_MINUTES) {
+  return ((minutes - gridStartMinutes) / 60) * HOUR_HEIGHT;
 }
 
 function durationToHeight(minutes: number) {
@@ -1838,17 +1846,17 @@ function cleanAvailability(availability?: AvailabilityWindow[][]): AvailabilityW
     const windows = Array.isArray(source[day]) ? source[day] : [];
     return windows
       .map((window) => {
-        const rawStart = Number.isFinite(Number(window?.start)) ? Number(window?.start) : START_HOUR * 60;
+        const rawStart = Number.isFinite(Number(window?.start)) ? Number(window?.start) : DEFAULT_CALENDAR_START_MINUTES;
         const rawEnd = Number.isFinite(Number(window?.end)) ? Number(window?.end) : rawStart + 60;
-        const start = snap(clamp(rawStart, START_HOUR * 60, END_HOUR * 60 - SNAP_MINUTES));
-        const end = snap(clamp(rawEnd, start + SNAP_MINUTES, END_HOUR * 60));
+        const start = snap(clamp(rawStart, DAY_START_MINUTES, LAST_TIME_SLOT_MINUTES));
+        const end = snap(clamp(rawEnd, start + SNAP_MINUTES, LAST_TIME_SLOT_MINUTES));
         return end > start ? { start, end } : null;
       })
       .filter((window): window is AvailabilityWindow => Boolean(window))
       .sort((a, b) => a.start - b.start)
       .reduce<AvailabilityWindow[]>((merged, window) => {
         const previous = merged.at(-1);
-        if (previous && window.start <= previous.end) {
+        if (previous && window.start < previous.end) {
           previous.end = Math.max(previous.end, window.end);
         } else {
           merged.push({ ...window });
@@ -1856,6 +1864,24 @@ function cleanAvailability(availability?: AvailabilityWindow[][]): AvailabilityW
         return merged;
       }, []);
   });
+}
+
+function isCancelledGroupSessionItem(item: CalendarItem) {
+  return (
+    item.kind === "block" &&
+    Boolean(item.serviceId) &&
+    (item.note === CANCELLED_GROUP_SESSION_NOTE || item.title === CANCELLED_GROUP_SESSION_TITLE)
+  );
+}
+
+function isCancelledGroupSessionMatch(item: CalendarItem, serviceId: string, week: number, day: number, start: number) {
+  return (
+    isCancelledGroupSessionItem(item) &&
+    item.serviceId === serviceId &&
+    itemWeek(item) === week &&
+    item.day === day &&
+    item.start === start
+  );
 }
 
 function getStoredCoachAccount(): CoachAccount {
@@ -2259,6 +2285,7 @@ function App() {
   const [calendarSaveError, setCalendarSaveError] = useState("");
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
+  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
   const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarSyncStatus>(defaultGoogleCalendarStatus);
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
   const [notificationSettings, setNotificationSettings] =
@@ -2337,8 +2364,102 @@ function App() {
   const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek]);
   const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
   const weekItems = useMemo(() => items.filter((item) => itemWeek(item) === activeWeek), [activeWeek, items]);
+  const visibleWeekItems = useMemo(() => weekItems.filter((item) => !isCancelledGroupSessionItem(item)), [weekItems]);
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
   const blocks = weekItems.filter((item) => item.kind === "block").length;
+  const calendarDisplayBounds = useMemo(() => {
+    const points = [DEFAULT_CALENDAR_START_MINUTES, DEFAULT_CALENDAR_END_MINUTES];
+    availability.forEach((dayWindows) => {
+      dayWindows.forEach((window) => {
+        points.push(window.start, window.end);
+      });
+    });
+    services.forEach((service) => {
+      if (service.active && service.lessonFormat === "group" && service.groupSchedule?.active) {
+        points.push(service.groupSchedule.startMinutes, service.groupSchedule.startMinutes + service.duration);
+      }
+    });
+    visibleWeekItems.forEach((item) => {
+      points.push(item.start, item.start + item.duration);
+    });
+    const earliest = Math.min(...points);
+    const latest = Math.max(...points);
+    const start = clamp(Math.floor(earliest / 60) * 60 - 60, DAY_START_MINUTES, LAST_TIME_SLOT_MINUTES);
+    const end = clamp(
+      Math.ceil(latest / 60) * 60 + 60,
+      Math.max(start + 60, DEFAULT_CALENDAR_END_MINUTES),
+      DAY_END_MINUTES,
+    );
+    return {
+      start,
+      end: Math.max(end, start + 60),
+    };
+  }, [availability, services, visibleWeekItems]);
+  const fullCalendarStartMinutes = calendarDisplayBounds.start;
+  const fullCalendarEndMinutes = calendarDisplayBounds.end;
+  const calendarViewBounds = useMemo(() => {
+    if (calendarViewMode === "full") {
+      return {
+        start: fullCalendarStartMinutes,
+        end: fullCalendarEndMinutes,
+        emptyMessage: "",
+      };
+    }
+
+    if (calendarViewMode === "am") {
+      const end = Math.min(fullCalendarEndMinutes, 12 * 60);
+      if (end <= fullCalendarStartMinutes) {
+        return {
+          start: fullCalendarStartMinutes,
+          end: Math.min(DAY_END_MINUTES, fullCalendarStartMinutes + 60),
+          emptyMessage: "No morning hours are available in this view.",
+        };
+      }
+      return {
+        start: fullCalendarStartMinutes,
+        end,
+        emptyMessage: "",
+      };
+    }
+
+    const start = Math.max(fullCalendarStartMinutes, 12 * 60);
+    if (start >= fullCalendarEndMinutes) {
+      return {
+        start: Math.max(DAY_START_MINUTES, fullCalendarEndMinutes - 60),
+        end: fullCalendarEndMinutes,
+        emptyMessage: "No afternoon or evening hours are available in this view.",
+      };
+    }
+    return {
+      start,
+      end: fullCalendarEndMinutes,
+      emptyMessage: "",
+    };
+  }, [calendarViewMode, fullCalendarEndMinutes, fullCalendarStartMinutes]);
+  const calendarStartMinutes = calendarViewBounds.start;
+  const calendarEndMinutes = calendarViewBounds.end;
+  const calendarViewEmptyMessage = calendarViewBounds.emptyMessage;
+  const calendarViewButtonLabel =
+    calendarViewMode === "full" ? "View: Full" : calendarViewMode === "am" ? "View: AM" : "View: PM";
+  const calendarHourMarks = useMemo(() => {
+    const marks: number[] = [];
+    for (let minutes = calendarStartMinutes; minutes <= calendarEndMinutes; minutes += 60) {
+      marks.push(minutes);
+    }
+    return marks;
+  }, [calendarStartMinutes, calendarEndMinutes]);
+  const gridHeight = ((calendarEndMinutes - calendarStartMinutes) / 60) * HOUR_HEIGHT;
+  const calendarMinutesToTop = (minutes: number) => minutesToTop(minutes, calendarStartMinutes);
+  const clipCalendarSegment = (start: number, duration: number) => {
+    const end = start + duration;
+    const visibleStart = Math.max(start, calendarStartMinutes);
+    const visibleEnd = Math.min(end, calendarEndMinutes);
+    if (visibleEnd <= visibleStart) return null;
+    return {
+      start: visibleStart,
+      duration: visibleEnd - visibleStart,
+    };
+  };
   const activeDockBooking = dockBookings.find((booking) => booking.id === activeDockBookingId) ?? null;
   const dockFocus =
     !selected &&
@@ -3102,6 +3223,9 @@ function App() {
           MAX_GROUP_OCCURRENCE_COUNT,
         );
         if (activeWeek < firstWeek || activeWeek >= firstWeek + occurrenceCount) return [];
+        if (items.some((item) => isCancelledGroupSessionMatch(item, service.id, activeWeek, schedule.dayOfWeek, schedule.startMinutes))) {
+          return [];
+        }
           return [
             {
               id: `group-slot-${service.id}-${activeWeek}`,
@@ -3118,11 +3242,11 @@ function App() {
             },
           ];
       });
-  }, [activeWeek, services]);
+  }, [activeWeek, items, services]);
 
   const displayItems = useMemo(() => {
     const floatingItemId = floatingDrag?.itemId ?? "";
-    const baseWeekItems = floatingItemId ? weekItems.filter((item) => item.id !== floatingItemId) : weekItems;
+    const baseWeekItems = floatingItemId ? visibleWeekItems.filter((item) => item.id !== floatingItemId) : visibleWeekItems;
     if (!draft || draft.mode === "block" || draft.mode === "place") {
       return [...baseWeekItems, ...scheduledGroupSlots];
     }
@@ -3134,7 +3258,7 @@ function App() {
       ...scheduledGroupSlots,
       { ...movingItem, week: draft.week, day: draft.day, start: draft.start, duration: draft.duration },
     ];
-  }, [activeWeek, draft, floatingDrag, items, weekItems, scheduledGroupSlots]);
+  }, [activeWeek, draft, floatingDrag, items, visibleWeekItems, scheduledGroupSlots]);
   const floatingItem = floatingDrag ? items.find((item) => item.id === floatingDrag.itemId) : null;
   const floatingService = floatingItem ? itemService(floatingItem, services) : null;
 
@@ -3347,6 +3471,10 @@ function App() {
 
   const peopleImportPreview = useMemo(() => parsePeopleImport(peopleImportText).length, [peopleImportText]);
 
+  function cycleCalendarViewMode() {
+    setCalendarViewMode((current) => (current === "full" ? "am" : current === "am" ? "pm" : "full"));
+  }
+
   function closeCalendarDetails() {
     setSelectedId("");
     setSelectedGroupSession(null);
@@ -3464,6 +3592,55 @@ function App() {
       email: "",
       note: "",
       error: quickCreateAvailabilityError(candidate, service),
+    });
+  }
+
+  function cancelSelectedGroupSession() {
+    if (!selectedGroupSession || !selectedGroupSessionService) return;
+    if (selectedGroupSessionBookedCount > 0) {
+      setToast({ message: "This group session has bookings. Cancel or move the bookings before deleting the session." });
+      return;
+    }
+    if (
+      !window.confirm(
+        "Cancel this group lesson session? This only removes this date/time, not the whole lesson type.",
+      )
+    ) {
+      return;
+    }
+    if (
+      items.some((item) =>
+        isCancelledGroupSessionMatch(
+          item,
+          selectedGroupSession.serviceId,
+          selectedGroupSession.week,
+          selectedGroupSession.day,
+          selectedGroupSession.start,
+        ),
+      )
+    ) {
+      closeCalendarDetails();
+      return;
+    }
+    const previous = items;
+    const cancellationRecord: CalendarItem = {
+      id: `group-session-cancel-${selectedGroupSession.serviceId}-${selectedGroupSession.week}-${selectedGroupSession.day}-${selectedGroupSession.start}`,
+      kind: "block",
+      week: selectedGroupSession.week,
+      day: selectedGroupSession.day,
+      start: selectedGroupSession.start,
+      duration: selectedGroupSession.duration,
+      serviceId: selectedGroupSession.serviceId,
+      title: CANCELLED_GROUP_SESSION_TITLE,
+      note: CANCELLED_GROUP_SESSION_NOTE,
+      readOnly: true,
+      groupSlot: true,
+    };
+    setItems([...items, cancellationRecord]);
+    closeCalendarDetails();
+    setToast({
+      message: `${selectedGroupSessionService.name} session cancelled.`,
+      undo: () => setItems(previous),
     });
   }
 
@@ -3632,10 +3809,14 @@ function App() {
     if (!grid) return null;
     const rect = grid.getBoundingClientRect();
     const x = clamp(clientX - rect.left, 0, rect.width - 1);
-    const y = clamp(clientY - rect.top, 0, GRID_HEIGHT - 1);
+    const y = clamp(clientY - rect.top, 0, gridHeight - 1);
     const day = clamp(Math.floor((x / rect.width) * DAY_COUNT), 0, DAY_COUNT - 1);
     const minutesFromStart = snap((y / HOUR_HEIGHT) * 60);
-    const start = clamp(START_HOUR * 60 + minutesFromStart, START_HOUR * 60, END_HOUR * 60 - SNAP_MINUTES);
+    const start = clamp(
+      calendarStartMinutes + minutesFromStart,
+      calendarStartMinutes,
+      Math.max(calendarStartMinutes, calendarEndMinutes - SNAP_MINUTES),
+    );
     return { day, start, x, y };
   }
 
@@ -3674,7 +3855,7 @@ function App() {
     const finalWidth = dayWidth - 12;
     const finalHeight = Math.max(durationToHeight(candidate.duration), 34);
     const finalCenterX = candidate.day * dayWidth + 6 + finalWidth / 2;
-    const finalCenterY = minutesToTop(candidate.start) + finalHeight / 2;
+    const finalCenterY = calendarMinutesToTop(candidate.start) + finalHeight / 2;
     const tileCenterX = tileRect.left + tileRect.width / 2 - gridRect.left;
     const tileCenterY = tileRect.top + tileRect.height / 2 - gridRect.top;
 
@@ -3947,7 +4128,7 @@ function App() {
   }
 
   function isValidAppointmentSlot(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
-    if (candidate.start < START_HOUR * 60 || candidate.start + candidate.duration > END_HOUR * 60) return false;
+    if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
     if (service?.lessonFormat === "group") return !hasCollision(candidate, ignoreId, service);
     if (hasAppointmentCollision(candidate, ignoreId)) return false;
     return true;
@@ -3955,7 +4136,7 @@ function App() {
 
   function isValidBlockSlot(candidate: SlotCandidate, ignoreId?: string) {
     if (candidate.duration < SNAP_MINUTES) return false;
-    if (candidate.start < START_HOUR * 60 || candidate.start + candidate.duration > END_HOUR * 60) return false;
+    if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
     const candidateEnd = candidate.start + candidate.duration;
     return !items.some((item) => {
       if (
@@ -4016,7 +4197,7 @@ function App() {
       .flatMap((other) => [other.start + other.duration, other.start - candidate.duration])
       .map((start) => snap(start))
       .filter((start) => Math.abs(start - candidate.start) <= SNAP_MINUTES * 2)
-      .filter((start) => start >= START_HOUR * 60 && start + candidate.duration <= END_HOUR * 60)
+      .filter((start) => start >= DAY_START_MINUTES && start + candidate.duration <= DAY_END_MINUTES)
       .sort((a, b) => Math.abs(a - candidate.start) - Math.abs(b - candidate.start));
 
     for (const start of nearbyStarts) {
@@ -4180,8 +4361,8 @@ function App() {
       const origin = session.origin;
       const start = clamp(
         snap(slot.start - session.offsetMinutes),
-        START_HOUR * 60,
-        END_HOUR * 60 - origin.duration,
+        DAY_START_MINUTES,
+        DAY_END_MINUTES - origin.duration,
       );
       const rawCandidate = { week: activeWeekRef.current, day: slot.day, start, duration: origin.duration };
       const { candidate, valid } = settleNearCollisionBoundary(origin, rawCandidate);
@@ -4197,7 +4378,7 @@ function App() {
     if (session.mode === "resize") {
       if (!slot) return;
       const origin = session.origin;
-      const end = clamp(snap(slot.start + SNAP_MINUTES), origin.start + SNAP_MINUTES, END_HOUR * 60);
+      const end = clamp(snap(slot.start + SNAP_MINUTES), origin.start + SNAP_MINUTES, DAY_END_MINUTES);
       const candidate = {
         week: itemWeek(origin),
         day: origin.day,
@@ -5668,9 +5849,9 @@ function App() {
     const existingWindows = availability[day] ?? [];
     const lastWindow = existingWindows.at(-1);
     const start = lastWindow
-      ? Math.min(Math.max(lastWindow.end, timeToMinutes(9, 0)), timeToMinutes(18, 0))
+      ? Math.min(Math.max(lastWindow.end, timeToMinutes(9, 0)), LAST_TIME_SLOT_MINUTES - SNAP_MINUTES * 2)
       : timeToMinutes(9, 0);
-    const end = Math.min(Math.max(start + 120, start + SNAP_MINUTES), END_HOUR * 60);
+    const end = Math.min(Math.max(start + SNAP_MINUTES * 2, start + SNAP_MINUTES), LAST_TIME_SLOT_MINUTES);
     setEditingAvailabilityWindow(`${day}-${existingWindows.length}`);
     setAvailability((current) =>
       cleanAvailability(
@@ -7677,6 +7858,13 @@ function App() {
           <Plus size={16} />
           Add person
         </button>
+        <button className="danger-button" onClick={cancelSelectedGroupSession} type="button">
+          <X size={16} />
+          Cancel session
+        </button>
+        {selectedGroupSessionBookedCount > 0 ? (
+          <p className="muted">Booked group sessions need attendees moved or cancelled before the session can be removed.</p>
+        ) : null}
         {selectedGroupSessionIsFull ? <p className="muted">Group is full.</p> : null}
       </div>
     </>
@@ -8022,7 +8210,12 @@ function App() {
             onTouchStart={handleCalendarTouchStart}
           >
             <div className="calendar-toolbar">
-              <h2>{weekTitle}</h2>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button className="outline-button compact-button" onClick={cycleCalendarViewMode} type="button">
+                  {calendarViewButtonLabel}
+                </button>
+                <h2>{weekTitle}</h2>
+              </div>
               <div className={`calendar-save-pill ${calendarSaveStatus}`}>
                 <strong>
                   {calendarSaveStatus === "saving"
@@ -8043,6 +8236,9 @@ function App() {
                 Your latest change was not saved. Please try again; the app will retry when you make another change.
               </div>
             )}
+            {calendarViewEmptyMessage ? (
+              <div className="calendar-save-warning">{calendarViewEmptyMessage}</div>
+            ) : null}
 
             <div className="calendar-header-row">
               <div className="time-gutter" />
@@ -8055,12 +8251,11 @@ function App() {
             </div>
 
             <div className="calendar-scroll">
-              <div className="time-column" style={{ height: GRID_HEIGHT }}>
-                {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, index) => {
-                  const hour = START_HOUR + index;
+              <div className="time-column" style={{ height: gridHeight }}>
+                {calendarHourMarks.map((hour, index) => {
                   return (
                     <div className="time-label" key={hour} style={{ top: index * HOUR_HEIGHT }}>
-                      {hour === 12 ? "Noon" : formatTime(hour * 60).replace(":00 ", "")}
+                      {hour === 12 * 60 ? "Noon" : formatTime(hour).replace(":00 ", "")}
                     </div>
                   );
                 })}
@@ -8069,7 +8264,7 @@ function App() {
               <div
                 ref={gridRef}
                 className={`week-grid ${pointerSession ? "is-grabbing" : ""}`}
-                style={{ height: GRID_HEIGHT }}
+                style={{ height: gridHeight }}
                 onPointerDown={beginBlankGesture}
                 onPointerMove={updatePointer}
                 onPointerUp={(event) => {
@@ -8086,32 +8281,38 @@ function App() {
               >
                 {weekDays.map((day, dayIndex) => (
                   <div className="day-lane" key={day.label} style={{ left: `${(dayIndex / DAY_COUNT) * 100}%` }}>
-                    {availability[dayIndex].map((window, index) => (
-                      <div
-                        className="available-band"
-                        key={`${day.label}-${index}`}
-                        style={{
-                          top: minutesToTop(window.start),
-                          height: durationToHeight(window.end - window.start),
-                        }}
-                      />
-                    ))}
+                    {availability[dayIndex].map((window, index) => {
+                      const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
+                      if (!visibleWindow) return null;
+                      return (
+                        <div
+                          className="available-band"
+                          key={`${day.label}-${index}`}
+                          style={{
+                            top: calendarMinutesToTop(visibleWindow.start),
+                            height: durationToHeight(visibleWindow.duration),
+                          }}
+                        />
+                      );
+                    })}
                   </div>
                 ))}
 
-                {Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, index) => (
+                {calendarHourMarks.map((hour, index) => (
                   <div className="hour-line" key={index} style={{ top: index * HOUR_HEIGHT }} />
                 ))}
 
                 {displayItems.map((item) => {
+                  const visibleItem = clipCalendarSegment(item.start, item.duration);
+                  if (!visibleItem) return null;
                   const service = itemService(item, services);
                   const activeDraft =
                     draft && (draft.mode === "move" || draft.mode === "resize") && draft.itemId === item.id
                       ? draft
                       : null;
                   const invalid = activeDraft ? !activeDraft.valid : false;
-                  const top = minutesToTop(item.start);
-                  const height = durationToHeight(item.duration);
+                  const top = calendarMinutesToTop(visibleItem.start);
+                  const height = durationToHeight(visibleItem.duration);
                   const width = 100 / DAY_COUNT;
                   const left = item.day * width;
                   const flyAnimation = placementAnimation?.itemId === item.id ? placementAnimation : null;
@@ -8265,44 +8466,56 @@ function App() {
                 })}
 
                 {draft?.mode === "block" && (
-                  <div
-                    className={`calendar-item block draft-block ${draft.valid ? "" : "invalid"}`}
-                    style={{
-                      top: minutesToTop(draft.start),
-                      height: Math.max(durationToHeight(draft.duration), 24),
-                      left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
-                      width: `calc(${100 / DAY_COUNT}% - 12px)`,
-                    }}
-                  >
-                    <div className="item-content">
-                      <strong>Busy</strong>
-                      <span>New blocked time</span>
-                      <em>{formatRange(draft.start, draft.duration)}</em>
-                    </div>
-                  </div>
+                  (() => {
+                    const visibleDraft = clipCalendarSegment(draft.start, draft.duration);
+                    if (!visibleDraft) return null;
+                    return (
+                      <div
+                        className={`calendar-item block draft-block ${draft.valid ? "" : "invalid"}`}
+                        style={{
+                          top: calendarMinutesToTop(visibleDraft.start),
+                          height: Math.max(durationToHeight(visibleDraft.duration), 24),
+                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
+                          width: `calc(${100 / DAY_COUNT}% - 12px)`,
+                        }}
+                      >
+                        <div className="item-content">
+                          <strong>Busy</strong>
+                          <span>New blocked time</span>
+                          <em>{formatRange(draft.start, draft.duration)}</em>
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
 
                 {draft?.mode === "place" && pointerSession?.mode === "place" && (
-                  <div
-                    className={`calendar-item appointment draft-place ${draft.valid ? "" : "invalid"}`}
-                    style={{
-                      top: minutesToTop(draft.start),
-                      height: Math.max(durationToHeight(draft.duration), 34),
-                      left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
-                      width: `calc(${100 / DAY_COUNT}% - 12px)`,
-                    }}
-                  >
-                    <div className="item-grip" aria-hidden="true">
-                      <GripVertical size={14} />
-                    </div>
-                    <div className="item-content">
-                      <strong>{pointerSession.booking.client}</strong>
-                      <span>
-                        {services.find((service) => service.id === pointerSession.booking.serviceId)?.name ?? "Lesson"}
-                      </span>
-                      <em>{formatRange(draft.start, draft.duration)}</em>
-                    </div>
-                  </div>
+                  (() => {
+                    const visibleDraft = clipCalendarSegment(draft.start, draft.duration);
+                    if (!visibleDraft) return null;
+                    return (
+                      <div
+                        className={`calendar-item appointment draft-place ${draft.valid ? "" : "invalid"}`}
+                        style={{
+                          top: calendarMinutesToTop(visibleDraft.start),
+                          height: Math.max(durationToHeight(visibleDraft.duration), 34),
+                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
+                          width: `calc(${100 / DAY_COUNT}% - 12px)`,
+                        }}
+                      >
+                        <div className="item-grip" aria-hidden="true">
+                          <GripVertical size={14} />
+                        </div>
+                        <div className="item-content">
+                          <strong>{pointerSession.booking.client}</strong>
+                          <span>
+                            {services.find((service) => service.id === pointerSession.booking.serviceId)?.name ?? "Lesson"}
+                          </span>
+                          <em>{formatRange(draft.start, draft.duration)}</em>
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
               </div>
             </div>
