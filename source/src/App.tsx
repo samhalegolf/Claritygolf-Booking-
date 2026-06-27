@@ -59,6 +59,7 @@ type GroupServiceSchedule = {
 type PriceMode = "session" | "per-person";
 type PackageCoverageMode = "upfront" | "lesson-by-lesson";
 type BookingStatus = "booked" | "completed" | "cancelled" | "no_show";
+type ServiceEditorFormat = "private" | "group" | "custom-group" | "package";
 
 type Service = {
   id: string;
@@ -203,6 +204,21 @@ function hasCustomGroupFlag(service?: Partial<Service> | null) {
 
 function isCustomGroupService(service?: Partial<Service> | null) {
   return Boolean(hasCustomGroupFlag(service) && service?.lessonFormat === "group");
+}
+
+function serviceEditorFormat(service?: Partial<Service> | null): ServiceEditorFormat {
+  if (service?.lessonFormat === "package") return "package";
+  if (isCustomGroupService(service)) return "custom-group";
+  if (service?.lessonFormat === "group") return "group";
+  return "private";
+}
+
+function serviceFormatLabel(service?: Partial<Service> | null) {
+  const format = serviceEditorFormat(service);
+  if (format === "package") return "Package";
+  if (format === "custom-group") return "Custom group";
+  if (format === "group") return "Group";
+  return "Private";
 }
 
 function customGroupBaseParticipants(service?: Partial<Service> | null) {
@@ -5569,6 +5585,86 @@ function App() {
     });
   }
 
+  function updateServiceEditorFormat(format: ServiceEditorFormat) {
+    setServiceSaveState("idle");
+    const customGroup = format === "custom-group";
+    if (customGroup) {
+      setGroupMinimumInput(String(DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS));
+      setGroupMaximumInput(String(DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS));
+    }
+    setServiceEditor((current) => {
+      if (format === "package") {
+        return {
+          ...current,
+          lessonFormat: "package",
+          visibility: "private",
+          customGroup: false,
+          customGroupEnabled: false,
+          groupSchedule: undefined,
+          capacity: 1,
+          minParticipants: 1,
+          priceMode: "session",
+          baseParticipants: undefined,
+          basePrice: undefined,
+          extraPersonPrice: undefined,
+          packageAllowance: clamp(Math.round(Number(current.packageAllowance) || 5), 1, 100),
+          packageCoverageMode: current.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront",
+        };
+      }
+      if (format === "private") {
+        return {
+          ...current,
+          lessonFormat: "private",
+          customGroup: false,
+          customGroupEnabled: false,
+          groupSchedule: undefined,
+          capacity: clamp(Math.round(Number(current.capacity) || 1), 1, 24),
+          minParticipants: 1,
+          priceMode: "session",
+          baseParticipants: undefined,
+          basePrice: undefined,
+          extraPersonPrice: undefined,
+        };
+      }
+      if (!customGroup) {
+        return {
+          ...current,
+          lessonFormat: "group",
+          customGroup: false,
+          customGroupEnabled: false,
+          groupSchedule: cleanGroupSchedule(current.groupSchedule, defaultGroupSchedule()),
+          capacity: clamp(Math.round(Number(current.capacity) || 2), 2, 24),
+          minParticipants: clamp(Math.round(Number(current.minParticipants) || 2), 2, clamp(Math.round(Number(current.capacity) || 2), 2, 24)),
+          priceMode: current.priceMode === "per-person" ? "per-person" : "session",
+          baseParticipants: undefined,
+          basePrice: undefined,
+          extraPersonPrice: undefined,
+        };
+      }
+
+      return {
+        ...current,
+        lessonFormat: "group",
+        customGroup: true,
+        customGroupEnabled: true,
+        groupSchedule: undefined,
+        capacity: DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
+        minParticipants: DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+        priceMode: "session",
+        baseParticipants: customGroupBaseParticipants({
+          ...current,
+          lessonFormat: "group",
+          customGroup: true,
+          customGroupEnabled: true,
+          capacity: DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
+          minParticipants: DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+        }),
+        basePrice: customGroupBasePrice(current),
+        extraPersonPrice: customGroupExtraPersonPrice(current),
+      };
+    });
+  }
+
   function updateBookingScreens(screenId: string, checked: boolean) {
     setServiceSaveState("idle");
     setServiceEditor((current) => {
@@ -7021,20 +7117,12 @@ function App() {
                 <label className="settings-field">
                   <span>Lesson format</span>
                   <select
-                    value={serviceEditor.lessonFormat}
-                    onChange={(event) =>
-                      updateServiceEditor(
-                        "lessonFormat",
-                        event.target.value === "package"
-                          ? "package"
-                          : event.target.value === "group"
-                            ? "group"
-                            : "private",
-                      )
-                    }
+                    value={serviceEditorFormat(serviceEditor)}
+                    onChange={(event) => updateServiceEditorFormat(event.target.value as ServiceEditorFormat)}
                   >
                     <option value="private">Private lesson</option>
                     <option value="group">Group lesson</option>
+                    <option value="custom-group">Custom group lesson</option>
                     <option value="package">Package</option>
                   </select>
                 </label>
@@ -7123,16 +7211,6 @@ function App() {
                   </select>
                 </label>
               </div>
-              {serviceEditor.lessonFormat === "group" && (
-                <label className="settings-toggle">
-                  <input
-                    checked={hasCustomGroupFlag(serviceEditor)}
-                    onChange={(event) => updateServiceEditor("customGroup", event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>Custom group lesson</span>
-                </label>
-              )}
               {serviceEditor.lessonFormat === "group" && hasCustomGroupFlag(serviceEditor) && (
                 <div className="service-form-row">
                   <label className="settings-field">
@@ -7249,7 +7327,13 @@ function App() {
                 )}
                 {serviceEditor.lessonFormat !== "package" && (
                   <label className="settings-field">
-                    <span>{serviceEditor.lessonFormat === "group" ? "Maximum group" : "Capacity"}</span>
+                    <span>
+                      {hasCustomGroupFlag(serviceEditor)
+                        ? "Max participants"
+                        : serviceEditor.lessonFormat === "group"
+                          ? "Maximum group"
+                          : "Capacity"}
+                    </span>
                     <input
                       value={groupMaximumInput}
                       min={serviceEditor.lessonFormat === "group" ? 2 : 1}
@@ -7370,7 +7454,7 @@ function App() {
                 <button className="service-row-main" onClick={() => editService(service)} type="button">
                   <span>
                     {service.archived ? "Archived" : service.active ? "Active" : "Inactive"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
-                    {service.lessonFormat === "package" ? "Package" : service.lessonFormat === "group" ? "Group" : "Private"} ·{" "}
+                    {serviceFormatLabel(service)} ·{" "}
                     {formatBookingScreenLabels(service.bookingScreenIds ?? ["main"]).join(", ")}
                   </span>
                   <strong>{service.name}</strong>
