@@ -233,8 +233,12 @@ function cleanPositiveInteger(value, fallback, min = 1, max = 100) {
     : fallback;
 }
 
+function hasCustomGroupFlag(service) {
+  return service?.customGroup === true || service?.customGroupEnabled === true;
+}
+
 function isCustomGroupService(service) {
-  return Boolean(service?.customGroup && service?.lessonFormat === "group");
+  return Boolean(hasCustomGroupFlag(service) && service?.lessonFormat === "group");
 }
 
 function customGroupBaseParticipants(service) {
@@ -483,7 +487,7 @@ function cleanService(service, index = 0) {
     /package/i.test(name);
   const lessonFormat =
     looksLikePackage ? "package" : service?.lessonFormat === "group" ? "group" : "private";
-  const customGroup = lessonFormat === "group" && service?.customGroup === true;
+  const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
   const cleanCapacity = customGroup
     ? Math.max(CUSTOM_GROUP_DEFAULTS.minParticipants, Math.min(CUSTOM_GROUP_DEFAULTS.maxParticipants, Math.round(capacity || CUSTOM_GROUP_DEFAULTS.maxParticipants)))
     : Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
@@ -535,6 +539,7 @@ function cleanService(service, index = 0) {
       lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
     bookingScreenIds,
     customGroup: customGroup || undefined,
+    customGroupEnabled: customGroup || undefined,
     baseParticipants: customGroup ? customGroupBaseParticipants({ ...service, capacity: cleanCapacity }) : undefined,
     basePrice: customGroup ? customGroupBasePrice(service) : undefined,
     extraPersonPrice: customGroup ? customGroupExtraPersonPrice(service) : undefined,
@@ -3221,7 +3226,7 @@ function hasCollision(items, candidate, service) {
       candidate,
     ),
   );
-  if (!service || service.lessonFormat !== "group" || service.customGroup === true) {
+  if (!service || service.lessonFormat !== "group" || isCustomGroupService(service)) {
     return overlapping.length > 0;
   }
   const sameServiceCount = overlapping.filter((item) => item.serviceId === service.id).length;
@@ -3274,7 +3279,7 @@ async function createPublicBooking(payload, context = null) {
   }
 
   const slot = { week, day, start, duration: service.duration };
-  if (service.lessonFormat === "group" && service.customGroup !== true) {
+  if (service.lessonFormat === "group" && !isCustomGroupService(service)) {
     if (!isGroupServiceSlotMatch(service, slot) || hasCollision(state.items, slot, service)) {
       throw Object.assign(new Error("That time is no longer available."), {
         status: 409,

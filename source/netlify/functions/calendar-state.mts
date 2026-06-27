@@ -225,6 +225,10 @@ function cleanEditableServiceText(value: unknown, fallback: string, maxLength: n
   return fallback;
 }
 
+function hasCustomGroupFlag(service?: Record<string, unknown> | null) {
+  return service?.customGroup === true || service?.customGroupEnabled === true;
+}
+
 function cleanService(service?: Record<string, unknown>, index = 0) {
   const fallback = (defaultServices[index] ?? defaultServices[0]) as any;
   const descriptionFallback = service ? "" : fallback.description;
@@ -248,7 +252,7 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
     : service?.lessonFormat === "group"
       ? "group"
       : "private";
-  const customGroup = lessonFormat === "group" && service?.customGroup === true;
+  const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
   const cleanCapacity = customGroup
     ? Math.max(CUSTOM_GROUP_DEFAULTS.minParticipants, Math.min(CUSTOM_GROUP_DEFAULTS.maxParticipants, Math.round(capacity || CUSTOM_GROUP_DEFAULTS.maxParticipants)))
     : Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
@@ -290,6 +294,7 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId: lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
     customGroup: customGroup || undefined,
+    customGroupEnabled: customGroup || undefined,
     baseParticipants: customGroup ? customGroupBaseParticipants({ ...service, capacity: cleanCapacity }) : undefined,
     basePrice: customGroup ? customGroupBasePrice(service) : undefined,
     extraPersonPrice: customGroup ? customGroupExtraPersonPrice(service) : undefined,
