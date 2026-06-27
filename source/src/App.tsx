@@ -124,6 +124,8 @@ type PlacementAnimation = {
   fromY: number;
 };
 
+type CalendarViewMode = "full" | "am" | "pm";
+
 type DockFlight = PendingBooking & {
   fromX?: number;
   fromY?: number;
@@ -2283,6 +2285,7 @@ function App() {
   const [calendarSaveError, setCalendarSaveError] = useState("");
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
+  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
   const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarSyncStatus>(defaultGoogleCalendarStatus);
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
   const [notificationSettings, setNotificationSettings] =
@@ -2392,8 +2395,52 @@ function App() {
       end: Math.max(end, start + 60),
     };
   }, [availability, services, visibleWeekItems]);
-  const calendarStartMinutes = calendarDisplayBounds.start;
-  const calendarEndMinutes = calendarDisplayBounds.end;
+  const fullCalendarStartMinutes = calendarDisplayBounds.start;
+  const fullCalendarEndMinutes = calendarDisplayBounds.end;
+  const calendarViewBounds = useMemo(() => {
+    if (calendarViewMode === "full") {
+      return {
+        start: fullCalendarStartMinutes,
+        end: fullCalendarEndMinutes,
+        emptyMessage: "",
+      };
+    }
+
+    if (calendarViewMode === "am") {
+      const end = Math.min(fullCalendarEndMinutes, 12 * 60);
+      if (end <= fullCalendarStartMinutes) {
+        return {
+          start: fullCalendarStartMinutes,
+          end: Math.min(DAY_END_MINUTES, fullCalendarStartMinutes + 60),
+          emptyMessage: "No morning hours are available in this view.",
+        };
+      }
+      return {
+        start: fullCalendarStartMinutes,
+        end,
+        emptyMessage: "",
+      };
+    }
+
+    const start = Math.max(fullCalendarStartMinutes, 12 * 60);
+    if (start >= fullCalendarEndMinutes) {
+      return {
+        start: Math.max(DAY_START_MINUTES, fullCalendarEndMinutes - 60),
+        end: fullCalendarEndMinutes,
+        emptyMessage: "No afternoon or evening hours are available in this view.",
+      };
+    }
+    return {
+      start,
+      end: fullCalendarEndMinutes,
+      emptyMessage: "",
+    };
+  }, [calendarViewMode, fullCalendarEndMinutes, fullCalendarStartMinutes]);
+  const calendarStartMinutes = calendarViewBounds.start;
+  const calendarEndMinutes = calendarViewBounds.end;
+  const calendarViewEmptyMessage = calendarViewBounds.emptyMessage;
+  const calendarViewButtonLabel =
+    calendarViewMode === "full" ? "View: Full" : calendarViewMode === "am" ? "View: AM" : "View: PM";
   const calendarHourMarks = useMemo(() => {
     const marks: number[] = [];
     for (let minutes = calendarStartMinutes; minutes <= calendarEndMinutes; minutes += 60) {
@@ -3413,6 +3460,10 @@ function App() {
   );
 
   const peopleImportPreview = useMemo(() => parsePeopleImport(peopleImportText).length, [peopleImportText]);
+
+  function cycleCalendarViewMode() {
+    setCalendarViewMode((current) => (current === "full" ? "am" : current === "am" ? "pm" : "full"));
+  }
 
   function closeCalendarDetails() {
     setSelectedId("");
@@ -8149,7 +8200,12 @@ function App() {
             onTouchStart={handleCalendarTouchStart}
           >
             <div className="calendar-toolbar">
-              <h2>{weekTitle}</h2>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button className="outline-button compact-button" onClick={cycleCalendarViewMode} type="button">
+                  {calendarViewButtonLabel}
+                </button>
+                <h2>{weekTitle}</h2>
+              </div>
               <div className={`calendar-save-pill ${calendarSaveStatus}`}>
                 <strong>
                   {calendarSaveStatus === "saving"
@@ -8170,6 +8226,9 @@ function App() {
                 Your latest change was not saved. Please try again; the app will retry when you make another change.
               </div>
             )}
+            {calendarViewEmptyMessage ? (
+              <div className="calendar-save-warning">{calendarViewEmptyMessage}</div>
+            ) : null}
 
             <div className="calendar-header-row">
               <div className="time-gutter" />
