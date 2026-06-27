@@ -15,6 +15,13 @@ const sessionDays = 7;
 const passwordResetMinutes = 30;
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
+const CUSTOM_GROUP_DEFAULTS = {
+  baseParticipants: 3,
+  basePrice: 200,
+  extraPersonPrice: 20,
+  minParticipants: 2,
+  maxParticipants: 5,
+};
 const BOOKING_SCREEN_IDS = new Set([
   "main",
   "range-three-kings",
@@ -219,6 +226,114 @@ function safeJsonParse(value, fallback) {
   }
 }
 
+function cleanPositiveInteger(value, fallback, min = 1, max = 100) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed)
+    ? Math.max(min, Math.min(max, Math.round(parsed)))
+    : fallback;
+}
+
+function hasCustomGroupFlag(service) {
+  return service?.customGroup === true || service?.customGroupEnabled === true;
+}
+
+function isCustomGroupService(service) {
+  return Boolean(hasCustomGroupFlag(service));
+}
+
+function isScheduledGroupService(service) {
+  return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
+}
+
+function customGroupBaseParticipants(service) {
+  return cleanPositiveInteger(
+    service?.baseParticipants,
+    CUSTOM_GROUP_DEFAULTS.baseParticipants,
+    CUSTOM_GROUP_DEFAULTS.minParticipants,
+    customGroupMaxParticipants(service),
+  );
+}
+
+function customGroupBasePrice(service) {
+  return cleanPositiveInteger(
+    service?.basePrice ?? service?.price,
+    CUSTOM_GROUP_DEFAULTS.basePrice,
+    0,
+    100000,
+  );
+}
+
+function customGroupExtraPersonPrice(service) {
+  return cleanPositiveInteger(
+    service?.extraPersonPrice,
+    CUSTOM_GROUP_DEFAULTS.extraPersonPrice,
+    0,
+    100000,
+  );
+}
+
+function customGroupMinParticipants(service) {
+  return cleanPositiveInteger(
+    service?.minParticipants,
+    CUSTOM_GROUP_DEFAULTS.minParticipants,
+    CUSTOM_GROUP_DEFAULTS.minParticipants,
+    CUSTOM_GROUP_DEFAULTS.maxParticipants,
+  );
+}
+
+function customGroupMaxParticipants(service) {
+  return cleanPositiveInteger(
+    service?.capacity,
+    CUSTOM_GROUP_DEFAULTS.maxParticipants,
+    CUSTOM_GROUP_DEFAULTS.minParticipants,
+    CUSTOM_GROUP_DEFAULTS.maxParticipants,
+  );
+}
+
+function calculateCustomGroupPrice(service, participantCount) {
+  const baseParticipants = customGroupBaseParticipants(service);
+  const extraPeople = Math.max(0, cleanPositiveInteger(participantCount, 1, 1, CUSTOM_GROUP_DEFAULTS.maxParticipants) - baseParticipants);
+  return customGroupBasePrice(service) + extraPeople * customGroupExtraPersonPrice(service);
+}
+
+function cleanCustomGroupAttendee(raw, index = 0) {
+  if (!raw || typeof raw !== "object") return null;
+  const name = cleanString(raw.name, "", 120);
+  const email = cleanEmail(raw.email, "");
+  if (!name && !email) return null;
+  const rawStatus = ["booker", "manual", "invited", "confirmed"].includes(raw.status)
+    ? raw.status
+    : "";
+  const status = rawStatus
+    ? rawStatus === "invited" && !email
+      ? "manual"
+      : rawStatus
+    : email
+      ? "invited"
+      : "manual";
+  return {
+    id: cleanString(raw.id, `attendee-${index + 1}`, 120),
+    name: name || email,
+    ...(email ? { email } : {}),
+    status,
+    ...(raw.token ? { token: cleanString(raw.token, "", 180) } : {}),
+  };
+}
+
+function cleanCustomGroupData(value) {
+  const source = typeof value === "string" ? safeJsonParse(value, null) : value;
+  if (!source || typeof source !== "object") return null;
+  const attendees = Array.isArray(source.attendees)
+    ? source.attendees.map(cleanCustomGroupAttendee).filter(Boolean)
+    : [];
+  if (!source.customGroup && !attendees.length) return null;
+  return {
+    customGroup: true,
+    attendees,
+    calculatedPrice: cleanPositiveInteger(source.calculatedPrice, 0, 0, 100000),
+  };
+}
+
 function json(value, status = 200, extraHeaders = {}) {
   return new Response(safeJsonStringify(value), {
     status,
@@ -376,10 +491,15 @@ function cleanService(service, index = 0) {
     /package/i.test(name);
   const lessonFormat =
     looksLikePackage ? "package" : service?.lessonFormat === "group" ? "group" : "private";
-  const cleanCapacity = Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
+  const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
+  const cleanCapacity = customGroup
+    ? Math.max(CUSTOM_GROUP_DEFAULTS.minParticipants, Math.min(CUSTOM_GROUP_DEFAULTS.maxParticipants, Math.round(capacity || CUSTOM_GROUP_DEFAULTS.maxParticipants)))
+    : Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
   const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
     ? Number(service.minParticipants)
-    : lessonFormat === "group"
+    : customGroup
+      ? CUSTOM_GROUP_DEFAULTS.minParticipants
+      : lessonFormat === "group"
       ? Math.min(2, cleanCapacity)
       : 1;
   const minParticipants =
@@ -387,14 +507,14 @@ function cleanService(service, index = 0) {
       ? Math.max(2, Math.min(cleanCapacity, Math.round(rawMinParticipants)))
       : 1;
   const priceMode =
-    lessonFormat === "group" && service?.priceMode === "per-person"
+    lessonFormat === "group" && service?.priceMode === "per-person" && !customGroup
       ? "per-person"
       : "session";
   const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
     ? Math.max(1, Math.min(100, Math.round(Number(service.packageAllowance))))
     : Math.max(1, fallback.packageAllowance ?? 5);
   const packageCoverageMode = service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
-  const groupSchedule = lessonFormat === "group"
+  const groupSchedule = lessonFormat === "group" && !customGroup
     ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule || {})
     : undefined;
   const bookingScreenIds = cleanBookingScreenIds(service?.bookingScreenIds);
@@ -422,6 +542,11 @@ function cleanService(service, index = 0) {
     packageCoversServiceId:
       lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
     bookingScreenIds,
+    customGroup: customGroup || undefined,
+    customGroupEnabled: customGroup || undefined,
+    baseParticipants: customGroup ? customGroupBaseParticipants({ ...service, capacity: cleanCapacity }) : undefined,
+    basePrice: customGroup ? customGroupBasePrice(service) : undefined,
+    extraPersonPrice: customGroup ? customGroupExtraPersonPrice(service) : undefined,
     archived: service?.archived === true,
     groupSchedule,
   };
@@ -708,12 +833,14 @@ async function ensureCoreTables() {
 	      phone TEXT,
 	      email TEXT,
 	      note TEXT,
+      custom_group JSONB,
       status TEXT NOT NULL DEFAULT 'booked',
 	      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	    )
 	  `;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
+  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
   await db().sql`
     CREATE INDEX IF NOT EXISTS idx_calendar_items_slot
     ON calendar_items (week, day, start)
@@ -1015,6 +1142,7 @@ function rowToItem(row) {
   const status = ["completed", "cancelled", "no_show"].includes(row.status)
     ? row.status
     : "booked";
+  const customGroup = cleanCustomGroupData(row.custom_group);
   return {
     id: row.id,
     kind: row.kind,
@@ -1029,6 +1157,7 @@ function rowToItem(row) {
 	    email: row.email || "",
 	    note: row.note || "",
     status: status,
+    ...(customGroup || {}),
 	  };
 	}
 
@@ -1050,6 +1179,11 @@ function cleanCalendarItem(item) {
   if (!Number.isInteger(duration) || duration <= 0 || duration > 12 * 60)
     return null;
 
+  const customGroup = cleanCustomGroupData({
+    customGroup: item.customGroup,
+    attendees: item.attendees,
+    calculatedPrice: item.calculatedPrice,
+  });
   return {
     id: cleanString(item.id, `${kind}-${Date.now()}`),
     kind,
@@ -1069,6 +1203,7 @@ function cleanCalendarItem(item) {
       item.status === "no_show"
         ? item.status
         : "booked",
+    ...(customGroup || {}),
   };
 }
 
@@ -1548,8 +1683,8 @@ async function writeItems(items, options = {}) {
     for (const item of cleanItems) {
       await client.query(
         `INSERT INTO calendar_items (
-          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, custom_group, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, NOW(), NOW())
         ON CONFLICT (id) DO UPDATE SET
           kind = EXCLUDED.kind,
           week = EXCLUDED.week,
@@ -1563,6 +1698,7 @@ async function writeItems(items, options = {}) {
           email = EXCLUDED.email,
           note = EXCLUDED.note,
           status = EXCLUDED.status,
+          custom_group = EXCLUDED.custom_group,
           updated_at = NOW()`,
         [
           item.id,
@@ -1578,6 +1714,7 @@ async function writeItems(items, options = {}) {
           item.email || "",
           item.note || "",
           item.status || "booked",
+          item.customGroup ? JSON.stringify(cleanCustomGroupData(item)) : null,
         ],
       );
     }
@@ -2390,6 +2527,56 @@ function bookingAppleCalendarUrl({ appointment }) {
   }
 }
 
+function customGroupConfirmUrl(token) {
+  const siteUrl =
+    env("URL") ||
+    env("DEPLOY_PRIME_URL") ||
+    env("CLARITY_SITE_URL", "https://claritygolf.app");
+  try {
+    const url = new URL("/api/custom-group-confirm", siteUrl);
+    url.searchParams.set("token", token);
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function customGroupInviteEmail({ appointment, attendee, service, account }) {
+  const variables = bookingEmailVariables({ appointment, service, account });
+  const confirmUrl = customGroupConfirmUrl(attendee.token);
+  const title = `${appointment.client || "A golfer"} invited you to ${variables.service}`;
+  const intro = `${attendee.name || "Hi"}, you have been invited to join ${appointment.client || "the booker"} for ${variables.service}.`;
+  const detailRows = `
+    <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">When</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.date)}, ${escapeHtml(variables.time)}</td></tr>
+    <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">Where</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.venue)}</td></tr>
+    <tr><td style="padding:8px;color:#697166">Group price</td><td style="padding:8px">${escapeHtml(variables.price)}</td></tr>
+  `;
+  return {
+    subject: title,
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.55;color:#101612">
+        <h2>${escapeHtml(title)}</h2>
+        <p>${escapeHtml(intro)}</p>
+        <table style="border-collapse:collapse;margin:18px 0;width:100%;max-width:520px">${detailRows}</table>
+        ${confirmUrl ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 14px"><tr><td><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:700">Confirm attendance</a></td></tr></table>` : ""}
+        <p>Confirmation is helpful, but the booking is already in place.</p>
+      </div>
+    `,
+    text: [
+      title,
+      "",
+      intro,
+      "",
+      `When: ${variables.date}, ${variables.time}`,
+      `Where: ${variables.venue}`,
+      `Group price: ${variables.price}`,
+      confirmUrl ? `Confirm attendance: ${confirmUrl}` : "",
+      "",
+      "Confirmation is helpful, but the booking is already in place.",
+    ].filter(Boolean).join("\n"),
+  };
+}
+
 function modernClientEmailFooter(value) {
   const footer = cleanString(value, "", 900);
   const legacyChangeFooter =
@@ -2421,7 +2608,9 @@ function bookingEmailVariables({ appointment, service, account }) {
     date: formatBookingDate(itemWeek(appointment), appointment.day),
     time: formatRange(appointment.start, appointment.duration),
     venue: account.venueName,
-    price: servicePriceLabel(service),
+    price: appointment.customGroup && Number.isFinite(Number(appointment.calculatedPrice))
+      ? `NZ$${Number(appointment.calculatedPrice)}.00`
+      : servicePriceLabel(service),
     duration: `${appointment.duration} minutes`,
     replyTo: account.contactEmail,
     rescheduleUrl: rescheduleUrl.toString(),
@@ -2643,6 +2832,29 @@ async function sendBookingNotifications(
           : "disabled_in_notification_settings",
       ),
     );
+  }
+
+  const inviteAttendees = Array.isArray(appointment.attendees)
+    ? appointment.attendees.filter((attendee) => attendee?.email && attendee?.token && attendee.status === "invited")
+    : [];
+  if ((kind === "booking" || kind === "updated") && inviteAttendees.length) {
+    for (const attendee of inviteAttendees) {
+      const invite = customGroupInviteEmail({ appointment, attendee, service, account });
+      if (settings.sendClientEmail) {
+        jobs.push(
+          sendAndRecord(
+            "custom_group_invite",
+            attendee.email,
+            invite.subject,
+            invite.html,
+            invite.text,
+            `${kind}-custom-group-invite-${appointment.id}-${hashToken(attendee.email).slice(0, 12)}`,
+          ),
+        );
+      } else {
+        jobs.push(recordSkipped("custom_group_invite", attendee.email, invite.subject, "disabled_in_notification_settings"));
+      }
+    }
   }
 
   if (settings.sendCoachEmail && kind !== "test") {
@@ -2994,7 +3206,7 @@ function currentWeekOffset() {
 }
 
 function isGroupServiceSlotMatch(service, candidate) {
-  if (!service || service.lessonFormat !== "group") return false;
+  if (!isScheduledGroupService(service)) return false;
   if (!service.groupSchedule || service.groupSchedule.active === false) return false;
   const schedule = service.groupSchedule;
   if (candidate.day !== schedule.dayOfWeek) return false;
@@ -3018,7 +3230,7 @@ function hasCollision(items, candidate, service) {
       candidate,
     ),
   );
-  if (!service || service.lessonFormat !== "group") {
+  if (!isScheduledGroupService(service)) {
     return overlapping.length > 0;
   }
   const sameServiceCount = overlapping.filter((item) => item.serviceId === service.id).length;
@@ -3071,7 +3283,7 @@ async function createPublicBooking(payload, context = null) {
   }
 
   const slot = { week, day, start, duration: service.duration };
-  if (service.lessonFormat === "group") {
+  if (isScheduledGroupService(service)) {
     if (!isGroupServiceSlotMatch(service, slot) || hasCollision(state.items, slot, service)) {
       throw Object.assign(new Error("That time is no longer available."), {
         status: 409,
@@ -3087,6 +3299,53 @@ async function createPublicBooking(payload, context = null) {
   }
 
   const client = `${firstName} ${lastName}`;
+  const rawAttendees = Array.isArray(payload?.attendees) ? payload.attendees : [];
+  let customGroup = null;
+  if (isCustomGroupService(service)) {
+    const invalidInvite = rawAttendees.find((attendee) => {
+      const rawEmail = cleanString(attendee?.email, "", 180);
+      return rawEmail && !cleanEmail(rawEmail, "");
+    });
+    if (invalidInvite) {
+      throw Object.assign(new Error("Enter a valid attendee email or leave it blank."), {
+        status: 400,
+      });
+    }
+    const otherAttendees = rawAttendees
+      .map((attendee, index) => cleanCustomGroupAttendee({
+        id: `attendee-${index + 1}`,
+        name: attendee?.name,
+        email: attendee?.email,
+        status: attendee?.email ? "invited" : "manual",
+        token: attendee?.email ? randomUUID() : "",
+      }, index))
+      .filter(Boolean)
+      .slice(0, customGroupMaxParticipants(service) - 1);
+    const participantCount = 1 + otherAttendees.length;
+    if (participantCount < customGroupMinParticipants(service)) {
+      throw Object.assign(new Error("Add at least one other person before confirming."), {
+        status: 400,
+      });
+    }
+    if (participantCount > customGroupMaxParticipants(service)) {
+      throw Object.assign(new Error("This custom group has too many attendees."), {
+        status: 400,
+      });
+    }
+    customGroup = {
+      customGroup: true,
+      attendees: [
+        {
+          id: "booker",
+          name: client,
+          email,
+          status: "booker",
+        },
+        ...otherAttendees,
+      ],
+      calculatedPrice: calculateCustomGroupPrice(service, participantCount),
+    };
+  }
   const appointment = {
     id: `appt-${Date.now()}`,
     kind: "appointment",
@@ -3097,6 +3356,7 @@ async function createPublicBooking(payload, context = null) {
     phone,
     email,
     note: "Booked from public booking page.",
+    ...(customGroup || {}),
   };
   await writePublicBookingState(state, [...state.items, appointment]);
   const notifications = await sendInitialBookingNotifications(
@@ -3135,6 +3395,45 @@ export async function handlePublicBookingRequest(req, context = null) {
       },
       status,
     );
+  }
+}
+
+export async function handleCustomGroupConfirmRequest(req) {
+  try {
+    const token = cleanString(new URL(req.url).searchParams.get("token") || "", "", 180);
+    if (!token) return text("This confirmation link is missing its token.", 400);
+
+    const state = await readPublicCalendarState();
+    let confirmedAttendee = null;
+    let confirmedAppointment = null;
+    const nextItems = state.items.map((item) => {
+      if (!item.customGroup || !Array.isArray(item.attendees)) return item;
+      let changed = false;
+      const attendees = item.attendees.map((attendee) => {
+        if (attendee.token !== token) return attendee;
+        changed = true;
+        confirmedAttendee = attendee;
+        confirmedAppointment = item;
+        return { ...attendee, status: "confirmed" };
+      });
+      return changed ? { ...item, attendees } : item;
+    });
+
+    if (!confirmedAttendee || !confirmedAppointment) {
+      return text("This confirmation link is not valid or has already been replaced.", 404);
+    }
+
+    await writePublicBookingState(state, nextItems);
+    const service = state.services.find((candidate) => candidate.id === confirmedAppointment.serviceId);
+    const title = "Attendance confirmed";
+    return text(
+      `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="font-family:Arial,sans-serif;line-height:1.5;color:#101612;padding:32px;max-width:640px;margin:auto"><h1>${title}</h1><p>${escapeHtml(confirmedAttendee.name)} is confirmed for ${escapeHtml(service?.name || "the custom group lesson")}.</p><p>You can close this page.</p></body></html>`,
+      200,
+      "text/html; charset=utf-8",
+    );
+  } catch (error) {
+    console.error("custom_group_confirm:failed", error);
+    return text("Attendance could not be confirmed. Please contact the coach.", 500);
   }
 }
 
@@ -3442,7 +3741,7 @@ async function reschedulePublicBooking(payload, context = null) {
     !service ||
     !service.active ||
     service.lessonFormat === "package" ||
-    (service.lessonFormat === "group"
+    (isScheduledGroupService(service)
       ? !isGroupServiceSlotMatch(service, slot)
       : !isInsideAvailability(
           state.availability || defaultAvailability,

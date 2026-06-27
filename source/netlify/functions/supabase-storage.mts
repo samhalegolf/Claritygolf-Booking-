@@ -510,6 +510,7 @@ function calendarItemFromParams(values) {
     email,
     note,
     status,
+    custom_group,
   ] = values;
   return cleanRow({
     id,
@@ -525,6 +526,7 @@ function calendarItemFromParams(values) {
     email,
     note,
     status: status || "booked",
+    custom_group: custom_group ? JSON.parse(custom_group) : null,
     created_at: nowIso(),
     updated_at: nowIso(),
   });

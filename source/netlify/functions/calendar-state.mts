@@ -6,6 +6,13 @@ import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mt
 
 const sessionCookieName = "clarity_session";
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
+const CUSTOM_GROUP_DEFAULTS = {
+  baseParticipants: 3,
+  basePrice: 200,
+  extraPersonPrice: 20,
+  minParticipants: 2,
+  maxParticipants: 5,
+};
 const ADMIN_NOTIFICATION_DEBOUNCE_MS = 30_000;
 const ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY = "adminNotificationDebounceQueueJson";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
@@ -218,6 +225,10 @@ function cleanEditableServiceText(value: unknown, fallback: string, maxLength: n
   return fallback;
 }
 
+function hasCustomGroupFlag(service?: Record<string, unknown> | null) {
+  return service?.customGroup === true || service?.customGroupEnabled === true;
+}
+
 function cleanService(service?: Record<string, unknown>, index = 0) {
   const fallback = (defaultServices[index] ?? defaultServices[0]) as any;
   const descriptionFallback = service ? "" : fallback.description;
@@ -241,21 +252,26 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
     : service?.lessonFormat === "group"
       ? "group"
       : "private";
-  const cleanCapacity = Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
+  const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
+  const cleanCapacity = customGroup
+    ? Math.max(CUSTOM_GROUP_DEFAULTS.minParticipants, Math.min(CUSTOM_GROUP_DEFAULTS.maxParticipants, Math.round(capacity || CUSTOM_GROUP_DEFAULTS.maxParticipants)))
+    : Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
   const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
     ? Number(service?.minParticipants)
-    : lessonFormat === "group"
+    : customGroup
+      ? CUSTOM_GROUP_DEFAULTS.minParticipants
+      : lessonFormat === "group"
       ? Math.min(2, cleanCapacity)
       : 1;
   const minParticipants = lessonFormat === "group"
     ? Math.max(2, Math.min(cleanCapacity, Math.round(rawMinParticipants)))
     : 1;
-  const priceMode: PriceMode = lessonFormat === "group" && service?.priceMode === "per-person" ? "per-person" : "session";
+  const priceMode: PriceMode = lessonFormat === "group" && service?.priceMode === "per-person" && !customGroup ? "per-person" : "session";
   const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
     ? Math.max(1, Math.min(100, Math.round(Number(service?.packageAllowance))))
     : Math.max(1, fallback.packageAllowance ?? 5);
   const packageCoverageMode: PackageCoverageMode = service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
-  const groupSchedule = lessonFormat === "group"
+  const groupSchedule = lessonFormat === "group" && !customGroup
     ? cleanGroupSchedule(service?.groupSchedule, (fallback.groupSchedule as GroupServiceSchedule) || { dayOfWeek: 2, startMinutes: timeToMinutes(18, 0), occurrenceCount: 8, active: true })
     : undefined;
   const bookingScreenIds = cleanBookingScreenIds(service?.bookingScreenIds);
@@ -277,6 +293,11 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId: lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
+    customGroup: customGroup || undefined,
+    customGroupEnabled: customGroup || undefined,
+    baseParticipants: customGroup ? customGroupBaseParticipants({ ...service, capacity: cleanCapacity }) : undefined,
+    basePrice: customGroup ? customGroupBasePrice(service) : undefined,
+    extraPersonPrice: customGroup ? customGroupExtraPersonPrice(service) : undefined,
     groupSchedule,
   };
 }
@@ -431,10 +452,97 @@ function parseJsonSetting<T>(
   }
 }
 
+function cleanPositiveInteger(value: unknown, fallback: number, min = 1, max = 100) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, Math.round(parsed))) : fallback;
+}
+
+function customGroupMaxParticipants(service?: Record<string, unknown> | null) {
+  return cleanPositiveInteger(
+    service?.capacity,
+    CUSTOM_GROUP_DEFAULTS.maxParticipants,
+    CUSTOM_GROUP_DEFAULTS.minParticipants,
+    CUSTOM_GROUP_DEFAULTS.maxParticipants,
+  );
+}
+
+function customGroupBaseParticipants(service?: Record<string, unknown> | null) {
+  return cleanPositiveInteger(
+    service?.baseParticipants,
+    CUSTOM_GROUP_DEFAULTS.baseParticipants,
+    CUSTOM_GROUP_DEFAULTS.minParticipants,
+    customGroupMaxParticipants(service),
+  );
+}
+
+function customGroupBasePrice(service?: Record<string, unknown> | null) {
+  return cleanPositiveInteger(
+    service?.basePrice ?? service?.price,
+    CUSTOM_GROUP_DEFAULTS.basePrice,
+    0,
+    100000,
+  );
+}
+
+function customGroupExtraPersonPrice(service?: Record<string, unknown> | null) {
+  return cleanPositiveInteger(
+    service?.extraPersonPrice,
+    CUSTOM_GROUP_DEFAULTS.extraPersonPrice,
+    0,
+    100000,
+  );
+}
+
+function cleanCustomGroupAttendee(raw: any, index = 0) {
+  if (!raw || typeof raw !== "object") return null;
+  const name = cleanString(raw.name, "", 120);
+  const email = cleanString(raw.email, "", 180).toLowerCase();
+  if (!name && !email) return null;
+  const rawStatus = ["booker", "manual", "invited", "confirmed"].includes(raw.status)
+    ? raw.status
+    : "";
+  const status = rawStatus
+    ? rawStatus === "invited" && !email
+      ? "manual"
+      : rawStatus
+    : email
+      ? "invited"
+      : "manual";
+  return {
+    id: cleanString(raw.id, `attendee-${index + 1}`, 120),
+    name: name || email,
+    ...(email ? { email } : {}),
+    status,
+    ...(raw.token ? { token: cleanString(raw.token, "", 180) } : {}),
+  };
+}
+
+function cleanCustomGroupData(value: any) {
+  let source = value;
+  if (typeof value === "string") {
+    try {
+      source = JSON.parse(value);
+    } catch {
+      source = null;
+    }
+  }
+  if (!source || typeof source !== "object") return null;
+  const attendees = Array.isArray(source.attendees)
+    ? source.attendees.map(cleanCustomGroupAttendee).filter(Boolean)
+    : [];
+  if (!source.customGroup && !attendees.length) return null;
+  return {
+    customGroup: true,
+    attendees,
+    calculatedPrice: cleanPositiveInteger(source.calculatedPrice, 0, 0, 100000),
+  };
+}
+
 function rowToItem(row: any) {
   const status = ["completed", "cancelled", "no_show"].includes(row.status)
     ? row.status
     : "booked";
+  const customGroup = cleanCustomGroupData(row.custom_group);
   return {
     id: row.id,
     kind: row.kind,
@@ -449,11 +557,17 @@ function rowToItem(row: any) {
     email: row.email || "",
     note: row.note || "",
     status,
+    ...(customGroup || {}),
   };
 }
 
 function itemToRow(item: any) {
   const kind = item?.kind === "block" ? "block" : "appointment";
+  const customGroup = cleanCustomGroupData({
+    customGroup: item?.customGroup,
+    attendees: item?.attendees,
+    calculatedPrice: item?.calculatedPrice,
+  });
   return {
     id: cleanString(item?.id, `${kind}-${randomUUID()}`, 140),
     kind,
@@ -473,6 +587,7 @@ function itemToRow(item: any) {
       item?.status === "no_show"
         ? item.status
         : "booked",
+    custom_group: customGroup,
     created_at: nowIso(),
     updated_at: nowIso(),
   };
@@ -807,6 +922,17 @@ function appointmentNotificationSignature(item: any) {
     phone: cleanString(item.phone, "", 80),
     email: normalizedEmail(item.email),
     status: cleanString(item.status, "booked", 40),
+    customGroup: item.customGroup === true,
+    calculatedPrice: Number(item.calculatedPrice ?? 0),
+    attendees: Array.isArray(item.attendees)
+      ? item.attendees.map((attendee: any) => ({
+          id: cleanString(attendee?.id, "", 120),
+          name: cleanString(attendee?.name, "", 120),
+          email: normalizedEmail(attendee?.email),
+          status: cleanString(attendee?.status, "", 40),
+          token: cleanString(attendee?.token, "", 220),
+        }))
+      : [],
   });
 }
 

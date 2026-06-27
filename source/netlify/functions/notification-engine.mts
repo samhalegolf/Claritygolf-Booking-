@@ -194,6 +194,22 @@ function rangeLabel(start = 0, duration = 0) {
 
 function normaliseAppointment(raw: any = {}) {
   const client = cleanText(raw.client, cleanText(raw.title, [raw.firstName, raw.lastName].filter(Boolean).join(" "), 160), 160);
+  const attendees = Array.isArray(raw.attendees)
+    ? raw.attendees
+        .map((attendee: any, index: number) => ({
+          id: cleanText(attendee?.id, `attendee-${index + 1}`, 120),
+          name: cleanText(attendee?.name, "", 120),
+          email: cleanEmail(attendee?.email, ""),
+          status:
+            attendee?.status === "booker" ||
+            attendee?.status === "manual" ||
+            attendee?.status === "confirmed"
+              ? attendee.status
+              : "invited",
+          token: cleanText(attendee?.token, "", 220),
+        }))
+        .filter((attendee: any) => attendee.name)
+    : [];
   return {
     id: cleanText(raw.id, `appt-${Date.now()}`, 160),
     kind: raw.kind || "appointment",
@@ -207,11 +223,54 @@ function normaliseAppointment(raw: any = {}) {
     phone: cleanText(raw.phone, "", 80),
     email: cleanEmail(raw.email, ""),
     note: cleanText(raw.note || raw.notes, "", 1200),
+    customGroup: raw.customGroup === true || raw.customGroupEnabled === true || attendees.length > 0,
+    attendees,
+    calculatedPrice: Number.isFinite(Number(raw.calculatedPrice)) ? Number(raw.calculatedPrice) : 0,
     status:
       raw.status === "completed" || raw.status === "cancelled" || raw.status === "no_show"
         ? raw.status
         : "booked",
   };
+}
+
+function attendeeSignature(appt: any) {
+  return JSON.stringify(
+    (Array.isArray(appt?.attendees) ? appt.attendees : []).map((attendee: any) => ({
+      id: cleanText(attendee?.id, "", 120),
+      name: cleanText(attendee?.name, "", 120),
+      email: cleanEmail(attendee?.email, ""),
+      status: cleanText(attendee?.status, "", 40),
+      token: cleanText(attendee?.token, "", 220),
+    })),
+  );
+}
+
+function customGroupConfirmUrl(token: string, settings: any) {
+  try {
+    const url = new URL("/api/custom-group-confirm", settings.siteUrl || "https://claritygolf.app");
+    url.searchParams.set("token", token);
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function customGroupInviteBody(appt: any, attendee: any, serviceName: string, settings: any, variables: Record<string, string>) {
+  const confirmUrl = customGroupConfirmUrl(attendee.token, settings);
+  const subject = `${variables.client} invited you to ${serviceName}`;
+  const intro = `${variables.client} added you to a custom group lesson with ${settings.coachName || settings.businessName}.`;
+  const rows = [
+    ["Lesson", serviceName],
+    ["When", `${variables.date}, ${variables.time}`],
+    ["Where", variables.venue],
+    ["Invited attendee", attendee.name],
+  ] as Array<[string, string]>;
+  const button = confirmUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 12px"><tr><td><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">Confirm attendance</a></td></tr></table>`
+    : "";
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${escapeHtml(settings.businessName || "Sam Hale Golf")}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">Confirm your spot</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailTable(rows)}</div>${button}<p style="margin:16px 0 0;color:#526054">If the button does not work, paste this link into your browser: ${escapeHtml(confirmUrl)}</p></div></div></div>`;
+  const text = ["Confirm your spot", "", intro, "", ...rows.map(([label, value]) => `${label}: ${value}`), "", confirmUrl ? `Confirm attendance: ${confirmUrl}` : ""].filter(Boolean).join("\n");
+  return { subject, html, text };
 }
 
 function rescheduleUrlFor(appt: any, settings: any) {
@@ -532,6 +591,31 @@ export async function notifyBookingEvent(input: NotifyInput) {
     );
   }
 
+  async function sendCustomGroupInvite(attendee: any) {
+    const recipient = cleanEmail(attendee?.email, "");
+    const token = cleanText(attendee?.token, "", 220);
+    if (!recipient || !token || attendee?.status !== "invited") return;
+    const invite = customGroupInviteBody(appt, attendee, serviceName, settings, variables);
+    const kind = `${action}_custom_group_invite_email`;
+    if (!settings.sendClientEmail) {
+      const skipped = { channel: "custom_group_invite", recipient, subject: invite.subject, kind, status: "skipped", sent: false, reason: "disabled_client_email" };
+      results.push(skipped);
+      await recordNotification({ personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status: "skipped", provider: "settings", error: "disabled_client_email" });
+      return;
+    }
+    const result = await sendEmail({
+      to: recipient,
+      subject: invite.subject,
+      html: invite.html,
+      text: invite.text,
+      replyTo: settings.replyToEmail || settings.contactEmail,
+      idempotencyKey: `${kind}-${appt.id}-${hash(token || recipient).slice(0, 24)}`,
+    });
+    const status = result.sent ? "sent" : "failed";
+    results.push({ channel: "custom_group_invite", recipient, subject: invite.subject, kind, status, ...result });
+    await recordNotification({ personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status, provider: "resend", providerId: result.id || "", error: result.reason || result.error || "" });
+  }
+
   if (action === "test") {
     await sendAndRecord("client", cleanEmail(input.testRecipient, appt.email), subjects.client);
     return results;
@@ -555,6 +639,23 @@ export async function notifyBookingEvent(input: NotifyInput) {
     await recordNotification({ personKey, calendarItemId: appt.id, recipient: settings.notificationEmail || settings.contactEmail, subject: subjects.admin, kind: `${action}_admin_email`, status: "skipped", provider: "settings", error: "disabled_admin_email" });
   }
 
+  if ((action === "booking" || action === "updated") && appt.customGroup) {
+    const previousInvites = new Set(
+      action === "updated" && previous
+        ? (previous.attendees || [])
+            .filter((attendee: any) => attendee?.status === "invited")
+            .map((attendee: any) => cleanText(attendee?.token, "", 220) || cleanEmail(attendee?.email, ""))
+        : [],
+    );
+    const invitees = (appt.attendees || []).filter((attendee: any) => {
+      const key = cleanText(attendee?.token, "", 220) || cleanEmail(attendee?.email, "");
+      return attendee?.status === "invited" && key && !previousInvites.has(key);
+    });
+    for (const attendee of invitees) {
+      await sendCustomGroupInvite(attendee);
+    }
+  }
+
   return results;
 }
 
@@ -576,7 +677,8 @@ export function inferBookingAction(previous: any, next: any): BookingAction | nu
     cleanText(previous.client || previous.title) !== cleanText(next.client || next.title) ||
     cleanEmail(previous.email) !== cleanEmail(next.email) ||
     cleanText(previous.phone) !== cleanText(next.phone) ||
-    cleanText(previous.serviceId || previous.service_id) !== cleanText(next.serviceId || next.service_id);
+    cleanText(previous.serviceId || previous.service_id) !== cleanText(next.serviceId || next.service_id) ||
+    attendeeSignature(previous) !== attendeeSignature(next);
   return contactChanged ? "updated" : null;
 }
 
