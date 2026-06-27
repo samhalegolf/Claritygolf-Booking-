@@ -2450,6 +2450,16 @@ function App() {
   }, [calendarStartMinutes, calendarEndMinutes]);
   const gridHeight = ((calendarEndMinutes - calendarStartMinutes) / 60) * HOUR_HEIGHT;
   const calendarMinutesToTop = (minutes: number) => minutesToTop(minutes, calendarStartMinutes);
+  const clipCalendarSegment = (start: number, duration: number) => {
+    const end = start + duration;
+    const visibleStart = Math.max(start, calendarStartMinutes);
+    const visibleEnd = Math.min(end, calendarEndMinutes);
+    if (visibleEnd <= visibleStart) return null;
+    return {
+      start: visibleStart,
+      duration: visibleEnd - visibleStart,
+    };
+  };
   const activeDockBooking = dockBookings.find((booking) => booking.id === activeDockBookingId) ?? null;
   const dockFocus =
     !selected &&
@@ -8271,16 +8281,20 @@ function App() {
               >
                 {weekDays.map((day, dayIndex) => (
                   <div className="day-lane" key={day.label} style={{ left: `${(dayIndex / DAY_COUNT) * 100}%` }}>
-                    {availability[dayIndex].map((window, index) => (
-                      <div
-                        className="available-band"
-                        key={`${day.label}-${index}`}
-                        style={{
-                          top: calendarMinutesToTop(window.start),
-                          height: durationToHeight(window.end - window.start),
-                        }}
-                      />
-                    ))}
+                    {availability[dayIndex].map((window, index) => {
+                      const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
+                      if (!visibleWindow) return null;
+                      return (
+                        <div
+                          className="available-band"
+                          key={`${day.label}-${index}`}
+                          style={{
+                            top: calendarMinutesToTop(visibleWindow.start),
+                            height: durationToHeight(visibleWindow.duration),
+                          }}
+                        />
+                      );
+                    })}
                   </div>
                 ))}
 
@@ -8289,14 +8303,16 @@ function App() {
                 ))}
 
                 {displayItems.map((item) => {
+                  const visibleItem = clipCalendarSegment(item.start, item.duration);
+                  if (!visibleItem) return null;
                   const service = itemService(item, services);
                   const activeDraft =
                     draft && (draft.mode === "move" || draft.mode === "resize") && draft.itemId === item.id
                       ? draft
                       : null;
                   const invalid = activeDraft ? !activeDraft.valid : false;
-                  const top = calendarMinutesToTop(item.start);
-                  const height = durationToHeight(item.duration);
+                  const top = calendarMinutesToTop(visibleItem.start);
+                  const height = durationToHeight(visibleItem.duration);
                   const width = 100 / DAY_COUNT;
                   const left = item.day * width;
                   const flyAnimation = placementAnimation?.itemId === item.id ? placementAnimation : null;
@@ -8450,44 +8466,56 @@ function App() {
                 })}
 
                 {draft?.mode === "block" && (
-                  <div
-                    className={`calendar-item block draft-block ${draft.valid ? "" : "invalid"}`}
-                    style={{
-                      top: calendarMinutesToTop(draft.start),
-                      height: Math.max(durationToHeight(draft.duration), 24),
-                      left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
-                      width: `calc(${100 / DAY_COUNT}% - 12px)`,
-                    }}
-                  >
-                    <div className="item-content">
-                      <strong>Busy</strong>
-                      <span>New blocked time</span>
-                      <em>{formatRange(draft.start, draft.duration)}</em>
-                    </div>
-                  </div>
+                  (() => {
+                    const visibleDraft = clipCalendarSegment(draft.start, draft.duration);
+                    if (!visibleDraft) return null;
+                    return (
+                      <div
+                        className={`calendar-item block draft-block ${draft.valid ? "" : "invalid"}`}
+                        style={{
+                          top: calendarMinutesToTop(visibleDraft.start),
+                          height: Math.max(durationToHeight(visibleDraft.duration), 24),
+                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
+                          width: `calc(${100 / DAY_COUNT}% - 12px)`,
+                        }}
+                      >
+                        <div className="item-content">
+                          <strong>Busy</strong>
+                          <span>New blocked time</span>
+                          <em>{formatRange(draft.start, draft.duration)}</em>
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
 
                 {draft?.mode === "place" && pointerSession?.mode === "place" && (
-                  <div
-                    className={`calendar-item appointment draft-place ${draft.valid ? "" : "invalid"}`}
-                    style={{
-                      top: calendarMinutesToTop(draft.start),
-                      height: Math.max(durationToHeight(draft.duration), 34),
-                      left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
-                      width: `calc(${100 / DAY_COUNT}% - 12px)`,
-                    }}
-                  >
-                    <div className="item-grip" aria-hidden="true">
-                      <GripVertical size={14} />
-                    </div>
-                    <div className="item-content">
-                      <strong>{pointerSession.booking.client}</strong>
-                      <span>
-                        {services.find((service) => service.id === pointerSession.booking.serviceId)?.name ?? "Lesson"}
-                      </span>
-                      <em>{formatRange(draft.start, draft.duration)}</em>
-                    </div>
-                  </div>
+                  (() => {
+                    const visibleDraft = clipCalendarSegment(draft.start, draft.duration);
+                    if (!visibleDraft) return null;
+                    return (
+                      <div
+                        className={`calendar-item appointment draft-place ${draft.valid ? "" : "invalid"}`}
+                        style={{
+                          top: calendarMinutesToTop(visibleDraft.start),
+                          height: Math.max(durationToHeight(visibleDraft.duration), 34),
+                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
+                          width: `calc(${100 / DAY_COUNT}% - 12px)`,
+                        }}
+                      >
+                        <div className="item-grip" aria-hidden="true">
+                          <GripVertical size={14} />
+                        </div>
+                        <div className="item-content">
+                          <strong>{pointerSession.booking.client}</strong>
+                          <span>
+                            {services.find((service) => service.id === pointerSession.booking.serviceId)?.name ?? "Lesson"}
+                          </span>
+                          <em>{formatRange(draft.start, draft.duration)}</em>
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
               </div>
             </div>
