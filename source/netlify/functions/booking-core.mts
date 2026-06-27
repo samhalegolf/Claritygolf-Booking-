@@ -450,6 +450,8 @@ function normalizeAvailability(availability) {
   const source = Array.isArray(availability)
     ? availability
     : defaultAvailability;
+  const dayStartMinutes = 0;
+  const dayEndMinutes = (24 * 60) - 15;
   return Array.from({ length: 7 }, (_, day) => {
     const windows = Array.isArray(source[day]) ? source[day] : [];
     return windows
@@ -461,12 +463,12 @@ function normalizeAvailability(availability) {
           ? Number(window.end)
           : rawStart + 60;
         const start = Math.max(
-          timeToMinutes(7, 0),
-          Math.min(timeToMinutes(19, 45), Math.round(rawStart / 15) * 15),
+          dayStartMinutes,
+          Math.min(dayEndMinutes, Math.round(rawStart / 15) * 15),
         );
         const end = Math.max(
           start + 15,
-          Math.min(timeToMinutes(20, 0), Math.round(rawEnd / 15) * 15),
+          Math.min(dayEndMinutes, Math.round(rawEnd / 15) * 15),
         );
         return end > start ? { start, end } : null;
       })
