@@ -135,6 +135,9 @@ type PendingBooking = {
   email?: string;
   note?: string;
   sourceItemId?: string;
+  customGroup?: true;
+  attendees?: CustomGroupAttendee[];
+  calculatedPrice?: number;
 };
 
 type PlacementAnimation = {
@@ -269,6 +272,42 @@ function customGroupStatusLabel(status: CustomGroupAttendeeStatus) {
   if (status === "manual") return "Manual";
   if (status === "confirmed") return "Confirmed";
   return "Invited";
+}
+
+function newCustomGroupAttendeeId(prefix = "attendee") {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function customGroupAttendeeToken() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function customGroupBookerAttendee(name: string, email = ""): CustomGroupAttendee {
+  return {
+    id: "booker",
+    name: name.trim() || "Booker",
+    email: email.trim() || undefined,
+    status: "booker",
+  };
+}
+
+function adminCustomGroupAttendee(name: string, email = ""): CustomGroupAttendee | null {
+  const cleanName = name.trim();
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanName) return null;
+  return {
+    id: newCustomGroupAttendeeId(),
+    name: cleanName,
+    email: cleanEmail || undefined,
+    status: cleanEmail ? "invited" : "manual",
+    token: cleanEmail ? customGroupAttendeeToken() : undefined,
+  };
 }
 
 function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
@@ -659,6 +698,9 @@ type QuickCreateState = {
   phone: string;
   email: string;
   note: string;
+  attendees: CustomGroupAttendee[];
+  attendeeName: string;
+  attendeeEmail: string;
   error: string;
 };
 
@@ -2392,6 +2434,7 @@ function App() {
   );
   const [customGroupAttendees, setCustomGroupAttendees] = useState<CustomGroupAttendee[]>([]);
   const [customGroupAttendeeDraft, setCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
+  const [selectedCustomGroupAttendeeDraft, setSelectedCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
   const [bookingMode, setBookingMode] = useState<BookingMode>("book");
   const [rescheduleForm, setRescheduleForm] = useState<RescheduleForm>({ email: "", phone: "" });
   const [rescheduleMatches, setRescheduleMatches] = useState<PublicRescheduleMatch[]>([]);
@@ -3680,6 +3723,9 @@ function App() {
       phone: "",
       email: "",
       note: "",
+      attendees: [],
+      attendeeName: "",
+      attendeeEmail: "",
       error: quickCreateAvailabilityError(candidate, service),
     });
   }
@@ -3756,6 +3802,9 @@ function App() {
       phone: "",
       email: "",
       note: "",
+      attendees: [],
+      attendeeName: "",
+      attendeeEmail: "",
       error: quickCreateAvailabilityError(candidate, service),
     });
   }
@@ -4109,6 +4158,9 @@ function App() {
       phone: movedItem.phone,
       email: movedItem.email,
       note: movedItem.note,
+      customGroup: movedItem.customGroup,
+      attendees: movedItem.attendees,
+      calculatedPrice: movedItem.calculatedPrice,
     };
     const dockRect = dockRef.current?.getBoundingClientRect();
     const meta = dragPreviewMetaRef.current;
@@ -4482,6 +4534,9 @@ function App() {
       phone: "",
       email: "",
       note: "",
+      attendees: [],
+      attendeeName: "",
+      attendeeEmail: "",
       error: "",
     };
     clickPlaceRef.current = activeDockBooking
@@ -4717,6 +4772,9 @@ function App() {
         phone: session.booking.phone,
         email: session.booking.email,
         note: session.booking.note ?? "Placed from dock.",
+        customGroup: session.booking.customGroup,
+        attendees: session.booking.attendees,
+        calculatedPrice: session.booking.calculatedPrice,
       };
       setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
       setDockBookings(dockBookings.filter((booking) => booking.id !== session.booking.id));
@@ -4809,6 +4867,51 @@ function App() {
     setQuickCreate((current) => (current ? { ...current, [field]: value, error: "" } : current));
   }
 
+  function updateQuickCreateAttendeeDraft(field: "attendeeName" | "attendeeEmail", value: string) {
+    setQuickCreate((current) => (current ? { ...current, [field]: value, error: "" } : current));
+  }
+
+  function addQuickCreateCustomGroupAttendee() {
+    if (!quickCreate || !quickCreateService || !isCustomGroupService(quickCreateService)) return;
+    if (quickCreate.attendeeEmail.trim() && !quickCreate.attendeeEmail.includes("@")) {
+      setQuickCreate((current) => (current ? { ...current, error: "Enter a valid attendee email or leave it blank." } : current));
+      return;
+    }
+    const attendee = adminCustomGroupAttendee(quickCreate.attendeeName, quickCreate.attendeeEmail);
+    if (!attendee) {
+      setQuickCreate((current) => (current ? { ...current, error: "Add an attendee name first." } : current));
+      return;
+    }
+    const nextCount = 1 + quickCreate.attendees.length + 1;
+    if (nextCount > customGroupMaxParticipants(quickCreateService)) {
+      setQuickCreate((current) => (current ? { ...current, error: "This custom group is already at maximum size." } : current));
+      return;
+    }
+    setQuickCreate((current) =>
+      current
+        ? {
+            ...current,
+            attendees: [...current.attendees, attendee],
+            attendeeName: "",
+            attendeeEmail: "",
+            error: "",
+          }
+        : current,
+    );
+  }
+
+  function removeQuickCreateCustomGroupAttendee(attendeeId: string) {
+    setQuickCreate((current) =>
+      current
+        ? {
+            ...current,
+            attendees: current.attendees.filter((attendee) => attendee.id !== attendeeId),
+            error: "",
+          }
+        : current,
+    );
+  }
+
   function selectQuickService(serviceId: string) {
     if (!quickCreate) return;
     const service = appointmentServices.find((candidate) => candidate.id === serviceId);
@@ -4824,6 +4927,9 @@ function App() {
         ? {
             ...current,
             serviceId,
+            attendees: [],
+            attendeeName: "",
+            attendeeEmail: "",
             error: quickCreateAvailabilityError(candidate, service),
           }
         : current,
@@ -4844,6 +4950,11 @@ function App() {
     const clientName = typedClientName;
     if (!clientName) {
       setQuickCreate((current) => (current ? { ...current, error: "Add a client name." } : current));
+      return;
+    }
+    const quickCreateIsCustomGroup = isCustomGroupService(quickCreateService);
+    if (quickCreateIsCustomGroup && quickCreate.attendees.length < customGroupMinParticipants(quickCreateService) - 1) {
+      setQuickCreate((current) => (current ? { ...current, error: "Add at least one other person." } : current));
       return;
     }
     const candidate = {
@@ -4869,6 +4980,16 @@ function App() {
       phone: quickCreate.phone.trim(),
       email: quickCreate.email.trim(),
       note: quickCreate.note.trim(),
+      ...(quickCreateIsCustomGroup
+        ? {
+            customGroup: true as const,
+            attendees: [
+              customGroupBookerAttendee(clientName, quickCreate.email),
+              ...quickCreate.attendees,
+            ],
+            calculatedPrice: calculateCustomGroupPrice(quickCreateService, 1 + quickCreate.attendees.length),
+          }
+        : {}),
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
     if (
@@ -5012,6 +5133,9 @@ function App() {
       phone: booking.phone,
       email: booking.email,
       note: booking.note ?? "Placed from dock.",
+      customGroup: booking.customGroup,
+      attendees: booking.attendees,
+      calculatedPrice: booking.calculatedPrice,
     };
     const animation = options.animateFromDock ? buildDockPlacementAnimation(booking.id, item.id, candidate) : null;
 
@@ -5092,6 +5216,66 @@ function App() {
   function updateCustomGroupAttendeeDraft(field: "name" | "email", value: string) {
     setBookingConfirmation(null);
     setCustomGroupAttendeeDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function attendeeListWithBooker(item: CalendarItem): CustomGroupAttendee[] {
+    const current = Array.isArray(item.attendees) ? item.attendees : [];
+    const booker =
+      current.find((attendee) => attendee.status === "booker") ??
+      customGroupBookerAttendee(item.client || item.title, item.email || "");
+    const others = current.filter((attendee) => attendee.status !== "booker");
+    return [booker, ...others];
+  }
+
+  function addSelectedCustomGroupAttendee() {
+    if (!selected || selected.kind !== "appointment" || !selectedService || !isCustomGroupService(selectedService)) return;
+    if (selectedCustomGroupAttendeeDraft.email.trim() && !selectedCustomGroupAttendeeDraft.email.includes("@")) {
+      setToast({ message: "Enter a valid attendee email or leave it blank." });
+      return;
+    }
+    const attendee = adminCustomGroupAttendee(selectedCustomGroupAttendeeDraft.name, selectedCustomGroupAttendeeDraft.email);
+    if (!attendee) {
+      setToast({ message: "Add an attendee name first." });
+      return;
+    }
+    const attendees = attendeeListWithBooker(selected);
+    if (attendees.length + 1 > customGroupMaxParticipants(selectedService)) {
+      setToast({ message: "This custom group is already at maximum size." });
+      return;
+    }
+    setItems((current) =>
+      current.map((item) =>
+        item.id === selected.id
+          ? {
+              ...item,
+              customGroup: true as const,
+              attendees: [...attendees, attendee],
+              calculatedPrice: calculateCustomGroupPrice(selectedService, attendees.length + 1),
+            }
+          : item,
+      ),
+    );
+    setSelectedCustomGroupAttendeeDraft({ name: "", email: "" });
+  }
+
+  function removeSelectedCustomGroupAttendee(attendeeId: string) {
+    if (!selected || selected.kind !== "appointment" || !selectedService || !isCustomGroupService(selectedService)) return;
+    const attendees = attendeeListWithBooker(selected);
+    const target = attendees.find((attendee) => attendee.id === attendeeId);
+    if (!target || target.status === "booker" || target.status === "confirmed") return;
+    const nextAttendees = attendees.filter((attendee) => attendee.id !== attendeeId);
+    setItems((current) =>
+      current.map((item) =>
+        item.id === selected.id
+          ? {
+              ...item,
+              customGroup: true as const,
+              attendees: nextAttendees,
+              calculatedPrice: calculateCustomGroupPrice(selectedService, nextAttendees.length),
+            }
+          : item,
+      ),
+    );
   }
 
   function addCustomGroupAttendee() {
@@ -8110,6 +8294,21 @@ function App() {
     </article>
   );
 
+  const quickCreateIsCustomGroup = Boolean(quickCreate && quickCreateService && isCustomGroupService(quickCreateService));
+  const quickCreateCustomGroupParticipantCount = quickCreateIsCustomGroup && quickCreate ? 1 + quickCreate.attendees.length : 1;
+  const quickCreateCustomGroupPrice =
+    quickCreateIsCustomGroup && quickCreateService
+      ? calculateCustomGroupPrice(quickCreateService, quickCreateCustomGroupParticipantCount)
+      : 0;
+  const selectedIsCustomGroupAppointment =
+    selected?.kind === "appointment" && isCustomGroupService(selectedService);
+  const selectedCustomGroupAttendees =
+    selectedIsCustomGroupAppointment && selected ? attendeeListWithBooker(selected) : [];
+  const selectedCustomGroupPrice =
+    selectedIsCustomGroupAppointment && selectedService
+      ? calculateCustomGroupPrice(selectedService, selectedCustomGroupAttendees.length)
+      : Number(selected?.calculatedPrice ?? 0);
+
   const selectedAppointmentDetails = selected ? (
     <>
       <div className="panel-header">
@@ -8146,17 +8345,18 @@ function App() {
 
       <div className="service-summary">
         <span>Price</span>
-        <strong>{selected.customGroup ? formatMoney(selected.calculatedPrice ?? 0) : servicePriceLabel(selectedService)}</strong>
+        <strong>{selectedIsCustomGroupAppointment ? formatMoney(selectedCustomGroupPrice) : servicePriceLabel(selectedService)}</strong>
         <p>{selectedService?.description ?? selected.note}</p>
       </div>
 
-      {selected.kind === "appointment" && selected.customGroup && Array.isArray(selected.attendees) && (
+      {selectedIsCustomGroupAppointment && selectedService && (
         <div className="lesson-receipts-panel custom-group-admin-panel">
           <div className="receipt-panel-title">
             <User size={16} />
             <span>Custom group attendees</span>
+            <em>{selectedCustomGroupAttendees.length} / {customGroupMaxParticipants(selectedService)}</em>
           </div>
-          {selected.attendees.map((attendee) => (
+          {selectedCustomGroupAttendees.map((attendee) => (
             <div className="email-receipt-row" key={attendee.id}>
               <span className={`email-status-dot ${attendee.status === "confirmed" || attendee.status === "booker" || attendee.status === "manual" ? "sent" : "pending"}`} aria-hidden="true" />
               <div>
@@ -8164,8 +8364,35 @@ function App() {
                 <span>{attendee.email || "Manual attendee"}</span>
               </div>
               <em>{customGroupStatusLabel(attendee.status)}</em>
+              {(attendee.status === "manual" || attendee.status === "invited") && (
+                <button className="icon-button small" onClick={() => removeSelectedCustomGroupAttendee(attendee.id)} aria-label={`Remove ${attendee.name}`}>
+                  <X size={14} />
+                </button>
+              )}
             </div>
           ))}
+          <div className="booking-form custom-group-attendee-form">
+            <input
+              value={selectedCustomGroupAttendeeDraft.name}
+              onChange={(event) => setSelectedCustomGroupAttendeeDraft((current) => ({ ...current, name: event.target.value }))}
+              placeholder="Attendee name"
+            />
+            <input
+              value={selectedCustomGroupAttendeeDraft.email}
+              onChange={(event) => setSelectedCustomGroupAttendeeDraft((current) => ({ ...current, email: event.target.value }))}
+              placeholder="Email optional"
+              type="email"
+            />
+            <button
+              className="outline-button"
+              onClick={addSelectedCustomGroupAttendee}
+              disabled={selectedCustomGroupAttendees.length >= customGroupMaxParticipants(selectedService)}
+              type="button"
+            >
+              <Plus size={15} />
+              {selectedCustomGroupAttendeeDraft.email.trim() ? "Send invite" : "Confirm attendee"}
+            </button>
+          </div>
         </div>
       )}
 
@@ -9161,6 +9388,60 @@ function App() {
                         placeholder="Optional"
                       />
                     </label>
+                    {quickCreateIsCustomGroup && quickCreateService && (
+                      <div className="lesson-receipts-panel custom-group-admin-panel">
+                        <div className="receipt-panel-title">
+                          <User size={16} />
+                          <span>Custom group attendees</span>
+                          <em>
+                            {quickCreateCustomGroupParticipantCount} / {customGroupMaxParticipants(quickCreateService)} · {formatMoney(quickCreateCustomGroupPrice)}
+                          </em>
+                        </div>
+                        <div className="email-receipt-row">
+                          <span className="email-status-dot sent" aria-hidden="true" />
+                          <div>
+                            <strong>{quickClientSearch.trim() || "Booker"}</strong>
+                            <span>{quickCreate.email.trim() || "Booker"}</span>
+                          </div>
+                          <em>{customGroupStatusLabel("booker")}</em>
+                        </div>
+                        {quickCreate.attendees.map((attendee) => (
+                          <div className="email-receipt-row" key={attendee.id}>
+                            <span className={`email-status-dot ${attendee.status === "manual" ? "sent" : "pending"}`} aria-hidden="true" />
+                            <div>
+                              <strong>{attendee.name}</strong>
+                              <span>{attendee.email || "Manual attendee"}</span>
+                            </div>
+                            <em>{customGroupStatusLabel(attendee.status)}</em>
+                            <button className="icon-button small" onClick={() => removeQuickCreateCustomGroupAttendee(attendee.id)} aria-label={`Remove ${attendee.name}`}>
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                        <div className="booking-form custom-group-attendee-form">
+                          <input
+                            value={quickCreate.attendeeName}
+                            onChange={(event) => updateQuickCreateAttendeeDraft("attendeeName", event.target.value)}
+                            placeholder="Attendee name"
+                          />
+                          <input
+                            value={quickCreate.attendeeEmail}
+                            onChange={(event) => updateQuickCreateAttendeeDraft("attendeeEmail", event.target.value)}
+                            placeholder="Email optional"
+                            type="email"
+                          />
+                          <button
+                            className="outline-button"
+                            onClick={addQuickCreateCustomGroupAttendee}
+                            disabled={quickCreateCustomGroupParticipantCount >= customGroupMaxParticipants(quickCreateService)}
+                            type="button"
+                          >
+                            <Plus size={15} />
+                            {quickCreate.attendeeEmail.trim() ? "Send invite" : "Confirm attendee"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     {quickCreate.error && <p className="quick-create-error">{quickCreate.error}</p>}
                     <div className="quick-create-actions">
                       <button className="outline-button" onClick={backToQuickServiceChoice} type="button">

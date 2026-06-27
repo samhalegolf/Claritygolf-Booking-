@@ -922,6 +922,17 @@ function appointmentNotificationSignature(item: any) {
     phone: cleanString(item.phone, "", 80),
     email: normalizedEmail(item.email),
     status: cleanString(item.status, "booked", 40),
+    customGroup: item.customGroup === true,
+    calculatedPrice: Number(item.calculatedPrice ?? 0),
+    attendees: Array.isArray(item.attendees)
+      ? item.attendees.map((attendee: any) => ({
+          id: cleanString(attendee?.id, "", 120),
+          name: cleanString(attendee?.name, "", 120),
+          email: normalizedEmail(attendee?.email),
+          status: cleanString(attendee?.status, "", 40),
+          token: cleanString(attendee?.token, "", 220),
+        }))
+      : [],
   });
 }
 

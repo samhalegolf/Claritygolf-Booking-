@@ -2837,7 +2837,7 @@ async function sendBookingNotifications(
   const inviteAttendees = Array.isArray(appointment.attendees)
     ? appointment.attendees.filter((attendee) => attendee?.email && attendee?.token && attendee.status === "invited")
     : [];
-  if (kind === "booking" && inviteAttendees.length) {
+  if ((kind === "booking" || kind === "updated") && inviteAttendees.length) {
     for (const attendee of inviteAttendees) {
       const invite = customGroupInviteEmail({ appointment, attendee, service, account });
       if (settings.sendClientEmail) {
