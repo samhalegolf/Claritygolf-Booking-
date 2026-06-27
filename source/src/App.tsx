@@ -78,7 +78,21 @@ type Service = {
   packageCoverageMode?: PackageCoverageMode;
   packageCoversServiceId?: string;
   bookingScreenIds?: string[];
+  customGroup?: boolean;
+  baseParticipants?: number;
+  basePrice?: number;
+  extraPersonPrice?: number;
   archived?: boolean;
+};
+
+type CustomGroupAttendeeStatus = "booker" | "manual" | "invited" | "confirmed";
+
+type CustomGroupAttendee = {
+  id: string;
+  name: string;
+  email?: string;
+  status: CustomGroupAttendeeStatus;
+  token?: string;
 };
 
 type ServiceListTab = "active" | "archived";
@@ -104,6 +118,9 @@ type CalendarItem = {
   email?: string;
   note?: string;
   status?: BookingStatus;
+  customGroup?: true;
+  attendees?: CustomGroupAttendee[];
+  calculatedPrice?: number;
 };
 
 type PendingBooking = {
@@ -177,6 +194,52 @@ type ClientSummary = Person & {
 
 function safeText(value: unknown, fallback = "") {
   return typeof value === "string" ? value : value == null ? fallback : String(value);
+}
+
+function isCustomGroupService(service?: Partial<Service> | null) {
+  return Boolean(service?.customGroup && service.lessonFormat === "group");
+}
+
+function customGroupBaseParticipants(service?: Partial<Service> | null) {
+  const raw = Number(service?.baseParticipants ?? DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS);
+  return Number.isFinite(raw)
+    ? clamp(Math.round(raw), customGroupMinParticipants(service), customGroupMaxParticipants(service))
+    : DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS;
+}
+
+function customGroupBasePrice(service?: Partial<Service> | null) {
+  const raw = Number(service?.basePrice ?? service?.price ?? DEFAULT_CUSTOM_GROUP_BASE_PRICE);
+  return Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : DEFAULT_CUSTOM_GROUP_BASE_PRICE;
+}
+
+function customGroupExtraPersonPrice(service?: Partial<Service> | null) {
+  const raw = Number(service?.extraPersonPrice ?? DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE);
+  return Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE;
+}
+
+function customGroupMinParticipants(service?: Partial<Service> | null) {
+  const raw = Number(service?.minParticipants ?? DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS);
+  return Number.isFinite(raw) ? clamp(Math.round(raw), 2, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS) : DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS;
+}
+
+function customGroupMaxParticipants(service?: Partial<Service> | null) {
+  const raw = Number(service?.capacity ?? DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS);
+  return Number.isFinite(raw) ? clamp(Math.round(raw), customGroupMinParticipants(service), DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS) : DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS;
+}
+
+function calculateCustomGroupPrice(service: Partial<Service> | null | undefined, participantCount: number) {
+  const baseParticipants = customGroupBaseParticipants(service);
+  const basePrice = customGroupBasePrice(service);
+  const extraPersonPrice = customGroupExtraPersonPrice(service);
+  const extraPeople = Math.max(0, Math.round(participantCount) - baseParticipants);
+  return basePrice + extraPeople * extraPersonPrice;
+}
+
+function customGroupStatusLabel(status: CustomGroupAttendeeStatus) {
+  if (status === "booker") return "Booked";
+  if (status === "manual") return "Manual";
+  if (status === "confirmed") return "Confirmed";
+  return "Invited";
 }
 
 function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
@@ -769,6 +832,11 @@ const initialItems: CalendarItem[] = [];
 const DEFAULT_MIN_BOOKING_NOTICE_MINUTES = 240;
 const MAX_MIN_BOOKING_NOTICE_MINUTES = 7 * 24 * 60;
 const MIN_BOOKING_NOTICE_PRESETS_HOURS = [0, 1, 2, 4, 24] as const;
+const DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS = 3;
+const DEFAULT_CUSTOM_GROUP_BASE_PRICE = 200;
+const DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE = 20;
+const DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS = 2;
+const DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS = 5;
 const NOTIFICATION_SUBJECT_TOKENS = [
   "{{service}}",
   "{{coach}}",
@@ -1608,16 +1676,24 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     /package/i.test(name);
   const lessonFormat: LessonFormat =
     looksLikePackage ? "package" : service?.lessonFormat === "group" ? "group" : "private";
-  const cleanCapacity = clamp(Math.round(capacity), lessonFormat === "group" ? 2 : 1, 24);
+  const customGroup = lessonFormat === "group" && service?.customGroup === true;
+  const cleanCapacity = customGroup
+    ? clamp(Math.round(capacity || DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS)
+    : clamp(Math.round(capacity), lessonFormat === "group" ? 2 : 1, 24);
   const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
     ? Number(service?.minParticipants)
-    : lessonFormat === "group"
+    : customGroup
+      ? DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS
+      : lessonFormat === "group"
       ? Math.min(2, cleanCapacity)
       : 1;
   const minParticipants =
     lessonFormat === "group" ? clamp(Math.round(rawMinParticipants), 2, cleanCapacity) : 1;
+  const baseParticipants = customGroupBaseParticipants({ ...service, capacity: cleanCapacity });
+  const basePrice = customGroupBasePrice(service);
+  const extraPersonPrice = customGroupExtraPersonPrice(service);
   const priceMode: PriceMode =
-    lessonFormat === "group" && service?.priceMode === "per-person" ? "per-person" : "session";
+    lessonFormat === "group" && service?.priceMode === "per-person" && !customGroup ? "per-person" : "session";
   const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
     ? clamp(Math.round(Number(service?.packageAllowance)), 1, 100)
     : Math.max(1, fallback.packageAllowance ?? 5);
@@ -1646,6 +1722,10 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
         : undefined,
     groupSchedule,
     bookingScreenIds,
+    customGroup: customGroup || undefined,
+    baseParticipants: customGroup ? baseParticipants : undefined,
+    basePrice: customGroup ? basePrice : undefined,
+    extraPersonPrice: customGroup ? extraPersonPrice : undefined,
     archived: service?.archived === true,
   };
 }
@@ -1684,6 +1764,9 @@ function calendarItemsFingerprint(itemList?: Partial<CalendarItem>[]) {
         email: (item.email || "").toLowerCase(),
         note: item.note || "",
         status: item.status || "booked",
+        customGroup: item.customGroup === true,
+        attendees: Array.isArray(item.attendees) ? item.attendees : [],
+        calculatedPrice: Number(item.calculatedPrice ?? 0),
       }))
       .sort((first, second) => first.id.localeCompare(second.id)),
   );
@@ -1693,13 +1776,17 @@ function calendarStateFingerprint(itemList: Partial<CalendarItem>[] | undefined,
   return JSON.stringify({ items: calendarItemsFingerprint(itemList), syncKey });
 }
 
-function servicePriceLabel(service?: { price: number; priceMode?: PriceMode } | null) {
+function servicePriceLabel(service?: (Pick<Service, "price" | "priceMode"> & Partial<Service>) | null) {
   if (!service) return "No charge";
+  if (isCustomGroupService(service)) {
+    return `NZ$${customGroupBasePrice(service)}.00 up to ${customGroupBaseParticipants(service)}`;
+  }
   return `NZ$${service.price}.00${service.priceMode === "per-person" ? " pp" : ""}`;
 }
 
 function serviceCapacityLabel(service: Pick<Service, "capacity" | "lessonFormat" | "minParticipants">) {
   if (service.lessonFormat === "package") return "Package";
+  if (isCustomGroupService(service)) return `${service.minParticipants}-${service.capacity} clients`;
   if (service.lessonFormat === "group") return `${service.minParticipants}-${service.capacity} clients`;
   return `${service.capacity} client${service.capacity === 1 ? "" : "s"}`;
 }
@@ -1837,6 +1924,10 @@ function emptyServiceEditor(): ServiceEditor {
     packageCoverageMode: "upfront",
     packageCoversServiceId: "",
     bookingScreenIds: ["main"],
+    customGroup: false,
+    baseParticipants: DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS,
+    basePrice: DEFAULT_CUSTOM_GROUP_BASE_PRICE,
+    extraPersonPrice: DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE,
   };
 }
 
@@ -2200,7 +2291,9 @@ function App() {
     }
 
     const baseSchedule = serviceEditor.groupSchedule ?? defaultGroupSchedule();
-    const normalizedCapacity = clamp(Math.round(serviceEditor.capacity), 2, 24);
+    const normalizedCapacity = serviceEditor.customGroup
+      ? customGroupMaxParticipants(serviceEditor)
+      : clamp(Math.round(serviceEditor.capacity), 2, 24);
     const normalizedMinimum = clamp(Math.round(serviceEditor.minParticipants), 2, normalizedCapacity);
 
     setGroupOccurrenceInput(
@@ -2258,6 +2351,8 @@ function App() {
   const [bookingForm, setBookingForm] = useState<BookingForm>(
     () => getInitialBookingLogin() ?? { firstName: "", lastName: "", phone: "", email: "" },
   );
+  const [customGroupAttendees, setCustomGroupAttendees] = useState<CustomGroupAttendee[]>([]);
+  const [customGroupAttendeeDraft, setCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
   const [bookingMode, setBookingMode] = useState<BookingMode>("book");
   const [rescheduleForm, setRescheduleForm] = useState<RescheduleForm>({ email: "", phone: "" });
   const [rescheduleMatches, setRescheduleMatches] = useState<PublicRescheduleMatch[]>([]);
@@ -2492,6 +2587,14 @@ function App() {
       : currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
   const visiblePublicServices = selectedBookingService ? [selectedBookingService] : currentScreenPublicServices;
   const bookingTargetService = bookingMode === "reschedule" ? selectedRescheduleService : selectedBookingService;
+  const isCustomGroupBooking = bookingMode === "book" && isCustomGroupService(bookingTargetService);
+  const customGroupParticipantCount = isCustomGroupBooking ? 1 + customGroupAttendees.length : 1;
+  const customGroupCalculatedPrice = isCustomGroupBooking
+    ? calculateCustomGroupPrice(bookingTargetService, customGroupParticipantCount)
+    : 0;
+  const customGroupRemainingAttendees = isCustomGroupBooking
+    ? Math.max(0, customGroupMaxParticipants(bookingTargetService) - customGroupParticipantCount)
+    : 0;
   const bookingScreenEmbeds = useMemo(
     () =>
       BOOKING_SCREEN_PATHS.map((screen) => ({
@@ -3728,7 +3831,7 @@ function App() {
 
     const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
 
-    if (bookingMode === "book" && bookingTargetService.lessonFormat === "group") {
+    if (bookingMode === "book" && bookingTargetService.lessonFormat === "group" && !bookingTargetService.customGroup) {
       const schedule = bookingTargetService.groupSchedule;
       if (!schedule?.active) return [];
       const candidate = {
@@ -3783,7 +3886,8 @@ function App() {
     isDateTimeStepComplete &&
     bookingForm.firstName.trim() !== "" &&
     bookingForm.lastName.trim() !== "" &&
-    bookingForm.email.trim() !== "";
+    bookingForm.email.trim() !== "" &&
+    (!isCustomGroupBooking || customGroupAttendees.length >= customGroupMinParticipants(bookingTargetService) - 1);
 
   const isAppointmentSectionOpen = openPublicBookingSection === "appointment";
   const isDateTimeSectionOpen = openPublicBookingSection === "datetime";
@@ -3794,7 +3898,11 @@ function App() {
     : "Choose an appointment type";
   const appointmentSummaryDescription = selectedBookingService?.description?.trim() || "";
   const appointmentSummaryDuration = selectedBookingService
-    ? `${selectedBookingService.duration} min · ${servicePriceLabel(selectedBookingService)}`
+    ? `${selectedBookingService.duration} min · ${
+        isCustomGroupService(selectedBookingService)
+          ? `${formatMoney(calculateCustomGroupPrice(selectedBookingService, customGroupMinParticipants(selectedBookingService)))}+`
+          : servicePriceLabel(selectedBookingService)
+      }`
     : "Select a lesson to continue";
   const dateTimeSummaryLocation = (selectedBookingService?.location?.trim() || locationLine || "").slice(0, 120);
   const bookingDaySummary = bookingDaySelected ? weekDays[bookingDay]?.label ?? "" : "No day selected";
@@ -4067,7 +4175,7 @@ function App() {
       const itemEnd = item.start + item.duration;
       return candidate.start < itemEnd && candidateEnd > item.start;
     });
-    if (!service || service.lessonFormat !== "group") {
+    if (!service || service.lessonFormat !== "group" || service.customGroup === true) {
       return overlappingItems.length > 0;
     }
     const sameServiceCount = overlappingItems.filter(
@@ -4081,7 +4189,7 @@ function App() {
   }
 
   function getGroupSlotRemainingSpots(candidate: SlotCandidate, service?: Service) {
-    if (!service || service.lessonFormat !== "group") return 0;
+    if (!service || service.lessonFormat !== "group" || service.customGroup === true) return 0;
     const bookedCount = items.filter(
       (item) =>
         item.kind === "appointment" &&
@@ -4093,7 +4201,7 @@ function App() {
   }
 
   function isGroupSlotFull(candidate: SlotCandidate, service?: Service) {
-    if (!service || service.lessonFormat !== "group") return false;
+    if (!service || service.lessonFormat !== "group" || service.customGroup === true) return false;
     const sameServiceCount = items.filter(
       (item) =>
         item.kind === "appointment" &&
@@ -4903,6 +5011,43 @@ function App() {
     setBookingForm((current) => ({ ...current, [field]: value }));
   }
 
+  function updateCustomGroupAttendeeDraft(field: "name" | "email", value: string) {
+    setBookingConfirmation(null);
+    setCustomGroupAttendeeDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function addCustomGroupAttendee() {
+    if (!isCustomGroupBooking) return;
+    const name = customGroupAttendeeDraft.name.trim();
+    const email = customGroupAttendeeDraft.email.trim().toLowerCase();
+    if (!name) {
+      setToast({ message: "Add a name for the attendee." });
+      return;
+    }
+    if (email && !email.includes("@")) {
+      setToast({ message: "Enter a valid attendee email or leave it blank." });
+      return;
+    }
+    if (customGroupParticipantCount >= customGroupMaxParticipants(bookingTargetService)) {
+      setToast({ message: "This custom group is already at its maximum size." });
+      return;
+    }
+    setCustomGroupAttendees((current) => [
+      ...current,
+      {
+        id: `attendee-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        email: email || undefined,
+        status: email ? "invited" : "manual",
+      },
+    ]);
+    setCustomGroupAttendeeDraft({ name: "", email: "" });
+  }
+
+  function removeCustomGroupAttendee(attendeeId: string) {
+    setCustomGroupAttendees((current) => current.filter((attendee) => attendee.id !== attendeeId));
+  }
+
   function updateRescheduleForm(field: keyof RescheduleForm, value: string) {
     setBookingConfirmation(null);
     setRescheduleForm((current) => ({ ...current, [field]: value }));
@@ -4912,6 +5057,8 @@ function App() {
     setBookingMode(nextMode);
     setBookingConfirmation(null);
     setBookingStart(null);
+    setCustomGroupAttendees([]);
+    setCustomGroupAttendeeDraft({ name: "", email: "" });
     setBookingDaySelected(nextMode === "book" ? false : bookingDaySelected);
     setOpenPublicBookingSection("appointment");
     setForceRescheduleLogin(nextMode === "reschedule" && showLogin);
@@ -4941,12 +5088,15 @@ function App() {
   function handlePublicBookingServiceSelect(serviceId: string) {
     const isCurrent = serviceId === bookingServiceId;
     setBookingServiceId(isCurrent ? "" : serviceId);
+    setCustomGroupAttendees([]);
+    setCustomGroupAttendeeDraft({ name: "", email: "" });
     setBookingDaySelected(false);
     setBookingStart(null);
     setOpenPublicBookingSection(isCurrent ? "appointment" : "datetime");
   }
 
-  const isGroupBookingTimeSelection = bookingMode === "book" && bookingTargetService?.lessonFormat === "group";
+  const isGroupBookingTimeSelection =
+    bookingMode === "book" && bookingTargetService?.lessonFormat === "group" && !bookingTargetService.customGroup;
 
   function handlePublicBookingDaySelect(dayIndex: number) {
     setBookingDay(dayIndex);
@@ -5293,20 +5443,36 @@ function App() {
         };
       }
       if (next.lessonFormat === "group") {
-        const capacity = clamp(Math.round(Number(next.capacity) || 2), 2, 24);
+        const customGroup = next.customGroup === true;
+        const capacity = customGroup
+          ? clamp(Math.round(Number(next.capacity) || DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS)
+          : clamp(Math.round(Number(next.capacity) || 2), 2, 24);
+        const minParticipants = customGroup
+          ? clamp(Math.round(Number(next.minParticipants) || DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, capacity)
+          : clamp(Math.round(Number(next.minParticipants) || 2), 2, capacity);
         return {
           ...next,
-          groupSchedule: cleanGroupSchedule(next.groupSchedule, defaultGroupSchedule()),
+          groupSchedule: customGroup ? undefined : cleanGroupSchedule(next.groupSchedule, defaultGroupSchedule()),
           capacity,
-          minParticipants: clamp(Math.round(Number(next.minParticipants) || 2), 2, capacity),
+          minParticipants,
+          priceMode: customGroup ? ("session" as PriceMode) : next.priceMode,
+          baseParticipants: customGroup
+            ? clamp(Math.round(Number(next.baseParticipants) || DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS), minParticipants, capacity)
+            : undefined,
+          basePrice: customGroupBasePrice(next),
+          extraPersonPrice: customGroupExtraPersonPrice(next),
         };
       }
       return {
         ...next,
         groupSchedule: undefined,
+        customGroup: false,
+        baseParticipants: undefined,
+        basePrice: undefined,
+        extraPersonPrice: undefined,
         capacity: clamp(Math.round(Number(next.capacity) || 1), 1, 24),
         minParticipants: 1,
-        priceMode: "session",
+        priceMode: "session" as PriceMode,
       };
     });
   }
@@ -5329,6 +5495,21 @@ function App() {
   function normalizeGroupDraftInputs(editor: ServiceEditor) {
     if (editor.lessonFormat !== "group") {
       return editor;
+    }
+
+    if (editor.customGroup) {
+      const capacity = clamp(Math.round(parseDraftNumber(groupMaximumInput) ?? editor.capacity), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS);
+      const minParticipants = clamp(Math.round(parseDraftNumber(groupMinimumInput) ?? editor.minParticipants), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, capacity);
+      return {
+        ...editor,
+        capacity,
+        minParticipants,
+        priceMode: "session" as PriceMode,
+        groupSchedule: undefined,
+        baseParticipants: clamp(Math.round(Number(editor.baseParticipants) || DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS), minParticipants, capacity),
+        basePrice: customGroupBasePrice(editor),
+        extraPersonPrice: customGroupExtraPersonPrice(editor),
+      };
     }
 
     const schedule = editor.groupSchedule ?? defaultGroupSchedule();
@@ -6438,6 +6619,10 @@ function App() {
       setToast({ message: "First name, last name, and email are required." });
       return;
     }
+    if (isCustomGroupBooking && customGroupAttendees.length < customGroupMinParticipants(bookingTargetService) - 1) {
+      setToast({ message: "Add at least one other person before confirming." });
+      return;
+    }
 
     const candidate = {
       week: activeWeek,
@@ -6467,6 +6652,10 @@ function App() {
             lastName,
             phone,
             email,
+            attendees: isCustomGroupBooking ? customGroupAttendees.map((attendee) => ({
+              name: attendee.name,
+              email: attendee.email || "",
+            })) : undefined,
           }),
         });
         const data = (await response.json()) as {
@@ -6500,6 +6689,8 @@ function App() {
         });
         setEmailNoticeVisible(confirmationNotifications.some((result) => result.channel === "client" && result.sent));
         setBookingStart(null);
+        setCustomGroupAttendees([]);
+        setCustomGroupAttendeeDraft({ name: "", email: "" });
       } catch {
         setToast({ message: "Could not complete the booking. Please try again." });
       } finally {
@@ -6518,6 +6709,16 @@ function App() {
       phone,
       email,
       note: "Booked from public booking page.",
+      ...(isCustomGroupBooking
+        ? {
+            customGroup: true as const,
+            attendees: [
+              { id: `booker-${Date.now()}`, name: client, email, status: "booker" as const },
+              ...customGroupAttendees,
+            ],
+            calculatedPrice: customGroupCalculatedPrice,
+          }
+        : {}),
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
     if (isEmbedMode) {
@@ -6527,6 +6728,8 @@ function App() {
       setActiveView("calendar");
     }
     setBookingStart(null);
+    setCustomGroupAttendees([]);
+    setCustomGroupAttendeeDraft({ name: "", email: "" });
     setBookingForm({ firstName: "", lastName: "", phone: "", email: "" });
     setToast({
       message: `${client} booked ${bookingTargetService.name} on ${weekDays[item.day].short} at ${formatTime(item.start)}.`,
@@ -6608,6 +6811,71 @@ function App() {
       undo: () => setItems(previous),
     });
   }
+
+  const customGroupAttendeePanel = isCustomGroupBooking ? (
+    <div className="custom-group-panel">
+      <div className="custom-group-summary">
+        <span>Attendees</span>
+        <strong>
+          {customGroupParticipantCount} / {customGroupMaxParticipants(bookingTargetService)}
+        </strong>
+        <em>{formatMoney(customGroupCalculatedPrice)}</em>
+      </div>
+      <div className="booking-form custom-group-attendee-form">
+        <input
+          value={customGroupAttendeeDraft.name}
+          onChange={(event) => updateCustomGroupAttendeeDraft("name", event.target.value)}
+          placeholder="Attendee name"
+        />
+        <input
+          value={customGroupAttendeeDraft.email}
+          autoComplete="email"
+          inputMode="email"
+          onChange={(event) => updateCustomGroupAttendeeDraft("email", event.target.value)}
+          placeholder="Email optional"
+          type="email"
+        />
+      </div>
+      <button
+        className="outline-button"
+        disabled={customGroupRemainingAttendees <= 0}
+        onClick={addCustomGroupAttendee}
+        type="button"
+      >
+        <Plus size={16} />
+        Add attendee
+      </button>
+      <div className="custom-group-attendee-list">
+        <div className="custom-group-attendee-row">
+          <span>
+            <strong>{[bookingForm.firstName, bookingForm.lastName].filter(Boolean).join(" ").trim() || "Booker"}</strong>
+            <em>{bookingForm.email || "Email required"}</em>
+          </span>
+          <small>{customGroupStatusLabel("booker")}</small>
+        </div>
+        {customGroupAttendees.map((attendee) => (
+          <div className="custom-group-attendee-row" key={attendee.id}>
+            <span>
+              <strong>{attendee.name}</strong>
+              <em>{attendee.email || "Manual attendee"}</em>
+            </span>
+            <small>{customGroupStatusLabel(attendee.status)}</small>
+            <button
+              className="icon-button small"
+              onClick={() => removeCustomGroupAttendee(attendee.id)}
+              aria-label={`Remove ${attendee.name}`}
+              type="button"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        ))}
+      </div>
+      {customGroupAttendees.length < customGroupMinParticipants(bookingTargetService) - 1 && (
+        <p className="field-help">Add at least one other person before confirming.</p>
+      )}
+    </div>
+  ) : null;
 
   const servicesSettingsPanel = (
     <div className="settings-section settings-services">
@@ -6739,7 +7007,7 @@ function App() {
                 <label className="settings-field">
                   <span>Pricing</span>
                   <select
-                    disabled={serviceEditor.lessonFormat !== "group"}
+                    disabled={serviceEditor.lessonFormat !== "group" || serviceEditor.customGroup === true}
                     value={serviceEditor.priceMode}
                     onChange={(event) =>
                       updateServiceEditor("priceMode", event.target.value === "per-person" ? "per-person" : "session")
@@ -6750,8 +7018,56 @@ function App() {
                   </select>
                 </label>
               </div>
+              {serviceEditor.lessonFormat === "group" && (
+                <label className="settings-toggle">
+                  <input
+                    checked={serviceEditor.customGroup === true}
+                    onChange={(event) => updateServiceEditor("customGroup", event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Custom group lesson</span>
+                </label>
+              )}
+              {serviceEditor.lessonFormat === "group" && serviceEditor.customGroup === true && (
+                <div className="service-form-row">
+                  <label className="settings-field">
+                    <span>Base participants</span>
+                    <input
+                      value={serviceEditor.baseParticipants ?? DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS}
+                      min={serviceEditor.minParticipants}
+                      max={serviceEditor.capacity}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) => updateServiceEditor("baseParticipants", Number(event.target.value))}
+                      type="text"
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <span>Base price NZD</span>
+                    <input
+                      value={serviceEditor.basePrice ?? DEFAULT_CUSTOM_GROUP_BASE_PRICE}
+                      min={0}
+                      step={1}
+                      inputMode="decimal"
+                      onChange={(event) => updateServiceEditor("basePrice", Number(event.target.value))}
+                      type="text"
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <span>Extra person NZD</span>
+                    <input
+                      value={serviceEditor.extraPersonPrice ?? DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE}
+                      min={0}
+                      step={1}
+                      inputMode="decimal"
+                      onChange={(event) => updateServiceEditor("extraPersonPrice", Number(event.target.value))}
+                      type="text"
+                    />
+                  </label>
+                </div>
+              )}
               <div className="service-form-row">
-                {serviceEditor.lessonFormat === "group" && (
+                {serviceEditor.lessonFormat === "group" && serviceEditor.customGroup !== true && (
                   <label className="settings-field">
                     <span>Day of week</span>
                     <select
@@ -6766,7 +7082,7 @@ function App() {
                     </select>
                   </label>
                 )}
-                {serviceEditor.lessonFormat === "group" && (
+                {serviceEditor.lessonFormat === "group" && serviceEditor.customGroup !== true && (
                   <label className="settings-field">
                     <span>Start time</span>
                     <input
@@ -6786,7 +7102,7 @@ function App() {
                     />
                   </label>
                 )}
-                {serviceEditor.lessonFormat === "group" && (
+                {serviceEditor.lessonFormat === "group" && serviceEditor.customGroup !== true && (
                   <label className="settings-field">
                     <span>Generate next</span>
                     <input
@@ -6803,7 +7119,7 @@ function App() {
                 )}
                 {serviceEditor.lessonFormat === "group" && (
                   <label className="settings-field">
-                    <span>Minimum group</span>
+                    <span>{serviceEditor.customGroup === true ? "Minimum participants" : "Minimum group"}</span>
                     <input
                       value={groupMinimumInput}
                       min={2}
@@ -6816,7 +7132,7 @@ function App() {
                     />
                   </label>
                 )}
-                {serviceEditor.lessonFormat === "group" && (
+                {serviceEditor.lessonFormat === "group" && serviceEditor.customGroup !== true && (
                   <label className="settings-toggle">
                     <input
                       checked={serviceEditor.groupSchedule?.active !== false}
@@ -6832,7 +7148,7 @@ function App() {
                     <input
                       value={groupMaximumInput}
                       min={serviceEditor.lessonFormat === "group" ? 2 : 1}
-                      max={24}
+                      max={serviceEditor.customGroup === true ? DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS : 24}
                       step={1}
                       inputMode="numeric"
                       onChange={(event) => setGroupMaximumInput(event.target.value)}
@@ -7418,6 +7734,7 @@ function App() {
                   </span>
                 </button>
               )}
+              {customGroupAttendeePanel}
               <div className="booking-summary">
                 <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
                 <span>
@@ -7431,7 +7748,7 @@ function App() {
               {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
               <button
                 className="primary-button confirm-booking"
-                disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving"}
+                disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving" || !isInformationStepComplete}
                 onClick={confirmPublicBooking}
                 type="button"
               >
@@ -7632,9 +7949,28 @@ function App() {
 
       <div className="service-summary">
         <span>Price</span>
-        <strong>{servicePriceLabel(selectedService)}</strong>
+        <strong>{selected.customGroup ? formatMoney(selected.calculatedPrice ?? 0) : servicePriceLabel(selectedService)}</strong>
         <p>{selectedService?.description ?? selected.note}</p>
       </div>
+
+      {selected.kind === "appointment" && selected.customGroup && Array.isArray(selected.attendees) && (
+        <div className="lesson-receipts-panel custom-group-admin-panel">
+          <div className="receipt-panel-title">
+            <User size={16} />
+            <span>Custom group attendees</span>
+          </div>
+          {selected.attendees.map((attendee) => (
+            <div className="email-receipt-row" key={attendee.id}>
+              <span className={`email-status-dot ${attendee.status === "confirmed" || attendee.status === "booker" || attendee.status === "manual" ? "sent" : "pending"}`} aria-hidden="true" />
+              <div>
+                <strong>{attendee.name}</strong>
+                <span>{attendee.email || "Manual attendee"}</span>
+              </div>
+              <em>{customGroupStatusLabel(attendee.status)}</em>
+            </div>
+          ))}
+        </div>
+      )}
 
       {selected.kind === "appointment" && (
         <div className="lesson-status-panel">
@@ -9742,6 +10078,7 @@ function App() {
                             </span>
                           </button>
                         )}
+                        {customGroupAttendeePanel}
                         <div className="booking-summary">
                           <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
                           <span>
@@ -9755,7 +10092,7 @@ function App() {
                         {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
                         <button
                           className="primary-button confirm-booking"
-                          disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving"}
+                          disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving" || !isInformationStepComplete}
                           onClick={confirmPublicBooking}
                           type="button"
                         >

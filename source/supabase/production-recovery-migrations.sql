@@ -5,6 +5,9 @@ ALTER TABLE public.calendar_items
   ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked';
 
 ALTER TABLE public.calendar_items
+  ADD COLUMN IF NOT EXISTS custom_group JSONB;
+
+ALTER TABLE public.calendar_items
   DROP CONSTRAINT IF EXISTS calendar_items_status_check;
 
 ALTER TABLE public.calendar_items

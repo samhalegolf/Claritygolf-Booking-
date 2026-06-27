@@ -20,6 +20,7 @@ create table if not exists public.calendar_items (
   phone text,
   email text,
   note text,
+  custom_group jsonb,
   status text not null default 'booked'
     check (status in ('booked', 'completed', 'cancelled', 'no_show')),
   created_at timestamptz not null default now(),

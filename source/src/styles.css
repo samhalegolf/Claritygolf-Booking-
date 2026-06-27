@@ -5912,6 +5912,54 @@ button {
     var(--shadow);
 }
 
+.custom-group-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.custom-group-summary,
+.custom-group-attendee-row {
+  align-items: center;
+  background: color-mix(in srgb, var(--coach-neutral, #ffffff) 86%, transparent);
+  border: 1px solid color-mix(in srgb, var(--coach-accent, #07100a) 14%, transparent);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 10px 12px;
+}
+
+.custom-group-summary span,
+.custom-group-attendee-row em,
+.custom-group-attendee-row small {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.custom-group-summary strong,
+.custom-group-summary em,
+.custom-group-attendee-row strong {
+  color: var(--text);
+}
+
+.custom-group-attendee-form {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.custom-group-attendee-list {
+  display: grid;
+  gap: 8px;
+}
+
+.custom-group-attendee-row span {
+  display: grid;
+  min-width: 0;
+}
+
+.custom-group-attendee-row .icon-button {
+  justify-self: end;
+}
+
 @media (max-width: 1180px) {
   .billing-dashboard-grid,
   .billing-reports {
@@ -5934,6 +5982,12 @@ button {
   .invoice-document-line-head,
   .invoice-document-line-row,
   .custom-field-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .custom-group-summary,
+  .custom-group-attendee-form,
+  .custom-group-attendee-row {
     grid-template-columns: minmax(0, 1fr);
   }
 
