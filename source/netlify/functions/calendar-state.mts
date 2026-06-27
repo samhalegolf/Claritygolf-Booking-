@@ -907,12 +907,16 @@ async function processAdminNotificationDebounce(
       }
 
       if ((action === "rescheduled" || action === "updated") && next) {
-        const originalPrevious = existing?.previousAppointment || previous || null;
+        const isPendingInitialBooking = existing?.action === "booking";
+        const originalPrevious = isPendingInitialBooking
+          ? null
+          : existing?.previousAppointment || previous || null;
         const originalPositionSignature =
           existing?.originalPositionSignature ||
           (previous ? appointmentPositionSignature(previous) : "");
         if (
           existing &&
+          !isPendingInitialBooking &&
           originalPositionSignature &&
           appointmentPositionSignature(next) === originalPositionSignature
         ) {
@@ -923,10 +927,10 @@ async function processAdminNotificationDebounce(
 
         queueById.set(id, {
           calendarItemId: id,
-          action: existing?.action === "booking" ? "booking" : action,
+          action: isPendingInitialBooking ? "booking" : action,
           queuedAt,
           fireAfter,
-          originalPositionSignature,
+          originalPositionSignature: isPendingInitialBooking ? "" : originalPositionSignature,
           targetSignature: appointmentNotificationSignature(next),
           appointment: next,
           previousAppointment: originalPrevious,
