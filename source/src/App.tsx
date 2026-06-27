@@ -1854,7 +1854,7 @@ function cleanAvailability(availability?: AvailabilityWindow[][]): AvailabilityW
       .sort((a, b) => a.start - b.start)
       .reduce<AvailabilityWindow[]>((merged, window) => {
         const previous = merged.at(-1);
-        if (previous && window.start <= previous.end) {
+        if (previous && window.start < previous.end) {
           previous.end = Math.max(previous.end, window.end);
         } else {
           merged.push({ ...window });
@@ -5788,9 +5788,9 @@ function App() {
     const existingWindows = availability[day] ?? [];
     const lastWindow = existingWindows.at(-1);
     const start = lastWindow
-      ? Math.min(Math.max(lastWindow.end, timeToMinutes(9, 0)), LAST_TIME_SLOT_MINUTES - 120)
+      ? Math.min(Math.max(lastWindow.end, timeToMinutes(9, 0)), LAST_TIME_SLOT_MINUTES - SNAP_MINUTES * 2)
       : timeToMinutes(9, 0);
-    const end = Math.min(Math.max(start + 120, start + SNAP_MINUTES), LAST_TIME_SLOT_MINUTES);
+    const end = Math.min(Math.max(start + SNAP_MINUTES * 2, start + SNAP_MINUTES), LAST_TIME_SLOT_MINUTES);
     setEditingAvailabilityWindow(`${day}-${existingWindows.length}`);
     setAvailability((current) =>
       cleanAvailability(

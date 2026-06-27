@@ -476,7 +476,7 @@ function normalizeAvailability(availability) {
       .sort((a, b) => a.start - b.start)
       .reduce((merged, window) => {
         const previous = merged.at(-1);
-        if (previous && window.start <= previous.end) {
+        if (previous && window.start < previous.end) {
           previous.end = Math.max(previous.end, window.end);
         } else {
           merged.push({ ...window });
