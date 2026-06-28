@@ -362,6 +362,56 @@ function cleanString(value: unknown, fallback = "", max = 600) {
     : fallback;
 }
 
+const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["status", "custom_group"]);
+
+function omittedCalendarColumnWarning(column: string) {
+  return `Calendar saved, but optional calendar item column "${column}" is not available in Supabase. Optional data for that field was not preserved.`;
+}
+
+function missingOptionalCalendarItemColumn(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (!/calendar_items/i.test(message)) return "";
+  if (!/(schema cache|column|PGRST204|42703|Could not find)/i.test(message)) return "";
+  for (const column of OPTIONAL_CALENDAR_ITEM_COLUMNS) {
+    const escaped = column.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`['"\`]${escaped}['"\`]|\\b${escaped}\\b`, "i").test(message)) return column;
+  }
+  return "";
+}
+
+function omitCalendarItemColumn(rows: any[], column: string) {
+  return rows.map((row) => {
+    const { [column]: _omitted, ...rest } = row;
+    return rest;
+  });
+}
+
+async function upsertCalendarItemsAccepting(rows: any[]) {
+  let nextRows = rows;
+  const omittedColumns: string[] = [];
+
+  while (true) {
+    try {
+      await supabase("calendar_items", {
+        method: "POST",
+        query: "on_conflict=id",
+        body: nextRows,
+        prefer: "resolution=merge-duplicates,return=minimal",
+      });
+      return omittedColumns.map(omittedCalendarColumnWarning);
+    } catch (error) {
+      const column = missingOptionalCalendarItemColumn(error);
+      if (!column || omittedColumns.includes(column)) throw error;
+      omittedColumns.push(column);
+      nextRows = omitCalendarItemColumn(nextRows, column);
+      console.warn("calendar_state:calendar_items_optional_column_omitted", {
+        column,
+        error: error instanceof Error ? error.message : String(error || ""),
+      });
+    }
+  }
+}
+
 function modernClientEmailFooter(value: unknown) {
   const fallback = "We look forward to seeing you.";
   const footer = cleanString(value, fallback, 900);
@@ -1329,12 +1379,7 @@ async function writeState(body: any) {
   if (hasItemsPayload && rows.length) {
     // Calendar items are the authoritative lesson records. Store them before
     // attempting the secondary client-directory synchronisation.
-    await supabase("calendar_items", {
-      method: "POST",
-      query: "on_conflict=id",
-      body: rows,
-      prefer: "resolution=merge-duplicates,return=minimal",
-    });
+    warnings.push(...(await upsertCalendarItemsAccepting(rows)));
 
     const keepIds = postgrestQuotedList(rows.map((row) => row.id));
     if (shouldReplaceItems && keepIds) {
