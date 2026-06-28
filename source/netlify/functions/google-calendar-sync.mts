@@ -8,9 +8,9 @@ const googleScopes = [
 ];
 
 const defaultServices = [
-  { id: "lesson-30", name: "30min Lesson", duration: 30, price: 100, location: "Bay hire included" },
-  { id: "lesson-60", name: "1 Hour Golf Lesson", duration: 60, price: 180, location: "Bay hire included" },
-  { id: "lesson-pair", name: "2 Person Golf Lesson", duration: 60, price: 200, location: "Bay hire included" },
+  { id: "lesson-30", name: "30min Lesson", duration: 30, price: 100, lessonNote: "Bay hire included", location: "Bay hire included" },
+  { id: "lesson-60", name: "1 Hour Golf Lesson", duration: 60, price: 180, lessonNote: "Bay hire included", location: "Bay hire included" },
+  { id: "lesson-pair", name: "2 Person Golf Lesson", duration: 60, price: 200, lessonNote: "Bay hire included", location: "Bay hire included" },
 ];
 
 function env(name: string, fallback = "") {
@@ -83,6 +83,43 @@ function parseJson<T>(value: string | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function cleanUrl(value: unknown, fallback = "") {
+  if (typeof value !== "string" || !value.trim()) return fallback;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString().replace(/\/$/, "") : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function cleanBookingLocationSnapshot(raw: any, fallback: any = {}) {
+  let source = raw;
+  if (typeof raw === "string") {
+    try {
+      source = JSON.parse(raw);
+    } catch {
+      source = null;
+    }
+  }
+  const base = source?.name ? source : fallback;
+  if (!base?.name) return null;
+  return {
+    locationId: cleanString(base.locationId, "", 120) || undefined,
+    name: cleanString(base.name, fallback.name || "", 140),
+    shortName: cleanString(base.shortName, fallback.shortName || base.name || "", 80) || undefined,
+    address: cleanString(base.address, "", 240) || undefined,
+    mapUrl: cleanUrl(base.mapUrl, "") || undefined,
+    arrivalInstructions: cleanString(base.arrivalInstructions, "", 500) || undefined,
+    publicNotes: cleanString(base.publicNotes, "", 500) || undefined,
+    timezone: cleanString(base.timezone, fallback.timezone || "", 80) || undefined,
+  };
+}
+
+function bookingLocationDisplay(location: any) {
+  return [location?.name, location?.address].filter(Boolean).join(" · ");
 }
 
 function configuredRedirectUri(req: Request) {
@@ -273,6 +310,7 @@ function rowToItem(row: any) {
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
+    location: cleanBookingLocationSnapshot(row.location),
   };
 }
 
@@ -286,6 +324,28 @@ function isCancelledGroupSessionItem(item: any) {
 
 function serviceName(serviceId: string, services: any[]) {
   return services.find((service) => service?.id === serviceId)?.name || "Golf Lesson";
+}
+
+function defaultLocationFromAccount(account: ReturnType<typeof accountFromSettings>) {
+  return {
+    id: "default-location",
+    name: account.venueName,
+    shortName: account.venueShortName || account.venueName,
+    address: "",
+    timezone: account.timezone,
+    active: true,
+    archived: false,
+    isDefault: true,
+  };
+}
+
+function resolveLocation(item: any, service: any, locations: any[], account: ReturnType<typeof accountFromSettings>) {
+  const activeLocations = Array.isArray(locations)
+    ? locations.filter((location) => location?.active !== false && location?.archived !== true)
+    : [];
+  const byService = activeLocations.find((location) => location.id && location.id === service?.locationId);
+  const fallback = activeLocations.find((location) => location.isDefault) || activeLocations[0] || defaultLocationFromAccount(account);
+  return cleanBookingLocationSnapshot(item.location, byService || fallback);
 }
 
 function dateForSlot(week: number, day: number) {
@@ -328,13 +388,16 @@ function eventSummary(item: any, account: ReturnType<typeof accountFromSettings>
   return `${item.client || item.title} - ${serviceName(item.serviceId, services)}`;
 }
 
-function eventDescription(item: any, services: any[]) {
+function eventDescription(item: any, services: any[], location: any) {
   const rows =
     item.kind === "block"
       ? ["Blocked time", item.note]
       : [
           `Service: ${serviceName(item.serviceId, services)}`,
           `Client: ${item.client || item.title}`,
+          location?.address ? `Address: ${location.address}` : "",
+          location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
+          location?.mapUrl ? `Map: ${location.mapUrl}` : "",
           item.phone ? `Phone: ${item.phone}` : "",
           item.email ? `Email: ${item.email}` : "",
           item.note,
@@ -342,17 +405,19 @@ function eventDescription(item: any, services: any[]) {
   return [...rows.filter(Boolean), "", `Clarity booking ID: ${item.id}`].join("\n");
 }
 
-function googleEventForItem(item: any, settings: Record<string, string>, services: any[], eventId: string) {
+function googleEventForItem(item: any, settings: Record<string, string>, services: any[], locations: any[], eventId: string) {
   const account = accountFromSettings(settings);
+  const service = services.find((candidate) => candidate?.id === item.serviceId);
+  const location = resolveLocation(item, service, locations, account);
   const week = Number(item.week ?? 0);
-  const timezone = account.timezone;
+  const timezone = location?.timezone || account.timezone;
   const start = googleLocalDateTime(week, item.day, item.start);
   const end = googleLocalDateTime(week, item.day, item.start + item.duration);
   return {
     id: eventId,
     summary: eventSummary(item, account, services),
-    description: eventDescription(item, services),
-    location: account.venueName,
+    description: eventDescription(item, services, location),
+    location: bookingLocationDisplay(location),
     start: { dateTime: start, timeZone: timezone },
     end: { dateTime: end, timeZone: timezone },
     transparency: "opaque",
@@ -429,11 +494,12 @@ async function calendarSyncPayload() {
     settings,
     items: itemRows.map(rowToItem).filter((item) => !isCancelledGroupSessionItem(item)),
     services: parseJson(settings.servicesJson, defaultServices),
+    locations: parseJson(settings.locationsJson, []),
   };
 }
 
 export async function syncGoogleCalendarNow() {
-  const { settings, items, services } = await calendarSyncPayload();
+  const { settings, items, services, locations } = await calendarSyncPayload();
   const status = await getGoogleCalendarSyncStatus();
   if (!status.configured) return { ...status, ok: false, skipped: true, reason: "google_oauth_not_configured" };
   if (!settings.googleCalendarRefreshToken) return { ...status, ok: false, skipped: true, reason: "google_calendar_not_connected" };
@@ -448,7 +514,7 @@ export async function syncGoogleCalendarNow() {
   try {
     for (const item of items) {
       const eventId = previousMap[item.id] || googleEventId(item.id);
-      const event = googleEventForItem(item, settings, services, eventId);
+      const event = googleEventForItem(item, settings, services, locations, eventId);
       const result = await upsertGoogleEvent(accessToken, calendarId, eventId, event);
       nextMap[item.id] = result.id || eventId;
       upserted += 1;

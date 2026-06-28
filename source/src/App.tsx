@@ -5902,6 +5902,7 @@ function App() {
       const data = (await response.json()) as {
         state?: { items?: CalendarItem[] };
         message?: string;
+        appointment?: { location?: BookingLocationSnapshot };
         notifications?: EmailSendResult[];
       };
       if (!response.ok) {
@@ -5926,6 +5927,7 @@ function App() {
         email: rescheduleForm.email,
         phone: rescheduleForm.phone,
         location:
+          data.appointment?.location ??
           selectedRescheduleMatch.location ??
           bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
         notifications: data.notifications ?? [],

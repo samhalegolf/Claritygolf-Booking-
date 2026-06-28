@@ -3901,6 +3901,7 @@ function publicRescheduleItem(item, serviceList = defaultServices) {
     day: item.day,
     start: item.start,
     client: item.client || item.title,
+    location: item.location,
   };
 }
 
@@ -4190,6 +4191,7 @@ export async function handlePublicRescheduleRequest(req, context = null) {
         day: result.appointment.day,
         start: result.appointment.start,
         duration: result.appointment.duration,
+        location: result.appointment.location,
       },
       notifications: clientNotificationResults(result.notifications),
     });
@@ -4298,12 +4300,15 @@ function formatLocalDateTime(week, day, minutes) {
   return `${date.year}${pad(date.month)}${pad(date.day)}T${pad(hour)}${pad(minute)}00`;
 }
 
-function eventDescription(item, serviceList) {
+function eventDescription(item, serviceList, location) {
   const rows =
     item.kind === "block"
       ? ["Blocked time", item.note]
       : [
           serviceName(item.serviceId, serviceList),
+          location?.address ? `Address: ${location.address}` : "",
+          location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
+          location?.mapUrl ? `Map: ${location.mapUrl}` : "",
           item.phone ? `Phone: ${item.phone}` : "",
           item.email ? `Email: ${item.email}` : "",
           item.note,
@@ -4321,6 +4326,7 @@ function generateCalendarFeed(state) {
   const account = cleanCoachAccount(state.account);
   const timezone = account.timezone;
   const serviceList = state.services || defaultServices;
+  const locationList = normalizeLocations(state.locations || [], account);
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -4340,15 +4346,17 @@ function generateCalendarFeed(state) {
     )
     .forEach((item) => {
       const week = itemWeek(item);
+      const service = serviceList.find((candidate) => candidate.id === item.serviceId);
+      const location = calendarItemLocation(item, service, locationList, account);
       lines.push(
         "BEGIN:VEVENT",
         `UID:${escapeText(item.id)}@clarity-golf-booking`,
         `DTSTAMP:${stamp}`,
-        `DTSTART;TZID=${timezone}:${formatLocalDateTime(week, item.day, item.start)}`,
-        `DTEND;TZID=${timezone}:${formatLocalDateTime(week, item.day, item.start + item.duration)}`,
+        `DTSTART;TZID=${location?.timezone || timezone}:${formatLocalDateTime(week, item.day, item.start)}`,
+        `DTEND;TZID=${location?.timezone || timezone}:${formatLocalDateTime(week, item.day, item.start + item.duration)}`,
         `SUMMARY:${escapeText(eventSummary(item, account, serviceList))}`,
-        `DESCRIPTION:${escapeText(eventDescription(item, serviceList))}`,
-        `LOCATION:${escapeText(account.venueName)}`,
+        `DESCRIPTION:${escapeText(eventDescription(item, serviceList, location))}`,
+        `LOCATION:${escapeText(bookingLocationDisplay(location))}`,
         `ORGANIZER;CN=${escapeText(account.businessName)}:MAILTO:${account.contactEmail}`,
         item.kind === "block" ? "CATEGORIES:Busy" : "CATEGORIES:Golf Lesson",
         "STATUS:CONFIRMED",
