@@ -2003,6 +2003,17 @@ function resolvedCalendarItemCoachId(
   return item?.coachId || item?.coach?.coachId || service?.coachId || calendarItemCoach(item, coaches, account).coachId || defaultCoachId(coaches);
 }
 
+function calendarItemBelongsToCoach(
+  item: Partial<CalendarItem> | undefined,
+  coachId: string | undefined,
+  service: Partial<Service> | undefined,
+  coaches: CoachProfile[],
+  account: Partial<CoachAccount>,
+) {
+  if (!coachId) return false;
+  return resolvedCalendarItemCoachId(item, service, coaches, account) === coachId;
+}
+
 function cleanLocation(raw?: Partial<Location>, fallback?: Location, index = 0): Location {
   const base = fallback ?? defaultLocationFromCoachAccount();
   const name =
@@ -2159,6 +2170,104 @@ function resolvedCalendarItemLocationId(
   account: Partial<CoachAccount>,
 ) {
   return item?.locationId || item?.location?.locationId || service?.locationId || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
+}
+
+function calendarItemBelongsToLocation(
+  item: Partial<CalendarItem> | undefined,
+  locationId: string | undefined,
+  service: Partial<Service> | undefined,
+  locations: Location[],
+  account: Partial<CoachAccount>,
+) {
+  if (!locationId) return false;
+  return resolvedCalendarItemLocationId(item, service, locations, account) === locationId;
+}
+
+function calendarItemCoachColumnId(
+  item: Partial<CalendarItem> | undefined,
+  service: Partial<Service> | undefined,
+  coaches: CoachProfile[],
+  account: Partial<CoachAccount>,
+) {
+  return resolvedCalendarItemCoachId(item, service, coaches, account);
+}
+
+function calendarItemLocationLaneId(
+  item: Partial<CalendarItem> | undefined,
+  service: Partial<Service> | undefined,
+  locations: Location[],
+  account: Partial<CoachAccount>,
+) {
+  return resolvedCalendarItemLocationId(item, service, locations, account);
+}
+
+function isLocationOnlyBlock(item: Partial<CalendarItem> | undefined) {
+  return item?.kind === "block" && Boolean(item.locationId || item.location?.locationId) && !item.coachId && !item.coach?.coachId;
+}
+
+function isCoachOnlyBlock(item: Partial<CalendarItem> | undefined) {
+  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && !item.locationId && !item.location?.locationId;
+}
+
+function isCoachLocationBlock(item: Partial<CalendarItem> | undefined) {
+  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && Boolean(item.locationId || item.location?.locationId);
+}
+
+function isInactiveForConflict(item: Partial<CalendarItem> | undefined) {
+  return item?.status === "cancelled" || item?.status === "no_show";
+}
+
+type SchedulingConflictContext = {
+  candidateService?: Partial<Service>;
+  existingService?: Partial<Service>;
+  candidateCoachId?: string;
+  candidateLocationId?: string;
+  coaches: CoachProfile[];
+  locations: Location[];
+  account: Partial<CoachAccount>;
+};
+
+function isCoachConflict(
+  candidate: Partial<CalendarItem>,
+  existing: Partial<CalendarItem>,
+  context: SchedulingConflictContext,
+) {
+  if (isInactiveForConflict(existing)) return false;
+  const candidateCoachId =
+    context.candidateCoachId ??
+    resolvedCalendarItemCoachId(candidate, context.candidateService, context.coaches, context.account);
+  const existingCoachId = resolvedCalendarItemCoachId(existing, context.existingService, context.coaches, context.account);
+  if (!candidateCoachId || !existingCoachId || candidateCoachId !== existingCoachId) return false;
+  if (isLocationOnlyBlock(existing)) return false;
+  return existing.kind === "appointment" || existing.kind === "block";
+}
+
+function isLocationConflict(
+  candidate: Partial<CalendarItem>,
+  existing: Partial<CalendarItem>,
+  context: SchedulingConflictContext,
+) {
+  if (isInactiveForConflict(existing)) return false;
+  const candidateLocationId =
+    context.candidateLocationId ??
+    resolvedCalendarItemLocationId(candidate, context.candidateService, context.locations, context.account);
+  const existingLocationId = resolvedCalendarItemLocationId(existing, context.existingService, context.locations, context.account);
+  if (!candidateLocationId || !existingLocationId || candidateLocationId !== existingLocationId) return false;
+  if (isLocationOnlyBlock(existing)) return true;
+  if (isCoachOnlyBlock(existing)) return false;
+  if (isCoachLocationBlock(existing)) {
+    return isCoachConflict(candidate, existing, context);
+  }
+  return candidate.kind === "block" && isLocationOnlyBlock(candidate);
+}
+
+function isAppointmentConflict(
+  candidate: Partial<CalendarItem>,
+  existing: Partial<CalendarItem>,
+  context: SchedulingConflictContext,
+) {
+  if (isInactiveForConflict(existing)) return false;
+  return isCoachConflict(candidate, existing, context) || isLocationConflict(candidate, existing, context);
 }
 
 function bookingLocationDisplay(location: Partial<BookingLocationSnapshot> | undefined) {
@@ -4869,20 +4978,46 @@ function App() {
   }
 
   function hasCollision(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
-    const candidateEnd = candidate.start + candidate.duration;
+    const candidateCoachId = service?.coachId || selectedCalendarCoachId || activeCoachId;
+    const candidateLocationId = serviceLocation(service, locations, coachAccount).id;
+    const candidateItem: Partial<CalendarItem> = {
+      kind: "appointment",
+      coachId: candidateCoachId,
+      locationId: candidateLocationId,
+      ...candidate,
+    };
     const overlappingItems = items.filter((item) => {
       if (item.id === ignoreId || itemWeek(item) !== candidate.week || item.day !== candidate.day) return false;
-      const itemEnd = item.start + item.duration;
-      return candidate.start < itemEnd && candidateEnd > item.start;
+      return overlaps(itemSlot(item), candidate);
     });
     if (!service || !isScheduledGroupService(service)) {
-      return overlappingItems.length > 0;
+      return overlappingItems.some((item) =>
+        isAppointmentConflict(candidateItem, item, {
+          candidateService: service,
+          existingService: itemService(item, services),
+          candidateCoachId,
+          candidateLocationId,
+          coaches: coachProfiles,
+          locations,
+          account: coachAccount,
+        }),
+      );
     }
     const sameServiceCount = overlappingItems.filter(
       (item) => item.kind === "appointment" && item.serviceId === service.id && isActiveGroupBooking(item.status),
     ).length;
     const collidesWithOtherService = overlappingItems.some(
-      (item) => item.kind !== "appointment" || item.serviceId !== service.id,
+      (item) =>
+        (item.kind !== "appointment" || item.serviceId !== service.id) &&
+        isAppointmentConflict(candidateItem, item, {
+          candidateService: service,
+          existingService: itemService(item, services),
+          candidateCoachId,
+          candidateLocationId,
+          coaches: coachProfiles,
+          locations,
+          account: coachAccount,
+        }),
     );
     if (collidesWithOtherService) return true;
     return sameServiceCount >= service.capacity;
@@ -4920,18 +5055,31 @@ function App() {
   }
 
   function hasAppointmentCollision(candidate: SlotCandidate, ignoreId?: string) {
-    const candidateEnd = candidate.start + candidate.duration;
+    const fallbackCoachId = selectedCalendarCoachId || activeCoachId;
+    const fallbackLocationId = selectedCalendarLocationId || defaultLocationId(locations);
+    const candidateItem: Partial<CalendarItem> = {
+      kind: "appointment",
+      coachId: fallbackCoachId,
+      locationId: fallbackLocationId,
+      ...candidate,
+    };
     return items.some((item) => {
       if (
         item.id === ignoreId ||
         itemWeek(item) !== candidate.week ||
         item.day !== candidate.day ||
-        item.kind !== "appointment"
+        !overlaps(itemSlot(item), candidate)
       ) {
         return false;
       }
-      const itemEnd = item.start + item.duration;
-      return candidate.start < itemEnd && candidateEnd > item.start;
+      return isAppointmentConflict(candidateItem, item, {
+        existingService: itemService(item, services),
+        candidateCoachId: fallbackCoachId,
+        candidateLocationId: fallbackLocationId,
+        coaches: coachProfiles,
+        locations,
+        account: coachAccount,
+      });
     });
   }
 
@@ -4949,18 +5097,33 @@ function App() {
   function isValidBlockSlot(candidate: SlotCandidate, ignoreId?: string) {
     if (candidate.duration < SNAP_MINUTES) return false;
     if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
-    const candidateEnd = candidate.start + candidate.duration;
+    const candidateCoachId =
+      effectiveCalendarPerspective === "location" ? undefined : selectedCalendarCoachId || activeCoachId;
+    const candidateLocationId =
+      effectiveCalendarPerspective === "location" ? selectedCalendarLocationId : defaultLocationId(locations);
+    const candidateItem: Partial<CalendarItem> = {
+      kind: "block",
+      coachId: candidateCoachId,
+      locationId: candidateLocationId,
+      ...candidate,
+    };
     return !items.some((item) => {
       if (
         item.id === ignoreId ||
         itemWeek(item) !== candidate.week ||
         item.day !== candidate.day ||
-        item.kind === "block"
+        !overlaps(itemSlot(item), candidate)
       ) {
         return false;
       }
-      const itemEnd = item.start + item.duration;
-      return candidate.start < itemEnd && candidateEnd > item.start;
+      return isAppointmentConflict(candidateItem, item, {
+        existingService: itemService(item, services),
+        candidateCoachId,
+        candidateLocationId,
+        coaches: coachProfiles,
+        locations,
+        account: coachAccount,
+      });
     });
   }
 
