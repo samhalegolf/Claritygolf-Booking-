@@ -492,6 +492,7 @@ button {
 }
 
 .settings-grid.settings-tab-services > .settings-services,
+.settings-grid.settings-tab-coaches > .settings-coaches,
 .settings-grid.settings-tab-locations > .settings-locations,
 .settings-grid.settings-tab-availability > .settings-availability {
   display: block !important;

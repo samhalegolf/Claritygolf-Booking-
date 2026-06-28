@@ -764,12 +764,14 @@ function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
     id: clean.id || "sam-hale-golf",
     name: clean.coachName,
     displayName: clean.coachName || clean.businessName,
+    shortName: "Sam",
     email: clean.contactEmail,
     active: true,
     archived: false,
     isDefault: true,
     bookable: true,
     assignedLocationIds: ["default-location"],
+    defaultLocationId: "default-location",
     sortOrder: 0,
   };
 }
@@ -799,9 +801,11 @@ function cleanCoachProfile(raw = {}, fallback = defaultCoachProfileFromAccount()
     id: cleanSlug(raw?.id, cleanSlug(name, `coach-${index + 1}`)),
     name,
     displayName: cleanString(raw?.displayName, name, 120),
+    shortName: cleanString(raw?.shortName, name.split(/\s+/).map((part) => part[0]).join("").slice(0, 4).toUpperCase(), 60),
     email: cleanEmail(raw?.email, fallback.email),
     phone: cleanString(raw?.phone, "", 80) || undefined,
     bio: cleanString(raw?.bio, "", 600) || undefined,
+    photoUrl: cleanUrl(raw?.photoUrl, "", 300) || undefined,
     active: raw?.active !== false,
     archived: raw?.archived === true,
     isDefault: raw?.isDefault === true || fallback.isDefault === true,
@@ -809,6 +813,7 @@ function cleanCoachProfile(raw = {}, fallback = defaultCoachProfileFromAccount()
     assignedLocationIds: Array.isArray(raw?.assignedLocationIds)
       ? raw.assignedLocationIds.map((id) => cleanSlug(id, "")).filter(Boolean)
       : fallback.assignedLocationIds,
+    defaultLocationId: cleanSlug(raw?.defaultLocationId, raw?.assignedLocationIds?.[0] || fallback.assignedLocationIds?.[0] || "") || undefined,
     sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw.sortOrder)) : index,
   };
 }

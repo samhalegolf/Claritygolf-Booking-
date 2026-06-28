@@ -475,6 +475,7 @@ type BillingSection = "none" | "dashboard" | "new-invoice" | "reports";
 type SettingsTab =
   | "none"
   | "services"
+  | "coaches"
   | "locations"
   | "availability"
   | "experience"
@@ -704,14 +705,17 @@ type CoachProfile = {
   id: string;
   name: string;
   displayName: string;
+  shortName?: string;
   email: string;
   phone?: string;
   bio?: string;
+  photoUrl?: string;
   active: boolean;
   archived?: boolean;
   isDefault?: boolean;
   bookable: boolean;
   assignedLocationIds?: string[];
+  defaultLocationId?: string;
   sortOrder?: number;
 };
 
@@ -1841,12 +1845,14 @@ function defaultCoachProfileFromAccount(account: Partial<CoachAccount> = default
     id: cleanAccount.id || "sam-hale",
     name: cleanAccount.coachName,
     displayName: cleanAccount.coachName || cleanAccount.businessName,
+    shortName: "Sam",
     email: cleanAccount.contactEmail,
     active: true,
     archived: false,
     isDefault: true,
     bookable: true,
     assignedLocationIds: ["default-location"],
+    defaultLocationId: "default-location",
     sortOrder: 0,
   };
 }
@@ -1883,9 +1889,14 @@ function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile,
       typeof raw?.displayName === "string" && raw.displayName.trim()
         ? raw.displayName.trim().slice(0, 120)
         : name,
+    shortName:
+      typeof raw?.shortName === "string" && raw.shortName.trim()
+        ? raw.shortName.trim().slice(0, 60)
+        : name.split(/\s+/).map((part) => part[0]).join("").slice(0, 4).toUpperCase(),
     email: cleanEmail(raw?.email, base.email),
     phone: typeof raw?.phone === "string" && raw.phone.trim() ? raw.phone.trim().slice(0, 80) : undefined,
     bio: typeof raw?.bio === "string" && raw.bio.trim() ? raw.bio.trim().slice(0, 600) : undefined,
+    photoUrl: cleanUrl(raw?.photoUrl, "") || undefined,
     active: raw?.active !== false,
     archived: raw?.archived === true,
     isDefault: raw?.isDefault === true || base.isDefault === true,
@@ -1893,6 +1904,7 @@ function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile,
     assignedLocationIds: Array.isArray(raw?.assignedLocationIds)
       ? raw.assignedLocationIds.map((id) => cleanSlug(id, "")).filter(Boolean)
       : base.assignedLocationIds,
+    defaultLocationId: cleanSlug(raw?.defaultLocationId, raw?.assignedLocationIds?.[0] || base.assignedLocationIds?.[0] || "") || undefined,
     sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw?.sortOrder)) : index,
   };
 }
@@ -2778,6 +2790,10 @@ function App() {
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
   const [showLocationEditor, setShowLocationEditor] = useState(false);
   const [locationSaveState, setLocationSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [coachEditor, setCoachEditor] = useState<CoachProfile>(() => defaultCoachProfileFromAccount(getStoredCoachAccount()));
+  const [editingCoachId, setEditingCoachId] = useState<string | null>(null);
+  const [showCoachEditor, setShowCoachEditor] = useState(false);
+  const [coachSaveState, setCoachSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showServiceEditor, setShowServiceEditor] = useState(false);
@@ -6346,6 +6362,131 @@ function App() {
     void persistLocations(next, `${location.name} set as default.`);
   }
 
+  function updateCoachEditor<K extends keyof CoachProfile>(field: K, value: CoachProfile[K]) {
+    setCoachSaveState("idle");
+    setCoachEditor((current) => ({ ...current, [field]: value }));
+  }
+
+  function startNewCoach() {
+    const fallback = defaultCoachProfileFromAccount(coachAccount);
+    const assignedLocationId = defaultLocationId(locations);
+    setEditingCoachId(null);
+    setCoachEditor({
+      ...fallback,
+      id: `coach-${Date.now()}`,
+      name: "",
+      displayName: "",
+      shortName: "",
+      email: "",
+      phone: "",
+      bio: "",
+      photoUrl: "",
+      active: true,
+      archived: false,
+      isDefault: activeCoachList.length === 0,
+      bookable: true,
+      assignedLocationIds: assignedLocationId ? [assignedLocationId] : [],
+      defaultLocationId: assignedLocationId,
+      sortOrder: coachProfiles.length,
+    });
+    setShowCoachEditor(true);
+    setCoachSaveState("idle");
+  }
+
+  function editCoach(coach: CoachProfile) {
+    setEditingCoachId(coach.id);
+    setCoachEditor(coach);
+    setShowCoachEditor(true);
+    setCoachSaveState("idle");
+  }
+
+  async function persistCoaches(nextCoaches: CoachProfile[], message = "Coaches saved.") {
+    const snapshot = coachProfiles;
+    const clean = cleanCoachProfiles(nextCoaches, coachAccount);
+    setCoachProfiles(clean);
+    setCoachSaveState("saving");
+    try {
+      const response = await fetch("/api/coaches", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ coaches: clean }),
+      });
+      if (!response.ok) throw new Error("Coach save failed");
+      const data = (await response.json()) as { coaches?: CoachProfile[] };
+      setCoachProfiles(cleanCoachProfiles(data.coaches, coachAccount));
+      setCoachSaveState("saved");
+      setToast({ message });
+      window.setTimeout(() => setCoachSaveState("idle"), 1600);
+    } catch {
+      setCoachProfiles(snapshot);
+      setCoachSaveState("error");
+      setToast({ message: "Could not save coaches." });
+    }
+  }
+
+  function saveEditedCoach() {
+    if (!coachEditor.name.trim()) {
+      setToast({ message: "Give the coach a name before saving." });
+      return;
+    }
+    const assignedLocationIds = (coachEditor.assignedLocationIds ?? []).filter(Boolean);
+    const defaultAssignedLocationId = assignedLocationIds.includes(coachEditor.defaultLocationId || "")
+      ? coachEditor.defaultLocationId
+      : assignedLocationIds[0] || defaultLocationId(locations);
+    const clean = cleanCoachProfile(
+      {
+        ...coachEditor,
+        displayName: coachEditor.displayName || coachEditor.name,
+        assignedLocationIds: assignedLocationIds.length
+          ? assignedLocationIds
+          : [defaultAssignedLocationId].filter((id): id is string => Boolean(id)),
+        defaultLocationId: defaultAssignedLocationId,
+      },
+      defaultCoachProfileFromAccount(coachAccount),
+      coachProfiles.length,
+    );
+    const exists = coachProfiles.some((coach) => coach.id === (editingCoachId || clean.id));
+    const stableId = editingCoachId || clean.id;
+    const next = exists
+      ? coachProfiles.map((coach) => (coach.id === stableId ? { ...clean, id: stableId } : coach))
+      : [...coachProfiles, { ...clean, id: stableId }];
+    setEditingCoachId(stableId);
+    setShowCoachEditor(false);
+    void persistCoaches(next, exists ? `${clean.displayName} updated.` : `${clean.displayName} added.`);
+  }
+
+  function archiveCoach(coach: CoachProfile) {
+    const activeCount = coachProfiles.filter((candidate) => candidate.active && !candidate.archived && candidate.bookable).length;
+    if (activeCount <= 1) {
+      setToast({ message: "At least one active coach is required." });
+      return;
+    }
+    const nextDefault = coach.isDefault
+      ? coachProfiles.find((candidate) => candidate.id !== coach.id && candidate.active && !candidate.archived && candidate.bookable)?.id
+      : "";
+    const next = coachProfiles.map((candidate) =>
+      candidate.id === coach.id
+        ? { ...candidate, active: false, archived: true, isDefault: false }
+        : nextDefault && candidate.id === nextDefault
+          ? { ...candidate, isDefault: true }
+          : candidate,
+    );
+    void persistCoaches(next, `${coach.displayName || coach.name} archived.`);
+  }
+
+  function restoreCoach(coach: CoachProfile) {
+    const next = coachProfiles.map((candidate) =>
+      candidate.id === coach.id ? { ...candidate, active: true, archived: false, bookable: true } : candidate,
+    );
+    void persistCoaches(next, `${coach.displayName || coach.name} restored.`);
+  }
+
+  function makeDefaultCoach(coach: CoachProfile) {
+    if (!coach.active || coach.archived) return;
+    const next = coachProfiles.map((candidate) => ({ ...candidate, isDefault: candidate.id === coach.id }));
+    void persistCoaches(next, `${coach.displayName || coach.name} set as default coach.`);
+  }
+
   function updateInvoiceSettings<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
     setCoachAccountSaveState("idle");
     setCoachAccount((current) =>
@@ -8679,6 +8820,183 @@ function App() {
                   </button>
                 ) : (
                   <button className="outline-button service-action-button" onClick={() => archiveLocation(location)} type="button">
+                    <Archive size={15} />
+                    <span>Archive</span>
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const coachesSettingsPanel = (
+    <div className="settings-section settings-coaches">
+      <div className="data-card wide">
+        <div className="data-card-header">
+          <div>
+            <span>Coaches</span>
+            <h2>{activeCoachList.length} active coach{activeCoachList.length === 1 ? "" : "es"}</h2>
+          </div>
+          <button className="primary-button" onClick={startNewCoach} type="button">
+            <Plus size={16} />
+            <span>Add coach</span>
+          </button>
+        </div>
+        <p className="field-help">
+          Coach profiles are bookable operator identities. Admin users are a permission layer, not the owner of bookings.
+        </p>
+
+        {showCoachEditor && (
+          <article className="service-editor-card">
+            <div className="data-card-header compact">
+              <div>
+                <span>{editingCoachId ? "Edit coach" : "New coach"}</span>
+                <h3>{coachEditor.displayName || coachEditor.name || "Coach details"}</h3>
+              </div>
+              <button className="icon-button" onClick={() => setShowCoachEditor(false)} type="button" aria-label="Close coach editor">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="service-form-grid">
+              <label className="settings-field">
+                <span>Name</span>
+                <input value={coachEditor.name} onChange={(event) => updateCoachEditor("name", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Public name</span>
+                <input value={coachEditor.displayName} onChange={(event) => updateCoachEditor("displayName", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Short name</span>
+                <input value={coachEditor.shortName ?? ""} onChange={(event) => updateCoachEditor("shortName", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Email</span>
+                <input value={coachEditor.email} onChange={(event) => updateCoachEditor("email", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Phone</span>
+                <input value={coachEditor.phone ?? ""} onChange={(event) => updateCoachEditor("phone", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Photo URL</span>
+                <input value={coachEditor.photoUrl ?? ""} onChange={(event) => updateCoachEditor("photoUrl", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Default location</span>
+                <select
+                  value={coachEditor.defaultLocationId || defaultLocationId(locations)}
+                  onChange={(event) => updateCoachEditor("defaultLocationId", event.target.value)}
+                >
+                  {activeLocationList.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.shortName || location.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="settings-field">
+                <span>Sort order</span>
+                <input
+                  value={coachEditor.sortOrder ?? 0}
+                  inputMode="numeric"
+                  onChange={(event) => updateCoachEditor("sortOrder", Number(event.target.value))}
+                  type="text"
+                />
+              </label>
+            </div>
+            <label className="settings-field">
+              <span>Bio</span>
+              <textarea value={coachEditor.bio ?? ""} onChange={(event) => updateCoachEditor("bio", event.target.value)} rows={3} />
+            </label>
+            <div className="service-form-row">
+              <label className="settings-toggle">
+                <input
+                  checked={coachEditor.active !== false && coachEditor.archived !== true}
+                  onChange={(event) => {
+                    updateCoachEditor("active", event.target.checked);
+                    updateCoachEditor("archived", !event.target.checked);
+                  }}
+                  type="checkbox"
+                />
+                <span>Active</span>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  checked={coachEditor.isDefault === true}
+                  onChange={(event) => updateCoachEditor("isDefault", event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Default coach</span>
+              </label>
+            </div>
+            <div className="settings-field">
+              <span>Assigned locations</span>
+              <div className="booking-screen-list">
+                {activeLocationList.map((location) => (
+                  <label key={location.id}>
+                    <input
+                      checked={(coachEditor.assignedLocationIds ?? []).includes(location.id)}
+                      onChange={(event) => {
+                        const current = coachEditor.assignedLocationIds ?? [];
+                        updateCoachEditor(
+                          "assignedLocationIds",
+                          event.target.checked
+                            ? Array.from(new Set([...current, location.id]))
+                            : current.filter((id) => id !== location.id),
+                        );
+                      }}
+                      type="checkbox"
+                    />
+                    <span>{location.shortName || location.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <button className="primary-button settings-save" onClick={saveEditedCoach} type="button">
+              {coachSaveState === "saving"
+                ? "Saving"
+                : coachSaveState === "saved"
+                  ? "Saved"
+                  : coachSaveState === "error"
+                    ? "Not saved"
+                    : "Save Coach"}
+            </button>
+          </article>
+        )}
+
+        <div className="service-list" aria-label="Coaches">
+          {coachProfiles.map((coach) => (
+            <article className={`service-row ${coach.active && !coach.archived ? "" : "is-archived"}`} key={coach.id}>
+              <button className="service-row-main" onClick={() => editCoach(coach)} type="button">
+                <span>{coach.isDefault ? "Default · " : ""}{coach.active && !coach.archived ? "Active" : "Archived"}</span>
+                <strong>{coach.displayName || coach.name}</strong>
+                {coach.email && <em>{coach.email}</em>}
+                <em>
+                  Assigned to {(coach.assignedLocationIds ?? []).length || 0} location{(coach.assignedLocationIds ?? []).length === 1 ? "" : "s"}
+                </em>
+              </button>
+              <div className="service-row-meta">
+                <strong>{coach.shortName || coach.name}</strong>
+                <span>{coach.phone || "No phone"}</span>
+              </div>
+              <div className="service-row-actions">
+                {!coach.isDefault && coach.active && !coach.archived ? (
+                  <button className="outline-button service-action-button" onClick={() => makeDefaultCoach(coach)} type="button">
+                    <Check size={15} />
+                    <span>Default</span>
+                  </button>
+                ) : null}
+                {coach.archived || !coach.active ? (
+                  <button className="outline-button service-action-button" onClick={() => restoreCoach(coach)} type="button">
+                    <RefreshCw size={15} />
+                    <span>Restore</span>
+                  </button>
+                ) : (
+                  <button className="outline-button service-action-button" onClick={() => archiveCoach(coach)} type="button">
                     <Archive size={15} />
                     <span>Archive</span>
                   </button>
@@ -11850,6 +12168,18 @@ function App() {
                 <ScissorsLineDashed size={16} />
                 Lesson Setup
               </button>
+              {isAdminUser ? (
+                <button
+                  className={settingsTab === "coaches" ? "active" : ""}
+                  onClick={() => setSettingsTab("coaches")}
+                  role="tab"
+                  aria-selected={settingsTab === "coaches"}
+                  type="button"
+                >
+                  <User size={16} />
+                  Coaches
+                </button>
+              ) : null}
               <button
                 className={settingsTab === "availability" ? "active" : ""}
                 onClick={() => setSettingsTab("availability")}
@@ -11924,6 +12254,7 @@ function App() {
 
             <div className={`settings-grid settings-tab-${settingsTab}`}>
               {servicesSettingsPanel}
+              {isAdminUser ? coachesSettingsPanel : null}
               {locationsSettingsPanel}
               {availabilitySettingsPanel}
               {bookingSettingsPanel}

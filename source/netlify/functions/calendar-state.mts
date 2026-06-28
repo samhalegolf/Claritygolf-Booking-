@@ -450,12 +450,14 @@ function defaultCoachProfileFromAccount(account: Record<string, unknown>) {
     id: cleanSlug(account?.id, DEFAULT_COACH_ID),
     name: cleanString(account?.coachName, "Sam Hale", 120),
     displayName: cleanString(account?.coachName, "Sam Hale", 120),
+    shortName: "Sam",
     email: cleanString(account?.contactEmail, "", 180),
     active: true,
     archived: false,
     isDefault: true,
     bookable: true,
     assignedLocationIds: ["default-location"],
+    defaultLocationId: "default-location",
     sortOrder: 0,
   };
 }
@@ -469,11 +471,19 @@ function normalizeCoachProfiles(rawProfiles: any, account: Record<string, unknow
     id: cleanSlug(raw?.id, index === 0 ? fallback.id : `coach-${index + 1}`),
     name: cleanString(raw?.name, fallback.name, 120),
     displayName: cleanString(raw?.displayName, raw?.name || fallback.displayName, 120),
+    shortName: cleanString(raw?.shortName, raw?.name || fallback.displayName, 60),
     email: cleanString(raw?.email, fallback.email, 180),
+    phone: cleanString(raw?.phone, "", 80) || undefined,
+    bio: cleanString(raw?.bio, "", 600) || undefined,
+    photoUrl: cleanUrl(raw?.photoUrl, "") || undefined,
     active: raw?.active !== false,
     archived: raw?.archived === true,
     isDefault: index === 0 ? raw?.isDefault !== false : raw?.isDefault === true,
     bookable: raw?.bookable !== false,
+    assignedLocationIds: Array.isArray(raw?.assignedLocationIds)
+      ? raw.assignedLocationIds.map((id: unknown) => cleanSlug(id, "")).filter(Boolean)
+      : fallback.assignedLocationIds,
+    defaultLocationId: cleanSlug(raw?.defaultLocationId, raw?.assignedLocationIds?.[0] || fallback.assignedLocationIds?.[0] || "") || undefined,
     sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw.sortOrder)) : index,
   }));
 }
