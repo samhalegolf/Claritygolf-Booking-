@@ -15,6 +15,8 @@ const CUSTOM_GROUP_DEFAULTS = {
 };
 const ADMIN_NOTIFICATION_DEBOUNCE_MS = 30_000;
 const ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY = "adminNotificationDebounceQueueJson";
+const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
+const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const BOOKING_SCREEN_IDS = new Set([
   "main",
@@ -538,11 +540,20 @@ function cleanCustomGroupData(value: any) {
   };
 }
 
+function isCancelledGroupSessionLike(item: any) {
+  return (
+    item?.kind === "block" &&
+    Boolean(item?.service_id || item?.serviceId) &&
+    (item?.note === CANCELLED_GROUP_SESSION_NOTE || item?.title === CANCELLED_GROUP_SESSION_TITLE)
+  );
+}
+
 function rowToItem(row: any) {
   const status = ["completed", "cancelled", "no_show"].includes(row.status)
     ? row.status
     : "booked";
   const customGroup = cleanCustomGroupData(row.custom_group);
+  const cancelledGroupSession = isCancelledGroupSessionLike(row);
   return {
     id: row.id,
     kind: row.kind,
@@ -556,13 +567,15 @@ function rowToItem(row: any) {
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
-    status,
+    status: cancelledGroupSession ? "cancelled" : status,
+    ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
     ...(customGroup || {}),
   };
 }
 
 function itemToRow(item: any) {
   const kind = item?.kind === "block" ? "block" : "appointment";
+  const cancelledGroupSession = isCancelledGroupSessionLike({ ...item, kind });
   const customGroup = cleanCustomGroupData({
     customGroup: item?.customGroup,
     attendees: item?.attendees,
@@ -576,18 +589,22 @@ function itemToRow(item: any) {
     start: Math.max(0, Math.min(1440, Number(item?.start ?? 0))),
     duration: Math.max(15, Math.min(720, Number(item?.duration ?? 30))),
     service_id: cleanString(item?.serviceId, "", 140) || null,
-    client: cleanString(item?.client, "", 160) || null,
-    title: cleanString(item?.title, item?.client || "Booking", 160),
-    phone: cleanString(item?.phone, "", 80) || null,
-    email: cleanString(item?.email, "", 180).toLowerCase() || null,
-    note: cleanString(item?.note, "", 1200) || null,
+    client: cancelledGroupSession ? null : cleanString(item?.client, "", 160) || null,
+    title: cancelledGroupSession
+      ? CANCELLED_GROUP_SESSION_TITLE
+      : cleanString(item?.title, item?.client || "Booking", 160),
+    phone: cancelledGroupSession ? null : cleanString(item?.phone, "", 80) || null,
+    email: cancelledGroupSession ? null : cleanString(item?.email, "", 180).toLowerCase() || null,
+    note: cancelledGroupSession ? CANCELLED_GROUP_SESSION_NOTE : cleanString(item?.note, "", 1200) || null,
     status:
-      item?.status === "completed" ||
-      item?.status === "cancelled" ||
-      item?.status === "no_show"
-        ? item.status
-        : "booked",
-    custom_group: customGroup,
+      cancelledGroupSession
+        ? "cancelled"
+        : item?.status === "completed" ||
+            item?.status === "cancelled" ||
+            item?.status === "no_show"
+          ? item.status
+          : "booked",
+    custom_group: cancelledGroupSession ? null : customGroup,
     created_at: nowIso(),
     updated_at: nowIso(),
   };
@@ -1132,6 +1149,13 @@ async function processAdminNotificationDebounce(
       }
 
       if (action === "cancelled" && previous) {
+        if (isAppointmentInPast(previous, timeZone)) {
+          if (existing) {
+            queueById.delete(id);
+            queueChanged = true;
+          }
+          continue;
+        }
         if (existing?.action === "booking") {
           queueById.delete(id);
           queueChanged = true;
@@ -1472,6 +1496,7 @@ export default async function handler(req: Request) {
           400,
         );
       }
+      if (!hasItemsPayload) return json(await writeState(body));
       const previousState = await readState();
       const nextState = await writeState(body);
       let notificationResults: any[] = [];

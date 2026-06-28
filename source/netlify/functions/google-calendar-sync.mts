@@ -276,6 +276,14 @@ function rowToItem(row: any) {
   };
 }
 
+function isCancelledGroupSessionItem(item: any) {
+  return (
+    item?.kind === "block" &&
+    Boolean(item?.serviceId || item?.service_id) &&
+    (item?.note === "__cancelled_group_session__" || item?.title === "Cancelled group session")
+  );
+}
+
 function serviceName(serviceId: string, services: any[]) {
   return services.find((service) => service?.id === serviceId)?.name || "Golf Lesson";
 }
@@ -419,7 +427,7 @@ async function calendarSyncPayload() {
   const settings = settingMap(settingsRows);
   return {
     settings,
-    items: itemRows.map(rowToItem),
+    items: itemRows.map(rowToItem).filter((item) => !isCancelledGroupSessionItem(item)),
     services: parseJson(settings.servicesJson, defaultServices),
   };
 }

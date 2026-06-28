@@ -15,6 +15,8 @@ const sessionDays = 7;
 const passwordResetMinutes = 30;
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
+const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
+const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
 const CUSTOM_GROUP_DEFAULTS = {
   baseParticipants: 3,
   basePrice: 200,
@@ -1143,6 +1145,7 @@ function rowToItem(row) {
     ? row.status
     : "booked";
   const customGroup = cleanCustomGroupData(row.custom_group);
+  const cancelledGroupSession = isCancelledGroupSessionLike(row);
   return {
     id: row.id,
     kind: row.kind,
@@ -1156,10 +1159,19 @@ function rowToItem(row) {
 	    phone: row.phone || "",
 	    email: row.email || "",
 	    note: row.note || "",
-    status: status,
+    status: cancelledGroupSession ? "cancelled" : status,
+    ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
     ...(customGroup || {}),
 	  };
 	}
+
+function isCancelledGroupSessionLike(item) {
+  return (
+    item?.kind === "block" &&
+    Boolean(item?.service_id || item?.serviceId) &&
+    (item?.note === CANCELLED_GROUP_SESSION_NOTE || item?.title === CANCELLED_GROUP_SESSION_TITLE)
+  );
+}
 
 function cleanCalendarItem(item) {
   if (!item || typeof item !== "object") return null;
@@ -1184,6 +1196,7 @@ function cleanCalendarItem(item) {
     attendees: item.attendees,
     calculatedPrice: item.calculatedPrice,
   });
+  const cancelledGroupSession = isCancelledGroupSessionLike({ ...item, kind });
   return {
     id: cleanString(item.id, `${kind}-${Date.now()}`),
     kind,
@@ -1192,18 +1205,22 @@ function cleanCalendarItem(item) {
     start,
     duration,
     serviceId: cleanString(item.serviceId),
-    client: cleanString(item.client),
-    title: cleanString(item.title, kind === "block" ? "Busy" : "Appointment"),
-    phone: cleanString(item.phone),
-    email: cleanString(item.email),
-    note: cleanString(item.note),
+    client: cancelledGroupSession ? "" : cleanString(item.client),
+    title: cancelledGroupSession
+      ? CANCELLED_GROUP_SESSION_TITLE
+      : cleanString(item.title, kind === "block" ? "Busy" : "Appointment"),
+    phone: cancelledGroupSession ? "" : cleanString(item.phone),
+    email: cancelledGroupSession ? "" : cleanString(item.email),
+    note: cancelledGroupSession ? CANCELLED_GROUP_SESSION_NOTE : cleanString(item.note),
     status:
-      item.status === "completed" ||
-      item.status === "cancelled" ||
-      item.status === "no_show"
-        ? item.status
-        : "booked",
-    ...(customGroup || {}),
+      cancelledGroupSession
+        ? "cancelled"
+        : item.status === "completed" ||
+            item.status === "cancelled" ||
+            item.status === "no_show"
+          ? item.status
+          : "booked",
+    ...(cancelledGroupSession ? {} : customGroup || {}),
   };
 }
 
