@@ -2947,6 +2947,12 @@ function App() {
   const [hasMoved, setHasMoved] = useState(false);
   const initialRescheduleLoginRef = useRef<SavedRescheduleLogin | null>(getInitialRescheduleLogin());
   const isAdminUser = currentAppUser.role === "admin";
+  useEffect(() => {
+    if (isAdminUser) return;
+    if (["coaches", "locations", "experience", "account", "branding", "integrations", "data"].includes(settingsTab)) {
+      setSettingsTab("services");
+    }
+  }, [isAdminUser, settingsTab]);
   const attemptedSavedRescheduleRef = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
@@ -12200,62 +12206,66 @@ function App() {
                 <MapPin size={16} />
                 Locations
               </button>
-              <button
-                className={settingsTab === "experience" ? "active" : ""}
-                onClick={() => setSettingsTab("experience")}
-                role="tab"
-                aria-selected={settingsTab === "experience"}
-                type="button"
-              >
-                <Eye size={16} />
-                Customer Experience
-              </button>
-              <button
-                className={settingsTab === "account" ? "active" : ""}
-                onClick={() => setSettingsTab("account")}
-                role="tab"
-                aria-selected={settingsTab === "account"}
-                type="button"
-              >
-                <User size={16} />
-                Coach Account
-              </button>
-              <button
-                className={settingsTab === "branding" ? "active" : ""}
-                onClick={() => setSettingsTab("branding")}
-                role="tab"
-                aria-selected={settingsTab === "branding"}
-                type="button"
-              >
-                <Palette size={16} />
-                Coach Branding
-              </button>
-              <button
-                className={settingsTab === "integrations" ? "active" : ""}
-                onClick={() => setSettingsTab("integrations")}
-                role="tab"
-                aria-selected={settingsTab === "integrations"}
-                type="button"
-              >
-                <KeyRound size={16} />
-                Integrations
-              </button>
-              <button
-                className={settingsTab === "data" ? "active" : ""}
-                onClick={() => setSettingsTab("data")}
-                role="tab"
-                aria-selected={settingsTab === "data"}
-                type="button"
-              >
-                <Upload size={16} />
-                Data
-              </button>
+              {isAdminUser ? (
+                <>
+                  <button
+                    className={settingsTab === "experience" ? "active" : ""}
+                    onClick={() => setSettingsTab("experience")}
+                    role="tab"
+                    aria-selected={settingsTab === "experience"}
+                    type="button"
+                  >
+                    <Eye size={16} />
+                    Customer Experience
+                  </button>
+                  <button
+                    className={settingsTab === "account" ? "active" : ""}
+                    onClick={() => setSettingsTab("account")}
+                    role="tab"
+                    aria-selected={settingsTab === "account"}
+                    type="button"
+                  >
+                    <User size={16} />
+                    Coach Account
+                  </button>
+                  <button
+                    className={settingsTab === "branding" ? "active" : ""}
+                    onClick={() => setSettingsTab("branding")}
+                    role="tab"
+                    aria-selected={settingsTab === "branding"}
+                    type="button"
+                  >
+                    <Palette size={16} />
+                    Coach Branding
+                  </button>
+                  <button
+                    className={settingsTab === "integrations" ? "active" : ""}
+                    onClick={() => setSettingsTab("integrations")}
+                    role="tab"
+                    aria-selected={settingsTab === "integrations"}
+                    type="button"
+                  >
+                    <KeyRound size={16} />
+                    Integrations
+                  </button>
+                  <button
+                    className={settingsTab === "data" ? "active" : ""}
+                    onClick={() => setSettingsTab("data")}
+                    role="tab"
+                    aria-selected={settingsTab === "data"}
+                    type="button"
+                  >
+                    <Upload size={16} />
+                    Data
+                  </button>
+                </>
+              ) : null}
             </div>
 
             <div className={`settings-grid settings-tab-${settingsTab}`}>
               {servicesSettingsPanel}
               {isAdminUser ? coachesSettingsPanel : null}
-              {locationsSettingsPanel}
+              {isAdminUser ? locationsSettingsPanel : null}
               {availabilitySettingsPanel}
               {bookingSettingsPanel}
               <article className="data-card notification-card account-card settings-section settings-account settings-branding">
