@@ -778,6 +778,8 @@ type QuickCreateState = {
   start: number;
   x: number;
   y: number;
+  coachId?: string;
+  locationId?: string;
   serviceId: string;
   phone: string;
   email: string;
@@ -4747,6 +4749,21 @@ function App() {
     return { day, start, x, y };
   }
 
+  function coachIdFromLocationCalendarSlot(slot: { day: number; x: number }) {
+    if (effectiveCalendarPerspective !== "location" || !locationCalendarCoachGroups.length) return undefined;
+    const grid = gridRef.current;
+    if (!grid) return undefined;
+    const rect = grid.getBoundingClientRect();
+    const dayWidth = rect.width / DAY_COUNT;
+    const xWithinDay = clamp(slot.x - slot.day * dayWidth, 0, Math.max(0, dayWidth - 1));
+    const coachIndex = clamp(
+      Math.floor((xWithinDay / dayWidth) * locationCalendarCoachGroups.length),
+      0,
+      locationCalendarCoachGroups.length - 1,
+    );
+    return locationCalendarCoachGroups[coachIndex]?.coachId;
+  }
+
   function isClientInsideGrid(clientX: number, clientY: number) {
     const grid = gridRef.current;
     if (!grid) return false;
@@ -5107,13 +5124,19 @@ function App() {
     return !isSlotInPast(candidate) || window.confirm(PAST_ADMIN_LESSON_WARNING);
   }
 
-  function isValidBlockSlot(candidate: SlotCandidate, ignoreId?: string) {
+  function isValidBlockSlot(
+    candidate: SlotCandidate,
+    ignoreId?: string,
+    options: { coachId?: string; locationId?: string; locationOnly?: boolean } = {},
+  ) {
     if (candidate.duration < SNAP_MINUTES) return false;
     if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
     const candidateCoachId =
-      effectiveCalendarPerspective === "location" ? undefined : selectedCalendarCoachId || activeCoachId;
+      options.locationOnly
+        ? undefined
+        : options.coachId ?? (effectiveCalendarPerspective === "location" ? undefined : selectedCalendarCoachId || activeCoachId);
     const candidateLocationId =
-      effectiveCalendarPerspective === "location" ? selectedCalendarLocationId : defaultLocationId(locations);
+      options.locationId ?? (effectiveCalendarPerspective === "location" ? selectedCalendarLocationId : defaultLocationId(locations));
     const candidateItem: Partial<CalendarItem> = {
       kind: "block",
       coachId: candidateCoachId,
@@ -5292,6 +5315,8 @@ function App() {
       start: slot.start,
       x: event.clientX,
       y: event.clientY,
+      coachId: coachIdFromLocationCalendarSlot(slot),
+      locationId: effectiveCalendarPerspective === "location" ? selectedCalendarLocationId : undefined,
       serviceId: "",
       phone: "",
       email: "",
@@ -5488,8 +5513,9 @@ function App() {
         return;
       }
       const previous = items;
-      const blockCoachId = currentAppUser.coachId || defaultCoachId(coachProfiles);
-      const blockLocationId = defaultLocationId(locations);
+      const blockLocationOnly = effectiveCalendarPerspective === "location";
+      const blockCoachId = blockLocationOnly ? undefined : selectedCalendarCoachId || currentAppUser.coachId || defaultCoachId(coachProfiles);
+      const blockLocationId = blockLocationOnly ? selectedCalendarLocationId : defaultLocationId(locations);
       const newBlock: CalendarItem = {
         id: `block-${Date.now()}`,
         kind: "block",
@@ -5499,12 +5525,12 @@ function App() {
         duration: activeDraft.duration,
         coachId: blockCoachId,
         locationId: blockLocationId,
-        coach: bookingCoachSnapshotFor(blockCoachId, coachProfiles, coachAccount),
+        coach: blockCoachId ? bookingCoachSnapshotFor(blockCoachId, coachProfiles, coachAccount) : undefined,
         location: cleanBookingLocationSnapshot(
           locationSnapshot(locationById(locations, blockLocationId) ?? defaultLocationFromCoachAccount(coachAccount)),
         ),
-        title: "Busy",
-        note: "Blocked from calendar drag",
+        title: blockLocationOnly ? "Location unavailable" : "Busy",
+        note: blockLocationOnly ? "Location-wide block from calendar drag" : "Blocked from calendar drag",
       };
       setItems([...items, newBlock]);
       closeCalendarDetails();
@@ -5787,27 +5813,31 @@ function App() {
     setQuickClientSearch("");
   }
 
-  function createBlockFromQuick() {
+  function createBlockFromQuick(scope: "coach-location" | "location" = "coach-location") {
     if (!quickCreate) return;
     if (!requireLiveDatabase("create blocks")) return;
+    const locationOnly = effectiveCalendarPerspective === "location" && scope === "location";
+    const blockCoachId =
+      locationOnly
+        ? undefined
+        : quickCreate.coachId || selectedCalendarCoachId || currentAppUser.coachId || defaultCoachId(coachProfiles);
+    const blockLocationId = quickCreate.locationId || selectedCalendarLocationId || defaultLocationId(locations);
     const candidate = { week: activeWeek, day: quickCreate.day, start: quickCreate.start, duration: 30 };
-    if (!isValidBlockSlot(candidate)) {
+    if (!isValidBlockSlot(candidate, undefined, { coachId: blockCoachId, locationId: blockLocationId, locationOnly })) {
       setToast({ message: "That block would overlap with another calendar item." });
       return;
     }
     const previous = items;
-    const blockCoachId = currentAppUser.coachId || defaultCoachId(coachProfiles);
-    const blockLocationId = defaultLocationId(locations);
     const item: CalendarItem = {
       id: `block-${Date.now()}`,
       kind: "block",
-      title: "Busy",
+      title: locationOnly ? "Location unavailable" : "Coach unavailable",
       coachId: blockCoachId,
       locationId: blockLocationId,
-      coach: bookingCoachSnapshotFor(blockCoachId, coachProfiles, coachAccount),
+      coach: blockCoachId ? bookingCoachSnapshotFor(blockCoachId, coachProfiles, coachAccount) : undefined,
       location: cleanBookingLocationSnapshot(locationSnapshot(locationById(locations, blockLocationId) ?? defaultLocationFromCoachAccount(coachAccount))),
       ...candidate,
-      note: "Quick block",
+      note: locationOnly ? "Location-wide quick block" : "Coach-location quick block",
     };
     setItems([...items, item]);
     closeCalendarDetails();
@@ -10870,10 +10900,25 @@ function App() {
                         </span>
                       </button>
                     ))}
-                    <button onClick={createBlockFromQuick}>
-                      <Clock size={16} />
-                      Block 30 minutes
-                    </button>
+                    {effectiveCalendarPerspective === "location" ? (
+                      <>
+                        <button onClick={() => createBlockFromQuick("location")}>
+                          <Clock size={16} />
+                          Block this location
+                        </button>
+                        {quickCreate.coachId ? (
+                          <button onClick={() => createBlockFromQuick("coach-location")}>
+                            <Clock size={16} />
+                            Block this coach
+                          </button>
+                        ) : null}
+                      </>
+                    ) : (
+                      <button onClick={() => createBlockFromQuick("coach-location")}>
+                        <Clock size={16} />
+                        Block 30 minutes
+                      </button>
+                    )}
                   </>
                 ) : (
                   <div className="quick-create-form">
