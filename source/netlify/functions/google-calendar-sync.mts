@@ -304,12 +304,15 @@ function rowToItem(row: any) {
     day: Number(row.day ?? 0),
     start: Number(row.start ?? 0),
     duration: Number(row.duration ?? 0),
+    coachId: row.coach_id || "",
+    locationId: row.location_id || cleanBookingLocationSnapshot(row.location)?.locationId || "",
     serviceId: row.service_id || "",
     client: row.client || "",
     title: row.title || row.client || "Booking",
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
+    coach: row.coach || undefined,
     location: cleanBookingLocationSnapshot(row.location),
   };
 }
@@ -343,9 +346,10 @@ function resolveLocation(item: any, service: any, locations: any[], account: Ret
   const activeLocations = Array.isArray(locations)
     ? locations.filter((location) => location?.active !== false && location?.archived !== true)
     : [];
+  const byItem = activeLocations.find((location) => location.id && location.id === item?.locationId);
   const byService = activeLocations.find((location) => location.id && location.id === service?.locationId);
   const fallback = activeLocations.find((location) => location.isDefault) || activeLocations[0] || defaultLocationFromAccount(account);
-  return cleanBookingLocationSnapshot(item.location, byService || fallback);
+  return cleanBookingLocationSnapshot(item.location, byItem || byService || fallback);
 }
 
 function dateForSlot(week: number, day: number) {

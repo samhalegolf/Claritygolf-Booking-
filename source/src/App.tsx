@@ -110,6 +110,7 @@ type CalendarItem = {
   id: string;
   kind: "appointment" | "block";
   coachId?: string;
+  locationId?: string;
   week?: number;
   day: number;
   start: number;
@@ -124,6 +125,7 @@ type CalendarItem = {
   email?: string;
   note?: string;
   location?: BookingLocationSnapshot;
+  coach?: BookingCoachSnapshot;
   status?: BookingStatus;
   customGroup?: true;
   attendees?: CustomGroupAttendee[];
@@ -156,6 +158,14 @@ type BookingLocationSnapshot = {
   timezone?: string;
 };
 
+type BookingCoachSnapshot = {
+  coachId?: string;
+  name: string;
+  displayName?: string;
+  email?: string;
+  phone?: string;
+};
+
 type PendingBooking = {
   id: string;
   client: string;
@@ -179,6 +189,7 @@ type PlacementAnimation = {
 };
 
 type CalendarViewMode = "full" | "am" | "pm";
+type CalendarPerspective = "all" | "coach" | "location";
 
 type DockFlight = PendingBooking & {
   fromX?: number;
@@ -1914,6 +1925,62 @@ function defaultCoachId(coaches: CoachProfile[]) {
   return coaches.find((coach) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || "";
 }
 
+function coachById(coaches: CoachProfile[], id?: string) {
+  if (!id) return undefined;
+  return coaches.find((coach) => coach.id === id);
+}
+
+function coachSnapshot(profile: CoachProfile): BookingCoachSnapshot {
+  return {
+    coachId: profile.id,
+    name: profile.name,
+    displayName: profile.displayName,
+    email: profile.email,
+    phone: profile.phone,
+  };
+}
+
+function bookingCoachSnapshotFor(
+  coachId: string | undefined,
+  coaches: CoachProfile[],
+  account: Partial<CoachAccount>,
+): BookingCoachSnapshot {
+  const profile =
+    coachById(coaches, coachId) ??
+    coachById(coaches, defaultCoachId(coaches)) ??
+    defaultCoachProfileFromAccount(account);
+  return coachSnapshot(profile);
+}
+
+function cleanBookingCoachSnapshot(
+  raw?: Partial<BookingCoachSnapshot>,
+  fallback?: BookingCoachSnapshot,
+): BookingCoachSnapshot | undefined {
+  const source = raw?.name ? raw : fallback;
+  if (!source?.name) return undefined;
+  return {
+    coachId: typeof source.coachId === "string" ? cleanSlug(source.coachId, "") || undefined : undefined,
+    name: String(source.name).trim().slice(0, 120),
+    displayName:
+      typeof source.displayName === "string" && source.displayName.trim()
+        ? source.displayName.trim().slice(0, 120)
+        : undefined,
+    email: cleanEmail(source.email, "") || undefined,
+    phone: typeof source.phone === "string" && source.phone.trim() ? source.phone.trim().slice(0, 80) : undefined,
+  };
+}
+
+function calendarItemCoach(
+  item: Partial<CalendarItem> | undefined,
+  coaches: CoachProfile[],
+  account: Partial<CoachAccount>,
+): BookingCoachSnapshot {
+  return (
+    cleanBookingCoachSnapshot(item?.coach) ??
+    bookingCoachSnapshotFor(item?.coachId, coaches, account)
+  );
+}
+
 function cleanLocation(raw?: Partial<Location>, fallback?: Location, index = 0): Location {
   const base = fallback ?? defaultLocationFromCoachAccount();
   const name =
@@ -2056,6 +2123,9 @@ function calendarItemLocation(
 ): BookingLocationSnapshot {
   return (
     cleanBookingLocationSnapshot(item?.location) ??
+    cleanBookingLocationSnapshot(
+      item?.locationId ? locationSnapshot(locationById(locations, item.locationId) ?? serviceLocation(service, locations, account)) : undefined,
+    ) ??
     bookingLocationSnapshotFor(service, locations, account)
   );
 }
@@ -2177,6 +2247,7 @@ function calendarItemsFingerprint(itemList?: Partial<CalendarItem>[]) {
         start: Number(item.start ?? 0),
         duration: Number(item.duration ?? 0),
         coachId: item.coachId || "",
+        locationId: item.locationId || "",
         serviceId: item.serviceId || "",
         client: item.client || "",
         title: item.title || "",
@@ -2184,6 +2255,7 @@ function calendarItemsFingerprint(itemList?: Partial<CalendarItem>[]) {
         email: (item.email || "").toLowerCase(),
         note: item.note || "",
         location: item.location || null,
+        coach: item.coach || null,
         status: item.status || "booked",
         customGroup: item.customGroup === true,
         attendees: Array.isArray(item.attendees) ? item.attendees : [],
@@ -2817,6 +2889,9 @@ function App() {
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
+  const [calendarPerspective, setCalendarPerspective] = useState<CalendarPerspective>("all");
+  const [calendarCoachFilterId, setCalendarCoachFilterId] = useState("");
+  const [calendarLocationFilterId, setCalendarLocationFilterId] = useState("");
   const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarSyncStatus>(defaultGoogleCalendarStatus);
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
   const [notificationSettings, setNotificationSettings] =
@@ -2897,7 +2972,40 @@ function App() {
   const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek]);
   const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
   const weekItems = useMemo(() => items.filter((item) => itemWeek(item) === activeWeek), [activeWeek, items]);
-  const visibleWeekItems = useMemo(() => weekItems.filter((item) => !isCancelledGroupSessionItem(item)), [weekItems]);
+  const selectedCalendarCoachId = calendarCoachFilterId || defaultCoachId(coachProfiles);
+  const selectedCalendarLocationId = calendarLocationFilterId || defaultLocationId(locations);
+  const visibleWeekItems = useMemo(
+    () =>
+      weekItems.filter((item) => {
+        if (isCancelledGroupSessionItem(item)) return false;
+        if (calendarPerspective === "coach") {
+          return (item.coachId || defaultCoachId(coachProfiles)) === selectedCalendarCoachId;
+        }
+        if (calendarPerspective === "location") {
+          const service = itemService(item, services);
+          const resolvedLocation = calendarItemLocation(item, service, locations, coachAccount);
+          return (item.locationId || resolvedLocation.locationId || defaultLocationId(locations)) === selectedCalendarLocationId;
+        }
+        return true;
+      }),
+    [
+      calendarPerspective,
+      coachAccount,
+      coachProfiles,
+      locations,
+      selectedCalendarCoachId,
+      selectedCalendarLocationId,
+      services,
+      weekItems,
+    ],
+  );
+  const locationCalendarCoachGroups = useMemo(() => {
+    if (calendarPerspective !== "location") return [];
+    const coachIds = new Set(visibleWeekItems.map((item) => item.coachId || defaultCoachId(coachProfiles)));
+    return Array.from(coachIds)
+      .map((coachId) => bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount))
+      .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
+  }, [calendarPerspective, coachAccount, coachProfiles, visibleWeekItems]);
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
   const blocks = weekItems.filter((item) => item.kind === "block").length;
   const calendarDisplayBounds = useMemo(() => {
@@ -4218,6 +4326,8 @@ function App() {
       return;
     }
     const previous = items;
+    const coachId = selectedGroupSessionService?.coachId || defaultCoachId(coachProfiles);
+    const location = bookingLocationSnapshotFor(selectedGroupSessionService, locations, coachAccount);
     const cancellationRecord: CalendarItem = {
       id: `group-session-cancel-${selectedGroupSession.serviceId}-${selectedGroupSession.week}-${selectedGroupSession.day}-${selectedGroupSession.start}`,
       kind: "block",
@@ -4226,7 +4336,10 @@ function App() {
       start: selectedGroupSession.start,
       duration: selectedGroupSession.duration,
       serviceId: selectedGroupSession.serviceId,
-      coachId: selectedGroupSessionService?.coachId || defaultCoachId(coachProfiles),
+      coachId,
+      locationId: location.locationId,
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
+      location,
       title: CANCELLED_GROUP_SESSION_TITLE,
       note: CANCELLED_GROUP_SESSION_NOTE,
       readOnly: true,
@@ -5115,6 +5228,8 @@ function App() {
         return;
       }
       const previous = items;
+      const blockCoachId = currentAppUser.coachId || defaultCoachId(coachProfiles);
+      const blockLocationId = defaultLocationId(locations);
       const newBlock: CalendarItem = {
         id: `block-${Date.now()}`,
         kind: "block",
@@ -5122,7 +5237,12 @@ function App() {
         day: activeDraft.day,
         start: activeDraft.start,
         duration: activeDraft.duration,
-        coachId: currentAppUser.coachId || defaultCoachId(coachProfiles),
+        coachId: blockCoachId,
+        locationId: blockLocationId,
+        coach: bookingCoachSnapshotFor(blockCoachId, coachProfiles, coachAccount),
+        location: cleanBookingLocationSnapshot(
+          locationSnapshot(locationById(locations, blockLocationId) ?? defaultLocationFromCoachAccount(coachAccount)),
+        ),
         title: "Busy",
         note: "Blocked from calendar drag",
       };
@@ -5149,6 +5269,8 @@ function App() {
         clearGesture();
         return;
       }
+      const coachId = service.coachId || defaultCoachId(coachProfiles);
+      const location = bookingLocationSnapshotFor(service, locations, coachAccount);
       const item: CalendarItem = {
         id: `appt-${Date.now()}`,
         kind: "appointment",
@@ -5159,11 +5281,13 @@ function App() {
         title: session.booking.title,
         client: session.booking.client,
         serviceId: session.booking.serviceId,
-        coachId: service.coachId || defaultCoachId(coachProfiles),
+        coachId,
+        locationId: location.locationId,
+        coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
         phone: session.booking.phone,
         email: session.booking.email,
         note: session.booking.note ?? "Placed from dock.",
-        location: bookingLocationSnapshotFor(service, locations, coachAccount),
+        location,
         customGroup: session.booking.customGroup,
         attendees: session.booking.attendees,
         calculatedPrice: session.booking.calculatedPrice,
@@ -5362,18 +5486,22 @@ function App() {
       return;
     }
     if (!confirmPastAdminLesson(candidate)) return;
+    const coachId = quickCreateService.coachId || defaultCoachId(coachProfiles);
+    const location = bookingLocationSnapshotFor(quickCreateService, locations, coachAccount);
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
       kind: "appointment",
       title: clientName,
       client: clientName,
       serviceId: quickCreateService.id,
-      coachId: quickCreateService.coachId || defaultCoachId(coachProfiles),
+      coachId,
+      locationId: location.locationId,
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
       ...candidate,
       phone: quickCreate.phone.trim(),
       email: quickCreate.email.trim(),
       note: quickCreate.note.trim(),
-      location: bookingLocationSnapshotFor(quickCreateService, locations, coachAccount),
+      location,
       ...(quickCreateIsCustomGroup
         ? {
             customGroup: true as const,
@@ -5408,11 +5536,16 @@ function App() {
       return;
     }
     const previous = items;
+    const blockCoachId = currentAppUser.coachId || defaultCoachId(coachProfiles);
+    const blockLocationId = defaultLocationId(locations);
     const item: CalendarItem = {
       id: `block-${Date.now()}`,
       kind: "block",
       title: "Busy",
-      coachId: currentAppUser.coachId || defaultCoachId(coachProfiles),
+      coachId: blockCoachId,
+      locationId: blockLocationId,
+      coach: bookingCoachSnapshotFor(blockCoachId, coachProfiles, coachAccount),
+      location: cleanBookingLocationSnapshot(locationSnapshot(locationById(locations, blockLocationId) ?? defaultLocationFromCoachAccount(coachAccount))),
       ...candidate,
       note: "Quick block",
     };
@@ -5436,18 +5569,22 @@ function App() {
     }
     if (!confirmPastAdminLesson(candidate)) return;
     const previous = items;
+    const coachId = service.coachId || defaultCoachId(coachProfiles);
+    const location = bookingLocationSnapshotFor(service, locations, coachAccount);
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
       kind: "appointment",
       title: "New client",
       client: "New client",
       serviceId,
-      coachId: service.coachId || defaultCoachId(coachProfiles),
+      coachId,
+      locationId: location.locationId,
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
       ...candidate,
       phone: "",
       email: "",
       note: "Admin-created inside blocked time.",
-      location: bookingLocationSnapshotFor(service, locations, coachAccount),
+      location,
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
     closeCalendarDetails();
@@ -5517,6 +5654,8 @@ function App() {
     }
     if (!confirmPastAdminLesson(candidate)) return false;
 
+    const coachId = service.coachId || defaultCoachId(coachProfiles);
+    const location = bookingLocationSnapshotFor(service, locations, coachAccount);
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
       kind: "appointment",
@@ -5527,11 +5666,13 @@ function App() {
       title: booking.title,
       client: booking.client,
       serviceId: booking.serviceId,
-      coachId: service.coachId || defaultCoachId(coachProfiles),
+      coachId,
+      locationId: location.locationId,
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
       phone: booking.phone,
       email: booking.email,
       note: booking.note ?? "Placed from dock.",
-      location: bookingLocationSnapshotFor(service, locations, coachAccount),
+      location,
       customGroup: booking.customGroup,
       attendees: booking.attendees,
       calculatedPrice: booking.calculatedPrice,
@@ -7562,6 +7703,10 @@ function App() {
       return;
     }
 
+    const bookingCoachId = bookingTargetService.coachId || defaultCoachId(coachProfiles);
+    const bookingLocation = bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount);
+    const bookingCoach = bookingCoachSnapshotFor(bookingCoachId, coachProfiles, coachAccount);
+
     if (isEmbedMode) {
       setBookingSubmitState("saving");
       setEmailNoticeVisible(false);
@@ -7578,7 +7723,10 @@ function App() {
             lastName,
             phone,
             email,
-            location: bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
+            coachId: bookingCoachId,
+            locationId: bookingLocation.locationId,
+            coach: bookingCoach,
+            location: bookingLocation,
             attendees: isCustomGroupBooking ? customGroupAttendees.map((attendee) => ({
               name: attendee.name,
               email: attendee.email || "",
@@ -7588,7 +7736,7 @@ function App() {
         const data = (await response.json()) as {
           message?: string;
           state?: { items?: CalendarItem[] };
-          appointment?: { id?: string; location?: BookingLocationSnapshot };
+          appointment?: { id?: string; location?: BookingLocationSnapshot; locationId?: string; coach?: BookingCoachSnapshot };
           notifications?: EmailSendResult[];
         };
         if (!response.ok) {
@@ -7612,7 +7760,7 @@ function App() {
           timeLabel: formatTime(bookingStart),
           email,
           phone,
-          location: data.appointment?.location ?? bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
+          location: data.appointment?.location ?? bookingLocation,
           notifications: confirmationNotifications,
         });
         setEmailNoticeVisible(confirmationNotifications.some((result) => result.channel === "client" && result.sent));
@@ -7632,13 +7780,15 @@ function App() {
       kind: "appointment",
       ...candidate,
       serviceId: bookingTargetService.id,
-      coachId: bookingTargetService.coachId || defaultCoachId(coachProfiles),
+      coachId: bookingCoachId,
+      locationId: bookingLocation.locationId,
+      coach: bookingCoach,
       client,
       title: client,
       phone,
       email,
       note: "Booked from public booking page.",
-      location: bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
+      location: bookingLocation,
       ...(isCustomGroupBooking
         ? {
             customGroup: true as const,
@@ -9680,6 +9830,46 @@ function App() {
                   {calendarViewButtonLabel}
                 </button>
                 <h2>{weekTitle}</h2>
+                <div className="calendar-scope-controls" aria-label="Calendar scope">
+                  <select
+                    value={calendarPerspective}
+                    onChange={(event) => setCalendarPerspective(event.target.value as CalendarPerspective)}
+                  >
+                    <option value="all">All calendars</option>
+                    <option value="coach">Coach calendar</option>
+                    <option value="location">Location calendar</option>
+                  </select>
+                  {calendarPerspective === "coach" ? (
+                    <select value={selectedCalendarCoachId} onChange={(event) => setCalendarCoachFilterId(event.target.value)}>
+                      {coachProfiles
+                        .filter((coach) => coach.active && !coach.archived && coach.bookable)
+                        .map((coach) => (
+                          <option key={coach.id} value={coach.id}>
+                            {coach.displayName || coach.name}
+                          </option>
+                        ))}
+                    </select>
+                  ) : null}
+                  {calendarPerspective === "location" ? (
+                    <>
+                      <select
+                        value={selectedCalendarLocationId}
+                        onChange={(event) => setCalendarLocationFilterId(event.target.value)}
+                      >
+                        {activeLocations(locations).map((location) => (
+                          <option key={location.id} value={location.id}>
+                            {location.shortName || location.name}
+                          </option>
+                        ))}
+                      </select>
+                      {locationCalendarCoachGroups.length ? (
+                        <span className="calendar-scope-note">
+                          Coaches: {locationCalendarCoachGroups.map((coach) => coach.displayName || coach.name).join(", ")}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
               </div>
               <div className={`calendar-save-pill ${calendarSaveStatus}`}>
                 <strong>
@@ -9778,8 +9968,20 @@ function App() {
                   const invalid = activeDraft ? !activeDraft.valid : false;
                   const top = calendarMinutesToTop(visibleItem.start);
                   const height = durationToHeight(visibleItem.duration);
-                  const width = 100 / DAY_COUNT;
-                  const left = item.day * width;
+                  const dayWidth = 100 / DAY_COUNT;
+                  const coachColumnCount =
+                    calendarPerspective === "location" ? Math.max(1, locationCalendarCoachGroups.length) : 1;
+                  const coachColumnIndex =
+                    calendarPerspective === "location"
+                      ? Math.max(
+                          0,
+                          locationCalendarCoachGroups.findIndex(
+                            (coach) => coach.coachId === (item.coachId || defaultCoachId(coachProfiles)),
+                          ),
+                        )
+                      : 0;
+                  const width = dayWidth / coachColumnCount;
+                  const left = item.day * dayWidth + coachColumnIndex * width;
                   const flyAnimation = placementAnimation?.itemId === item.id ? placementAnimation : null;
                   const itemNotifications = notificationsByAppointment.get(item.id) ?? [];
                   const latestClientEmail = itemNotifications.find((notification) => notification.kind.includes("client"));

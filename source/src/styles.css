@@ -2416,6 +2416,30 @@ button {
   line-height: 1.05;
 }
 
+.calendar-scope-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.calendar-scope-controls select {
+  min-height: 34px;
+  border: 1px solid #d3d1c8;
+  border-radius: 6px;
+  background: #fff;
+  color: #24231f;
+  font: inherit;
+  font-size: 13px;
+  padding: 0 30px 0 10px;
+}
+
+.calendar-scope-note {
+  color: #6e6b65;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .calendar-header-row {
   display: grid;
   grid-template-columns: 64px repeat(7, minmax(92px, 1fr));

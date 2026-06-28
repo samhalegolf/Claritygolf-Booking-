@@ -841,6 +841,41 @@ function defaultCoachId(coaches) {
   return coaches.find((coach) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || defaultCoachProfileFromAccount().id;
 }
 
+function coachById(coaches, id) {
+  if (!id) return null;
+  return (coaches || []).find((coach) => coach.id === id) || null;
+}
+
+function coachSnapshot(coach) {
+  return {
+    coachId: coach.id,
+    name: coach.name,
+    displayName: coach.displayName,
+    email: coach.email || undefined,
+    phone: coach.phone || undefined,
+  };
+}
+
+function bookingCoachSnapshotFor(coachId, coaches, account) {
+  const profile =
+    coachById(coaches, coachId) ||
+    coachById(coaches, defaultCoachId(coaches)) ||
+    defaultCoachProfileFromAccount(account);
+  return coachSnapshot(profile);
+}
+
+function cleanBookingCoachSnapshot(raw, fallback) {
+  const source = raw?.name ? raw : fallback;
+  if (!source?.name) return undefined;
+  return {
+    coachId: cleanSlug(source.coachId, "") || undefined,
+    name: cleanString(source.name, "", 120),
+    displayName: cleanString(source.displayName, "", 120) || undefined,
+    email: cleanEmail(source.email, "") || undefined,
+    phone: cleanString(source.phone, "", 80) || undefined,
+  };
+}
+
 function cleanLocation(raw = {}, fallback = defaultLocationFromCoachAccount(), index = 0) {
   const name = cleanString(raw?.name, fallback.name, 140);
   const shortName = cleanString(raw?.shortName, name, 80);
@@ -939,7 +974,15 @@ function bookingLocationSnapshotFor(service, locations, account) {
 }
 
 function calendarItemLocation(item, service, locations, account) {
-  return cleanBookingLocationSnapshot(item?.location) || bookingLocationSnapshotFor(service, locations, account);
+  return (
+    cleanBookingLocationSnapshot(item?.location) ||
+    cleanBookingLocationSnapshot(
+      item?.locationId
+        ? locationSnapshot(locationById(locations, item.locationId) || serviceLocation(service, locations, account))
+        : undefined,
+    ) ||
+    bookingLocationSnapshotFor(service, locations, account)
+  );
 }
 
 function bookingLocationDisplay(location) {
@@ -1045,12 +1088,14 @@ async function ensureCoreTables() {
       start INTEGER NOT NULL,
       duration INTEGER NOT NULL,
       coach_id TEXT,
+      location_id TEXT,
       service_id TEXT,
       client TEXT,
       title TEXT NOT NULL,
 	      phone TEXT,
 	      email TEXT,
       note TEXT,
+      coach JSONB,
       location JSONB,
       custom_group JSONB,
       status TEXT NOT NULL DEFAULT 'booked',
@@ -1060,6 +1105,8 @@ async function ensureCoreTables() {
 	  `;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach_id TEXT`;
+  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location_id TEXT`;
+  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach JSONB`;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location JSONB`;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
   await db().sql`
@@ -1376,12 +1423,14 @@ function rowToItem(row) {
     start: Number(row.start ?? 0),
     duration: Number(row.duration ?? 0),
     coachId: row.coach_id || defaultCoachProfileFromAccount().id,
+    locationId: row.location_id || cleanBookingLocationSnapshot(row.location)?.locationId || "",
     serviceId: row.service_id || "",
     client: row.client || "",
     title: row.title,
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
+    coach: cleanBookingCoachSnapshot(row.coach),
     location: cleanBookingLocationSnapshot(row.location),
     status: cancelledGroupSession ? "cancelled" : status,
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
@@ -1429,6 +1478,7 @@ function cleanCalendarItem(item) {
     start,
     duration,
     coachId: cleanSlug(item.coachId, defaultCoachProfileFromAccount().id),
+    locationId: cleanSlug(item.locationId || item.location?.locationId, ""),
     serviceId: cleanString(item.serviceId),
     client: cancelledGroupSession ? "" : cleanString(item.client),
     title: cancelledGroupSession
@@ -1437,6 +1487,7 @@ function cleanCalendarItem(item) {
     phone: cancelledGroupSession ? "" : cleanString(item.phone),
     email: cancelledGroupSession ? "" : cleanString(item.email),
     note: cancelledGroupSession ? CANCELLED_GROUP_SESSION_NOTE : cleanString(item.note),
+    coach: cancelledGroupSession ? undefined : cleanBookingCoachSnapshot(item.coach),
     location: cancelledGroupSession ? undefined : cleanBookingLocationSnapshot(item.location),
     status:
       cancelledGroupSession
@@ -1926,8 +1977,8 @@ async function writeItems(items, options = {}) {
     for (const item of cleanItems) {
       await client.query(
         `INSERT INTO calendar_items (
-          id, kind, week, day, start, duration, coach_id, service_id, client, title, phone, email, note, status, custom_group, location, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16::jsonb, NOW(), NOW())
+          id, kind, week, day, start, duration, coach_id, location_id, service_id, client, title, phone, email, note, status, custom_group, coach, location, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::jsonb, $18::jsonb, NOW(), NOW())
         ON CONFLICT (id) DO UPDATE SET
           kind = EXCLUDED.kind,
           week = EXCLUDED.week,
@@ -1935,6 +1986,7 @@ async function writeItems(items, options = {}) {
           start = EXCLUDED.start,
           duration = EXCLUDED.duration,
           coach_id = EXCLUDED.coach_id,
+          location_id = EXCLUDED.location_id,
           service_id = EXCLUDED.service_id,
           client = EXCLUDED.client,
           title = EXCLUDED.title,
@@ -1943,6 +1995,7 @@ async function writeItems(items, options = {}) {
           note = EXCLUDED.note,
           status = EXCLUDED.status,
           custom_group = EXCLUDED.custom_group,
+          coach = EXCLUDED.coach,
           location = EXCLUDED.location,
           updated_at = NOW()`,
         [
@@ -1953,6 +2006,7 @@ async function writeItems(items, options = {}) {
           item.start,
           item.duration,
           item.coachId || defaultCoachProfileFromAccount().id,
+          item.locationId || item.location?.locationId || "",
           item.serviceId || "",
           item.client || "",
           item.title,
@@ -1961,6 +2015,7 @@ async function writeItems(items, options = {}) {
           item.note || "",
           item.status || "booked",
           item.customGroup ? JSON.stringify(cleanCustomGroupData(item)) : null,
+          item.coach ? JSON.stringify(cleanBookingCoachSnapshot(item.coach)) : null,
           item.location ? JSON.stringify(cleanBookingLocationSnapshot(item.location)) : null,
         ],
       );
@@ -3674,21 +3729,29 @@ async function createPublicBooking(payload, context = null) {
       calculatedPrice: calculateCustomGroupPrice(service, participantCount),
     };
   }
+  const coachId = cleanSlug(payload?.coachId, service.coachId || defaultCoachId(state.coaches || []));
+  const location = cleanBookingLocationSnapshot(
+    payload?.location,
+    bookingLocationSnapshotFor(service, state.locations || [], state.account),
+  );
+  const coach = cleanBookingCoachSnapshot(
+    payload?.coach,
+    bookingCoachSnapshotFor(coachId, state.coaches || [], state.account),
+  );
   const appointment = {
     id: `appt-${Date.now()}`,
     kind: "appointment",
     ...slot,
-    coachId: service.coachId || defaultCoachProfileFromAccount(state.account).id,
+    coachId,
+    locationId: cleanSlug(payload?.locationId || location?.locationId || service.locationId, ""),
+    coach,
     serviceId: service.id,
     client,
     title: client,
     phone,
     email,
     note: "Booked from public booking page.",
-    location: cleanBookingLocationSnapshot(
-      payload?.location,
-      bookingLocationSnapshotFor(service, state.locations || [], state.account),
-    ),
+    location,
     ...(customGroup || {}),
   };
   await writePublicBookingState(state, [...state.items, appointment]);
@@ -3712,6 +3775,9 @@ export async function handlePublicBookingRequest(req, context = null) {
         day: result.appointment.day,
         start: result.appointment.start,
         duration: result.appointment.duration,
+        coachId: result.appointment.coachId,
+        locationId: result.appointment.locationId,
+        coach: result.appointment.coach,
         location: result.appointment.location,
       },
       notifications: clientNotificationResults(result.notifications),

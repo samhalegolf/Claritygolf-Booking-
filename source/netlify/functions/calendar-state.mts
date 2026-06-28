@@ -519,7 +519,26 @@ function cleanBookingLocationSnapshot(raw: any) {
   };
 }
 
-const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["status", "custom_group", "location", "coach_id"]);
+function cleanBookingCoachSnapshot(raw: any) {
+  let source = raw;
+  if (typeof raw === "string") {
+    try {
+      source = JSON.parse(raw);
+    } catch {
+      source = null;
+    }
+  }
+  if (!source?.name) return undefined;
+  return {
+    coachId: cleanSlug(source.coachId, "") || undefined,
+    name: cleanString(source.name, "", 120),
+    displayName: cleanString(source.displayName, "", 120) || undefined,
+    email: cleanEmail(source.email, "") || undefined,
+    phone: cleanString(source.phone, "", 80) || undefined,
+  };
+}
+
+const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["status", "custom_group", "location", "coach", "coach_id", "location_id"]);
 
 function omittedCalendarColumnWarning(column: string) {
   return `Calendar saved, but optional calendar item column "${column}" is not available in Supabase. Optional data for that field was not preserved.`;
@@ -769,12 +788,14 @@ function rowToItem(row: any) {
     start: Number(row.start ?? 0),
     duration: Number(row.duration ?? 0),
     coachId: row.coach_id || DEFAULT_COACH_ID,
+    locationId: row.location_id || cleanBookingLocationSnapshot(row.location)?.locationId || "",
     serviceId: row.service_id || "",
     client: row.client || "",
     title: row.title || row.client || "Booking",
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
+    coach: cleanBookingCoachSnapshot(row.coach),
     location: cleanBookingLocationSnapshot(row.location),
     status: cancelledGroupSession ? "cancelled" : status,
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
@@ -798,6 +819,7 @@ function itemToRow(item: any) {
     start: Math.max(0, Math.min(1440, Number(item?.start ?? 0))),
     duration: Math.max(15, Math.min(720, Number(item?.duration ?? 30))),
     coach_id: cleanSlug(item?.coachId, DEFAULT_COACH_ID),
+    location_id: cleanSlug(item?.locationId || item?.location?.locationId, "") || null,
     service_id: cleanString(item?.serviceId, "", 140) || null,
     client: cancelledGroupSession ? null : cleanString(item?.client, "", 160) || null,
     title: cancelledGroupSession
@@ -815,6 +837,7 @@ function itemToRow(item: any) {
           ? item.status
           : "booked",
     custom_group: cancelledGroupSession ? null : customGroup,
+    coach: cancelledGroupSession ? null : cleanBookingCoachSnapshot(item?.coach) || null,
     location: cancelledGroupSession ? null : cleanBookingLocationSnapshot(item?.location) || null,
     created_at: nowIso(),
     updated_at: nowIso(),
