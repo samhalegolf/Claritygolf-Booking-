@@ -63,6 +63,7 @@ type ServiceEditorFormat = "private" | "group" | "custom-group" | "package";
 
 type Service = {
   id: string;
+  coachId?: string;
   name: string;
   duration: number;
   price: number;
@@ -108,6 +109,7 @@ type PendingServiceAction =
 type CalendarItem = {
   id: string;
   kind: "appointment" | "block";
+  coachId?: string;
   week?: number;
   day: number;
   start: number;
@@ -159,6 +161,7 @@ type PendingBooking = {
   client: string;
   title: string;
   serviceId: string;
+  coachId?: string;
   duration: number;
   phone?: string;
   email?: string;
@@ -461,6 +464,7 @@ type BillingSection = "none" | "dashboard" | "new-invoice" | "reports";
 type SettingsTab =
   | "none"
   | "services"
+  | "locations"
   | "availability"
   | "experience"
   | "account"
@@ -493,6 +497,7 @@ type PublicRescheduleMatch = {
   day: number;
   start: number;
   client: string;
+  location?: BookingLocationSnapshot;
 };
 
 type NotificationRecord = {
@@ -534,6 +539,7 @@ type BookingConfirmation = {
   timeLabel: string;
   email: string;
   phone?: string;
+  location?: BookingLocationSnapshot;
   notifications: EmailSendResult[];
 };
 
@@ -570,6 +576,23 @@ type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | 
 type AuthStatus = "checking" | "authenticated" | "guest";
 type AuthMode = "login" | "forgot" | "reset";
 type ThemeMode = "light" | "dark";
+type PermissionScope = "own" | "assigned" | "all";
+
+type AppUser = {
+  id: string;
+  email: string;
+  name: string;
+  role: "admin" | "coach" | "staff";
+  coachId?: string;
+  permissions: {
+    bookings: PermissionScope;
+    services: PermissionScope;
+    availability: PermissionScope;
+    locations: PermissionScope;
+    clients: PermissionScope;
+    settings: PermissionScope;
+  };
+};
 
 type PasswordChangeForm = {
   currentPassword: string;
@@ -608,6 +631,7 @@ type ServiceEditor = Omit<Service, "id"> & {
 };
 
 type AvailabilityWindow = {
+  coachId?: string;
   start: number;
   end: number;
 };
@@ -663,6 +687,21 @@ type CoachAccount = {
   calendarSlug: string;
   caddyWorkspaceUrl: string;
   invoiceSettings: InvoiceSettings;
+};
+
+type CoachProfile = {
+  id: string;
+  name: string;
+  displayName: string;
+  email: string;
+  phone?: string;
+  bio?: string;
+  active: boolean;
+  archived?: boolean;
+  isDefault?: boolean;
+  bookable: boolean;
+  assignedLocationIds?: string[];
+  sortOrder?: number;
 };
 
 type BillingCatalogKind = "service" | "product" | "package" | "lesson-type";
@@ -1784,6 +1823,97 @@ function defaultLocationFromCoachAccount(account: Partial<CoachAccount> = defaul
   };
 }
 
+function defaultCoachProfileFromAccount(account: Partial<CoachAccount> = defaultCoachAccount): CoachProfile {
+  const cleanAccount = cleanCoachAccount(account);
+  return {
+    id: cleanAccount.id || "sam-hale",
+    name: cleanAccount.coachName,
+    displayName: cleanAccount.coachName || cleanAccount.businessName,
+    email: cleanAccount.contactEmail,
+    active: true,
+    archived: false,
+    isDefault: true,
+    bookable: true,
+    assignedLocationIds: ["default-location"],
+    sortOrder: 0,
+  };
+}
+
+function defaultAppUserFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): AppUser {
+  const coach = defaultCoachProfileFromAccount(account);
+  return {
+    id: `${coach.id}-admin`,
+    email: coach.email,
+    name: coach.displayName,
+    role: "admin",
+    coachId: coach.id,
+    permissions: {
+      bookings: "all",
+      services: "all",
+      availability: "all",
+      locations: "all",
+      clients: "all",
+      settings: "all",
+    },
+  };
+}
+
+function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile, index = 0): CoachProfile {
+  const base = fallback ?? defaultCoachProfileFromAccount();
+  const name =
+    typeof raw?.name === "string" && raw.name.trim()
+      ? raw.name.trim().slice(0, 120)
+      : base.name;
+  return {
+    id: cleanSlug(raw?.id, cleanSlug(name, `coach-${index + 1}`)),
+    name,
+    displayName:
+      typeof raw?.displayName === "string" && raw.displayName.trim()
+        ? raw.displayName.trim().slice(0, 120)
+        : name,
+    email: cleanEmail(raw?.email, base.email),
+    phone: typeof raw?.phone === "string" && raw.phone.trim() ? raw.phone.trim().slice(0, 80) : undefined,
+    bio: typeof raw?.bio === "string" && raw.bio.trim() ? raw.bio.trim().slice(0, 600) : undefined,
+    active: raw?.active !== false,
+    archived: raw?.archived === true,
+    isDefault: raw?.isDefault === true || base.isDefault === true,
+    bookable: raw?.bookable !== false,
+    assignedLocationIds: Array.isArray(raw?.assignedLocationIds)
+      ? raw.assignedLocationIds.map((id) => cleanSlug(id, "")).filter(Boolean)
+      : base.assignedLocationIds,
+    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw?.sortOrder)) : index,
+  };
+}
+
+function cleanCoachProfiles(rawProfiles?: Partial<CoachProfile>[], account?: Partial<CoachAccount>): CoachProfile[] {
+  const fallback = defaultCoachProfileFromAccount(account ?? defaultCoachAccount);
+  const source = Array.isArray(rawProfiles) && rawProfiles.length ? rawProfiles : [fallback];
+  const seen = new Set<string>();
+  const cleaned = source.map((raw, index) => {
+    const profile = cleanCoachProfile(raw, index === 0 ? fallback : undefined, index);
+    let id = profile.id;
+    let suffix = 2;
+    while (seen.has(id)) {
+      id = `${profile.id}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(id);
+    return { ...profile, id };
+  });
+  if (!cleaned.some((coach) => coach.active && !coach.archived && coach.bookable)) {
+    cleaned[0] = { ...cleaned[0], active: true, archived: false, bookable: true };
+  }
+  const defaultIndex = cleaned.findIndex((coach) => coach.isDefault && coach.active && !coach.archived);
+  const nextDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((coach) => coach.active && !coach.archived);
+  return cleaned
+    .map((coach, index) => ({ ...coach, isDefault: index === nextDefaultIndex }))
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName));
+}
+
+function defaultCoachId(coaches: CoachProfile[]) {
+  return coaches.find((coach) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || "";
+}
+
 function cleanLocation(raw?: Partial<Location>, fallback?: Location, index = 0): Location {
   const base = fallback ?? defaultLocationFromCoachAccount();
   const name =
@@ -1988,6 +2118,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
   const bookingScreenIds = normalizeBookingScreenIds(service?.bookingScreenIds);
   return {
     id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
+    coachId: cleanSlug(service?.coachId, defaultCoachProfileFromAccount().id),
     name,
     duration: clamp(Math.round(duration), 15, 240),
     price: Math.max(0, Math.round(price)),
@@ -2045,12 +2176,14 @@ function calendarItemsFingerprint(itemList?: Partial<CalendarItem>[]) {
         day: Number(item.day ?? 0),
         start: Number(item.start ?? 0),
         duration: Number(item.duration ?? 0),
+        coachId: item.coachId || "",
         serviceId: item.serviceId || "",
         client: item.client || "",
         title: item.title || "",
         phone: item.phone || "",
         email: (item.email || "").toLowerCase(),
         note: item.note || "",
+        location: item.location || null,
         status: item.status || "booked",
         customGroup: item.customGroup === true,
         attendees: Array.isArray(item.attendees) ? item.attendees : [],
@@ -2210,6 +2343,8 @@ function emptyServiceEditor(): ServiceEditor {
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    locationId: "",
+    lessonNote: "",
     location: "",
     groupSchedule: defaultGroupSchedule(),
     packageAllowance: 5,
@@ -2511,6 +2646,8 @@ function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
   const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [coachProfiles, setCoachProfiles] = useState<CoachProfile[]>(() => cleanCoachProfiles(undefined, getStoredCoachAccount()));
+  const [currentAppUser, setCurrentAppUser] = useState<AppUser>(() => defaultAppUserFromCoachAccount(getStoredCoachAccount()));
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(getStoredBrandSettings);
   const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [authStatus, setAuthStatus] = useState<AuthStatus>(isEmbedMode ? "authenticated" : "checking");
@@ -2538,6 +2675,10 @@ function App() {
   const [items, setItems] = useState<CalendarItem[]>(initialItems);
   const [services, setServices] = useState<Service[]>(defaultServices);
   const [locations, setLocations] = useState<Location[]>(() => cleanLocations(undefined, getStoredCoachAccount()));
+  const [locationEditor, setLocationEditor] = useState<Location>(() => defaultLocationFromCoachAccount(getStoredCoachAccount()));
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  const [showLocationEditor, setShowLocationEditor] = useState(false);
+  const [locationSaveState, setLocationSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showServiceEditor, setShowServiceEditor] = useState(false);
@@ -2861,6 +3002,12 @@ function App() {
       (pointerSession?.mode === "move" && Boolean(floatingDrag)));
   const activeServices = services.filter((service) => service.archived !== true);
   const archivedServices = services.filter((service) => service.archived === true);
+  const sortedLocations = [...locations].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
+  const activeLocationList = sortedLocations.filter((location) => location.active && !location.archived);
+  const archivedLocationList = sortedLocations.filter((location) => location.archived || !location.active);
+  const defaultLocation = locationById(locations, defaultLocationId(locations)) ?? defaultLocationFromCoachAccount(coachAccount);
+  const locationUsageCount = (locationId: string) =>
+    services.filter((service) => (service.locationId || defaultLocation.id) === locationId && service.archived !== true).length;
   const packageServices = activeServices.filter((service) => service.active && service.lessonFormat === "package");
   const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = activeServices.filter((service) => service.active && isAppointmentStyleService(service));
@@ -3559,6 +3706,8 @@ function App() {
       notifications?: NotificationRecord[];
       services?: Service[];
       locations?: Location[];
+      coaches?: CoachProfile[];
+      currentUser?: AppUser;
       availability?: AvailabilityWindow[][];
       settings?: Partial<NotificationSettings>;
       brand?: Partial<BrandSettings>;
@@ -3576,6 +3725,8 @@ function App() {
     if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     if (Array.isArray(data.services)) setServices(cleanServices(data.services));
     setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
+    setCoachProfiles(cleanCoachProfiles(data.coaches, data.account ?? coachAccount));
+    if (data.currentUser) setCurrentAppUser(data.currentUser);
     if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
     if (typeof data.syncKey === "string" && data.syncKey.startsWith("cg_")) {
       setCalendarSyncKey(data.syncKey);
@@ -3603,6 +3754,7 @@ function App() {
       items?: CalendarItem[];
       services?: Service[];
       locations?: Location[];
+      coaches?: CoachProfile[];
       availability?: AvailabilityWindow[][];
       notifications?: NotificationRecord[];
       brand?: Partial<BrandSettings>;
@@ -3614,6 +3766,7 @@ function App() {
     if (Array.isArray(data.notifications)) setNotifications(data.notifications);
     if (Array.isArray(data.services)) setServices(cleanServices(data.services));
     setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
+    setCoachProfiles(cleanCoachProfiles(data.coaches, data.account ?? coachAccount));
     if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
@@ -3867,7 +4020,7 @@ function App() {
         ? `Group Session · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
         : service?.name ?? "Golf lesson",
       time: `${dateForSlot(itemWeek(item), item.day).toLocaleDateString("en-NZ", { weekday: "long", month: "short", day: "numeric" })}, ${formatRange(item.start, item.duration)}`,
-      venue: service?.location || coachAccount.venueShortName || coachAccount.venueName,
+      venue: bookingLocationShortDisplay(calendarItemLocation(item, service ?? undefined, locations, coachAccount)) || coachAccount.venueShortName || coachAccount.venueName,
       phone: groupSessionContext ? "" : item.phone || "",
       email: groupSessionContext ? "" : item.email || "",
       clientEmailStatus: latestClientEmail ? notificationStatusLabel(latestClientEmail) : "No client email receipt yet",
@@ -4073,6 +4226,7 @@ function App() {
       start: selectedGroupSession.start,
       duration: selectedGroupSession.duration,
       serviceId: selectedGroupSession.serviceId,
+      coachId: selectedGroupSessionService?.coachId || defaultCoachId(coachProfiles),
       title: CANCELLED_GROUP_SESSION_TITLE,
       note: CANCELLED_GROUP_SESSION_NOTE,
       readOnly: true,
@@ -4237,6 +4391,12 @@ function App() {
     ? selectedBookingService.name
     : "Choose an appointment type";
   const appointmentSummaryDescription = selectedBookingService?.description?.trim() || "";
+  const appointmentSummaryLessonNote = selectedBookingService
+    ? (selectedBookingService.lessonNote || selectedBookingService.location || "").trim()
+    : "";
+  const selectedBookingLocation = selectedBookingService
+    ? bookingLocationSnapshotFor(selectedBookingService, locations, coachAccount)
+    : bookingLocationSnapshotFor(undefined, locations, coachAccount);
   const appointmentSummaryDuration = selectedBookingService
     ? `${selectedBookingService.duration} min · ${
         isCustomGroupService(selectedBookingService)
@@ -4244,7 +4404,7 @@ function App() {
           : servicePriceLabel(selectedBookingService)
       }`
     : "Select a lesson to continue";
-  const dateTimeSummaryLocation = (selectedBookingService?.location?.trim() || locationLine || "").slice(0, 120);
+  const dateTimeSummaryLocation = bookingLocationDisplay(selectedBookingLocation).slice(0, 180);
   const bookingDaySummary = bookingDaySelected ? weekDays[bookingDay]?.label ?? "" : "No day selected";
   const dateTimeSummaryLine = isDateTimeStepComplete
     ? `${bookingDaySummary}, ${formatTime(bookingStart ?? 0)}`
@@ -4962,6 +5122,7 @@ function App() {
         day: activeDraft.day,
         start: activeDraft.start,
         duration: activeDraft.duration,
+        coachId: currentAppUser.coachId || defaultCoachId(coachProfiles),
         title: "Busy",
         note: "Blocked from calendar drag",
       };
@@ -4998,9 +5159,11 @@ function App() {
         title: session.booking.title,
         client: session.booking.client,
         serviceId: session.booking.serviceId,
+        coachId: service.coachId || defaultCoachId(coachProfiles),
         phone: session.booking.phone,
         email: session.booking.email,
         note: session.booking.note ?? "Placed from dock.",
+        location: bookingLocationSnapshotFor(service, locations, coachAccount),
         customGroup: session.booking.customGroup,
         attendees: session.booking.attendees,
         calculatedPrice: session.booking.calculatedPrice,
@@ -5205,10 +5368,12 @@ function App() {
       title: clientName,
       client: clientName,
       serviceId: quickCreateService.id,
+      coachId: quickCreateService.coachId || defaultCoachId(coachProfiles),
       ...candidate,
       phone: quickCreate.phone.trim(),
       email: quickCreate.email.trim(),
       note: quickCreate.note.trim(),
+      location: bookingLocationSnapshotFor(quickCreateService, locations, coachAccount),
       ...(quickCreateIsCustomGroup
         ? {
             customGroup: true as const,
@@ -5247,6 +5412,7 @@ function App() {
       id: `block-${Date.now()}`,
       kind: "block",
       title: "Busy",
+      coachId: currentAppUser.coachId || defaultCoachId(coachProfiles),
       ...candidate,
       note: "Quick block",
     };
@@ -5276,10 +5442,12 @@ function App() {
       title: "New client",
       client: "New client",
       serviceId,
+      coachId: service.coachId || defaultCoachId(coachProfiles),
       ...candidate,
       phone: "",
       email: "",
       note: "Admin-created inside blocked time.",
+      location: bookingLocationSnapshotFor(service, locations, coachAccount),
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
     closeCalendarDetails();
@@ -5359,9 +5527,11 @@ function App() {
       title: booking.title,
       client: booking.client,
       serviceId: booking.serviceId,
+      coachId: service.coachId || defaultCoachId(coachProfiles),
       phone: booking.phone,
       email: booking.email,
       note: booking.note ?? "Placed from dock.",
+      location: bookingLocationSnapshotFor(service, locations, coachAccount),
       customGroup: booking.customGroup,
       attendees: booking.attendees,
       calculatedPrice: booking.calculatedPrice,
@@ -5615,13 +5785,14 @@ function App() {
     const date = dateForSlot(confirmation.week, confirmation.day);
     const start = compactDateTime(date, confirmation.start);
     const end = compactDateTime(date, confirmation.start + confirmation.duration);
+    const location = confirmation.location ?? selectedBookingLocation;
     const params = new URLSearchParams({
       action: "TEMPLATE",
       text: `${confirmation.service} with ${coachAccount.businessName}`,
       dates: `${start}/${end}`,
-      location: coachAccount.venueName,
+      location: bookingLocationDisplay(location),
       details: `${confirmation.service} for ${confirmation.client}.`,
-      ctz: coachAccount.timezone,
+      ctz: location.timezone || coachAccount.timezone,
     });
     return `https://calendar.google.com/calendar/render?${params.toString()}`;
   }
@@ -5630,6 +5801,7 @@ function App() {
     const date = dateForSlot(confirmation.week, confirmation.day);
     const start = compactDateTime(date, confirmation.start);
     const end = compactDateTime(date, confirmation.start + confirmation.duration);
+    const location = confirmation.location ?? selectedBookingLocation;
     const ics = [
       "BEGIN:VCALENDAR",
       "VERSION:2.0",
@@ -5637,10 +5809,10 @@ function App() {
       "BEGIN:VEVENT",
       `UID:${Date.now()}@clarity-golf-booking`,
       `DTSTAMP:${compactDateTime(new Date(), new Date().getHours() * 60 + new Date().getMinutes())}`,
-      `DTSTART;TZID=${coachAccount.timezone}:${start}`,
-      `DTEND;TZID=${coachAccount.timezone}:${end}`,
+      `DTSTART;TZID=${location.timezone || coachAccount.timezone}:${start}`,
+      `DTEND;TZID=${location.timezone || coachAccount.timezone}:${end}`,
       `SUMMARY:${escapeIcsText(`${confirmation.service} with ${coachAccount.businessName}`)}`,
-      `LOCATION:${escapeIcsText(coachAccount.venueName)}`,
+      `LOCATION:${escapeIcsText(bookingLocationDisplay(location))}`,
       `DESCRIPTION:${escapeIcsText(`${confirmation.service} for ${confirmation.client}.`)}`,
       "STATUS:CONFIRMED",
       "END:VEVENT",
@@ -5753,6 +5925,9 @@ function App() {
         timeLabel: formatTime(bookingStart),
         email: rescheduleForm.email,
         phone: rescheduleForm.phone,
+        location:
+          selectedRescheduleMatch.location ??
+          bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
         notifications: data.notifications ?? [],
       });
       setRescheduleMatches([]);
@@ -5817,6 +5992,9 @@ function App() {
         timeLabel: formatTime(original.start),
         email: rescheduleForm.email,
         phone: rescheduleForm.phone,
+        location:
+          original.location ??
+          bookingLocationSnapshotFor(services.find((service) => service.id === original.serviceId), locations, coachAccount),
         notifications: confirmationNotifications,
       });
       setEmailNoticeVisible(
@@ -5858,6 +6036,109 @@ function App() {
   function updateCoachAccount<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
     setCoachAccountSaveState("idle");
     setCoachAccount((current) => cleanCoachAccount({ ...current, [field]: value }));
+  }
+
+  function updateLocationEditor<K extends keyof Location>(field: K, value: Location[K]) {
+    setLocationSaveState("idle");
+    setLocationEditor((current) => ({ ...current, [field]: value }));
+  }
+
+  function startNewLocation() {
+    const base = defaultLocationFromCoachAccount(coachAccount);
+    const nextOrder = Math.max(0, ...locations.map((location) => location.sortOrder ?? 0)) + 1;
+    setEditingLocationId(null);
+    setLocationEditor({
+      ...base,
+      id: `location-${Date.now()}`,
+      name: "",
+      shortName: "",
+      isDefault: activeLocations(locations).length === 0,
+      sortOrder: nextOrder,
+    });
+    setShowLocationEditor(true);
+    setLocationSaveState("idle");
+  }
+
+  function editLocation(location: Location) {
+    setEditingLocationId(location.id);
+    setLocationEditor(location);
+    setShowLocationEditor(true);
+    setLocationSaveState("idle");
+  }
+
+  async function persistLocations(nextLocations: Location[], message = "Locations saved.") {
+    const snapshot = locations;
+    const clean = cleanLocations(nextLocations, coachAccount);
+    setLocations(clean);
+    setLocationSaveState("saving");
+    try {
+      const response = await fetch("/api/locations", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ locations: clean }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error("Location save failed");
+      const data = (await response.json()) as { locations?: Location[] };
+      const saved = cleanLocations(data.locations, coachAccount);
+      setLocations(saved);
+      setLocationSaveState("saved");
+      setToast({ message });
+      window.setTimeout(() => setLocationSaveState("idle"), 1600);
+    } catch (error) {
+      setLocations(snapshot);
+      setLocationSaveState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not save locations." });
+    }
+  }
+
+  function saveEditedLocation() {
+    if (!locationEditor.name.trim()) {
+      setToast({ message: "Name the location before saving." });
+      return;
+    }
+    const clean = cleanLocation(locationEditor, defaultLocationFromCoachAccount(coachAccount), locations.length);
+    const exists = locations.some((location) => location.id === (editingLocationId || clean.id));
+    const stableId = editingLocationId || clean.id;
+    const next = exists
+      ? locations.map((location) => (location.id === stableId ? { ...clean, id: stableId } : location))
+      : [...locations, { ...clean, id: stableId }];
+    setEditingLocationId(stableId);
+    setShowLocationEditor(false);
+    void persistLocations(next, exists ? `${clean.name} updated.` : `${clean.name} added.`);
+  }
+
+  function archiveLocation(location: Location) {
+    const activeCount = activeLocations(locations).length;
+    if (location.active && !location.archived && activeCount <= 1) {
+      setToast({ message: "Keep at least one active location." });
+      return;
+    }
+    const next = locations.map((candidate) =>
+      candidate.id === location.id ? { ...candidate, active: false, archived: true, isDefault: false } : candidate,
+    );
+    void persistLocations(next, `${location.name} archived.`);
+  }
+
+  function restoreLocation(location: Location) {
+    const next = locations.map((candidate) =>
+      candidate.id === location.id ? { ...candidate, active: true, archived: false } : candidate,
+    );
+    void persistLocations(next, `${location.name} restored.`);
+  }
+
+  function makeDefaultLocation(location: Location) {
+    if (location.archived || !location.active) {
+      setToast({ message: "Restore the location before making it default." });
+      return;
+    }
+    const next = locations.map((candidate) => ({ ...candidate, isDefault: candidate.id === location.id }));
+    void persistLocations(next, `${location.name} set as default.`);
   }
 
   function updateInvoiceSettings<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
@@ -6172,6 +6453,8 @@ function App() {
       customGroup: isCustomGroupService(service),
       customGroupEnabled: isCustomGroupService(service),
       description: service.description ?? "",
+      locationId: service.locationId || defaultLocationId(locations),
+      lessonNote: service.lessonNote || service.location || "",
       location: service.location ?? "",
       bookingScreenIds: service.bookingScreenIds ?? ["main"],
     });
@@ -6184,7 +6467,9 @@ function App() {
     setServiceEditor({
       ...emptyServiceEditor(),
       id: generateServiceDraftId(),
-      location: coachAccount.venueShortName,
+      locationId: defaultLocationId(locations),
+      lessonNote: "",
+      location: "",
     });
     setShowServiceEditor(true);
     setServiceSaveState("idle");
@@ -6497,7 +6782,22 @@ function App() {
     const editableEditor = {
       ...normalizedEditor,
       description: typeof normalizedEditor.description === "string" ? normalizedEditor.description : "",
-      location: typeof normalizedEditor.location === "string" ? normalizedEditor.location : "",
+      locationId:
+        typeof normalizedEditor.locationId === "string" && normalizedEditor.locationId
+          ? normalizedEditor.locationId
+          : defaultLocationId(locations),
+      lessonNote:
+        typeof normalizedEditor.lessonNote === "string"
+          ? normalizedEditor.lessonNote
+          : typeof normalizedEditor.location === "string"
+            ? normalizedEditor.location
+            : "",
+      location:
+        typeof normalizedEditor.lessonNote === "string"
+          ? normalizedEditor.lessonNote
+          : typeof normalizedEditor.location === "string"
+            ? normalizedEditor.location
+            : "",
     };
     const hasPublicScreen = (editableEditor.bookingScreenIds ?? []).length > 0;
     if (editableEditor.visibility === "public" && !hasPublicScreen) {
@@ -7276,6 +7576,7 @@ function App() {
             lastName,
             phone,
             email,
+            location: bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
             attendees: isCustomGroupBooking ? customGroupAttendees.map((attendee) => ({
               name: attendee.name,
               email: attendee.email || "",
@@ -7285,7 +7586,7 @@ function App() {
         const data = (await response.json()) as {
           message?: string;
           state?: { items?: CalendarItem[] };
-          appointment?: { id?: string };
+          appointment?: { id?: string; location?: BookingLocationSnapshot };
           notifications?: EmailSendResult[];
         };
         if (!response.ok) {
@@ -7309,6 +7610,7 @@ function App() {
           timeLabel: formatTime(bookingStart),
           email,
           phone,
+          location: data.appointment?.location ?? bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
           notifications: confirmationNotifications,
         });
         setEmailNoticeVisible(confirmationNotifications.some((result) => result.channel === "client" && result.sent));
@@ -7328,11 +7630,13 @@ function App() {
       kind: "appointment",
       ...candidate,
       serviceId: bookingTargetService.id,
+      coachId: bookingTargetService.coachId || defaultCoachId(coachProfiles),
       client,
       title: client,
       phone,
       email,
       note: "Booked from public booking page.",
+      location: bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
       ...(isCustomGroupBooking
         ? {
             customGroup: true as const,
@@ -7770,11 +8074,24 @@ function App() {
                   </label>
                 )}
                 <label className="settings-field">
-                  <span>Location note</span>
+                  <span>Booking location</span>
+                  <select
+                    value={serviceEditor.locationId || defaultLocationId(locations)}
+                    onChange={(event) => updateServiceEditor("locationId", event.target.value)}
+                  >
+                    {activeLocationList.map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.name}{location.isDefault ? " (default)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="settings-field">
+                  <span>Lesson note</span>
                   <input
-                    value={serviceEditor.location}
-                    onChange={(event) => updateServiceEditor("location", event.target.value)}
-                    placeholder={coachAccount.venueShortName}
+                    value={serviceEditor.lessonNote ?? serviceEditor.location ?? ""}
+                    onChange={(event) => updateServiceEditor("lessonNote", event.target.value)}
+                    placeholder="Bay hire included"
                   />
                 </label>
               </div>
@@ -7882,6 +8199,8 @@ function App() {
                   </span>
                   <strong>{service.name}</strong>
                   {service.description && <em>{service.description}</em>}
+                  <em>Booking location: {bookingLocationShortDisplay(bookingLocationSnapshotFor(service, locations, coachAccount))}</em>
+                  {(service.lessonNote || service.location) && <em>Lesson note: {service.lessonNote || service.location}</em>}
                   {service.lessonFormat === "package" && (
                     <em>
                       {service.packageAllowance ?? 5} slots ·{" "}
@@ -7976,6 +8295,157 @@ function App() {
 
   const pendingService =
     pendingServiceAction ? services.find((service) => service.id === pendingServiceAction.serviceId) ?? null : null;
+
+  const locationsSettingsPanel = (
+    <div className="settings-section settings-locations">
+      <div className="data-card wide">
+        <div className="data-card-header">
+          <div>
+            <span>Locations</span>
+            <h2>{activeLocationList.length} active place{activeLocationList.length === 1 ? "" : "s"}</h2>
+          </div>
+          <button className="primary-button" onClick={startNewLocation} type="button">
+            <Plus size={16} />
+            <span>Add location</span>
+          </button>
+        </div>
+        <p className="field-help">
+          Locations are real places customers can travel to. Lesson-specific inclusions like "Bay hire included" belong on the lesson type, not here.
+        </p>
+
+        {showLocationEditor && (
+          <article className="service-editor-card">
+            <div className="data-card-header compact">
+              <div>
+                <span>{editingLocationId ? "Edit location" : "New location"}</span>
+                <h3>{locationEditor.name || "Location details"}</h3>
+              </div>
+              <button className="icon-button" onClick={() => setShowLocationEditor(false)} type="button" aria-label="Close location editor">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="service-form-grid">
+              <label className="settings-field">
+                <span>Location name</span>
+                <input value={locationEditor.name} onChange={(event) => updateLocationEditor("name", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Short name</span>
+                <input value={locationEditor.shortName} onChange={(event) => updateLocationEditor("shortName", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Address</span>
+                <input value={locationEditor.address} onChange={(event) => updateLocationEditor("address", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Map URL</span>
+                <input value={locationEditor.mapUrl ?? ""} onChange={(event) => updateLocationEditor("mapUrl", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Timezone</span>
+                <input value={locationEditor.timezone} onChange={(event) => updateLocationEditor("timezone", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Sort order</span>
+                <input
+                  value={locationEditor.sortOrder ?? 0}
+                  inputMode="numeric"
+                  onChange={(event) => updateLocationEditor("sortOrder", Number(event.target.value))}
+                  type="text"
+                />
+              </label>
+            </div>
+            <div className="service-form-row">
+              <label className="settings-field">
+                <span>Arrival instructions</span>
+                <textarea
+                  value={locationEditor.arrivalInstructions ?? ""}
+                  onChange={(event) => updateLocationEditor("arrivalInstructions", event.target.value)}
+                  rows={3}
+                />
+              </label>
+              <label className="settings-field">
+                <span>Public notes</span>
+                <textarea
+                  value={locationEditor.publicNotes ?? ""}
+                  onChange={(event) => updateLocationEditor("publicNotes", event.target.value)}
+                  rows={3}
+                />
+              </label>
+            </div>
+            <div className="service-form-row">
+              <label className="settings-toggle">
+                <input
+                  checked={locationEditor.active !== false && locationEditor.archived !== true}
+                  onChange={(event) => {
+                    updateLocationEditor("active", event.target.checked);
+                    updateLocationEditor("archived", !event.target.checked);
+                  }}
+                  type="checkbox"
+                />
+                <span>Active</span>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  checked={locationEditor.isDefault === true}
+                  onChange={(event) => updateLocationEditor("isDefault", event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Default location</span>
+              </label>
+            </div>
+            <button className="primary-button settings-save" onClick={saveEditedLocation} type="button">
+              {locationSaveState === "saving"
+                ? "Saving"
+                : locationSaveState === "saved"
+                  ? "Saved"
+                  : locationSaveState === "error"
+                    ? "Not saved"
+                    : "Save Location"}
+            </button>
+          </article>
+        )}
+
+        <div className="service-list" aria-label="Locations">
+          {[...activeLocationList, ...archivedLocationList].map((location) => (
+            <article className={`service-row ${location.active && !location.archived ? "" : "is-archived"}`} key={location.id}>
+              <button className="service-row-main" onClick={() => editLocation(location)} type="button">
+                <span>
+                  {location.isDefault ? "Default · " : ""}{location.active && !location.archived ? "Active" : "Archived"}
+                </span>
+                <strong>{location.name}</strong>
+                {location.address && <em>{location.address}</em>}
+                <em>Used by {locationUsageCount(location.id)} lesson type{locationUsageCount(location.id) === 1 ? "" : "s"}</em>
+              </button>
+              <div className="service-row-meta">
+                <strong>{location.shortName}</strong>
+                <span>{location.timezone}</span>
+              </div>
+              <div className="service-row-actions">
+                {!location.isDefault && location.active && !location.archived ? (
+                  <button className="outline-button service-action-button" onClick={() => makeDefaultLocation(location)} type="button">
+                    <Check size={15} />
+                    <span>Default</span>
+                  </button>
+                ) : null}
+                {location.archived || !location.active ? (
+                  <button className="outline-button service-action-button" onClick={() => restoreLocation(location)} type="button">
+                    <RefreshCw size={15} />
+                    <span>Restore</span>
+                  </button>
+                ) : (
+                  <button className="outline-button service-action-button" onClick={() => archiveLocation(location)} type="button">
+                    <Archive size={15} />
+                    <span>Archive</span>
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 
   const availabilitySettingsPanel = (
     <div className="settings-section settings-availability">
@@ -8157,6 +8627,7 @@ function App() {
                         {service.duration} minutes @ {servicePriceLabel(service)}
                       </em>
                       {service.description && <small>{service.description}</small>}
+                      {(service.lessonNote || service.location) && <small>{service.lessonNote || service.location}</small>}
                     </button>
                   ))
                 ) : (
@@ -8173,6 +8644,7 @@ function App() {
                       <strong>{appointmentSummaryName}</strong>
                       <span>{appointmentSummaryDuration}</span>
                       {appointmentSummaryDescription ? <small>{appointmentSummaryDescription}</small> : null}
+                      {appointmentSummaryLessonNote ? <small>{appointmentSummaryLessonNote}</small> : null}
                     </button>
                   ) : (
             <button
@@ -8750,7 +9222,7 @@ function App() {
         </div>
         <div>
           <MapPin size={16} />
-          <span>{selectedGroupSessionService.location || coachAccount.venueName}</span>
+          <span>{bookingLocationDisplay(bookingLocationSnapshotFor(selectedGroupSessionService, locations, coachAccount))}</span>
         </div>
         <div>
           <User size={16} />
@@ -10514,7 +10986,7 @@ function App() {
                   <em>
                     {bookingConfirmation.dayLabel}, {bookingConfirmation.timeLabel}
                   </em>
-                  <p>{coachAccount.venueName}</p>
+                  <p>{bookingLocationDisplay(bookingConfirmation.location ?? selectedBookingLocation)}</p>
                 </div>
                 {bookingConfirmation.notifications.some((result) => result.channel === "client") && (
                   <div className="email-status-list">
@@ -10596,6 +11068,7 @@ function App() {
                                   {service.duration} minutes @ {servicePriceLabel(service)}
                                 </em>
                                 {service.description && <small>{service.description}</small>}
+                                {(service.lessonNote || service.location) && <small>{service.lessonNote || service.location}</small>}
                               </button>
                             ))
                           ) : (
@@ -10612,6 +11085,7 @@ function App() {
                       <strong>{appointmentSummaryName}</strong>
                       <span>{appointmentSummaryDuration}</span>
                       {appointmentSummaryDescription ? <small>{appointmentSummaryDescription}</small> : null}
+                      {appointmentSummaryLessonNote ? <small>{appointmentSummaryLessonNote}</small> : null}
                     </button>
                   ) : (
                       <button
@@ -11068,6 +11542,16 @@ function App() {
                 Schedule
               </button>
               <button
+                className={settingsTab === "locations" ? "active" : ""}
+                onClick={() => setSettingsTab("locations")}
+                role="tab"
+                aria-selected={settingsTab === "locations"}
+                type="button"
+              >
+                <MapPin size={16} />
+                Locations
+              </button>
+              <button
                 className={settingsTab === "experience" ? "active" : ""}
                 onClick={() => setSettingsTab("experience")}
                 role="tab"
@@ -11121,6 +11605,7 @@ function App() {
 
             <div className={`settings-grid settings-tab-${settingsTab}`}>
               {servicesSettingsPanel}
+              {locationsSettingsPanel}
               {availabilitySettingsPanel}
               {bookingSettingsPanel}
               <article className="data-card notification-card account-card settings-section settings-account settings-branding">

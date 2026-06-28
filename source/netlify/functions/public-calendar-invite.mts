@@ -15,6 +15,42 @@ function cleanEmail(value: unknown, fallback = "") {
   return email.includes("@") ? email : fallback;
 }
 
+function cleanUrl(value: unknown, fallback = "") {
+  if (typeof value !== "string" || !value.trim()) return fallback;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString().replace(/\/$/, "") : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function cleanBookingLocationSnapshot(raw: any, fallback: any = {}) {
+  let source = raw;
+  if (typeof raw === "string") {
+    try {
+      source = JSON.parse(raw);
+    } catch {
+      source = null;
+    }
+  }
+  const base = source?.name ? source : fallback;
+  if (!base?.name) return null;
+  return {
+    name: cleanText(base.name, fallback.name || "", 140),
+    shortName: cleanText(base.shortName, fallback.shortName || base.name || "", 80),
+    address: cleanText(base.address, "", 240),
+    mapUrl: cleanUrl(base.mapUrl, ""),
+    arrivalInstructions: cleanText(base.arrivalInstructions, "", 500),
+    publicNotes: cleanText(base.publicNotes, "", 500),
+    timezone: cleanText(base.timezone, fallback.timezone || "", 80),
+  };
+}
+
+function bookingLocationDisplay(location: any) {
+  return [location?.name, location?.address].filter(Boolean).join(" · ");
+}
+
 function normalizePhone(value: unknown) {
   return cleanText(value, "", 80).replace(/\D/g, "");
 }
@@ -118,9 +154,16 @@ function generateInvite(appointment: any, settings: any) {
   const service = settings.services.find((candidate: any) => candidate.id === appointment.service_id);
   const serviceName = cleanText(service?.name, "Golf Lesson", 160);
   const client = cleanText(appointment.client || appointment.title, "Client", 160);
+  const location = cleanBookingLocationSnapshot(appointment.location, {
+    name: settings.venueName,
+    timezone: settings.timezone,
+  });
   const manage = manageUrl(appointment, settings);
   const description = [
     `${serviceName} for ${client}.`,
+    location?.address ? `Address: ${location.address}` : "",
+    location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
+    location?.mapUrl ? `Map: ${location.mapUrl}` : "",
     manage ? `Manage / Reschedule: ${manage}` : "",
   ]
     .filter(Boolean)
@@ -139,7 +182,7 @@ function generateInvite(appointment: any, settings: any) {
     `DTEND;TZID=${escapeIcs(settings.timezone)}:${formatLocalDateTime(appointment.week, appointment.day, Number(appointment.start || 0) + Number(appointment.duration || 0))}`,
     `SUMMARY:${escapeIcs(`${serviceName} with ${settings.coachName || settings.businessName}`)}`,
     `DESCRIPTION:${escapeIcs(description)}`,
-    `LOCATION:${escapeIcs(settings.venueName)}`,
+    `LOCATION:${escapeIcs(bookingLocationDisplay(location))}`,
     settings.contactEmail ? `ORGANIZER;CN=${escapeIcs(settings.businessName)}:MAILTO:${escapeIcs(settings.contactEmail)}` : "",
     manage ? `URL:${escapeIcs(manage)}` : "",
     "CATEGORIES:Golf Lesson",

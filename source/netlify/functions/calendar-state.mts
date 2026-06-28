@@ -176,6 +176,8 @@ const defaultInvoiceSettings = {
   customFields: [],
 };
 
+const DEFAULT_COACH_ID = "sam-hale-golf";
+
 function timeToMinutes(hour: number, minute: number) {
   return hour * 60 + minute;
 }
@@ -287,6 +289,7 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
   const bookingScreenIds = cleanBookingScreenIds(service?.bookingScreenIds);
   return {
     id: cleanSlug(service?.id as unknown, cleanSlug(name, `service-${Date.now()}-${index}`)),
+    coachId: cleanSlug(service?.coachId as unknown, DEFAULT_COACH_ID),
     name,
     duration: Math.max(15, Math.min(240, Math.round(duration))),
     price: Math.max(0, Math.round(price)),
@@ -442,7 +445,81 @@ function normalizeLocations(rawLocations: any, account: Record<string, unknown>)
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
 }
 
-const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["status", "custom_group"]);
+function defaultCoachProfileFromAccount(account: Record<string, unknown>) {
+  return {
+    id: cleanSlug(account?.id, DEFAULT_COACH_ID),
+    name: cleanString(account?.coachName, "Sam Hale", 120),
+    displayName: cleanString(account?.coachName, "Sam Hale", 120),
+    email: cleanString(account?.contactEmail, "", 180),
+    active: true,
+    archived: false,
+    isDefault: true,
+    bookable: true,
+    assignedLocationIds: ["default-location"],
+    sortOrder: 0,
+  };
+}
+
+function normalizeCoachProfiles(rawProfiles: any, account: Record<string, unknown>) {
+  const fallback = defaultCoachProfileFromAccount(account);
+  const source = Array.isArray(rawProfiles) && rawProfiles.length ? rawProfiles : [fallback];
+  return source.map((raw, index) => ({
+    ...fallback,
+    ...raw,
+    id: cleanSlug(raw?.id, index === 0 ? fallback.id : `coach-${index + 1}`),
+    name: cleanString(raw?.name, fallback.name, 120),
+    displayName: cleanString(raw?.displayName, raw?.name || fallback.displayName, 120),
+    email: cleanString(raw?.email, fallback.email, 180),
+    active: raw?.active !== false,
+    archived: raw?.archived === true,
+    isDefault: index === 0 ? raw?.isDefault !== false : raw?.isDefault === true,
+    bookable: raw?.bookable !== false,
+    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw.sortOrder)) : index,
+  }));
+}
+
+function defaultAppUserFromAccount(account: Record<string, unknown>) {
+  const coach = defaultCoachProfileFromAccount(account);
+  return {
+    id: `${coach.id}-admin`,
+    email: coach.email,
+    name: coach.displayName,
+    role: "admin",
+    coachId: coach.id,
+    permissions: {
+      bookings: "all",
+      services: "all",
+      availability: "all",
+      locations: "all",
+      clients: "all",
+      settings: "all",
+    },
+  };
+}
+
+function cleanBookingLocationSnapshot(raw: any) {
+  let source = raw;
+  if (typeof raw === "string") {
+    try {
+      source = JSON.parse(raw);
+    } catch {
+      source = null;
+    }
+  }
+  if (!source?.name) return undefined;
+  return {
+    locationId: cleanString(source.locationId, "", 120) || undefined,
+    name: cleanString(source.name, "", 140),
+    shortName: cleanString(source.shortName, "", 80) || undefined,
+    address: cleanString(source.address, "", 240) || undefined,
+    mapUrl: cleanUrl(source.mapUrl, "") || undefined,
+    arrivalInstructions: cleanString(source.arrivalInstructions, "", 500) || undefined,
+    publicNotes: cleanString(source.publicNotes, "", 500) || undefined,
+    timezone: cleanString(source.timezone, "", 80) || undefined,
+  };
+}
+
+const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["status", "custom_group", "location", "coach_id"]);
 
 function omittedCalendarColumnWarning(column: string) {
   return `Calendar saved, but optional calendar item column "${column}" is not available in Supabase. Optional data for that field was not preserved.`;
@@ -691,12 +768,14 @@ function rowToItem(row: any) {
     day: Number(row.day ?? 0),
     start: Number(row.start ?? 0),
     duration: Number(row.duration ?? 0),
+    coachId: row.coach_id || DEFAULT_COACH_ID,
     serviceId: row.service_id || "",
     client: row.client || "",
     title: row.title || row.client || "Booking",
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
+    location: cleanBookingLocationSnapshot(row.location),
     status: cancelledGroupSession ? "cancelled" : status,
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
     ...(customGroup || {}),
@@ -718,6 +797,7 @@ function itemToRow(item: any) {
     day: Math.max(0, Math.min(6, Number(item?.day ?? 0))),
     start: Math.max(0, Math.min(1440, Number(item?.start ?? 0))),
     duration: Math.max(15, Math.min(720, Number(item?.duration ?? 30))),
+    coach_id: cleanSlug(item?.coachId, DEFAULT_COACH_ID),
     service_id: cleanString(item?.serviceId, "", 140) || null,
     client: cancelledGroupSession ? null : cleanString(item?.client, "", 160) || null,
     title: cancelledGroupSession
@@ -735,6 +815,7 @@ function itemToRow(item: any) {
           ? item.status
           : "booked",
     custom_group: cancelledGroupSession ? null : customGroup,
+    location: cancelledGroupSession ? null : cleanBookingLocationSnapshot(item?.location) || null,
     created_at: nowIso(),
     updated_at: nowIso(),
   };
@@ -1388,6 +1469,8 @@ async function readState() {
     updatedAt,
     items: itemRows.map(rowToItem),
     services: parseJsonSetting(settings, "servicesJson", defaultServices),
+    coaches: normalizeCoachProfiles(parseJsonSetting(settings, "coachProfilesJson", []), account),
+    currentUser: defaultAppUserFromAccount(account),
     locations: normalizeLocations(parseJsonSetting(settings, "locationsJson", []), account),
     availability: parseJsonSetting(
       settings,
