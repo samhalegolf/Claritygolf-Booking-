@@ -2449,23 +2449,24 @@ function emptyServiceEditor(): ServiceEditor {
   };
 }
 
-function cleanAvailability(availability?: AvailabilityWindow[][]): AvailabilityWindow[][] {
+function cleanAvailability(availability?: AvailabilityWindow[][], fallbackCoachId = defaultCoachProfileFromAccount().id): AvailabilityWindow[][] {
   const source = Array.isArray(availability) ? availability : defaultAvailability;
   return Array.from({ length: DAY_COUNT }, (_, day) => {
     const windows = Array.isArray(source[day]) ? source[day] : [];
     return windows
-      .map((window) => {
+      .map<AvailabilityWindow | null>((window) => {
         const rawStart = Number.isFinite(Number(window?.start)) ? Number(window?.start) : DEFAULT_CALENDAR_START_MINUTES;
         const rawEnd = Number.isFinite(Number(window?.end)) ? Number(window?.end) : rawStart + 60;
         const start = snap(clamp(rawStart, DAY_START_MINUTES, LAST_TIME_SLOT_MINUTES));
         const end = snap(clamp(rawEnd, start + SNAP_MINUTES, LAST_TIME_SLOT_MINUTES));
-        return end > start ? { start, end } : null;
+        const coachId = cleanSlug(window?.coachId, fallbackCoachId);
+        return end > start ? { start, end, coachId } : null;
       })
       .filter((window): window is AvailabilityWindow => Boolean(window))
-      .sort((a, b) => a.start - b.start)
+      .sort((a, b) => (a.coachId || "").localeCompare(b.coachId || "") || a.start - b.start)
       .reduce<AvailabilityWindow[]>((merged, window) => {
         const previous = merged.at(-1);
-        if (previous && window.start < previous.end) {
+        if (previous && previous.coachId === window.coachId && window.start < previous.end) {
           previous.end = Math.max(previous.end, window.end);
         } else {
           merged.push({ ...window });
@@ -2473,6 +2474,12 @@ function cleanAvailability(availability?: AvailabilityWindow[][]): AvailabilityW
         return merged;
       }, []);
   });
+}
+
+function availabilityForCoach(availability: AvailabilityWindow[][], coachId: string, fallbackCoachId: string) {
+  return availability.map((dayWindows) =>
+    dayWindows.filter((window) => (window.coachId || fallbackCoachId) === coachId),
+  );
 }
 
 function isCancelledGroupSessionItem(item: CalendarItem) {
@@ -2991,6 +2998,8 @@ function App() {
   const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek]);
   const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
   const weekItems = useMemo(() => items.filter((item) => itemWeek(item) === activeWeek), [activeWeek, items]);
+  const activeCoachId = currentAppUser.coachId || defaultCoachId(coachProfiles);
+  const activeCoachList = coachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
   const selectedCalendarCoachId = calendarCoachFilterId || defaultCoachId(coachProfiles);
   const selectedCalendarLocationId = calendarLocationFilterId || defaultLocationId(locations);
   const visibleWeekItems = useMemo(
@@ -3030,9 +3039,16 @@ function App() {
   }, [calendarPerspective, coachAccount, coachProfiles, services, visibleWeekItems]);
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
   const blocks = weekItems.filter((item) => item.kind === "block").length;
+  const calendarAvailability = useMemo(
+    () =>
+      calendarPerspective === "coach"
+        ? availabilityForCoach(availability, selectedCalendarCoachId, activeCoachId)
+        : availability,
+    [activeCoachId, availability, calendarPerspective, selectedCalendarCoachId],
+  );
   const calendarDisplayBounds = useMemo(() => {
     const points = [DEFAULT_CALENDAR_START_MINUTES, DEFAULT_CALENDAR_END_MINUTES];
-    availability.forEach((dayWindows) => {
+    calendarAvailability.forEach((dayWindows) => {
       dayWindows.forEach((window) => {
         points.push(window.start, window.end);
       });
@@ -3057,7 +3073,7 @@ function App() {
       start,
       end: Math.max(end, start + 60),
     };
-  }, [availability, services, visibleWeekItems]);
+  }, [calendarAvailability, services, visibleWeekItems]);
   const fullCalendarStartMinutes = calendarDisplayBounds.start;
   const fullCalendarEndMinutes = calendarDisplayBounds.end;
   const calendarViewBounds = useMemo(() => {
@@ -3130,8 +3146,6 @@ function App() {
       Boolean(flyingBooking) ||
       pointerSession?.mode === "place" ||
       (pointerSession?.mode === "move" && Boolean(floatingDrag)));
-  const activeCoachId = currentAppUser.coachId || defaultCoachId(coachProfiles);
-  const activeCoachList = coachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
   const serviceScopeCoachId = isAdminUser ? selectedCalendarCoachId || activeCoachId : activeCoachId;
   const serviceVisibleToCurrentUser = (service: Service) =>
     isAdminUser || (service.coachId || defaultCoachId(coachProfiles)) === serviceScopeCoachId;
@@ -4490,7 +4504,9 @@ function App() {
 
     if (!bookingDaySelected) return [];
 
-    const windows = availability[bookingDay] ?? [];
+    const serviceCoachId = bookingTargetService.coachId || activeCoachId;
+    const serviceAvailability = availabilityForCoach(availability, serviceCoachId, activeCoachId);
+    const windows = serviceAvailability[bookingDay] ?? [];
     const slots: BookingSlot[] = [];
     windows.forEach((window) => {
       for (let start = window.start; start + bookingTargetService.duration <= window.end; start += 30) {
@@ -4511,7 +4527,7 @@ function App() {
       }
     });
     return slots;
-  }, [activeWeek, bookingDay, bookingDaySelected, bookingMode, bookingTargetService, selectedRescheduleMatch, items, availability]);
+  }, [activeCoachId, activeWeek, bookingDay, bookingDaySelected, bookingMode, bookingTargetService, selectedRescheduleMatch, items, availability]);
   const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.start === bookingStart);
 
   const isAppointmentStepComplete = Boolean(selectedBookingService);
@@ -7109,6 +7125,7 @@ function App() {
               )
             : windows,
         ),
+        activeCoachId,
       ),
     );
   }
@@ -7121,6 +7138,7 @@ function App() {
         current.map((windows, dayIndex) =>
           dayIndex === day ? windows.filter((_, windowIndex) => windowIndex !== index) : windows,
         ),
+        activeCoachId,
       ),
     );
   }
@@ -7136,7 +7154,8 @@ function App() {
     setEditingAvailabilityWindow(`${day}-${existingWindows.length}`);
     setAvailability((current) =>
       cleanAvailability(
-        current.map((windows, dayIndex) => (dayIndex === day ? [...windows, { start, end }] : windows)),
+        current.map((windows, dayIndex) => (dayIndex === day ? [...windows, { start, end, coachId: activeCoachId }] : windows)),
+        activeCoachId,
       ),
     );
   }
@@ -7150,15 +7169,16 @@ function App() {
           dayIndex === day
             ? windows.length
               ? []
-              : [{ start: timeToMinutes(9, 0), end: timeToMinutes(17, 0) }]
+              : [{ start: timeToMinutes(9, 0), end: timeToMinutes(17, 0), coachId: activeCoachId }]
             : windows,
         ),
+        activeCoachId,
       ),
     );
   }
 
   async function saveAvailability() {
-    const clean = cleanAvailability(availability);
+    const clean = cleanAvailability(availability, activeCoachId);
     setEditingAvailabilityWindow("");
     setAvailability(clean);
     setAvailabilitySaveState("saving");
@@ -9988,7 +10008,7 @@ function App() {
               >
                 {weekDays.map((day, dayIndex) => (
                   <div className="day-lane" key={day.label} style={{ left: `${(dayIndex / DAY_COUNT) * 100}%` }}>
-                    {availability[dayIndex].map((window, index) => {
+                    {calendarAvailability[dayIndex].map((window, index) => {
                       const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
                       if (!visibleWindow) return null;
                       return (

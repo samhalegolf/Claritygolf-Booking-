@@ -608,13 +608,14 @@ function normalizeAvailability(availability) {
           start + 15,
           Math.min(dayEndMinutes, Math.round(rawEnd / 15) * 15),
         );
-        return end > start ? { start, end } : null;
+        const coachId = cleanSlug(window?.coachId, defaultCoachProfileFromAccount().id);
+        return end > start ? { start, end, coachId } : null;
       })
       .filter(Boolean)
-      .sort((a, b) => a.start - b.start)
+      .sort((a, b) => (a.coachId || "").localeCompare(b.coachId || "") || a.start - b.start)
       .reduce((merged, window) => {
         const previous = merged.at(-1);
-        if (previous && window.start < previous.end) {
+        if (previous && previous.coachId === window.coachId && window.start < previous.end) {
           previous.end = Math.max(previous.end, window.end);
         } else {
           merged.push({ ...window });
@@ -3559,11 +3560,15 @@ function slotOverlaps(a, b) {
   );
 }
 
-function isInsideAvailability(availability, day, start, duration) {
+function isInsideAvailability(availability, day, start, duration, coachId = defaultCoachProfileFromAccount().id) {
   const end = start + duration;
+  const fallbackCoachId = defaultCoachProfileFromAccount().id;
   return (
     availability[day]?.some(
-      (window) => start >= window.start && end <= window.end,
+      (window) =>
+        (window.coachId || fallbackCoachId) === coachId &&
+        start >= window.start &&
+        end <= window.end,
     ) ?? false
   );
 }
@@ -3666,6 +3671,7 @@ async function createPublicBooking(payload, context = null) {
   }
 
   const slot = { week, day, start, duration: service.duration };
+  const serviceCoachId = service.coachId || defaultCoachId(state.coaches || []);
   if (isScheduledGroupService(service)) {
     if (!isGroupServiceSlotMatch(service, slot) || hasCollision(state.items, slot, service)) {
       throw Object.assign(new Error("That time is no longer available."), {
@@ -3673,7 +3679,7 @@ async function createPublicBooking(payload, context = null) {
       });
     }
   } else if (
-    !isInsideAvailability(state.availability, day, start, service.duration) ||
+    !isInsideAvailability(state.availability, day, start, service.duration, serviceCoachId) ||
     hasCollision(state.items, slot, service)
   ) {
     throw Object.assign(new Error("That time is no longer available."), {
@@ -3729,7 +3735,7 @@ async function createPublicBooking(payload, context = null) {
       calculatedPrice: calculateCustomGroupPrice(service, participantCount),
     };
   }
-  const coachId = cleanSlug(payload?.coachId, service.coachId || defaultCoachId(state.coaches || []));
+  const coachId = cleanSlug(payload?.coachId, serviceCoachId);
   const location = cleanBookingLocationSnapshot(
     payload?.location,
     bookingLocationSnapshotFor(service, state.locations || [], state.account),
@@ -4134,6 +4140,7 @@ async function reschedulePublicBooking(payload, context = null) {
     (candidate) => candidate.id === appointment.serviceId,
   );
   const duration = service?.duration || appointment.duration;
+  const serviceCoachId = appointment.coachId || service?.coachId || defaultCoachId(state.coaches || []);
   const slot = { week, day, start, duration };
   const itemsWithoutOriginal = state.items.filter(
     (item) => item.id !== appointment.id,
@@ -4149,6 +4156,7 @@ async function reschedulePublicBooking(payload, context = null) {
           day,
           start,
           duration,
+          serviceCoachId,
         ) ||
         !Number.isInteger(duration)) ||
     hasCollision(itemsWithoutOriginal, slot, service)
