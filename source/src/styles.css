@@ -2466,6 +2466,20 @@ button {
   white-space: nowrap;
 }
 
+.location-coach-columns em span,
+.location-coach-columns em small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-coach-columns em small {
+  color: #8a877d;
+  font-size: 9px;
+  font-weight: 600;
+}
+
 .time-gutter,
 .day-heading {
   height: 58px;
@@ -2588,6 +2602,19 @@ button {
   background: #d8d4ca;
   color: #24221f;
   box-shadow: none;
+}
+
+.calendar-item.location-wide-block {
+  border-style: dashed;
+  background: #efe8d9;
+}
+
+.calendar-item.coach-location-block {
+  background: #ddd8cc;
+}
+
+.calendar-item.coach-only-block {
+  border-style: dotted;
 }
 
 .calendar-item.appointment {

@@ -3182,6 +3182,14 @@ function App() {
       .map((coachId) => bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount))
       .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
   }, [activeCoachList, effectiveCalendarPerspective, selectedCalendarLocationId, coachAccount, coachProfiles, services, visibleWeekItems]);
+  const locationCalendarHasAppointments = visibleWeekItems.some((item) => item.kind === "appointment");
+  const locationCalendarCoachItemCount = (coachId?: string) => {
+    if (!coachId) return 0;
+    return visibleWeekItems.filter((item) => {
+      if (item.kind !== "appointment") return false;
+      return calendarItemCoachColumnId(item, itemService(item, services), coachProfiles, coachAccount) === coachId;
+    }).length;
+  };
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
   const blocks = weekItems.filter((item) => item.kind === "block").length;
   const calendarAvailability = useMemo(
@@ -10514,6 +10522,11 @@ function App() {
                 No active coaches are assigned to this location yet.
               </div>
             ) : null}
+            {effectiveCalendarPerspective === "location" && locationCalendarCoachGroups.length && !locationCalendarHasAppointments ? (
+              <div className="calendar-save-warning">
+                No appointments at this location for the selected week.
+              </div>
+            ) : null}
 
             <div className="calendar-header-row">
               <div className="time-gutter" />
@@ -10524,7 +10537,10 @@ function App() {
                   {effectiveCalendarPerspective === "location" && locationCalendarCoachGroups.length ? (
                     <div className="location-coach-columns" aria-label="Coach columns">
                       {locationCalendarCoachGroups.map((coach) => (
-                        <em key={coach.coachId || coach.name}>{coach.displayName || coach.name}</em>
+                        <em key={coach.coachId || coach.name}>
+                          <span>{coach.displayName || coach.name}</span>
+                          <small>{locationCalendarCoachItemCount(coach.coachId)} appt</small>
+                        </em>
                       ))}
                     </div>
                   ) : null}
@@ -10599,8 +10615,9 @@ function App() {
                   const dayWidth = 100 / DAY_COUNT;
                   const coachColumnCount =
                     effectiveCalendarPerspective === "location" ? Math.max(1, locationCalendarCoachGroups.length) : 1;
+                  const locationWideBlock = effectiveCalendarPerspective === "location" && isLocationOnlyBlock(item);
                   const coachColumnIndex =
-                    effectiveCalendarPerspective === "location"
+                    effectiveCalendarPerspective === "location" && !locationWideBlock
                       ? Math.max(
                           0,
                           locationCalendarCoachGroups.findIndex(
@@ -10608,7 +10625,7 @@ function App() {
                           ),
                         )
                       : 0;
-                  const width = dayWidth / coachColumnCount;
+                  const width = locationWideBlock ? dayWidth : dayWidth / coachColumnCount;
                   const left = item.day * dayWidth + coachColumnIndex * width;
                   const flyAnimation = placementAnimation?.itemId === item.id ? placementAnimation : null;
                   const itemNotifications = notificationsByAppointment.get(item.id) ?? [];
@@ -10636,7 +10653,11 @@ function App() {
                     <article
                       data-calendar-item
                       key={item.id}
-                      className={`calendar-item ${item.kind} ${selectedId === item.id ? "selected" : ""} ${
+                      className={`calendar-item ${item.kind} ${
+                        isLocationOnlyBlock(item) ? "location-wide-block" : ""
+                      } ${isCoachLocationBlock(item) ? "coach-location-block" : ""} ${
+                        isCoachOnlyBlock(item) ? "coach-only-block" : ""
+                      } ${selectedId === item.id ? "selected" : ""} ${
                         invalid ? "invalid" : ""
 	                      } ${flyAnimation ? "just-placed-from-dock" : ""} ${
 	                        pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
@@ -10718,7 +10739,15 @@ function App() {
                         ) : null}
                         <div className="item-content">
                         <strong>{groupSessionContext ? groupSessionContext.service.name : item.kind === "appointment" ? item.client || item.title : item.title}</strong>
-                        <span>{groupSessionContext ? "Group Session" : service?.name ?? "Busy"}</span>
+                        <span>
+                          {groupSessionContext
+                            ? "Group Session"
+                            : item.kind === "block" && isLocationOnlyBlock(item)
+                              ? "Location unavailable"
+                              : item.kind === "block" && isCoachLocationBlock(item)
+                                ? "Coach unavailable"
+                                : service?.name ?? "Busy"}
+                        </span>
                         <em>
                           {groupSessionContext
                             ? `${formatRange(item.start, item.duration)} · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
