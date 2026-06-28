@@ -3002,23 +3002,25 @@ function App() {
   const weekItems = useMemo(() => items.filter((item) => itemWeek(item) === activeWeek), [activeWeek, items]);
   const activeCoachId = currentAppUser.coachId || defaultCoachId(coachProfiles);
   const activeCoachList = coachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
-  const selectedCalendarCoachId = calendarCoachFilterId || defaultCoachId(coachProfiles);
+  const effectiveCalendarPerspective: CalendarPerspective = isAdminUser ? calendarPerspective : "coach";
+  const selectedCalendarCoachId = calendarCoachFilterId || (isAdminUser ? defaultCoachId(coachProfiles) : activeCoachId);
   const selectedCalendarLocationId = calendarLocationFilterId || defaultLocationId(locations);
+  const selectedCalendarCoach = bookingCoachSnapshotFor(selectedCalendarCoachId, coachProfiles, coachAccount);
   const visibleWeekItems = useMemo(
     () =>
       weekItems.filter((item) => {
         if (isCancelledGroupSessionItem(item)) return false;
         const service = itemService(item, services);
-        if (calendarPerspective === "coach") {
+        if (effectiveCalendarPerspective === "coach") {
           return resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount) === selectedCalendarCoachId;
         }
-        if (calendarPerspective === "location") {
+        if (effectiveCalendarPerspective === "location") {
           return resolvedCalendarItemLocationId(item, service, locations, coachAccount) === selectedCalendarLocationId;
         }
         return true;
       }),
     [
-      calendarPerspective,
+      effectiveCalendarPerspective,
       coachAccount,
       coachProfiles,
       locations,
@@ -3029,7 +3031,7 @@ function App() {
     ],
   );
   const locationCalendarCoachGroups = useMemo(() => {
-    if (calendarPerspective !== "location") return [];
+    if (effectiveCalendarPerspective !== "location") return [];
     const coachIds = new Set(
       visibleWeekItems.map((item) =>
         resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
@@ -3038,15 +3040,15 @@ function App() {
     return Array.from(coachIds)
       .map((coachId) => bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount))
       .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
-  }, [calendarPerspective, coachAccount, coachProfiles, services, visibleWeekItems]);
+  }, [effectiveCalendarPerspective, coachAccount, coachProfiles, services, visibleWeekItems]);
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
   const blocks = weekItems.filter((item) => item.kind === "block").length;
   const calendarAvailability = useMemo(
     () =>
-      calendarPerspective === "coach"
+      effectiveCalendarPerspective === "coach"
         ? availabilityForCoach(availability, selectedCalendarCoachId, activeCoachId)
         : availability,
-    [activeCoachId, availability, calendarPerspective, selectedCalendarCoachId],
+    [activeCoachId, availability, effectiveCalendarPerspective, selectedCalendarCoachId],
   );
   const calendarDisplayBounds = useMemo(() => {
     const points = [DEFAULT_CALENDAR_START_MINUTES, DEFAULT_CALENDAR_END_MINUTES];
@@ -3222,7 +3224,10 @@ function App() {
   const bookingBrandPrimary = bookingBrandWords.slice(0, -1).join(" ") || bookingBrandName;
   const bookingBrandSecondary = bookingBrandWords.length > 1 ? bookingBrandWords.at(-1) : "";
   const showBookingBrandLogo = brandSettings.showLogo && !isBookingLogoHiddenByUrl();
-  const locationLine = coachAccount.venueName;
+  const calendarTitle =
+    effectiveCalendarPerspective === "location"
+      ? `Location Calendar · ${locationById(locations, selectedCalendarLocationId)?.shortName || locationById(locations, selectedCalendarLocationId)?.name || defaultLocation.shortName || defaultLocation.name}`
+      : `Coach Calendar · ${selectedCalendarCoach.displayName || selectedCalendarCoach.name}`;
   const settingsLocationLine = `${coachAccount.venueName} · ${coachAccount.timezone}`;
   const hasSavedRescheduleLogin = Boolean(rescheduleForm.email.trim() && rescheduleForm.phone.trim());
   const isEmailLinkReschedule = Boolean(
@@ -9793,7 +9798,7 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">{activeView === "booking" ? "Public Booking" : activeView}</p>
-            <h1>{activeView === "calendar" ? locationLine : sectionTitle(activeView)}</h1>
+            <h1>{activeView === "calendar" ? calendarTitle : sectionTitle(activeView)}</h1>
             {activeView === "calendar" ? (
               <span>
                 {appointments} appointments · {blocks} blocked {blocks === 1 ? "time" : "times"}
@@ -9914,15 +9919,20 @@ function App() {
                 <h2>{weekTitle}</h2>
                 <div className="calendar-scope-controls" aria-label="Calendar scope">
                   <select
-                    value={calendarPerspective}
+                    value={effectiveCalendarPerspective}
                     onChange={(event) => setCalendarPerspective(event.target.value as CalendarPerspective)}
+                    disabled={!isAdminUser}
                   >
-                    <option value="all">All calendars</option>
+                    {isAdminUser ? <option value="all">All calendars</option> : null}
                     <option value="coach">Coach calendar</option>
-                    <option value="location">Location calendar</option>
+                    {isAdminUser ? <option value="location">Location calendar</option> : null}
                   </select>
-                  {calendarPerspective === "coach" ? (
-                    <select value={selectedCalendarCoachId} onChange={(event) => setCalendarCoachFilterId(event.target.value)}>
+                  {effectiveCalendarPerspective === "coach" ? (
+                    <select
+                      value={selectedCalendarCoachId}
+                      onChange={(event) => setCalendarCoachFilterId(event.target.value)}
+                      disabled={!isAdminUser}
+                    >
                       {coachProfiles
                         .filter((coach) => coach.active && !coach.archived && coach.bookable)
                         .map((coach) => (
@@ -9932,7 +9942,7 @@ function App() {
                         ))}
                     </select>
                   ) : null}
-                  {calendarPerspective === "location" ? (
+                  {effectiveCalendarPerspective === "location" ? (
                     <>
                       <select
                         value={selectedCalendarLocationId}
@@ -10053,9 +10063,9 @@ function App() {
                   const height = durationToHeight(visibleItem.duration);
                   const dayWidth = 100 / DAY_COUNT;
                   const coachColumnCount =
-                    calendarPerspective === "location" ? Math.max(1, locationCalendarCoachGroups.length) : 1;
+                    effectiveCalendarPerspective === "location" ? Math.max(1, locationCalendarCoachGroups.length) : 1;
                   const coachColumnIndex =
-                    calendarPerspective === "location"
+                    effectiveCalendarPerspective === "location"
                       ? Math.max(
                           0,
                           locationCalendarCoachGroups.findIndex(
@@ -10073,6 +10083,10 @@ function App() {
                   const scheduledGroupSession = isScheduledGroupSessionSlot(item);
                   const groupSessionItem = isGroupSessionItem(item);
                   const groupSessionContext = getGroupSessionContext(item);
+                  const itemLocationTag =
+                    item.kind === "appointment" || groupSessionContext
+                      ? bookingLocationShortDisplay(calendarItemLocation(item, service, locations, coachAccount))
+                      : "";
                   const tooltipRows = [
                     groupSessionContext ? "Group Session" : item.client || item.title,
                     groupSessionContext
@@ -10175,6 +10189,7 @@ function App() {
                             ? `${formatRange(item.start, item.duration)} · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
                             : formatRange(item.start, item.duration)}
                         </em>
+                        {itemLocationTag ? <small className="item-location-tag">{itemLocationTag}</small> : null}
                       </div>
                       {item.kind === "appointment" && (latestClientEmail || latestCoachEmail || latestAdminEmail) && (
                         <div className="item-email-indicators" aria-label="Email receipt status">

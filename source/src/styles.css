@@ -2620,7 +2620,8 @@ button {
 
 .item-content strong,
 .item-content span,
-.item-content em {
+.item-content em,
+.item-content small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4951,12 +4952,23 @@ button {
 }
 
 .calendar-item.appointment .item-content span,
-.calendar-item.appointment .item-content em {
+.calendar-item.appointment .item-content em,
+.calendar-item.appointment .item-content small {
   max-height: 0;
   opacity: 0;
   overflow: hidden;
   transform: translateY(-2px);
   transition: opacity 150ms ease, max-height 150ms ease, transform 150ms ease;
+}
+
+.item-location-tag {
+  color: #1f5d3a;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  max-height: 14px !important;
+  opacity: 0.82 !important;
+  transform: translateY(0) !important;
 }
 
 .calendar-item.appointment:hover,
@@ -4967,10 +4979,13 @@ button {
 
 .calendar-item.appointment:hover .item-content span,
 .calendar-item.appointment:hover .item-content em,
+.calendar-item.appointment:hover .item-content small,
 .calendar-item.appointment.selected .item-content span,
 .calendar-item.appointment.selected .item-content em,
+.calendar-item.appointment.selected .item-content small,
 .floating-drag-tile .item-content span,
-.floating-drag-tile .item-content em {
+.floating-drag-tile .item-content em,
+.floating-drag-tile .item-content small {
   max-height: 16px;
   opacity: 0.76;
   transform: translateY(0);
