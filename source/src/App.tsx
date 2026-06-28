@@ -2471,6 +2471,7 @@ function App() {
   const [testEmailAddress, setTestEmailAddress] = useState("");
   const [testEmailState, setTestEmailState] = useState<"idle" | "sending" | "sent">("idle");
   const [emailNoticeVisible, setEmailNoticeVisible] = useState(false);
+  const emailNoticeToastKeyRef = useRef("");
   const [hasMoved, setHasMoved] = useState(false);
   const initialRescheduleLoginRef = useRef<SavedRescheduleLogin | null>(getInitialRescheduleLogin());
   const attemptedSavedRescheduleRef = useRef(false);
@@ -2495,6 +2496,7 @@ function App() {
   const edgeCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestureCleanupRef = useRef<null | (() => void)>(null);
   const brandSaveVersionRef = useRef(0);
+  const serviceSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
   const lastPersistedCalendarFingerprintRef = useRef("");
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
@@ -2976,6 +2978,14 @@ function App() {
       if (timer) window.clearTimeout(timer);
     };
   }, [bookingConfirmation?.appointmentId, bookingConfirmation?.email, bookingConfirmation?.kind, bookingConfirmation?.phone, isEmbedMode]);
+
+  useEffect(() => {
+    if (!isEmbedMode || !emailNoticeVisible || !bookingConfirmation?.appointmentId) return;
+    const noticeKey = `${bookingConfirmation.kind}:${bookingConfirmation.appointmentId}`;
+    if (emailNoticeToastKeyRef.current === noticeKey) return;
+    emailNoticeToastKeyRef.current = noticeKey;
+    setToast({ message: "Email Sent" });
+  }, [bookingConfirmation?.appointmentId, bookingConfirmation?.kind, emailNoticeVisible, isEmbedMode]);
 
   useEffect(() => {
     if (activeDockBookingId && !dockBookings.some((booking) => booking.id === activeDockBookingId)) {
@@ -6172,10 +6182,12 @@ function App() {
   async function persistServices(
     nextServices: Service[],
     message = "Lesson types saved.",
-    requiredServiceId?: string,
+    requiredServiceId?: string | null,
   ) {
     const payloadServices = nextServices.map((service) => ({ ...service }));
     const snapshot = services;
+    const saveVersion = ++serviceSaveVersionRef.current;
+    setServices(cleanServices(payloadServices));
     setServiceSaveState("saving");
     try {
       const response = await fetch("/api/calendar-state", {
@@ -6184,9 +6196,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({
-          items: items,
           services: payloadServices,
-          syncKey: calendarSyncKey,
           updatedAt: calendarStateVersion,
         }),
       });
@@ -6210,7 +6220,7 @@ function App() {
         throw new Error("Services save response did not return services.");
       }
       const persistedServices = cleanServices(data.services);
-      const expectedServiceId = requiredServiceId || payloadServices.at(-1)?.id;
+      const expectedServiceId = requiredServiceId === undefined ? payloadServices.at(-1)?.id : requiredServiceId;
       const persistedServiceIds = new Set(persistedServices.map((service) => service.id));
       if (expectedServiceId && !persistedServiceIds.has(expectedServiceId)) {
         throw new Error("Service did not persist. Reload and try again.");
@@ -6224,6 +6234,7 @@ function App() {
       if (expectedService && isCustomGroupService(expectedService) && !isCustomGroupService(persistedService)) {
         throw new Error("Custom group lesson settings did not persist. Reload and try again.");
       }
+      if (serviceSaveVersionRef.current !== saveVersion) return;
       setServices(persistedServices);
       if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
       if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
@@ -6235,6 +6246,7 @@ function App() {
       setToast({ message });
       window.setTimeout(() => setServiceSaveState("idle"), 1600);
     } catch (error) {
+      if (serviceSaveVersionRef.current !== saveVersion) return;
       setServiceSaveState("error");
       const reason = error instanceof Error ? error.message : "Could not save lesson types.";
       setToast({ message: reason });
@@ -6335,7 +6347,7 @@ function App() {
     void persistServices(
       nextServices,
       `${service.name} deleted.${packageSuffix}`,
-      undefined,
+      null,
     );
   }
 
@@ -10295,7 +10307,7 @@ function App() {
                           <div className={`email-status ${tone}`} key={`client-${index}`}>
                             {tone === "sent" ? <Check size={17} /> : tone === "failed" ? <X size={17} /> : <Mail size={17} />}
                             <span>
-                              Client email: {tone === "sent" ? "sent" : tone}
+                              Client email: {tone === "sent" ? "Email Sent" : tone}
                               {result.recipient ? ` to ${result.recipient}` : ""}
                               {result.reason || result.error ? ` · ${(result.reason || result.error || "").replaceAll("_", " ")}` : ""}
                             </span>

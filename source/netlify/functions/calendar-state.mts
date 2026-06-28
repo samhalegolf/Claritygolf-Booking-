@@ -1132,6 +1132,13 @@ async function processAdminNotificationDebounce(
       }
 
       if (action === "cancelled" && previous) {
+        if (isAppointmentInPast(previous, timeZone)) {
+          if (existing) {
+            queueById.delete(id);
+            queueChanged = true;
+          }
+          continue;
+        }
         if (existing?.action === "booking") {
           queueById.delete(id);
           queueChanged = true;
@@ -1472,6 +1479,7 @@ export default async function handler(req: Request) {
           400,
         );
       }
+      if (!hasItemsPayload) return json(await writeState(body));
       const previousState = await readState();
       const nextState = await writeState(body);
       let notificationResults: any[] = [];
