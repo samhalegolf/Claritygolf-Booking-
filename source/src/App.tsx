@@ -1981,6 +1981,15 @@ function calendarItemCoach(
   );
 }
 
+function resolvedCalendarItemCoachId(
+  item: Partial<CalendarItem> | undefined,
+  service: Partial<Service> | undefined,
+  coaches: CoachProfile[],
+  account: Partial<CoachAccount>,
+) {
+  return item?.coachId || item?.coach?.coachId || service?.coachId || calendarItemCoach(item, coaches, account).coachId || defaultCoachId(coaches);
+}
+
 function cleanLocation(raw?: Partial<Location>, fallback?: Location, index = 0): Location {
   const base = fallback ?? defaultLocationFromCoachAccount();
   const name =
@@ -2128,6 +2137,15 @@ function calendarItemLocation(
     ) ??
     bookingLocationSnapshotFor(service, locations, account)
   );
+}
+
+function resolvedCalendarItemLocationId(
+  item: Partial<CalendarItem> | undefined,
+  service: Partial<Service> | undefined,
+  locations: Location[],
+  account: Partial<CoachAccount>,
+) {
+  return item?.locationId || item?.location?.locationId || service?.locationId || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
 }
 
 function bookingLocationDisplay(location: Partial<BookingLocationSnapshot> | undefined) {
@@ -2978,13 +2996,12 @@ function App() {
     () =>
       weekItems.filter((item) => {
         if (isCancelledGroupSessionItem(item)) return false;
+        const service = itemService(item, services);
         if (calendarPerspective === "coach") {
-          return (item.coachId || defaultCoachId(coachProfiles)) === selectedCalendarCoachId;
+          return resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount) === selectedCalendarCoachId;
         }
         if (calendarPerspective === "location") {
-          const service = itemService(item, services);
-          const resolvedLocation = calendarItemLocation(item, service, locations, coachAccount);
-          return (item.locationId || resolvedLocation.locationId || defaultLocationId(locations)) === selectedCalendarLocationId;
+          return resolvedCalendarItemLocationId(item, service, locations, coachAccount) === selectedCalendarLocationId;
         }
         return true;
       }),
@@ -3001,11 +3018,15 @@ function App() {
   );
   const locationCalendarCoachGroups = useMemo(() => {
     if (calendarPerspective !== "location") return [];
-    const coachIds = new Set(visibleWeekItems.map((item) => item.coachId || defaultCoachId(coachProfiles)));
+    const coachIds = new Set(
+      visibleWeekItems.map((item) =>
+        resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
+      ),
+    );
     return Array.from(coachIds)
       .map((coachId) => bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount))
       .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
-  }, [calendarPerspective, coachAccount, coachProfiles, visibleWeekItems]);
+  }, [calendarPerspective, coachAccount, coachProfiles, services, visibleWeekItems]);
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
   const blocks = weekItems.filter((item) => item.kind === "block").length;
   const calendarDisplayBounds = useMemo(() => {
@@ -9961,6 +9982,7 @@ function App() {
                   const visibleItem = clipCalendarSegment(item.start, item.duration);
                   if (!visibleItem) return null;
                   const service = itemService(item, services);
+                  const resolvedItemCoachId = resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount);
                   const activeDraft =
                     draft && (draft.mode === "move" || draft.mode === "resize") && draft.itemId === item.id
                       ? draft
@@ -9976,7 +9998,7 @@ function App() {
                       ? Math.max(
                           0,
                           locationCalendarCoachGroups.findIndex(
-                            (coach) => coach.coachId === (item.coachId || defaultCoachId(coachProfiles)),
+                            (coach) => coach.coachId === resolvedItemCoachId,
                           ),
                         )
                       : 0;
