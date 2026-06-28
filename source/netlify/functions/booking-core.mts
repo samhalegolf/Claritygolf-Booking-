@@ -991,6 +991,37 @@ function calendarItemLocation(item, service, locations, account) {
   );
 }
 
+function calendarItemCoach(item, coaches, account) {
+  return (
+    cleanBookingCoachSnapshot(item?.coach) ||
+    bookingCoachSnapshotFor(item?.coachId, coaches, account)
+  );
+}
+
+function resolvedCalendarItemCoachId(item, service, coaches, account) {
+  return item?.coachId || item?.coach?.coachId || service?.coachId || calendarItemCoach(item, coaches, account).coachId || defaultCoachId(coaches);
+}
+
+function resolvedCalendarItemLocationId(item, service, locations, account) {
+  return item?.locationId || item?.location?.locationId || service?.locationId || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
+}
+
+function isLocationOnlyBlock(item) {
+  return item?.kind === "block" && Boolean(item.locationId || item.location?.locationId) && !item.coachId && !item.coach?.coachId;
+}
+
+function isCoachOnlyBlock(item) {
+  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && !item.locationId && !item.location?.locationId;
+}
+
+function isCoachLocationBlock(item) {
+  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && Boolean(item.locationId || item.location?.locationId);
+}
+
+function isInactiveForConflict(item) {
+  return item?.status === "cancelled" || item?.status === "no_show";
+}
+
 function bookingLocationDisplay(location) {
   return [location?.name, location?.address].filter(Boolean).join(" · ");
 }
@@ -3611,7 +3642,35 @@ function isGroupServiceSlotMatch(service, candidate) {
   return true;
 }
 
-function hasCollision(items, candidate, service) {
+function hasCollision(items, candidate, service, state = {}) {
+  const services = state.services || defaultServices;
+  const coaches = state.coaches || [];
+  const locations = state.locations || [];
+  const account = state.account || defaultCoachAccount();
+  const candidateCoachId = service?.coachId || defaultCoachId(coaches);
+  const candidateLocationId = serviceLocation(service, locations, account).id;
+  const candidateItem = {
+    kind: "appointment",
+    coachId: candidateCoachId,
+    locationId: candidateLocationId,
+    ...candidate,
+  };
+  const existingService = (item) => services.find((candidateService) => candidateService.id === item.serviceId);
+  const isCoachConflict = (item) => {
+    if (isInactiveForConflict(item) || isLocationOnlyBlock(item)) return false;
+    const itemCoachId = resolvedCalendarItemCoachId(item, existingService(item), coaches, account);
+    return Boolean(candidateCoachId && itemCoachId && candidateCoachId === itemCoachId);
+  };
+  const isLocationConflict = (item) => {
+    if (isInactiveForConflict(item)) return false;
+    const itemLocationId = resolvedCalendarItemLocationId(item, existingService(item), locations, account);
+    if (!candidateLocationId || !itemLocationId || candidateLocationId !== itemLocationId) return false;
+    if (isLocationOnlyBlock(item)) return true;
+    if (isCoachOnlyBlock(item)) return false;
+    if (isCoachLocationBlock(item)) return isCoachConflict(item);
+    return candidateItem.kind === "block" && isLocationOnlyBlock(candidateItem);
+  };
+  const isAppointmentConflict = (item) => isCoachConflict(item) || isLocationConflict(item);
   const overlapping = items.filter((item) =>
     slotOverlaps(
       {
@@ -3624,11 +3683,11 @@ function hasCollision(items, candidate, service) {
     ),
   );
   if (!isScheduledGroupService(service)) {
-    return overlapping.length > 0;
+    return overlapping.some(isAppointmentConflict);
   }
-  const sameServiceCount = overlapping.filter((item) => item.serviceId === service.id).length;
+  const sameServiceCount = overlapping.filter((item) => item.serviceId === service.id && !isInactiveForConflict(item)).length;
   const blocksOrOtherService = overlapping.some(
-    (item) => item.kind !== "appointment" || item.serviceId !== service.id,
+    (item) => (item.kind !== "appointment" || item.serviceId !== service.id) && isAppointmentConflict(item),
   );
   if (blocksOrOtherService) return true;
   return sameServiceCount >= service.capacity;
@@ -3678,14 +3737,14 @@ async function createPublicBooking(payload, context = null) {
   const slot = { week, day, start, duration: service.duration };
   const serviceCoachId = service.coachId || defaultCoachId(state.coaches || []);
   if (isScheduledGroupService(service)) {
-    if (!isGroupServiceSlotMatch(service, slot) || hasCollision(state.items, slot, service)) {
+    if (!isGroupServiceSlotMatch(service, slot) || hasCollision(state.items, slot, service, state)) {
       throw Object.assign(new Error("That time is no longer available."), {
         status: 409,
       });
     }
   } else if (
     !isInsideAvailability(state.availability, day, start, service.duration, serviceCoachId) ||
-    hasCollision(state.items, slot, service)
+    hasCollision(state.items, slot, service, state)
   ) {
     throw Object.assign(new Error("That time is no longer available."), {
       status: 409,
@@ -4164,7 +4223,7 @@ async function reschedulePublicBooking(payload, context = null) {
           serviceCoachId,
         ) ||
         !Number.isInteger(duration)) ||
-    hasCollision(itemsWithoutOriginal, slot, service)
+    hasCollision(itemsWithoutOriginal, slot, service, state)
   ) {
     throw Object.assign(new Error("That time is no longer available."), {
       status: 409,
