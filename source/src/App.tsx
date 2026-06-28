@@ -3033,14 +3033,19 @@ function App() {
   const locationCalendarCoachGroups = useMemo(() => {
     if (effectiveCalendarPerspective !== "location") return [];
     const coachIds = new Set(
-      visibleWeekItems.map((item) =>
+      activeCoachList
+        .filter((coach) => (coach.assignedLocationIds ?? []).includes(selectedCalendarLocationId))
+        .map((coach) => coach.id),
+    );
+    visibleWeekItems.forEach((item) =>
+      coachIds.add(
         resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
       ),
     );
     return Array.from(coachIds)
       .map((coachId) => bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount))
       .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
-  }, [effectiveCalendarPerspective, coachAccount, coachProfiles, services, visibleWeekItems]);
+  }, [activeCoachList, effectiveCalendarPerspective, selectedCalendarLocationId, coachAccount, coachProfiles, services, visibleWeekItems]);
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
   const blocks = weekItems.filter((item) => item.kind === "block").length;
   const calendarAvailability = useMemo(
@@ -9986,6 +9991,11 @@ function App() {
             {calendarViewEmptyMessage ? (
               <div className="calendar-save-warning">{calendarViewEmptyMessage}</div>
             ) : null}
+            {effectiveCalendarPerspective === "location" && !locationCalendarCoachGroups.length ? (
+              <div className="calendar-save-warning">
+                No active coaches are assigned to this location yet.
+              </div>
+            ) : null}
 
             <div className="calendar-header-row">
               <div className="time-gutter" />
@@ -9993,6 +10003,13 @@ function App() {
                 <div className={`day-heading ${day.isToday ? "today" : ""}`} key={day.label}>
                   <span>{day.short}</span>
                   <strong>{day.date}</strong>
+                  {effectiveCalendarPerspective === "location" && locationCalendarCoachGroups.length ? (
+                    <div className="location-coach-columns" aria-label="Coach columns">
+                      {locationCalendarCoachGroups.map((coach) => (
+                        <em key={coach.coachId || coach.name}>{coach.displayName || coach.name}</em>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
