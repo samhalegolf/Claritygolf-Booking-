@@ -37,6 +37,47 @@ function cleanRow(row) {
   return Object.fromEntries(Object.entries(row || {}).filter(([, value]) => value !== undefined));
 }
 
+const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["status", "custom_group"]);
+
+function missingOptionalCalendarItemColumn(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (!/calendar_items/i.test(message)) return "";
+  if (!/(schema cache|column|PGRST204|42703|Could not find)/i.test(message)) return "";
+  for (const column of OPTIONAL_CALENDAR_ITEM_COLUMNS) {
+    const escaped = column.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`['"\`]${escaped}['"\`]|\\b${escaped}\\b`, "i").test(message)) return column;
+  }
+  return "";
+}
+
+function omitCalendarItemColumn(rows, column) {
+  return rows.map((row) => {
+    const { [column]: _omitted, ...rest } = row;
+    return rest;
+  });
+}
+
+async function upsertCalendarItemsAccepting(store, rows) {
+  let nextRows = rows;
+  const omittedColumns = [];
+
+  while (true) {
+    try {
+      await store.upsert("calendar_items", nextRows, "id");
+      return omittedColumns;
+    } catch (error) {
+      const column = missingOptionalCalendarItemColumn(error);
+      if (!column || omittedColumns.includes(column)) throw error;
+      omittedColumns.push(column);
+      nextRows = omitCalendarItemColumn(nextRows, column);
+      console.warn("supabase_storage:calendar_items_optional_column_omitted", {
+        column,
+        error: error instanceof Error ? error.message : String(error || ""),
+      });
+    }
+  }
+}
+
 class SupabaseRestStore {
   constructor() {
     this.url = env("SUPABASE_URL").replace(/\/$/, "");
@@ -121,7 +162,7 @@ class SupabaseRestStore {
       return { rows: [] };
     }
     if (sql.includes("insert into calendar_items")) {
-      await this.upsert("calendar_items", [calendarItemFromParams(values)], "id");
+      await upsertCalendarItemsAccepting(this, [calendarItemFromParams(values)]);
       return { rows: [] };
     }
 
