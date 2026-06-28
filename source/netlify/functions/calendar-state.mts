@@ -497,6 +497,30 @@ function defaultAppUserFromAccount(account: Record<string, unknown>) {
   };
 }
 
+function normalizeAppUsers(rawUsers: any, account: Record<string, unknown>) {
+  const fallback = defaultAppUserFromAccount(account);
+  const source = Array.isArray(rawUsers) && rawUsers.length ? rawUsers : [fallback];
+  return source.map((raw: any, index: number) => {
+    const role = raw?.role === "coach" || raw?.role === "staff" ? raw.role : "admin";
+    const permissions = typeof raw?.permissions === "object" && raw.permissions ? raw.permissions : fallback.permissions;
+    return {
+      id: cleanSlug(raw?.id, index === 0 ? fallback.id : `app-user-${index + 1}`),
+      email: cleanEmail(raw?.email, fallback.email),
+      name: cleanString(raw?.name, fallback.name, 120),
+      role,
+      coachId: cleanSlug(raw?.coachId, fallback.coachId) || undefined,
+      permissions: {
+        bookings: permissions.bookings === "own" || permissions.bookings === "assigned" ? permissions.bookings : "all",
+        services: permissions.services === "own" || permissions.services === "assigned" ? permissions.services : "all",
+        availability: permissions.availability === "own" || permissions.availability === "assigned" ? permissions.availability : "all",
+        locations: permissions.locations === "own" || permissions.locations === "assigned" ? permissions.locations : "all",
+        clients: permissions.clients === "own" || permissions.clients === "assigned" ? permissions.clients : "all",
+        settings: permissions.settings === "own" || permissions.settings === "assigned" ? permissions.settings : "all",
+      },
+    };
+  });
+}
+
 function cleanBookingLocationSnapshot(raw: any) {
   let source = raw;
   if (typeof raw === "string") {
@@ -1493,7 +1517,7 @@ async function readState() {
     items: itemRows.map(rowToItem),
     services: parseJsonSetting(settings, "servicesJson", defaultServices),
     coaches: normalizeCoachProfiles(parseJsonSetting(settings, "coachProfilesJson", []), account),
-    currentUser: defaultAppUserFromAccount(account),
+    currentUser: normalizeAppUsers(parseJsonSetting(settings, "appUsersJson", []), account)[0],
     locations: normalizeLocations(parseJsonSetting(settings, "locationsJson", []), account),
     availability: parseJsonSetting(
       settings,
@@ -1557,6 +1581,8 @@ async function writeState(body: any) {
   const hasItemsPayload = Object.prototype.hasOwnProperty.call(body || {}, "items");
   const hasServicesPayload = Object.prototype.hasOwnProperty.call(body || {}, "services");
   const hasLocationsPayload = Object.prototype.hasOwnProperty.call(body || {}, "locations");
+  const hasCoachesPayload = Object.prototype.hasOwnProperty.call(body || {}, "coaches");
+  const hasAppUsersPayload = Object.prototype.hasOwnProperty.call(body || {}, "appUsers");
   const shouldReplaceItems = body?.replaceItems === true || body?.itemsOperation === "replace";
   const rows = uniqueById(Array.isArray(body?.items) ? body.items.map(itemToRow) : []);
   const warnings: string[] = [];
@@ -1567,6 +1593,14 @@ async function writeState(body: any) {
   if (hasLocationsPayload) {
     const current = await readState();
     await setSetting("locationsJson", JSON.stringify(normalizeLocations(body?.locations, current.account)));
+  }
+  if (hasCoachesPayload) {
+    const current = await readState();
+    await setSetting("coachProfilesJson", JSON.stringify(normalizeCoachProfiles(body?.coaches, current.account)));
+  }
+  if (hasAppUsersPayload) {
+    const current = await readState();
+    await setSetting("appUsersJson", JSON.stringify(normalizeAppUsers(body?.appUsers, current.account)));
   }
 
   if (hasItemsPayload && rows.length) {
