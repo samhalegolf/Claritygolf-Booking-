@@ -3322,9 +3322,9 @@ function App() {
   const currentScreenPublicServices = publicServices.filter((service) =>
     (service.bookingScreenIds ?? ["main"]).includes(currentBookingScreenId),
   );
-  const quickCreateServices = appointmentServices;
+  const quickCreateServices = effectiveCalendarPerspective === "location" ? [] : appointmentServices;
   const quickCreateService = quickCreate?.serviceId
-    ? appointmentServices.find((service) => service.id === quickCreate.serviceId) ?? null
+    ? quickCreateServices.find((service) => service.id === quickCreate.serviceId) ?? null
     : null;
   const selectedRescheduleMatch =
     rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
@@ -5587,7 +5587,7 @@ function App() {
         clearGesture();
         return;
       }
-      const coachId = service.coachId || defaultCoachId(coachProfiles);
+      const coachId = service.coachId || selectedCalendarCoachId || defaultCoachId(coachProfiles);
       const location = bookingLocationSnapshotFor(service, locations, coachAccount);
       const item: CalendarItem = {
         id: `appt-${Date.now()}`,
@@ -5804,7 +5804,7 @@ function App() {
       return;
     }
     if (!confirmPastAdminLesson(candidate)) return;
-    const coachId = quickCreateService.coachId || defaultCoachId(coachProfiles);
+    const coachId = quickCreateService.coachId || selectedCalendarCoachId || activeCoachId || defaultCoachId(coachProfiles);
     const location = bookingLocationSnapshotFor(quickCreateService, locations, coachAccount);
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
@@ -5891,7 +5891,7 @@ function App() {
     }
     if (!confirmPastAdminLesson(candidate)) return;
     const previous = items;
-    const coachId = service.coachId || defaultCoachId(coachProfiles);
+    const coachId = service.coachId || selectedCalendarCoachId || activeCoachId || defaultCoachId(coachProfiles);
     const location = bookingLocationSnapshotFor(service, locations, coachAccount);
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
