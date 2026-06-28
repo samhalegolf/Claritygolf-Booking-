@@ -3092,6 +3092,11 @@ function App() {
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
+  const selectedCoachSnapshot = selected ? calendarItemCoach(selected, coachProfiles, coachAccount) : null;
+  const selectedLocationSnapshot = selected
+    ? calendarItemLocation(selected, selectedService ?? undefined, locations, coachAccount)
+    : null;
+  const selectedLessonNote = selectedService?.lessonNote || selectedService?.location || "";
   const selectedGroupSessionService = selectedGroupSession
     ? services.find((service) => service.id === selectedGroupSession.serviceId) ?? null
     : null;
@@ -9761,8 +9766,34 @@ function App() {
         </div>
         <div>
           <MapPin size={16} />
-          <span>{coachAccount.venueName}</span>
+          <span>{bookingLocationDisplay(selectedLocationSnapshot ?? undefined)}</span>
         </div>
+        {selectedCoachSnapshot && (
+          <div>
+            <User size={16} />
+            <span>{selectedCoachSnapshot.displayName || selectedCoachSnapshot.name}</span>
+          </div>
+        )}
+        {selected.kind === "appointment" && selectedLessonNote && (
+          <div>
+            <FileText size={16} />
+            <span>{selectedLessonNote}</span>
+          </div>
+        )}
+        {selectedLocationSnapshot?.arrivalInstructions && (
+          <div>
+            <FileText size={16} />
+            <span>{selectedLocationSnapshot.arrivalInstructions}</span>
+          </div>
+        )}
+        {selectedLocationSnapshot?.mapUrl && (
+          <div>
+            <ExternalLink size={16} />
+            <a href={selectedLocationSnapshot.mapUrl} target="_blank" rel="noreferrer">
+              Map
+            </a>
+          </div>
+        )}
         {selected.phone && (
           <div>
             <Phone size={16} />
