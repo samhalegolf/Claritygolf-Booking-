@@ -73,6 +73,8 @@ type Service = {
   minParticipants: number;
   lessonFormat: LessonFormat;
   priceMode: PriceMode;
+  locationId?: string;
+  lessonNote?: string;
   location: string;
   groupSchedule?: GroupServiceSchedule;
   packageAllowance?: number;
@@ -119,10 +121,37 @@ type CalendarItem = {
   phone?: string;
   email?: string;
   note?: string;
+  location?: BookingLocationSnapshot;
   status?: BookingStatus;
   customGroup?: true;
   attendees?: CustomGroupAttendee[];
   calculatedPrice?: number;
+};
+
+type Location = {
+  id: string;
+  name: string;
+  shortName: string;
+  address: string;
+  mapUrl?: string;
+  arrivalInstructions?: string;
+  publicNotes?: string;
+  timezone: string;
+  active: boolean;
+  archived?: boolean;
+  isDefault?: boolean;
+  sortOrder?: number;
+};
+
+type BookingLocationSnapshot = {
+  locationId?: string;
+  name: string;
+  shortName?: string;
+  address?: string;
+  mapUrl?: string;
+  arrivalInstructions?: string;
+  publicNotes?: string;
+  timezone?: string;
 };
 
 type PendingBooking = {
@@ -803,6 +832,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -817,6 +847,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -831,6 +862,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -851,6 +883,7 @@ const defaultServices: Service[] = [
       occurrenceCount: 8,
       active: true,
     },
+    lessonNote: "Group coaching bay",
     location: "Group coaching bay",
   },
   {
@@ -865,6 +898,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire deducted from membership account",
     location: "Range 24/7 member bay",
   },
   {
@@ -879,6 +913,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire deducted from membership account",
     location: "Range 24/7 member bay",
   },
   {
@@ -893,6 +928,7 @@ const defaultServices: Service[] = [
     minParticipants: 1,
     lessonFormat: "package",
     priceMode: "session",
+    lessonNote: "Package allowance",
     location: "Package allowance",
     packageAllowance: 5,
     packageCoverageMode: "upfront",
@@ -1733,6 +1769,175 @@ function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
   };
 }
 
+function defaultLocationFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): Location {
+  const cleanAccount = cleanCoachAccount(account);
+  return {
+    id: "default-location",
+    name: cleanAccount.venueName,
+    shortName: cleanAccount.venueShortName || cleanAccount.venueName,
+    address: "",
+    timezone: cleanAccount.timezone,
+    active: true,
+    archived: false,
+    isDefault: true,
+    sortOrder: 0,
+  };
+}
+
+function cleanLocation(raw?: Partial<Location>, fallback?: Location, index = 0): Location {
+  const base = fallback ?? defaultLocationFromCoachAccount();
+  const name =
+    typeof raw?.name === "string" && raw.name.trim()
+      ? raw.name.trim().slice(0, 140)
+      : base.name;
+  const shortName =
+    typeof raw?.shortName === "string" && raw.shortName.trim()
+      ? raw.shortName.trim().slice(0, 80)
+      : name;
+  const id = cleanSlug(raw?.id, cleanSlug(name, `location-${index + 1}`));
+  return {
+    id,
+    name,
+    shortName,
+    address: typeof raw?.address === "string" ? raw.address.trim().slice(0, 240) : base.address,
+    mapUrl: cleanUrl(raw?.mapUrl, "") || undefined,
+    arrivalInstructions:
+      typeof raw?.arrivalInstructions === "string" && raw.arrivalInstructions.trim()
+        ? raw.arrivalInstructions.trim().slice(0, 500)
+        : undefined,
+    publicNotes:
+      typeof raw?.publicNotes === "string" && raw.publicNotes.trim()
+        ? raw.publicNotes.trim().slice(0, 500)
+        : undefined,
+    timezone:
+      typeof raw?.timezone === "string" && raw.timezone.trim()
+        ? raw.timezone.trim().slice(0, 80)
+        : base.timezone,
+    active: raw?.active !== false,
+    archived: raw?.archived === true,
+    isDefault: raw?.isDefault === true || base.isDefault === true,
+    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw?.sortOrder)) : index,
+  };
+}
+
+function cleanLocations(rawLocations?: Partial<Location>[], account?: Partial<CoachAccount>): Location[] {
+  const fallback = defaultLocationFromCoachAccount(account ?? defaultCoachAccount);
+  const source = Array.isArray(rawLocations) && rawLocations.length ? rawLocations : [fallback];
+  const seen = new Set<string>();
+  const cleaned = source.map((raw, index) => {
+    const location = cleanLocation(raw, index === 0 ? fallback : undefined, index);
+    let id = location.id;
+    let suffix = 2;
+    while (seen.has(id)) {
+      id = `${location.id}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(id);
+    return { ...location, id };
+  });
+  const active = cleaned.filter((location) => location.active && !location.archived);
+  if (!active.length) {
+    cleaned[0] = { ...cleaned[0], active: true, archived: false };
+  }
+  const defaultIndex = cleaned.findIndex((location) => location.isDefault && location.active && !location.archived);
+  const nextDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((location) => location.active && !location.archived);
+  return cleaned
+    .map((location, index) => ({ ...location, isDefault: index === nextDefaultIndex }))
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
+}
+
+function activeLocations(locations: Location[]) {
+  return locations.filter((location) => location.active && !location.archived);
+}
+
+function defaultLocationId(locations: Location[]) {
+  return (
+    activeLocations(locations).find((location) => location.isDefault)?.id ??
+    activeLocations(locations)[0]?.id ??
+    locations[0]?.id ??
+    ""
+  );
+}
+
+function locationById(locations: Location[], id?: string) {
+  if (!id) return undefined;
+  return locations.find((location) => location.id === id);
+}
+
+function locationSnapshot(location: Location): BookingLocationSnapshot {
+  return {
+    locationId: location.id,
+    name: location.name,
+    shortName: location.shortName,
+    address: location.address || undefined,
+    mapUrl: location.mapUrl,
+    arrivalInstructions: location.arrivalInstructions,
+    publicNotes: location.publicNotes,
+    timezone: location.timezone,
+  };
+}
+
+function serviceLocation(service: Partial<Service> | undefined, locations: Location[], account: Partial<CoachAccount>) {
+  const cleanAccount = cleanCoachAccount(account);
+  return (
+    locationById(locations, service?.locationId) ??
+    locationById(locations, defaultLocationId(locations)) ??
+    defaultLocationFromCoachAccount(cleanAccount)
+  );
+}
+
+function bookingLocationSnapshotFor(
+  service: Partial<Service> | undefined,
+  locations: Location[],
+  account: Partial<CoachAccount>,
+): BookingLocationSnapshot {
+  return locationSnapshot(serviceLocation(service, locations, account));
+}
+
+function cleanBookingLocationSnapshot(
+  raw?: Partial<BookingLocationSnapshot>,
+  fallback?: BookingLocationSnapshot,
+): BookingLocationSnapshot | undefined {
+  const source = raw?.name ? raw : fallback;
+  if (!source?.name) return undefined;
+  return {
+    locationId: typeof source.locationId === "string" ? source.locationId.trim().slice(0, 120) : undefined,
+    name: String(source.name).trim().slice(0, 140),
+    shortName: typeof source.shortName === "string" && source.shortName.trim() ? source.shortName.trim().slice(0, 80) : undefined,
+    address: typeof source.address === "string" && source.address.trim() ? source.address.trim().slice(0, 240) : undefined,
+    mapUrl: cleanUrl(source.mapUrl, "") || undefined,
+    arrivalInstructions:
+      typeof source.arrivalInstructions === "string" && source.arrivalInstructions.trim()
+        ? source.arrivalInstructions.trim().slice(0, 500)
+        : undefined,
+    publicNotes:
+      typeof source.publicNotes === "string" && source.publicNotes.trim()
+        ? source.publicNotes.trim().slice(0, 500)
+        : undefined,
+    timezone: typeof source.timezone === "string" && source.timezone.trim() ? source.timezone.trim().slice(0, 80) : undefined,
+  };
+}
+
+function calendarItemLocation(
+  item: Partial<CalendarItem> | undefined,
+  service: Partial<Service> | undefined,
+  locations: Location[],
+  account: Partial<CoachAccount>,
+): BookingLocationSnapshot {
+  return (
+    cleanBookingLocationSnapshot(item?.location) ??
+    bookingLocationSnapshotFor(service, locations, account)
+  );
+}
+
+function bookingLocationDisplay(location: Partial<BookingLocationSnapshot> | undefined) {
+  return [location?.name, location?.address].filter(Boolean).join(" · ");
+}
+
+function bookingLocationShortDisplay(location: Partial<BookingLocationSnapshot> | undefined) {
+  return location?.shortName || location?.name || "";
+}
+
 function cleanEditableServiceText(value: unknown, fallback: string, maxLength: number) {
   if (typeof value === "string") return value.trim().slice(0, maxLength);
   return fallback;
@@ -1742,6 +1947,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
   const fallback = defaultServices[index] ?? defaultServices[0];
   const descriptionFallback = service ? "" : fallback.description;
   const locationFallback = service ? "" : fallback.location;
+  const lessonNoteFallback = service ? service.location || "" : fallback.lessonNote || fallback.location || "";
   const name =
     typeof service?.name === "string" && service.name.trim()
       ? service.name.trim().slice(0, 120)
@@ -1792,6 +1998,8 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     minParticipants,
     lessonFormat,
     priceMode,
+    locationId: typeof service?.locationId === "string" ? cleanSlug(service.locationId, "") || undefined : undefined,
+    lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
@@ -2329,6 +2537,7 @@ function App() {
   const [passwordChangeMessage, setPasswordChangeMessage] = useState("");
   const [items, setItems] = useState<CalendarItem[]>(initialItems);
   const [services, setServices] = useState<Service[]>(defaultServices);
+  const [locations, setLocations] = useState<Location[]>(() => cleanLocations(undefined, getStoredCoachAccount()));
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showServiceEditor, setShowServiceEditor] = useState(false);
@@ -3349,6 +3558,7 @@ function App() {
       people?: Person[];
       notifications?: NotificationRecord[];
       services?: Service[];
+      locations?: Location[];
       availability?: AvailabilityWindow[][];
       settings?: Partial<NotificationSettings>;
       brand?: Partial<BrandSettings>;
@@ -3365,6 +3575,7 @@ function App() {
     if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
     if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     if (Array.isArray(data.services)) setServices(cleanServices(data.services));
+    setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
     if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
     if (typeof data.syncKey === "string" && data.syncKey.startsWith("cg_")) {
       setCalendarSyncKey(data.syncKey);
@@ -3391,6 +3602,7 @@ function App() {
     const data = (await response.json()) as {
       items?: CalendarItem[];
       services?: Service[];
+      locations?: Location[];
       availability?: AvailabilityWindow[][];
       notifications?: NotificationRecord[];
       brand?: Partial<BrandSettings>;
@@ -3401,6 +3613,7 @@ function App() {
     if (Array.isArray(data.items)) setItems(data.items);
     if (Array.isArray(data.notifications)) setNotifications(data.notifications);
     if (Array.isArray(data.services)) setServices(cleanServices(data.services));
+    setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
     if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);

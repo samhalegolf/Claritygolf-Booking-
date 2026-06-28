@@ -72,6 +72,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -86,6 +87,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -100,6 +102,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -114,6 +117,7 @@ const defaultServices = [
     minParticipants: 3,
     lessonFormat: "group",
     priceMode: "per-person",
+    lessonNote: "Group coaching bay",
     location: "Group coaching bay",
     groupSchedule: {
       dayOfWeek: 2,
@@ -134,6 +138,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire deducted from membership account",
     location: "Range 24/7 member bay",
   },
   {
@@ -148,6 +153,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire deducted from membership account",
     location: "Range 24/7 member bay",
   },
   {
@@ -162,6 +168,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "package",
     priceMode: "session",
+    lessonNote: "Package allowance",
     location: "Package allowance",
     packageAllowance: 5,
     packageCoverageMode: "upfront",
@@ -483,6 +490,7 @@ function cleanService(service, index = 0) {
   const fallback = defaultServices[index] ?? defaultServices[0];
   const descriptionFallback = service ? "" : fallback.description;
   const locationFallback = service ? "" : fallback.location;
+  const lessonNoteFallback = service ? service.location || "" : fallback.lessonNote || fallback.location || "";
   const name = cleanString(service?.name, fallback.name, 120);
   const duration = Number.isFinite(Number(service?.duration)) ? Number(service.duration) : fallback.duration;
   const price = Number.isFinite(Number(service?.price)) ? Number(service.price) : fallback.price;
@@ -538,6 +546,8 @@ function cleanService(service, index = 0) {
     minParticipants,
     lessonFormat,
     priceMode,
+    locationId: cleanSlug(service?.locationId, "") || undefined,
+    lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
@@ -730,6 +740,126 @@ function cleanCoachAccount(account) {
     invoiceSettings: cleanInvoiceSettings(account?.invoiceSettings),
 	  };
 	}
+
+function defaultLocationFromCoachAccount(account = defaultCoachAccount()) {
+  const clean = cleanCoachAccount(account);
+  return {
+    id: "default-location",
+    name: clean.venueName,
+    shortName: clean.venueShortName || clean.venueName,
+    address: "",
+    timezone: clean.timezone,
+    active: true,
+    archived: false,
+    isDefault: true,
+    sortOrder: 0,
+  };
+}
+
+function cleanLocation(raw = {}, fallback = defaultLocationFromCoachAccount(), index = 0) {
+  const name = cleanString(raw?.name, fallback.name, 140);
+  const shortName = cleanString(raw?.shortName, name, 80);
+  return {
+    id: cleanSlug(raw?.id, cleanSlug(name, `location-${index + 1}`)),
+    name,
+    shortName,
+    address: cleanString(raw?.address, fallback.address || "", 240),
+    mapUrl: cleanUrl(raw?.mapUrl, "", 300) || undefined,
+    arrivalInstructions: cleanString(raw?.arrivalInstructions, "", 500) || undefined,
+    publicNotes: cleanString(raw?.publicNotes, "", 500) || undefined,
+    timezone: cleanString(raw?.timezone, fallback.timezone, 80),
+    active: raw?.active !== false,
+    archived: raw?.archived === true,
+    isDefault: raw?.isDefault === true || fallback.isDefault === true,
+    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw.sortOrder)) : index,
+  };
+}
+
+function normalizeLocations(rawLocations, account = defaultCoachAccount()) {
+  const fallback = defaultLocationFromCoachAccount(account);
+  const source = Array.isArray(rawLocations) && rawLocations.length ? rawLocations : [fallback];
+  const seen = new Set();
+  const cleaned = source.map((raw, index) => {
+    const location = cleanLocation(raw, index === 0 ? fallback : undefined, index);
+    let id = location.id;
+    let suffix = 2;
+    while (seen.has(id)) {
+      id = `${location.id}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(id);
+    return { ...location, id };
+  });
+  if (!cleaned.some((location) => location.active && !location.archived)) {
+    cleaned[0] = { ...cleaned[0], active: true, archived: false };
+  }
+  const defaultIndex = cleaned.findIndex((location) => location.isDefault && location.active && !location.archived);
+  const fallbackDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((location) => location.active && !location.archived);
+  return cleaned
+    .map((location, index) => ({ ...location, isDefault: index === fallbackDefaultIndex }))
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
+}
+
+function activeLocations(locations) {
+  return (locations || []).filter((location) => location.active && !location.archived);
+}
+
+function defaultLocationId(locations) {
+  return activeLocations(locations).find((location) => location.isDefault)?.id || activeLocations(locations)[0]?.id || locations?.[0]?.id || "";
+}
+
+function locationById(locations, id) {
+  if (!id) return null;
+  return (locations || []).find((location) => location.id === id) || null;
+}
+
+function locationSnapshot(location) {
+  return {
+    locationId: location.id,
+    name: location.name,
+    shortName: location.shortName,
+    address: location.address || undefined,
+    mapUrl: location.mapUrl || undefined,
+    arrivalInstructions: location.arrivalInstructions || undefined,
+    publicNotes: location.publicNotes || undefined,
+    timezone: location.timezone || undefined,
+  };
+}
+
+function serviceLocation(service, locations, account) {
+  return (
+    locationById(locations, service?.locationId) ||
+    locationById(locations, defaultLocationId(locations)) ||
+    defaultLocationFromCoachAccount(account)
+  );
+}
+
+function cleanBookingLocationSnapshot(raw, fallback) {
+  const source = raw?.name ? raw : fallback;
+  if (!source?.name) return undefined;
+  return {
+    locationId: cleanString(source.locationId, "", 120) || undefined,
+    name: cleanString(source.name, "", 140),
+    shortName: cleanString(source.shortName, "", 80) || undefined,
+    address: cleanString(source.address, "", 240) || undefined,
+    mapUrl: cleanUrl(source.mapUrl, "", 300) || undefined,
+    arrivalInstructions: cleanString(source.arrivalInstructions, "", 500) || undefined,
+    publicNotes: cleanString(source.publicNotes, "", 500) || undefined,
+    timezone: cleanString(source.timezone, "", 80) || undefined,
+  };
+}
+
+function bookingLocationSnapshotFor(service, locations, account) {
+  return locationSnapshot(serviceLocation(service, locations, account));
+}
+
+function calendarItemLocation(item, service, locations, account) {
+  return cleanBookingLocationSnapshot(item?.location) || bookingLocationSnapshotFor(service, locations, account);
+}
+
+function bookingLocationDisplay(location) {
+  return [location?.name, location?.address].filter(Boolean).join(" · ");
+}
 
 function generateSyncKey() {
   return `cg_${randomUUID().replaceAll("-", "")}`;
@@ -988,6 +1118,7 @@ async function defaultSettings() {
     accountCaddyWorkspaceUrl: account.caddyWorkspaceUrl,
     accountInvoiceSettingsJson: JSON.stringify(account.invoiceSettings),
     coachName: account.businessName,
+    locationsJson: JSON.stringify(normalizeLocations([], account)),
     servicesJson: JSON.stringify(defaultServices),
     availabilityJson: JSON.stringify(defaultAvailability),
     brandLogoName: "",
@@ -1841,6 +1972,27 @@ async function writeServices(services) {
   return clean;
 }
 
+async function readLocations() {
+  await ensureSeeded();
+  const account = await readCoachAccount();
+  try {
+    return normalizeLocations(
+      JSON.parse((await getSetting("locationsJson")) || "[]"),
+      account,
+    );
+  } catch {
+    return normalizeLocations([], account);
+  }
+}
+
+async function writeLocations(locations) {
+  const account = await readCoachAccount();
+  const clean = normalizeLocations(locations, account);
+  await setSetting("locationsJson", JSON.stringify(clean));
+  await setSetting("updatedAt", nowIso());
+  return clean;
+}
+
 async function readAvailability() {
   await ensureSeeded();
   try {
@@ -1962,6 +2114,7 @@ async function readCalendarState() {
     updatedAt: (await getSetting("updatedAt")) || nowIso(),
     items: await readItems(),
     services: await readServices(),
+    locations: await readLocations(),
     availability: await readAvailability(),
     people: await readPeople(),
     notifications: await readNotificationHistory(),
@@ -1984,6 +2137,7 @@ async function readPublicCalendarState() {
     updatedAt: (await getSetting("updatedAt")) || nowIso(),
     items: await readItems(),
     services: await readServices(),
+    locations: await readLocations(),
     availability: await readAvailability(),
     brand: await readBrandSettings(),
     account: await readCoachAccount(),
@@ -2267,6 +2421,7 @@ export function publicBookingState(state) {
         service.visibility === "public" &&
         service.lessonFormat !== "package",
     ),
+    locations: state.locations || [],
     availability: state.availability || [],
     brand: state.brand,
     account: state.account,
@@ -4398,6 +4553,15 @@ export async function handleBookingApiRoute(
     if (req.method === "PUT" && pathname === "/api/services") {
       const body = await parseBody(req);
       return json({ services: await writeServices(body.services) });
+    }
+
+    if (req.method === "GET" && pathname === "/api/locations") {
+      return json({ locations: await readLocations() });
+    }
+
+    if (req.method === "PUT" && pathname === "/api/locations") {
+      const body = await parseBody(req);
+      return json({ locations: await writeLocations(body.locations) });
     }
 
     if (req.method === "GET" && pathname === "/api/availability") {

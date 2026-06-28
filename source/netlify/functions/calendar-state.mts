@@ -59,6 +59,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -73,6 +74,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -87,6 +89,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -101,6 +104,7 @@ const defaultServices = [
     minParticipants: 3,
     lessonFormat: "group",
     priceMode: "per-person",
+    lessonNote: "Group coaching bay",
     location: "Group coaching bay",
   },
   {
@@ -115,6 +119,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire deducted from membership account",
     location: "Range 24/7 member bay",
   },
   {
@@ -129,6 +134,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    lessonNote: "Bay hire deducted from membership account",
     location: "Range 24/7 member bay",
   },
   {
@@ -143,6 +149,7 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "package",
     priceMode: "session",
+    lessonNote: "Package allowance",
     location: "Package allowance",
     packageAllowance: 5,
     packageCoverageMode: "upfront",
@@ -235,6 +242,7 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
   const fallback = (defaultServices[index] ?? defaultServices[0]) as any;
   const descriptionFallback = service ? "" : fallback.description;
   const locationFallback = service ? "" : fallback.location;
+  const lessonNoteFallback = service ? String(service?.location || "") : fallback.lessonNote || fallback.location || "";
   const name = cleanString(service?.name, fallback.name, 120);
   const duration = Number.isFinite(Number(service?.duration))
     ? Number(service?.duration)
@@ -289,6 +297,8 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
     minParticipants,
     lessonFormat,
     priceMode,
+    locationId: cleanSlug(service?.locationId as unknown, "") || undefined,
+    lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
     bookingScreenIds,
     archived: service?.archived === true,
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
@@ -360,6 +370,76 @@ function cleanString(value: unknown, fallback = "", max = 600) {
   return typeof value === "string"
     ? value.trim().slice(0, max) || fallback
     : fallback;
+}
+
+function cleanUrl(value: unknown, fallback = "") {
+  if (typeof value !== "string" || !value.trim()) return fallback;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString().replace(/\/$/, "") : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function defaultLocationFromAccount(account: Record<string, unknown>) {
+  const name = cleanString(account?.venueName, env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"), 140);
+  const shortName = cleanString(account?.venueShortName, name, 80);
+  return {
+    id: "default-location",
+    name,
+    shortName,
+    address: "",
+    timezone: cleanString(account?.timezone, env("CLARITY_TIMEZONE", "Pacific/Auckland"), 80),
+    active: true,
+    archived: false,
+    isDefault: true,
+    sortOrder: 0,
+  };
+}
+
+function cleanLocation(raw: any = {}, fallback = defaultLocationFromAccount({}), index = 0) {
+  const name = cleanString(raw?.name, fallback.name, 140);
+  const shortName = cleanString(raw?.shortName, name, 80);
+  return {
+    id: cleanSlug(raw?.id, cleanSlug(name, `location-${index + 1}`)),
+    name,
+    shortName,
+    address: cleanString(raw?.address, fallback.address || "", 240),
+    mapUrl: cleanUrl(raw?.mapUrl, "") || undefined,
+    arrivalInstructions: cleanString(raw?.arrivalInstructions, "", 500) || undefined,
+    publicNotes: cleanString(raw?.publicNotes, "", 500) || undefined,
+    timezone: cleanString(raw?.timezone, fallback.timezone, 80),
+    active: raw?.active !== false,
+    archived: raw?.archived === true,
+    isDefault: raw?.isDefault === true || fallback.isDefault === true,
+    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw.sortOrder)) : index,
+  };
+}
+
+function normalizeLocations(rawLocations: any, account: Record<string, unknown>) {
+  const fallback = defaultLocationFromAccount(account);
+  const source = Array.isArray(rawLocations) && rawLocations.length ? rawLocations : [fallback];
+  const seen = new Set<string>();
+  const cleaned = source.map((raw, index) => {
+    const location = cleanLocation(raw, index === 0 ? fallback : undefined, index);
+    let id = location.id;
+    let suffix = 2;
+    while (seen.has(id)) {
+      id = `${location.id}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(id);
+    return { ...location, id };
+  });
+  if (!cleaned.some((location) => location.active && !location.archived)) {
+    cleaned[0] = { ...cleaned[0], active: true, archived: false };
+  }
+  const defaultIndex = cleaned.findIndex((location) => location.isDefault && location.active && !location.archived);
+  const fallbackDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((location) => location.active && !location.archived);
+  return cleaned
+    .map((location, index) => ({ ...location, isDefault: index === fallbackDefaultIndex }))
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
 }
 
 const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["status", "custom_group"]);
@@ -1278,12 +1358,37 @@ async function readState() {
       env("CLARITY_CALENDAR_SYNC_KEY") ||
         `cg_${randomUUID().replaceAll("-", "")}`,
     );
+  const account = {
+    id: settings.accountId || "sam-hale-golf",
+    coachName: settings.accountCoachName || env("CLARITY_COACH_NAME", "Sam Hale"),
+    businessName:
+      settings.accountBusinessName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
+    venueName:
+      settings.accountVenueName ||
+      env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
+    venueShortName:
+      settings.accountVenueShortName || env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
+    timezone: settings.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
+    contactEmail: settings.accountContactEmail || env("CLARITY_CONTACT_EMAIL", ""),
+    bookingUrl:
+      settings.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
+    calendarSlug: settings.accountCalendarSlug || "sam-hale-golf",
+    caddyWorkspaceUrl:
+      settings.accountCaddyWorkspaceUrl ||
+      env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
+    invoiceSettings: parseJsonSetting(
+      settings,
+      "accountInvoiceSettingsJson",
+      defaultInvoiceSettings,
+    ),
+  };
 
   return {
     syncKey: settings.syncKey || env("CLARITY_CALENDAR_SYNC_KEY") || "",
     updatedAt,
     items: itemRows.map(rowToItem),
     services: parseJsonSetting(settings, "servicesJson", defaultServices),
+    locations: normalizeLocations(parseJsonSetting(settings, "locationsJson", []), account),
     availability: parseJsonSetting(
       settings,
       "availabilityJson",
@@ -1337,30 +1442,7 @@ async function readState() {
       accent: settings.brandAccent || "#07100a",
       bookingTheme: settings.brandBookingTheme || "dark",
     },
-    account: {
-      id: settings.accountId || "sam-hale-golf",
-      coachName: settings.accountCoachName || env("CLARITY_COACH_NAME", "Sam Hale"),
-      businessName:
-        settings.accountBusinessName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
-      venueName:
-        settings.accountVenueName ||
-        env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
-      venueShortName:
-        settings.accountVenueShortName || env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
-      timezone: settings.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
-      contactEmail: settings.accountContactEmail || env("CLARITY_CONTACT_EMAIL", ""),
-      bookingUrl:
-        settings.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
-      calendarSlug: settings.accountCalendarSlug || "sam-hale-golf",
-      caddyWorkspaceUrl:
-        settings.accountCaddyWorkspaceUrl ||
-        env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
-      invoiceSettings: parseJsonSetting(
-        settings,
-        "accountInvoiceSettingsJson",
-        defaultInvoiceSettings,
-      ),
-    },
+    account,
     googleCalendar: await getGoogleCalendarSyncStatus(),
   };
 }
@@ -1368,12 +1450,17 @@ async function readState() {
 async function writeState(body: any) {
   const hasItemsPayload = Object.prototype.hasOwnProperty.call(body || {}, "items");
   const hasServicesPayload = Object.prototype.hasOwnProperty.call(body || {}, "services");
+  const hasLocationsPayload = Object.prototype.hasOwnProperty.call(body || {}, "locations");
   const shouldReplaceItems = body?.replaceItems === true || body?.itemsOperation === "replace";
   const rows = uniqueById(Array.isArray(body?.items) ? body.items.map(itemToRow) : []);
   const warnings: string[] = [];
   if (hasServicesPayload) {
     const normalizedServices = normalizeServices(body?.services);
     await setSetting("servicesJson", JSON.stringify(normalizedServices));
+  }
+  if (hasLocationsPayload) {
+    const current = await readState();
+    await setSetting("locationsJson", JSON.stringify(normalizeLocations(body?.locations, current.account)));
   }
 
   if (hasItemsPayload && rows.length) {
@@ -1513,11 +1600,12 @@ export default async function handler(req: Request) {
       const body = await parseBody(req);
       const hasItemsPayload = Object.prototype.hasOwnProperty.call(body || {}, "items");
       const hasServicesPayload = Object.prototype.hasOwnProperty.call(body || {}, "services");
-      if (!hasItemsPayload && !hasServicesPayload) {
+      const hasLocationsPayload = Object.prototype.hasOwnProperty.call(body || {}, "locations");
+      if (!hasItemsPayload && !hasServicesPayload && !hasLocationsPayload) {
         return json(
           {
             error: "invalid_calendar_state",
-            message: "PUT /api/calendar-state requires body.items and/or body.services.",
+            message: "PUT /api/calendar-state requires body.items, body.services, and/or body.locations.",
           },
           400,
         );
@@ -1527,6 +1615,15 @@ export default async function handler(req: Request) {
           {
             error: "invalid_calendar_state",
             message: "PUT /api/calendar-state requires body.services to be an array when present.",
+          },
+          400,
+        );
+      }
+      if (hasLocationsPayload && !Array.isArray(body?.locations)) {
+        return json(
+          {
+            error: "invalid_calendar_state",
+            message: "PUT /api/calendar-state requires body.locations to be an array when present.",
           },
           400,
         );
