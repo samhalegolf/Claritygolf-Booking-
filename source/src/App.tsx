@@ -740,6 +740,7 @@ type InvoiceLine = {
 };
 
 type InvoiceDraft = {
+  coachId?: string;
   payerName: string;
   payerEmail: string;
   payerPhone: string;
@@ -2397,8 +2398,9 @@ function generateServiceDraftId() {
   return `service-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function emptyInvoiceDraft(settings = defaultInvoiceSettings): InvoiceDraft {
+function emptyInvoiceDraft(settings = defaultInvoiceSettings, coachId = defaultCoachProfileFromAccount().id): InvoiceDraft {
   return {
+    coachId,
     payerName: "",
     payerEmail: "",
     payerPhone: "",
@@ -3147,6 +3149,8 @@ function App() {
       pointerSession?.mode === "place" ||
       (pointerSession?.mode === "move" && Boolean(floatingDrag)));
   const serviceScopeCoachId = isAdminUser ? selectedCalendarCoachId || activeCoachId : activeCoachId;
+  const itemInCoachScope = (item: CalendarItem) =>
+    isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount) === serviceScopeCoachId;
   const serviceVisibleToCurrentUser = (service: Service) =>
     isAdminUser || (service.coachId || defaultCoachId(coachProfiles)) === serviceScopeCoachId;
   const activeServices = services.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
@@ -3250,8 +3254,9 @@ function App() {
     () =>
       items
         .filter((item) => item.kind === "appointment" && item.status === "completed")
+        .filter(itemInCoachScope)
         .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start),
-    [items],
+    [coachAccount, coachProfiles, isAdminUser, items, services, serviceScopeCoachId],
   );
   const completedUninvoicedCount = completedAppointments.length;
   const invoiceLineSubtotal = invoiceDraft.lines.reduce(
@@ -4013,6 +4018,7 @@ function App() {
 
     items
       .filter((item) => item.kind === "appointment")
+      .filter(itemInCoachScope)
       .forEach((item) => {
         const name = item.client ?? item.title;
         const key = clientKey(name, item.email ?? "", item.phone ?? "");
@@ -4045,7 +4051,7 @@ function App() {
       });
 
     return Array.from(byKey.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [items, people]);
+  }, [coachAccount, coachProfiles, isAdminUser, items, people, services, serviceScopeCoachId]);
 
   const selectedPerson = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return null;
@@ -4115,6 +4121,8 @@ function App() {
     const byAppointment = new Map<string, NotificationRecord[]>();
     notifications.forEach((notification) => {
       if (!notification.calendarItemId) return;
+      const appointment = items.find((item) => item.id === notification.calendarItemId);
+      if (appointment && !itemInCoachScope(appointment)) return;
       const current = byAppointment.get(notification.calendarItemId) ?? [];
       current.push(notification);
       byAppointment.set(notification.calendarItemId, current);
@@ -4123,7 +4131,7 @@ function App() {
       records.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     });
     return byAppointment;
-  }, [notifications]);
+  }, [coachAccount, coachProfiles, isAdminUser, items, notifications, services, serviceScopeCoachId]);
 
   const selectedClient =
     !isAddingClient && selectedClientId ? clients.find((client) => client.id === selectedClientId) ?? null : null;
@@ -4132,9 +4140,10 @@ function App() {
     const key = clientKey(selectedClient.name, selectedClient.email, selectedClient.phone);
     return items
       .filter((item) => item.kind === "appointment")
+      .filter(itemInCoachScope)
       .filter((item) => clientKey(item.client || item.title, item.email ?? "", item.phone ?? "") === key)
       .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
-  }, [items, selectedClient]);
+  }, [coachAccount, coachProfiles, isAdminUser, items, selectedClient, services, serviceScopeCoachId]);
   const selectedAppointmentNotifications = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return [];
     return notificationsByAppointment.get(selected.id) ?? [];
@@ -6798,6 +6807,7 @@ function App() {
     setInvoiceCustomerSearch("");
     setInvoiceDraft((current) => ({
       ...current,
+      coachId: resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount),
       payerName: current.payerName || item.client || item.title,
       payerEmail: current.payerEmail || item.email || "",
       payerPhone: current.payerPhone || item.phone || "",
@@ -6842,7 +6852,7 @@ function App() {
   }
 
   function resetInvoiceDraft() {
-    setInvoiceDraft(emptyInvoiceDraft(invoiceSettings));
+    setInvoiceDraft(emptyInvoiceDraft(invoiceSettings, activeCoachId));
     setInvoiceCustomerSearch("");
     setShowInvoiceLinePicker(false);
     setConfirmedInvoiceNumber("");
