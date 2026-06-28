@@ -3138,7 +3138,7 @@ function App() {
         id: `service-${service.id}`,
         kind: service.lessonFormat === "package" ? "package" : "lesson-type",
         name: service.name,
-        description: service.description || service.location,
+        description: service.description || service.lessonNote || service.location,
         price: service.price,
         taxRate: invoiceSettings.taxRate,
         sourceServiceId: service.id,
