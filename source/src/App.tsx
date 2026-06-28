@@ -2921,6 +2921,7 @@ function App() {
   const emailNoticeToastKeyRef = useRef("");
   const [hasMoved, setHasMoved] = useState(false);
   const initialRescheduleLoginRef = useRef<SavedRescheduleLogin | null>(getInitialRescheduleLogin());
+  const isAdminUser = currentAppUser.role === "admin";
   const attemptedSavedRescheduleRef = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
@@ -3129,8 +3130,13 @@ function App() {
       Boolean(flyingBooking) ||
       pointerSession?.mode === "place" ||
       (pointerSession?.mode === "move" && Boolean(floatingDrag)));
-  const activeServices = services.filter((service) => service.archived !== true);
-  const archivedServices = services.filter((service) => service.archived === true);
+  const activeCoachId = currentAppUser.coachId || defaultCoachId(coachProfiles);
+  const activeCoachList = coachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
+  const serviceScopeCoachId = isAdminUser ? selectedCalendarCoachId || activeCoachId : activeCoachId;
+  const serviceVisibleToCurrentUser = (service: Service) =>
+    isAdminUser || (service.coachId || defaultCoachId(coachProfiles)) === serviceScopeCoachId;
+  const activeServices = services.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
+  const archivedServices = services.filter((service) => service.archived === true && serviceVisibleToCurrentUser(service));
   const sortedLocations = [...locations].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
   const activeLocationList = sortedLocations.filter((location) => location.active && !location.archived);
   const archivedLocationList = sortedLocations.filter((location) => location.archived || !location.active);
@@ -6617,6 +6623,7 @@ function App() {
       customGroup: isCustomGroupService(service),
       customGroupEnabled: isCustomGroupService(service),
       description: service.description ?? "",
+      coachId: service.coachId || serviceScopeCoachId || defaultCoachId(coachProfiles),
       locationId: service.locationId || defaultLocationId(locations),
       lessonNote: service.lessonNote || service.location || "",
       location: service.location ?? "",
@@ -6631,6 +6638,7 @@ function App() {
     setServiceEditor({
       ...emptyServiceEditor(),
       id: generateServiceDraftId(),
+      coachId: serviceScopeCoachId || defaultCoachId(coachProfiles),
       locationId: defaultLocationId(locations),
       lessonNote: "",
       location: "",
@@ -6946,6 +6954,10 @@ function App() {
     const editableEditor = {
       ...normalizedEditor,
       description: typeof normalizedEditor.description === "string" ? normalizedEditor.description : "",
+      coachId:
+        typeof normalizedEditor.coachId === "string" && normalizedEditor.coachId
+          ? normalizedEditor.coachId
+          : serviceScopeCoachId || defaultCoachId(coachProfiles),
       locationId:
         typeof normalizedEditor.locationId === "string" && normalizedEditor.locationId
           ? normalizedEditor.locationId
@@ -8246,6 +8258,22 @@ function App() {
                     />
                   </label>
                 )}
+                {(isAdminUser || activeCoachList.length > 1) && (
+                  <label className="settings-field">
+                    <span>Coach</span>
+                    <select
+                      value={serviceEditor.coachId || serviceScopeCoachId || defaultCoachId(coachProfiles)}
+                      onChange={(event) => updateServiceEditor("coachId", event.target.value)}
+                      disabled={!isAdminUser}
+                    >
+                      {activeCoachList.map((coach) => (
+                        <option key={coach.id} value={coach.id}>
+                          {coach.displayName || coach.name}{coach.isDefault ? " (default)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label className="settings-field">
                   <span>Booking location</span>
                   <select
@@ -8372,6 +8400,9 @@ function App() {
                   </span>
                   <strong>{service.name}</strong>
                   {service.description && <em>{service.description}</em>}
+                  {(isAdminUser || activeCoachList.length > 1) && (
+                    <em>Coach: {bookingCoachSnapshotFor(service.coachId, coachProfiles, coachAccount).displayName || bookingCoachSnapshotFor(service.coachId, coachProfiles, coachAccount).name}</em>
+                  )}
                   <em>Booking location: {bookingLocationShortDisplay(bookingLocationSnapshotFor(service, locations, coachAccount))}</em>
                   {(service.lessonNote || service.location) && <em>Lesson note: {service.lessonNote || service.location}</em>}
                   {service.lessonFormat === "package" && (
