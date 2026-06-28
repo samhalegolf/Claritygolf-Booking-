@@ -5120,6 +5120,34 @@ function App() {
     return true;
   }
 
+  function isValidAppointmentSlotForItem(item: CalendarItem, candidate: SlotCandidate) {
+    if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
+    const service = itemService(item, services);
+    if (isScheduledGroupService(service)) return !hasCollision(candidate, item.id, service);
+    const candidateItem: Partial<CalendarItem> = {
+      ...item,
+      week: candidate.week,
+      day: candidate.day,
+      start: candidate.start,
+      duration: candidate.duration,
+    };
+    const candidateCoachId = resolvedCalendarItemCoachId(candidateItem, service, coachProfiles, coachAccount);
+    const candidateLocationId = resolvedCalendarItemLocationId(candidateItem, service, locations, coachAccount);
+    return !items.some((other) => {
+      if (other.id === item.id || itemWeek(other) !== candidate.week || other.day !== candidate.day) return false;
+      if (!overlaps(itemSlot(other), candidate)) return false;
+      return isAppointmentConflict(candidateItem, other, {
+        candidateService: service,
+        existingService: itemService(other, services),
+        candidateCoachId,
+        candidateLocationId,
+        coaches: coachProfiles,
+        locations,
+        account: coachAccount,
+      });
+    });
+  }
+
   function confirmPastAdminLesson(candidate: SlotCandidate) {
     return !isSlotInPast(candidate) || window.confirm(PAST_ADMIN_LESSON_WARNING);
   }
@@ -5196,8 +5224,12 @@ function App() {
 
   function isValidForItem(item: CalendarItem, candidate: SlotCandidate) {
     return item.kind === "block"
-      ? isValidBlockSlot(candidate, item.id)
-      : isValidAppointmentSlot(candidate, item.id);
+      ? isValidBlockSlot(candidate, item.id, {
+          coachId: resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
+          locationId: resolvedCalendarItemLocationId(item, itemService(item, services), locations, coachAccount),
+          locationOnly: isLocationOnlyBlock(item),
+        })
+      : isValidAppointmentSlotForItem(item, candidate);
   }
 
   function settleNearCollisionBoundary(item: CalendarItem, candidate: SlotCandidate) {
