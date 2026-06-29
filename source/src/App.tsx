@@ -4340,9 +4340,9 @@ function App() {
     try {
       const contentType = response.headers.get("Content-Type") || "";
       if (contentType.includes("application/json")) {
-        const data = (await response.json()) as { message?: string; error?: string; failed?: Array<{ name?: string; message?: string }> };
+        const data = (await response.json()) as { message?: string; error?: string; details?: string; failed?: Array<{ name?: string; message?: string }> };
         const firstFailed = Array.isArray(data.failed) && data.failed[0] ? `${data.failed[0].name}: ${data.failed[0].message}` : "";
-        return [data.message, firstFailed, data.error, `${response.status} ${response.statusText}`].filter(Boolean).join(" · ");
+        return [data.message, firstFailed, data.error, data.details, `${response.status} ${response.statusText}`].filter(Boolean).join(" · ");
       }
       const text = await response.text();
       return text ? `${response.status} ${response.statusText}: ${text.slice(0, 280)}` : `${response.status} ${response.statusText}`;
@@ -7713,14 +7713,13 @@ function App() {
     setServices(cleanServices(payloadServices));
     setServiceSaveState("saving");
     try {
-      const response = await fetch("/api/calendar-state", {
+      const response = await fetch("/api/services", {
         method: "PUT",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
         body: JSON.stringify({
           services: payloadServices,
-          updatedAt: calendarStateVersion,
         }),
       });
       if (response.status === 401) {

@@ -1,6 +1,7 @@
-import type { Config } from "@netlify/functions";
+import type { Config, Context } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 
+import { handleBookingApiRoute } from "./booking-core.mts";
 import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
 
@@ -350,6 +351,10 @@ const defaultAvailability = [
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
+}
+
+function directSupabaseRestConfigured() {
+  return Boolean(env("SUPABASE_URL") && (env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY")));
 }
 
 function json(value: unknown, status = 200) {
@@ -1863,7 +1868,13 @@ async function parseBody(req: Request) {
   return raw ? JSON.parse(raw) : {};
 }
 
-export default async function handler(req: Request) {
+export default async function handler(req: Request, context: Context) {
+  if (!directSupabaseRestConfigured()) {
+    console.warn("calendar_state:delegating_to_booking_core", {
+      reason: "direct_supabase_rest_not_configured",
+    });
+    return handleBookingApiRoute(req, "/api/calendar-state", context);
+  }
   try {
     if (!(await requireAdmin(req)))
       return json(
