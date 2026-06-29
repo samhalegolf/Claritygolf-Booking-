@@ -3676,7 +3676,8 @@ function App() {
   const packageServices = activeServices.filter((service) => service.active && service.lessonFormat === "package");
   const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = activeServices.filter((service) => service.active && isAppointmentStyleService(service));
-  const publicServices = bookableServices.filter((service) => service.visibility === "public");
+  const publicBookingEnabled = canUseFeature(activeAccount, "publicBooking");
+  const publicServices = publicBookingEnabled ? bookableServices.filter((service) => service.visibility === "public") : [];
   const currentBookingScreenId = getBookingScreenId(typeof window === "undefined" ? "/" : window.location.pathname);
   const currentScreenPublicServices = publicServices.filter((service) =>
     (service.bookingScreenIds ?? ["main"]).includes(currentBookingScreenId),
@@ -12445,7 +12446,7 @@ function App() {
                               </button>
                             ))
                           ) : (
-                            <p>No public lesson types are active.</p>
+                            <p>{publicBookingEnabled ? "No public lesson types are active." : featureUnavailableMessage("publicBooking")}</p>
                           )}
                         </div>
                       </div>
