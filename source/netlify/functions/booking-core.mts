@@ -533,6 +533,7 @@ function cleanService(service, index = 0) {
       service?.id,
       cleanSlug(name, `service-${Date.now()}-${index}`),
     ),
+    accountId: cleanSlug(service?.accountId, defaultWorkspaceAccountFromCoachAccount().id),
     coachId: cleanSlug(service?.coachId, defaultCoachProfileFromAccount().id),
     name,
     duration: Math.max(15, Math.min(240, Math.round(duration))),
@@ -743,10 +744,135 @@ function cleanCoachAccount(account) {
 	  };
 	}
 
+const accountFeatureKeys = [
+  "publicBooking",
+  "coachCalendar",
+  "locationCalendar",
+  "multiCoach",
+  "multiLocation",
+  "services",
+  "groupLessons",
+  "packages",
+  "clients",
+  "notifications",
+  "googleCalendarSync",
+  "invoicing",
+  "checkout",
+  "customBranding",
+  "customDomains",
+  "staffUsers",
+  "advancedPermissions",
+];
+
+function accountFeatures(enabled) {
+  return Object.fromEntries(accountFeatureKeys.map((feature) => [feature, enabled.includes(feature)]));
+}
+
+const allAccountFeatures = accountFeatures(accountFeatureKeys);
+const accountPlanCatalog = {
+  solo: {
+    features: accountFeatures(["publicBooking", "coachCalendar", "services", "groupLessons", "packages", "clients", "notifications", "googleCalendarSync"]),
+    limits: { maxCoaches: 1, maxLocations: 1, maxUsers: 1, maxServices: 10, maxBookingScreens: 1 },
+  },
+  studio: {
+    features: accountFeatures(["publicBooking", "coachCalendar", "locationCalendar", "multiCoach", "multiLocation", "services", "groupLessons", "packages", "clients", "notifications", "googleCalendarSync", "invoicing", "customBranding", "staffUsers"]),
+    limits: { maxCoaches: 5, maxLocations: 3, maxUsers: 8, maxServices: 40, maxBookingScreens: 4 },
+  },
+  academy: { features: allAccountFeatures, limits: { maxCoaches: 20, maxLocations: 10, maxUsers: 30, maxServices: 120, maxBookingScreens: 12 } },
+  enterprise: { features: allAccountFeatures, limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 } },
+  founder: { features: allAccountFeatures, limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 } },
+};
+
+function mergeEntitlementOverrides(base, override) {
+  return {
+    features: { ...base.features, ...(override?.features || {}) },
+    limits: { ...base.limits, ...(override?.limits || {}) },
+  };
+}
+
+function accountEntitlements(account) {
+  return mergeEntitlementOverrides(accountPlanCatalog[account?.planKey] || accountPlanCatalog.solo, account?.entitlementsOverride);
+}
+
+function accountHasFeature(account, feature) {
+  return accountEntitlements(account).features[feature] === true;
+}
+
+function accountLimit(account, limit) {
+  return accountEntitlements(account).limits[limit];
+}
+
+function isAccountActive(account) {
+  return account?.active !== false && ["trialing", "active", "comped", "internal"].includes(account?.subscriptionStatus);
+}
+
+function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
+  const clean = cleanCoachAccount(account);
+  const slug = cleanSlug(clean.calendarSlug || clean.businessName, "sam-hale-golf");
+  return {
+    id: slug,
+    name: clean.businessName || "Sam Hale Golf",
+    slug,
+    planKey: "founder",
+    subscriptionStatus: "comped",
+    billingProvider: "none",
+    active: true,
+  };
+}
+
+function cleanWorkspaceAccount(raw = {}, fallback = defaultWorkspaceAccountFromCoachAccount()) {
+  const name = cleanString(raw?.name, fallback.name, 120);
+  const slug = cleanSlug(raw?.slug || raw?.id || name, fallback.slug);
+  const planKey = accountPlanCatalog[raw?.planKey] ? raw.planKey : fallback.planKey;
+  const subscriptionStatus = ["trialing", "active", "past_due", "paused", "cancelled", "comped", "internal"].includes(raw?.subscriptionStatus)
+    ? raw.subscriptionStatus
+    : fallback.subscriptionStatus;
+  return {
+    id: cleanSlug(raw?.id, slug),
+    name,
+    slug,
+    planKey,
+    subscriptionStatus,
+    ownerUserId: cleanString(raw?.ownerUserId, fallback.ownerUserId || "", 120) || undefined,
+    billingProvider: ["stripe", "manual", "none"].includes(raw?.billingProvider) ? raw.billingProvider : fallback.billingProvider,
+    billingCustomerId: cleanString(raw?.billingCustomerId, "", 160) || undefined,
+    billingSubscriptionId: cleanString(raw?.billingSubscriptionId, "", 160) || undefined,
+    trialEndsAt: cleanString(raw?.trialEndsAt, "", 80) || undefined,
+    currentPeriodEndsAt: cleanString(raw?.currentPeriodEndsAt, "", 80) || undefined,
+    entitlementsOverride: raw?.entitlementsOverride && typeof raw.entitlementsOverride === "object" ? raw.entitlementsOverride : undefined,
+    active: raw?.active !== false,
+    createdAt: cleanString(raw?.createdAt, fallback.createdAt || "", 80) || undefined,
+    updatedAt: cleanString(raw?.updatedAt, fallback.updatedAt || "", 80) || undefined,
+  };
+}
+
+function normalizeWorkspaceAccounts(rawAccounts, account = defaultCoachAccount()) {
+  const fallback = defaultWorkspaceAccountFromCoachAccount(account);
+  const source = Array.isArray(rawAccounts) && rawAccounts.length ? rawAccounts : [fallback];
+  const seen = new Set();
+  return source.map((raw, index) => {
+    const clean = cleanWorkspaceAccount(raw, index === 0 ? fallback : defaultWorkspaceAccountFromCoachAccount(account));
+    let id = clean.id;
+    let suffix = 2;
+    while (seen.has(id)) {
+      id = `${clean.id}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(id);
+    return { ...clean, id, active: clean.active || index === 0 };
+  });
+}
+
+function defaultAccountId(accounts) {
+  return (accounts || []).find((account) => account.active)?.id || accounts?.[0]?.id || defaultWorkspaceAccountFromCoachAccount().id;
+}
+
 function defaultLocationFromCoachAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
+  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(clean);
   return {
     id: "default-location",
+    accountId: workspaceAccount.id,
     name: clean.venueName,
     shortName: clean.venueShortName || clean.venueName,
     address: "",
@@ -760,8 +886,10 @@ function defaultLocationFromCoachAccount(account = defaultCoachAccount()) {
 
 function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
+  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(clean);
   return {
     id: clean.id || "sam-hale-golf",
+    accountId: workspaceAccount.id,
     name: clean.coachName,
     displayName: clean.coachName || clean.businessName,
     shortName: "Sam",
@@ -778,8 +906,10 @@ function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
 
 function defaultAppUserFromAccount(account = defaultCoachAccount()) {
   const coach = defaultCoachProfileFromAccount(account);
+  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(account);
   return {
     id: `${coach.id}-admin`,
+    accountId: workspaceAccount.id,
     email: coach.email,
     name: coach.displayName,
     role: "admin",
@@ -799,6 +929,7 @@ function cleanCoachProfile(raw = {}, fallback = defaultCoachProfileFromAccount()
   const name = cleanString(raw?.name, fallback.name, 120);
   return {
     id: cleanSlug(raw?.id, cleanSlug(name, `coach-${index + 1}`)),
+    accountId: cleanSlug(raw?.accountId, fallback.accountId || defaultWorkspaceAccountFromCoachAccount().id),
     name,
     displayName: cleanString(raw?.displayName, name, 120),
     shortName: cleanString(raw?.shortName, name.split(/\s+/).map((part) => part[0]).join("").slice(0, 4).toUpperCase(), 60),
@@ -887,6 +1018,7 @@ function cleanLocation(raw = {}, fallback = defaultLocationFromCoachAccount(), i
   const shortName = cleanString(raw?.shortName, name, 80);
   return {
     id: cleanSlug(raw?.id, cleanSlug(name, `location-${index + 1}`)),
+    accountId: cleanSlug(raw?.accountId, fallback.accountId || defaultWorkspaceAccountFromCoachAccount().id),
     name,
     shortName,
     address: cleanString(raw?.address, fallback.address || "", 240),
@@ -1291,6 +1423,7 @@ async function defaultSettings() {
     accountCaddyWorkspaceUrl: account.caddyWorkspaceUrl,
     accountInvoiceSettingsJson: JSON.stringify(account.invoiceSettings),
     coachName: account.businessName,
+    workspaceAccountsJson: JSON.stringify(normalizeWorkspaceAccounts([], account)),
     coachProfilesJson: JSON.stringify(normalizeCoachProfiles([], account)),
     appUsersJson: JSON.stringify([defaultAppUserFromAccount(account)]),
     locationsJson: JSON.stringify(normalizeLocations([], account)),
@@ -2163,6 +2296,27 @@ async function writeServices(services) {
   return clean;
 }
 
+async function readWorkspaceAccounts() {
+  await ensureSeeded();
+  const account = await readCoachAccount();
+  try {
+    return normalizeWorkspaceAccounts(
+      JSON.parse((await getSetting("workspaceAccountsJson")) || "[]"),
+      account,
+    );
+  } catch {
+    return normalizeWorkspaceAccounts([], account);
+  }
+}
+
+async function writeWorkspaceAccounts(accounts) {
+  const account = await readCoachAccount();
+  const clean = normalizeWorkspaceAccounts(accounts, account);
+  await setSetting("workspaceAccountsJson", JSON.stringify(clean));
+  await setSetting("updatedAt", nowIso());
+  return clean;
+}
+
 async function readCoachProfiles() {
   await ensureSeeded();
   const account = await readCoachAccount();
@@ -2337,6 +2491,7 @@ async function readCalendarState() {
     updatedAt: (await getSetting("updatedAt")) || nowIso(),
     items: await readItems(),
     services: await readServices(),
+    workspaceAccounts: await readWorkspaceAccounts(),
     coaches: await readCoachProfiles(),
     currentUser: (await readAppUsers())[0],
     locations: await readLocations(),
@@ -2362,6 +2517,7 @@ async function readPublicCalendarState() {
     updatedAt: (await getSetting("updatedAt")) || nowIso(),
     items: await readItems(),
     services: await readServices(),
+    workspaceAccounts: await readWorkspaceAccounts(),
     coaches: await readCoachProfiles(),
     locations: await readLocations(),
     availability: await readAvailability(),

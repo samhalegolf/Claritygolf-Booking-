@@ -289,6 +289,7 @@ function cleanService(service?: Record<string, unknown>, index = 0) {
   const bookingScreenIds = cleanBookingScreenIds(service?.bookingScreenIds);
   return {
     id: cleanSlug(service?.id as unknown, cleanSlug(name, `service-${Date.now()}-${index}`)),
+    accountId: cleanSlug(service?.accountId as unknown, defaultWorkspaceAccountFromAccount({}).id),
     coachId: cleanSlug(service?.coachId as unknown, DEFAULT_COACH_ID),
     name,
     duration: Math.max(15, Math.min(240, Math.round(duration))),
@@ -385,11 +386,70 @@ function cleanUrl(value: unknown, fallback = "") {
   }
 }
 
+function defaultWorkspaceAccountFromAccount(account: Record<string, unknown>) {
+  const name = cleanString(account?.businessName, env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"), 120);
+  const slug = cleanSlug(account?.calendarSlug || account?.id || name, "sam-hale-golf");
+  return {
+    id: slug,
+    name,
+    slug,
+    planKey: "founder",
+    subscriptionStatus: "comped",
+    billingProvider: "none",
+    active: true,
+  };
+}
+
+function cleanWorkspaceAccount(raw: any = {}, fallback = defaultWorkspaceAccountFromAccount({})) {
+  const name = cleanString(raw?.name, fallback.name, 120);
+  const slug = cleanSlug(raw?.slug || raw?.id || name, fallback.slug);
+  const planKey = ["solo", "studio", "academy", "enterprise", "founder"].includes(raw?.planKey) ? raw.planKey : fallback.planKey;
+  const subscriptionStatus = ["trialing", "active", "past_due", "paused", "cancelled", "comped", "internal"].includes(raw?.subscriptionStatus)
+    ? raw.subscriptionStatus
+    : fallback.subscriptionStatus;
+  return {
+    id: cleanSlug(raw?.id, slug),
+    name,
+    slug,
+    planKey,
+    subscriptionStatus,
+    ownerUserId: cleanString(raw?.ownerUserId, fallback.ownerUserId || "", 120) || undefined,
+    billingProvider: ["stripe", "manual", "none"].includes(raw?.billingProvider) ? raw.billingProvider : fallback.billingProvider,
+    billingCustomerId: cleanString(raw?.billingCustomerId, "", 160) || undefined,
+    billingSubscriptionId: cleanString(raw?.billingSubscriptionId, "", 160) || undefined,
+    trialEndsAt: cleanString(raw?.trialEndsAt, "", 80) || undefined,
+    currentPeriodEndsAt: cleanString(raw?.currentPeriodEndsAt, "", 80) || undefined,
+    entitlementsOverride: raw?.entitlementsOverride && typeof raw.entitlementsOverride === "object" ? raw.entitlementsOverride : undefined,
+    active: raw?.active !== false,
+    createdAt: cleanString(raw?.createdAt, fallback.createdAt || "", 80) || undefined,
+    updatedAt: cleanString(raw?.updatedAt, fallback.updatedAt || "", 80) || undefined,
+  };
+}
+
+function normalizeWorkspaceAccounts(rawAccounts: any, account: Record<string, unknown>) {
+  const fallback = defaultWorkspaceAccountFromAccount(account);
+  const source = Array.isArray(rawAccounts) && rawAccounts.length ? rawAccounts : [fallback];
+  const seen = new Set<string>();
+  return source.map((raw, index) => {
+    const clean = cleanWorkspaceAccount(raw, index === 0 ? fallback : defaultWorkspaceAccountFromAccount(account));
+    let id = clean.id;
+    let suffix = 2;
+    while (seen.has(id)) {
+      id = `${clean.id}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(id);
+    return { ...clean, id, active: clean.active || index === 0 };
+  });
+}
+
 function defaultLocationFromAccount(account: Record<string, unknown>) {
+  const workspaceAccount = defaultWorkspaceAccountFromAccount(account);
   const name = cleanString(account?.venueName, env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"), 140);
   const shortName = cleanString(account?.venueShortName, name, 80);
   return {
     id: "default-location",
+    accountId: workspaceAccount.id,
     name,
     shortName,
     address: "",
@@ -406,6 +466,7 @@ function cleanLocation(raw: any = {}, fallback = defaultLocationFromAccount({}),
   const shortName = cleanString(raw?.shortName, name, 80);
   return {
     id: cleanSlug(raw?.id, cleanSlug(name, `location-${index + 1}`)),
+    accountId: cleanSlug(raw?.accountId, fallback.accountId || defaultWorkspaceAccountFromAccount({}).id),
     name,
     shortName,
     address: cleanString(raw?.address, fallback.address || "", 240),
@@ -446,8 +507,10 @@ function normalizeLocations(rawLocations: any, account: Record<string, unknown>)
 }
 
 function defaultCoachProfileFromAccount(account: Record<string, unknown>) {
+  const workspaceAccount = defaultWorkspaceAccountFromAccount(account);
   return {
     id: cleanSlug(account?.id, DEFAULT_COACH_ID),
+    accountId: workspaceAccount.id,
     name: cleanString(account?.coachName, "Sam Hale", 120),
     displayName: cleanString(account?.coachName, "Sam Hale", 120),
     shortName: "Sam",
@@ -469,6 +532,7 @@ function normalizeCoachProfiles(rawProfiles: any, account: Record<string, unknow
     ...fallback,
     ...raw,
     id: cleanSlug(raw?.id, index === 0 ? fallback.id : `coach-${index + 1}`),
+    accountId: cleanSlug(raw?.accountId, fallback.accountId || defaultWorkspaceAccountFromAccount(account).id),
     name: cleanString(raw?.name, fallback.name, 120),
     displayName: cleanString(raw?.displayName, raw?.name || fallback.displayName, 120),
     shortName: cleanString(raw?.shortName, raw?.name || fallback.displayName, 60),
@@ -490,8 +554,10 @@ function normalizeCoachProfiles(rawProfiles: any, account: Record<string, unknow
 
 function defaultAppUserFromAccount(account: Record<string, unknown>) {
   const coach = defaultCoachProfileFromAccount(account);
+  const workspaceAccount = defaultWorkspaceAccountFromAccount(account);
   return {
     id: `${coach.id}-admin`,
+    accountId: workspaceAccount.id,
     email: coach.email,
     name: coach.displayName,
     role: "admin",
@@ -515,6 +581,7 @@ function normalizeAppUsers(rawUsers: any, account: Record<string, unknown>) {
     const permissions = typeof raw?.permissions === "object" && raw.permissions ? raw.permissions : fallback.permissions;
     return {
       id: cleanSlug(raw?.id, index === 0 ? fallback.id : `app-user-${index + 1}`),
+      accountId: cleanSlug(raw?.accountId, fallback.accountId || defaultWorkspaceAccountFromAccount(account).id),
       email: cleanEmail(raw?.email, fallback.email),
       name: cleanString(raw?.name, fallback.name, 120),
       role,
@@ -1525,6 +1592,7 @@ async function readState() {
     syncKey: settings.syncKey || env("CLARITY_CALENDAR_SYNC_KEY") || "",
     updatedAt,
     items: itemRows.map(rowToItem),
+    workspaceAccounts: normalizeWorkspaceAccounts(parseJsonSetting(settings, "workspaceAccountsJson", []), account),
     services: parseJsonSetting(settings, "servicesJson", defaultServices),
     coaches: normalizeCoachProfiles(parseJsonSetting(settings, "coachProfilesJson", []), account),
     currentUser: normalizeAppUsers(parseJsonSetting(settings, "appUsersJson", []), account)[0],
@@ -1593,12 +1661,17 @@ async function writeState(body: any) {
   const hasLocationsPayload = Object.prototype.hasOwnProperty.call(body || {}, "locations");
   const hasCoachesPayload = Object.prototype.hasOwnProperty.call(body || {}, "coaches");
   const hasAppUsersPayload = Object.prototype.hasOwnProperty.call(body || {}, "appUsers");
+  const hasWorkspaceAccountsPayload = Object.prototype.hasOwnProperty.call(body || {}, "workspaceAccounts");
   const shouldReplaceItems = body?.replaceItems === true || body?.itemsOperation === "replace";
   const rows = uniqueById(Array.isArray(body?.items) ? body.items.map(itemToRow) : []);
   const warnings: string[] = [];
   if (hasServicesPayload) {
     const normalizedServices = normalizeServices(body?.services);
     await setSetting("servicesJson", JSON.stringify(normalizedServices));
+  }
+  if (hasWorkspaceAccountsPayload) {
+    const current = await readState();
+    await setSetting("workspaceAccountsJson", JSON.stringify(normalizeWorkspaceAccounts(body?.workspaceAccounts, current.account)));
   }
   if (hasLocationsPayload) {
     const current = await readState();
