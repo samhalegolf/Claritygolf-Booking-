@@ -1256,6 +1256,63 @@ async function setSetting(key: string, value: unknown) {
   });
 }
 
+function safeErrorDetail(error: unknown) {
+  const raw = error instanceof Error ? error.message : String(error || "Unknown error");
+  return raw.replace(/\s+/g, " ").slice(0, 700);
+}
+
+async function setSettingBestEffort(key: string, value: unknown) {
+  try {
+    await setSetting(key, value);
+  } catch (error) {
+    console.warn("calendar_state:setting_backfill_failed", {
+      key,
+      error: safeErrorDetail(error),
+    });
+  }
+}
+
+async function readOptionalRows(
+  table: string,
+  options: Parameters<typeof supabase>[1],
+) {
+  try {
+    return await supabase(table, options);
+  } catch (error) {
+    console.warn("calendar_state:optional_read_failed", {
+      table,
+      error: safeErrorDetail(error),
+    });
+    return [];
+  }
+}
+
+async function getGoogleCalendarSyncStatusBestEffort() {
+  try {
+    return await getGoogleCalendarSyncStatus();
+  } catch (error) {
+    console.warn("calendar_state:google_calendar_status_failed", {
+      error: safeErrorDetail(error),
+    });
+    return {
+      configured: false,
+      connected: false,
+      calendarId: "primary",
+      autoSync: false,
+      accountEmail: "",
+      lastSyncAt: "",
+      lastSyncStatus: "unavailable",
+      lastSyncError: safeErrorDetail(error),
+      connectedAt: "",
+      redirectUri: "",
+      scope: "",
+      ok: false,
+      skipped: true,
+      reason: "google_calendar_status_unavailable",
+    };
+  }
+}
+
 function appointmentPositionSignature(item: any) {
   if (!item) return "";
   return JSON.stringify({
@@ -1545,22 +1602,23 @@ async function processAdminNotificationDebounce(
 }
 
 async function readState() {
-  const [settingsRows, itemRows, peopleRows, notificationRows] =
-    await Promise.all([
-      supabase("settings", { query: "select=key,value" }),
-      supabase("calendar_items", {
-        query: "select=*&order=week.asc,day.asc,start.asc,id.asc",
-      }),
-      supabase("people", { query: "select=*&order=name.asc,email.asc,id.asc" }),
-      supabase("notification_history", {
-        query: "select=*&order=created_at.desc&limit=500",
-      }),
-    ]);
+  const [settingsRows, itemRows] = await Promise.all([
+    supabase("settings", { query: "select=key,value" }),
+    supabase("calendar_items", {
+      query: "select=*&order=week.asc,day.asc,start.asc,id.asc",
+    }),
+  ]);
+  const [peopleRows, notificationRows] = await Promise.all([
+    readOptionalRows("people", { query: "select=*&order=name.asc,email.asc,id.asc" }),
+    readOptionalRows("notification_history", {
+      query: "select=*&order=created_at.desc&limit=500",
+    }),
+  ]);
   const settings = settingMap(settingsRows);
   const updatedAt = settings.updatedAt || nowIso();
-  if (!settings.updatedAt) await setSetting("updatedAt", updatedAt);
+  if (!settings.updatedAt) await setSettingBestEffort("updatedAt", updatedAt);
   if (!settings.syncKey)
-    await setSetting(
+    await setSettingBestEffort(
       "syncKey",
       env("CLARITY_CALENDAR_SYNC_KEY") ||
         `cg_${randomUUID().replaceAll("-", "")}`,
@@ -1659,7 +1717,7 @@ async function readState() {
       bookingTheme: settings.brandBookingTheme || "dark",
     },
     account,
-    googleCalendar: await getGoogleCalendarSyncStatus(),
+    googleCalendar: await getGoogleCalendarSyncStatusBestEffort(),
   };
 }
 
@@ -1769,7 +1827,7 @@ async function writeState(body: any) {
       googleCalendarSync = await syncGoogleCalendarIfEnabled();
     } catch (error) {
       googleCalendarSync = {
-        ...(await getGoogleCalendarSyncStatus()),
+        ...(await getGoogleCalendarSyncStatusBestEffort()),
         ok: false,
         skipped: false,
         error: error instanceof Error ? error.message : "Google Calendar sync failed.",
@@ -1906,9 +1964,11 @@ export default async function handler(req: Request) {
     return json({ error: "method_not_allowed" }, 405);
   } catch (error) {
     console.error("calendar_state:failed", error);
+    const details = safeErrorDetail(error);
     return json(
       {
         error: "calendar_state_error",
+        details,
         message:
           req.method === "PUT"
             ? "Your calendar change could not be saved. Please try again."
