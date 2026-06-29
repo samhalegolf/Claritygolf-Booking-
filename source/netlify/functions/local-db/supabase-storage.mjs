@@ -150,6 +150,7 @@ class SupabaseRestStore {
       await this.upsert("settings", [{ key, value: String(value ?? ""), updated_at: nowIso() }], "key", { ignore: sql.includes("do nothing") });
       return [];
     }
+    if (sql.startsWith("select key, value from settings")) return this.select("settings", "select=key,value");
     if (sql.startsWith("select value from settings")) return this.select("settings", `select=value&key=eq.${encodeFilter(values[0])}`);
 
     if (sql.startsWith("select count(*) as count from calendar_items")) {
