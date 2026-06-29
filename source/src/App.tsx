@@ -7154,6 +7154,10 @@ function App() {
   }
 
   function updateInvoiceSettings<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
+    if ((field === "enabled" || field === "showBillingWorkspace") && value === true && !canUseFeature(activeAccount, "invoicing")) {
+      setToast({ message: featureUnavailableMessage("invoicing") });
+      return;
+    }
     setCoachAccountSaveState("idle");
     setCoachAccount((current) =>
       cleanCoachAccount({
@@ -13235,6 +13239,7 @@ function App() {
                       <label className="settings-toggle">
                         <input
                           checked={invoiceSettings.enabled}
+                          disabled={!canUseFeature(activeAccount, "invoicing")}
                           onChange={(event) => updateInvoiceSettings("enabled", event.target.checked)}
                           type="checkbox"
                         />
@@ -13243,6 +13248,7 @@ function App() {
                       <label className="settings-toggle">
                         <input
                           checked={invoiceSettings.showBillingWorkspace}
+                          disabled={!canUseFeature(activeAccount, "invoicing")}
                           onChange={(event) => updateInvoiceSettings("showBillingWorkspace", event.target.checked)}
                           type="checkbox"
                         />
