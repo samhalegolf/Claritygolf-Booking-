@@ -806,6 +806,30 @@ function isAccountActive(account) {
   return account?.active !== false && ["trialing", "active", "comped", "internal"].includes(account?.subscriptionStatus);
 }
 
+function entitlementError(message, status = 403) {
+  return Object.assign(new Error(message), { status });
+}
+
+function assertAccountActive(account) {
+  if (!isAccountActive(account)) {
+    throw entitlementError("This workspace subscription is not active.");
+  }
+}
+
+function assertAccountFeature(account, feature) {
+  assertAccountActive(account);
+  if (!accountHasFeature(account, feature)) {
+    throw entitlementError(`${feature} is not included in this workspace plan.`);
+  }
+}
+
+function assertAccountLimit(account, currentUsage, limitName) {
+  const limit = accountLimit(account, limitName);
+  if (Number.isFinite(limit) && currentUsage > limit) {
+    throw entitlementError(`This workspace plan allows ${limit} ${String(limitName).replace(/^max/, "").toLowerCase()}.`, 409);
+  }
+}
+
 function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
   const slug = cleanSlug(clean.calendarSlug || clean.businessName, "sam-hale-golf");
@@ -2298,6 +2322,10 @@ async function readServices() {
 
 async function writeServices(services) {
   const clean = normalizeServices(services);
+  const account = await readDefaultWorkspaceAccount();
+  assertAccountFeature(account, "services");
+  const activeServices = clean.filter((service) => service.accountId === account.id && service.archived !== true).length;
+  assertAccountLimit(account, activeServices, "maxServices");
   await setSetting("servicesJson", JSON.stringify(clean));
   await setSetting("updatedAt", nowIso());
   return clean;
@@ -2324,6 +2352,12 @@ async function writeWorkspaceAccounts(accounts) {
   return clean;
 }
 
+async function readDefaultWorkspaceAccount() {
+  const accounts = await readWorkspaceAccounts();
+  const id = defaultAccountId(accounts);
+  return accounts.find((account) => account.id === id) || accounts[0] || defaultWorkspaceAccountFromCoachAccount();
+}
+
 async function readCoachProfiles() {
   await ensureSeeded();
   const account = await readCoachAccount();
@@ -2340,6 +2374,10 @@ async function readCoachProfiles() {
 async function writeCoachProfiles(coaches) {
   const account = await readCoachAccount();
   const clean = normalizeCoachProfiles(coaches, account);
+  const workspaceAccount = await readDefaultWorkspaceAccount();
+  const activeCoaches = clean.filter((coach) => coach.accountId === workspaceAccount.id && coach.active && coach.archived !== true).length;
+  if (activeCoaches > 1) assertAccountFeature(workspaceAccount, "multiCoach");
+  assertAccountLimit(workspaceAccount, activeCoaches, "maxCoaches");
   await setSetting("coachProfilesJson", JSON.stringify(clean));
   await setSetting("updatedAt", nowIso());
   return clean;
@@ -2372,6 +2410,10 @@ async function readLocations() {
 async function writeLocations(locations) {
   const account = await readCoachAccount();
   const clean = normalizeLocations(locations, account);
+  const workspaceAccount = await readDefaultWorkspaceAccount();
+  const activeLocations = clean.filter((location) => location.accountId === workspaceAccount.id && location.active && location.archived !== true).length;
+  if (activeLocations > 1) assertAccountFeature(workspaceAccount, "multiLocation");
+  assertAccountLimit(workspaceAccount, activeLocations, "maxLocations");
   await setSetting("locationsJson", JSON.stringify(clean));
   await setSetting("updatedAt", nowIso());
   return clean;
@@ -3858,8 +3900,14 @@ function hasCollision(items, candidate, service, state = {}) {
 
 async function createPublicBooking(payload, context = null) {
   const state = await readPublicCalendarState();
+  const workspaceAccount =
+    (state.workspaceAccounts || []).find((account) => account.id === defaultAccountId(state.workspaceAccounts)) ||
+    (state.workspaceAccounts || [])[0] ||
+    defaultWorkspaceAccountFromCoachAccount(state.account);
+  assertAccountFeature(workspaceAccount, "publicBooking");
   const service = state.services.find(
     (candidate) =>
+      candidate.accountId === workspaceAccount.id &&
       candidate.id === payload?.serviceId &&
       candidate.active &&
       candidate.archived !== true &&
@@ -3973,7 +4021,7 @@ async function createPublicBooking(payload, context = null) {
   );
   const appointment = {
     id: `appt-${Date.now()}`,
-    accountId: service.accountId || defaultWorkspaceAccountFromCoachAccount(state.account).id,
+    accountId: service.accountId || workspaceAccount.id,
     kind: "appointment",
     ...slot,
     coachId,
