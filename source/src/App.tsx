@@ -5499,7 +5499,7 @@ function App() {
 
   function isValidAppointmentSlot(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
     if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
-    if (isScheduledGroupService(service)) return !hasCollision(candidate, ignoreId, service);
+    if (service) return !hasCollision(candidate, ignoreId, service);
     if (hasAppointmentCollision(candidate, ignoreId)) return false;
     return true;
   }
