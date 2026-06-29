@@ -361,6 +361,7 @@ function adminCustomGroupAttendee(name: string, email = ""): CustomGroupAttendee
 function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
   return {
     id: safeText(person.id),
+    accountId: safeText(person.accountId) || defaultWorkspaceAccountFromCoachAccount().id,
     name: safeText(person.name),
     email: safeText(person.email),
     phone: safeText(person.phone),
@@ -380,6 +381,7 @@ function cleanPeople(people: unknown[]): Person[] {
 function cleanNotificationRecord(notification: Partial<NotificationRecord> & { id?: unknown } = {}): NotificationRecord {
   return {
     id: safeText(notification.id),
+    accountId: safeText(notification.accountId) || defaultWorkspaceAccountFromCoachAccount().id,
     personKey: safeText(notification.personKey),
     calendarItemId: safeText(notification.calendarItemId),
     recipient: safeText(notification.recipient),
@@ -2083,8 +2085,10 @@ function accountById(accounts: WorkspaceAccount[], id?: string) {
 
 function defaultLocationFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): Location {
   const cleanAccount = cleanCoachAccount(account);
+  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(cleanAccount);
   return {
     id: "default-location",
+    accountId: workspaceAccount.id,
     name: cleanAccount.venueName,
     shortName: cleanAccount.venueShortName || cleanAccount.venueName,
     address: "",
@@ -2098,8 +2102,10 @@ function defaultLocationFromCoachAccount(account: Partial<CoachAccount> = defaul
 
 function defaultCoachProfileFromAccount(account: Partial<CoachAccount> = defaultCoachAccount): CoachProfile {
   const cleanAccount = cleanCoachAccount(account);
+  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(cleanAccount);
   return {
     id: cleanAccount.id || "sam-hale",
+    accountId: workspaceAccount.id,
     name: cleanAccount.coachName,
     displayName: cleanAccount.coachName || cleanAccount.businessName,
     shortName: "Sam",
@@ -2116,8 +2122,10 @@ function defaultCoachProfileFromAccount(account: Partial<CoachAccount> = default
 
 function defaultAppUserFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): AppUser {
   const coach = defaultCoachProfileFromAccount(account);
+  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(account);
   return {
     id: `${coach.id}-admin`,
+    accountId: workspaceAccount.id,
     email: coach.email,
     name: coach.displayName,
     role: "admin",
@@ -2133,6 +2141,32 @@ function defaultAppUserFromCoachAccount(account: Partial<CoachAccount> = default
   };
 }
 
+function cleanAppUser(raw?: Partial<AppUser>, fallback = defaultAppUserFromCoachAccount(), accountId = fallback.accountId): AppUser {
+  const role =
+    raw?.role === "account_admin" || raw?.role === "coach" || raw?.role === "staff" || raw?.role === "platform_admin"
+      ? raw.role
+      : raw?.role === "admin"
+        ? "admin"
+        : fallback.role;
+  const permissions = typeof raw?.permissions === "object" && raw.permissions ? raw.permissions : fallback.permissions;
+  return {
+    id: cleanSlug(raw?.id, fallback.id),
+    accountId: cleanSlug(raw?.accountId, accountId || defaultWorkspaceAccountFromCoachAccount().id),
+    email: cleanEmail(raw?.email, fallback.email),
+    name: typeof raw?.name === "string" && raw.name.trim() ? raw.name.trim().slice(0, 120) : fallback.name,
+    role,
+    coachId: cleanSlug(raw?.coachId, fallback.coachId || "") || undefined,
+    permissions: {
+      bookings: permissions.bookings === "own" || permissions.bookings === "assigned" ? permissions.bookings : "all",
+      services: permissions.services === "own" || permissions.services === "assigned" ? permissions.services : "all",
+      availability: permissions.availability === "own" || permissions.availability === "assigned" ? permissions.availability : "all",
+      locations: permissions.locations === "own" || permissions.locations === "assigned" ? permissions.locations : "all",
+      clients: permissions.clients === "own" || permissions.clients === "assigned" ? permissions.clients : "all",
+      settings: permissions.settings === "own" || permissions.settings === "assigned" ? permissions.settings : "all",
+    },
+  };
+}
+
 function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile, index = 0): CoachProfile {
   const base = fallback ?? defaultCoachProfileFromAccount();
   const name =
@@ -2141,6 +2175,7 @@ function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile,
       : base.name;
   return {
     id: cleanSlug(raw?.id, cleanSlug(name, `coach-${index + 1}`)),
+    accountId: cleanSlug(raw?.accountId, base.accountId || defaultWorkspaceAccountFromCoachAccount().id),
     name,
     displayName:
       typeof raw?.displayName === "string" && raw.displayName.trim()
@@ -2284,6 +2319,7 @@ function cleanLocation(raw?: Partial<Location>, fallback?: Location, index = 0):
   const id = cleanSlug(raw?.id, cleanSlug(name, `location-${index + 1}`));
   return {
     id,
+    accountId: cleanSlug(raw?.accountId, base.accountId || defaultWorkspaceAccountFromCoachAccount().id),
     name,
     shortName,
     address: typeof raw?.address === "string" ? raw.address.trim().slice(0, 240) : base.address,
@@ -2585,6 +2621,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
   const bookingScreenIds = normalizeBookingScreenIds(service?.bookingScreenIds);
   return {
     id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
+    accountId: cleanSlug(service?.accountId, fallback.accountId || defaultWorkspaceAccountFromCoachAccount().id),
     coachId: cleanSlug(service?.coachId, defaultCoachProfileFromAccount().id),
     name,
     duration: clamp(Math.round(duration), 15, 240),
@@ -2840,7 +2877,8 @@ function cleanAvailability(availability?: AvailabilityWindow[][], fallbackCoachI
         const start = snap(clamp(rawStart, DAY_START_MINUTES, LAST_TIME_SLOT_MINUTES));
         const end = snap(clamp(rawEnd, start + SNAP_MINUTES, LAST_TIME_SLOT_MINUTES));
         const coachId = cleanSlug(window?.coachId, fallbackCoachId);
-        return end > start ? { start, end, coachId } : null;
+        const accountId = cleanSlug(window?.accountId, defaultWorkspaceAccountFromCoachAccount().id);
+        return end > start ? { start, end, coachId, accountId } : null;
       })
       .filter((window): window is AvailabilityWindow => Boolean(window))
       .sort((a, b) => (a.coachId || "").localeCompare(b.coachId || "") || a.start - b.start)
@@ -3122,6 +3160,9 @@ function App() {
   const isEmbedMode = isPublicBookingMode();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
+  const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>(() =>
+    cleanWorkspaceAccounts(undefined, getStoredCoachAccount()),
+  );
   const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [coachProfiles, setCoachProfiles] = useState<CoachProfile[]>(() => cleanCoachProfiles(undefined, getStoredCoachAccount()));
   const [currentAppUser, setCurrentAppUser] = useState<AppUser>(() => defaultAppUserFromCoachAccount(getStoredCoachAccount()));
@@ -3150,7 +3191,7 @@ function App() {
   const [passwordChangeState, setPasswordChangeState] = useState<"idle" | "saving" | "saved">("idle");
   const [passwordChangeMessage, setPasswordChangeMessage] = useState("");
   const [items, setItems] = useState<CalendarItem[]>(initialItems);
-  const [services, setServices] = useState<Service[]>(defaultServices);
+  const [services, setServices] = useState<Service[]>(() => cleanServices(defaultServices));
   const [locations, setLocations] = useState<Location[]>(() => cleanLocations(undefined, getStoredCoachAccount()));
   const [locationEditor, setLocationEditor] = useState<Location>(() => defaultLocationFromCoachAccount(getStoredCoachAccount()));
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
@@ -3312,7 +3353,10 @@ function App() {
   const emailNoticeToastKeyRef = useRef("");
   const [hasMoved, setHasMoved] = useState(false);
   const initialRescheduleLoginRef = useRef<SavedRescheduleLogin | null>(getInitialRescheduleLogin());
-  const isAdminUser = currentAppUser.role === "admin";
+  const activeAccountId = defaultAccountId(workspaceAccounts);
+  const activeAccount =
+    accountById(workspaceAccounts, activeAccountId) ?? defaultWorkspaceAccountFromCoachAccount(coachAccount);
+  const isAdminUser = currentAppUser.role === "admin" || currentAppUser.role === "account_admin" || currentAppUser.role === "platform_admin";
   useEffect(() => {
     if (isAdminUser) return;
     if (["coaches", "locations", "experience", "account", "branding", "integrations", "data"].includes(settingsTab)) {
@@ -4272,6 +4316,7 @@ function App() {
       services?: Service[];
       locations?: Location[];
       coaches?: CoachProfile[];
+      workspaceAccounts?: WorkspaceAccount[];
       currentUser?: AppUser;
       availability?: AvailabilityWindow[][];
       settings?: Partial<NotificationSettings>;
@@ -4281,18 +4326,24 @@ function App() {
       updatedAt?: string;
     };
     const loadedItems = Array.isArray(data.items) ? data.items : [];
+    const loadedAccounts = cleanWorkspaceAccounts(data.workspaceAccounts, data.account ?? coachAccount);
+    const loadedAccountId = defaultAccountId(loadedAccounts);
+    const accountItems = loadedItems.map((item) => ({ ...item, accountId: item.accountId || loadedAccountId }));
     const loadedSyncKey =
       typeof data.syncKey === "string" && data.syncKey.startsWith("cg_") ? data.syncKey : calendarSyncKey;
-    lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(loadedItems, loadedSyncKey);
+    lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(accountItems, loadedSyncKey);
     if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-    if (Array.isArray(data.items)) setItems(data.items);
+    setWorkspaceAccounts(loadedAccounts);
+    if (Array.isArray(data.items)) setItems(accountItems);
     if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
     if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
-    if (Array.isArray(data.services)) setServices(cleanServices(data.services));
+    if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
     setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
     setCoachProfiles(cleanCoachProfiles(data.coaches, data.account ?? coachAccount));
-    if (data.currentUser) setCurrentAppUser(data.currentUser);
-    if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
+    if (data.currentUser) setCurrentAppUser(cleanAppUser(data.currentUser, defaultAppUserFromCoachAccount(data.account ?? coachAccount), loadedAccountId));
+    if (Array.isArray(data.availability)) {
+      setAvailability(cleanAvailability(data.availability).map((day) => day.map((window) => ({ ...window, accountId: window.accountId || loadedAccountId }))));
+    }
     if (typeof data.syncKey === "string" && data.syncKey.startsWith("cg_")) {
       setCalendarSyncKey(data.syncKey);
     }
@@ -4320,16 +4371,20 @@ function App() {
       services?: Service[];
       locations?: Location[];
       coaches?: CoachProfile[];
+      workspaceAccounts?: WorkspaceAccount[];
       availability?: AvailabilityWindow[][];
       notifications?: NotificationRecord[];
       brand?: Partial<BrandSettings>;
       account?: Partial<CoachAccount>;
       updatedAt?: string;
     };
+    const loadedAccounts = cleanWorkspaceAccounts(data.workspaceAccounts, data.account ?? coachAccount);
+    const loadedAccountId = defaultAccountId(loadedAccounts);
     if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-    if (Array.isArray(data.items)) setItems(data.items);
+    setWorkspaceAccounts(loadedAccounts);
+    if (Array.isArray(data.items)) setItems(data.items.map((item) => ({ ...item, accountId: item.accountId || loadedAccountId })));
     if (Array.isArray(data.notifications)) setNotifications(data.notifications);
-    if (Array.isArray(data.services)) setServices(cleanServices(data.services));
+    if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
     setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
     setCoachProfiles(cleanCoachProfiles(data.coaches, data.account ?? coachAccount));
     if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
@@ -4792,6 +4847,7 @@ function App() {
     const cancellationRecord: CalendarItem = {
       id: `group-session-cancel-${selectedGroupSession.serviceId}-${selectedGroupSession.week}-${selectedGroupSession.day}-${selectedGroupSession.start}`,
       kind: "block",
+      accountId: activeAccountId,
       week: selectedGroupSession.week,
       day: selectedGroupSession.day,
       start: selectedGroupSession.start,
@@ -5267,6 +5323,7 @@ function App() {
     const candidateLocationId = serviceLocation(service, locations, coachAccount).id;
     const candidateItem: Partial<CalendarItem> = {
       kind: "appointment",
+      accountId: activeAccountId,
       coachId: candidateCoachId,
       locationId: candidateLocationId,
       ...candidate,
@@ -5344,6 +5401,7 @@ function App() {
     const fallbackLocationId = selectedCalendarLocationId || defaultLocationId(locations);
     const candidateItem: Partial<CalendarItem> = {
       kind: "appointment",
+      accountId: activeAccountId,
       coachId: fallbackCoachId,
       locationId: fallbackLocationId,
       ...candidate,
@@ -5422,6 +5480,7 @@ function App() {
       options.locationId ?? (effectiveCalendarPerspective === "location" ? selectedCalendarLocationId : defaultLocationId(locations));
     const candidateItem: Partial<CalendarItem> = {
       kind: "block",
+      accountId: activeAccountId,
       coachId: candidateCoachId,
       locationId: candidateLocationId,
       ...candidate,
@@ -5806,6 +5865,7 @@ function App() {
       const newBlock: CalendarItem = {
         id: `block-${Date.now()}`,
         kind: "block",
+      accountId: activeAccountId,
         week: activeDraft.week,
         day: activeDraft.day,
         start: activeDraft.start,
@@ -5847,6 +5907,7 @@ function App() {
       const item: CalendarItem = {
         id: `appt-${Date.now()}`,
         kind: "appointment",
+      accountId: activeAccountId,
         week: activeDraft.week,
         day: activeDraft.day,
         start: activeDraft.start,
@@ -6064,6 +6125,7 @@ function App() {
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
       kind: "appointment",
+      accountId: activeAccountId,
       title: clientName,
       client: clientName,
       serviceId: quickCreateService.id,
@@ -6118,6 +6180,7 @@ function App() {
     const item: CalendarItem = {
       id: `block-${Date.now()}`,
       kind: "block",
+      accountId: activeAccountId,
       title: locationOnly ? "Location unavailable" : "Coach unavailable",
       coachId: blockCoachId,
       locationId: blockLocationId,
@@ -6151,6 +6214,7 @@ function App() {
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
       kind: "appointment",
+      accountId: activeAccountId,
       title: "New client",
       client: "New client",
       serviceId,
@@ -6236,6 +6300,7 @@ function App() {
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
       kind: "appointment",
+      accountId: activeAccountId,
       week: candidate.week,
       day: candidate.day,
       start: candidate.start,
@@ -8491,6 +8556,7 @@ function App() {
     const item: CalendarItem = {
       id: `appt-${Date.now()}`,
       kind: "appointment",
+      accountId: activeAccountId,
       ...candidate,
       serviceId: bookingTargetService.id,
       coachId: bookingCoachId,
