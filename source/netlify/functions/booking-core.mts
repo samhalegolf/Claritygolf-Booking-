@@ -2951,8 +2951,18 @@ export async function handleCalendarFeedRequest(req: Request) {
     const state = await readPublicCalendarState();
     const key = new URL(req.url).searchParams.get("key");
     if (key !== state.syncKey) return text("Invalid calendar sync key.", 401);
+    const workspaceAccount = publicWorkspaceAccount(state);
+    assertAccountFeature(workspaceAccount, "coachCalendar");
+    const scopedState = {
+      ...state,
+      items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
+      services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
+      coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
+      locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
+      availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+    };
     return text(
-      generateCalendarFeed(state),
+      generateCalendarFeed(scopedState),
       200,
       "text/calendar; charset=utf-8",
     );
@@ -3080,21 +3090,25 @@ function publicCalendarState(state) {
 }
 
 export function publicBookingState(state) {
+  const workspaceAccount = publicWorkspaceAccount(state);
+  assertAccountFeature(workspaceAccount, "publicBooking");
+  const accountServices = (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id));
+  const accountItems = (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id));
   return {
     updatedAt: state.updatedAt,
-    services: (state.services || []).filter(
+    services: accountServices.filter(
       (service) =>
         service.active &&
         service.archived !== true &&
         service.visibility === "public" &&
         service.lessonFormat !== "package",
     ),
-    coaches: state.coaches || [],
-    locations: state.locations || [],
-    availability: state.availability || [],
+    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
+    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
+    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
     brand: state.brand,
     account: state.account,
-    items: state.items.map((item) => ({
+    items: accountItems.map((item) => ({
       id: item.id,
       kind: item.kind,
       week: item.week ?? 0,
@@ -4035,6 +4049,10 @@ function defaultWorkspaceAccount(settings = {}) {
   return accounts.find((account) => account.id === id) || accounts[0] || defaultWorkspaceAccountFromCoachAccount(settings.account);
 }
 
+function publicWorkspaceAccount(state = {}) {
+  return defaultWorkspaceAccount(state);
+}
+
 function resolveWorkspaceAccount(_req, settings = {}) {
   return defaultWorkspaceAccount(settings);
 }
@@ -4236,9 +4254,16 @@ async function createPublicBooking(payload, context = null) {
     (state.workspaceAccounts || [])[0] ||
     defaultWorkspaceAccountFromCoachAccount(state.account);
   assertAccountFeature(workspaceAccount, "publicBooking");
-  const service = state.services.find(
+  const accountState = {
+    ...state,
+    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
+    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
+    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
+    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
+    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+  };
+  const service = accountState.services.find(
     (candidate) =>
-      candidate.accountId === workspaceAccount.id &&
       candidate.id === payload?.serviceId &&
       candidate.active &&
       candidate.archived !== true &&
@@ -4277,16 +4302,16 @@ async function createPublicBooking(payload, context = null) {
   }
 
   const slot = { week, day, start, duration: service.duration };
-  const serviceCoachId = service.coachId || defaultCoachId(state.coaches || []);
+  const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
   if (isScheduledGroupService(service)) {
-    if (!isGroupServiceSlotMatch(service, slot) || hasCollision(state.items, slot, service, state)) {
+    if (!isGroupServiceSlotMatch(service, slot) || hasCollision(accountState.items, slot, service, accountState)) {
       throw Object.assign(new Error("That time is no longer available."), {
         status: 409,
       });
     }
   } else if (
-    !isInsideAvailability(state.availability, day, start, service.duration, serviceCoachId) ||
-    hasCollision(state.items, slot, service, state)
+    !isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId) ||
+    hasCollision(accountState.items, slot, service, accountState)
   ) {
     throw Object.assign(new Error("That time is no longer available."), {
       status: 409,
@@ -4341,14 +4366,12 @@ async function createPublicBooking(payload, context = null) {
       calculatedPrice: calculateCustomGroupPrice(service, participantCount),
     };
   }
-  const coachId = cleanSlug(payload?.coachId, serviceCoachId);
+  const coachId = serviceCoachId;
   const location = cleanBookingLocationSnapshot(
-    payload?.location,
-    bookingLocationSnapshotFor(service, state.locations || [], state.account),
+    bookingLocationSnapshotFor(service, accountState.locations || [], accountState.account),
   );
   const coach = cleanBookingCoachSnapshot(
-    payload?.coach,
-    bookingCoachSnapshotFor(coachId, state.coaches || [], state.account),
+    bookingCoachSnapshotFor(coachId, accountState.coaches || [], accountState.account),
   );
   const appointment = {
     id: `appt-${Date.now()}`,
@@ -4356,7 +4379,7 @@ async function createPublicBooking(payload, context = null) {
     kind: "appointment",
     ...slot,
     coachId,
-    locationId: cleanSlug(payload?.locationId || location?.locationId || service.locationId, ""),
+    locationId: cleanSlug(location?.locationId || service.locationId, ""),
     coach,
     serviceId: service.id,
     client,
@@ -4417,9 +4440,12 @@ export async function handleCustomGroupConfirmRequest(req) {
     if (!token) return text("This confirmation link is missing its token.", 400);
 
     const state = await readPublicCalendarState();
+    const workspaceAccount = publicWorkspaceAccount(state);
+    assertAccountFeature(workspaceAccount, "publicBooking");
     let confirmedAttendee = null;
     let confirmedAppointment = null;
     const nextItems = state.items.map((item) => {
+      if (!recordBelongsToAccount(item, workspaceAccount.id)) return item;
       if (!item.customGroup || !Array.isArray(item.attendees)) return item;
       let changed = false;
       const attendees = item.attendees.map((attendee) => {
@@ -4437,7 +4463,7 @@ export async function handleCustomGroupConfirmRequest(req) {
     }
 
     await writePublicBookingState(state, nextItems);
-    const service = state.services.find((candidate) => candidate.id === confirmedAppointment.serviceId);
+    const service = state.services.find((candidate) => recordBelongsToAccount(candidate, workspaceAccount.id) && candidate.id === confirmedAppointment.serviceId);
     const title = "Attendance confirmed";
     return text(
       `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="font-family:Arial,sans-serif;line-height:1.5;color:#101612;padding:32px;max-width:640px;margin:auto"><h1>${title}</h1><p>${escapeHtml(confirmedAttendee.name)} is confirmed for ${escapeHtml(service?.name || "the custom group lesson")}.</p><p>You can close this page.</p></body></html>`,
@@ -4467,7 +4493,9 @@ export async function handlePublicNotificationStatusRequest(req) {
     if (!appointmentId || (!email && !phone)) return json({ sent: false }, 400);
 
     const state = await readPublicCalendarState();
-    const appointment = state.items.find((item) => item.id === appointmentId);
+    const workspaceAccount = publicWorkspaceAccount(state);
+    assertAccountFeature(workspaceAccount, "publicBooking");
+    const appointment = state.items.find((item) => recordBelongsToAccount(item, workspaceAccount.id) && item.id === appointmentId);
     if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
       return json({ sent: false }, 404);
     }
@@ -4650,7 +4678,17 @@ async function triggerPublicBookingNotifications(payload) {
   }
 
   const state = await readPublicCalendarState();
-  const appointment = state.items.find((item) => item.id === appointmentId);
+  const workspaceAccount = publicWorkspaceAccount(state);
+  assertAccountFeature(workspaceAccount, "publicBooking");
+  const accountState = {
+    ...state,
+    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
+    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
+    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
+    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
+    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+  };
+  const appointment = accountState.items.find((item) => item.id === appointmentId);
   if (!appointment || !matchesNotificationContact(appointment, email, phone)) {
     throw Object.assign(
       new Error("That booking could not be verified for email notification."),
@@ -4698,8 +4736,15 @@ async function lookupPublicReschedule(payload) {
   }
 
   const state = await readPublicCalendarState();
-  const serviceList = state.services || defaultServices;
-  const matches = state.items
+  const workspaceAccount = publicWorkspaceAccount(state);
+  assertAccountFeature(workspaceAccount, "publicBooking");
+  const accountState = {
+    ...state,
+    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
+    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
+  };
+  const serviceList = accountState.services || defaultServices;
+  const matches = accountState.items
     .filter((item) => matchesRescheduleContact(item, email, phone))
     .sort(
       (a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start,
@@ -4735,21 +4780,31 @@ async function reschedulePublicBooking(payload, context = null) {
   }
 
   const state = await readPublicCalendarState();
-  const appointment = state.items.find((item) => item.id === appointmentId);
+  const workspaceAccount = publicWorkspaceAccount(state);
+  assertAccountFeature(workspaceAccount, "publicBooking");
+  const accountState = {
+    ...state,
+    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
+    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
+    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
+    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
+    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+  };
+  const appointment = accountState.items.find((item) => item.id === appointmentId);
   if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
     throw Object.assign(new Error("That booking could not be verified."), {
       status: 404,
     });
   }
 
-  const serviceList = state.services || defaultServices;
+  const serviceList = accountState.services || defaultServices;
   const service = serviceList.find(
     (candidate) => candidate.id === appointment.serviceId,
   );
   const duration = service?.duration || appointment.duration;
-  const serviceCoachId = appointment.coachId || service?.coachId || defaultCoachId(state.coaches || []);
+  const serviceCoachId = appointment.coachId || service?.coachId || defaultCoachId(accountState.coaches || []);
   const slot = { week, day, start, duration };
-  const itemsWithoutOriginal = state.items.filter(
+  const itemsWithoutOriginal = accountState.items.filter(
     (item) => item.id !== appointment.id,
   );
   if (
@@ -4759,14 +4814,14 @@ async function reschedulePublicBooking(payload, context = null) {
     (isScheduledGroupService(service)
       ? !isGroupServiceSlotMatch(service, slot)
       : !isInsideAvailability(
-          state.availability || defaultAvailability,
+          accountState.availability || defaultAvailability,
           day,
           start,
           duration,
           serviceCoachId,
         ) ||
         !Number.isInteger(duration)) ||
-    hasCollision(itemsWithoutOriginal, slot, service, state)
+    hasCollision(itemsWithoutOriginal, slot, service, accountState)
   ) {
     throw Object.assign(new Error("That time is no longer available."), {
       status: 409,
@@ -4814,7 +4869,9 @@ async function cancelPublicBooking(payload) {
   }
 
   const state = await readPublicCalendarState();
-  const appointment = state.items.find((item) => item.id === appointmentId);
+  const workspaceAccount = publicWorkspaceAccount(state);
+  assertAccountFeature(workspaceAccount, "publicBooking");
+  const appointment = state.items.find((item) => recordBelongsToAccount(item, workspaceAccount.id) && item.id === appointmentId);
   if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
     throw Object.assign(new Error("That booking could not be verified."), {
       status: 404,
@@ -4907,7 +4964,7 @@ export async function handlePublicCancelRequest(req) {
         start: result.appointment.start,
         duration: result.appointment.duration,
       },
-      state: { items: result.state.items },
+      state: { items: publicBookingState(result.state).items },
       notifications: clientNotificationResults(result.notifications),
     });
   } catch (error) {

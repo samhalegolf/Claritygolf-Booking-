@@ -80,12 +80,26 @@ async function readSettings() {
   const rows = await supabase("settings", "select=key,value");
   const settings = Object.fromEntries(rows.map((row: any) => [row.key, row.value]));
   let services: any[] = [];
+  let workspaceAccounts: any[] = [];
   try {
     services = settings.servicesJson ? JSON.parse(settings.servicesJson) : [];
   } catch {
     services = [];
   }
+  try {
+    workspaceAccounts = settings.workspaceAccountsJson ? JSON.parse(settings.workspaceAccountsJson) : [];
+  } catch {
+    workspaceAccounts = [];
+  }
+  const fallbackAccount = {
+    id: settings.accountCalendarSlug || settings.accountId || "sam-hale-golf",
+    planKey: "founder",
+    subscriptionStatus: "comped",
+    active: true,
+  };
+  const account = workspaceAccounts.find((candidate: any) => candidate?.active !== false) || fallbackAccount;
   return {
+    account,
     services,
     businessName: settings.accountBusinessName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
     coachName: settings.accountCoachName || env("CLARITY_COACH_NAME", "Sam Hale"),
@@ -94,6 +108,14 @@ async function readSettings() {
     contactEmail: cleanEmail(settings.accountContactEmail, env("CLARITY_CONTACT_EMAIL", "")),
     bookingUrl: settings.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
   };
+}
+
+function accountHasPublicBooking(account: any) {
+  if (account?.active === false) return false;
+  if (!["trialing", "active", "comped", "internal"].includes(account?.subscriptionStatus || "active")) return false;
+  if (account?.entitlementsOverride?.features?.publicBooking === false) return false;
+  if (account?.entitlementsOverride?.features?.publicBooking === true) return true;
+  return ["solo", "studio", "academy", "enterprise", "founder"].includes(account?.planKey || "solo");
 }
 
 function pad(value: number) {
@@ -151,7 +173,7 @@ function manageUrl(appointment: any, settings: any) {
 }
 
 function generateInvite(appointment: any, settings: any) {
-  const service = settings.services.find((candidate: any) => candidate.id === appointment.service_id);
+  const service = settings.services.find((candidate: any) => candidate.id === appointment.service_id && (!candidate.accountId || candidate.accountId === settings.account.id));
   const serviceName = cleanText(service?.name, "Golf Lesson", 160);
   const client = cleanText(appointment.client || appointment.title, "Client", 160);
   const location = cleanBookingLocationSnapshot(appointment.location, {
@@ -228,6 +250,13 @@ export default async function handler(req: Request) {
     }
 
     const settings = await readSettings();
+    if (!accountHasPublicBooking(settings.account)) {
+      return json({ error: "feature_unavailable", message: "Public booking is not available for this account." }, 403);
+    }
+    const appointmentAccountId = appointment.account_id || settings.account.id;
+    if (appointmentAccountId !== settings.account.id) {
+      return json({ error: "not_found", message: "Booking not found." }, 404);
+    }
     const ics = generateInvite(appointment, settings);
     return new Response(ics, {
       status: 200,

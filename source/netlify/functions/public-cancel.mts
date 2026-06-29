@@ -30,6 +30,31 @@ function json(body: unknown, status = 200) {
   });
 }
 
+async function readWorkspaceAccount() {
+  const rows = await supabase("settings", { query: "select=key,value&key=in.(workspaceAccountsJson,accountCalendarSlug,accountId)" });
+  const settings = Object.fromEntries(rows.map((row: any) => [row.key, row.value]));
+  let accounts: any[] = [];
+  try {
+    accounts = settings.workspaceAccountsJson ? JSON.parse(settings.workspaceAccountsJson) : [];
+  } catch {
+    accounts = [];
+  }
+  return accounts.find((account: any) => account?.active !== false) || {
+    id: settings.accountCalendarSlug || settings.accountId || "sam-hale-golf",
+    planKey: "founder",
+    subscriptionStatus: "comped",
+    active: true,
+  };
+}
+
+function accountHasPublicBooking(account: any) {
+  if (account?.active === false) return false;
+  if (!["trialing", "active", "comped", "internal"].includes(account?.subscriptionStatus || "active")) return false;
+  if (account?.entitlementsOverride?.features?.publicBooking === false) return false;
+  if (account?.entitlementsOverride?.features?.publicBooking === true) return true;
+  return ["solo", "studio", "academy", "enterprise", "founder"].includes(account?.planKey || "solo");
+}
+
 async function parseBody(req: Request) {
   try {
     return await req.json();
@@ -82,6 +107,7 @@ async function supabase(
 function rowToItem(row: any) {
   return {
     id: row.id,
+    accountId: row.account_id || "sam-hale-golf",
     kind: row.kind,
     week: Number(row.week ?? 0),
     day: Number(row.day ?? 0),
@@ -116,9 +142,14 @@ async function cancelPublicBooking(payload: any) {
   const rows = await supabase("calendar_items", {
     query: `select=*&id=eq.${encodeURIComponent(appointmentId)}&limit=1`,
   });
+  const account = await readWorkspaceAccount();
+  if (!accountHasPublicBooking(account)) {
+    throw Object.assign(new Error("Public booking is not available for this account."), { status: 403 });
+  }
   const row = rows[0];
   if (
     !row ||
+    (row.account_id || account.id) !== account.id ||
     row.kind !== "appointment" ||
     normalizeContact(row.email) !== email ||
     normalizeContact(row.phone) !== phone
@@ -135,7 +166,7 @@ async function cancelPublicBooking(payload: any) {
   // cancellation into a misleading failure response.
   await supabase("calendar_items", {
     method: "DELETE",
-    query: `id=eq.${encodeURIComponent(appointmentId)}`,
+    query: `id=eq.${encodeURIComponent(appointmentId)}&account_id=eq.${encodeURIComponent(account.id)}`,
     prefer: "return=minimal",
   });
 
@@ -165,9 +196,17 @@ async function cancelPublicBooking(payload: any) {
   let stateItems: any[] | null = null;
   try {
     const remainingRows = await supabase("calendar_items", {
-      query: "select=*&order=week.asc,day.asc,start.asc,id.asc",
+      query: `select=*&account_id=eq.${encodeURIComponent(account.id)}&order=week.asc,day.asc,start.asc,id.asc`,
     });
-    stateItems = remainingRows.map(rowToItem);
+    stateItems = remainingRows.map(rowToItem).map((item: any) => ({
+      id: item.id,
+      kind: item.kind,
+      week: item.week,
+      day: item.day,
+      start: item.start,
+      duration: item.duration,
+      serviceId: item.serviceId,
+    }));
   } catch (error) {
     console.error("public_cancel:state_refresh_failed", error);
   }
