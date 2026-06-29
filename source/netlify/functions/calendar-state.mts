@@ -639,7 +639,7 @@ function cleanBookingCoachSnapshot(raw: any) {
   };
 }
 
-const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["status", "custom_group", "location", "coach", "coach_id", "location_id"]);
+const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["status", "custom_group", "location", "coach", "coach_id", "location_id", "account_id"]);
 
 function omittedCalendarColumnWarning(column: string) {
   return `Calendar saved, but optional calendar item column "${column}" is not available in Supabase. Optional data for that field was not preserved.`;
@@ -883,6 +883,7 @@ function rowToItem(row: any) {
   const cancelledGroupSession = isCancelledGroupSessionLike(row);
   return {
     id: row.id,
+    accountId: row.account_id || defaultWorkspaceAccountFromAccount({}).id,
     kind: row.kind,
     week: Number(row.week ?? 0),
     day: Number(row.day ?? 0),
@@ -914,6 +915,7 @@ function itemToRow(item: any) {
   });
   return {
     id: cleanString(item?.id, `${kind}-${randomUUID()}`, 140),
+    account_id: cleanSlug(item?.accountId, defaultWorkspaceAccountFromAccount({}).id),
     kind,
     week: Number.isInteger(Number(item?.week)) ? Number(item.week) : 0,
     day: Math.max(0, Math.min(6, Number(item?.day ?? 0))),

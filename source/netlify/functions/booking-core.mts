@@ -1251,6 +1251,7 @@ async function ensureCoreTables() {
   await db().sql`
     CREATE TABLE IF NOT EXISTS calendar_items (
       id TEXT PRIMARY KEY,
+      account_id TEXT,
       kind TEXT NOT NULL,
       week INTEGER NOT NULL DEFAULT 0,
       day INTEGER NOT NULL,
@@ -1272,6 +1273,7 @@ async function ensureCoreTables() {
 	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	    )
 	  `;
+  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS account_id TEXT`;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach_id TEXT`;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location_id TEXT`;
@@ -1463,11 +1465,12 @@ async function seedItems() {
     for (const item of initialItems) {
       await client.query(
         `INSERT INTO calendar_items (
-          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
-	        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+          id, account_id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
+	        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
 	        ON CONFLICT (id) DO NOTHING`,
         [
           item.id,
+          item.accountId || defaultWorkspaceAccountFromCoachAccount(account).id,
           item.kind,
           item.week,
           item.day,
@@ -1587,6 +1590,7 @@ function rowToItem(row) {
   const cancelledGroupSession = isCancelledGroupSessionLike(row);
   return {
     id: row.id,
+    accountId: row.account_id || defaultWorkspaceAccountFromCoachAccount().id,
     kind: row.kind,
     week: Number(row.week ?? 0),
     day: Number(row.day ?? 0),
@@ -1642,6 +1646,7 @@ function cleanCalendarItem(item) {
   const cancelledGroupSession = isCancelledGroupSessionLike({ ...item, kind });
   return {
     id: cleanString(item.id, `${kind}-${Date.now()}`),
+    accountId: cleanSlug(item.accountId, defaultWorkspaceAccountFromCoachAccount().id),
     kind,
     week: Number.isInteger(Number(item.week)) ? Number(item.week) : 0,
     day,
@@ -2147,9 +2152,10 @@ async function writeItems(items, options = {}) {
     for (const item of cleanItems) {
       await client.query(
         `INSERT INTO calendar_items (
-          id, kind, week, day, start, duration, coach_id, location_id, service_id, client, title, phone, email, note, status, custom_group, coach, location, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17::jsonb, $18::jsonb, NOW(), NOW())
+          id, account_id, kind, week, day, start, duration, coach_id, location_id, service_id, client, title, phone, email, note, status, custom_group, coach, location, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb, $19::jsonb, NOW(), NOW())
         ON CONFLICT (id) DO UPDATE SET
+          account_id = EXCLUDED.account_id,
           kind = EXCLUDED.kind,
           week = EXCLUDED.week,
           day = EXCLUDED.day,
@@ -2170,6 +2176,7 @@ async function writeItems(items, options = {}) {
           updated_at = NOW()`,
         [
           item.id,
+          item.accountId || defaultWorkspaceAccountFromCoachAccount().id,
           item.kind,
           item.week ?? 0,
           item.day,
@@ -3966,6 +3973,7 @@ async function createPublicBooking(payload, context = null) {
   );
   const appointment = {
     id: `appt-${Date.now()}`,
+    accountId: service.accountId || defaultWorkspaceAccountFromCoachAccount(state.account).id,
     kind: "appointment",
     ...slot,
     coachId,
@@ -4968,6 +4976,7 @@ export async function handleBookingApiRoute(
         services.find((candidate) => candidate.active) || defaultServices[0];
       const appointment = {
         id: `test-${Date.now()}`,
+        accountId: service.accountId || defaultWorkspaceAccountFromCoachAccount().id,
         kind: "appointment",
         week: 0,
         day: 0,

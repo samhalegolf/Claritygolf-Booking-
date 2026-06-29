@@ -9,6 +9,7 @@ create table if not exists public.settings (
 
 create table if not exists public.calendar_items (
   id text primary key,
+  account_id text,
   kind text not null,
   week integer not null default 0,
   day integer not null,
@@ -33,6 +34,9 @@ create table if not exists public.calendar_items (
 
 create index if not exists idx_calendar_items_slot
   on public.calendar_items (week, day, start);
+
+create index if not exists idx_calendar_items_account_slot
+  on public.calendar_items (account_id, week, day, start);
 
 create table if not exists public.people (
   id text primary key,
