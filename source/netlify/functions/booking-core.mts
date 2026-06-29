@@ -1461,6 +1461,19 @@ async function getSetting(key) {
   return rows[0]?.value || "";
 }
 
+async function readSettingsMap() {
+  const rows = await db().sql`SELECT key, value FROM settings`;
+  return Object.fromEntries(rows.map((row) => [row.key, row.value || ""]));
+}
+
+function settingValue(settings, key) {
+  return settings?.[key] || "";
+}
+
+function parseSettingJson(settings, key, fallback) {
+  return safeJsonParse(settingValue(settings, key), fallback);
+}
+
 async function ensureCoreTables() {
   await db().sql`
     CREATE TABLE IF NOT EXISTS settings (
@@ -2459,6 +2472,141 @@ async function seedPeopleFromAppointments() {
   );
 }
 
+async function readStateSettingsSnapshot() {
+  await ensureSeeded();
+  const settings = await readSettingsMap();
+  let syncKey = settingValue(settings, "syncKey");
+  if (!syncKey) {
+    syncKey = generateSyncKey();
+    await setSetting("syncKey", syncKey);
+    settings.syncKey = syncKey;
+  }
+  let updatedAt = settingValue(settings, "updatedAt");
+  if (!updatedAt) {
+    updatedAt = nowIso();
+    await setSetting("updatedAt", updatedAt);
+    settings.updatedAt = updatedAt;
+  }
+  return { settings, syncKey, updatedAt };
+}
+
+function coachAccountFromSettings(settings) {
+  const defaults = defaultCoachAccount();
+  return cleanCoachAccount({
+    id: settingValue(settings, "accountId") || defaults.id,
+    coachName: settingValue(settings, "accountCoachName") || defaults.coachName,
+    businessName:
+      settingValue(settings, "accountBusinessName") ||
+      settingValue(settings, "coachName") ||
+      defaults.businessName,
+    venueName: settingValue(settings, "accountVenueName") || defaults.venueName,
+    venueShortName:
+      settingValue(settings, "accountVenueShortName") || defaults.venueShortName,
+    timezone: settingValue(settings, "accountTimezone") || defaults.timezone,
+    contactEmail:
+      settingValue(settings, "accountContactEmail") || defaults.contactEmail,
+    bookingUrl: settingValue(settings, "accountBookingUrl") || defaults.bookingUrl,
+    calendarSlug:
+      settingValue(settings, "accountCalendarSlug") || defaults.calendarSlug,
+    caddyWorkspaceUrl:
+      settingValue(settings, "accountCaddyWorkspaceUrl") ||
+      defaults.caddyWorkspaceUrl,
+    invoiceSettings: parseSettingJson(
+      settings,
+      "accountInvoiceSettingsJson",
+      defaults.invoiceSettings,
+    ),
+  });
+}
+
+function adminSettingsFromSettings(settings) {
+  const delaySeconds = Number(settingValue(settings, "notificationDelaySeconds") || 30);
+  return {
+    emailNotificationsEnabled: settingValue(settings, "emailNotificationsEnabled") !== "false",
+    notificationEmail: settingValue(settings, "notificationEmail"),
+    coachEmail: settingValue(settings, "coachEmail"),
+    replyToEmail: settingValue(settings, "replyToEmail"),
+    notificationDelaySeconds: Number.isFinite(delaySeconds)
+      ? Math.max(30, Math.min(3600, delaySeconds))
+      : 30,
+    sendClientEmail: settingValue(settings, "sendClientEmail") !== "false",
+    sendCoachEmail: settingValue(settings, "sendCoachEmail") !== "false",
+    sendAdminEmail: settingValue(settings, "sendAdminEmail") !== "false",
+    clientEmailSubject:
+      settingValue(settings, "clientEmailSubject") ||
+      defaultEmailTemplates.clientEmailSubject,
+    clientEmailIntro:
+      settingValue(settings, "clientEmailIntro") ||
+      defaultEmailTemplates.clientEmailIntro,
+    clientEmailFooter: modernClientEmailFooter(
+      settingValue(settings, "clientEmailFooter") ||
+        defaultEmailTemplates.clientEmailFooter,
+    ),
+    adminEmailSubject:
+      settingValue(settings, "adminEmailSubject") ||
+      defaultEmailTemplates.adminEmailSubject,
+    adminEmailIntro:
+      settingValue(settings, "adminEmailIntro") ||
+      defaultEmailTemplates.adminEmailIntro,
+    smsProviderName: settingValue(settings, "smsProviderName"),
+    smsWebhookUrl: settingValue(settings, "smsWebhookUrl"),
+    smsFromNumber: settingValue(settings, "smsFromNumber"),
+    sendClientSms: settingValue(settings, "sendClientSms") === "true",
+    sendAdminSms: settingValue(settings, "sendAdminSms") === "true",
+  };
+}
+
+function brandSettingsFromSettings(settings, account) {
+  return {
+    coachName: settingValue(settings, "coachName") || account.businessName,
+    logoName: settingValue(settings, "brandLogoName"),
+    logoPreview: settingValue(settings, "brandLogoPreview"),
+    showLogo: settingValue(settings, "brandShowLogo") === "true",
+    neutral: settingValue(settings, "brandNeutral") || "#ffffff",
+    primary: settingValue(settings, "brandPrimary") || "#1fd36d",
+    secondary: settingValue(settings, "brandSecondary") || "#d7b06b",
+    accent: settingValue(settings, "brandAccent") || "#07100a",
+    bookingTheme:
+      settingValue(settings, "brandBookingTheme") === "light" ? "light" : "dark",
+  };
+}
+
+function servicesFromSettings(settings) {
+  return normalizeServices(parseSettingJson(settings, "servicesJson", defaultServices));
+}
+
+function workspaceAccountsFromSettings(settings, account) {
+  return normalizeWorkspaceAccounts(
+    parseSettingJson(settings, "workspaceAccountsJson", []),
+    account,
+  );
+}
+
+function coachProfilesFromSettings(settings, account) {
+  return normalizeCoachProfiles(
+    parseSettingJson(settings, "coachProfilesJson", []),
+    account,
+  );
+}
+
+function appUsersFromSettings(settings, account) {
+  const users = parseSettingJson(settings, "appUsersJson", []);
+  return Array.isArray(users) && users.length ? users : [defaultAppUserFromAccount(account)];
+}
+
+function locationsFromSettings(settings, account) {
+  return normalizeLocations(
+    parseSettingJson(settings, "locationsJson", []),
+    account,
+  );
+}
+
+function availabilityFromSettings(settings) {
+  return normalizeAvailability(
+    parseSettingJson(settings, "availabilityJson", defaultAvailability),
+  );
+}
+
 async function readAdminSettings() {
   await ensureSeeded();
   const delaySeconds = Number(
@@ -2758,49 +2906,47 @@ async function writeBrandSettings(settings) {
 }
 
 async function readCalendarState() {
-  await ensureSeeded();
-  let syncKey = await getSetting("syncKey");
-  if (!syncKey) {
-    syncKey = generateSyncKey();
-    await setSetting("syncKey", syncKey);
-  }
+  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
+  const account = coachAccountFromSettings(settingsMap);
+  const [items, people, notifications, googleCalendar] = await Promise.all([
+    readItems(),
+    readPeople(),
+    readNotificationHistory(),
+    getGoogleCalendarSyncStatus(),
+  ]);
   return {
     syncKey,
-    updatedAt: (await getSetting("updatedAt")) || nowIso(),
-    items: await readItems(),
-    services: await readServices(),
-    workspaceAccounts: await readWorkspaceAccounts(),
-    coaches: await readCoachProfiles(),
-    currentUser: (await readAppUsers())[0],
-    locations: await readLocations(),
-    availability: await readAvailability(),
-    people: await readPeople(),
-    notifications: await readNotificationHistory(),
-    settings: await readAdminSettings(),
-    brand: await readBrandSettings(),
-    account: await readCoachAccount(),
-    googleCalendar: await getGoogleCalendarSyncStatus(),
+    updatedAt,
+    items,
+    services: servicesFromSettings(settingsMap),
+    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
+    coaches: coachProfilesFromSettings(settingsMap, account),
+    currentUser: appUsersFromSettings(settingsMap, account)[0],
+    locations: locationsFromSettings(settingsMap, account),
+    availability: availabilityFromSettings(settingsMap),
+    people,
+    notifications,
+    settings: adminSettingsFromSettings(settingsMap),
+    brand: brandSettingsFromSettings(settingsMap, account),
+    account,
+    googleCalendar,
   };
 }
 
 async function readPublicCalendarState() {
-  await ensureSeeded();
-  let syncKey = await getSetting("syncKey");
-  if (!syncKey) {
-    syncKey = generateSyncKey();
-    await setSetting("syncKey", syncKey);
-  }
+  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
+  const account = coachAccountFromSettings(settingsMap);
   return {
     syncKey,
-    updatedAt: (await getSetting("updatedAt")) || nowIso(),
+    updatedAt,
     items: await readItems(),
-    services: await readServices(),
-    workspaceAccounts: await readWorkspaceAccounts(),
-    coaches: await readCoachProfiles(),
-    locations: await readLocations(),
-    availability: await readAvailability(),
-    brand: await readBrandSettings(),
-    account: await readCoachAccount(),
+    services: servicesFromSettings(settingsMap),
+    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
+    coaches: coachProfilesFromSettings(settingsMap, account),
+    locations: locationsFromSettings(settingsMap, account),
+    availability: availabilityFromSettings(settingsMap),
+    brand: brandSettingsFromSettings(settingsMap, account),
+    account,
   };
 }
 
