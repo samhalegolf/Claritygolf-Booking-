@@ -2534,10 +2534,13 @@ async function readCoachProfiles() {
   }
 }
 
-async function writeCoachProfiles(coaches) {
+async function writeCoachProfiles(coaches, context = null) {
   const account = await readCoachAccount();
-  const clean = normalizeCoachProfiles(coaches, account);
-  const workspaceAccount = await readDefaultWorkspaceAccount();
+  const workspaceAccount = context?.account || await readDefaultWorkspaceAccount();
+  const clean = normalizeCoachProfiles(coaches, account).map((coach) => ({
+    ...coach,
+    accountId: workspaceAccount.id,
+  }));
   const activeCoaches = clean.filter((coach) => coach.accountId === workspaceAccount.id && coach.active && coach.archived !== true).length;
   if (activeCoaches > 1) assertAccountFeature(workspaceAccount, "multiCoach");
   assertAccountLimit(workspaceAccount, activeCoaches, "maxCoaches");
@@ -2570,10 +2573,13 @@ async function readLocations() {
   }
 }
 
-async function writeLocations(locations) {
+async function writeLocations(locations, context = null) {
   const account = await readCoachAccount();
-  const clean = normalizeLocations(locations, account);
-  const workspaceAccount = await readDefaultWorkspaceAccount();
+  const workspaceAccount = context?.account || await readDefaultWorkspaceAccount();
+  const clean = normalizeLocations(locations, account).map((location) => ({
+    ...location,
+    accountId: workspaceAccount.id,
+  }));
   const activeLocations = clean.filter((location) => location.accountId === workspaceAccount.id && location.active && location.archived !== true).length;
   if (activeLocations > 1) assertAccountFeature(workspaceAccount, "multiLocation");
   assertAccountLimit(workspaceAccount, activeLocations, "maxLocations");
@@ -4045,6 +4051,11 @@ function assertAuthenticatedContext(context) {
   assertUserBelongsToAccount(context.user, context.accountId);
 }
 
+function assertAccountAdminContext(context, message = "You do not have permission to change account settings.") {
+  assertAuthenticatedContext(context);
+  if (!context.isAdmin) throw permissionDenied(message);
+}
+
 async function resolveBackendRequestContext(req, settings = null) {
   const resolvedSettings = settings || await readBackendSettings();
   const account = resolveWorkspaceAccount(req, resolvedSettings);
@@ -5260,6 +5271,8 @@ export async function handleBookingApiRoute(
     if (req.method === "PUT" && pathname === "/api/calendar-sync-key") {
       const body = await parseBody(req);
       const current = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, current);
+      assertAccountAdminContext(requestContext, "You do not have permission to rotate the calendar sync key.");
       return json(
         publicCalendarState(
           await writeCalendarState({
@@ -5274,10 +5287,16 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/admin-settings") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to view account settings.");
       return json(await readAdminSettings());
     }
 
     if ((req.method === "PUT" || req.method === "POST") && pathname === "/api/admin-settings") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to change account settings.");
       return json(await writeAdminSettings(await parseBody(req)));
     }
 
@@ -5341,7 +5360,12 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "PUT" && pathname === "/api/coach-account") {
-      return json(await writeCoachAccount(await parseBody(req)));
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to change business account settings.");
+      if (body?.invoiceSettings?.enabled) assertAccountFeature(requestContext.account, "invoicing");
+      return json(await writeCoachAccount(body));
     }
 
     if (req.method === "GET" && pathname === "/api/services") {
@@ -5370,7 +5394,10 @@ export async function handleBookingApiRoute(
 
     if (req.method === "PUT" && pathname === "/api/locations") {
       const body = await parseBody(req);
-      return json({ locations: await writeLocations(body.locations) });
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to manage locations.");
+      return json({ locations: await writeLocations(body.locations, requestContext) });
     }
 
     if (req.method === "GET" && pathname === "/api/coaches") {
@@ -5379,7 +5406,10 @@ export async function handleBookingApiRoute(
 
     if (req.method === "PUT" && pathname === "/api/coaches") {
       const body = await parseBody(req);
-      return json({ coaches: await writeCoachProfiles(body.coaches) });
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to manage coaches.");
+      return json({ coaches: await writeCoachProfiles(body.coaches, requestContext) });
     }
 
     if (req.method === "GET" && pathname === "/api/availability") {
@@ -5417,6 +5447,10 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "PUT" && pathname === "/api/brand-settings") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to change brand settings.");
+      assertAccountFeature(requestContext.account, "customBranding");
       return json(await writeBrandSettings(await parseBody(req)));
     }
 
