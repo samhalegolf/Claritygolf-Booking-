@@ -31,6 +31,7 @@ const BOOKING_SCREEN_IDS = new Set([
   "private-lessons",
 ]);
 let authReadyPromise = null;
+let seedReadyPromise = null;
 const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
   clientEmailIntro:
@@ -1794,12 +1795,20 @@ async function ensureNotificationHistoryTable() {
 }
 
 async function ensureSeeded() {
-  await ensureCoreTables();
-  await seedSettings();
-  await ensureNotificationHistoryTable();
-  await seedItems();
-  await seedPeopleFromAppointments();
-  await ensureAdminUser();
+  if (!seedReadyPromise) {
+    seedReadyPromise = (async () => {
+      await ensureCoreTables();
+      await seedSettings();
+      await ensureNotificationHistoryTable();
+      await seedItems();
+      await seedPeopleFromAppointments();
+      await ensureAdminUser();
+    })().catch((error) => {
+      seedReadyPromise = null;
+      throw error;
+    });
+  }
+  await seedReadyPromise;
 }
 
 function rowToItem(row) {
