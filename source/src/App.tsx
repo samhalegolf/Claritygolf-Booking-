@@ -4409,7 +4409,7 @@ function App() {
     if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
     if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
-    setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
+    if (Array.isArray(data.locations) && data.locations.length) setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
     setCoachProfiles(cleanCoachProfiles(data.coaches, data.account ?? coachAccount));
     if (data.currentUser) setCurrentAppUser(cleanAppUser(data.currentUser, defaultAppUserFromCoachAccount(data.account ?? coachAccount), loadedAccountId));
     if (Array.isArray(data.availability)) {
@@ -4456,7 +4456,7 @@ function App() {
     if (Array.isArray(data.items)) setItems(data.items.map((item) => ({ ...item, accountId: item.accountId || loadedAccountId })));
     if (Array.isArray(data.notifications)) setNotifications(data.notifications);
     if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
-    setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
+    if (Array.isArray(data.locations) && data.locations.length) setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
     setCoachProfiles(cleanCoachProfiles(data.coaches, data.account ?? coachAccount));
     if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
     applyCoachAccount(data.account);
