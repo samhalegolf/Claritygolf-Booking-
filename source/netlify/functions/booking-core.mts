@@ -830,6 +830,15 @@ function assertAccountLimit(account, currentUsage, limitName) {
   }
 }
 
+function forbidden(message = "Permission denied.", code = "permission_denied") {
+  const error = Object.assign(new Error(message), { status: 403, code });
+  return error;
+}
+
+function permissionDenied(message = "You do not have permission to perform this action.") {
+  return forbidden(message, "permission_denied");
+}
+
 function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
   const slug = cleanSlug(clean.calendarSlug || clean.businessName, "sam-hale-golf");
@@ -3786,6 +3795,95 @@ async function requireAdmin(req) {
   const session = await readAdminSession(sessionTokenFromRequest(req));
   if (!session) return null;
   return session;
+}
+
+async function readBackendSettings() {
+  return readCalendarState();
+}
+
+function defaultWorkspaceAccount(settings = {}) {
+  const accounts = normalizeWorkspaceAccounts(settings.workspaceAccounts || [], settings.account || defaultCoachAccount());
+  const id = defaultAccountId(accounts);
+  return accounts.find((account) => account.id === id) || accounts[0] || defaultWorkspaceAccountFromCoachAccount(settings.account);
+}
+
+function resolveWorkspaceAccount(_req, settings = {}) {
+  return defaultWorkspaceAccount(settings);
+}
+
+function defaultAppUserForAccount(account, settings = {}) {
+  const accountSettings = settings.account || defaultCoachAccount();
+  const users = Array.isArray(settings.currentUser)
+    ? settings.currentUser
+    : Array.isArray(settings.appUsers)
+      ? settings.appUsers
+      : [];
+  const cleanUsers = users.length ? users : [settings.currentUser].filter(Boolean);
+  const fallback = { ...defaultAppUserFromAccount(accountSettings), accountId: account.id };
+  return cleanUsers.find((user) => user?.accountId === account.id) || fallback;
+}
+
+async function readCurrentSessionUser(req, settings = {}) {
+  const session = await readAdminSession(sessionTokenFromRequest(req));
+  if (!session) return null;
+  const account = defaultWorkspaceAccount(settings);
+  const appUsers = await readAppUsers();
+  const matched =
+    appUsers.find((user) => user.accountId === account.id && user.email && session.email && user.email.toLowerCase() === session.email.toLowerCase()) ||
+    appUsers.find((user) => user.accountId === account.id && isAdminUser(user)) ||
+    defaultAppUserForAccount(account, { ...settings, currentUser: settings.currentUser });
+  return { ...matched, accountId: matched.accountId || account.id };
+}
+
+function isAdminUser(user) {
+  return ["admin", "account_admin", "platform_admin"].includes(user?.role) || Object.values(user?.permissions || {}).includes("all");
+}
+
+function userBelongsToAccount(user, accountId) {
+  return Boolean(user && (!user.accountId || user.accountId === accountId));
+}
+
+function userCoachId(user) {
+  return cleanSlug(user?.coachId, "") || undefined;
+}
+
+function hasPermission(user, permissionKey, scope = "own") {
+  if (isAdminUser(user)) return true;
+  const grant = user?.permissions?.[permissionKey];
+  if (!grant) return false;
+  if (grant === "all") return true;
+  if (scope === "assigned") return grant === "assigned";
+  if (scope === "own") return grant === "own" || grant === "assigned";
+  return false;
+}
+
+function assertUserBelongsToAccount(user, accountId) {
+  if (!userBelongsToAccount(user, accountId)) {
+    throw permissionDenied("This user does not belong to the requested workspace.");
+  }
+}
+
+function assertAuthenticatedContext(context) {
+  if (!context?.user) throw Object.assign(new Error("Admin login required."), { status: 401, code: "unauthorized" });
+  assertAccountActive(context.account);
+  assertUserBelongsToAccount(context.user, context.accountId);
+}
+
+async function resolveBackendRequestContext(req, settings = null) {
+  const resolvedSettings = settings || await readBackendSettings();
+  const account = resolveWorkspaceAccount(req, resolvedSettings);
+  const user = await readCurrentSessionUser(req, resolvedSettings);
+  const context = {
+    account,
+    accountId: account.id,
+    user,
+    userId: user?.id || "",
+    coachId: userCoachId(user),
+    isAdmin: isAdminUser(user),
+    entitlements: accountEntitlements(account),
+  };
+  assertAuthenticatedContext(context);
+  return context;
 }
 
 function itemWeek(item) {
