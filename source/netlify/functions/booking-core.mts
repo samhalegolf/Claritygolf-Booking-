@@ -1312,6 +1312,39 @@ function mergeAvailabilityForContext(incomingAvailability, currentAvailability, 
   });
 }
 
+function personMatchesCalendarItem(person, item) {
+  const email = cleanString(person?.email, "", 180).toLowerCase();
+  const phone = cleanString(person?.phone, "", 80).replace(/\D/g, "");
+  const itemEmail = cleanString(item?.email, "", 180).toLowerCase();
+  const itemPhone = cleanString(item?.phone, "", 80).replace(/\D/g, "");
+  if (email && itemEmail && email === itemEmail) return true;
+  if (phone && itemPhone && phone === itemPhone) return true;
+  return false;
+}
+
+function filterPeopleForContext(people, context, state) {
+  if (context.isAdmin) return people || [];
+  const visibleItems = (state.items || []).filter((item) => canReadCalendarItem(context, item, state));
+  return (people || []).filter((person) => visibleItems.some((item) => personMatchesCalendarItem(person, item)));
+}
+
+function filterNotificationsForContext(notifications, context, state) {
+  if (context.isAdmin) return notifications || [];
+  const visibleItemIds = new Set((state.items || []).filter((item) => canReadCalendarItem(context, item, state)).map((item) => item.id));
+  return (notifications || []).filter((notification) => visibleItemIds.has(notification.calendarItemId));
+}
+
+function assertCanManagePerson(context, person, state) {
+  assertAccountFeature(context.account, "clients");
+  if (context.isAdmin) return;
+  if (!hasPermission(context.user, "clients", "own")) {
+    throw permissionDenied("You do not have permission to edit clients.");
+  }
+  if (!filterPeopleForContext([person], context, state).length) {
+    throw permissionDenied("You do not have permission to edit this client.");
+  }
+}
+
 function isLocationOnlyBlock(item) {
   return item?.kind === "block" && Boolean(item.locationId || item.location?.locationId) && !item.coachId && !item.coach?.coachId;
 }
@@ -5301,7 +5334,10 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/notification-history") {
-      return json({ notifications: await readNotificationHistory() });
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "notifications");
+      return json({ notifications: filterNotificationsForContext(await readNotificationHistory(), requestContext, state) });
     }
 
     if (req.method === "POST" && pathname === "/api/test-email") {
@@ -5455,17 +5491,31 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/people") {
-      return json({ people: await readPeople() });
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json({ people: filterPeopleForContext(await readPeople(), requestContext, state) });
     }
 
     if (req.method === "POST" && pathname === "/api/people/import") {
       const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to import clients.");
+      assertAccountFeature(requestContext.account, "clients");
       return json(await importPeople(body.people, "manual_import"), 201);
     }
 
     if (req.method === "PUT" && pathname === "/api/people") {
       const body = await parseBody(req);
-      return json(await updatePerson(body.person || body));
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertCanManagePerson(requestContext, body.person || body, state);
+      const result = await updatePerson(body.person || body);
+      return json({
+        ...result,
+        people: filterPeopleForContext(result.people, requestContext, state),
+      });
     }
 
     return json({ error: "not_found", message: "Route not found." }, 404);
