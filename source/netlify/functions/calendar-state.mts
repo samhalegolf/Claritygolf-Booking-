@@ -1590,11 +1590,17 @@ async function readState() {
     ),
   };
 
+  const workspaceAccounts = normalizeWorkspaceAccounts(parseJsonSetting(settings, "workspaceAccountsJson", []), account);
+  const workspaceAccount = workspaceAccounts.find((candidate: any) => candidate.active) || workspaceAccounts[0] || defaultWorkspaceAccountFromAccount(account);
+  const items = itemRows
+    .map(rowToItem)
+    .filter((item: any) => (item.accountId || workspaceAccount.id) === workspaceAccount.id);
+
   return {
     syncKey: settings.syncKey || env("CLARITY_CALENDAR_SYNC_KEY") || "",
     updatedAt,
-    items: itemRows.map(rowToItem),
-    workspaceAccounts: normalizeWorkspaceAccounts(parseJsonSetting(settings, "workspaceAccountsJson", []), account),
+    items,
+    workspaceAccounts,
     services: parseJsonSetting(settings, "servicesJson", defaultServices),
     coaches: normalizeCoachProfiles(parseJsonSetting(settings, "coachProfilesJson", []), account),
     currentUser: normalizeAppUsers(parseJsonSetting(settings, "appUsersJson", []), account)[0],
@@ -1658,6 +1664,11 @@ async function readState() {
 }
 
 async function writeState(body: any) {
+  const currentState = await readState();
+  const workspaceAccount =
+    (currentState.workspaceAccounts || []).find((account: any) => account.active) ||
+    (currentState.workspaceAccounts || [])[0] ||
+    defaultWorkspaceAccountFromAccount(currentState.account);
   const hasItemsPayload = Object.prototype.hasOwnProperty.call(body || {}, "items");
   const hasServicesPayload = Object.prototype.hasOwnProperty.call(body || {}, "services");
   const hasLocationsPayload = Object.prototype.hasOwnProperty.call(body || {}, "locations");
@@ -1665,27 +1676,23 @@ async function writeState(body: any) {
   const hasAppUsersPayload = Object.prototype.hasOwnProperty.call(body || {}, "appUsers");
   const hasWorkspaceAccountsPayload = Object.prototype.hasOwnProperty.call(body || {}, "workspaceAccounts");
   const shouldReplaceItems = body?.replaceItems === true || body?.itemsOperation === "replace";
-  const rows = uniqueById(Array.isArray(body?.items) ? body.items.map(itemToRow) : []);
+  const rows = uniqueById(Array.isArray(body?.items) ? body.items.map(itemToRow).map((row) => ({ ...row, account_id: workspaceAccount.id })) : []);
   const warnings: string[] = [];
   if (hasServicesPayload) {
     const normalizedServices = normalizeServices(body?.services);
     await setSetting("servicesJson", JSON.stringify(normalizedServices));
   }
   if (hasWorkspaceAccountsPayload) {
-    const current = await readState();
-    await setSetting("workspaceAccountsJson", JSON.stringify(normalizeWorkspaceAccounts(body?.workspaceAccounts, current.account)));
+    await setSetting("workspaceAccountsJson", JSON.stringify(normalizeWorkspaceAccounts(body?.workspaceAccounts, currentState.account)));
   }
   if (hasLocationsPayload) {
-    const current = await readState();
-    await setSetting("locationsJson", JSON.stringify(normalizeLocations(body?.locations, current.account)));
+    await setSetting("locationsJson", JSON.stringify(normalizeLocations(body?.locations, currentState.account)));
   }
   if (hasCoachesPayload) {
-    const current = await readState();
-    await setSetting("coachProfilesJson", JSON.stringify(normalizeCoachProfiles(body?.coaches, current.account)));
+    await setSetting("coachProfilesJson", JSON.stringify(normalizeCoachProfiles(body?.coaches, currentState.account)));
   }
   if (hasAppUsersPayload) {
-    const current = await readState();
-    await setSetting("appUsersJson", JSON.stringify(normalizeAppUsers(body?.appUsers, current.account)));
+    await setSetting("appUsersJson", JSON.stringify(normalizeAppUsers(body?.appUsers, currentState.account)));
   }
 
   if (hasItemsPayload && rows.length) {
@@ -1697,7 +1704,7 @@ async function writeState(body: any) {
     if (shouldReplaceItems && keepIds) {
       await supabase("calendar_items", {
         method: "DELETE",
-        query: `id=not.in.(${keepIds})`,
+        query: `account_id=eq.${encodeURIComponent(workspaceAccount.id)}&id=not.in.(${keepIds})`,
         prefer: "return=minimal",
       });
     }
@@ -1719,7 +1726,7 @@ async function writeState(body: any) {
     // requests cannot reach this branch because the handler requires an array.
     await supabase("calendar_items", {
       method: "DELETE",
-      query: "id=not.is.null",
+      query: `account_id=eq.${encodeURIComponent(workspaceAccount.id)}`,
       prefer: "return=minimal",
     });
   }

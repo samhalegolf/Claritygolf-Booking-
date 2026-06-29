@@ -1171,6 +1171,78 @@ function resolvedCalendarItemLocationId(item, service, locations, account) {
   return item?.locationId || item?.location?.locationId || service?.locationId || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
 }
 
+function serviceForCalendarItem(item, services = []) {
+  return (services || []).find((service) => service.id && service.id === item?.serviceId) || null;
+}
+
+function recordAccountId(record, fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  return record?.accountId || fallbackAccountId;
+}
+
+function recordBelongsToAccount(record, accountId) {
+  return recordAccountId(record, accountId) === accountId;
+}
+
+function calendarItemBelongsToAccount(item, accountId) {
+  return recordBelongsToAccount(item, accountId);
+}
+
+function calendarItemBelongsToCoach(item, coachId, services = [], coaches = [], account = defaultCoachAccount()) {
+  if (!coachId) return false;
+  if (isLocationOnlyBlock(item)) return true;
+  return resolvedCalendarItemCoachId(item, serviceForCalendarItem(item, services), coaches, account) === coachId;
+}
+
+function canReadCalendarItem(context, item, state) {
+  if (!calendarItemBelongsToAccount(item, context.accountId)) return false;
+  if (context.isAdmin) return true;
+  return calendarItemBelongsToCoach(item, context.coachId, state.services, state.coaches, state.account);
+}
+
+function assertCanWriteCalendarItem(context, item, previousItem, state) {
+  if (!calendarItemBelongsToAccount(item, context.accountId)) {
+    throw permissionDenied("This booking does not belong to your workspace.");
+  }
+  if (context.isAdmin) return;
+  if (!hasPermission(context.user, "bookings", "own")) {
+    throw permissionDenied("You do not have permission to edit bookings.");
+  }
+  if (isLocationOnlyBlock(item)) {
+    throw permissionDenied("You do not have permission to block an entire location.");
+  }
+  if (previousItem && !calendarItemBelongsToCoach(previousItem, context.coachId, state.services, state.coaches, state.account)) {
+    throw permissionDenied("You do not have permission to edit another coach's calendar.");
+  }
+  if (!calendarItemBelongsToCoach(item, context.coachId, state.services, state.coaches, state.account)) {
+    throw permissionDenied("You do not have permission to move bookings to another coach.");
+  }
+}
+
+function normalizeCalendarItemsForContext(items, context) {
+  return normalizeItems(items).map((item) => ({ ...item, accountId: context.accountId }));
+}
+
+function filterCalendarStateForContext(state, context) {
+  const filteredItems = (state.items || []).filter((item) => canReadCalendarItem(context, item, state));
+  const visibleItemIds = new Set(filteredItems.map((item) => item.id));
+  return {
+    ...state,
+    items: filteredItems,
+    services: context.isAdmin
+      ? (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId))
+      : (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId) && (service.coachId || defaultCoachId(state.coaches)) === context.coachId),
+    availability: context.isAdmin
+      ? (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId)))
+      : (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId) && (window.coachId || defaultCoachId(state.coaches)) === context.coachId)),
+    notifications: context.isAdmin
+      ? state.notifications
+      : (state.notifications || []).filter((notification) => visibleItemIds.has(notification.calendarItemId)),
+    people: context.isAdmin
+      ? state.people
+      : (state.people || []).filter((person) => filteredItems.some((item) => item.email && person.email && item.email === person.email)),
+  };
+}
+
 function isLocationOnlyBlock(item) {
   return item?.kind === "block" && Boolean(item.locationId || item.location?.locationId) && !item.coachId && !item.coach?.coachId;
 }
@@ -1685,7 +1757,7 @@ function cleanCalendarItem(item) {
     day,
     start,
     duration,
-    coachId: cleanSlug(item.coachId, defaultCoachProfileFromAccount().id),
+    coachId: cleanSlug(item.coachId || item.coach?.coachId, kind === "appointment" ? defaultCoachProfileFromAccount().id : "") || undefined,
     locationId: cleanSlug(item.locationId || item.location?.locationId, ""),
     serviceId: cleanString(item.serviceId),
     client: cancelledGroupSession ? "" : cleanString(item.client),
@@ -2180,7 +2252,11 @@ async function writeItems(items, options = {}) {
   try {
     await client.query("BEGIN");
     if (options.clearItems === true) {
-      await client.query("DELETE FROM calendar_items");
+      if (options.accountId) {
+        await client.query("DELETE FROM calendar_items WHERE account_id = $1", [options.accountId]);
+      } else {
+        await client.query("DELETE FROM calendar_items");
+      }
     }
     for (const item of cleanItems) {
       await client.query(
@@ -2231,7 +2307,14 @@ async function writeItems(items, options = {}) {
       );
     }
     if (options.replaceItems === true && cleanItems.length) {
-      await client.query("DELETE FROM calendar_items WHERE NOT (id = ANY($1::text[]))", [cleanItems.map((item) => item.id)]);
+      if (options.accountId) {
+        await client.query("DELETE FROM calendar_items WHERE account_id = $1 AND NOT (id = ANY($2::text[]))", [
+          options.accountId,
+          cleanItems.map((item) => item.id),
+        ]);
+      } else {
+        await client.query("DELETE FROM calendar_items WHERE NOT (id = ANY($1::text[]))", [cleanItems.map((item) => item.id)]);
+      }
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -2760,8 +2843,11 @@ export async function handlePublicBookingStateRequest() {
   }
 }
 
-async function writeCalendarState(nextState) {
+async function writeCalendarState(nextState, context = null) {
   const current = await readCalendarState();
+  if (context) {
+    assertAccountFeature(context.account, "coachCalendar");
+  }
   const expectedUpdatedAt = cleanString(
     nextState?.updatedAt || nextState?.previousUpdatedAt,
     "",
@@ -2782,9 +2868,23 @@ async function writeCalendarState(nextState) {
     );
   }
   const syncKey = cleanString(nextState?.syncKey, current.syncKey, 140);
-  const items = await writeItems(nextState?.items ?? current.items, {
+  if (context && nextState?.clearItems === true && !context.isAdmin) {
+    throw permissionDenied("You do not have permission to clear the account calendar.");
+  }
+  let requestedItems = nextState?.items ?? current.items;
+  if (context) {
+    requestedItems = normalizeCalendarItemsForContext(requestedItems, context);
+    const previousById = new Map((current.items || []).map((item) => [item.id, item]));
+    requestedItems.forEach((item) => assertCanWriteCalendarItem(context, item, previousById.get(item.id), current));
+    if (!context.isAdmin && (nextState?.replaceItems === true || nextState?.itemsOperation === "replace")) {
+      const preservedItems = current.items.filter((item) => !canReadCalendarItem(context, item, current));
+      requestedItems = [...preservedItems, ...requestedItems];
+    }
+  }
+  const items = await writeItems(requestedItems, {
     replaceItems: nextState?.replaceItems === true || nextState?.itemsOperation === "replace",
     clearItems: nextState?.clearItems === true,
+    accountId: context?.accountId,
   });
   const updatedAt = nowIso();
   await setSetting("syncKey", syncKey);
@@ -2803,7 +2903,7 @@ async function writeCalendarState(nextState) {
   }
   return {
     syncKey,
-    items,
+    items: context ? items.filter((item) => canReadCalendarItem(context, item, { ...current, items })) : items,
     updatedAt,
     services: current.services,
     availability: current.availability,
@@ -5050,12 +5150,15 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/calendar-state") {
-      return json(publicCalendarState(await readCalendarState()));
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      return json(publicCalendarState(filterCalendarStateForContext(state, requestContext)));
     }
 
     if (req.method === "PUT" && pathname === "/api/calendar-state") {
       const body = await parseBody(req);
       const current = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, current);
       const nextState = await writeCalendarState({
         syncKey:
           typeof body.syncKey === "string" ? body.syncKey : current.syncKey,
@@ -5064,7 +5167,7 @@ export async function handleBookingApiRoute(
         clearItems: body.clearItems === true,
         itemsOperation: body.itemsOperation,
         updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
-      });
+      }, requestContext);
       const notificationResults = await sendCalendarChangeNotifications(
         current.items,
         nextState.items,
