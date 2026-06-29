@@ -1334,6 +1334,19 @@ function filterNotificationsForContext(notifications, context, state) {
   return (notifications || []).filter((notification) => visibleItemIds.has(notification.calendarItemId));
 }
 
+function filterCoachesForContext(coaches, context) {
+  if (context.isAdmin) return (coaches || []).filter((coach) => recordBelongsToAccount(coach, context.accountId));
+  return (coaches || []).filter((coach) => recordBelongsToAccount(coach, context.accountId) && coach.id === context.coachId);
+}
+
+function filterLocationsForContext(locations, context, coaches = []) {
+  const accountLocations = (locations || []).filter((location) => recordBelongsToAccount(location, context.accountId));
+  if (context.isAdmin) return accountLocations;
+  const coach = (coaches || []).find((candidate) => candidate.id === context.coachId);
+  const assigned = new Set([...(coach?.assignedLocationIds || []), coach?.defaultLocationId].filter(Boolean));
+  return accountLocations.filter((location) => assigned.has(location.id) || location.isDefault);
+}
+
 function assertCanManagePerson(context, person, state) {
   assertAccountFeature(context.account, "clients");
   if (context.isAdmin) return;
@@ -5425,7 +5438,9 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/locations") {
-      return json({ locations: await readLocations() });
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      return json({ locations: filterLocationsForContext(state.locations, requestContext, state.coaches) });
     }
 
     if (req.method === "PUT" && pathname === "/api/locations") {
@@ -5437,7 +5452,12 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/coaches") {
-      return json({ coaches: await readCoachProfiles(), currentUser: (await readAppUsers())[0] });
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      return json({
+        coaches: filterCoachesForContext(state.coaches, requestContext),
+        currentUser: requestContext.user,
+      });
     }
 
     if (req.method === "PUT" && pathname === "/api/coaches") {
