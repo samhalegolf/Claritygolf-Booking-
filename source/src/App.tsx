@@ -2083,6 +2083,38 @@ function accountById(accounts: WorkspaceAccount[], id?: string) {
   return accounts.find((account) => account.id === id);
 }
 
+function resolvedRecordAccountId(record: { accountId?: string } | undefined, fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  return record?.accountId || fallbackAccountId;
+}
+
+function recordBelongsToAccount(record: { accountId?: string } | undefined, accountId: string) {
+  return resolvedRecordAccountId(record, accountId) === accountId;
+}
+
+function filterRecordsForAccount<T extends { accountId?: string }>(records: T[], accountId: string) {
+  return records.filter((record) => recordBelongsToAccount(record, accountId));
+}
+
+function serviceBelongsToAccount(service: Partial<Service> | undefined, accountId: string) {
+  return recordBelongsToAccount(service, accountId);
+}
+
+function coachBelongsToAccount(coach: Partial<CoachProfile> | undefined, accountId: string) {
+  return recordBelongsToAccount(coach, accountId);
+}
+
+function locationBelongsToAccount(location: Partial<Location> | undefined, accountId: string) {
+  return recordBelongsToAccount(location, accountId);
+}
+
+function calendarItemBelongsToAccount(item: Partial<CalendarItem> | undefined, accountId: string) {
+  return recordBelongsToAccount(item, accountId);
+}
+
+function userBelongsToAccount(user: Partial<AppUser> | undefined, accountId: string) {
+  return recordBelongsToAccount(user, accountId);
+}
+
 function defaultLocationFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): Location {
   const cleanAccount = cleanCoachAccount(account);
   const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(cleanAccount);
@@ -3436,13 +3468,16 @@ function App() {
     : "";
   const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek]);
   const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
-  const weekItems = useMemo(() => items.filter((item) => itemWeek(item) === activeWeek), [activeWeek, items]);
-  const activeCoachId = currentAppUser.coachId || defaultCoachId(coachProfiles);
-  const activeCoachList = coachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
+  const accountItems = useMemo(() => filterRecordsForAccount(items, activeAccountId), [activeAccountId, items]);
+  const accountCoachProfiles = useMemo(() => filterRecordsForAccount(coachProfiles, activeAccountId), [activeAccountId, coachProfiles]);
+  const accountLocations = useMemo(() => filterRecordsForAccount(locations, activeAccountId), [activeAccountId, locations]);
+  const weekItems = useMemo(() => accountItems.filter((item) => itemWeek(item) === activeWeek), [activeWeek, accountItems]);
+  const activeCoachId = currentAppUser.coachId || defaultCoachId(accountCoachProfiles);
+  const activeCoachList = accountCoachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
   const effectiveCalendarPerspective: CalendarPerspective = isAdminUser ? calendarPerspective : "coach";
-  const selectedCalendarCoachId = calendarCoachFilterId || (isAdminUser ? defaultCoachId(coachProfiles) : activeCoachId);
-  const selectedCalendarLocationId = calendarLocationFilterId || defaultLocationId(locations);
-  const selectedCalendarCoach = bookingCoachSnapshotFor(selectedCalendarCoachId, coachProfiles, coachAccount);
+  const selectedCalendarCoachId = calendarCoachFilterId || (isAdminUser ? defaultCoachId(accountCoachProfiles) : activeCoachId);
+  const selectedCalendarLocationId = calendarLocationFilterId || defaultLocationId(accountLocations);
+  const selectedCalendarCoach = bookingCoachSnapshotFor(selectedCalendarCoachId, accountCoachProfiles, coachAccount);
   const visibleWeekItems = useMemo(
     () =>
       weekItems.filter((item) => {
@@ -3493,12 +3528,16 @@ function App() {
   };
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
   const blocks = weekItems.filter((item) => item.kind === "block").length;
+  const accountAvailability = useMemo(
+    () => availability.map((dayWindows) => dayWindows.filter((window) => recordBelongsToAccount(window, activeAccountId))),
+    [activeAccountId, availability],
+  );
   const calendarAvailability = useMemo(
     () =>
       effectiveCalendarPerspective === "coach"
-        ? availabilityForCoach(availability, selectedCalendarCoachId, activeCoachId)
-        : availability,
-    [activeCoachId, availability, effectiveCalendarPerspective, selectedCalendarCoachId],
+        ? availabilityForCoach(accountAvailability, selectedCalendarCoachId, activeCoachId)
+        : accountAvailability,
+    [accountAvailability, activeCoachId, effectiveCalendarPerspective, selectedCalendarCoachId],
   );
   const calendarDisplayBounds = useMemo(() => {
     const points = [DEFAULT_CALENDAR_START_MINUTES, DEFAULT_CALENDAR_END_MINUTES];
@@ -3604,15 +3643,17 @@ function App() {
   const itemInCoachScope = (item: CalendarItem) =>
     isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount) === serviceScopeCoachId;
   const serviceVisibleToCurrentUser = (service: Service) =>
-    isAdminUser || (service.coachId || defaultCoachId(coachProfiles)) === serviceScopeCoachId;
-  const activeServices = services.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
-  const archivedServices = services.filter((service) => service.archived === true && serviceVisibleToCurrentUser(service));
-  const sortedLocations = [...locations].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
+    serviceBelongsToAccount(service, activeAccountId) &&
+    (isAdminUser || (service.coachId || defaultCoachId(accountCoachProfiles)) === serviceScopeCoachId);
+  const accountServices = services.filter((service) => serviceBelongsToAccount(service, activeAccountId));
+  const activeServices = accountServices.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
+  const archivedServices = accountServices.filter((service) => service.archived === true && serviceVisibleToCurrentUser(service));
+  const sortedLocations = [...accountLocations].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
   const activeLocationList = sortedLocations.filter((location) => location.active && !location.archived);
   const archivedLocationList = sortedLocations.filter((location) => location.archived || !location.active);
-  const defaultLocation = locationById(locations, defaultLocationId(locations)) ?? defaultLocationFromCoachAccount(coachAccount);
+  const defaultLocation = locationById(accountLocations, defaultLocationId(accountLocations)) ?? defaultLocationFromCoachAccount(coachAccount);
   const locationUsageCount = (locationId: string) =>
-    services.filter((service) => (service.locationId || defaultLocation.id) === locationId && service.archived !== true).length;
+    accountServices.filter((service) => (service.locationId || defaultLocation.id) === locationId && service.archived !== true).length;
   const packageServices = activeServices.filter((service) => service.active && service.lessonFormat === "package");
   const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = activeServices.filter((service) => service.active && isAppointmentStyleService(service));
@@ -3628,7 +3669,7 @@ function App() {
   const selectedRescheduleMatch =
     rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
   const selectedRescheduleService = selectedRescheduleMatch
-    ? services.find((service) => service.id === selectedRescheduleMatch.serviceId) ?? null
+    ? accountServices.find((service) => service.id === selectedRescheduleMatch.serviceId) ?? null
     : null;
   const selectedBookingService =
     bookingMode === "reschedule"
@@ -3666,7 +3707,7 @@ function App() {
   const caddyWorkspaceUrl = coachAccount.caddyWorkspaceUrl || CADDY_APP_URL;
   const invoiceSettings = coachAccount.invoiceSettings;
   const invoiceNumber = `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`;
-  const billingWorkspaceEnabled = invoiceSettings.enabled && invoiceSettings.showBillingWorkspace;
+  const billingWorkspaceEnabled = invoiceSettings.enabled && invoiceSettings.showBillingWorkspace && accountHasFeature(activeAccount, "invoicing");
   const hasMissingInvoiceCoachSettings =
     !invoiceSettings.bankAccount.trim() || !invoiceSettings.taxNumber.trim() || !invoiceSettings.businessAddress.trim();
   const bookingBrandName = (brandSettings.coachName || coachAccount.businessName).trim();
@@ -4473,7 +4514,7 @@ function App() {
   const clients = useMemo<ClientSummary[]>(() => {
     const byKey = new Map<string, ClientSummary>();
 
-    people.forEach((person) => {
+    filterRecordsForAccount(people, activeAccountId).forEach((person) => {
       byKey.set(clientKey(person.name, person.email, person.phone), {
         ...person,
         count: 0,
@@ -4482,7 +4523,7 @@ function App() {
       });
     });
 
-    items
+    accountItems
       .filter((item) => item.kind === "appointment")
       .filter(itemInCoachScope)
       .forEach((item) => {
@@ -4517,7 +4558,7 @@ function App() {
       });
 
     return Array.from(byKey.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [coachAccount, coachProfiles, isAdminUser, items, people, services, serviceScopeCoachId]);
+  }, [accountItems, activeAccountId, coachAccount, coachProfiles, isAdminUser, people, services, serviceScopeCoachId]);
 
   const selectedPerson = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return null;
@@ -4585,9 +4626,9 @@ function App() {
 
   const notificationsByAppointment = useMemo(() => {
     const byAppointment = new Map<string, NotificationRecord[]>();
-    notifications.forEach((notification) => {
+    filterRecordsForAccount(notifications, activeAccountId).forEach((notification) => {
       if (!notification.calendarItemId) return;
-      const appointment = items.find((item) => item.id === notification.calendarItemId);
+      const appointment = accountItems.find((item) => item.id === notification.calendarItemId);
       if (appointment && !itemInCoachScope(appointment)) return;
       const current = byAppointment.get(notification.calendarItemId) ?? [];
       current.push(notification);
@@ -4597,7 +4638,7 @@ function App() {
       records.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     });
     return byAppointment;
-  }, [coachAccount, coachProfiles, isAdminUser, items, notifications, services, serviceScopeCoachId]);
+  }, [accountItems, activeAccountId, coachAccount, coachProfiles, isAdminUser, notifications, services, serviceScopeCoachId]);
 
   const selectedClient =
     !isAddingClient && selectedClientId ? clients.find((client) => client.id === selectedClientId) ?? null : null;
@@ -4981,7 +5022,7 @@ function App() {
     if (!bookingDaySelected) return [];
 
     const serviceCoachId = bookingTargetService.coachId || activeCoachId;
-    const serviceAvailability = availabilityForCoach(availability, serviceCoachId, activeCoachId);
+    const serviceAvailability = availabilityForCoach(accountAvailability, serviceCoachId, activeCoachId);
     const windows = serviceAvailability[bookingDay] ?? [];
     const slots: BookingSlot[] = [];
     windows.forEach((window) => {
@@ -5003,7 +5044,7 @@ function App() {
       }
     });
     return slots;
-  }, [activeCoachId, activeWeek, bookingDay, bookingDaySelected, bookingMode, bookingTargetService, selectedRescheduleMatch, items, availability]);
+  }, [accountAvailability, activeCoachId, activeWeek, bookingDay, bookingDaySelected, bookingMode, bookingTargetService, selectedRescheduleMatch, items]);
   const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.start === bookingStart);
 
   const isAppointmentStepComplete = Boolean(selectedBookingService);
