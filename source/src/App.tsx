@@ -4282,7 +4282,7 @@ function App() {
           }
           const calmMessage = sessionExpired
             ? message || "Admin login expired. Sign in again before editing the calendar."
-            : "Your latest calendar change was not saved. Please try again.";
+            : message || "Your latest calendar change was not saved. Please try again.";
           setCalendarFeedStatus(sessionExpired ? "offline" : "connected");
           setCalendarSaveStatus("failed");
           setCalendarSaveError(calmMessage);
@@ -6948,7 +6948,7 @@ function App() {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error("Location save failed");
+      if (!response.ok) throw new Error(await readApiFailure(response, "Location save failed"));
       const data = (await response.json()) as { locations?: Location[] };
       const saved = cleanLocations(data.locations, coachAccount);
       setLocations(saved);
@@ -7068,16 +7068,20 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ coaches: clean }),
       });
-      if (!response.ok) throw new Error("Coach save failed");
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Coach save failed"));
       const data = (await response.json()) as { coaches?: CoachProfile[] };
       setCoachProfiles(cleanCoachProfiles(data.coaches, coachAccount));
       setCoachSaveState("saved");
       setToast({ message });
       window.setTimeout(() => setCoachSaveState("idle"), 1600);
-    } catch {
+    } catch (error) {
       setCoachProfiles(snapshot);
       setCoachSaveState("error");
-      setToast({ message: "Could not save coaches." });
+      setToast({ message: error instanceof Error ? error.message : "Could not save coaches." });
     }
   }
 
@@ -8020,15 +8024,15 @@ function App() {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error("Availability save failed");
+      if (!response.ok) throw new Error(await readApiFailure(response, "Availability save failed"));
       const data = (await response.json()) as { availability?: AvailabilityWindow[][] };
       if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
       setAvailabilitySaveState("saved");
       setToast({ message: "Availability saved." });
       window.setTimeout(() => setAvailabilitySaveState("idle"), 1600);
-    } catch {
+    } catch (error) {
       setAvailabilitySaveState("idle");
-      setToast({ message: "Could not save availability." });
+      setToast({ message: error instanceof Error ? error.message : "Could not save availability." });
     }
   }
 
@@ -8046,15 +8050,15 @@ function App() {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error("Coach account save failed");
+      if (!response.ok) throw new Error(await readApiFailure(response, "Coach account save failed"));
       const saved = (await response.json()) as Partial<CoachAccount>;
       applyCoachAccount(saved);
       setCoachAccountSaveState("saved");
       setToast({ message: "Coach account saved." });
       window.setTimeout(() => setCoachAccountSaveState("idle"), 1600);
-    } catch {
+    } catch (error) {
       setCoachAccountSaveState("idle");
-      setToast({ message: "Could not save coach account." });
+      setToast({ message: error instanceof Error ? error.message : "Could not save coach account." });
     }
   }
 
@@ -8238,15 +8242,15 @@ function App() {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error("Settings save failed");
+      if (!response.ok) throw new Error(await readApiFailure(response, "Settings save failed"));
       const settings = (await response.json()) as NotificationSettings;
       applyNotificationSettings(settings);
       setSettingsSaveState("saved");
       setToast({ message: "Notification and text settings saved." });
       window.setTimeout(() => setSettingsSaveState("idle"), 1600);
-    } catch {
+    } catch (error) {
       setSettingsSaveState("idle");
-      setToast({ message: "Could not save notification settings." });
+      setToast({ message: error instanceof Error ? error.message : "Could not save notification settings." });
     }
   }
 
@@ -8387,7 +8391,11 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(cleanBrand),
       });
-      if (!response.ok) throw new Error("Brand save failed");
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Brand save failed"));
       const saved = (await response.json()) as Partial<BrandSettings>;
       if (brandSaveVersionRef.current !== saveVersion) return;
       applyBrandSettings(saved);
@@ -8396,10 +8404,10 @@ function App() {
       window.setTimeout(() => {
         if (brandSaveVersionRef.current === saveVersion) setBrandSaveState("idle");
       }, 1600);
-    } catch {
+    } catch (error) {
       if (brandSaveVersionRef.current !== saveVersion) return;
       setBrandSaveState("idle");
-      if (!options.silent) setToast({ message: "Brand colours applied locally. The backend did not save them yet." });
+      if (!options.silent) setToast({ message: error instanceof Error ? error.message : "Brand colours applied locally. The backend did not save them yet." });
     }
   }
 
@@ -8459,7 +8467,7 @@ function App() {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error("People import failed");
+      if (!response.ok) throw new Error(await readApiFailure(response, "People import failed"));
       const result = (await response.json()) as PeopleImportResult;
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       setPeopleImportText("");
@@ -8469,9 +8477,9 @@ function App() {
         message: `${result.imported} added, ${result.updated} updated${result.skipped ? `, ${result.skipped} skipped` : ""}.`,
       });
       window.setTimeout(() => setPeopleImportState("idle"), 1600);
-    } catch {
+    } catch (error) {
       setPeopleImportState("idle");
-      setToast({ message: "Could not import people." });
+      setToast({ message: error instanceof Error ? error.message : "Could not import people." });
     }
   }
 
@@ -8550,7 +8558,7 @@ function App() {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error("Client save failed");
+      if (!response.ok) throw new Error(await readApiFailure(response, "Client save failed"));
       const result = (await response.json()) as PeopleUpdateResult;
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       if (result.person?.id) setSelectedClientId(result.person.id);
@@ -8559,9 +8567,9 @@ function App() {
       setClientSaveState("saved");
       setToast({ message: "Client profile saved." });
       window.setTimeout(() => setClientSaveState("idle"), 1400);
-    } catch {
+    } catch (error) {
       setClientSaveState("idle");
-      setToast({ message: "Could not save client profile." });
+      setToast({ message: error instanceof Error ? error.message : "Could not save client profile." });
     }
   }
 
