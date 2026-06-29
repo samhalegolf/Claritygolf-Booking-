@@ -2115,6 +2115,22 @@ function userBelongsToAccount(user: Partial<AppUser> | undefined, accountId: str
   return recordBelongsToAccount(user, accountId);
 }
 
+function canUseFeature(account: WorkspaceAccount, feature: AccountFeatureKey) {
+  return isAccountActive(account) && accountHasFeature(account, feature);
+}
+
+function canCreateWithinLimit(account: WorkspaceAccount, currentUsage: number, limitName: keyof AccountLimits) {
+  return currentUsage < accountLimit(account, limitName);
+}
+
+function featureUnavailableMessage(feature: AccountFeatureKey) {
+  return `${feature} is not included in this workspace plan.`;
+}
+
+function limitReachedMessage(limitName: keyof AccountLimits, limit: number) {
+  return `This workspace plan allows ${limit} ${limitName.replace(/^max/, "").toLowerCase()}.`;
+}
+
 function defaultLocationFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): Location {
   const cleanAccount = cleanCoachAccount(account);
   const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(cleanAccount);
@@ -3474,7 +3490,10 @@ function App() {
   const weekItems = useMemo(() => accountItems.filter((item) => itemWeek(item) === activeWeek), [activeWeek, accountItems]);
   const activeCoachId = currentAppUser.coachId || defaultCoachId(accountCoachProfiles);
   const activeCoachList = accountCoachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
-  const effectiveCalendarPerspective: CalendarPerspective = isAdminUser ? calendarPerspective : "coach";
+  const effectiveCalendarPerspective: CalendarPerspective =
+    isAdminUser && (calendarPerspective !== "location" || canUseFeature(activeAccount, "locationCalendar"))
+      ? calendarPerspective
+      : "coach";
   const selectedCalendarCoachId = calendarCoachFilterId || (isAdminUser ? defaultCoachId(accountCoachProfiles) : activeCoachId);
   const selectedCalendarLocationId = calendarLocationFilterId || defaultLocationId(accountLocations);
   const selectedCalendarCoach = bookingCoachSnapshotFor(selectedCalendarCoachId, accountCoachProfiles, coachAccount);
@@ -3707,7 +3726,8 @@ function App() {
   const caddyWorkspaceUrl = coachAccount.caddyWorkspaceUrl || CADDY_APP_URL;
   const invoiceSettings = coachAccount.invoiceSettings;
   const invoiceNumber = `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`;
-  const billingWorkspaceEnabled = invoiceSettings.enabled && invoiceSettings.showBillingWorkspace && accountHasFeature(activeAccount, "invoicing");
+  const billingWorkspaceEnabled = invoiceSettings.enabled && invoiceSettings.showBillingWorkspace && canUseFeature(activeAccount, "invoicing");
+  const googleCalendarSyncEnabled = canUseFeature(activeAccount, "googleCalendarSync");
   const hasMissingInvoiceCoachSettings =
     !invoiceSettings.bankAccount.trim() || !invoiceSettings.taxNumber.trim() || !invoiceSettings.businessAddress.trim();
   const bookingBrandName = (brandSettings.coachName || coachAccount.businessName).trim();
@@ -6870,12 +6890,21 @@ function App() {
   }
 
   function startNewLocation() {
+    if (!canUseFeature(activeAccount, "multiLocation") && activeLocationList.length >= 1) {
+      setToast({ message: featureUnavailableMessage("multiLocation") });
+      return;
+    }
+    if (!canCreateWithinLimit(activeAccount, activeLocationList.length, "maxLocations")) {
+      setToast({ message: limitReachedMessage("maxLocations", accountLimit(activeAccount, "maxLocations")) });
+      return;
+    }
     const base = defaultLocationFromCoachAccount(coachAccount);
     const nextOrder = Math.max(0, ...locations.map((location) => location.sortOrder ?? 0)) + 1;
     setEditingLocationId(null);
     setLocationEditor({
       ...base,
       id: `location-${Date.now()}`,
+      accountId: activeAccountId,
       name: "",
       shortName: "",
       isDefault: activeLocations(locations).length === 0,
@@ -6930,6 +6959,10 @@ function App() {
     }
     const clean = cleanLocation(locationEditor, defaultLocationFromCoachAccount(coachAccount), locations.length);
     const exists = locations.some((location) => location.id === (editingLocationId || clean.id));
+    if (!exists && !canCreateWithinLimit(activeAccount, activeLocationList.length, "maxLocations")) {
+      setToast({ message: limitReachedMessage("maxLocations", accountLimit(activeAccount, "maxLocations")) });
+      return;
+    }
     const stableId = editingLocationId || clean.id;
     const next = exists
       ? locations.map((location) => (location.id === stableId ? { ...clean, id: stableId } : location))
@@ -6973,12 +7006,21 @@ function App() {
   }
 
   function startNewCoach() {
+    if (!canUseFeature(activeAccount, "multiCoach") && activeCoachList.length >= 1) {
+      setToast({ message: featureUnavailableMessage("multiCoach") });
+      return;
+    }
+    if (!canCreateWithinLimit(activeAccount, activeCoachList.length, "maxCoaches")) {
+      setToast({ message: limitReachedMessage("maxCoaches", accountLimit(activeAccount, "maxCoaches")) });
+      return;
+    }
     const fallback = defaultCoachProfileFromAccount(coachAccount);
     const assignedLocationId = defaultLocationId(locations);
     setEditingCoachId(null);
     setCoachEditor({
       ...fallback,
       id: `coach-${Date.now()}`,
+      accountId: activeAccountId,
       name: "",
       displayName: "",
       shortName: "",
@@ -7041,6 +7083,7 @@ function App() {
     const clean = cleanCoachProfile(
       {
         ...coachEditor,
+        accountId: coachEditor.accountId || activeAccountId,
         displayName: coachEditor.displayName || coachEditor.name,
         assignedLocationIds: assignedLocationIds.length
           ? assignedLocationIds
@@ -7051,6 +7094,10 @@ function App() {
       coachProfiles.length,
     );
     const exists = coachProfiles.some((coach) => coach.id === (editingCoachId || clean.id));
+    if (!exists && !canCreateWithinLimit(activeAccount, activeCoachList.length, "maxCoaches")) {
+      setToast({ message: limitReachedMessage("maxCoaches", accountLimit(activeAccount, "maxCoaches")) });
+      return;
+    }
     const stableId = editingCoachId || clean.id;
     const next = exists
       ? coachProfiles.map((coach) => (coach.id === stableId ? { ...clean, id: stableId } : coach))
@@ -7735,6 +7782,7 @@ function App() {
     const normalizedEditor = serviceEditor.lessonFormat === "group" ? applyGroupDraftInputs() : serviceEditor;
     const editableEditor = {
       ...normalizedEditor,
+      accountId: normalizedEditor.accountId || activeAccountId,
       description: typeof normalizedEditor.description === "string" ? normalizedEditor.description : "",
       coachId:
         typeof normalizedEditor.coachId === "string" && normalizedEditor.coachId
@@ -7771,6 +7819,10 @@ function App() {
       services.length,
     );
     const exists = services.some((service) => service.id === clean.id);
+    if (!exists && !canCreateWithinLimit(activeAccount, accountServices.filter((service) => service.archived !== true).length, "maxServices")) {
+      setToast({ message: limitReachedMessage("maxServices", accountLimit(activeAccount, "maxServices")) });
+      return;
+    }
     const nextServices = exists
       ? services.map((service) => (service.id === clean.id ? clean : service))
       : [...services, clean];
@@ -8203,6 +8255,10 @@ function App() {
   }
 
   async function connectGoogleCalendar() {
+    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
+      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
+      return;
+    }
     setGoogleCalendarAction("connecting");
     try {
       const response = await fetch("/api/google-calendar/connect", {
@@ -8223,6 +8279,10 @@ function App() {
   }
 
   async function saveGoogleCalendarSettings(next?: Partial<GoogleCalendarSyncStatus>) {
+    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
+      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
+      return;
+    }
     const nextStatus = { ...googleCalendar, ...(next ?? {}) };
     setGoogleCalendar(nextStatus);
     setGoogleCalendarAction("saving");
@@ -8249,6 +8309,10 @@ function App() {
   }
 
   async function syncGoogleCalendarNow() {
+    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
+      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
+      return;
+    }
     setGoogleCalendarAction("syncing");
     try {
       const response = await fetch("/api/google-calendar/sync", {
@@ -8277,6 +8341,10 @@ function App() {
   }
 
   async function disconnectGoogleCalendar() {
+    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
+      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
+      return;
+    }
     setGoogleCalendarAction("disconnecting");
     try {
       const response = await fetch("/api/google-calendar/disconnect", {
@@ -10880,7 +10948,7 @@ function App() {
                   >
                     {isAdminUser ? <option value="all">All calendars</option> : null}
                     <option value="coach">Coach calendar</option>
-                    {isAdminUser ? <option value="location">Location calendar</option> : null}
+                    {isAdminUser && canUseFeature(activeAccount, "locationCalendar") ? <option value="location">Location calendar</option> : null}
                   </select>
                   {effectiveCalendarPerspective === "coach" ? (
                     <select
@@ -13297,7 +13365,9 @@ function App() {
                 <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
                   <span>Direct Google API</span>
                   <strong>
-                    {!googleCalendar.configured
+                    {!googleCalendarSyncEnabled
+                      ? "Plan feature unavailable"
+                      : !googleCalendar.configured
                       ? "Needs OAuth credentials"
                       : googleCalendar.connected
                         ? googleCalendar.lastSyncStatus === "failed"
@@ -13306,7 +13376,9 @@ function App() {
                         : "Ready to connect"}
                   </strong>
                   <em>
-                    {googleCalendar.lastSyncError ||
+                    {!googleCalendarSyncEnabled
+                      ? featureUnavailableMessage("googleCalendarSync")
+                      : googleCalendar.lastSyncError ||
                       (googleCalendar.connected
                         ? `${googleCalendar.accountEmail || "Google account"} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`
                         : googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify.")}
@@ -13325,6 +13397,7 @@ function App() {
                     <span>Google calendar ID</span>
                     <input
                       value={googleCalendar.calendarId}
+                      disabled={!googleCalendarSyncEnabled}
                       onChange={(event) => setGoogleCalendar((current) => ({ ...current, calendarId: event.target.value }))}
                       placeholder="primary or calendar email"
                     />
@@ -13332,6 +13405,7 @@ function App() {
                   <label className="settings-toggle">
                     <input
                       checked={googleCalendar.autoSync}
+                      disabled={!googleCalendarSyncEnabled}
                       onChange={(event) => void saveGoogleCalendarSettings({ autoSync: event.target.checked })}
                       type="checkbox"
                     />
@@ -13345,7 +13419,7 @@ function App() {
                     {!googleCalendar.connected ? (
                       <button
                         className="primary-button"
-                        disabled={!googleCalendar.configured || googleCalendarAction !== "idle"}
+                        disabled={!googleCalendarSyncEnabled || !googleCalendar.configured || googleCalendarAction !== "idle"}
                         onClick={connectGoogleCalendar}
                         type="button"
                       >
@@ -13356,7 +13430,7 @@ function App() {
                       <>
                         <button
                           className="primary-button"
-                          disabled={googleCalendarAction !== "idle"}
+                          disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
                           onClick={syncGoogleCalendarNow}
                           type="button"
                         >
@@ -13365,7 +13439,7 @@ function App() {
                         </button>
                         <button
                           className="outline-button"
-                          disabled={googleCalendarAction !== "idle"}
+                          disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
                           onClick={() => void saveGoogleCalendarSettings()}
                           type="button"
                         >
@@ -13374,7 +13448,7 @@ function App() {
                         </button>
                         <button
                           className="danger-button"
-                          disabled={googleCalendarAction !== "idle"}
+                          disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
                           onClick={disconnectGoogleCalendar}
                           type="button"
                         >
