@@ -3731,6 +3731,15 @@ function App() {
   const googleCalendarSyncEnabled = canUseFeature(activeAccount, "googleCalendarSync");
   const hasMissingInvoiceCoachSettings =
     !invoiceSettings.bankAccount.trim() || !invoiceSettings.taxNumber.trim() || !invoiceSettings.businessAddress.trim();
+  const activeAccountEntitlements = accountEntitlements(activeAccount);
+  const accountUsage = {
+    maxCoaches: activeCoachList.length,
+    maxLocations: activeLocationList.length,
+    maxUsers: userBelongsToAccount(currentAppUser, activeAccountId) ? 1 : 0,
+    maxServices: accountServices.filter((service) => service.archived !== true).length,
+    maxBookingScreens: BOOKING_SCREEN_PATHS.length,
+  };
+  const enabledAccountFeatures = accountFeatureKeys.filter((feature) => activeAccountEntitlements.features[feature]);
   const bookingBrandName = (brandSettings.coachName || coachAccount.businessName).trim();
   const bookingBrandWords = bookingBrandName.split(/\s+/);
   const bookingBrandPrimary = bookingBrandWords.slice(0, -1).join(" ") || bookingBrandName;
@@ -13007,6 +13016,50 @@ function App() {
                   </div>
                   <User size={24} />
                 </div>
+                <details className="settings-subsection" open>
+                  <summary className="settings-subsection-title">
+                    <KeyRound size={18} />
+                    <div>
+                      <span>Workspace subscription</span>
+                      <strong>{activeAccount.planKey} · {activeAccount.subscriptionStatus}</strong>
+                    </div>
+                  </summary>
+                  <div className="service-form-row">
+                    <label className="settings-field">
+                      <span>Workspace</span>
+                      <input value={activeAccount.name} readOnly />
+                    </label>
+                    <label className="settings-field">
+                      <span>Slug</span>
+                      <input value={activeAccount.slug} readOnly />
+                    </label>
+                  </div>
+                  <div className="service-form-row">
+                    <label className="settings-field">
+                      <span>Billing provider</span>
+                      <input value={activeAccount.billingProvider || "none"} readOnly />
+                    </label>
+                    <label className="settings-field">
+                      <span>Subscription</span>
+                      <input value={isAccountActive(activeAccount) ? "Active" : "Restricted"} readOnly />
+                    </label>
+                  </div>
+                  <div className="location-usage-grid">
+                    {(Object.keys(accountUsage) as Array<keyof AccountLimits>).map((limitName) => (
+                      <span key={limitName}>
+                        <strong>{limitName.replace(/^max/, "")}</strong>
+                        {accountUsage[limitName]} / {activeAccountEntitlements.limits[limitName]}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="service-card-meta">
+                    {enabledAccountFeatures.slice(0, 10).map((feature) => (
+                      <span key={feature}>{feature}</span>
+                    ))}
+                    {enabledAccountFeatures.length > 10 ? <span>+{enabledAccountFeatures.length - 10} more</span> : null}
+                  </div>
+                  <p className="field-help">This is the account wrapper for subscription entitlements. Billing automation and platform admin tools are not implemented here.</p>
+                </details>
                 <div className="account-settings-groups">
                   <details className="settings-subsection">
                     <summary className="settings-subsection-title">
