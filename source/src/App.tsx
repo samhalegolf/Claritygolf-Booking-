@@ -63,6 +63,7 @@ type ServiceEditorFormat = "private" | "group" | "custom-group" | "package";
 
 type Service = {
   id: string;
+  accountId?: string;
   coachId?: string;
   name: string;
   duration: number;
@@ -109,6 +110,7 @@ type PendingServiceAction =
 type CalendarItem = {
   id: string;
   kind: "appointment" | "block";
+  accountId?: string;
   coachId?: string;
   locationId?: string;
   week?: number;
@@ -134,6 +136,7 @@ type CalendarItem = {
 
 type Location = {
   id: string;
+  accountId?: string;
   name: string;
   shortName: string;
   address: string;
@@ -168,6 +171,7 @@ type BookingCoachSnapshot = {
 
 type PendingBooking = {
   id: string;
+  accountId?: string;
   client: string;
   title: string;
   serviceId: string;
@@ -222,6 +226,7 @@ type CalendarHoverPreview = {
 
 type Person = {
   id: string;
+  accountId?: string;
   name: string;
   email: string;
   phone: string;
@@ -514,6 +519,7 @@ type PublicRescheduleMatch = {
 
 type NotificationRecord = {
   id: string;
+  accountId?: string;
   personKey: string;
   calendarItemId: string;
   recipient: string;
@@ -589,12 +595,72 @@ type AuthStatus = "checking" | "authenticated" | "guest";
 type AuthMode = "login" | "forgot" | "reset";
 type ThemeMode = "light" | "dark";
 type PermissionScope = "own" | "assigned" | "all";
+type SubscriptionStatus =
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "paused"
+  | "cancelled"
+  | "comped"
+  | "internal";
+type AccountPlanKey = "solo" | "studio" | "academy" | "enterprise" | "founder";
+type AccountFeatureKey =
+  | "publicBooking"
+  | "coachCalendar"
+  | "locationCalendar"
+  | "multiCoach"
+  | "multiLocation"
+  | "services"
+  | "groupLessons"
+  | "packages"
+  | "clients"
+  | "notifications"
+  | "googleCalendarSync"
+  | "invoicing"
+  | "checkout"
+  | "customBranding"
+  | "customDomains"
+  | "staffUsers"
+  | "advancedPermissions";
+type AccountLimits = {
+  maxCoaches: number;
+  maxLocations: number;
+  maxUsers: number;
+  maxServices: number;
+  maxBookingScreens: number;
+};
+type AccountEntitlements = {
+  features: Record<AccountFeatureKey, boolean>;
+  limits: AccountLimits;
+};
+type AccountEntitlementsOverride = {
+  features?: Partial<Record<AccountFeatureKey, boolean>>;
+  limits?: Partial<AccountLimits>;
+};
+type WorkspaceAccount = {
+  id: string;
+  name: string;
+  slug: string;
+  planKey: AccountPlanKey;
+  subscriptionStatus: SubscriptionStatus;
+  ownerUserId?: string;
+  billingProvider?: "stripe" | "manual" | "none";
+  billingCustomerId?: string;
+  billingSubscriptionId?: string;
+  trialEndsAt?: string;
+  currentPeriodEndsAt?: string;
+  entitlementsOverride?: AccountEntitlementsOverride;
+  active: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 type AppUser = {
   id: string;
+  accountId?: string;
   email: string;
   name: string;
-  role: "admin" | "coach" | "staff";
+  role: "admin" | "account_admin" | "coach" | "staff" | "platform_admin";
   coachId?: string;
   permissions: {
     bookings: PermissionScope;
@@ -643,6 +709,7 @@ type ServiceEditor = Omit<Service, "id"> & {
 };
 
 type AvailabilityWindow = {
+  accountId?: string;
   coachId?: string;
   start: number;
   end: number;
@@ -703,6 +770,7 @@ type CoachAccount = {
 
 type CoachProfile = {
   id: string;
+  accountId?: string;
   name: string;
   displayName: string;
   shortName?: string;
@@ -744,6 +812,7 @@ type InvoiceLine = {
 };
 
 type InvoiceDraft = {
+  accountId?: string;
   coachId?: string;
   payerName: string;
   payerEmail: string;
@@ -1824,6 +1893,192 @@ function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
     caddyWorkspaceUrl: cleanUrl(account?.caddyWorkspaceUrl, defaultCoachAccount.caddyWorkspaceUrl),
     invoiceSettings: cleanInvoiceSettings(account?.invoiceSettings),
   };
+}
+
+const accountFeatureKeys: AccountFeatureKey[] = [
+  "publicBooking",
+  "coachCalendar",
+  "locationCalendar",
+  "multiCoach",
+  "multiLocation",
+  "services",
+  "groupLessons",
+  "packages",
+  "clients",
+  "notifications",
+  "googleCalendarSync",
+  "invoicing",
+  "checkout",
+  "customBranding",
+  "customDomains",
+  "staffUsers",
+  "advancedPermissions",
+];
+
+function accountFeatures(enabled: AccountFeatureKey[]): Record<AccountFeatureKey, boolean> {
+  return accountFeatureKeys.reduce(
+    (features, feature) => ({ ...features, [feature]: enabled.includes(feature) }),
+    {} as Record<AccountFeatureKey, boolean>,
+  );
+}
+
+const allAccountFeatures = accountFeatures(accountFeatureKeys);
+
+const accountPlanCatalog: Record<AccountPlanKey, AccountEntitlements> = {
+  solo: {
+    features: accountFeatures([
+      "publicBooking",
+      "coachCalendar",
+      "services",
+      "groupLessons",
+      "packages",
+      "clients",
+      "notifications",
+      "googleCalendarSync",
+    ]),
+    limits: { maxCoaches: 1, maxLocations: 1, maxUsers: 1, maxServices: 10, maxBookingScreens: 1 },
+  },
+  studio: {
+    features: accountFeatures([
+      "publicBooking",
+      "coachCalendar",
+      "locationCalendar",
+      "multiCoach",
+      "multiLocation",
+      "services",
+      "groupLessons",
+      "packages",
+      "clients",
+      "notifications",
+      "googleCalendarSync",
+      "invoicing",
+      "customBranding",
+      "staffUsers",
+    ]),
+    limits: { maxCoaches: 5, maxLocations: 3, maxUsers: 8, maxServices: 40, maxBookingScreens: 4 },
+  },
+  academy: {
+    features: allAccountFeatures,
+    limits: { maxCoaches: 20, maxLocations: 10, maxUsers: 30, maxServices: 120, maxBookingScreens: 12 },
+  },
+  enterprise: {
+    features: allAccountFeatures,
+    limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 },
+  },
+  founder: {
+    features: allAccountFeatures,
+    limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 },
+  },
+};
+
+function mergeEntitlementOverrides(
+  base: AccountEntitlements,
+  override?: AccountEntitlementsOverride,
+): AccountEntitlements {
+  return {
+    features: { ...base.features, ...(override?.features ?? {}) },
+    limits: { ...base.limits, ...(override?.limits ?? {}) },
+  };
+}
+
+function accountEntitlements(account: WorkspaceAccount): AccountEntitlements {
+  return mergeEntitlementOverrides(accountPlanCatalog[account.planKey] ?? accountPlanCatalog.solo, account.entitlementsOverride);
+}
+
+function accountHasFeature(account: WorkspaceAccount, feature: AccountFeatureKey) {
+  return accountEntitlements(account).features[feature] === true;
+}
+
+function accountLimit(account: WorkspaceAccount, limit: keyof AccountLimits) {
+  return accountEntitlements(account).limits[limit];
+}
+
+function isAccountActive(account: WorkspaceAccount) {
+  return account.active && ["trialing", "active", "comped", "internal"].includes(account.subscriptionStatus);
+}
+
+function defaultWorkspaceAccountFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): WorkspaceAccount {
+  const cleanAccount = cleanCoachAccount(account);
+  const slug = cleanSlug(cleanAccount.calendarSlug || cleanAccount.businessName, "sam-hale-golf");
+  return {
+    id: slug,
+    name: cleanAccount.businessName || "Sam Hale Golf",
+    slug,
+    planKey: "founder",
+    subscriptionStatus: "comped",
+    billingProvider: "none",
+    active: true,
+  };
+}
+
+function cleanWorkspaceAccount(
+  raw?: Partial<WorkspaceAccount>,
+  fallback: WorkspaceAccount = defaultWorkspaceAccountFromCoachAccount(),
+): WorkspaceAccount {
+  const name =
+    typeof raw?.name === "string" && raw.name.trim()
+      ? raw.name.trim().slice(0, 120)
+      : fallback.name;
+  const slug = cleanSlug(raw?.slug || raw?.id || name, fallback.slug);
+  const planKey: AccountPlanKey =
+    raw?.planKey && raw.planKey in accountPlanCatalog ? raw.planKey : fallback.planKey;
+  const subscriptionStatus: SubscriptionStatus =
+    raw?.subscriptionStatus && ["trialing", "active", "past_due", "paused", "cancelled", "comped", "internal"].includes(raw.subscriptionStatus)
+      ? raw.subscriptionStatus
+      : fallback.subscriptionStatus;
+  return {
+    id: cleanSlug(raw?.id, slug),
+    name,
+    slug,
+    planKey,
+    subscriptionStatus,
+    ownerUserId: typeof raw?.ownerUserId === "string" && raw.ownerUserId.trim() ? raw.ownerUserId.trim().slice(0, 120) : fallback.ownerUserId,
+    billingProvider: raw?.billingProvider === "stripe" || raw?.billingProvider === "manual" || raw?.billingProvider === "none" ? raw.billingProvider : fallback.billingProvider,
+    billingCustomerId: typeof raw?.billingCustomerId === "string" && raw.billingCustomerId.trim() ? raw.billingCustomerId.trim().slice(0, 160) : undefined,
+    billingSubscriptionId: typeof raw?.billingSubscriptionId === "string" && raw.billingSubscriptionId.trim() ? raw.billingSubscriptionId.trim().slice(0, 160) : undefined,
+    trialEndsAt: typeof raw?.trialEndsAt === "string" && raw.trialEndsAt.trim() ? raw.trialEndsAt.trim() : undefined,
+    currentPeriodEndsAt: typeof raw?.currentPeriodEndsAt === "string" && raw.currentPeriodEndsAt.trim() ? raw.currentPeriodEndsAt.trim() : undefined,
+    entitlementsOverride:
+      raw?.entitlementsOverride && typeof raw.entitlementsOverride === "object"
+        ? {
+            features: raw.entitlementsOverride.features,
+            limits: raw.entitlementsOverride.limits,
+          }
+        : undefined,
+    active: raw?.active !== false,
+    createdAt: typeof raw?.createdAt === "string" ? raw.createdAt : fallback.createdAt,
+    updatedAt: typeof raw?.updatedAt === "string" ? raw.updatedAt : fallback.updatedAt,
+  };
+}
+
+function cleanWorkspaceAccounts(rawAccounts?: Partial<WorkspaceAccount>[], account?: Partial<CoachAccount>): WorkspaceAccount[] {
+  const fallback = defaultWorkspaceAccountFromCoachAccount(account ?? defaultCoachAccount);
+  const source = Array.isArray(rawAccounts) && rawAccounts.length ? rawAccounts : [fallback];
+  const seen = new Set<string>();
+  return source.map((raw, index) => {
+    const clean = cleanWorkspaceAccount(raw, index === 0 ? fallback : defaultWorkspaceAccountFromCoachAccount(account ?? defaultCoachAccount));
+    let id = clean.id;
+    let suffix = 2;
+    while (seen.has(id)) {
+      id = `${clean.id}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(id);
+    return { ...clean, id, active: clean.active || index === 0 };
+  });
+}
+
+function activeWorkspaceAccounts(accounts: WorkspaceAccount[]) {
+  return accounts.filter((account) => account.active);
+}
+
+function defaultAccountId(accounts: WorkspaceAccount[]) {
+  return activeWorkspaceAccounts(accounts)[0]?.id || accounts[0]?.id || defaultWorkspaceAccountFromCoachAccount().id;
+}
+
+function accountById(accounts: WorkspaceAccount[], id?: string) {
+  if (!id) return undefined;
+  return accounts.find((account) => account.id === id);
 }
 
 function defaultLocationFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): Location {
