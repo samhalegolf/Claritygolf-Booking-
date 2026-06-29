@@ -1243,6 +1243,75 @@ function filterCalendarStateForContext(state, context) {
   };
 }
 
+function serviceBelongsToContext(service, context, coaches = []) {
+  if (!recordBelongsToAccount(service, context.accountId)) return false;
+  if (context.isAdmin) return true;
+  return (service?.coachId || defaultCoachId(coaches)) === context.coachId;
+}
+
+function assertCanWriteService(context, service, previousService, coaches = []) {
+  if (!recordBelongsToAccount(service, context.accountId)) {
+    throw permissionDenied("This service does not belong to your workspace.");
+  }
+  if (context.isAdmin) return;
+  if (!hasPermission(context.user, "services", "own")) {
+    throw permissionDenied("You do not have permission to edit lesson services.");
+  }
+  if (previousService && !serviceBelongsToContext(previousService, context, coaches)) {
+    throw permissionDenied("You do not have permission to edit another coach's service.");
+  }
+  if (!serviceBelongsToContext(service, context, coaches)) {
+    throw permissionDenied("You do not have permission to assign services to another coach.");
+  }
+}
+
+function mergeServicesForContext(incomingServices, currentServices, context, coaches = []) {
+  if (context.isAdmin) return incomingServices.map((service) => ({ ...service, accountId: context.accountId }));
+  const previousById = new Map((currentServices || []).map((service) => [service.id, service]));
+  const ownedIncoming = incomingServices.map((service) => ({
+    ...service,
+    accountId: context.accountId,
+    coachId: service.coachId || context.coachId,
+  }));
+  ownedIncoming.forEach((service) => assertCanWriteService(context, service, previousById.get(service.id), coaches));
+  const ownedIds = new Set(ownedIncoming.map((service) => service.id));
+  const preserved = (currentServices || []).filter(
+    (service) => !ownedIds.has(service.id) && !serviceBelongsToContext(service, context, coaches),
+  );
+  return [...preserved, ...ownedIncoming];
+}
+
+function availabilityWindowBelongsToContext(window, context, fallbackCoachId) {
+  if (!recordBelongsToAccount(window, context.accountId)) return false;
+  if (context.isAdmin) return true;
+  return (window?.coachId || fallbackCoachId) === context.coachId;
+}
+
+function mergeAvailabilityForContext(incomingAvailability, currentAvailability, context, fallbackCoachId) {
+  const incoming = normalizeAvailability(incomingAvailability).map((dayWindows) =>
+    dayWindows.map((window) => ({
+      ...window,
+      accountId: context.accountId,
+      coachId: window.coachId || (context.isAdmin ? fallbackCoachId : context.coachId),
+    })),
+  );
+  if (context.isAdmin) return incoming;
+  if (!hasPermission(context.user, "availability", "own")) {
+    throw permissionDenied("You do not have permission to edit availability.");
+  }
+  return incoming.map((dayWindows, index) => {
+    dayWindows.forEach((window) => {
+      if (!availabilityWindowBelongsToContext(window, context, fallbackCoachId)) {
+        throw permissionDenied("You do not have permission to edit another coach's availability.");
+      }
+    });
+    const preserved = (currentAvailability[index] || []).filter(
+      (window) => !availabilityWindowBelongsToContext(window, context, fallbackCoachId),
+    );
+    return [...preserved, ...dayWindows];
+  });
+}
+
 function isLocationOnlyBlock(item) {
   return item?.kind === "block" && Boolean(item.locationId || item.location?.locationId) && !item.coachId && !item.coach?.coachId;
 }
@@ -2412,9 +2481,11 @@ async function readServices() {
   }
 }
 
-async function writeServices(services) {
-  const clean = normalizeServices(services);
-  const account = await readDefaultWorkspaceAccount();
+async function writeServices(services, context = null) {
+  const clean = normalizeServices(services).map((service) =>
+    context ? { ...service, accountId: context.accountId } : service,
+  );
+  const account = context?.account || await readDefaultWorkspaceAccount();
   assertAccountFeature(account, "services");
   const activeServices = clean.filter((service) => service.accountId === account.id && service.archived !== true).length;
   assertAccountLimit(account, activeServices, "maxServices");
@@ -2522,8 +2593,13 @@ async function readAvailability() {
   }
 }
 
-async function writeAvailability(availability) {
-  const clean = normalizeAvailability(availability);
+async function writeAvailability(availability, context = null) {
+  const clean = normalizeAvailability(availability).map((dayWindows) =>
+    dayWindows.map((window) => ({
+      ...window,
+      ...(context ? { accountId: context.accountId } : {}),
+    })),
+  );
   await setSetting("availabilityJson", JSON.stringify(clean));
   await setSetting("updatedAt", nowIso());
   return clean;
@@ -5269,12 +5345,23 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/services") {
-      return json({ services: await readServices() });
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      return json({
+        services: state.services.filter((service) => serviceBelongsToContext(service, requestContext, state.coaches)),
+      });
     }
 
     if (req.method === "PUT" && pathname === "/api/services") {
       const body = await parseBody(req);
-      return json({ services: await writeServices(body.services) });
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "services");
+      const nextServices = mergeServicesForContext(body.services || [], state.services, requestContext, state.coaches);
+      const savedServices = await writeServices(nextServices, requestContext);
+      return json({
+        services: savedServices.filter((service) => serviceBelongsToContext(service, requestContext, state.coaches)),
+      });
     }
 
     if (req.method === "GET" && pathname === "/api/locations") {
@@ -5296,12 +5383,33 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/availability") {
-      return json({ availability: await readAvailability() });
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      const fallbackCoachId = defaultCoachId(state.coaches);
+      return json({
+        availability: state.availability.map((dayWindows) =>
+          dayWindows.filter((window) => availabilityWindowBelongsToContext(window, requestContext, fallbackCoachId)),
+        ),
+      });
     }
 
     if (req.method === "PUT" && pathname === "/api/availability") {
       const body = await parseBody(req);
-      return json({ availability: await writeAvailability(body.availability) });
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      const nextAvailability = mergeAvailabilityForContext(
+        body.availability || [],
+        state.availability,
+        requestContext,
+        defaultCoachId(state.coaches),
+      );
+      const savedAvailability = await writeAvailability(nextAvailability, requestContext);
+      const fallbackCoachId = defaultCoachId(state.coaches);
+      return json({
+        availability: savedAvailability.map((dayWindows) =>
+          dayWindows.filter((window) => availabilityWindowBelongsToContext(window, requestContext, fallbackCoachId)),
+        ),
+      });
     }
 
     if (req.method === "GET" && pathname === "/api/brand-settings") {
