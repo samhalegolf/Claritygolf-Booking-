@@ -1,6 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 
+const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const googleScopes = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -25,6 +26,26 @@ function cleanString(value: unknown, fallback = "", max = 1200) {
   return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
 }
 
+function hashToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function parseCookies(req: Request) {
+  const cookieHeaderValue = req.headers.get("cookie") || "";
+  return Object.fromEntries(
+    cookieHeaderValue
+      .split(";")
+      .map((pair) => pair.trim())
+      .filter(Boolean)
+      .map((pair) => {
+        const index = pair.indexOf("=");
+        return index === -1
+          ? [decodeURIComponent(pair), ""]
+          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
+      }),
+  );
+}
+
 function supabaseConfig() {
   const url = env("SUPABASE_URL").replace(/\/$/, "");
   const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
@@ -47,6 +68,15 @@ async function supabase(table: string, options: { method?: string; query?: strin
   const text = await response.text();
   if (!response.ok) throw new Error(`Supabase ${options.method || "GET"} ${table} failed ${response.status}: ${text.slice(0, 500)}`);
   return text ? JSON.parse(text) : [];
+}
+
+async function requireAdmin(req: Request) {
+  const token = parseCookies(req)[sessionCookieName] || "";
+  if (!token) return false;
+  const rows = await supabase("admin_sessions", {
+    query: `select=id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
+  });
+  return rows.length > 0;
 }
 
 function settingMap(rows: Array<{ key: string; value: string }>) {
@@ -573,8 +603,14 @@ function json(value: unknown, status = 200) {
 
 export default async function googleCalendarSyncHandler(req: Request) {
   try {
-    if (req.method === "GET") return json(await getGoogleCalendarSyncStatus(req));
-    if (req.method === "POST") return json(await syncGoogleCalendarIfEnabled());
+    if (req.method === "GET") {
+      if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+      return json(await getGoogleCalendarSyncStatus(req));
+    }
+    if (req.method === "POST") {
+      if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+      return json(await syncGoogleCalendarIfEnabled());
+    }
     return json({ error: "method_not_allowed", message: "Use GET for status or POST to sync." }, 405);
   } catch (error: any) {
     console.error("google_calendar_sync:function_failed", error);

@@ -5412,6 +5412,10 @@ export async function handleBookingApiRoute(
 
     if (req.method === "POST" && pathname === "/api/test-email") {
       const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to send test emails.");
+      assertAccountFeature(requestContext.account, "notifications");
       const recipient = cleanEmail(body.email, "");
       if (!recipient)
         return json(
@@ -5421,12 +5425,12 @@ export async function handleBookingApiRoute(
           },
           400,
         );
-      const services = await readServices();
+      const services = state.services;
       const service =
         services.find((candidate) => candidate.active) || defaultServices[0];
       const appointment = {
         id: `test-${Date.now()}`,
-        accountId: service.accountId || defaultWorkspaceAccountFromCoachAccount().id,
+        accountId: requestContext.account.id,
         kind: "appointment",
         week: 0,
         day: 0,
