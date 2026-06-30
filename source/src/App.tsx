@@ -579,6 +579,22 @@ type ClientProfileTab = "bookings" | "notifications";
 
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
+type LessonCompleteErrorMap = Record<string, string>;
+type CalendarStateSaveResponse = {
+  message?: string;
+  error?: string;
+  expectedUpdatedAt?: string;
+  backendUpdatedAt?: string;
+  conflictSource?: string;
+  notifications?: NotificationRecord[];
+  notificationResults?: EmailSendResult[];
+  updatedAt?: string;
+  items?: CalendarItem[];
+  googleCalendar?: Partial<GoogleCalendarSyncStatus>;
+  googleCalendarSync?: Partial<GoogleCalendarSyncStatus> & { ok?: boolean; error?: string };
+  syncKey?: string;
+  warnings?: string[];
+};
 type GoogleCalendarSyncStatus = {
   configured: boolean;
   connected: boolean;
@@ -3414,6 +3430,8 @@ function App() {
   const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
   const [calendarSaveError, setCalendarSaveError] = useState("");
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
+  const [pendingLessonCompleteId, setPendingLessonCompleteId] = useState("");
+  const [lessonCompleteErrors, setLessonCompleteErrors] = useState<LessonCompleteErrorMap>({});
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
   const [calendarPerspective, setCalendarPerspective] = useState<CalendarPerspective>("all");
@@ -3465,6 +3483,7 @@ function App() {
   const serviceSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
   const lastPersistedCalendarFingerprintRef = useRef("");
+  const pendingLessonCompleteIdRef = useRef("");
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
   const pendingQuickCreateRef = useRef<QuickCreateState | null>(null);
 
@@ -4247,18 +4266,7 @@ function App() {
           }
         }
         if (calendarSaveVersionRef.current !== saveVersion) return;
-        let data = (recoveredData ?? (await response.json().catch(() => ({})))) as {
-          message?: string;
-          error?: string;
-          notifications?: NotificationRecord[];
-          notificationResults?: EmailSendResult[];
-          updatedAt?: string;
-          items?: CalendarItem[];
-          googleCalendar?: Partial<GoogleCalendarSyncStatus>;
-          googleCalendarSync?: Partial<GoogleCalendarSyncStatus> & { ok?: boolean; error?: string };
-          syncKey?: string;
-          warnings?: string[];
-        };
+        let data = (recoveredData ?? (await response.json().catch(() => ({})))) as CalendarStateSaveResponse;
         if (!response.ok && response.status >= 500) {
           await retryDelay(900);
           response = await saveWithRetries();
@@ -7996,14 +8004,189 @@ function App() {
   }
 
   function updateAppointmentStatus(itemId: string, status: BookingStatus) {
+    if (status === "completed") {
+      void completeAppointmentSafely(itemId);
+      return;
+    }
     const previous = items;
     setItems((current) =>
       current.map((item) => (item.id === itemId && item.kind === "appointment" ? { ...item, status } : item)),
     );
+    setLessonCompleteErrors((current) => {
+      if (!current[itemId]) return current;
+      const { [itemId]: _removed, ...next } = current;
+      return next;
+    });
     setToast({
       message: `Lesson marked ${status.replace("_", "-")}.`,
       undo: () => setItems(previous),
     });
+  }
+
+  function logLessonCompleteDiagnostic(
+    label: string,
+    details: {
+      lessonId: string;
+      calendarId: string;
+      expectedRevision?: string;
+      backendRevision?: string;
+      httpStatus?: number;
+      conflictSource?: string;
+    },
+  ) {
+    console.warn("calendar_state:lesson_complete", {
+      action: "lesson_complete",
+      event: label,
+      lessonId: details.lessonId,
+      calendarId: details.calendarId,
+      expectedRevision: details.expectedRevision || "",
+      backendRevision: details.backendRevision || "",
+      httpStatus: details.httpStatus || 0,
+      conflictSource: details.conflictSource || "",
+    });
+  }
+
+  async function readLatestCalendarStateForLessonComplete(itemId: string) {
+    const response = await fetch("/api/calendar-state", {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    const data = (await response.json().catch(() => ({}))) as CalendarStateSaveResponse;
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
+    }
+    if (!response.ok) {
+      logLessonCompleteDiagnostic("fetch_latest_failed", {
+        lessonId: itemId,
+        calendarId: "unknown",
+        expectedRevision: calendarStateVersion,
+        backendRevision: data.backendUpdatedAt || data.updatedAt,
+        httpStatus: response.status,
+        conflictSource: data.conflictSource || data.error,
+      });
+      throw new Error(data.message || data.error || "Calendar state could not be loaded.");
+    }
+    return data;
+  }
+
+  async function saveCompletedLessonFromLatest(itemId: string, attempt: number) {
+    const latest = await readLatestCalendarStateForLessonComplete(itemId);
+    const latestItems = Array.isArray(latest.items) ? latest.items : [];
+    const latestItem = latestItems.find((item) => item.id === itemId && item.kind === "appointment");
+    const calendarId = latestItem
+      ? resolvedCalendarItemCoachId(latestItem, itemService(latestItem, services), coachProfiles, coachAccount) ||
+        latestItem.locationId ||
+        latestItem.accountId ||
+        "unknown"
+      : "unknown";
+    const expectedRevision = typeof latest.updatedAt === "string" ? latest.updatedAt : "";
+    if (!latestItem) {
+      logLessonCompleteDiagnostic("lesson_missing", {
+        lessonId: itemId,
+        calendarId,
+        expectedRevision,
+        httpStatus: 404,
+        conflictSource: "missing_lesson",
+      });
+      throw new Error("Lesson was not completed because it could not be found. Reload and try again.");
+    }
+    const nextItems = latestItems.map((item) =>
+      item.id === itemId && item.kind === "appointment" ? { ...item, status: "completed" as BookingStatus } : item,
+    );
+    const response = await fetch("/api/calendar-state", {
+      method: "PUT",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        items: nextItems,
+        replaceItems: true,
+        syncKey: typeof latest.syncKey === "string" ? latest.syncKey : calendarSyncKey,
+        updatedAt: expectedRevision,
+      }),
+    });
+    const data = (await response.json().catch(() => ({}))) as CalendarStateSaveResponse;
+    const backendRevision = data.backendUpdatedAt || data.updatedAt || "";
+    if (response.status === 409 && attempt === 0) {
+      logLessonCompleteDiagnostic("conflict_retry", {
+        lessonId: itemId,
+        calendarId,
+        expectedRevision,
+        backendRevision,
+        httpStatus: response.status,
+        conflictSource: data.conflictSource || data.error,
+      });
+      return saveCompletedLessonFromLatest(itemId, attempt + 1);
+    }
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
+    }
+    if (!response.ok) {
+      logLessonCompleteDiagnostic("save_failed", {
+        lessonId: itemId,
+        calendarId,
+        expectedRevision,
+        backendRevision,
+        httpStatus: response.status,
+        conflictSource: data.conflictSource || data.error,
+      });
+      throw new Error(data.message || data.error || "Lesson completion failed.");
+    }
+    logLessonCompleteDiagnostic("saved", {
+      lessonId: itemId,
+      calendarId,
+      expectedRevision,
+      backendRevision: data.updatedAt || backendRevision,
+      httpStatus: response.status,
+    });
+    return { data, fallbackItems: nextItems, fallbackSyncKey: typeof latest.syncKey === "string" ? latest.syncKey : calendarSyncKey };
+  }
+
+  async function completeAppointmentSafely(itemId: string) {
+    if (pendingLessonCompleteIdRef.current) return;
+    pendingLessonCompleteIdRef.current = itemId;
+    setPendingLessonCompleteId(itemId);
+    setLessonCompleteErrors((current) => {
+      if (!current[itemId]) return current;
+      const { [itemId]: _removed, ...next } = current;
+      return next;
+    });
+    setCalendarSaveStatus("saving");
+    setCalendarSaveError("");
+    try {
+      const { data, fallbackItems, fallbackSyncKey } = await saveCompletedLessonFromLatest(itemId, 0);
+      const persistedItems = Array.isArray(data.items) ? data.items : fallbackItems;
+      const persistedSyncKey = typeof data.syncKey === "string" ? data.syncKey : fallbackSyncKey;
+      setItems(persistedItems);
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
+      if (typeof data.syncKey === "string" && data.syncKey !== calendarSyncKey) setCalendarSyncKey(data.syncKey);
+      if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+      if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+      applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar);
+      setCalendarFeedStatus("connected");
+      setCalendarSaveStatus("saved");
+      setCalendarSaveError("");
+      setToast({ message: "Lesson marked completed." });
+      window.setTimeout(() => setCalendarSaveStatus((current) => (current === "saved" ? "idle" : current)), 1800);
+      window.setTimeout(() => void refreshNotificationHistory(), 1500);
+      window.setTimeout(() => void processPendingAdminNotifications(), 32000);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.includes("Admin login")
+          ? error.message
+          : "Lesson was not completed because calendar data changed. Reload and try again.";
+      setCalendarFeedStatus(message.includes("Admin login") ? "offline" : "connected");
+      setCalendarSaveStatus("failed");
+      setCalendarSaveError(message);
+      setLessonCompleteErrors((current) => ({ ...current, [itemId]: message }));
+      setToast({ message });
+    } finally {
+      pendingLessonCompleteIdRef.current = "";
+      setPendingLessonCompleteId("");
+    }
   }
 
   function cancelGroupSessionAttendee(itemId: string) {
@@ -10935,14 +11118,20 @@ function App() {
             {(["booked", "completed", "cancelled", "no_show"] as BookingStatus[]).map((status) => (
               <button
                 className={(selected.status ?? "booked") === status ? "active" : ""}
+                disabled={pendingLessonCompleteId === selected.id || (pendingLessonCompleteId !== "" && status === "completed")}
                 key={status}
                 onClick={() => updateAppointmentStatus(selected.id, status)}
                 type="button"
               >
-                {status === "no_show" ? "No-show" : status[0].toUpperCase() + status.slice(1)}
+                {status === "completed" && pendingLessonCompleteId === selected.id
+                  ? "Saving..."
+                  : status === "no_show"
+                    ? "No-show"
+                    : status[0].toUpperCase() + status.slice(1)}
               </button>
             ))}
           </div>
+          {lessonCompleteErrors[selected.id] ? <p className="inline-error">{lessonCompleteErrors[selected.id]}</p> : null}
         </div>
       )}
 
@@ -11570,7 +11759,7 @@ function App() {
             </div>
             {calendarSaveStatus === "failed" && (
               <div className="calendar-save-warning">
-                Your latest change was not saved. Please try again; the app will retry when you make another change.
+                {calendarSaveError || "Your latest calendar change was not saved. Reload and try again."}
               </div>
             )}
             {calendarViewEmptyMessage ? (
@@ -13587,7 +13776,7 @@ function App() {
               {isAdminUser ? locationsSettingsPanel : null}
               {availabilitySettingsPanel}
               {bookingSettingsPanel}
-              <article className="data-card notification-card account-card settings-section settings-account settings-branding">
+              <article className="data-card notification-card account-card settings-section settings-account">
                 <div className="data-card-header">
                   <div>
                     <span>Coach Account</span>
@@ -13595,7 +13784,25 @@ function App() {
                   </div>
                   <User size={24} />
                 </div>
-                <details className="settings-subsection" open>
+                <div className="settings-summary-grid">
+                  <span>
+                    <strong>{activeAccount.planKey}</strong>
+                    plan
+                  </span>
+                  <span>
+                    <strong>{isAccountActive(activeAccount) ? "Active" : "Restricted"}</strong>
+                    subscription
+                  </span>
+                  <span>
+                    <strong>{activeAccount.slug}</strong>
+                    workspace
+                  </span>
+                  <span>
+                    <strong>{enabledAccountFeatures.length}</strong>
+                    features
+                  </span>
+                </div>
+                <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <KeyRound size={18} />
                     <div>
@@ -13603,25 +13810,23 @@ function App() {
                       <strong>{activeAccount.planKey} · {activeAccount.subscriptionStatus}</strong>
                     </div>
                   </summary>
-                  <div className="service-form-row">
-                    <label className="settings-field">
-                      <span>Workspace</span>
-                      <input value={activeAccount.name} readOnly />
-                    </label>
-                    <label className="settings-field">
-                      <span>Slug</span>
-                      <input value={activeAccount.slug} readOnly />
-                    </label>
-                  </div>
-                  <div className="service-form-row">
-                    <label className="settings-field">
-                      <span>Billing provider</span>
-                      <input value={activeAccount.billingProvider || "none"} readOnly />
-                    </label>
-                    <label className="settings-field">
-                      <span>Subscription</span>
-                      <input value={isAccountActive(activeAccount) ? "Active" : "Restricted"} readOnly />
-                    </label>
+                  <div className="settings-readout-grid">
+                    <span>
+                      <em>Workspace</em>
+                      <strong>{activeAccount.name}</strong>
+                    </span>
+                    <span>
+                      <em>Slug</em>
+                      <strong>{activeAccount.slug}</strong>
+                    </span>
+                    <span>
+                      <em>Billing provider</em>
+                      <strong>{activeAccount.billingProvider || "None"}</strong>
+                    </span>
+                    <span>
+                      <em>Subscription</em>
+                      <strong>{isAccountActive(activeAccount) ? "Active" : "Restricted"}</strong>
+                    </span>
                   </div>
                   <div className="location-usage-grid">
                     {(Object.keys(accountUsage) as Array<keyof AccountLimits>).map((limitName) => (
@@ -14020,7 +14225,7 @@ function App() {
                   </em>
                 </div>
 
-                <details className="settings-subsection" open>
+                <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Link2 size={18} />
                     <div>
@@ -14360,7 +14565,7 @@ function App() {
                 </button>
               </article>
 
-              <article className="data-card notification-card email-template-card settings-section settings-experience settings-branding">
+              <article className="data-card notification-card email-template-card settings-section settings-experience">
                 <span>Email Template</span>
                 <h2>Customer experience</h2>
                 <div className="email-preview">
@@ -14600,7 +14805,7 @@ function App() {
                 </button>
               </article>
 
-              <article className="data-card notification-card settings-section settings-experience settings-branding">
+              <article className="data-card notification-card settings-section settings-branding">
                 <span>Theme</span>
                 <h2>Light and dark surfaces</h2>
                 <details className="settings-subsection">
@@ -14685,7 +14890,7 @@ function App() {
                 </details>
               </article>
 
-              <article className="data-card brand-vein-card settings-section settings-branding settings-experience">
+              <article className="data-card brand-vein-card settings-section settings-branding">
                 <div className="data-card-header">
                   <div>
                     <span>Coach Branding</span>

@@ -821,6 +821,36 @@ button {
   overflow-wrap: anywhere;
 }
 
+.settings-readout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.settings-readout-grid span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #e2e0d8;
+  background: #f7f7f3;
+}
+
+.settings-readout-grid em {
+  color: #76736d;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.settings-readout-grid strong {
+  min-width: 0;
+  color: #171717;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
 .availability-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -6004,6 +6034,14 @@ button {
   color: var(--text);
   font-size: 12px;
   font-weight: 800;
+}
+
+.inline-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
 .lesson-status-options button.active {

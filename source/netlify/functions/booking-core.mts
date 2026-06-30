@@ -3176,6 +3176,10 @@ async function writeCalendarState(nextState, context = null) {
       ),
       {
         status: 409,
+        code: "calendar_state_conflict",
+        expectedUpdatedAt,
+        backendUpdatedAt: current.updatedAt,
+        conflictSource: "updatedAt",
       },
     );
   }
@@ -6081,6 +6085,13 @@ export async function handleBookingApiRoute(
         error: status === 500 ? "booking_api_error" : "request_error",
         message:
           error instanceof Error ? error.message : "Unknown booking API error",
+        ...(status === 409
+          ? {
+              expectedUpdatedAt: error?.expectedUpdatedAt || "",
+              backendUpdatedAt: error?.backendUpdatedAt || "",
+              conflictSource: error?.conflictSource || "",
+            }
+          : {}),
       },
       status,
     );
