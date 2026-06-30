@@ -789,6 +789,24 @@ type CoachProfile = {
   sortOrder?: number;
 };
 
+type WorkspaceConfigRecord = {
+  id?: string;
+  accountId?: string;
+  name?: string;
+  displayName?: string;
+};
+
+type WorkspaceConfigDiagnostic = {
+  activeAccountId: string;
+  expected: Array<{ id: string; name: string }>;
+  putStatus?: number;
+  putRecords?: WorkspaceConfigRecord[];
+  getStatus?: number;
+  getRecords?: WorkspaceConfigRecord[];
+  calendarStatus?: number;
+  calendarRecords?: WorkspaceConfigRecord[];
+};
+
 type BillingCatalogKind = "service" | "product" | "package" | "lesson-type";
 
 type BillingCatalogItem = {
@@ -4351,6 +4369,79 @@ function App() {
     }
   }
 
+  function workspaceRecordName(record: WorkspaceConfigRecord) {
+    return record.displayName || record.name || record.id || "unnamed";
+  }
+
+  function summarizeWorkspaceRecords(records?: WorkspaceConfigRecord[]) {
+    if (!Array.isArray(records)) return "not returned";
+    if (!records.length) return "none";
+    return records.map((record) => `${record.id || "missing-id"}:${record.accountId || "missing-account"}`).join(", ");
+  }
+
+  function formatWorkspaceSaveFailure(
+    label: "Location" | "Coach",
+    routeLabel: string,
+    stage: string,
+    diagnostic: WorkspaceConfigDiagnostic,
+    detail: string,
+  ) {
+    const expectedIds = diagnostic.expected.map((record) => record.id).join(", ") || "none";
+    const expectedNames = diagnostic.expected.map((record) => record.name).join(", ") || "none";
+    return [
+      `${label} save failed at ${routeLabel}: ${detail}`,
+      `Stage ${stage}.`,
+      `activeAccountId=${diagnostic.activeAccountId || "missing"}.`,
+      `expectedIds=${expectedIds}.`,
+      `expectedNames=${expectedNames}.`,
+      `PUT status=${diagnostic.putStatus ?? "not run"} records=${summarizeWorkspaceRecords(diagnostic.putRecords)}.`,
+      `GET status=${diagnostic.getStatus ?? "not run"} records=${summarizeWorkspaceRecords(diagnostic.getRecords)}.`,
+      `calendar-state status=${diagnostic.calendarStatus ?? "not run"} records=${summarizeWorkspaceRecords(diagnostic.calendarRecords)}.`,
+    ].join(" ");
+  }
+
+  function throwWorkspaceSaveFailure(
+    label: "Location" | "Coach",
+    routeLabel: string,
+    stage: string,
+    diagnostic: WorkspaceConfigDiagnostic,
+    detail: string,
+  ): never {
+    throw new Error(formatWorkspaceSaveFailure(label, routeLabel, stage, diagnostic, detail));
+  }
+
+  function assertExpectedWorkspaceRecords(
+    records: WorkspaceConfigRecord[] | undefined,
+    label: "Location" | "Coach",
+    routeLabel: string,
+    missingStage: string,
+    mismatchStage: string,
+    diagnostic: WorkspaceConfigDiagnostic,
+  ) {
+    const source = Array.isArray(records) ? records : [];
+    for (const expected of diagnostic.expected) {
+      const match = source.find((record) => record.id === expected.id);
+      if (!match) {
+        throwWorkspaceSaveFailure(
+          label,
+          routeLabel,
+          missingStage,
+          diagnostic,
+          `${expected.name} (${expected.id}) was missing from the response.`,
+        );
+      }
+      if (match.accountId !== diagnostic.activeAccountId) {
+        throwWorkspaceSaveFailure(
+          label,
+          routeLabel,
+          mismatchStage,
+          diagnostic,
+          `saved record accountId was ${match.accountId || "missing"}, activeAccountId was ${diagnostic.activeAccountId || "missing"}.`,
+        );
+      }
+    }
+  }
+
   async function fetchDatabaseHealthSummary() {
     try {
       const response = await fetch("/api/database-health", { headers: { Accept: "application/json" } });
@@ -6934,9 +7025,10 @@ function App() {
   async function persistLocations(nextLocations: Location[], message = "Locations saved.") {
     const snapshot = locations;
     const clean = cleanLocations(nextLocations, coachAccount);
-    const expectedIds = clean.map((location) => location.id).filter(Boolean);
-    const includesExpectedLocations = (records: Location[] | undefined) =>
-      Array.isArray(records) && expectedIds.every((id) => records.some((location) => location.id === id));
+    const diagnostic: WorkspaceConfigDiagnostic = {
+      activeAccountId,
+      expected: clean.map((location) => ({ id: location.id, name: workspaceRecordName(location) })).filter((location) => location.id),
+    };
     setLocations(clean);
     setLocationSaveState("saving");
     try {
@@ -6947,46 +7039,76 @@ function App() {
         cache: "no-store",
         body: JSON.stringify({ locations: clean }),
       });
+      diagnostic.putStatus = response.status;
       if (response.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Location save failed"));
+      if (!response.ok) {
+        const detail = await readApiFailure(response, "Location save failed");
+        throwWorkspaceSaveFailure("Location", "PUT /api/locations", "location_put_failed", diagnostic, detail);
+      }
       const data = (await response.json()) as { locations?: Location[] };
       const saved = cleanLocations(data.locations, coachAccount);
-      if (!includesExpectedLocations(saved)) {
-        throw new Error("Location save failed: PUT /api/locations did not return the new location.");
-      }
+      diagnostic.putRecords = saved;
+      assertExpectedWorkspaceRecords(
+        saved,
+        "Location",
+        "PUT /api/locations",
+        "location_put_missing_expected_id",
+        "location_put_account_mismatch",
+        diagnostic,
+      );
       const locationsResponse = await fetch("/api/locations", {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
         cache: "no-store",
       });
+      diagnostic.getStatus = locationsResponse.status;
       if (locationsResponse.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!locationsResponse.ok) throw new Error(await readApiFailure(locationsResponse, "Location save failed"));
+      if (!locationsResponse.ok) {
+        const detail = await readApiFailure(locationsResponse, "Location save failed");
+        throwWorkspaceSaveFailure("Location", "GET /api/locations", "location_get_failed", diagnostic, detail);
+      }
       const locationsData = (await locationsResponse.json()) as { locations?: Location[] };
       const loadedLocations = cleanLocations(locationsData.locations, coachAccount);
-      if (!includesExpectedLocations(loadedLocations)) {
-        throw new Error("Location save failed: GET /api/locations did not return the new location.");
-      }
+      diagnostic.getRecords = loadedLocations;
+      assertExpectedWorkspaceRecords(
+        loadedLocations,
+        "Location",
+        "GET /api/locations",
+        "location_get_missing_expected_id",
+        "location_get_account_mismatch",
+        diagnostic,
+      );
       const calendarResponse = await fetch("/api/calendar-state", {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
         cache: "no-store",
       });
+      diagnostic.calendarStatus = calendarResponse.status;
       if (calendarResponse.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!calendarResponse.ok) throw new Error(await readApiFailure(calendarResponse, "Location save failed"));
+      if (!calendarResponse.ok) {
+        const detail = await readApiFailure(calendarResponse, "Location save failed");
+        throwWorkspaceSaveFailure("Location", "GET /api/calendar-state", "location_calendar_state_failed", diagnostic, detail);
+      }
       const calendarData = (await calendarResponse.json()) as { locations?: Location[] };
       const calendarLocations = cleanLocations(calendarData.locations, coachAccount);
-      if (!includesExpectedLocations(calendarLocations)) {
-        throw new Error("Location saved, but /api/calendar-state did not return it yet.");
-      }
+      diagnostic.calendarRecords = calendarLocations;
+      assertExpectedWorkspaceRecords(
+        calendarLocations,
+        "Location",
+        "GET /api/calendar-state",
+        "location_calendar_state_missing_expected_id",
+        "location_calendar_state_account_mismatch",
+        diagnostic,
+      );
       setLocations(saved);
       setLocationSaveState("saved");
       setToast({ message });
@@ -7096,9 +7218,10 @@ function App() {
   async function persistCoaches(nextCoaches: CoachProfile[], message = "Coaches saved.") {
     const snapshot = coachProfiles;
     const clean = cleanCoachProfiles(nextCoaches, coachAccount);
-    const expectedIds = clean.map((coach) => coach.id).filter(Boolean);
-    const includesExpectedCoaches = (records: CoachProfile[] | undefined) =>
-      Array.isArray(records) && expectedIds.every((id) => records.some((coach) => coach.id === id));
+    const diagnostic: WorkspaceConfigDiagnostic = {
+      activeAccountId,
+      expected: clean.map((coach) => ({ id: coach.id, name: workspaceRecordName(coach) })).filter((coach) => coach.id),
+    };
     setCoachProfiles(clean);
     setCoachSaveState("saving");
     try {
@@ -7109,46 +7232,76 @@ function App() {
         cache: "no-store",
         body: JSON.stringify({ coaches: clean }),
       });
+      diagnostic.putStatus = response.status;
       if (response.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Coach save failed"));
+      if (!response.ok) {
+        const detail = await readApiFailure(response, "Coach save failed");
+        throwWorkspaceSaveFailure("Coach", "PUT /api/coaches", "coach_put_failed", diagnostic, detail);
+      }
       const data = (await response.json()) as { coaches?: CoachProfile[] };
       const saved = cleanCoachProfiles(data.coaches, coachAccount);
-      if (!includesExpectedCoaches(saved)) {
-        throw new Error("Coach save failed: PUT /api/coaches did not return the new coach.");
-      }
+      diagnostic.putRecords = saved;
+      assertExpectedWorkspaceRecords(
+        saved,
+        "Coach",
+        "PUT /api/coaches",
+        "coach_put_missing_expected_id",
+        "coach_put_account_mismatch",
+        diagnostic,
+      );
       const coachesResponse = await fetch("/api/coaches", {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
         cache: "no-store",
       });
+      diagnostic.getStatus = coachesResponse.status;
       if (coachesResponse.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!coachesResponse.ok) throw new Error(await readApiFailure(coachesResponse, "Coach save failed"));
+      if (!coachesResponse.ok) {
+        const detail = await readApiFailure(coachesResponse, "Coach save failed");
+        throwWorkspaceSaveFailure("Coach", "GET /api/coaches", "coach_get_failed", diagnostic, detail);
+      }
       const coachesData = (await coachesResponse.json()) as { coaches?: CoachProfile[] };
       const loadedCoaches = cleanCoachProfiles(coachesData.coaches, coachAccount);
-      if (!includesExpectedCoaches(loadedCoaches)) {
-        throw new Error("Coach save failed: GET /api/coaches did not return the new coach.");
-      }
+      diagnostic.getRecords = loadedCoaches;
+      assertExpectedWorkspaceRecords(
+        loadedCoaches,
+        "Coach",
+        "GET /api/coaches",
+        "coach_get_missing_expected_id",
+        "coach_get_account_mismatch",
+        diagnostic,
+      );
       const calendarResponse = await fetch("/api/calendar-state", {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
         cache: "no-store",
       });
+      diagnostic.calendarStatus = calendarResponse.status;
       if (calendarResponse.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!calendarResponse.ok) throw new Error(await readApiFailure(calendarResponse, "Coach save failed"));
+      if (!calendarResponse.ok) {
+        const detail = await readApiFailure(calendarResponse, "Coach save failed");
+        throwWorkspaceSaveFailure("Coach", "GET /api/calendar-state", "coach_calendar_state_failed", diagnostic, detail);
+      }
       const calendarData = (await calendarResponse.json()) as { coaches?: CoachProfile[] };
       const calendarCoaches = cleanCoachProfiles(calendarData.coaches, coachAccount);
-      if (!includesExpectedCoaches(calendarCoaches)) {
-        throw new Error("Coach saved, but /api/calendar-state did not return it yet.");
-      }
+      diagnostic.calendarRecords = calendarCoaches;
+      assertExpectedWorkspaceRecords(
+        calendarCoaches,
+        "Coach",
+        "GET /api/calendar-state",
+        "coach_calendar_state_missing_expected_id",
+        "coach_calendar_state_account_mismatch",
+        diagnostic,
+      );
       setCoachProfiles(saved);
       setCoachSaveState("saved");
       setToast({ message });
