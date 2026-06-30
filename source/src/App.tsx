@@ -3506,6 +3506,7 @@ function App() {
   const locationSaveVersionRef = useRef(0);
   const coachSaveVersionRef = useRef(0);
   const settingsSaveVersionRef = useRef(0);
+  const notificationSettingsDraftVersionRef = useRef(0);
   const lastPersistedCalendarFingerprintRef = useRef("");
   const pendingLessonCompleteIdRef = useRef("");
   const activeAdminSaveOwnersRef = useRef<Map<AdminSaveOwner, number>>(new Map());
@@ -4673,42 +4674,15 @@ function App() {
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
-    const calendarStateRequest = fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
-    const locationsRequest = fetch("/api/locations", {
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    }).then(async (locationsResponse) => ({
-      response: locationsResponse,
-      data: locationsResponse.ok ? ((await locationsResponse.json()) as { locations?: Location[] }) : null,
-    }));
-    const coachesRequest = fetch("/api/coaches", {
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    }).then(async (coachesResponse) => ({
-      response: coachesResponse,
-      data: coachesResponse.ok ? ((await coachesResponse.json()) as { coaches?: CoachProfile[] }) : null,
-    }));
-    const adminSettingsRequest = fetch("/api/admin-settings", { headers: { Accept: "application/json" } }).then(
-      async (adminSettingsResponse) => ({
-        response: adminSettingsResponse,
-        data: adminSettingsResponse.ok ? ((await adminSettingsResponse.json()) as Partial<NotificationSettings>) : null,
-      }),
-    );
-    const [calendarResult, locationsResult, coachesResult, adminSettingsResult] = await Promise.allSettled([
-      calendarStateRequest,
-      locationsRequest,
-      coachesRequest,
-      adminSettingsRequest,
-    ]);
     if (!isCurrentRun() || hasActiveAdminSave()) return false;
-    if (calendarResult.status === "rejected") {
+    let response: Response;
+    try {
+      response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
+    } catch {
       const healthMessage = await fetchDatabaseHealthSummary();
       if (!isCurrentRun()) return false;
       throw new Error(["Calendar API unavailable", healthMessage].filter(Boolean).join(" · "));
     }
-    const response = calendarResult.value;
     if (response.status === 401) {
       throw new Error("Admin login required");
     }
@@ -4750,45 +4724,11 @@ function App() {
     if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
     const fallbackAccount = data.account ?? coachAccount;
-    let dedicatedLocations: Location[] | null = null;
-    let dedicatedCoaches: CoachProfile[] | null = null;
-    const workspaceConfigWarnings: string[] = [];
-    if (locationsResult.status === "fulfilled") {
-      if (locationsResult.value.response.ok) {
-        const locationsData = locationsResult.value.data;
-        if (Array.isArray(locationsData?.locations) && locationsData.locations.length) {
-          dedicatedLocations = cleanLocations(locationsData.locations, fallbackAccount);
-        }
-      } else {
-        workspaceConfigWarnings.push("locations");
-      }
-    } else {
-      workspaceConfigWarnings.push("locations");
-    }
-    if (coachesResult.status === "fulfilled") {
-      if (coachesResult.value.response.ok) {
-        const coachesData = coachesResult.value.data;
-        if (Array.isArray(coachesData?.coaches) && coachesData.coaches.length) {
-          dedicatedCoaches = cleanCoachProfiles(coachesData.coaches, fallbackAccount);
-        }
-      } else {
-        workspaceConfigWarnings.push("coaches");
-      }
-    } else {
-      workspaceConfigWarnings.push("coaches");
-    }
-    if (dedicatedLocations) {
-      setLocations(dedicatedLocations);
-    } else if (Array.isArray(data.locations) && data.locations.length) {
+    if (Array.isArray(data.locations) && data.locations.length) {
       setLocations(cleanLocations(data.locations, fallbackAccount));
     }
-    if (dedicatedCoaches) {
-      setCoachProfiles(dedicatedCoaches);
-    } else if (Array.isArray(data.coaches) && data.coaches.length) {
+    if (Array.isArray(data.coaches) && data.coaches.length) {
       setCoachProfiles(cleanCoachProfiles(data.coaches, fallbackAccount));
-    }
-    if (workspaceConfigWarnings.length) {
-      setToast({ message: `Workspace ${workspaceConfigWarnings.join(" and ")} loaded from calendar state. Dedicated endpoint will refresh shortly.` });
     }
     if (data.currentUser) setCurrentAppUser(cleanAppUser(data.currentUser, defaultAppUserFromCoachAccount(data.account ?? coachAccount), loadedAccountId));
     if (Array.isArray(data.availability)) {
@@ -4798,20 +4738,85 @@ function App() {
       setCalendarSyncKey(data.syncKey);
     }
     applyNotificationSettings(data.settings);
-    if (
-      adminSettingsResult.status === "fulfilled" &&
-      adminSettingsResult.value.response.ok &&
-      adminSettingsResult.value.data
-    ) {
-      applyNotificationSettings(adminSettingsResult.value.data);
-    } else {
-      // Keep the notification settings from /api/calendar-state if admin settings read fails.
-    }
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
     applyGoogleCalendarStatus(data.googleCalendar);
     hasLoadedCalendarApiRef.current = true;
+    refreshAdminWorkspaceDetails(runId, fallbackAccount);
     return true;
+  }
+
+  function shouldApplyAdminWorkspaceDetail(runId: number) {
+    return adminHydrationRunIdRef.current === runId && !hasActiveAdminSave();
+  }
+
+  function refreshAdminWorkspaceDetails(runId: number, fallbackAccount: Partial<CoachAccount>) {
+    const locationVersion = locationSaveVersionRef.current;
+    const coachVersion = coachSaveVersionRef.current;
+    const settingsSaveVersion = settingsSaveVersionRef.current;
+    const settingsDraftVersion = notificationSettingsDraftVersionRef.current;
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/locations", {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!shouldApplyAdminWorkspaceDetail(runId) || locationSaveVersionRef.current !== locationVersion) return;
+        if (!response.ok) {
+          console.warn("admin_workspace_detail_load_failed", { detail: "locations", status: response.status });
+          return;
+        }
+        const data = (await response.json()) as { locations?: Location[] };
+        if (Array.isArray(data.locations) && data.locations.length) {
+          setLocations(cleanLocations(data.locations, fallbackAccount));
+        }
+      } catch (error) {
+        console.warn("admin_workspace_detail_load_failed", { detail: "locations", error });
+      }
+    })();
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/coaches", {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!shouldApplyAdminWorkspaceDetail(runId) || coachSaveVersionRef.current !== coachVersion) return;
+        if (!response.ok) {
+          console.warn("admin_workspace_detail_load_failed", { detail: "coaches", status: response.status });
+          return;
+        }
+        const data = (await response.json()) as { coaches?: CoachProfile[] };
+        if (Array.isArray(data.coaches) && data.coaches.length) {
+          setCoachProfiles(cleanCoachProfiles(data.coaches, fallbackAccount));
+        }
+      } catch (error) {
+        console.warn("admin_workspace_detail_load_failed", { detail: "coaches", error });
+      }
+    })();
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/admin-settings", { headers: { Accept: "application/json" } });
+        if (
+          !shouldApplyAdminWorkspaceDetail(runId) ||
+          settingsSaveVersionRef.current !== settingsSaveVersion ||
+          notificationSettingsDraftVersionRef.current !== settingsDraftVersion
+        ) {
+          return;
+        }
+        if (!response.ok) {
+          console.warn("admin_workspace_detail_load_failed", { detail: "admin-settings", status: response.status });
+          return;
+        }
+        applyNotificationSettings((await response.json()) as Partial<NotificationSettings>);
+      } catch (error) {
+        console.warn("admin_workspace_detail_load_failed", { detail: "admin-settings", error });
+      }
+    })();
   }
 
   async function loadPublicBookingState() {
@@ -7260,6 +7265,7 @@ function App() {
   }
 
   function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
+    notificationSettingsDraftVersionRef.current += 1;
     setSettingsSaveState("idle");
     setSettingsSaveError("");
     setNotificationSettings((current) => ({ ...current, [field]: value }));
