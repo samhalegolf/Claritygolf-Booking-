@@ -1765,6 +1765,181 @@ export async function handlePublicBookingSubmitRequest(req: Request) {
   }
 }
 
+function normalizePublicContact(value: unknown) {
+  return cleanString(value, "", 180)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function matchesPublicNotificationContact(item: any, email: string, phone: string) {
+  if (item?.kind !== "appointment") return false;
+  const itemEmail = normalizePublicContact(item.email);
+  const itemPhone = normalizePublicContact(item.phone);
+  if (!itemEmail || itemEmail !== email) return false;
+  return !itemPhone || !phone || itemPhone === phone;
+}
+
+function notificationResultFromRecord(notification: any) {
+  const kind = cleanString(notification?.kind, "", 120);
+  const status = cleanString(notification?.status, "", 80);
+  const channel = kind.includes("admin")
+    ? "admin"
+    : kind.includes("coach")
+      ? "coach"
+      : "client";
+  return {
+    channel,
+    recipient: notification?.recipient || "",
+    subject: notification?.subject || "",
+    kind,
+    status,
+    sent: ["sent", "delivered", "opened", "clicked"].includes(status),
+    id: notification?.providerId || "",
+    reason: notification?.error || "",
+  };
+}
+
+function notificationRowToRecord(row: any) {
+  return {
+    id: row.id,
+    personKey: row.person_key || "",
+    calendarItemId: row.calendar_item_id || "",
+    recipient: row.recipient || "",
+    subject: row.subject || "",
+    kind: row.kind || "",
+    status: row.status || "",
+    provider: row.provider || "",
+    providerId: row.provider_id || "",
+    error: row.error || "",
+    createdAt: row.created_at || "",
+  };
+}
+
+function clientNotificationRecords(records: any[] = [], appointmentId = "") {
+  return records.filter(
+    (record) =>
+      (!appointmentId || record.calendarItemId === appointmentId) &&
+      cleanString(record.kind, "", 120).includes("client_email"),
+  );
+}
+
+async function readPublicNotificationRecords(appointmentId: string) {
+  const rows = await supabase("notification_history", {
+    query: `select=*&calendar_item_id=eq.${encodeURIComponent(appointmentId)}&order=created_at.desc&limit=50`,
+  });
+  return rows.map(notificationRowToRecord);
+}
+
+export async function handlePublicBookingNotificationsRequest(req: Request) {
+  try {
+    const payload = await parseBody(req);
+    const appointmentId = cleanString(
+      payload?.appointmentId || payload?.appointment || "",
+      "",
+      120,
+    );
+    const email = normalizePublicContact(payload?.email);
+    const phone = normalizePublicContact(payload?.phone);
+    const action = payload?.kind === "reschedule" ? "rescheduled" : "booking";
+
+    if (!appointmentId || !email) {
+      return json(
+        { error: "request_error", message: "Booking email details are missing." },
+        400,
+      );
+    }
+
+    const state = await readPublicBookingState();
+    const appointment = state.items.find((item) => item.id === appointmentId);
+    if (!appointment || !matchesPublicNotificationContact(appointment, email, phone)) {
+      return json(
+        {
+          error: "request_error",
+          message: "That booking could not be verified for email notification.",
+        },
+        404,
+      );
+    }
+
+    const existing = clientNotificationRecords(
+      await readPublicNotificationRecords(appointmentId),
+      appointmentId,
+    ).filter((notification) => notification.kind.startsWith(`${action}_`));
+    if (existing.some((notification) => notification.status === "sent")) {
+      return json({
+        ok: true,
+        alreadySent: true,
+        results: existing.map(notificationResultFromRecord),
+      });
+    }
+
+    const results = (
+      // Public booking emails are immediate. The 30-second correction window is
+      // only for admin calendar edits handled by processAdminNotificationDebounce.
+      await notifyBookingEvent({
+        action,
+        appointment,
+        source: "public-booking-notifications",
+      })
+    ).filter(
+      (result: any) =>
+        result?.channel === "client" ||
+        cleanString(result?.kind, "", 120).includes("client_email"),
+    );
+    return json({
+      ok: results.some((result: any) => result.sent),
+      alreadySent: false,
+      results,
+      notifications: clientNotificationRecords(
+        await readPublicNotificationRecords(appointmentId),
+        appointmentId,
+      ),
+    });
+  } catch (error: any) {
+    console.error("public_booking_notifications_direct:failed", error);
+    return json(
+      {
+        error: "request_error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Booking email could not be sent.",
+      },
+      error?.status || 500,
+    );
+  }
+}
+
+export async function handlePublicNotificationStatusRequest(req: Request) {
+  try {
+    const url = new URL(req.url);
+    const appointmentId = cleanString(url.searchParams.get("appointment") || "", "", 120);
+    const email = normalizePublicContact(url.searchParams.get("email") || "");
+    const phone = normalizePublicContact(url.searchParams.get("phone") || "");
+    if (!appointmentId || (!email && !phone)) return json({ sent: false }, 400);
+
+    const state = await readPublicBookingState();
+    const appointment = state.items.find((item) => item.id === appointmentId);
+    if (!appointment || !matchesPublicNotificationContact(appointment, email, phone)) {
+      return json({ sent: false }, 404);
+    }
+
+    const notification = clientNotificationRecords(
+      await readPublicNotificationRecords(appointmentId),
+      appointmentId,
+    )[0];
+    return json({
+      sent: ["sent", "delivered", "opened", "clicked"].includes(
+        notification?.status || "",
+      ),
+      notification: notification ? notificationResultFromRecord(notification) : null,
+    });
+  } catch (error) {
+    console.error("public_notification_status_direct:failed", error);
+    return json({ sent: false }, 500);
+  }
+}
+
 async function parseBody(req: Request) {
   const raw = await req.text();
   return raw ? JSON.parse(raw) : {};

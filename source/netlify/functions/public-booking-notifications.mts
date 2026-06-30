@@ -1,9 +1,9 @@
-import type { Config, Context } from "@netlify/functions";
+import type { Config } from "@netlify/functions";
 
-import { handleBookingApiRoute } from "./booking-core.mts";
+import { handlePublicBookingNotificationsRequest } from "./calendar-state.mts";
 
-export default async function handler(req: Request, context: Context) {
-  return handleBookingApiRoute(req, "/api/public-booking-notifications", context);
+export default async function handler(req: Request) {
+  return handlePublicBookingNotificationsRequest(req);
 }
 
 export const config: Config = {

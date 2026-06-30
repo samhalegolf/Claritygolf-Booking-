@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
 
-import { handlePublicNotificationStatusRequest } from "./booking-core.mts";
+import { handlePublicNotificationStatusRequest } from "./calendar-state.mts";
 
 export default async (req: Request) => handlePublicNotificationStatusRequest(req);
 
