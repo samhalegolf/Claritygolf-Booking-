@@ -2240,6 +2240,36 @@ async function writePublicBookingState(currentState, items) {
   };
 }
 
+function schedulePublicBookingSideEffects(context, appointment) {
+  const task = (async () => {
+    await importPeople([personFromAppointment(appointment)].filter(Boolean), "appointment");
+    await syncGoogleCalendarIfEnabled().catch((error) =>
+      console.error("public_booking:google_calendar_sync_failed", error),
+    );
+  })().catch((error) => console.error("public_booking:side_effects_failed", appointment?.id, error));
+
+  if (context && typeof context.waitUntil === "function") {
+    context.waitUntil(task);
+  }
+}
+
+async function writePublicBookingAppointment(currentState, appointment, context = null) {
+  const cleanItems = await writeItems([appointment]);
+  const updatedAt = nowIso();
+  await setSetting("updatedAt", updatedAt);
+  const savedAppointment = cleanItems.find((item) => item.id === appointment.id) || appointment;
+  schedulePublicBookingSideEffects(context, savedAppointment);
+  return {
+    syncKey: currentState.syncKey,
+    updatedAt,
+    items: cleanItems,
+    services: currentState.services,
+    availability: currentState.availability,
+    brand: currentState.brand,
+    account: currentState.account,
+  };
+}
+
 function publicCalendarState(state) {
   return {
     syncKey: state.syncKey,
@@ -3375,12 +3405,8 @@ async function createPublicBooking(payload, context = null) {
     note: "Booked from public booking page.",
     ...(customGroup || {}),
   };
-  await writePublicBookingState(state, [...state.items, appointment]);
-  const notifications = await sendInitialBookingNotifications(
-    appointment,
-    "booking",
-  );
-  return { appointment, notifications };
+  const nextState = await writePublicBookingAppointment(state, appointment, context);
+  return { appointment, notifications: [], state: nextState };
 }
 
 export async function handlePublicBookingRequest(req, context = null) {
@@ -3397,6 +3423,7 @@ export async function handlePublicBookingRequest(req, context = null) {
         start: result.appointment.start,
         duration: result.appointment.duration,
       },
+      state: { items: result.state?.items || [] },
       notifications: clientNotificationResults(result.notifications),
     });
   } catch (error) {
