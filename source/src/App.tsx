@@ -6934,6 +6934,9 @@ function App() {
   async function persistLocations(nextLocations: Location[], message = "Locations saved.") {
     const snapshot = locations;
     const clean = cleanLocations(nextLocations, coachAccount);
+    const expectedIds = clean.map((location) => location.id).filter(Boolean);
+    const includesExpectedLocations = (records: Location[] | undefined) =>
+      Array.isArray(records) && expectedIds.every((id) => records.some((location) => location.id === id));
     setLocations(clean);
     setLocationSaveState("saving");
     try {
@@ -6951,6 +6954,39 @@ function App() {
       if (!response.ok) throw new Error(await readApiFailure(response, "Location save failed"));
       const data = (await response.json()) as { locations?: Location[] };
       const saved = cleanLocations(data.locations, coachAccount);
+      if (!includesExpectedLocations(saved)) {
+        throw new Error("Location save failed: PUT /api/locations did not return the new location.");
+      }
+      const locationsResponse = await fetch("/api/locations", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (locationsResponse.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!locationsResponse.ok) throw new Error(await readApiFailure(locationsResponse, "Location save failed"));
+      const locationsData = (await locationsResponse.json()) as { locations?: Location[] };
+      const loadedLocations = cleanLocations(locationsData.locations, coachAccount);
+      if (!includesExpectedLocations(loadedLocations)) {
+        throw new Error("Location save failed: GET /api/locations did not return the new location.");
+      }
+      const calendarResponse = await fetch("/api/calendar-state", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (calendarResponse.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!calendarResponse.ok) throw new Error(await readApiFailure(calendarResponse, "Location save failed"));
+      const calendarData = (await calendarResponse.json()) as { locations?: Location[] };
+      const calendarLocations = cleanLocations(calendarData.locations, coachAccount);
+      if (!includesExpectedLocations(calendarLocations)) {
+        throw new Error("Location saved, but /api/calendar-state did not return it yet.");
+      }
       setLocations(saved);
       setLocationSaveState("saved");
       setToast({ message });
@@ -7060,12 +7096,17 @@ function App() {
   async function persistCoaches(nextCoaches: CoachProfile[], message = "Coaches saved.") {
     const snapshot = coachProfiles;
     const clean = cleanCoachProfiles(nextCoaches, coachAccount);
+    const expectedIds = clean.map((coach) => coach.id).filter(Boolean);
+    const includesExpectedCoaches = (records: CoachProfile[] | undefined) =>
+      Array.isArray(records) && expectedIds.every((id) => records.some((coach) => coach.id === id));
     setCoachProfiles(clean);
     setCoachSaveState("saving");
     try {
       const response = await fetch("/api/coaches", {
         method: "PUT",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
+        cache: "no-store",
         body: JSON.stringify({ coaches: clean }),
       });
       if (response.status === 401) {
@@ -7074,7 +7115,41 @@ function App() {
       }
       if (!response.ok) throw new Error(await readApiFailure(response, "Coach save failed"));
       const data = (await response.json()) as { coaches?: CoachProfile[] };
-      setCoachProfiles(cleanCoachProfiles(data.coaches, coachAccount));
+      const saved = cleanCoachProfiles(data.coaches, coachAccount);
+      if (!includesExpectedCoaches(saved)) {
+        throw new Error("Coach save failed: PUT /api/coaches did not return the new coach.");
+      }
+      const coachesResponse = await fetch("/api/coaches", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (coachesResponse.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!coachesResponse.ok) throw new Error(await readApiFailure(coachesResponse, "Coach save failed"));
+      const coachesData = (await coachesResponse.json()) as { coaches?: CoachProfile[] };
+      const loadedCoaches = cleanCoachProfiles(coachesData.coaches, coachAccount);
+      if (!includesExpectedCoaches(loadedCoaches)) {
+        throw new Error("Coach save failed: GET /api/coaches did not return the new coach.");
+      }
+      const calendarResponse = await fetch("/api/calendar-state", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (calendarResponse.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!calendarResponse.ok) throw new Error(await readApiFailure(calendarResponse, "Coach save failed"));
+      const calendarData = (await calendarResponse.json()) as { coaches?: CoachProfile[] };
+      const calendarCoaches = cleanCoachProfiles(calendarData.coaches, coachAccount);
+      if (!includesExpectedCoaches(calendarCoaches)) {
+        throw new Error("Coach saved, but /api/calendar-state did not return it yet.");
+      }
+      setCoachProfiles(saved);
       setCoachSaveState("saved");
       setToast({ message });
       window.setTimeout(() => setCoachSaveState("idle"), 1600);
