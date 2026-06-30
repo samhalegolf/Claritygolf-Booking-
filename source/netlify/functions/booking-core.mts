@@ -8,7 +8,7 @@ import {
 } from "node:crypto";
 
 import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
-import { notifyBookingEvent } from "./notification-engine.mts";
+import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
 
 const sessionCookieName = "clarity_session";
 const sessionDays = 7;
@@ -24,6 +24,8 @@ const CUSTOM_GROUP_DEFAULTS = {
   minParticipants: 2,
   maxParticipants: 5,
 };
+const ADMIN_NOTIFICATION_DEBOUNCE_MS = 30_000;
+const ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY = "adminNotificationDebounceQueueJson";
 const BOOKING_SCREEN_IDS = new Set([
   "main",
   "range-three-kings",
@@ -2950,6 +2952,23 @@ async function readPublicCalendarState() {
   };
 }
 
+async function readFastPublicCalendarState() {
+  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
+  const account = coachAccountFromSettings(settingsMap);
+  return {
+    syncKey,
+    updatedAt,
+    items: await readItems(),
+    services: servicesFromSettings(settingsMap),
+    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
+    coaches: coachProfilesFromSettings(settingsMap, account),
+    locations: locationsFromSettings(settingsMap, account),
+    availability: availabilityFromSettings(settingsMap),
+    brand: brandSettingsFromSettings(settingsMap, account),
+    account,
+  };
+}
+
 async function runPublicDiagnostics() {
   const diagnostics = {};
   const checks = {
@@ -3231,6 +3250,36 @@ async function writePublicBookingState(currentState, items) {
   };
 }
 
+function schedulePublicBookingSideEffects(context, appointment) {
+  const task = (async () => {
+    await importPeople([personFromAppointment(appointment)].filter(Boolean), "appointment");
+    await syncGoogleCalendarIfEnabled().catch((error) =>
+      console.error("public_booking:google_calendar_sync_failed", error),
+    );
+  })().catch((error) => console.error("public_booking:side_effects_failed", appointment?.id, error));
+
+  if (context && typeof context.waitUntil === "function") {
+    context.waitUntil(task);
+  }
+}
+
+async function writePublicBookingAppointment(currentState, appointment, context = null) {
+  const cleanItems = await writeItems([appointment]);
+  const updatedAt = nowIso();
+  await setSetting("updatedAt", updatedAt);
+  const savedAppointment = cleanItems.find((item) => item.id === appointment.id) || appointment;
+  schedulePublicBookingSideEffects(context, savedAppointment);
+  return {
+    syncKey: currentState.syncKey,
+    updatedAt,
+    items: cleanItems,
+    services: currentState.services,
+    availability: currentState.availability,
+    brand: currentState.brand,
+    account: currentState.account,
+  };
+}
+
 function publicCalendarState(state) {
   return {
     syncKey: state.syncKey,
@@ -3284,82 +3333,286 @@ export function publicBookingState(state) {
   };
 }
 
-function queueBookingNotifications(appointment, options = {}, context = null) {
-  if (!appointment?.email && options.kind !== "admin") return;
-  const task = sendBookingNotifications(appointment, options).catch((error) => {
-    console.error("Queued booking notifications failed", error);
+function appointmentPositionSignature(item) {
+  if (!item) return "";
+  return JSON.stringify({
+    week: Number(item.week ?? 0),
+    day: Number(item.day ?? 0),
+    start: Number(item.start ?? 0),
+    duration: Number(item.duration ?? 0),
+    serviceId: cleanString(item.serviceId || item.service_id, "", 140),
   });
-  if (context?.waitUntil) {
-    context.waitUntil(task);
-    return;
-  }
-  void task;
 }
 
-function appointmentSlotSignature(item) {
-  return [
-    itemWeek(item),
-    item.day,
-    item.start,
-    item.duration,
-    item.serviceId || "",
-  ].join(":");
+function appointmentNotificationSignature(item) {
+  if (!item) return "";
+  return JSON.stringify({
+    position: appointmentPositionSignature(item),
+    client: cleanString(item.client || item.title, "", 160),
+    title: cleanString(item.title, "", 160),
+    phone: cleanString(item.phone, "", 80),
+    email: cleanEmail(item.email, ""),
+    status: cleanString(item.status, "booked", 40),
+    customGroup: item.customGroup === true,
+    calculatedPrice: Number(item.calculatedPrice ?? 0),
+    attendees: Array.isArray(item.attendees)
+      ? item.attendees.map((attendee) => ({
+          id: cleanString(attendee?.id, "", 120),
+          name: cleanString(attendee?.name, "", 120),
+          email: cleanEmail(attendee?.email, ""),
+          status: cleanString(attendee?.status, "", 40),
+          token: cleanString(attendee?.token, "", 220),
+        }))
+      : [],
+  });
 }
 
-function appointmentContactSignature(item) {
-  return [item.client || item.title || "", item.email || "", item.phone || ""]
-    .join(":")
-    .toLowerCase();
-}
-
-function notificationJobsForCalendarChange(previousItems = [], nextItems = []) {
-  const previousById = new Map(
-    previousItems
-      .filter((item) => item.kind === "appointment")
-      .map((item) => [item.id, item]),
+function appointmentById(items = []) {
+  return new Map(
+    items
+      .filter((item) => item?.kind === "appointment" && item?.id)
+      .map((item) => [String(item.id), item]),
   );
-  return nextItems
-    .filter((item) => item.kind === "appointment" && item.email)
-    .map((item) => {
-      const previous = previousById.get(item.id);
-      if (!previous) return { appointment: item, kind: "booking" };
-      if (
-        appointmentSlotSignature(previous) !== appointmentSlotSignature(item)
-      ) {
-        return { appointment: item, kind: "reschedule" };
-      }
-      if (!previous.email && item.email)
-        return { appointment: item, kind: "booking" };
-      if (
-        appointmentContactSignature(previous) !==
-        appointmentContactSignature(item)
-      )
-        return null;
-      return null;
-    })
-    .filter(Boolean);
 }
 
-async function sendCalendarChangeNotifications(
+function parseTimestamp(value) {
+  const timestamp = Date.parse(typeof value === "string" ? value : "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function slotDateParts(week = 0, day = 0) {
+  const date = new Date(baseWeekStart);
+  date.setUTCDate(baseWeekStart.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
+}
+
+function nowInTimeZoneParts(timeZone = "Pacific/Auckland") {
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat("en-NZ", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date());
+  } catch {
+    parts = new Intl.DateTimeFormat("en-NZ", {
+      timeZone: "Pacific/Auckland",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date());
+  }
+  const value = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+  return {
+    year: value("year"),
+    month: value("month"),
+    day: value("day"),
+    minutes: value("hour") * 60 + value("minute"),
+  };
+}
+
+function dateSortValue(parts) {
+  return parts.year * 10000 + parts.month * 100 + parts.day;
+}
+
+function isAppointmentInPast(item, timeZone = "Pacific/Auckland") {
+  if (!item || item.kind !== "appointment") return false;
+  const slotDate = slotDateParts(Number(item.week ?? 0), Number(item.day ?? 0));
+  const now = nowInTimeZoneParts(timeZone);
+  const slotValue = dateSortValue(slotDate);
+  const nowValue = dateSortValue(now);
+  if (slotValue !== nowValue) return slotValue < nowValue;
+  return Number(item.start ?? 0) < now.minutes;
+}
+
+function cleanPendingAdminNotification(value) {
+  const calendarItemId = cleanString(value?.calendarItemId, "", 180);
+  const action =
+    value?.action === "rescheduled" || value?.action === "updated"
+      ? value.action
+      : value?.action === "booking"
+        ? "booking"
+        : "";
+  if (!calendarItemId || !action || !value?.appointment) return null;
+  return {
+    calendarItemId,
+    action,
+    queuedAt: cleanString(value?.queuedAt, nowIso(), 80),
+    fireAfter: cleanString(value?.fireAfter, nowIso(), 80),
+    originalPositionSignature: cleanString(value?.originalPositionSignature, "", 800),
+    targetSignature: cleanString(value?.targetSignature, "", 1600),
+    appointment: value.appointment,
+    previousAppointment: value.previousAppointment || null,
+  };
+}
+
+async function readPendingAdminNotifications() {
+  try {
+    const parsed = JSON.parse((await getSetting(ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY)) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(cleanPendingAdminNotification).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function writePendingAdminNotifications(queue) {
+  await setSetting(ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY, JSON.stringify(queue));
+}
+
+async function processAdminNotificationDebounce(
   previousItems = [],
   nextItems = [],
+  options = {},
 ) {
+  const now = Date.now();
+  const timeZone = cleanString(options.timeZone, "Pacific/Auckland", 80);
+  const queueById = new Map(
+    (await readPendingAdminNotifications()).map((entry) => [
+      entry.calendarItemId,
+      entry,
+    ]),
+  );
+  const previousById = appointmentById(previousItems);
+  const nextById = appointmentById(nextItems);
   const results = [];
-  for (const { appointment, kind } of notificationJobsForCalendarChange(
-    previousItems,
-    nextItems,
-  )) {
-    try {
-      results.push(...(await sendBookingNotifications(appointment, { kind })));
-    } catch (error) {
-      console.error(
-        "Calendar change notification failed",
-        appointment?.id,
-        kind,
-        error,
-      );
+  let queueChanged = false;
+
+  if (options.queueDiffs !== false) {
+    const ids = new Set([...previousById.keys(), ...nextById.keys()]);
+    const queuedAt = nowIso();
+    const fireAfter = new Date(now + ADMIN_NOTIFICATION_DEBOUNCE_MS).toISOString();
+
+    for (const id of ids) {
+      const previous = previousById.get(id);
+      const next = nextById.get(id);
+      const action = inferBookingAction(previous, next);
+      if (!action) continue;
+
+      const existing = queueById.get(id);
+      if (next && isAppointmentInPast(next, timeZone)) {
+        if (existing) {
+          queueById.delete(id);
+          queueChanged = true;
+        }
+        continue;
+      }
+
+      if (action === "booking" && next) {
+        queueById.set(id, {
+          calendarItemId: id,
+          action: "booking",
+          queuedAt,
+          fireAfter,
+          originalPositionSignature: "",
+          targetSignature: appointmentNotificationSignature(next),
+          appointment: next,
+          previousAppointment: null,
+        });
+        queueChanged = true;
+        continue;
+      }
+
+      if ((action === "rescheduled" || action === "updated") && next) {
+        const isPendingInitialBooking = existing?.action === "booking";
+        const originalPrevious = isPendingInitialBooking
+          ? null
+          : existing?.previousAppointment || previous || null;
+        const originalPositionSignature =
+          existing?.originalPositionSignature ||
+          (previous ? appointmentPositionSignature(previous) : "");
+        if (
+          existing &&
+          !isPendingInitialBooking &&
+          originalPositionSignature &&
+          appointmentPositionSignature(next) === originalPositionSignature
+        ) {
+          queueById.delete(id);
+          queueChanged = true;
+          continue;
+        }
+
+        queueById.set(id, {
+          calendarItemId: id,
+          action: isPendingInitialBooking ? "booking" : action,
+          queuedAt,
+          fireAfter,
+          originalPositionSignature: isPendingInitialBooking ? "" : originalPositionSignature,
+          targetSignature: appointmentNotificationSignature(next),
+          appointment: next,
+          previousAppointment: originalPrevious,
+        });
+        queueChanged = true;
+        continue;
+      }
+
+      if (action === "cancelled" && previous) {
+        if (isAppointmentInPast(previous, timeZone)) {
+          if (existing) {
+            queueById.delete(id);
+            queueChanged = true;
+          }
+          continue;
+        }
+        if (existing?.action === "booking") {
+          queueById.delete(id);
+          queueChanged = true;
+          continue;
+        }
+        if (existing) {
+          queueById.delete(id);
+          queueChanged = true;
+        }
+        results.push(
+          ...(await notifyBookingEvent({
+            action,
+            appointment: previous,
+            previousAppointment: previous,
+            source: "calendar-state",
+          })),
+        );
+      }
     }
   }
+
+  for (const [id, pending] of [...queueById.entries()]) {
+    if (parseTimestamp(pending.fireAfter) > now) continue;
+
+    const current = nextById.get(id);
+    queueById.delete(id);
+    queueChanged = true;
+    if (!current) continue;
+    if (isAppointmentInPast(current, timeZone)) continue;
+    if (appointmentNotificationSignature(current) !== pending.targetSignature) continue;
+    if (
+      pending.originalPositionSignature &&
+      appointmentPositionSignature(current) === pending.originalPositionSignature
+    ) {
+      continue;
+    }
+
+    results.push(
+      ...(await notifyBookingEvent({
+        action: pending.action,
+        appointment: current,
+        previousAppointment: pending.previousAppointment,
+        source: "calendar-state-admin-debounce",
+      })),
+    );
+  }
+
+  if (queueChanged) await writePendingAdminNotifications([...queueById.values()]);
   return results;
 }
 
@@ -4411,7 +4664,7 @@ function hasCollision(items, candidate, service, state = {}) {
 }
 
 async function createPublicBooking(payload, context = null) {
-  const state = await readPublicCalendarState();
+  const state = await readFastPublicCalendarState();
   const workspaceAccount =
     (state.workspaceAccounts || []).find((account) => account.id === defaultAccountId(state.workspaceAccounts)) ||
     (state.workspaceAccounts || [])[0] ||
@@ -4553,12 +4806,8 @@ async function createPublicBooking(payload, context = null) {
     location,
     ...(customGroup || {}),
   };
-  await writePublicBookingState(state, [...state.items, appointment]);
-  const notifications = await sendInitialBookingNotifications(
-    appointment,
-    "booking",
-  );
-  return { appointment, notifications };
+  const nextState = await writePublicBookingAppointment(state, appointment, context);
+  return { appointment, notifications: [], state: nextState };
 }
 
 export async function handlePublicBookingRequest(req, context = null) {
@@ -4579,6 +4828,7 @@ export async function handlePublicBookingRequest(req, context = null) {
         coach: result.appointment.coach,
         location: result.appointment.location,
       },
+      state: { items: result.state?.items || [] },
       notifications: clientNotificationResults(result.notifications),
     });
   } catch (error) {
@@ -4659,7 +4909,7 @@ export async function handlePublicNotificationStatusRequest(req) {
     const workspaceAccount = publicWorkspaceAccount(state);
     assertAccountFeature(workspaceAccount, "publicBooking");
     const appointment = state.items.find((item) => recordBelongsToAccount(item, workspaceAccount.id) && item.id === appointmentId);
-    if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
+    if (!appointment || !matchesNotificationContact(appointment, email, phone)) {
       return json({ sent: false }, 404);
     }
 
@@ -5299,6 +5549,27 @@ export async function handleBookingApiRoute(
       return json({ authenticated: false });
     }
 
+    if (req.method === "GET" && pathname === "/api/public-booking-state") {
+      return handlePublicBookingStateRequest();
+    }
+
+    if (req.method === "POST" && pathname === "/api/public-booking") {
+      return handlePublicBookingRequest(req, context);
+    }
+
+    if (req.method === "GET" && pathname === "/api/public-notification-status") {
+      return handlePublicNotificationStatusRequest(req);
+    }
+
+    if (
+      req.method === "POST" &&
+      pathname === "/api/public-booking-notifications"
+    ) {
+      return json(
+        await triggerPublicBookingNotifications(await parseBody(req)),
+      );
+    }
+
     if (pathname.startsWith("/api/auth/")) {
       await ensureAuthReady();
     } else {
@@ -5466,6 +5737,14 @@ export async function handleBookingApiRoute(
       return handlePublicBookingStateRequest();
     }
 
+    if (req.method === "POST" && pathname === "/api/public-booking") {
+      return handlePublicBookingRequest(req, context);
+    }
+
+    if (req.method === "GET" && pathname === "/api/public-notification-status") {
+      return handlePublicNotificationStatusRequest(req);
+    }
+
     if (
       req.method === "POST" &&
       pathname === "/api/public-booking-notifications"
@@ -5505,7 +5784,24 @@ export async function handleBookingApiRoute(
     if (req.method === "GET" && pathname === "/api/calendar-state") {
       const state = await readCalendarState();
       const requestContext = await resolveBackendRequestContext(req, state);
-      return json(publicCalendarState(filterCalendarStateForContext(state, requestContext)));
+      let notificationResults = [];
+      try {
+        notificationResults = await processAdminNotificationDebounce(
+          state.items,
+          state.items,
+          { queueDiffs: false, timeZone: state.account?.timezone },
+        );
+      } catch (error) {
+        console.error("calendar_state:notification_debounce_failed", error);
+      }
+      if (!notificationResults.length) {
+        return json(publicCalendarState(filterCalendarStateForContext(state, requestContext)));
+      }
+      const refreshedState = await readCalendarState();
+      return json({
+        ...publicCalendarState(filterCalendarStateForContext(refreshedState, requestContext)),
+        notificationResults,
+      });
     }
 
     if (req.method === "PUT" && pathname === "/api/calendar-state") {
@@ -5521,16 +5817,31 @@ export async function handleBookingApiRoute(
         itemsOperation: body.itemsOperation,
         updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
       }, requestContext);
-      const notificationResults = await sendCalendarChangeNotifications(
-        current.items,
-        nextState.items,
-      );
+      let notificationResults = [];
+      let notificationWarning = "";
+      try {
+        notificationResults = await processAdminNotificationDebounce(
+          current.items,
+          nextState.items,
+          { timeZone: nextState.account?.timezone },
+        );
+      } catch (error) {
+        notificationWarning =
+          "Calendar saved, but booking alerts could not be processed.";
+        console.error("calendar_state:notification_failed", error);
+      }
+      const existingWarnings = Array.isArray(nextState.warnings)
+        ? nextState.warnings
+        : [];
       return json({
         ...publicCalendarState({
           ...nextState,
           notifications: await readNotificationHistory(),
         }),
         notificationResults,
+        ...(notificationWarning
+          ? { warnings: [...new Set([...existingWarnings, notificationWarning])] }
+          : {}),
       });
     }
 
