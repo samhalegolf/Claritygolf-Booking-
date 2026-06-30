@@ -580,10 +580,24 @@ type ClientProfileTab = "bookings" | "notifications";
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
 type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
-type LessonCompleteErrorMap = Record<string, string>;
+type LessonCompleteDiagnostic = {
+  action: "lesson_complete";
+  itemId: string;
+  expectedStatus: "completed";
+  serverStatus: number;
+  message: string;
+  backendMessage?: string;
+  backendError?: string;
+  backendDetails?: string;
+  conflictSource?: string;
+  expectedRevision?: string;
+  backendRevision?: string;
+};
+type LessonCompleteErrorMap = Record<string, LessonCompleteDiagnostic>;
 type CalendarStateSaveResponse = {
   message?: string;
   error?: string;
+  details?: unknown;
   expectedUpdatedAt?: string;
   backendUpdatedAt?: string;
   conflictSource?: string;
@@ -4214,6 +4228,7 @@ function App() {
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
+    if (pendingLessonCompleteIdRef.current) return;
     const requestedFingerprint = calendarStateFingerprint(items, calendarSyncKey);
     if (requestedFingerprint === lastPersistedCalendarFingerprintRef.current) return;
     const saveVersion = ++calendarSaveVersionRef.current;
@@ -4592,7 +4607,7 @@ function App() {
   }
 
   async function startAdminWorkspaceHydration() {
-    if (isEmbedMode) return;
+    if (isEmbedMode || pendingLessonCompleteIdRef.current) return;
     const runId = ++adminHydrationRunIdRef.current;
     hasLoadedCalendarApiRef.current = false;
     setAdminWorkspaceLoadStatus("loading");
@@ -8097,10 +8112,14 @@ function App() {
     details: {
       lessonId: string;
       calendarId: string;
+      expectedStatus?: "completed";
       expectedRevision?: string;
       backendRevision?: string;
       httpStatus?: number;
       conflictSource?: string;
+      backendMessage?: string;
+      backendError?: string;
+      backendDetails?: string;
     },
   ) {
     console.warn("calendar_state:lesson_complete", {
@@ -8108,11 +8127,62 @@ function App() {
       event: label,
       lessonId: details.lessonId,
       calendarId: details.calendarId,
+      expectedStatus: details.expectedStatus || "completed",
       expectedRevision: details.expectedRevision || "",
       backendRevision: details.backendRevision || "",
       httpStatus: details.httpStatus || 0,
       conflictSource: details.conflictSource || "",
+      backendMessage: details.backendMessage || "",
+      backendError: details.backendError || "",
+      backendDetails: details.backendDetails || "",
     });
+  }
+
+  function lessonCompleteDiagnosticText(diagnostic: LessonCompleteDiagnostic) {
+    return [
+      diagnostic.message,
+      `action: ${diagnostic.action}`,
+      `item id: ${diagnostic.itemId}`,
+      `expected status: ${diagnostic.expectedStatus}`,
+      `server response status: ${diagnostic.serverStatus || "n/a"}`,
+      diagnostic.backendMessage ? `backend message: ${diagnostic.backendMessage}` : "",
+      diagnostic.backendError ? `backend error: ${diagnostic.backendError}` : "",
+      diagnostic.backendDetails ? `backend details: ${diagnostic.backendDetails}` : "",
+      diagnostic.conflictSource ? `conflict source: ${diagnostic.conflictSource}` : "",
+      diagnostic.expectedRevision ? `expected revision: ${diagnostic.expectedRevision}` : "",
+      diagnostic.backendRevision ? `backend revision: ${diagnostic.backendRevision}` : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  function lessonCompleteDiagnosticFromResponse(
+    itemId: string,
+    responseStatus: number,
+    data: CalendarStateSaveResponse,
+    fallbackMessage: string,
+    revisions: { expectedRevision?: string; backendRevision?: string; conflictSource?: string } = {},
+  ): LessonCompleteDiagnostic {
+    const backendMessage = workspaceDiagnosticValue(data.message);
+    const backendError = workspaceDiagnosticValue(data.error);
+    const backendDetails = workspaceDiagnosticValue(data.details);
+    return {
+      action: "lesson_complete",
+      itemId,
+      expectedStatus: "completed",
+      serverStatus: responseStatus,
+      message: backendMessage || backendError || fallbackMessage,
+      backendMessage,
+      backendError,
+      backendDetails,
+      conflictSource: revisions.conflictSource || workspaceDiagnosticValue(data.conflictSource),
+      expectedRevision: revisions.expectedRevision,
+      backendRevision: revisions.backendRevision || data.backendUpdatedAt || data.updatedAt,
+    };
+  }
+
+  function lessonCompleteFailure(diagnostic: LessonCompleteDiagnostic) {
+    const error = new Error(diagnostic.message) as Error & { lessonCompleteDiagnostic?: LessonCompleteDiagnostic };
+    error.lessonCompleteDiagnostic = diagnostic;
+    return error;
   }
 
   async function readLatestCalendarStateForLessonComplete(itemId: string) {
@@ -8127,15 +8197,30 @@ function App() {
       throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
     }
     if (!response.ok) {
+      const diagnostic = lessonCompleteDiagnosticFromResponse(
+        itemId,
+        response.status,
+        data,
+        "Calendar state could not be loaded before completing the lesson.",
+        {
+          expectedRevision: calendarStateVersion,
+          backendRevision: data.backendUpdatedAt || data.updatedAt,
+          conflictSource: data.conflictSource || data.error,
+        },
+      );
       logLessonCompleteDiagnostic("fetch_latest_failed", {
         lessonId: itemId,
         calendarId: "unknown",
+        expectedStatus: "completed",
         expectedRevision: calendarStateVersion,
         backendRevision: data.backendUpdatedAt || data.updatedAt,
         httpStatus: response.status,
         conflictSource: data.conflictSource || data.error,
+        backendMessage: diagnostic.backendMessage,
+        backendError: diagnostic.backendError,
+        backendDetails: diagnostic.backendDetails,
       });
-      throw new Error(data.message || data.error || "Calendar state could not be loaded.");
+      throw lessonCompleteFailure(diagnostic);
     }
     return data;
   }
@@ -8152,14 +8237,24 @@ function App() {
       : "unknown";
     const expectedRevision = typeof latest.updatedAt === "string" ? latest.updatedAt : "";
     if (!latestItem) {
+      const diagnostic: LessonCompleteDiagnostic = {
+        action: "lesson_complete",
+        itemId,
+        expectedStatus: "completed",
+        serverStatus: 404,
+        message: "Lesson was not completed because it could not be found. Reload and try again.",
+        backendError: "missing_lesson",
+        expectedRevision,
+      };
       logLessonCompleteDiagnostic("lesson_missing", {
         lessonId: itemId,
         calendarId,
+        expectedStatus: "completed",
         expectedRevision,
         httpStatus: 404,
         conflictSource: "missing_lesson",
       });
-      throw new Error("Lesson was not completed because it could not be found. Reload and try again.");
+      throw lessonCompleteFailure(diagnostic);
     }
     const nextItems = latestItems.map((item) =>
       item.id === itemId && item.kind === "appointment" ? { ...item, status: "completed" as BookingStatus } : item,
@@ -8194,15 +8289,30 @@ function App() {
       throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
     }
     if (!response.ok) {
+      const diagnostic = lessonCompleteDiagnosticFromResponse(
+        itemId,
+        response.status,
+        data,
+        "Lesson completion failed.",
+        {
+          expectedRevision,
+          backendRevision,
+          conflictSource: data.conflictSource || data.error,
+        },
+      );
       logLessonCompleteDiagnostic("save_failed", {
         lessonId: itemId,
         calendarId,
+        expectedStatus: "completed",
         expectedRevision,
         backendRevision,
         httpStatus: response.status,
         conflictSource: data.conflictSource || data.error,
+        backendMessage: diagnostic.backendMessage,
+        backendError: diagnostic.backendError,
+        backendDetails: diagnostic.backendDetails,
       });
-      throw new Error(data.message || data.error || "Lesson completion failed.");
+      throw lessonCompleteFailure(diagnostic);
     }
     logLessonCompleteDiagnostic("saved", {
       lessonId: itemId,
@@ -8216,6 +8326,8 @@ function App() {
 
   async function completeAppointmentSafely(itemId: string) {
     if (pendingLessonCompleteIdRef.current) return;
+    const completeSaveVersion = ++calendarSaveVersionRef.current;
+    adminHydrationRunIdRef.current += 1;
     pendingLessonCompleteIdRef.current = itemId;
     setPendingLessonCompleteId(itemId);
     setLessonCompleteErrors((current) => {
@@ -8239,18 +8351,35 @@ function App() {
       setCalendarSaveStatus("saved");
       setCalendarSaveError("");
       setToast({ message: "Lesson marked completed." });
-      window.setTimeout(() => setCalendarSaveStatus((current) => (current === "saved" ? "idle" : current)), 1800);
+      window.setTimeout(() => {
+        if (calendarSaveVersionRef.current === completeSaveVersion) {
+          setCalendarSaveStatus((current) => (current === "saved" ? "idle" : current));
+        }
+      }, 1800);
       window.setTimeout(() => void refreshNotificationHistory(), 1500);
       scheduleAdminNotificationDebounceFlush();
     } catch (error) {
-      const message =
-        error instanceof Error && error.message.includes("Admin login")
-          ? error.message
-          : "Lesson was not completed because calendar data changed. Reload and try again.";
+      const errorDiagnostic =
+        error instanceof Error
+          ? (error as Error & { lessonCompleteDiagnostic?: LessonCompleteDiagnostic }).lessonCompleteDiagnostic
+          : undefined;
+      const diagnostic =
+        errorDiagnostic ??
+        ({
+          action: "lesson_complete",
+          itemId,
+          expectedStatus: "completed",
+          serverStatus: 0,
+          message:
+            error instanceof Error && error.message.includes("Admin login")
+              ? error.message
+              : "Lesson was not completed because calendar data changed. Reload and try again.",
+        } satisfies LessonCompleteDiagnostic);
+      const message = diagnostic.message;
       setCalendarFeedStatus(message.includes("Admin login") ? "offline" : "connected");
       setCalendarSaveStatus("failed");
-      setCalendarSaveError(message);
-      setLessonCompleteErrors((current) => ({ ...current, [itemId]: message }));
+      setCalendarSaveError(lessonCompleteDiagnosticText(diagnostic));
+      setLessonCompleteErrors((current) => ({ ...current, [itemId]: diagnostic }));
       setToast({ message });
     } finally {
       pendingLessonCompleteIdRef.current = "";
@@ -11198,7 +11327,11 @@ function App() {
               </button>
             ))}
           </div>
-          {lessonCompleteErrors[selected.id] ? <p className="inline-error">{lessonCompleteErrors[selected.id]}</p> : null}
+          {lessonCompleteErrors[selected.id] ? (
+            <p className="inline-error" role="alert">
+              {lessonCompleteDiagnosticText(lessonCompleteErrors[selected.id])}
+            </p>
+          ) : null}
         </div>
       )}
 
