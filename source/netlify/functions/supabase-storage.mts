@@ -363,6 +363,12 @@ class SupabaseRestStore {
       ]);
       return [];
     }
+    if (sql.startsWith("select id from admin_sessions where token_hash")) {
+      return this.select(
+        "admin_sessions",
+        `select=id&token_hash=eq.${encodeFilter(values[0])}&expires_at=gt.${encodeFilter(values[1] || nowIso())}&limit=1`,
+      );
+    }
     if (sql.includes("from admin_sessions join admin_users")) {
       return this.adminSessionRows(
         values[0],

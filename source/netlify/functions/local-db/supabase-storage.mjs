@@ -217,6 +217,9 @@ class SupabaseRestStore {
       await this.insert("admin_sessions", [{ id, token_hash, user_id, expires_at, created_at: nowIso() }]);
       return [];
     }
+    if (sql.startsWith("select id from admin_sessions where token_hash")) {
+      return this.select("admin_sessions", `select=id&token_hash=eq.${encodeFilter(values[0])}&expires_at=gt.${encodeFilter(values[1] || nowIso())}&limit=1`);
+    }
     if (sql.includes("from admin_sessions join admin_users")) return this.adminSessionRows(values[0], "session");
     if (sql.includes("from admin_password_resets join admin_users")) return this.adminSessionRows(values[0], "reset");
     if (sql.startsWith("delete from admin_sessions where token_hash")) {
