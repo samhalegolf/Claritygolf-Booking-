@@ -4520,8 +4520,57 @@ function App() {
     if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
     if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
-    if (Array.isArray(data.locations) && data.locations.length) setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
-    setCoachProfiles(cleanCoachProfiles(data.coaches, data.account ?? coachAccount));
+    const fallbackAccount = data.account ?? coachAccount;
+    let dedicatedLocations: Location[] | null = null;
+    let dedicatedCoaches: CoachProfile[] | null = null;
+    const workspaceConfigWarnings: string[] = [];
+    try {
+      const locationsResponse = await fetch("/api/locations", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (locationsResponse.ok) {
+        const locationsData = (await locationsResponse.json()) as { locations?: Location[] };
+        if (Array.isArray(locationsData.locations) && locationsData.locations.length) {
+          dedicatedLocations = cleanLocations(locationsData.locations, fallbackAccount);
+        }
+      } else {
+        workspaceConfigWarnings.push("locations");
+      }
+    } catch {
+      workspaceConfigWarnings.push("locations");
+    }
+    try {
+      const coachesResponse = await fetch("/api/coaches", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (coachesResponse.ok) {
+        const coachesData = (await coachesResponse.json()) as { coaches?: CoachProfile[] };
+        if (Array.isArray(coachesData.coaches) && coachesData.coaches.length) {
+          dedicatedCoaches = cleanCoachProfiles(coachesData.coaches, fallbackAccount);
+        }
+      } else {
+        workspaceConfigWarnings.push("coaches");
+      }
+    } catch {
+      workspaceConfigWarnings.push("coaches");
+    }
+    if (dedicatedLocations) {
+      setLocations(dedicatedLocations);
+    } else if (Array.isArray(data.locations) && data.locations.length) {
+      setLocations(cleanLocations(data.locations, fallbackAccount));
+    }
+    if (dedicatedCoaches) {
+      setCoachProfiles(dedicatedCoaches);
+    } else if (Array.isArray(data.coaches) && data.coaches.length) {
+      setCoachProfiles(cleanCoachProfiles(data.coaches, fallbackAccount));
+    }
+    if (workspaceConfigWarnings.length) {
+      setToast({ message: `Workspace ${workspaceConfigWarnings.join(" and ")} loaded from calendar state. Dedicated endpoint will refresh shortly.` });
+    }
     if (data.currentUser) setCurrentAppUser(cleanAppUser(data.currentUser, defaultAppUserFromCoachAccount(data.account ?? coachAccount), loadedAccountId));
     if (Array.isArray(data.availability)) {
       setAvailability(cleanAvailability(data.availability).map((day) => day.map((window) => ({ ...window, accountId: window.accountId || loadedAccountId }))));
@@ -7068,23 +7117,6 @@ function App() {
         const detail = await readApiFailure(response, "Location save failed");
         throwWorkspaceSaveFailure("Location", "PUT /api/locations", "location_put_failed", diagnostic, detail);
       }
-      const data = await readWorkspaceSaveJson<{ locations?: Location[] }>(
-        response,
-        "Location",
-        "PUT /api/locations",
-        "location_put_failed",
-        diagnostic,
-      );
-      const saved = cleanLocations(data.locations, coachAccount);
-      diagnostic.putRecords = saved;
-      assertExpectedWorkspaceRecords(
-        saved,
-        "Location",
-        "PUT /api/locations",
-        "location_put_missing_expected_id",
-        "location_put_account_mismatch",
-        diagnostic,
-      );
       const locationsResponse = await fetch("/api/locations", {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -7116,38 +7148,7 @@ function App() {
         "location_get_account_mismatch",
         diagnostic,
       );
-      const calendarResponse = await fetch("/api/calendar-state", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      diagnostic.calendarStatus = calendarResponse.status;
-      if (calendarResponse.status === 401) {
-        setAuthStatus("guest");
-        throw new Error("Admin login required");
-      }
-      if (!calendarResponse.ok) {
-        const detail = await readApiFailure(calendarResponse, "Location save failed");
-        throwWorkspaceSaveFailure("Location", "GET /api/calendar-state", "location_calendar_state_failed", diagnostic, detail);
-      }
-      const calendarData = await readWorkspaceSaveJson<{ locations?: Location[] }>(
-        calendarResponse,
-        "Location",
-        "GET /api/calendar-state",
-        "location_calendar_state_failed",
-        diagnostic,
-      );
-      const calendarLocations = cleanLocations(calendarData.locations, coachAccount);
-      diagnostic.calendarRecords = calendarLocations;
-      assertExpectedWorkspaceRecords(
-        calendarLocations,
-        "Location",
-        "GET /api/calendar-state",
-        "location_calendar_state_missing_expected_id",
-        "location_calendar_state_account_mismatch",
-        diagnostic,
-      );
-      setLocations(saved);
+      setLocations(loadedLocations);
       setLocationSaveState("saved");
       setToast({ message });
       window.setTimeout(() => setLocationSaveState("idle"), 1600);
@@ -7279,23 +7280,6 @@ function App() {
         const detail = await readApiFailure(response, "Coach save failed");
         throwWorkspaceSaveFailure("Coach", "PUT /api/coaches", "coach_put_failed", diagnostic, detail);
       }
-      const data = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
-        response,
-        "Coach",
-        "PUT /api/coaches",
-        "coach_put_failed",
-        diagnostic,
-      );
-      const saved = cleanCoachProfiles(data.coaches, coachAccount);
-      diagnostic.putRecords = saved;
-      assertExpectedWorkspaceRecords(
-        saved,
-        "Coach",
-        "PUT /api/coaches",
-        "coach_put_missing_expected_id",
-        "coach_put_account_mismatch",
-        diagnostic,
-      );
       const coachesResponse = await fetch("/api/coaches", {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -7327,38 +7311,7 @@ function App() {
         "coach_get_account_mismatch",
         diagnostic,
       );
-      const calendarResponse = await fetch("/api/calendar-state", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      diagnostic.calendarStatus = calendarResponse.status;
-      if (calendarResponse.status === 401) {
-        setAuthStatus("guest");
-        throw new Error("Admin login required");
-      }
-      if (!calendarResponse.ok) {
-        const detail = await readApiFailure(calendarResponse, "Coach save failed");
-        throwWorkspaceSaveFailure("Coach", "GET /api/calendar-state", "coach_calendar_state_failed", diagnostic, detail);
-      }
-      const calendarData = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
-        calendarResponse,
-        "Coach",
-        "GET /api/calendar-state",
-        "coach_calendar_state_failed",
-        diagnostic,
-      );
-      const calendarCoaches = cleanCoachProfiles(calendarData.coaches, coachAccount);
-      diagnostic.calendarRecords = calendarCoaches;
-      assertExpectedWorkspaceRecords(
-        calendarCoaches,
-        "Coach",
-        "GET /api/calendar-state",
-        "coach_calendar_state_missing_expected_id",
-        "coach_calendar_state_account_mismatch",
-        diagnostic,
-      );
-      setCoachProfiles(saved);
+      setCoachProfiles(loadedCoaches);
       setCoachSaveState("saved");
       setToast({ message });
       window.setTimeout(() => setCoachSaveState("idle"), 1600);
