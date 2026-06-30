@@ -42,7 +42,20 @@ function cleanRow(row) {
   );
 }
 
-const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["status", "custom_group"]);
+const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set([
+  "account_id",
+  "status",
+  "custom_group",
+  "coach_id",
+  "location_id",
+  "coach",
+  "location",
+]);
+const CALENDAR_ITEM_JSON_COLUMNS = new Set([
+  "custom_group",
+  "coach",
+  "location",
+]);
 
 function missingOptionalCalendarItemColumn(error) {
   const message = error instanceof Error ? error.message : String(error || "");
@@ -60,6 +73,30 @@ function omitCalendarItemColumn(rows, column) {
     const { [column]: _omitted, ...rest } = row;
     return rest;
   });
+}
+
+function parseJsonParam(value, column) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return null;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    console.warn("supabase_storage:calendar_items_json_param_ignored", {
+      column,
+      error: error instanceof Error ? error.message : String(error || ""),
+    });
+    return null;
+  }
+}
+
+function calendarItemInsertColumns(sqlText) {
+  const match = String(sqlText || "").match(/insert into calendar_items\s*\(([^)]+)\)/i);
+  if (!match) return [];
+  return match[1]
+    .split(",")
+    .map((column) => column.trim())
+    .filter(Boolean);
 }
 
 async function upsertCalendarItemsAccepting(store, rows) {
@@ -235,7 +272,7 @@ class SupabaseRestStore {
       return { rows: [] };
     }
     if (sql.includes("insert into calendar_items")) {
-      await upsertCalendarItemsAccepting(this, [calendarItemFromParams(values)]);
+      await upsertCalendarItemsAccepting(this, [calendarItemFromParams(values, sql)]);
       return { rows: [] };
     }
 
@@ -548,23 +585,26 @@ class SupabaseRestStore {
   }
 }
 
-function calendarItemFromParams(values) {
-  const [
-    id,
-    kind,
-    week,
-    day,
-    start,
-    duration,
-    service_id,
-    client,
-    title,
-    phone,
-    email,
-    note,
-    status,
-    custom_group,
-  ] = values;
+function calendarItemFromParams(values, sqlText = "") {
+  const columns = calendarItemInsertColumns(sqlText);
+  if (columns.length) {
+    const row = {};
+    columns.forEach((column, index) => {
+      if (column === "created_at" || column === "updated_at") return;
+      const value = values[index];
+      row[column] = CALENDAR_ITEM_JSON_COLUMNS.has(column)
+        ? parseJsonParam(value, column)
+        : value;
+    });
+    return cleanRow({
+      ...row,
+      status: row.status || "booked",
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    });
+  }
+
+  const [id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, custom_group] = values;
   return cleanRow({
     id,
     kind,
@@ -579,7 +619,7 @@ function calendarItemFromParams(values) {
     email,
     note,
     status: status || "booked",
-    custom_group: custom_group ? JSON.parse(custom_group) : null,
+    custom_group: parseJsonParam(custom_group, "custom_group"),
     created_at: nowIso(),
     updated_at: nowIso(),
   });
