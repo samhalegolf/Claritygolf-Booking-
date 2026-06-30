@@ -1990,6 +1990,18 @@ async function readPublicCalendarState() {
   };
 }
 
+async function readFastPublicCalendarState() {
+  return {
+    syncKey: await getSetting("syncKey"),
+    updatedAt: (await getSetting("updatedAt")) || nowIso(),
+    items: await readItems(),
+    services: await readServices(),
+    availability: await readAvailability(),
+    brand: await readBrandSettings(),
+    account: await readCoachAccount(),
+  };
+}
+
 async function runPublicDiagnostics() {
   const diagnostics = {};
   const checks = {
@@ -3289,7 +3301,7 @@ function hasCollision(items, candidate, service) {
 }
 
 async function createPublicBooking(payload, context = null) {
-  const state = await readPublicCalendarState();
+  const state = await readFastPublicCalendarState();
   const service = state.services.find(
     (candidate) =>
       candidate.id === payload?.serviceId &&
@@ -4098,6 +4110,27 @@ export async function handleBookingApiRoute(
       !sessionTokenFromRequest(req)
     ) {
       return json({ authenticated: false });
+    }
+
+    if (req.method === "GET" && pathname === "/api/public-booking-state") {
+      return handlePublicBookingStateRequest();
+    }
+
+    if (req.method === "POST" && pathname === "/api/public-booking") {
+      return handlePublicBookingRequest(req, context);
+    }
+
+    if (req.method === "GET" && pathname === "/api/public-notification-status") {
+      return handlePublicNotificationStatusRequest(req);
+    }
+
+    if (
+      req.method === "POST" &&
+      pathname === "/api/public-booking-notifications"
+    ) {
+      return json(
+        await triggerPublicBookingNotifications(await parseBody(req)),
+      );
     }
 
     if (pathname.startsWith("/api/auth/")) {
