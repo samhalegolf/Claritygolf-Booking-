@@ -4267,6 +4267,14 @@ export async function handleBookingApiRoute(
       return handlePublicBookingStateRequest();
     }
 
+    if (req.method === "POST" && pathname === "/api/public-booking") {
+      return handlePublicBookingRequest(req, context);
+    }
+
+    if (req.method === "GET" && pathname === "/api/public-notification-status") {
+      return handlePublicNotificationStatusRequest(req);
+    }
+
     if (
       req.method === "POST" &&
       pathname === "/api/public-booking-notifications"
