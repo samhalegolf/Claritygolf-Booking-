@@ -518,6 +518,15 @@ function customGroupMaxParticipants(service?: Record<string, unknown> | null) {
   );
 }
 
+function customGroupMinParticipants(service?: Record<string, unknown> | null) {
+  return cleanPositiveInteger(
+    service?.minParticipants,
+    CUSTOM_GROUP_DEFAULTS.minParticipants,
+    CUSTOM_GROUP_DEFAULTS.minParticipants,
+    CUSTOM_GROUP_DEFAULTS.maxParticipants,
+  );
+}
+
 function customGroupBaseParticipants(service?: Record<string, unknown> | null) {
   return cleanPositiveInteger(
     service?.baseParticipants,
@@ -543,6 +552,16 @@ function customGroupExtraPersonPrice(service?: Record<string, unknown> | null) {
     0,
     100000,
   );
+}
+
+function calculateCustomGroupPrice(service: Record<string, unknown>, participantCount: number) {
+  const baseParticipants = customGroupBaseParticipants(service);
+  const extraPeople = Math.max(
+    0,
+    cleanPositiveInteger(participantCount, 1, 1, CUSTOM_GROUP_DEFAULTS.maxParticipants) -
+      baseParticipants,
+  );
+  return customGroupBasePrice(service) + extraPeople * customGroupExtraPersonPrice(service);
 }
 
 function cleanCustomGroupAttendee(raw: any, index = 0) {
@@ -704,6 +723,11 @@ function uniqueById<T extends { id?: string | null }>(rows: T[]) {
 
 function normalizedEmail(value: unknown) {
   return cleanString(value, "", 180).toLowerCase();
+}
+
+function cleanEmail(value: unknown, fallback = "") {
+  const email = normalizedEmail(value);
+  return email.includes("@") ? email : fallback;
 }
 
 function normalizedName(value: unknown) {
@@ -1479,6 +1503,266 @@ export async function readPublicBookingState() {
     account: state.account,
     items: state.items || [],
   };
+}
+
+function isCustomGroupService(service: Record<string, unknown>) {
+  return Boolean(hasCustomGroupFlag(service));
+}
+
+function isScheduledGroupService(service: Record<string, unknown>) {
+  return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
+}
+
+function slotOverlaps(
+  a: { week: number; day: number; start: number; duration: number },
+  b: { week: number; day: number; start: number; duration: number },
+) {
+  return (
+    a.week === b.week &&
+    a.day === b.day &&
+    a.start < b.start + b.duration &&
+    a.start + a.duration > b.start
+  );
+}
+
+function currentWeekOffset() {
+  const today = new Date();
+  const day = today.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const weekStart = new Date(today);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() + mondayOffset);
+  const weekStartUtc = Date.UTC(
+    weekStart.getFullYear(),
+    weekStart.getMonth(),
+    weekStart.getDate(),
+  );
+  const baseWeekStartUtc = Date.UTC(
+    baseWeekStart.getFullYear(),
+    baseWeekStart.getMonth(),
+    baseWeekStart.getDate(),
+  );
+  return Math.round((weekStartUtc - baseWeekStartUtc) / (7 * 24 * 60 * 60 * 1000));
+}
+
+function isGroupServiceSlotMatch(
+  service: Record<string, any>,
+  candidate: { week: number; day: number; start: number; duration: number },
+) {
+  if (!isScheduledGroupService(service)) return false;
+  const schedule = service.groupSchedule;
+  if (!schedule || schedule.active === false) return false;
+  if (candidate.day !== schedule.dayOfWeek) return false;
+  if (candidate.start !== schedule.startMinutes) return false;
+  if (!Number.isInteger(candidate.week)) return false;
+  const minWeek = currentWeekOffset();
+  const occurrenceCount = Math.max(
+    1,
+    Math.min(MAX_GROUP_OCCURRENCE_COUNT, Math.round(schedule.occurrenceCount || 1)),
+  );
+  return candidate.week >= minWeek && candidate.week < minWeek + occurrenceCount;
+}
+
+function itemWeek(item: any) {
+  return Number(item?.week ?? 0);
+}
+
+function hasCollision(
+  items: any[],
+  candidate: { week: number; day: number; start: number; duration: number },
+  service: Record<string, unknown>,
+) {
+  const overlapping = items.filter((item) =>
+    slotOverlaps(
+      {
+        week: itemWeek(item),
+        day: Number(item.day),
+        start: Number(item.start),
+        duration: Number(item.duration),
+      },
+      candidate,
+    ),
+  );
+  if (!isScheduledGroupService(service)) return overlapping.length > 0;
+  const sameServiceCount = overlapping.filter((item) => item.serviceId === service.id).length;
+  const blocksOrOtherService = overlapping.some(
+    (item) => item.kind !== "appointment" || item.serviceId !== service.id,
+  );
+  if (blocksOrOtherService) return true;
+  return sameServiceCount >= Number(service.capacity || 1);
+}
+
+function isInsideAvailability(
+  availability: Array<Array<{ start: number; end: number }>>,
+  day: number,
+  start: number,
+  duration: number,
+) {
+  const end = start + duration;
+  return (
+    availability[day]?.some(
+      (window) => start >= Number(window.start) && end <= Number(window.end),
+    ) ?? false
+  );
+}
+
+async function createPublicBookingFromPublicState(payload: any) {
+  const state = await readPublicBookingState();
+  const service = (state.services as Array<Record<string, any>>).find(
+    (candidate) =>
+      candidate.id === payload?.serviceId &&
+      candidate.active &&
+      candidate.archived !== true &&
+      candidate.visibility === "public" &&
+      candidate.lessonFormat !== "package",
+  );
+  if (!service)
+    throw Object.assign(new Error("Choose a public lesson type."), {
+      status: 400,
+    });
+
+  const week = Number(payload.week ?? 0);
+  const day = Number(payload.day);
+  const start = Number(payload.start);
+  const firstName = cleanString(payload.firstName, "", 80);
+  const lastName = cleanString(payload.lastName, "", 80);
+  const email = cleanString(payload.email, "", 180);
+  const phone = cleanString(payload.phone, "", 80);
+
+  if (!firstName || !lastName || !email) {
+    throw Object.assign(
+      new Error("First name, last name, and email are required."),
+      { status: 400 },
+    );
+  }
+  if (
+    !Number.isInteger(week) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(start) ||
+    day < 0 ||
+    day > 6
+  ) {
+    throw Object.assign(new Error("Choose a valid appointment time."), {
+      status: 400,
+    });
+  }
+
+  const slot = { week, day, start, duration: Number(service.duration || 30) };
+  if (isScheduledGroupService(service)) {
+    if (!isGroupServiceSlotMatch(service, slot) || hasCollision(state.items, slot, service)) {
+      throw Object.assign(new Error("That time is no longer available."), {
+        status: 409,
+      });
+    }
+  } else if (
+    !isInsideAvailability(state.availability, day, start, slot.duration) ||
+    hasCollision(state.items, slot, service)
+  ) {
+    throw Object.assign(new Error("That time is no longer available."), {
+      status: 409,
+    });
+  }
+
+  const client = `${firstName} ${lastName}`;
+  const rawAttendees = Array.isArray(payload?.attendees) ? payload.attendees : [];
+  let customGroup = null;
+  if (isCustomGroupService(service)) {
+    const invalidInvite = rawAttendees.find((attendee) => {
+      const rawEmail = cleanString(attendee?.email, "", 180);
+      return rawEmail && !cleanEmail(rawEmail, "");
+    });
+    if (invalidInvite) {
+      throw Object.assign(new Error("Enter a valid attendee email or leave it blank."), {
+        status: 400,
+      });
+    }
+    const otherAttendees = rawAttendees
+      .map((attendee, index) =>
+        cleanCustomGroupAttendee(
+          {
+            id: `attendee-${index + 1}`,
+            name: attendee?.name,
+            email: attendee?.email,
+            status: attendee?.email ? "invited" : "manual",
+            token: attendee?.email ? randomUUID() : "",
+          },
+          index,
+        ),
+      )
+      .filter(Boolean)
+      .slice(0, customGroupMaxParticipants(service) - 1);
+    const participantCount = 1 + otherAttendees.length;
+    if (participantCount < customGroupMinParticipants(service)) {
+      throw Object.assign(new Error("Add at least one other person before confirming."), {
+        status: 400,
+      });
+    }
+    if (participantCount > customGroupMaxParticipants(service)) {
+      throw Object.assign(new Error("This custom group has too many attendees."), {
+        status: 400,
+      });
+    }
+    customGroup = {
+      customGroup: true,
+      attendees: [
+        {
+          id: "booker",
+          name: client,
+          email,
+          status: "booker",
+        },
+        ...otherAttendees,
+      ],
+      calculatedPrice: calculateCustomGroupPrice(service, participantCount),
+    };
+  }
+
+  const appointment = {
+    id: `appt-${Date.now()}`,
+    kind: "appointment",
+    ...slot,
+    serviceId: String(service.id),
+    client,
+    title: client,
+    phone,
+    email,
+    note: "Booked from public booking page.",
+    ...(customGroup || {}),
+  };
+  await upsertCalendarItemsAccepting([itemToRow(appointment)]);
+  const updatedAt = nowIso();
+  await setSetting("updatedAt", updatedAt);
+  return { appointment, state: { ...state, updatedAt, items: [...state.items, appointment] } };
+}
+
+export async function handlePublicBookingSubmitRequest(req: Request) {
+  try {
+    const result = await createPublicBookingFromPublicState(await parseBody(req));
+    return json({
+      ok: true,
+      appointment: {
+        id: result.appointment.id,
+        week: result.appointment.week,
+        day: result.appointment.day,
+        start: result.appointment.start,
+        duration: result.appointment.duration,
+      },
+      state: { items: result.state.items || [] },
+      notifications: [],
+    });
+  } catch (error: any) {
+    console.error("public_booking_direct:failed", error);
+    return json(
+      {
+        error: "public_booking_error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Booking could not be created.",
+      },
+      error?.status || 500,
+    );
+  }
 }
 
 async function parseBody(req: Request) {
