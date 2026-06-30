@@ -39,6 +39,7 @@ function cleanRow(row) {
 
 const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["account_id", "status", "custom_group", "coach_id", "location_id", "coach", "location"]);
 const CALENDAR_ITEM_JSON_COLUMNS = new Set(["custom_group", "coach", "location"]);
+const CALENDAR_ITEM_ACCOUNT_SCOPE_COLUMNS = ["account_id", "coach_id", "location_id", "coach", "location"];
 
 function missingOptionalCalendarItemColumn(error) {
   const message = error instanceof Error ? error.message : String(error || "");
@@ -56,6 +57,16 @@ function omitCalendarItemColumn(rows, column) {
     const { [column]: _omitted, ...rest } = row;
     return rest;
   });
+}
+
+function omitCalendarItemColumns(rows, columns) {
+  return columns.reduce((nextRows, column) => omitCalendarItemColumn(nextRows, column), rows);
+}
+
+function relatedMissingCalendarItemColumns(column) {
+  return CALENDAR_ITEM_ACCOUNT_SCOPE_COLUMNS.includes(column)
+    ? CALENDAR_ITEM_ACCOUNT_SCOPE_COLUMNS
+    : [column];
 }
 
 function parseJsonParam(value, column) {
@@ -80,8 +91,11 @@ function calendarItemInsertColumns(sqlText) {
 }
 
 async function upsertCalendarItemsAccepting(store, rows) {
-  let nextRows = rows;
-  const omittedColumns = [];
+  store.omittedCalendarItemColumns ||= new Set();
+  const omittedColumns = [...store.omittedCalendarItemColumns];
+  let nextRows = omittedColumns.length
+    ? omitCalendarItemColumns(rows, omittedColumns)
+    : rows;
 
   while (true) {
     try {
@@ -90,10 +104,15 @@ async function upsertCalendarItemsAccepting(store, rows) {
     } catch (error) {
       const column = missingOptionalCalendarItemColumn(error);
       if (!column || omittedColumns.includes(column)) throw error;
-      omittedColumns.push(column);
-      nextRows = omitCalendarItemColumn(nextRows, column);
+      const columns = relatedMissingCalendarItemColumns(column).filter((candidate) => !omittedColumns.includes(candidate));
+      columns.forEach((candidate) => {
+        omittedColumns.push(candidate);
+        store.omittedCalendarItemColumns.add(candidate);
+      });
+      nextRows = omitCalendarItemColumns(nextRows, columns);
       console.warn("supabase_storage:calendar_items_optional_column_omitted", {
         column,
+        columns,
         error: error instanceof Error ? error.message : String(error || ""),
       });
     }
