@@ -580,6 +580,7 @@ type ClientProfileTab = "bookings" | "notifications";
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
 type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
+type AdminSaveOwner = "lesson_complete" | "locations" | "coaches" | "settings";
 type LessonCompleteDiagnostic = {
   action: "lesson_complete";
   itemId: string;
@@ -3448,6 +3449,8 @@ function App() {
   const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
   const [calendarSaveError, setCalendarSaveError] = useState("");
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
+  const [pendingLessonCompleteId, setPendingLessonCompleteId] = useState("");
+  const [lessonCompleteErrors, setLessonCompleteErrors] = useState<LessonCompleteErrorMap>({});
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
   const [calendarPerspective, setCalendarPerspective] = useState<CalendarPerspective>("all");
@@ -3458,6 +3461,7 @@ function App() {
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
   const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [settingsSaveError, setSettingsSaveError] = useState("");
   const [testEmailAddress, setTestEmailAddress] = useState("");
   const [testEmailState, setTestEmailState] = useState<"idle" | "sending" | "sent">("idle");
   const [emailNoticeVisible, setEmailNoticeVisible] = useState(false);
@@ -3499,7 +3503,12 @@ function App() {
   const brandSaveVersionRef = useRef(0);
   const serviceSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
+  const locationSaveVersionRef = useRef(0);
+  const coachSaveVersionRef = useRef(0);
+  const settingsSaveVersionRef = useRef(0);
   const lastPersistedCalendarFingerprintRef = useRef("");
+  const pendingLessonCompleteIdRef = useRef("");
+  const activeAdminSaveOwnersRef = useRef<Map<AdminSaveOwner, number>>(new Map());
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
   const pendingQuickCreateRef = useRef<QuickCreateState | null>(null);
 
@@ -3509,6 +3518,26 @@ function App() {
   const selectedLocationSnapshot = selected
     ? calendarItemLocation(selected, selectedService ?? undefined, locations, coachAccount)
     : null;
+
+  function hasActiveAdminSave(owner?: AdminSaveOwner) {
+    if (owner) return (activeAdminSaveOwnersRef.current.get(owner) ?? 0) > 0;
+    return Array.from(activeAdminSaveOwnersRef.current.values()).some((count) => count > 0);
+  }
+
+  function beginAdminSave(owner: AdminSaveOwner) {
+    activeAdminSaveOwnersRef.current.set(owner, (activeAdminSaveOwnersRef.current.get(owner) ?? 0) + 1);
+    adminHydrationRunIdRef.current += 1;
+    return ++calendarSaveVersionRef.current;
+  }
+
+  function endAdminSave(owner: AdminSaveOwner) {
+    const nextCount = (activeAdminSaveOwnersRef.current.get(owner) ?? 0) - 1;
+    if (nextCount > 0) {
+      activeAdminSaveOwnersRef.current.set(owner, nextCount);
+    } else {
+      activeAdminSaveOwnersRef.current.delete(owner);
+    }
+  }
   const selectedLessonNote = selectedService?.lessonNote || selectedService?.location || "";
   const selectedGroupSessionService = selectedGroupSession
     ? services.find((service) => service.id === selectedGroupSession.serviceId) ?? null
@@ -4225,7 +4254,7 @@ function App() {
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
-    if (pendingLessonCompleteIdRef.current) return;
+    if (hasActiveAdminSave()) return;
     const requestedFingerprint = calendarStateFingerprint(items, calendarSyncKey);
     if (requestedFingerprint === lastPersistedCalendarFingerprintRef.current) return;
     const saveVersion = ++calendarSaveVersionRef.current;
@@ -4615,7 +4644,7 @@ function App() {
   }
 
   async function startAdminWorkspaceHydration() {
-    if (isEmbedMode || pendingLessonCompleteIdRef.current) return;
+    if (isEmbedMode || hasActiveAdminSave()) return;
     const runId = ++adminHydrationRunIdRef.current;
     hasLoadedCalendarApiRef.current = false;
     setAdminWorkspaceLoadStatus("loading");
@@ -4673,7 +4702,7 @@ function App() {
       coachesRequest,
       adminSettingsRequest,
     ]);
-    if (!isCurrentRun()) return false;
+    if (!isCurrentRun() || hasActiveAdminSave()) return false;
     if (calendarResult.status === "rejected") {
       const healthMessage = await fetchDatabaseHealthSummary();
       if (!isCurrentRun()) return false;
@@ -4706,7 +4735,7 @@ function App() {
       googleCalendar?: Partial<GoogleCalendarSyncStatus>;
       updatedAt?: string;
     };
-    if (!isCurrentRun()) return false;
+    if (!isCurrentRun() || hasActiveAdminSave()) return false;
     const loadedItems = Array.isArray(data.items) ? data.items : [];
     const loadedAccounts = cleanWorkspaceAccounts(data.workspaceAccounts, data.account ?? coachAccount);
     const loadedAccountId = defaultAccountId(loadedAccounts);
@@ -7232,6 +7261,7 @@ function App() {
 
   function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
     setSettingsSaveState("idle");
+    setSettingsSaveError("");
     setNotificationSettings((current) => ({ ...current, [field]: value }));
   }
 
@@ -7286,6 +7316,9 @@ function App() {
   }
 
   async function persistLocations(nextLocations: Location[], message = "Locations saved."): Promise<boolean> {
+    const saveVersion = ++locationSaveVersionRef.current;
+    beginAdminSave("locations");
+    const isCurrentSave = () => locationSaveVersionRef.current === saveVersion;
     const snapshot = locations;
     const clean = cleanLocations(nextLocations, coachAccount);
     const diagnostic: WorkspaceConfigDiagnostic = {
@@ -7412,13 +7445,17 @@ function App() {
         "location_calendar_state_account_mismatch",
         diagnostic,
       );
+      if (!isCurrentSave()) return false;
       setLocations(loadedLocations);
       setLocationSaveState("saved");
       setLocationEditorError("");
       setToast({ message });
-      window.setTimeout(() => setLocationSaveState("idle"), 1600);
+      window.setTimeout(() => {
+        if (isCurrentSave()) setLocationSaveState("idle");
+      }, 1600);
       return true;
     } catch (error) {
+      if (!isCurrentSave()) return false;
       setLocations(snapshot);
       setLocationSaveState("error");
       const errorMessage = workspaceSaveFailureMessage(
@@ -7432,6 +7469,8 @@ function App() {
       setLocationEditorError(errorMessage);
       setToast({ message: errorMessage });
       return false;
+    } finally {
+      endAdminSave("locations");
     }
   }
 
@@ -7536,6 +7575,9 @@ function App() {
   }
 
   async function persistCoaches(nextCoaches: CoachProfile[], message = "Coaches saved."): Promise<boolean> {
+    const saveVersion = ++coachSaveVersionRef.current;
+    beginAdminSave("coaches");
+    const isCurrentSave = () => coachSaveVersionRef.current === saveVersion;
     const snapshot = coachProfiles;
     const clean = cleanCoachProfiles(nextCoaches, coachAccount);
     const diagnostic: WorkspaceConfigDiagnostic = {
@@ -7662,13 +7704,17 @@ function App() {
         "coach_calendar_state_account_mismatch",
         diagnostic,
       );
+      if (!isCurrentSave()) return false;
       setCoachProfiles(loadedCoaches);
       setCoachSaveState("saved");
       setCoachEditorError("");
       setToast({ message });
-      window.setTimeout(() => setCoachSaveState("idle"), 1600);
+      window.setTimeout(() => {
+        if (isCurrentSave()) setCoachSaveState("idle");
+      }, 1600);
       return true;
     } catch (error) {
+      if (!isCurrentSave()) return false;
       setCoachProfiles(snapshot);
       setCoachSaveState("error");
       const errorMessage = workspaceSaveFailureMessage(
@@ -7682,6 +7728,8 @@ function App() {
       setCoachEditorError(errorMessage);
       setToast({ message: errorMessage });
       return false;
+    } finally {
+      endAdminSave("coaches");
     }
   }
 
@@ -8096,10 +8144,19 @@ function App() {
   }
 
   function updateAppointmentStatus(itemId: string, status: BookingStatus) {
+    if (status === "completed") {
+      void completeAppointmentSafely(itemId);
+      return;
+    }
     const previous = items;
     setItems((current) =>
       current.map((item) => (item.id === itemId && item.kind === "appointment" ? { ...item, status } : item)),
     );
+    setLessonCompleteErrors((current) => {
+      if (!current[itemId]) return current;
+      const { [itemId]: _removed, ...next } = current;
+      return next;
+    });
     setToast({
       message: `Lesson marked ${status.replace("_", "-")}.`,
       undo: () => setItems(previous),
@@ -8325,8 +8382,7 @@ function App() {
 
   async function completeAppointmentSafely(itemId: string) {
     if (pendingLessonCompleteIdRef.current) return;
-    const completeSaveVersion = ++calendarSaveVersionRef.current;
-    adminHydrationRunIdRef.current += 1;
+    const completeSaveVersion = beginAdminSave("lesson_complete");
     pendingLessonCompleteIdRef.current = itemId;
     setPendingLessonCompleteId(itemId);
     setLessonCompleteErrors((current) => {
@@ -8383,6 +8439,7 @@ function App() {
     } finally {
       pendingLessonCompleteIdRef.current = "";
       setPendingLessonCompleteId("");
+      endAdminSave("lesson_complete");
     }
   }
 
@@ -9114,7 +9171,11 @@ function App() {
   }
 
   async function saveNotificationSettings() {
+    const saveVersion = ++settingsSaveVersionRef.current;
+    beginAdminSave("settings");
+    const isCurrentSave = () => settingsSaveVersionRef.current === saveVersion;
     setSettingsSaveState("saving");
+    setSettingsSaveError("");
     try {
       const response = await fetch("/api/admin-settings", {
         method: "PUT",
@@ -9127,14 +9188,30 @@ function App() {
       }
       if (!response.ok) throw new Error(await readApiFailure(response, "Settings save failed"));
       const settings = (await response.json()) as NotificationSettings;
+      if (!isCurrentSave()) return;
       applyNotificationSettings(settings);
       setSettingsSaveState("saved");
       setToast({ message: "Notification and text settings saved." });
-      window.setTimeout(() => setSettingsSaveState("idle"), 1600);
+      window.setTimeout(() => {
+        if (isCurrentSave()) setSettingsSaveState("idle");
+      }, 1600);
     } catch (error) {
+      if (!isCurrentSave()) return;
+      const message = error instanceof Error ? error.message : "Could not save notification settings.";
       setSettingsSaveState("idle");
-      setToast({ message: error instanceof Error ? error.message : "Could not save notification settings." });
+      setSettingsSaveError(message);
+      setToast({ message });
+    } finally {
+      endAdminSave("settings");
     }
+  }
+
+  function settingsSaveErrorNotice() {
+    return settingsSaveError ? (
+      <p className="workspace-save-error" role="alert">
+        {settingsSaveError}
+      </p>
+    ) : null;
   }
 
   async function refreshGoogleCalendarStatus() {
@@ -11087,6 +11164,7 @@ function App() {
               ? "Saved"
               : "Save minimum notice"}
         </button>
+        {settingsSaveErrorNotice()}
       </details>
               <details className="settings-subsection">
                 <summary className="settings-subsection-title">
@@ -11313,11 +11391,16 @@ function App() {
             {(["booked", "completed", "cancelled", "no_show"] as BookingStatus[]).map((status) => (
               <button
                 className={(selected.status ?? "booked") === status ? "active" : ""}
+                disabled={pendingLessonCompleteId === selected.id || (pendingLessonCompleteId !== "" && status === "completed")}
                 key={status}
                 onClick={() => updateAppointmentStatus(selected.id, status)}
                 type="button"
               >
-                {status === "no_show" ? "No-show" : status[0].toUpperCase() + status.slice(1)}
+                {status === "completed" && pendingLessonCompleteId === selected.id
+                  ? "Saving..."
+                  : status === "no_show"
+                    ? "No-show"
+                    : status[0].toUpperCase() + status.slice(1)}
               </button>
             ))}
           </div>
@@ -14679,6 +14762,7 @@ function App() {
                       ? "Saved"
                       : "Save Email Settings"}
                 </button>
+                {settingsSaveErrorNotice()}
               </article>
 
               <article className="data-card notification-card settings-section settings-experience settings-integrations">
@@ -14767,6 +14851,7 @@ function App() {
                       ? "Saved"
                       : "Save Text Settings"}
                 </button>
+                {settingsSaveErrorNotice()}
               </article>
 
               <article className="data-card notification-card email-template-card settings-section settings-experience settings-branding">
@@ -15007,6 +15092,7 @@ function App() {
                       ? "Saved"
                       : "Save Template"}
                 </button>
+                {settingsSaveErrorNotice()}
               </article>
 
               <article className="data-card notification-card settings-section settings-experience settings-branding">
