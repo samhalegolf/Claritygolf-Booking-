@@ -579,6 +579,7 @@ type ClientProfileTab = "bookings" | "notifications";
 
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
+type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
 type LessonCompleteErrorMap = Record<string, string>;
 type CalendarStateSaveResponse = {
   message?: string;
@@ -3266,6 +3267,9 @@ function App() {
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [authError, setAuthError] = useState("");
   const [loginState, setLoginState] = useState<"idle" | "signing-in">("idle");
+  const [adminWorkspaceLoadStatus, setAdminWorkspaceLoadStatus] =
+    useState<AdminWorkspaceLoadStatus>(isEmbedMode ? "loaded" : "idle");
+  const [adminWorkspaceLoadError, setAdminWorkspaceLoadError] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotState, setForgotState] = useState<"idle" | "sending" | "sent">("idle");
   const [forgotMessage, setForgotMessage] = useState("");
@@ -3468,6 +3472,7 @@ function App() {
   const suppressItemClickUntilRef = useRef(0);
   const activeWeekRef = useRef(activeWeek);
   const hasLoadedCalendarApiRef = useRef(false);
+  const adminHydrationRunIdRef = useRef(0);
   const clickPlaceRef = useRef<null | { bookingId: string; candidate: SlotCandidate }>(null);
   const pointerClientRef = useRef({ x: 0, y: 0 });
   const pointerStartRef = useRef({ x: 0, y: 0 });
@@ -4129,18 +4134,20 @@ function App() {
         if (!session.authenticated) {
           setAuthStatus("guest");
           setCalendarFeedStatus("offline");
+          setAdminWorkspaceLoadStatus("idle");
+          setAdminWorkspaceLoadError("");
           return;
         }
 
         if (session.email) setAdminEmail(session.email);
-        await loadAdminCalendarState();
-        if (cancelled) return;
         setAuthStatus("authenticated");
-        setCalendarFeedStatus("connected");
+        void startAdminWorkspaceHydration();
       } catch {
         if (!cancelled) {
           hasLoadedCalendarApiRef.current = false;
           setCalendarFeedStatus("offline");
+          setAdminWorkspaceLoadStatus("idle");
+          setAdminWorkspaceLoadError("");
           if (!isEmbedMode) setAuthStatus("guest");
         }
       }
@@ -4167,7 +4174,8 @@ function App() {
   async function processPendingAdminNotifications() {
     if (isEmbedMode || authStatus !== "authenticated") return;
     try {
-      const response = await fetch("/api/calendar-state", {
+      const response = await fetch("/api/admin-notification-debounce", {
+        method: "POST",
         credentials: "same-origin",
         cache: "no-store",
         headers: { Accept: "application/json" },
@@ -4182,8 +4190,13 @@ function App() {
       };
       if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     } catch {
-      // Pending admin notification sends are secondary to the saved calendar change.
+      console.warn("admin_notification_debounce:flush_failed");
     }
+  }
+
+  function scheduleAdminNotificationDebounceFlush() {
+    window.setTimeout(() => void processPendingAdminNotifications(), 32000);
+    window.setTimeout(() => void refreshNotificationHistory(), 35000);
   }
 
   useEffect(() => {
@@ -4302,8 +4315,7 @@ function App() {
         }, 1800);
         window.setTimeout(() => void refreshNotificationHistory(), 1500);
         window.setTimeout(() => void refreshNotificationHistory(), 8000);
-        window.setTimeout(() => void processPendingAdminNotifications(), 32000);
-        window.setTimeout(() => void refreshNotificationHistory(), 35000);
+        scheduleAdminNotificationDebounceFlush();
       })().catch((error) => {
         if (calendarSaveVersionRef.current === saveVersion) {
           const message = error instanceof Error ? error.message : "Calendar save failed.";
@@ -4574,19 +4586,84 @@ function App() {
     }
   }
 
-  async function loadAdminCalendarState() {
+  function adminWorkspaceLoadMessage(error: unknown) {
+    if (error instanceof Error && error.message) return error.message;
+    return "Calendar, people, locations, coaches, and settings could not be loaded.";
+  }
+
+  async function startAdminWorkspaceHydration() {
+    if (isEmbedMode) return;
+    const runId = ++adminHydrationRunIdRef.current;
+    hasLoadedCalendarApiRef.current = false;
+    setAdminWorkspaceLoadStatus("loading");
+    setAdminWorkspaceLoadError("");
+    setCalendarFeedStatus("checking");
+    setCalendarSaveStatus("idle");
+    setCalendarSaveError("");
+    try {
+      const applied = await loadAdminCalendarState(runId);
+      if (!applied || adminHydrationRunIdRef.current !== runId) return;
+      setAdminWorkspaceLoadStatus("loaded");
+      setAdminWorkspaceLoadError("");
+      setCalendarFeedStatus("connected");
+    } catch (error) {
+      if (adminHydrationRunIdRef.current !== runId) return;
+      hasLoadedCalendarApiRef.current = false;
+      setAdminWorkspaceLoadStatus("error");
+      setAdminWorkspaceLoadError(adminWorkspaceLoadMessage(error));
+      setCalendarFeedStatus("offline");
+    }
+  }
+
+  async function loadAdminCalendarState(runId = ++adminHydrationRunIdRef.current) {
+    const isCurrentRun = () => adminHydrationRunIdRef.current === runId;
     hasLoadedCalendarApiRef.current = false;
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
-    const response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
+    const calendarStateRequest = fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
+    const locationsRequest = fetch("/api/locations", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    }).then(async (locationsResponse) => ({
+      response: locationsResponse,
+      data: locationsResponse.ok ? ((await locationsResponse.json()) as { locations?: Location[] }) : null,
+    }));
+    const coachesRequest = fetch("/api/coaches", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    }).then(async (coachesResponse) => ({
+      response: coachesResponse,
+      data: coachesResponse.ok ? ((await coachesResponse.json()) as { coaches?: CoachProfile[] }) : null,
+    }));
+    const adminSettingsRequest = fetch("/api/admin-settings", { headers: { Accept: "application/json" } }).then(
+      async (adminSettingsResponse) => ({
+        response: adminSettingsResponse,
+        data: adminSettingsResponse.ok ? ((await adminSettingsResponse.json()) as Partial<NotificationSettings>) : null,
+      }),
+    );
+    const [calendarResult, locationsResult, coachesResult, adminSettingsResult] = await Promise.allSettled([
+      calendarStateRequest,
+      locationsRequest,
+      coachesRequest,
+      adminSettingsRequest,
+    ]);
+    if (!isCurrentRun()) return false;
+    if (calendarResult.status === "rejected") {
+      const healthMessage = await fetchDatabaseHealthSummary();
+      if (!isCurrentRun()) return false;
+      throw new Error(["Calendar API unavailable", healthMessage].filter(Boolean).join(" · "));
+    }
+    const response = calendarResult.value;
     if (response.status === 401) {
-      setAuthStatus("guest");
       throw new Error("Admin login required");
     }
     if (!response.ok) {
       const apiMessage = await readApiFailure(response, "Calendar API unavailable");
       const healthMessage = await fetchDatabaseHealthSummary();
+      if (!isCurrentRun()) return false;
       throw new Error([apiMessage, healthMessage].filter(Boolean).join(" · "));
     }
     const data = (await response.json()) as {
@@ -4606,6 +4683,7 @@ function App() {
       googleCalendar?: Partial<GoogleCalendarSyncStatus>;
       updatedAt?: string;
     };
+    if (!isCurrentRun()) return false;
     const loadedItems = Array.isArray(data.items) ? data.items : [];
     const loadedAccounts = cleanWorkspaceAccounts(data.workspaceAccounts, data.account ?? coachAccount);
     const loadedAccountId = defaultAccountId(loadedAccounts);
@@ -4623,38 +4701,28 @@ function App() {
     let dedicatedLocations: Location[] | null = null;
     let dedicatedCoaches: CoachProfile[] | null = null;
     const workspaceConfigWarnings: string[] = [];
-    try {
-      const locationsResponse = await fetch("/api/locations", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (locationsResponse.ok) {
-        const locationsData = (await locationsResponse.json()) as { locations?: Location[] };
-        if (Array.isArray(locationsData.locations) && locationsData.locations.length) {
+    if (locationsResult.status === "fulfilled") {
+      if (locationsResult.value.response.ok) {
+        const locationsData = locationsResult.value.data;
+        if (Array.isArray(locationsData?.locations) && locationsData.locations.length) {
           dedicatedLocations = cleanLocations(locationsData.locations, fallbackAccount);
         }
       } else {
         workspaceConfigWarnings.push("locations");
       }
-    } catch {
+    } else {
       workspaceConfigWarnings.push("locations");
     }
-    try {
-      const coachesResponse = await fetch("/api/coaches", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (coachesResponse.ok) {
-        const coachesData = (await coachesResponse.json()) as { coaches?: CoachProfile[] };
-        if (Array.isArray(coachesData.coaches) && coachesData.coaches.length) {
+    if (coachesResult.status === "fulfilled") {
+      if (coachesResult.value.response.ok) {
+        const coachesData = coachesResult.value.data;
+        if (Array.isArray(coachesData?.coaches) && coachesData.coaches.length) {
           dedicatedCoaches = cleanCoachProfiles(coachesData.coaches, fallbackAccount);
         }
       } else {
         workspaceConfigWarnings.push("coaches");
       }
-    } catch {
+    } else {
       workspaceConfigWarnings.push("coaches");
     }
     if (dedicatedLocations) {
@@ -4678,19 +4746,20 @@ function App() {
       setCalendarSyncKey(data.syncKey);
     }
     applyNotificationSettings(data.settings);
-    try {
-      const adminSettingsResponse = await fetch("/api/admin-settings", { headers: { Accept: "application/json" } });
-      if (adminSettingsResponse.ok) {
-        const adminSettings = (await adminSettingsResponse.json()) as Partial<NotificationSettings>;
-        applyNotificationSettings(adminSettings);
-      }
-    } catch {
+    if (
+      adminSettingsResult.status === "fulfilled" &&
+      adminSettingsResult.value.response.ok &&
+      adminSettingsResult.value.data
+    ) {
+      applyNotificationSettings(adminSettingsResult.value.data);
+    } else {
       // Keep the notification settings from /api/calendar-state if admin settings read fails.
     }
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
     applyGoogleCalendarStatus(data.googleCalendar);
     hasLoadedCalendarApiRef.current = true;
+    return true;
   }
 
   async function loadPublicBookingState() {
@@ -8172,7 +8241,7 @@ function App() {
       setToast({ message: "Lesson marked completed." });
       window.setTimeout(() => setCalendarSaveStatus((current) => (current === "saved" ? "idle" : current)), 1800);
       window.setTimeout(() => void refreshNotificationHistory(), 1500);
-      window.setTimeout(() => void processPendingAdminNotifications(), 32000);
+      scheduleAdminNotificationDebounceFlush();
     } catch (error) {
       const message =
         error instanceof Error && error.message.includes("Admin login")
@@ -8763,29 +8832,22 @@ function App() {
       const data = (await response.json()) as { authenticated?: boolean; message?: string; email?: string };
       if (!response.ok || !data.authenticated) {
         setAuthError(data.message || "Login failed.");
+        setAdminWorkspaceLoadStatus("idle");
+        setAdminWorkspaceLoadError("");
         return;
       }
       if (data.email) setAdminEmail(data.email);
-      try {
-        await loadAdminCalendarState();
-      } catch (error) {
-        hasLoadedCalendarApiRef.current = false;
-        setAuthStatus("guest");
-        setCalendarFeedStatus("offline");
-        await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-        const detail = error instanceof Error && error.message ? ` Details: ${error.message}` : "";
-        setAuthError(`Login worked, but the live database is not connected. Nothing will be editable until the database connection is fixed.${detail}`);
-        return;
-      }
       setAuthStatus("authenticated");
       setAdminPassword("");
-      setCalendarFeedStatus("connected");
       setAuthError("");
+      void startAdminWorkspaceHydration();
     } catch {
       hasLoadedCalendarApiRef.current = false;
       setAuthStatus("guest");
       setAuthError("Could not reach the booking server.");
       setCalendarFeedStatus("offline");
+      setAdminWorkspaceLoadStatus("idle");
+      setAdminWorkspaceLoadError("");
     } finally {
       setLoginState("idle");
     }
@@ -8851,12 +8913,14 @@ function App() {
       setResetState("idle");
       if (data.email) setAdminEmail(data.email);
       if (typeof window !== "undefined") window.history.replaceState(null, "", window.location.pathname);
-      await loadAdminCalendarState();
-      setCalendarFeedStatus("connected");
+      setAuthError("");
+      void startAdminWorkspaceHydration();
     } catch {
       setResetState("idle");
       setAuthError("Could not reach the booking server.");
       setCalendarFeedStatus("offline");
+      setAdminWorkspaceLoadStatus("idle");
+      setAdminWorkspaceLoadError("");
     }
   }
 
@@ -8910,8 +8974,11 @@ function App() {
 
   async function handleAdminLogout() {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    adminHydrationRunIdRef.current += 1;
     hasLoadedCalendarApiRef.current = false;
     setAuthStatus("guest");
+    setAdminWorkspaceLoadStatus("idle");
+    setAdminWorkspaceLoadError("");
     closeCalendarDetails();
     setCalendarFeedStatus("offline");
     setCalendarSaveStatus("idle");
@@ -9222,7 +9289,7 @@ function App() {
       }
       setTestEmailState("sent");
       setToast({ message: data.message || "Test email sent." });
-      void loadAdminCalendarState().catch(() => undefined);
+      void startAdminWorkspaceHydration();
       window.setTimeout(() => setTestEmailState("idle"), 1600);
     } catch {
       setToast({ message: "Could not reach the email sender." });
@@ -11354,6 +11421,14 @@ function App() {
   const selectedDetails = selectedGroupSessionDetails
     ? selectedGroupSessionDetails
     : selectedAppointmentDetails;
+  const adminWorkspaceReady = isEmbedMode || adminWorkspaceLoadStatus === "loaded";
+  const adminWorkspaceLoading =
+    !isEmbedMode &&
+    authStatus === "authenticated" &&
+    adminWorkspaceLoadStatus !== "loaded" &&
+    adminWorkspaceLoadStatus !== "error";
+  const adminWorkspaceFailed =
+    !isEmbedMode && authStatus === "authenticated" && adminWorkspaceLoadStatus === "error";
 
   if (!isEmbedMode && authStatus !== "authenticated") {
     return (
@@ -11604,7 +11679,25 @@ function App() {
         </header>
         )}
 
-        {!isEmbedMode && activeView === "calendar" && (
+        {!isEmbedMode && (adminWorkspaceLoading || adminWorkspaceFailed) && (
+        <section className="workspace">
+          <div className="empty-panel compact" role={adminWorkspaceFailed ? "alert" : "status"}>
+            <h2>{adminWorkspaceFailed ? "Admin workspace could not load" : "Loading admin workspace"}</h2>
+            <p>
+              {adminWorkspaceFailed
+                ? adminWorkspaceLoadError || "Calendar, people, locations, coaches, and settings could not be loaded."
+                : "Calendar, people, locations, coaches, and settings are loading."}
+            </p>
+            {adminWorkspaceFailed ? (
+              <button className="outline-button" type="button" onClick={() => void startAdminWorkspaceHydration()}>
+                Retry
+              </button>
+            ) : null}
+          </div>
+        </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && (
         <div
           ref={dockRef}
           className={`appointment-dock ${dockBookings.length || flyingBooking ? "has-tiles" : ""} ${
@@ -11681,7 +11774,7 @@ function App() {
         </div>
         )}
 
-        {!isEmbedMode && activeView === "calendar" && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && (
         <section
           className={`workspace ${pointerSession?.mode === "place" || activeDockBooking ? "placing-from-dock" : ""}`}
         >
@@ -12299,7 +12392,7 @@ function App() {
         </section>
         )}
 
-        {!isEmbedMode && activeView === "calendar" && floatingDrag && floatingItem?.kind === "appointment" && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && floatingDrag && floatingItem?.kind === "appointment" && (
           <article
             className="calendar-item appointment floating-drag-tile"
             aria-hidden="true"
@@ -12321,7 +12414,7 @@ function App() {
           </article>
         )}
 
-        {!isEmbedMode && activeView === "calendar" && calendarHover && !pointerSession && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && calendarHover && !pointerSession && (
           <aside
             className="calendar-hover-card"
             style={{ left: calendarHover.x, top: calendarHover.y }}
@@ -12360,7 +12453,7 @@ function App() {
           </aside>
         )}
 
-        {!isEmbedMode && activeView === "clients" && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "clients" && (
           <section className="module-page clients-page">
             <div className="client-toolbar">
               <div className="client-search">
@@ -12448,7 +12541,7 @@ function App() {
           </section>
         )}
 
-        {!isEmbedMode && activeView === "billing" && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "billing" && (
           <section className="module-page billing-page">
             <div className="settings-tabs billing-tabs" role="tablist" aria-label="Billing sections">
               <button
@@ -13669,7 +13762,7 @@ function App() {
           </section>
         )}
 
-        {!isEmbedMode && activeView === "settings" && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "settings" && (
           <section className="module-page settings-page">
             <div className="settings-tabs" role="tablist" aria-label="Settings sections">
               <button
@@ -15007,7 +15100,7 @@ function App() {
         )}
       </main>
 
-      {!isEmbedMode && activeView === "calendar" && selectedDetails && (
+      {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && selectedDetails && (
         <div className="details-overlay" role="presentation" onPointerDown={closeCalendarDetails}>
           <aside
             className="details-panel details-modal"

@@ -33,6 +33,8 @@ const BOOKING_SCREEN_IDS = new Set([
   "private-lessons",
 ]);
 let authReadyPromise = null;
+let authReady = false;
+let authReadyConfigSignature = "";
 let seedReadyPromise = null;
 const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
@@ -1394,6 +1396,35 @@ function hashPassword(password, salt = randomBytes(16).toString("hex")) {
   return { passwordHash, salt };
 }
 
+function logAuthTiming(step, startedAt, details = {}) {
+  console.log("auth_timing", {
+    step,
+    ms: Date.now() - startedAt,
+    ...details,
+  });
+}
+
+function authBootstrapSignature() {
+  const email = cleanEmail(env("CLARITY_ADMIN_EMAIL"), "");
+  const password = env("CLARITY_ADMIN_PASSWORD");
+  return hashToken(
+    JSON.stringify({
+      email,
+      passwordSeed: email && password ? hashToken(`${email}:${password}`) : "",
+      passwordConfigured: Boolean(password),
+    }),
+  );
+}
+
+function hasValidStoredPasswordHash(user) {
+  return (
+    typeof user?.password_hash === "string" &&
+    /^[a-f0-9]{128}$/i.test(user.password_hash) &&
+    typeof user?.password_salt === "string" &&
+    user.password_salt.length >= 16
+  );
+}
+
 function cookieHeader(token, req, maxAgeSeconds) {
   const secure = new URL(req.url).protocol === "https:";
   return [
@@ -1616,16 +1647,37 @@ async function ensureAuthTables() {
 }
 
 async function ensureAuthReady() {
+  const startedAt = Date.now();
+  const configSignature = authBootstrapSignature();
+  if (authReady && authReadyConfigSignature === configSignature) {
+    logAuthTiming("ensureAuthReady", startedAt, { cache: "hit" });
+    return;
+  }
+  if (authReady && authReadyConfigSignature !== configSignature) {
+    authReady = false;
+    authReadyPromise = null;
+    authReadyConfigSignature = "";
+    console.warn("auth_bootstrap_config_changed");
+  }
+  const cacheState = authReadyPromise ? "wait" : "miss";
   if (!authReadyPromise) {
+    const setupStartedAt = Date.now();
     authReadyPromise = (async () => {
       await ensureAuthTables();
       await ensureAdminUser();
+      authReady = true;
+      authReadyConfigSignature = configSignature;
+      logAuthTiming("ensureAuthReady.setup", setupStartedAt, { ok: true });
     })().catch((error) => {
       authReadyPromise = null;
+      authReady = false;
+      authReadyConfigSignature = "";
+      logAuthTiming("ensureAuthReady.setup", setupStartedAt, { ok: false });
       throw error;
     });
   }
   await authReadyPromise;
+  logAuthTiming("ensureAuthReady", startedAt, { cache: cacheState });
 }
 
 async function defaultSettings() {
@@ -1732,41 +1784,60 @@ async function seedItems() {
 }
 
 async function ensureAdminUser() {
+  const startedAt = Date.now();
+  let outcome = "unknown";
+  let wrote = false;
+  let hashed = false;
   const email = cleanEmail(env("CLARITY_ADMIN_EMAIL"), "");
   const password = env("CLARITY_ADMIN_PASSWORD");
 
-  if (!email || !password) {
-    console.warn(
-      "Admin user not seeded because CLARITY_ADMIN_EMAIL or CLARITY_ADMIN_PASSWORD is not set.",
-    );
-    return;
-  }
+  try {
+    if (!email || !password) {
+      outcome = "missing_seed_env";
+      console.warn(
+        "Admin user not seeded because CLARITY_ADMIN_EMAIL or CLARITY_ADMIN_PASSWORD is not set.",
+      );
+      return;
+    }
 
-  const existing = await db()
-    .sql`SELECT id FROM admin_users WHERE email = ${email}`;
+    const seedKey = hashToken(`${email}:${password}`);
+    const existing = await db()
+      .sql`SELECT id, password_hash, password_salt FROM admin_users WHERE email = ${email}`;
 
-  const { passwordHash, salt } = hashPassword(password);
-  const seedKey = hashToken(`${email}:${password}`);
-  if (existing.length) {
-    const currentSeedKey = await getSetting("adminPasswordSeedKey");
-    if (currentSeedKey === seedKey) return;
+    if (existing.length) {
+      const currentSeedKey = await getSetting("adminPasswordSeedKey");
+      if (currentSeedKey === seedKey && hasValidStoredPasswordHash(existing[0])) {
+        outcome = "ready";
+        return;
+      }
+      hashed = true;
+      const { passwordHash, salt } = hashPassword(password);
+      await db().sql`
+        UPDATE admin_users
+        SET password_hash = ${passwordHash},
+            password_salt = ${salt},
+            updated_at = NOW()
+        WHERE email = ${email}
+      `;
+      await setSetting("adminPasswordSeedKey", seedKey);
+      wrote = true;
+      outcome = "updated_seed";
+      return;
+    }
+
+    hashed = true;
+    const { passwordHash, salt } = hashPassword(password);
     await db().sql`
-      UPDATE admin_users
-      SET password_hash = ${passwordHash},
-          password_salt = ${salt},
-          updated_at = NOW()
-      WHERE email = ${email}
+      INSERT INTO admin_users (id, email, password_hash, password_salt, created_at, updated_at)
+      VALUES (${randomUUID()}, ${email}, ${passwordHash}, ${salt}, NOW(), NOW())
+      ON CONFLICT (email) DO NOTHING
     `;
     await setSetting("adminPasswordSeedKey", seedKey);
-    return;
+    wrote = true;
+    outcome = "inserted_seed";
+  } finally {
+    logAuthTiming("ensureAdminUser", startedAt, { outcome, wrote, hashed });
   }
-
-  await db().sql`
-    INSERT INTO admin_users (id, email, password_hash, password_salt, created_at, updated_at)
-    VALUES (${randomUUID()}, ${email}, ${passwordHash}, ${salt}, NOW(), NOW())
-    ON CONFLICT (email) DO NOTHING
-  `;
-  await setSetting("adminPasswordSeedKey", seedKey);
 }
 
 async function ensureNotificationHistoryTable() {
@@ -3621,25 +3692,32 @@ async function processAdminNotificationDebounce(
 }
 
 async function verifyAdminPassword(email, password) {
-  const rows = await db().sql`
-    SELECT * FROM admin_users
-    WHERE email = ${cleanString(email, "", 180)}
-  `;
-  const row = rows[0];
-  if (!row || typeof password !== "string") return null;
+  const startedAt = Date.now();
+  let ok = false;
+  try {
+    const rows = await db().sql`
+      SELECT * FROM admin_users
+      WHERE email = ${cleanString(email, "", 180)}
+    `;
+    const row = rows[0];
+    if (!row || typeof password !== "string") return null;
 
-  const { passwordHash } = hashPassword(password, row.password_salt);
-  const saved = Buffer.from(row.password_hash, "hex");
-  const attempt = Buffer.from(passwordHash, "hex");
-  if (saved.length !== attempt.length || !timingSafeEqual(saved, attempt))
-    return null;
+    const { passwordHash } = hashPassword(password, row.password_salt);
+    const saved = Buffer.from(row.password_hash, "hex");
+    const attempt = Buffer.from(passwordHash, "hex");
+    if (saved.length !== attempt.length || !timingSafeEqual(saved, attempt))
+      return null;
 
-  return {
-    id: row.id,
-    email: row.email,
-    password_hash: row.password_hash,
-    password_salt: row.password_salt,
-  };
+    ok = true;
+    return {
+      id: row.id,
+      email: row.email,
+      password_hash: row.password_hash,
+      password_salt: row.password_salt,
+    };
+  } finally {
+    logAuthTiming("verifyAdminPassword", startedAt, { ok });
+  }
 }
 
 async function cleanupExpiredPasswordResets() {
@@ -4415,15 +4493,22 @@ async function changeAdminPassword(session, currentPassword, nextPassword) {
 }
 
 async function createAdminSession(userOrId) {
+  const startedAt = Date.now();
+  let ok = false;
   const userId = typeof userOrId === "object" ? userOrId.id : userOrId;
   const token = randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000).toISOString();
-  await db().sql`
-    INSERT INTO admin_sessions (id, token_hash, user_id, expires_at, created_at)
-    VALUES (${randomUUID()}, ${tokenHash}, ${userId}, ${expiresAt}, NOW())
-  `;
-  return { token, expiresAt };
+  try {
+    await db().sql`
+      INSERT INTO admin_sessions (id, token_hash, user_id, expires_at, created_at)
+      VALUES (${randomUUID()}, ${tokenHash}, ${userId}, ${expiresAt}, NOW())
+    `;
+    ok = true;
+    return { token, expiresAt };
+  } finally {
+    logAuthTiming("createAdminSession", startedAt, { ok });
+  }
 }
 
 async function readAdminSession(token) {
@@ -5788,24 +5873,7 @@ export async function handleBookingApiRoute(
     if (req.method === "GET" && pathname === "/api/calendar-state") {
       const state = await readCalendarState();
       const requestContext = await resolveBackendRequestContext(req, state);
-      let notificationResults = [];
-      try {
-        notificationResults = await processAdminNotificationDebounce(
-          state.items,
-          state.items,
-          { queueDiffs: false, timeZone: state.account?.timezone },
-        );
-      } catch (error) {
-        console.error("calendar_state:notification_debounce_failed", error);
-      }
-      if (!notificationResults.length) {
-        return json(publicCalendarState(filterCalendarStateForContext(state, requestContext)));
-      }
-      const refreshedState = await readCalendarState();
-      return json({
-        ...publicCalendarState(filterCalendarStateForContext(refreshedState, requestContext)),
-        notificationResults,
-      });
+      return json(publicCalendarState(filterCalendarStateForContext(state, requestContext)));
     }
 
     if (req.method === "PUT" && pathname === "/api/calendar-state") {
@@ -5846,6 +5914,34 @@ export async function handleBookingApiRoute(
         ...(notificationWarning
           ? { warnings: [...new Set([...existingWarnings, notificationWarning])] }
           : {}),
+      });
+    }
+
+    if (req.method === "POST" && pathname === "/api/admin-notification-debounce") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      let notificationResults = [];
+      let notificationWarning = "";
+      try {
+        notificationResults = await processAdminNotificationDebounce(
+          state.items,
+          state.items,
+          { queueDiffs: false, timeZone: state.account?.timezone },
+        );
+      } catch (error) {
+        notificationWarning =
+          "Booking alerts could not be processed.";
+        console.error("calendar_state:notification_debounce_failed", error);
+      }
+      const refreshedState = notificationResults.length ? await readCalendarState() : state;
+      return json({
+        notifications: filterNotificationsForContext(
+          await readNotificationHistory(),
+          requestContext,
+          refreshedState,
+        ),
+        notificationResults,
+        ...(notificationWarning ? { warnings: [notificationWarning] } : {}),
       });
     }
 
