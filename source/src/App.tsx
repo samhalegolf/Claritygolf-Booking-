@@ -4442,6 +4442,26 @@ function App() {
     }
   }
 
+  async function readWorkspaceSaveJson<T>(
+    response: Response,
+    label: "Location" | "Coach",
+    routeLabel: string,
+    stage: string,
+    diagnostic: WorkspaceConfigDiagnostic,
+  ) {
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throwWorkspaceSaveFailure(
+        label,
+        routeLabel,
+        stage,
+        diagnostic,
+        `expected JSON but received ${response.headers.get("Content-Type") || "unknown content type"}.`,
+      );
+    }
+  }
+
   async function fetchDatabaseHealthSummary() {
     try {
       const response = await fetch("/api/database-health", { headers: { Accept: "application/json" } });
@@ -7048,7 +7068,13 @@ function App() {
         const detail = await readApiFailure(response, "Location save failed");
         throwWorkspaceSaveFailure("Location", "PUT /api/locations", "location_put_failed", diagnostic, detail);
       }
-      const data = (await response.json()) as { locations?: Location[] };
+      const data = await readWorkspaceSaveJson<{ locations?: Location[] }>(
+        response,
+        "Location",
+        "PUT /api/locations",
+        "location_put_failed",
+        diagnostic,
+      );
       const saved = cleanLocations(data.locations, coachAccount);
       diagnostic.putRecords = saved;
       assertExpectedWorkspaceRecords(
@@ -7073,7 +7099,13 @@ function App() {
         const detail = await readApiFailure(locationsResponse, "Location save failed");
         throwWorkspaceSaveFailure("Location", "GET /api/locations", "location_get_failed", diagnostic, detail);
       }
-      const locationsData = (await locationsResponse.json()) as { locations?: Location[] };
+      const locationsData = await readWorkspaceSaveJson<{ locations?: Location[] }>(
+        locationsResponse,
+        "Location",
+        "GET /api/locations",
+        "location_get_failed",
+        diagnostic,
+      );
       const loadedLocations = cleanLocations(locationsData.locations, coachAccount);
       diagnostic.getRecords = loadedLocations;
       assertExpectedWorkspaceRecords(
@@ -7098,7 +7130,13 @@ function App() {
         const detail = await readApiFailure(calendarResponse, "Location save failed");
         throwWorkspaceSaveFailure("Location", "GET /api/calendar-state", "location_calendar_state_failed", diagnostic, detail);
       }
-      const calendarData = (await calendarResponse.json()) as { locations?: Location[] };
+      const calendarData = await readWorkspaceSaveJson<{ locations?: Location[] }>(
+        calendarResponse,
+        "Location",
+        "GET /api/calendar-state",
+        "location_calendar_state_failed",
+        diagnostic,
+      );
       const calendarLocations = cleanLocations(calendarData.locations, coachAccount);
       diagnostic.calendarRecords = calendarLocations;
       assertExpectedWorkspaceRecords(
@@ -7241,7 +7279,13 @@ function App() {
         const detail = await readApiFailure(response, "Coach save failed");
         throwWorkspaceSaveFailure("Coach", "PUT /api/coaches", "coach_put_failed", diagnostic, detail);
       }
-      const data = (await response.json()) as { coaches?: CoachProfile[] };
+      const data = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
+        response,
+        "Coach",
+        "PUT /api/coaches",
+        "coach_put_failed",
+        diagnostic,
+      );
       const saved = cleanCoachProfiles(data.coaches, coachAccount);
       diagnostic.putRecords = saved;
       assertExpectedWorkspaceRecords(
@@ -7266,7 +7310,13 @@ function App() {
         const detail = await readApiFailure(coachesResponse, "Coach save failed");
         throwWorkspaceSaveFailure("Coach", "GET /api/coaches", "coach_get_failed", diagnostic, detail);
       }
-      const coachesData = (await coachesResponse.json()) as { coaches?: CoachProfile[] };
+      const coachesData = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
+        coachesResponse,
+        "Coach",
+        "GET /api/coaches",
+        "coach_get_failed",
+        diagnostic,
+      );
       const loadedCoaches = cleanCoachProfiles(coachesData.coaches, coachAccount);
       diagnostic.getRecords = loadedCoaches;
       assertExpectedWorkspaceRecords(
@@ -7291,7 +7341,13 @@ function App() {
         const detail = await readApiFailure(calendarResponse, "Coach save failed");
         throwWorkspaceSaveFailure("Coach", "GET /api/calendar-state", "coach_calendar_state_failed", diagnostic, detail);
       }
-      const calendarData = (await calendarResponse.json()) as { coaches?: CoachProfile[] };
+      const calendarData = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
+        calendarResponse,
+        "Coach",
+        "GET /api/calendar-state",
+        "coach_calendar_state_failed",
+        diagnostic,
+      );
       const calendarCoaches = cleanCoachProfiles(calendarData.coaches, coachAccount);
       diagnostic.calendarRecords = calendarCoaches;
       assertExpectedWorkspaceRecords(
