@@ -299,6 +299,16 @@ class SupabaseRestStore {
         `select=id&email=eq.${encodeFilter(values[0])}`,
       );
     }
+    if (
+      sql.startsWith(
+        "select id, password_hash, password_salt from admin_users where email = $1",
+      )
+    ) {
+      return this.select(
+        "admin_users",
+        `select=id,password_hash,password_salt&email=eq.${encodeFilter(values[0])}`,
+      );
+    }
     if (sql.startsWith("select * from admin_users where email = $1")) {
       return this.select(
         "admin_users",

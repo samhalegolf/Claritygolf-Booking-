@@ -198,6 +198,7 @@ class SupabaseRestStore {
     }
 
     if (sql.startsWith("select id from admin_users where email = $1")) return this.select("admin_users", `select=id&email=eq.${encodeFilter(values[0])}`);
+    if (sql.startsWith("select id, password_hash, password_salt from admin_users where email = $1")) return this.select("admin_users", `select=id,password_hash,password_salt&email=eq.${encodeFilter(values[0])}`);
     if (sql.startsWith("select * from admin_users where email = $1")) return this.select("admin_users", `select=*&email=eq.${encodeFilter(values[0])}`);
     if (sql.startsWith("select id, email, password_hash, password_salt from admin_users where id = $1")) return this.select("admin_users", `select=id,email,password_hash,password_salt&id=eq.${encodeFilter(values[0])}&limit=1`);
     if (sql.startsWith("select id, email from admin_users where lower(email) = lower($1)")) return this.select("admin_users", `select=id,email&email=eq.${encodeFilter(String(values[0] || "").toLowerCase())}&limit=1`);
