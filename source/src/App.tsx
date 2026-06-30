@@ -7925,7 +7925,9 @@ function App() {
             onClick={() => setPublicBookingSection("appointment")}
             type="button"
           >
-            <span className="booking-progressive-title-label">1. Appointment</span>
+            <span className="booking-progressive-title-label">
+              1. Appointment <span className="booking-required-mark" aria-hidden="true">*</span>
+            </span>
             <span className="booking-progressive-title-state">{isAppointmentStepComplete ? "Done" : "In progress"}</span>
           </button>
           {isAppointmentSectionOpen ? (
@@ -7982,7 +7984,9 @@ function App() {
             type="button"
             disabled={!isAppointmentStepComplete}
           >
-            <span className="booking-progressive-title-label">2. Date & Time</span>
+            <span className="booking-progressive-title-label">
+              2. Date & Time <span className="booking-required-mark" aria-hidden="true">*</span>
+            </span>
             <span className="booking-progressive-title-state">{isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}</span>
           </button>
           {isDateTimeSectionOpen ? (
@@ -8087,20 +8091,32 @@ function App() {
           {isInformationSectionOpen ? (
             <div className="booking-progressive-body">
               <div className="booking-form">
-                <input
-                  value={bookingForm.firstName}
-                  autoComplete="given-name"
-                  onChange={(event) => updateBookingForm("firstName", event.target.value)}
-                  onKeyDown={handleBookingMatchKeyDown}
-                  placeholder="First name"
-                />
-                <input
-                  value={bookingForm.lastName}
-                  autoComplete="family-name"
-                  onChange={(event) => updateBookingForm("lastName", event.target.value)}
-                  onKeyDown={handleBookingMatchKeyDown}
-                  placeholder="Last name"
-                />
+                <label className="booking-required-field">
+                  <input
+                    value={bookingForm.firstName}
+                    aria-label="First name required"
+                    aria-required="true"
+                    autoComplete="given-name"
+                    onChange={(event) => updateBookingForm("firstName", event.target.value)}
+                    onKeyDown={handleBookingMatchKeyDown}
+                    placeholder="First name"
+                    required
+                  />
+                  <span className="booking-required-mark" aria-hidden="true">*</span>
+                </label>
+                <label className="booking-required-field">
+                  <input
+                    value={bookingForm.lastName}
+                    aria-label="Last name required"
+                    aria-required="true"
+                    autoComplete="family-name"
+                    onChange={(event) => updateBookingForm("lastName", event.target.value)}
+                    onKeyDown={handleBookingMatchKeyDown}
+                    placeholder="Last name"
+                    required
+                  />
+                  <span className="booking-required-mark" aria-hidden="true">*</span>
+                </label>
                 <input
                   value={bookingForm.phone}
                   autoComplete="tel"
@@ -8110,15 +8126,21 @@ function App() {
                   placeholder="Phone"
                   type="tel"
                 />
-                <input
-                  value={bookingForm.email}
-                  autoComplete="email"
-                  inputMode="email"
-                  onChange={(event) => updateBookingForm("email", event.target.value)}
-                  onKeyDown={handleBookingMatchKeyDown}
-                  placeholder="Email"
-                  type="email"
-                />
+                <label className="booking-required-field">
+                  <input
+                    value={bookingForm.email}
+                    aria-label="Email required"
+                    aria-required="true"
+                    autoComplete="email"
+                    inputMode="email"
+                    onChange={(event) => updateBookingForm("email", event.target.value)}
+                    onKeyDown={handleBookingMatchKeyDown}
+                    placeholder="Email"
+                    required
+                    type="email"
+                  />
+                  <span className="booking-required-mark" aria-hidden="true">*</span>
+                </label>
               </div>
               {bookingClientSuggestion && showBookingClientSuggestion && (
                 <button
@@ -10364,7 +10386,9 @@ function App() {
                       onClick={() => setPublicBookingSection("appointment")}
                       type="button"
                     >
-                      <span className="booking-progressive-title-label">1. Appointment</span>
+                      <span className="booking-progressive-title-label">
+                        1. Appointment <span className="booking-required-mark" aria-hidden="true">*</span>
+                      </span>
                       <span className="booking-progressive-title-state">{isAppointmentStepComplete ? "Done" : "In progress"}</span>
                     </button>
                     {isAppointmentSectionOpen ? (
@@ -10421,7 +10445,9 @@ function App() {
                       type="button"
                       disabled={!isAppointmentStepComplete}
                     >
-                      <span className="booking-progressive-title-label">2. Date & Time</span>
+                      <span className="booking-progressive-title-label">
+                        2. Date & Time <span className="booking-required-mark" aria-hidden="true">*</span>
+                      </span>
                       <span className="booking-progressive-title-state">
                         {isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}
                       </span>
@@ -10528,20 +10554,32 @@ function App() {
                     {isInformationSectionOpen ? (
                       <div className="booking-progressive-body">
                         <div className="booking-form">
-                          <input
-                            value={bookingForm.firstName}
-                            autoComplete="given-name"
-                            onChange={(event) => updateBookingForm("firstName", event.target.value)}
-                            onKeyDown={handleBookingMatchKeyDown}
-                            placeholder="First name"
-                          />
-                          <input
-                            value={bookingForm.lastName}
-                            autoComplete="family-name"
-                            onChange={(event) => updateBookingForm("lastName", event.target.value)}
-                            onKeyDown={handleBookingMatchKeyDown}
-                            placeholder="Last name"
-                          />
+                          <label className="booking-required-field">
+                            <input
+                              value={bookingForm.firstName}
+                              aria-label="First name required"
+                              aria-required="true"
+                              autoComplete="given-name"
+                              onChange={(event) => updateBookingForm("firstName", event.target.value)}
+                              onKeyDown={handleBookingMatchKeyDown}
+                              placeholder="First name"
+                              required
+                            />
+                            <span className="booking-required-mark" aria-hidden="true">*</span>
+                          </label>
+                          <label className="booking-required-field">
+                            <input
+                              value={bookingForm.lastName}
+                              aria-label="Last name required"
+                              aria-required="true"
+                              autoComplete="family-name"
+                              onChange={(event) => updateBookingForm("lastName", event.target.value)}
+                              onKeyDown={handleBookingMatchKeyDown}
+                              placeholder="Last name"
+                              required
+                            />
+                            <span className="booking-required-mark" aria-hidden="true">*</span>
+                          </label>
                           <input
                             value={bookingForm.phone}
                             autoComplete="tel"
@@ -10551,15 +10589,21 @@ function App() {
                             placeholder="Phone"
                             type="tel"
                           />
-                          <input
-                            value={bookingForm.email}
-                            autoComplete="email"
-                            inputMode="email"
-                            onChange={(event) => updateBookingForm("email", event.target.value)}
-                            onKeyDown={handleBookingMatchKeyDown}
-                            placeholder="Email"
-                            type="email"
-                          />
+                          <label className="booking-required-field">
+                            <input
+                              value={bookingForm.email}
+                              aria-label="Email required"
+                              aria-required="true"
+                              autoComplete="email"
+                              inputMode="email"
+                              onChange={(event) => updateBookingForm("email", event.target.value)}
+                              onKeyDown={handleBookingMatchKeyDown}
+                              placeholder="Email"
+                              required
+                              type="email"
+                            />
+                            <span className="booking-required-mark" aria-hidden="true">*</span>
+                          </label>
                         </div>
                         {bookingClientSuggestion && showBookingClientSuggestion && (
                           <button

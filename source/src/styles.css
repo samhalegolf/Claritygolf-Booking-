@@ -1755,6 +1755,30 @@ button {
   font: inherit;
 }
 
+.booking-required-field {
+  position: relative;
+  display: block;
+}
+
+.booking-required-field input {
+  box-sizing: border-box;
+  width: 100%;
+  padding-right: 24px;
+}
+
+.booking-required-mark {
+  color: #d9362e;
+  font-weight: 900;
+}
+
+.booking-required-field .booking-required-mark {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
 .booking-summary {
   margin: 14px 0;
   padding: 12px;
