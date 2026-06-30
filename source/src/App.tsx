@@ -807,6 +807,15 @@ type WorkspaceConfigDiagnostic = {
   calendarRecords?: WorkspaceConfigRecord[];
 };
 
+type WorkspaceApiFailureDetail = {
+  error?: string;
+  message?: string;
+  details?: string;
+  failed?: string;
+  text?: string;
+  statusText?: string;
+};
+
 type BillingCatalogKind = "service" | "product" | "package" | "lesson-type";
 
 type BillingCatalogItem = {
@@ -3263,10 +3272,12 @@ function App() {
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
   const [showLocationEditor, setShowLocationEditor] = useState(false);
   const [locationSaveState, setLocationSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [locationEditorError, setLocationEditorError] = useState("");
   const [coachEditor, setCoachEditor] = useState<CoachProfile>(() => defaultCoachProfileFromAccount(getStoredCoachAccount()));
   const [editingCoachId, setEditingCoachId] = useState<string | null>(null);
   const [showCoachEditor, setShowCoachEditor] = useState(false);
   const [coachSaveState, setCoachSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [coachEditorError, setCoachEditorError] = useState("");
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showServiceEditor, setShowServiceEditor] = useState(false);
@@ -4354,29 +4365,88 @@ function App() {
   }
 
 
-  async function readApiFailure(response: Response, fallback: string) {
+  function workspaceDiagnosticValue(value: unknown) {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return value.trim();
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  async function readApiFailureDetail(response: Response, fallback: string): Promise<WorkspaceApiFailureDetail> {
+    const statusText = `${response.status} ${response.statusText}`.trim();
     try {
       const contentType = response.headers.get("Content-Type") || "";
       if (contentType.includes("application/json")) {
-        const data = (await response.json()) as { message?: string; error?: string; details?: string; failed?: Array<{ name?: string; message?: string }> };
-        const firstFailed = Array.isArray(data.failed) && data.failed[0] ? `${data.failed[0].name}: ${data.failed[0].message}` : "";
-        return [data.message, firstFailed, data.error, data.details, `${response.status} ${response.statusText}`].filter(Boolean).join(" · ");
+        const data = (await response.json()) as {
+          message?: unknown;
+          error?: unknown;
+          details?: unknown;
+          failed?: Array<{ name?: unknown; message?: unknown }>;
+        };
+        const firstFailed = Array.isArray(data.failed) && data.failed[0]
+          ? [workspaceDiagnosticValue(data.failed[0].name), workspaceDiagnosticValue(data.failed[0].message)]
+              .filter(Boolean)
+              .join(": ")
+          : "";
+        return {
+          message: workspaceDiagnosticValue(data.message),
+          failed: firstFailed,
+          error: workspaceDiagnosticValue(data.error),
+          details: workspaceDiagnosticValue(data.details),
+          statusText,
+        };
       }
       const text = await response.text();
-      return text ? `${response.status} ${response.statusText}: ${text.slice(0, 280)}` : `${response.status} ${response.statusText}`;
+      return { message: text ? text.slice(0, 280) : fallback, statusText };
     } catch {
-      return fallback;
+      return { message: fallback, statusText };
     }
+  }
+
+  function summarizeApiFailureDetail(detail: WorkspaceApiFailureDetail) {
+    return [detail.message, detail.failed, detail.error, detail.details, detail.text, detail.statusText].filter(Boolean).join(" · ");
+  }
+
+  async function readApiFailure(response: Response, fallback: string) {
+    return summarizeApiFailureDetail(await readApiFailureDetail(response, fallback)) || fallback;
   }
 
   function workspaceRecordName(record: WorkspaceConfigRecord) {
     return record.displayName || record.name || record.id || "unnamed";
   }
 
-  function summarizeWorkspaceRecords(records?: WorkspaceConfigRecord[]) {
+  function summarizeWorkspaceRecordIds(records?: WorkspaceConfigRecord[]) {
     if (!Array.isArray(records)) return "not returned";
     if (!records.length) return "none";
-    return records.map((record) => `${record.id || "missing-id"}:${record.accountId || "missing-account"}`).join(", ");
+    return records.map((record) => record.id || "missing-id").join(", ");
+  }
+
+  function summarizeWorkspaceAccountIds(records?: WorkspaceConfigRecord[]) {
+    if (!Array.isArray(records)) return "not returned";
+    if (!records.length) return "none";
+    return Array.from(new Set(records.map((record) => record.accountId || "missing-account"))).join(", ");
+  }
+
+  function workspaceRouteStatus(routeLabel: string, diagnostic: WorkspaceConfigDiagnostic) {
+    if (routeLabel.startsWith("PUT ")) return diagnostic.putStatus;
+    if (routeLabel === "GET /api/calendar-state") return diagnostic.calendarStatus;
+    if (routeLabel.startsWith("GET ")) return diagnostic.getStatus;
+    return diagnostic.getStatus ?? diagnostic.putStatus ?? diagnostic.calendarStatus;
+  }
+
+  function workspaceRouteRecords(routeLabel: string, diagnostic: WorkspaceConfigDiagnostic) {
+    if (routeLabel.startsWith("PUT ")) return diagnostic.putRecords;
+    if (routeLabel === "GET /api/calendar-state") return diagnostic.calendarRecords;
+    if (routeLabel.startsWith("GET ")) return diagnostic.getRecords;
+    return diagnostic.getRecords ?? diagnostic.putRecords ?? diagnostic.calendarRecords;
+  }
+
+  function normalizeWorkspaceFailureDetail(detail: WorkspaceApiFailureDetail | string): WorkspaceApiFailureDetail {
+    return typeof detail === "string" ? { message: detail } : detail;
   }
 
   function formatWorkspaceSaveFailure(
@@ -4384,20 +4454,28 @@ function App() {
     routeLabel: string,
     stage: string,
     diagnostic: WorkspaceConfigDiagnostic,
-    detail: string,
+    detail: WorkspaceApiFailureDetail | string,
   ) {
+    const normalizedDetail = normalizeWorkspaceFailureDetail(detail);
+    const routeRecords = workspaceRouteRecords(routeLabel, diagnostic);
+    const routeStatus = workspaceRouteStatus(routeLabel, diagnostic);
     const expectedIds = diagnostic.expected.map((record) => record.id).join(", ") || "none";
-    const expectedNames = diagnostic.expected.map((record) => record.name).join(", ") || "none";
     return [
-      `${label} save failed at ${routeLabel}: ${detail}`,
-      `Stage ${stage}.`,
-      `activeAccountId=${diagnostic.activeAccountId || "missing"}.`,
-      `expectedIds=${expectedIds}.`,
-      `expectedNames=${expectedNames}.`,
-      `PUT status=${diagnostic.putStatus ?? "not run"} records=${summarizeWorkspaceRecords(diagnostic.putRecords)}.`,
-      `GET status=${diagnostic.getStatus ?? "not run"} records=${summarizeWorkspaceRecords(diagnostic.getRecords)}.`,
-      `calendar-state status=${diagnostic.calendarStatus ?? "not run"} records=${summarizeWorkspaceRecords(diagnostic.calendarRecords)}.`,
-    ].join(" ");
+      `${label} save failed`,
+      `Code: ${stage}`,
+      `Route: ${routeLabel}`,
+      `HTTP: ${routeStatus ?? "not available"}`,
+      normalizedDetail.error ? `Backend error: ${normalizedDetail.error}` : "",
+      normalizedDetail.message || normalizedDetail.text || normalizedDetail.statusText
+        ? `Message: ${normalizedDetail.message || normalizedDetail.text || normalizedDetail.statusText}`
+        : "",
+      normalizedDetail.details ? `Details: ${normalizedDetail.details}` : "",
+      normalizedDetail.failed ? `Backend failed: ${normalizedDetail.failed}` : "",
+      `Expected: ${expectedIds}`,
+      `Returned: ${summarizeWorkspaceRecordIds(routeRecords)}`,
+      `Active account: ${diagnostic.activeAccountId || "missing"}`,
+      `Returned accountIds: ${summarizeWorkspaceAccountIds(routeRecords)}`,
+    ].filter(Boolean).join("\n");
   }
 
   function throwWorkspaceSaveFailure(
@@ -4405,9 +4483,22 @@ function App() {
     routeLabel: string,
     stage: string,
     diagnostic: WorkspaceConfigDiagnostic,
-    detail: string,
+    detail: WorkspaceApiFailureDetail | string,
   ): never {
     throw new Error(formatWorkspaceSaveFailure(label, routeLabel, stage, diagnostic, detail));
+  }
+
+  function workspaceSaveFailureMessage(
+    error: unknown,
+    label: "Location" | "Coach",
+    routeLabel: string,
+    stage: string,
+    diagnostic: WorkspaceConfigDiagnostic,
+    fallback: string,
+  ) {
+    if (error instanceof Error && error.message.includes("\nCode: ")) return error.message;
+    const message = error instanceof Error && error.message ? error.message : fallback;
+    return formatWorkspaceSaveFailure(label, routeLabel, stage, diagnostic, { message });
   }
 
   function assertExpectedWorkspaceRecords(
@@ -7056,6 +7147,7 @@ function App() {
 
   function updateLocationEditor<K extends keyof Location>(field: K, value: Location[K]) {
     setLocationSaveState("idle");
+    setLocationEditorError("");
     setLocationEditor((current) => ({ ...current, [field]: value }));
   }
 
@@ -7082,6 +7174,7 @@ function App() {
     });
     setShowLocationEditor(true);
     setLocationSaveState("idle");
+    setLocationEditorError("");
   }
 
   function editLocation(location: Location) {
@@ -7089,18 +7182,24 @@ function App() {
     setLocationEditor(location);
     setShowLocationEditor(true);
     setLocationSaveState("idle");
+    setLocationEditorError("");
   }
 
-  async function persistLocations(nextLocations: Location[], message = "Locations saved.") {
+  async function persistLocations(nextLocations: Location[], message = "Locations saved."): Promise<boolean> {
     const snapshot = locations;
     const clean = cleanLocations(nextLocations, coachAccount);
     const diagnostic: WorkspaceConfigDiagnostic = {
       activeAccountId,
       expected: clean.map((location) => ({ id: location.id, name: workspaceRecordName(location) })).filter((location) => location.id),
     };
+    let failureRoute = "PUT /api/locations";
+    let failureStage = "location_put_request_failed";
     setLocations(clean);
     setLocationSaveState("saving");
+    setLocationEditorError("");
     try {
+      failureRoute = "PUT /api/locations";
+      failureStage = "location_put_request_failed";
       const response = await fetch("/api/locations", {
         method: "PUT",
         credentials: "same-origin",
@@ -7111,12 +7210,35 @@ function App() {
       diagnostic.putStatus = response.status;
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throwWorkspaceSaveFailure("Location", "PUT /api/locations", "location_put_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
       }
       if (!response.ok) {
-        const detail = await readApiFailure(response, "Location save failed");
+        const detail = await readApiFailureDetail(response, "Location save failed");
         throwWorkspaceSaveFailure("Location", "PUT /api/locations", "location_put_failed", diagnostic, detail);
       }
+      failureStage = "location_put_failed";
+      const putLocationsData = await readWorkspaceSaveJson<{ locations?: Location[] }>(
+        response,
+        "Location",
+        "PUT /api/locations",
+        "location_put_failed",
+        diagnostic,
+      );
+      const savedLocationRecords = Array.isArray(putLocationsData.locations) ? putLocationsData.locations : undefined;
+      diagnostic.putRecords = savedLocationRecords;
+      assertExpectedWorkspaceRecords(
+        savedLocationRecords,
+        "Location",
+        "PUT /api/locations",
+        "location_put_missing_expected_id",
+        "location_put_account_mismatch",
+        diagnostic,
+      );
+      failureRoute = "GET /api/locations";
+      failureStage = "location_get_request_failed";
       const locationsResponse = await fetch("/api/locations", {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -7125,12 +7247,16 @@ function App() {
       diagnostic.getStatus = locationsResponse.status;
       if (locationsResponse.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throwWorkspaceSaveFailure("Location", "GET /api/locations", "location_get_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
       }
       if (!locationsResponse.ok) {
-        const detail = await readApiFailure(locationsResponse, "Location save failed");
+        const detail = await readApiFailureDetail(locationsResponse, "Location save failed");
         throwWorkspaceSaveFailure("Location", "GET /api/locations", "location_get_failed", diagnostic, detail);
       }
+      failureStage = "location_get_failed";
       const locationsData = await readWorkspaceSaveJson<{ locations?: Location[] }>(
         locationsResponse,
         "Location",
@@ -7138,28 +7264,78 @@ function App() {
         "location_get_failed",
         diagnostic,
       );
+      const loadedLocationRecords = Array.isArray(locationsData.locations) ? locationsData.locations : undefined;
       const loadedLocations = cleanLocations(locationsData.locations, coachAccount);
-      diagnostic.getRecords = loadedLocations;
+      diagnostic.getRecords = loadedLocationRecords;
       assertExpectedWorkspaceRecords(
-        loadedLocations,
+        loadedLocationRecords,
         "Location",
         "GET /api/locations",
         "location_get_missing_expected_id",
         "location_get_account_mismatch",
         diagnostic,
       );
+      failureRoute = "GET /api/calendar-state";
+      failureStage = "location_calendar_state_request_failed";
+      const calendarStateResponse = await fetch("/api/calendar-state", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      diagnostic.calendarStatus = calendarStateResponse.status;
+      if (calendarStateResponse.status === 401) {
+        setAuthStatus("guest");
+        throwWorkspaceSaveFailure("Location", "GET /api/calendar-state", "location_calendar_state_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
+      }
+      if (!calendarStateResponse.ok) {
+        const detail = await readApiFailureDetail(calendarStateResponse, "Location save failed");
+        throwWorkspaceSaveFailure("Location", "GET /api/calendar-state", "location_calendar_state_failed", diagnostic, detail);
+      }
+      failureStage = "location_calendar_state_failed";
+      const calendarStateData = await readWorkspaceSaveJson<{ locations?: Location[] }>(
+        calendarStateResponse,
+        "Location",
+        "GET /api/calendar-state",
+        "location_calendar_state_failed",
+        diagnostic,
+      );
+      const calendarLocationRecords = Array.isArray(calendarStateData.locations) ? calendarStateData.locations : undefined;
+      diagnostic.calendarRecords = calendarLocationRecords;
+      assertExpectedWorkspaceRecords(
+        calendarLocationRecords,
+        "Location",
+        "GET /api/calendar-state",
+        "location_calendar_state_missing_expected_id",
+        "location_calendar_state_account_mismatch",
+        diagnostic,
+      );
       setLocations(loadedLocations);
       setLocationSaveState("saved");
+      setLocationEditorError("");
       setToast({ message });
       window.setTimeout(() => setLocationSaveState("idle"), 1600);
+      return true;
     } catch (error) {
       setLocations(snapshot);
       setLocationSaveState("error");
-      setToast({ message: error instanceof Error ? error.message : "Could not save locations." });
+      const errorMessage = workspaceSaveFailureMessage(
+        error,
+        "Location",
+        failureRoute,
+        failureStage,
+        diagnostic,
+        "Could not save locations.",
+      );
+      setLocationEditorError(errorMessage);
+      setToast({ message: errorMessage });
+      return false;
     }
   }
 
-  function saveEditedLocation() {
+  async function saveEditedLocation() {
     if (!locationEditor.name.trim()) {
       setToast({ message: "Name the location before saving." });
       return;
@@ -7171,12 +7347,14 @@ function App() {
       return;
     }
     const stableId = editingLocationId || clean.id;
+    const cleanedLocation = { ...clean, id: stableId };
     const next = exists
-      ? locations.map((location) => (location.id === stableId ? { ...clean, id: stableId } : location))
-      : [...locations, { ...clean, id: stableId }];
+      ? locations.map((location) => (location.id === stableId ? cleanedLocation : location))
+      : [...locations, cleanedLocation];
     setEditingLocationId(stableId);
-    setShowLocationEditor(false);
-    void persistLocations(next, exists ? `${clean.name} updated.` : `${clean.name} added.`);
+    setLocationEditor(cleanedLocation);
+    const saved = await persistLocations(next, exists ? `${clean.name} updated.` : `${clean.name} added.`);
+    if (saved) setShowLocationEditor(false);
   }
 
   function archiveLocation(location: Location) {
@@ -7209,6 +7387,7 @@ function App() {
 
   function updateCoachEditor<K extends keyof CoachProfile>(field: K, value: CoachProfile[K]) {
     setCoachSaveState("idle");
+    setCoachEditorError("");
     setCoachEditor((current) => ({ ...current, [field]: value }));
   }
 
@@ -7245,6 +7424,7 @@ function App() {
     });
     setShowCoachEditor(true);
     setCoachSaveState("idle");
+    setCoachEditorError("");
   }
 
   function editCoach(coach: CoachProfile) {
@@ -7252,18 +7432,24 @@ function App() {
     setCoachEditor(coach);
     setShowCoachEditor(true);
     setCoachSaveState("idle");
+    setCoachEditorError("");
   }
 
-  async function persistCoaches(nextCoaches: CoachProfile[], message = "Coaches saved.") {
+  async function persistCoaches(nextCoaches: CoachProfile[], message = "Coaches saved."): Promise<boolean> {
     const snapshot = coachProfiles;
     const clean = cleanCoachProfiles(nextCoaches, coachAccount);
     const diagnostic: WorkspaceConfigDiagnostic = {
       activeAccountId,
       expected: clean.map((coach) => ({ id: coach.id, name: workspaceRecordName(coach) })).filter((coach) => coach.id),
     };
+    let failureRoute = "PUT /api/coaches";
+    let failureStage = "coach_put_request_failed";
     setCoachProfiles(clean);
     setCoachSaveState("saving");
+    setCoachEditorError("");
     try {
+      failureRoute = "PUT /api/coaches";
+      failureStage = "coach_put_request_failed";
       const response = await fetch("/api/coaches", {
         method: "PUT",
         credentials: "same-origin",
@@ -7274,12 +7460,35 @@ function App() {
       diagnostic.putStatus = response.status;
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throwWorkspaceSaveFailure("Coach", "PUT /api/coaches", "coach_put_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
       }
       if (!response.ok) {
-        const detail = await readApiFailure(response, "Coach save failed");
+        const detail = await readApiFailureDetail(response, "Coach save failed");
         throwWorkspaceSaveFailure("Coach", "PUT /api/coaches", "coach_put_failed", diagnostic, detail);
       }
+      failureStage = "coach_put_failed";
+      const putCoachesData = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
+        response,
+        "Coach",
+        "PUT /api/coaches",
+        "coach_put_failed",
+        diagnostic,
+      );
+      const savedCoachRecords = Array.isArray(putCoachesData.coaches) ? putCoachesData.coaches : undefined;
+      diagnostic.putRecords = savedCoachRecords;
+      assertExpectedWorkspaceRecords(
+        savedCoachRecords,
+        "Coach",
+        "PUT /api/coaches",
+        "coach_put_missing_expected_id",
+        "coach_put_account_mismatch",
+        diagnostic,
+      );
+      failureRoute = "GET /api/coaches";
+      failureStage = "coach_get_request_failed";
       const coachesResponse = await fetch("/api/coaches", {
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -7288,12 +7497,16 @@ function App() {
       diagnostic.getStatus = coachesResponse.status;
       if (coachesResponse.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throwWorkspaceSaveFailure("Coach", "GET /api/coaches", "coach_get_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
       }
       if (!coachesResponse.ok) {
-        const detail = await readApiFailure(coachesResponse, "Coach save failed");
+        const detail = await readApiFailureDetail(coachesResponse, "Coach save failed");
         throwWorkspaceSaveFailure("Coach", "GET /api/coaches", "coach_get_failed", diagnostic, detail);
       }
+      failureStage = "coach_get_failed";
       const coachesData = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
         coachesResponse,
         "Coach",
@@ -7301,28 +7514,78 @@ function App() {
         "coach_get_failed",
         diagnostic,
       );
+      const loadedCoachRecords = Array.isArray(coachesData.coaches) ? coachesData.coaches : undefined;
       const loadedCoaches = cleanCoachProfiles(coachesData.coaches, coachAccount);
-      diagnostic.getRecords = loadedCoaches;
+      diagnostic.getRecords = loadedCoachRecords;
       assertExpectedWorkspaceRecords(
-        loadedCoaches,
+        loadedCoachRecords,
         "Coach",
         "GET /api/coaches",
         "coach_get_missing_expected_id",
         "coach_get_account_mismatch",
         diagnostic,
       );
+      failureRoute = "GET /api/calendar-state";
+      failureStage = "coach_calendar_state_request_failed";
+      const calendarStateResponse = await fetch("/api/calendar-state", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      diagnostic.calendarStatus = calendarStateResponse.status;
+      if (calendarStateResponse.status === 401) {
+        setAuthStatus("guest");
+        throwWorkspaceSaveFailure("Coach", "GET /api/calendar-state", "coach_calendar_state_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
+      }
+      if (!calendarStateResponse.ok) {
+        const detail = await readApiFailureDetail(calendarStateResponse, "Coach save failed");
+        throwWorkspaceSaveFailure("Coach", "GET /api/calendar-state", "coach_calendar_state_failed", diagnostic, detail);
+      }
+      failureStage = "coach_calendar_state_failed";
+      const calendarStateData = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
+        calendarStateResponse,
+        "Coach",
+        "GET /api/calendar-state",
+        "coach_calendar_state_failed",
+        diagnostic,
+      );
+      const calendarCoachRecords = Array.isArray(calendarStateData.coaches) ? calendarStateData.coaches : undefined;
+      diagnostic.calendarRecords = calendarCoachRecords;
+      assertExpectedWorkspaceRecords(
+        calendarCoachRecords,
+        "Coach",
+        "GET /api/calendar-state",
+        "coach_calendar_state_missing_expected_id",
+        "coach_calendar_state_account_mismatch",
+        diagnostic,
+      );
       setCoachProfiles(loadedCoaches);
       setCoachSaveState("saved");
+      setCoachEditorError("");
       setToast({ message });
       window.setTimeout(() => setCoachSaveState("idle"), 1600);
+      return true;
     } catch (error) {
       setCoachProfiles(snapshot);
       setCoachSaveState("error");
-      setToast({ message: error instanceof Error ? error.message : "Could not save coaches." });
+      const errorMessage = workspaceSaveFailureMessage(
+        error,
+        "Coach",
+        failureRoute,
+        failureStage,
+        diagnostic,
+        "Could not save coaches.",
+      );
+      setCoachEditorError(errorMessage);
+      setToast({ message: errorMessage });
+      return false;
     }
   }
 
-  function saveEditedCoach() {
+  async function saveEditedCoach() {
     if (!coachEditor.name.trim()) {
       setToast({ message: "Give the coach a name before saving." });
       return;
@@ -7350,12 +7613,14 @@ function App() {
       return;
     }
     const stableId = editingCoachId || clean.id;
+    const cleanedCoach = { ...clean, id: stableId };
     const next = exists
-      ? coachProfiles.map((coach) => (coach.id === stableId ? { ...clean, id: stableId } : coach))
-      : [...coachProfiles, { ...clean, id: stableId }];
+      ? coachProfiles.map((coach) => (coach.id === stableId ? cleanedCoach : coach))
+      : [...coachProfiles, cleanedCoach];
     setEditingCoachId(stableId);
-    setShowCoachEditor(false);
-    void persistCoaches(next, exists ? `${clean.displayName} updated.` : `${clean.displayName} added.`);
+    setCoachEditor(cleanedCoach);
+    const saved = await persistCoaches(next, exists ? `${clean.displayName} updated.` : `${clean.displayName} added.`);
+    if (saved) setShowCoachEditor(false);
   }
 
   function archiveCoach(coach: CoachProfile) {
@@ -9637,7 +9902,13 @@ function App() {
                 <span>{editingLocationId ? "Edit location" : "New location"}</span>
                 <h3>{locationEditor.name || "Location details"}</h3>
               </div>
-              <button className="icon-button" onClick={() => setShowLocationEditor(false)} type="button" aria-label="Close location editor">
+              <button
+                className="icon-button"
+                disabled={locationSaveState === "saving"}
+                onClick={() => setShowLocationEditor(false)}
+                type="button"
+                aria-label="Close location editor"
+              >
                 <X size={16} />
               </button>
             </div>
@@ -9711,7 +9982,12 @@ function App() {
                 <span>Default location</span>
               </label>
             </div>
-            <button className="primary-button settings-save" onClick={saveEditedLocation} type="button">
+            {locationSaveState === "error" && locationEditorError && (
+              <p className="workspace-save-error" role="alert">
+                {locationEditorError}
+              </p>
+            )}
+            <button className="primary-button settings-save" disabled={locationSaveState === "saving"} onClick={saveEditedLocation} type="button">
               {locationSaveState === "saving"
                 ? "Saving"
                 : locationSaveState === "saved"
@@ -9788,7 +10064,13 @@ function App() {
                 <span>{editingCoachId ? "Edit coach" : "New coach"}</span>
                 <h3>{coachEditor.displayName || coachEditor.name || "Coach details"}</h3>
               </div>
-              <button className="icon-button" onClick={() => setShowCoachEditor(false)} type="button" aria-label="Close coach editor">
+              <button
+                className="icon-button"
+                disabled={coachSaveState === "saving"}
+                onClick={() => setShowCoachEditor(false)}
+                type="button"
+                aria-label="Close coach editor"
+              >
                 <X size={16} />
               </button>
             </div>
@@ -9888,7 +10170,12 @@ function App() {
                 ))}
               </div>
             </div>
-            <button className="primary-button settings-save" onClick={saveEditedCoach} type="button">
+            {coachSaveState === "error" && coachEditorError && (
+              <p className="workspace-save-error" role="alert">
+                {coachEditorError}
+              </p>
+            )}
+            <button className="primary-button settings-save" disabled={coachSaveState === "saving"} onClick={saveEditedCoach} type="button">
               {coachSaveState === "saving"
                 ? "Saving"
                 : coachSaveState === "saved"

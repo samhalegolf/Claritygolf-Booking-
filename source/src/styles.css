@@ -2137,6 +2137,18 @@ button {
   margin-top: 10px;
 }
 
+.workspace-save-error {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #f0c7bd;
+  background: #fff3f0;
+  color: #8f2a18;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .email-template-card {
   align-content: start;
 }

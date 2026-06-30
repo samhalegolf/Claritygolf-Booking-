@@ -12,6 +12,8 @@ import {
   publicBookingState,
   publicCalendarState,
   readAvailability,
+  readCoaches,
+  readLocations,
   readPeople,
   readAdminSession,
   readAdminSettings,
@@ -27,6 +29,8 @@ import {
   writeBrandSettings,
   writeCalendarState,
   writeCoachAccount,
+  writeCoaches,
+  writeLocations,
   writeServices,
 } from "./calendar-store.mjs";
 import { createHash } from "node:crypto";
@@ -434,6 +438,32 @@ export function calendarApiMiddleware() {
         if (!(await requireAdmin(req, res))) return;
         const body = await readJsonBody(req);
         sendJson(res, 200, { services: writeServices(body.services) });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/locations") {
+        if (!(await requireAdmin(req, res))) return;
+        sendJson(res, 200, { locations: await readLocations() });
+        return;
+      }
+
+      if (req.method === "PUT" && pathname === "/api/locations") {
+        if (!(await requireAdmin(req, res))) return;
+        const body = await readJsonBody(req);
+        sendJson(res, 200, { locations: await writeLocations(body.locations) });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/api/coaches") {
+        if (!(await requireAdmin(req, res))) return;
+        sendJson(res, 200, { coaches: await readCoaches() });
+        return;
+      }
+
+      if (req.method === "PUT" && pathname === "/api/coaches") {
+        if (!(await requireAdmin(req, res))) return;
+        const body = await readJsonBody(req);
+        sendJson(res, 200, { coaches: await writeCoaches(body.coaches) });
         return;
       }
 
