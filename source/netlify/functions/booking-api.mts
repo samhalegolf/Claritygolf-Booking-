@@ -41,6 +41,7 @@ export const config: Config = {
     "/api/auth/change-password",
     "/api/auth/logout",
     "/api/calendar-state",
+    "/api/coaches",
     "/api/locations",
     "/api/admin-settings",
     "/api/notification-history",
