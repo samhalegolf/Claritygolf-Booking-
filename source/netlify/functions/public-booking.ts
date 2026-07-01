@@ -231,7 +231,7 @@ class SupabaseRest {
     const message = error instanceof Error ? error.message : String(error || "");
     if (!/calendar_items/i.test(message)) return "";
     if (!/(schema cache|column|PGRST204|42703|Could not find)/i.test(message)) return "";
-    return OPTIONAL_CALENDAR_ITEM_COLUMNS.find((column) => new RegExp(`['"\\`]${column}['"\\`]|\\b${column}\\b`, "i").test(message)) || "";
+    return OPTIONAL_CALENDAR_ITEM_COLUMNS.find((column) => new RegExp("['\"`]" + column + "['\"`]|\\b" + column + "\\b", "i").test(message)) || "";
   }
 
   omitColumns(row: Record<string, unknown>, columns: string[]) {
@@ -437,13 +437,13 @@ function fallbackEmailBody(input: { appointment: any; service: any; settings: Re
     ["Raw slot", `week=${input.appointment.week}, day=${input.appointment.day}, start=${input.appointment.start}, duration=${input.appointment.duration}`],
     ["Location", [input.appointment.location?.name, input.appointment.location?.address].filter(Boolean).join(" · ") || input.appointment.locationId],
     ["Coach", input.appointment.coach?.name || input.appointment.coachId],
-    ["Supabase error", input.error],
+    ["Exact error/status/response", input.error],
   ] as Array<[string, string]>;
-  const text = ["URGENT fallback booking — Supabase save failed", "", ...rows.map(([label, value]) => `${label}: ${value}`)].join("\n");
+  const text = ["URGENT fallback booking — public booking did not save normally", "", ...rows.map(([label, value]) => `${label}: ${value}`)].join("\n");
   const htmlRows = rows
     .map(([label, value]) => `<tr><td style="font-weight:700;padding:6px 10px;border-bottom:1px solid #e8ede6">${escapeHtml(label)}</td><td style="padding:6px 10px;border-bottom:1px solid #e8ede6">${escapeHtml(value)}</td></tr>`)
     .join("");
-  const html = `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#172017"><h1>URGENT fallback booking</h1><p>Supabase calendar save failed. Customer was shown the normal confirmed booking screen. Manually add this booking.</p><table cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;border:1px solid #e8ede6">${htmlRows}</table></div>`;
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#172017"><h1>URGENT fallback booking</h1><p>Public booking did not save normally. Customer was shown the normal confirmed booking screen. Manually add this booking.</p><table cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;border:1px solid #e8ede6">${htmlRows}</table></div>`;
   return { text, html };
 }
 
@@ -463,7 +463,7 @@ async function sendFallbackBookingEmail(input: { appointment: any; service: any;
     body: JSON.stringify({
       from: emailFrom(input.settings, input.account),
       to: [to],
-      subject: "URGENT fallback booking — Supabase save failed",
+      subject: "URGENT fallback booking — public booking did not save normally",
       html: body.html,
       text: body.text,
       reply_to: input.appointment.email,
@@ -651,16 +651,37 @@ async function fallbackFromRawPayload(payload: any, originalError: unknown) {
   const firstName = cleanString(payload?.firstName, "", 80);
   const lastName = cleanString(payload?.lastName, "", 80);
   const email = cleanEmail(payload?.email, "");
-  if (!payload?.serviceId || !firstName || !lastName || !email) throw originalError;
+  const hasWeek = payload?.week !== undefined && payload?.week !== null && payload?.week !== "";
+  const hasDay = payload?.day !== undefined && payload?.day !== null && payload?.day !== "";
+  const hasStart = payload?.start !== undefined && payload?.start !== null && payload?.start !== "";
+  const week = Number(payload?.week);
+  const day = Number(payload?.day);
+  const start = Number(payload?.start);
+  if (
+    !payload?.serviceId ||
+    !firstName ||
+    !lastName ||
+    !email ||
+    !hasWeek ||
+    !hasDay ||
+    !hasStart ||
+    !Number.isInteger(week) ||
+    !Number.isInteger(day) ||
+    !Number.isInteger(start) ||
+    day < 0 ||
+    day > 6
+  ) {
+    throw originalError;
+  }
   const fallbackId = `fallback-appt-${Date.now()}`;
   const account = defaultCoachAccount();
   const appointment = {
     id: fallbackId,
     accountId: defaultWorkspaceAccountFromCoachAccount(account).id,
     kind: "appointment",
-    week: Number(payload.week ?? 0),
-    day: Number(payload.day ?? 0),
-    start: Number(payload.start ?? 0),
+    week,
+    day,
+    start,
     duration: Number(payload.duration ?? 0),
     coachId: cleanSlug(payload.coachId, "sam-hale"),
     locationId: cleanSlug(payload.locationId, "default-location"),

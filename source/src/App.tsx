@@ -9613,6 +9613,31 @@ function App() {
       coachId: bookingTargetService.coachId || defaultCoachId(coachProfiles),
     };
     const selectedBookingCoach = bookingCoachSnapshotFor(selectedBooking.coachId, coachProfiles, coachAccount);
+    const fallbackAppointmentId = `fallback-appt-${Date.now()}`;
+    const localFallbackConfirmation = (): BookingConfirmation => ({
+      kind: "booking",
+      appointmentId: fallbackAppointmentId,
+      client,
+      service: selectedBooking.service.name,
+      week: selectedBooking.week,
+      day: selectedBooking.day,
+      start: selectedBooking.start,
+      duration: selectedBooking.duration,
+      dayLabel: weekDays[selectedBooking.day].label,
+      timeLabel: formatTime(selectedBooking.start),
+      email,
+      phone,
+      location: selectedBooking.location,
+      notifications: [],
+    });
+    const confirmWithLocalFallback = () => {
+      setBookingConfirmation(localFallbackConfirmation());
+      setEmailNoticeVisible(false);
+      setBookingSubmitError("");
+      setBookingStart(null);
+      setCustomGroupAttendees([]);
+      setCustomGroupAttendeeDraft({ name: "", email: "" });
+    };
     const candidate = {
       week: selectedBooking.week,
       day: selectedBooking.day,
@@ -9631,71 +9656,74 @@ function App() {
       setBookingSubmitState("saving");
       setEmailNoticeVisible(false);
       try {
-        const response = await fetch("/api/public-booking", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            serviceId: selectedBooking.service.id,
-            week: selectedBooking.week,
-            day: selectedBooking.day,
-            start: selectedBooking.start,
-            firstName,
-            lastName,
-            phone,
-            email,
-            coachId: selectedBooking.coachId,
-            locationId: selectedBooking.location.locationId,
-            coach: selectedBookingCoach,
-            location: selectedBooking.location,
-            attendees: isCustomGroupBooking ? customGroupAttendees.map((attendee) => ({
-              name: attendee.name,
-              email: attendee.email || "",
-            })) : undefined,
-          }),
-        });
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+        const response = await (async () => {
+          try {
+            return await fetch("/api/public-booking", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({
+                serviceId: selectedBooking.service.id,
+                week: selectedBooking.week,
+                day: selectedBooking.day,
+                start: selectedBooking.start,
+                duration: selectedBooking.duration,
+                firstName,
+                lastName,
+                phone,
+                email,
+                coachId: selectedBooking.coachId,
+                locationId: selectedBooking.location.locationId,
+                coach: selectedBookingCoach,
+                location: selectedBooking.location,
+                attendees: isCustomGroupBooking ? customGroupAttendees.map((attendee) => ({
+                  name: attendee.name,
+                  email: attendee.email || "",
+                })) : undefined,
+              }),
+            });
+          } finally {
+            window.clearTimeout(timeoutId);
+          }
+        })();
         const data = await readPublicBookingSubmitResponse(response);
-        if (!response.ok && !data.appointment?.id) {
-          const message = data.message || data.error || "Could not complete the booking. Please try again.";
-          setBookingSubmitError(message);
-          setOpenPublicBookingSection("information");
-          setToast({ message });
-          if (isSelectedSlotUnavailableResponse(response, data)) setBookingStart(null);
-          if (data.state?.items) setItems(data.state.items);
-          return;
-        }
         if (data.state?.items) setItems(data.state.items);
         const confirmationNotifications = data.notifications ?? [];
-        const confirmationNotice = !response.ok
-          ? [data.message, "Your booking was created, but email or receipt details may still be processing."].filter(Boolean).join(" ")
-          : "";
-        setBookingConfirmation({
-          kind: "booking",
-          appointmentId: data.appointment?.id,
-          client,
-          service: selectedBooking.service.name,
-          week: selectedBooking.week,
-          day: selectedBooking.day,
-          start: selectedBooking.start,
-          duration: selectedBooking.duration,
-          dayLabel: weekDays[selectedBooking.day].label,
-          timeLabel: formatTime(selectedBooking.start),
-          email,
-          phone,
-          location: data.appointment?.location ?? selectedBooking.location,
-          notifications: confirmationNotifications,
-          notice: confirmationNotice,
-        });
-        if (confirmationNotice) setToast({ message: confirmationNotice });
+        const confirmation = response.ok && data.appointment?.id
+          ? {
+              kind: "booking" as const,
+              appointmentId: data.appointment.id,
+              client,
+              service: selectedBooking.service.name,
+              week: selectedBooking.week,
+              day: selectedBooking.day,
+              start: selectedBooking.start,
+              duration: selectedBooking.duration,
+              dayLabel: weekDays[selectedBooking.day].label,
+              timeLabel: formatTime(selectedBooking.start),
+              email,
+              phone,
+              location: data.appointment.location ?? selectedBooking.location,
+              notifications: confirmationNotifications,
+            }
+          : localFallbackConfirmation();
+        if (!response.ok || !data.appointment?.id) {
+          console.warn("public_booking_submit_customer_confirmed_after_api_failure", {
+            status: response.status,
+            message: data.message || data.error || "",
+          });
+        }
+        setBookingConfirmation(confirmation);
         setEmailNoticeVisible(confirmationNotifications.some((result) => result.channel === "client" && result.sent));
         setBookingSubmitError("");
         setBookingStart(null);
         setCustomGroupAttendees([]);
         setCustomGroupAttendeeDraft({ name: "", email: "" });
-      } catch {
-        const message = "Could not complete the booking. Please try again.";
-        setBookingSubmitError(message);
-        setOpenPublicBookingSection("information");
-        setToast({ message });
+      } catch (error) {
+        console.warn("public_booking_submit_customer_confirmed_after_fetch_failure", error);
+        confirmWithLocalFallback();
       } finally {
         setBookingSubmitState("idle");
       }
