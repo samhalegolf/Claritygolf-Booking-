@@ -7016,6 +7016,19 @@ function App() {
     setOpenPublicBookingSection(section);
   }
 
+  function startAnotherPublicBooking() {
+    const hasSelectedPublicService = currentScreenPublicServices.some((service) => service.id === bookingServiceId);
+    setBookingConfirmation(null);
+    setBookingMode("book");
+    setEmailNoticeVisible(false);
+    setBookingSubmitError("");
+    setBookingStart(null);
+    setCustomGroupAttendees([]);
+    setCustomGroupAttendeeDraft({ name: "", email: "" });
+    setOpenPublicBookingSection(hasSelectedPublicService ? "datetime" : "appointment");
+    if (!hasSelectedPublicService) setBookingDaySelected(false);
+  }
+
   function handlePublicBookingServiceSelect(serviceId: string) {
     const isCurrent = serviceId === bookingServiceId;
     setBookingServiceId(isCurrent ? "" : serviceId);
@@ -13552,11 +13565,7 @@ function App() {
                 )}
                 <button
                   className="primary-button confirm-booking"
-	                  onClick={() => {
-	                    setBookingConfirmation(null);
-	                    setBookingMode("book");
-	                    setEmailNoticeVisible(false);
-	                  }}
+                  onClick={startAnotherPublicBooking}
                   type="button"
                 >
                   {bookingConfirmation.kind === "cancelled" ? "Back to booking" : "Book another lesson"}
