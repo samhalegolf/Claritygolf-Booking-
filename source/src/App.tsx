@@ -11168,16 +11168,6 @@ function App() {
                 </button>
               )}
               {customGroupAttendeePanel}
-              <div className="booking-summary">
-                <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
-                <span>
-                  {!selectedBookingService
-                    ? "Select a lesson to see available times"
-                    : bookingStart === null
-                    ? "Choose a time"
-                    : `${weekDays[bookingDay].label}, ${formatTime(bookingStart)}`}
-                </span>
-              </div>
               {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
               {bookingSubmitError && (
                 <div className="email-status failed" role="alert">
@@ -13819,16 +13809,6 @@ function App() {
                           </button>
                         )}
                         {customGroupAttendeePanel}
-                        <div className="booking-summary">
-                          <strong>{selectedBookingService?.name ?? "Choose appointment type"}</strong>
-                          <span>
-                            {!selectedBookingService
-                              ? "Select a lesson to see available times"
-                              : bookingStart === null
-                              ? "Choose a time"
-                              : `${weekDays[bookingDay].label}, ${formatTime(bookingStart)}`}
-                          </span>
-                        </div>
                         {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
                         {bookingSubmitError && (
                           <div className="email-status failed" role="alert">
