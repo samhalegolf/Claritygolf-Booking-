@@ -712,14 +712,16 @@ export default async function handler(req: Request) {
     return json(result);
   } catch (error) {
     const status = (error as any)?.status || 500;
-    if (status >= 500) {
-      try {
-        const fallback = await fallbackFromRawPayload(payload, error);
-        console.warn("public_booking_lean:raw_payload_fallback_confirmed", fallback.appointment.id);
-        return json(fallback);
-      } catch (fallbackError) {
-        console.error("public_booking_lean:raw_payload_fallback_unavailable", fallbackError);
-      }
+    try {
+      const fallback = await fallbackFromRawPayload(payload, error);
+      console.warn("public_booking_lean:any_error_payload_fallback_confirmed", {
+        fallbackAppointmentId: fallback.appointment.id,
+        originalStatus: status,
+        originalError: errorMessage(error),
+      });
+      return json(fallback);
+    } catch (fallbackError) {
+      console.error("public_booking_lean:any_error_payload_fallback_unavailable", fallbackError);
     }
     console.error("public_booking_lean:failed", error);
     return json(
