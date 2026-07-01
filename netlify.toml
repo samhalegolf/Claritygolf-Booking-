@@ -48,6 +48,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/public-booking"
+  to = "/.netlify/functions/public-booking"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
