@@ -579,10 +579,26 @@ type ClientProfileTab = "bookings" | "notifications";
 
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
-type LessonCompleteErrorMap = Record<string, string>;
+type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
+type AdminSaveOwner = "lesson_complete" | "locations" | "coaches" | "settings";
+type LessonCompleteDiagnostic = {
+  action: "lesson_complete";
+  itemId: string;
+  expectedStatus: "completed";
+  serverStatus: number;
+  message: string;
+  backendMessage?: string;
+  backendError?: string;
+  backendDetails?: string;
+  conflictSource?: string;
+  expectedRevision?: string;
+  backendRevision?: string;
+};
+type LessonCompleteErrorMap = Record<string, LessonCompleteDiagnostic>;
 type CalendarStateSaveResponse = {
   message?: string;
   error?: string;
+  details?: unknown;
   expectedUpdatedAt?: string;
   backendUpdatedAt?: string;
   conflictSource?: string;
@@ -3266,6 +3282,9 @@ function App() {
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [authError, setAuthError] = useState("");
   const [loginState, setLoginState] = useState<"idle" | "signing-in">("idle");
+  const [adminWorkspaceLoadStatus, setAdminWorkspaceLoadStatus] =
+    useState<AdminWorkspaceLoadStatus>(isEmbedMode ? "loaded" : "idle");
+  const [adminWorkspaceLoadError, setAdminWorkspaceLoadError] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotState, setForgotState] = useState<"idle" | "sending" | "sent">("idle");
   const [forgotMessage, setForgotMessage] = useState("");
@@ -3442,6 +3461,7 @@ function App() {
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
   const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [settingsSaveError, setSettingsSaveError] = useState("");
   const [testEmailAddress, setTestEmailAddress] = useState("");
   const [testEmailState, setTestEmailState] = useState<"idle" | "sending" | "sent">("idle");
   const [emailNoticeVisible, setEmailNoticeVisible] = useState(false);
@@ -3468,6 +3488,7 @@ function App() {
   const suppressItemClickUntilRef = useRef(0);
   const activeWeekRef = useRef(activeWeek);
   const hasLoadedCalendarApiRef = useRef(false);
+  const adminHydrationRunIdRef = useRef(0);
   const clickPlaceRef = useRef<null | { bookingId: string; candidate: SlotCandidate }>(null);
   const pointerClientRef = useRef({ x: 0, y: 0 });
   const pointerStartRef = useRef({ x: 0, y: 0 });
@@ -3482,8 +3503,12 @@ function App() {
   const brandSaveVersionRef = useRef(0);
   const serviceSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
+  const locationSaveVersionRef = useRef(0);
+  const coachSaveVersionRef = useRef(0);
+  const settingsSaveVersionRef = useRef(0);
   const lastPersistedCalendarFingerprintRef = useRef("");
   const pendingLessonCompleteIdRef = useRef("");
+  const activeAdminSaveOwnersRef = useRef<Map<AdminSaveOwner, number>>(new Map());
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
   const pendingQuickCreateRef = useRef<QuickCreateState | null>(null);
 
@@ -3493,6 +3518,26 @@ function App() {
   const selectedLocationSnapshot = selected
     ? calendarItemLocation(selected, selectedService ?? undefined, locations, coachAccount)
     : null;
+
+  function hasActiveAdminSave(owner?: AdminSaveOwner) {
+    if (owner) return (activeAdminSaveOwnersRef.current.get(owner) ?? 0) > 0;
+    return Array.from(activeAdminSaveOwnersRef.current.values()).some((count) => count > 0);
+  }
+
+  function beginAdminSave(owner: AdminSaveOwner) {
+    activeAdminSaveOwnersRef.current.set(owner, (activeAdminSaveOwnersRef.current.get(owner) ?? 0) + 1);
+    adminHydrationRunIdRef.current += 1;
+    return ++calendarSaveVersionRef.current;
+  }
+
+  function endAdminSave(owner: AdminSaveOwner) {
+    const nextCount = (activeAdminSaveOwnersRef.current.get(owner) ?? 0) - 1;
+    if (nextCount > 0) {
+      activeAdminSaveOwnersRef.current.set(owner, nextCount);
+    } else {
+      activeAdminSaveOwnersRef.current.delete(owner);
+    }
+  }
   const selectedLessonNote = selectedService?.lessonNote || selectedService?.location || "";
   const selectedGroupSessionService = selectedGroupSession
     ? services.find((service) => service.id === selectedGroupSession.serviceId) ?? null
@@ -4129,18 +4174,20 @@ function App() {
         if (!session.authenticated) {
           setAuthStatus("guest");
           setCalendarFeedStatus("offline");
+          setAdminWorkspaceLoadStatus("idle");
+          setAdminWorkspaceLoadError("");
           return;
         }
 
         if (session.email) setAdminEmail(session.email);
-        await loadAdminCalendarState();
-        if (cancelled) return;
         setAuthStatus("authenticated");
-        setCalendarFeedStatus("connected");
+        void startAdminWorkspaceHydration();
       } catch {
         if (!cancelled) {
           hasLoadedCalendarApiRef.current = false;
           setCalendarFeedStatus("offline");
+          setAdminWorkspaceLoadStatus("idle");
+          setAdminWorkspaceLoadError("");
           if (!isEmbedMode) setAuthStatus("guest");
         }
       }
@@ -4167,7 +4214,8 @@ function App() {
   async function processPendingAdminNotifications() {
     if (isEmbedMode || authStatus !== "authenticated") return;
     try {
-      const response = await fetch("/api/calendar-state", {
+      const response = await fetch("/api/admin-notification-debounce", {
+        method: "POST",
         credentials: "same-origin",
         cache: "no-store",
         headers: { Accept: "application/json" },
@@ -4182,8 +4230,13 @@ function App() {
       };
       if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     } catch {
-      // Pending admin notification sends are secondary to the saved calendar change.
+      console.warn("admin_notification_debounce:flush_failed");
     }
+  }
+
+  function scheduleAdminNotificationDebounceFlush() {
+    window.setTimeout(() => void processPendingAdminNotifications(), 32000);
+    window.setTimeout(() => void refreshNotificationHistory(), 35000);
   }
 
   useEffect(() => {
@@ -4201,6 +4254,7 @@ function App() {
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
+    if (hasActiveAdminSave()) return;
     const requestedFingerprint = calendarStateFingerprint(items, calendarSyncKey);
     if (requestedFingerprint === lastPersistedCalendarFingerprintRef.current) return;
     const saveVersion = ++calendarSaveVersionRef.current;
@@ -4302,8 +4356,7 @@ function App() {
         }, 1800);
         window.setTimeout(() => void refreshNotificationHistory(), 1500);
         window.setTimeout(() => void refreshNotificationHistory(), 8000);
-        window.setTimeout(() => void processPendingAdminNotifications(), 32000);
-        window.setTimeout(() => void refreshNotificationHistory(), 35000);
+        scheduleAdminNotificationDebounceFlush();
       })().catch((error) => {
         if (calendarSaveVersionRef.current === saveVersion) {
           const message = error instanceof Error ? error.message : "Calendar save failed.";
@@ -4574,19 +4627,84 @@ function App() {
     }
   }
 
-  async function loadAdminCalendarState() {
+  function adminWorkspaceLoadMessage(error: unknown) {
+    if (error instanceof Error && error.message) return error.message;
+    return "Calendar, people, locations, coaches, and settings could not be loaded.";
+  }
+
+  async function startAdminWorkspaceHydration() {
+    if (isEmbedMode || hasActiveAdminSave()) return;
+    const runId = ++adminHydrationRunIdRef.current;
+    hasLoadedCalendarApiRef.current = false;
+    setAdminWorkspaceLoadStatus("loading");
+    setAdminWorkspaceLoadError("");
+    setCalendarFeedStatus("checking");
+    setCalendarSaveStatus("idle");
+    setCalendarSaveError("");
+    try {
+      const applied = await loadAdminCalendarState(runId);
+      if (!applied || adminHydrationRunIdRef.current !== runId) return;
+      setAdminWorkspaceLoadStatus("loaded");
+      setAdminWorkspaceLoadError("");
+      setCalendarFeedStatus("connected");
+    } catch (error) {
+      if (adminHydrationRunIdRef.current !== runId) return;
+      hasLoadedCalendarApiRef.current = false;
+      setAdminWorkspaceLoadStatus("error");
+      setAdminWorkspaceLoadError(adminWorkspaceLoadMessage(error));
+      setCalendarFeedStatus("offline");
+    }
+  }
+
+  async function loadAdminCalendarState(runId = ++adminHydrationRunIdRef.current) {
+    const isCurrentRun = () => adminHydrationRunIdRef.current === runId;
     hasLoadedCalendarApiRef.current = false;
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
-    const response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
+    const calendarStateRequest = fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
+    const locationsRequest = fetch("/api/locations", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    }).then(async (locationsResponse) => ({
+      response: locationsResponse,
+      data: locationsResponse.ok ? ((await locationsResponse.json()) as { locations?: Location[] }) : null,
+    }));
+    const coachesRequest = fetch("/api/coaches", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    }).then(async (coachesResponse) => ({
+      response: coachesResponse,
+      data: coachesResponse.ok ? ((await coachesResponse.json()) as { coaches?: CoachProfile[] }) : null,
+    }));
+    const adminSettingsRequest = fetch("/api/admin-settings", { headers: { Accept: "application/json" } }).then(
+      async (adminSettingsResponse) => ({
+        response: adminSettingsResponse,
+        data: adminSettingsResponse.ok ? ((await adminSettingsResponse.json()) as Partial<NotificationSettings>) : null,
+      }),
+    );
+    const [calendarResult, locationsResult, coachesResult, adminSettingsResult] = await Promise.allSettled([
+      calendarStateRequest,
+      locationsRequest,
+      coachesRequest,
+      adminSettingsRequest,
+    ]);
+    if (!isCurrentRun() || hasActiveAdminSave()) return false;
+    if (calendarResult.status === "rejected") {
+      const healthMessage = await fetchDatabaseHealthSummary();
+      if (!isCurrentRun()) return false;
+      throw new Error(["Calendar API unavailable", healthMessage].filter(Boolean).join(" · "));
+    }
+    const response = calendarResult.value;
     if (response.status === 401) {
-      setAuthStatus("guest");
       throw new Error("Admin login required");
     }
     if (!response.ok) {
       const apiMessage = await readApiFailure(response, "Calendar API unavailable");
       const healthMessage = await fetchDatabaseHealthSummary();
+      if (!isCurrentRun()) return false;
       throw new Error([apiMessage, healthMessage].filter(Boolean).join(" · "));
     }
     const data = (await response.json()) as {
@@ -4606,6 +4724,7 @@ function App() {
       googleCalendar?: Partial<GoogleCalendarSyncStatus>;
       updatedAt?: string;
     };
+    if (!isCurrentRun() || hasActiveAdminSave()) return false;
     const loadedItems = Array.isArray(data.items) ? data.items : [];
     const loadedAccounts = cleanWorkspaceAccounts(data.workspaceAccounts, data.account ?? coachAccount);
     const loadedAccountId = defaultAccountId(loadedAccounts);
@@ -4623,38 +4742,28 @@ function App() {
     let dedicatedLocations: Location[] | null = null;
     let dedicatedCoaches: CoachProfile[] | null = null;
     const workspaceConfigWarnings: string[] = [];
-    try {
-      const locationsResponse = await fetch("/api/locations", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (locationsResponse.ok) {
-        const locationsData = (await locationsResponse.json()) as { locations?: Location[] };
-        if (Array.isArray(locationsData.locations) && locationsData.locations.length) {
+    if (locationsResult.status === "fulfilled") {
+      if (locationsResult.value.response.ok) {
+        const locationsData = locationsResult.value.data;
+        if (Array.isArray(locationsData?.locations) && locationsData.locations.length) {
           dedicatedLocations = cleanLocations(locationsData.locations, fallbackAccount);
         }
       } else {
         workspaceConfigWarnings.push("locations");
       }
-    } catch {
+    } else {
       workspaceConfigWarnings.push("locations");
     }
-    try {
-      const coachesResponse = await fetch("/api/coaches", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (coachesResponse.ok) {
-        const coachesData = (await coachesResponse.json()) as { coaches?: CoachProfile[] };
-        if (Array.isArray(coachesData.coaches) && coachesData.coaches.length) {
+    if (coachesResult.status === "fulfilled") {
+      if (coachesResult.value.response.ok) {
+        const coachesData = coachesResult.value.data;
+        if (Array.isArray(coachesData?.coaches) && coachesData.coaches.length) {
           dedicatedCoaches = cleanCoachProfiles(coachesData.coaches, fallbackAccount);
         }
       } else {
         workspaceConfigWarnings.push("coaches");
       }
-    } catch {
+    } else {
       workspaceConfigWarnings.push("coaches");
     }
     if (dedicatedLocations) {
@@ -4678,19 +4787,20 @@ function App() {
       setCalendarSyncKey(data.syncKey);
     }
     applyNotificationSettings(data.settings);
-    try {
-      const adminSettingsResponse = await fetch("/api/admin-settings", { headers: { Accept: "application/json" } });
-      if (adminSettingsResponse.ok) {
-        const adminSettings = (await adminSettingsResponse.json()) as Partial<NotificationSettings>;
-        applyNotificationSettings(adminSettings);
-      }
-    } catch {
+    if (
+      adminSettingsResult.status === "fulfilled" &&
+      adminSettingsResult.value.response.ok &&
+      adminSettingsResult.value.data
+    ) {
+      applyNotificationSettings(adminSettingsResult.value.data);
+    } else {
       // Keep the notification settings from /api/calendar-state if admin settings read fails.
     }
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
     applyGoogleCalendarStatus(data.googleCalendar);
     hasLoadedCalendarApiRef.current = true;
+    return true;
   }
 
   async function loadPublicBookingState() {
@@ -7140,6 +7250,7 @@ function App() {
 
   function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
     setSettingsSaveState("idle");
+    setSettingsSaveError("");
     setNotificationSettings((current) => ({ ...current, [field]: value }));
   }
 
@@ -7194,6 +7305,9 @@ function App() {
   }
 
   async function persistLocations(nextLocations: Location[], message = "Locations saved."): Promise<boolean> {
+    const saveVersion = ++locationSaveVersionRef.current;
+    beginAdminSave("locations");
+    const isCurrentSave = () => locationSaveVersionRef.current === saveVersion;
     const snapshot = locations;
     const clean = cleanLocations(nextLocations, coachAccount);
     const diagnostic: WorkspaceConfigDiagnostic = {
@@ -7320,13 +7434,17 @@ function App() {
         "location_calendar_state_account_mismatch",
         diagnostic,
       );
+      if (!isCurrentSave()) return false;
       setLocations(loadedLocations);
       setLocationSaveState("saved");
       setLocationEditorError("");
       setToast({ message });
-      window.setTimeout(() => setLocationSaveState("idle"), 1600);
+      window.setTimeout(() => {
+        if (isCurrentSave()) setLocationSaveState("idle");
+      }, 1600);
       return true;
     } catch (error) {
+      if (!isCurrentSave()) return false;
       setLocations(snapshot);
       setLocationSaveState("error");
       const errorMessage = workspaceSaveFailureMessage(
@@ -7340,6 +7458,8 @@ function App() {
       setLocationEditorError(errorMessage);
       setToast({ message: errorMessage });
       return false;
+    } finally {
+      endAdminSave("locations");
     }
   }
 
@@ -7444,6 +7564,9 @@ function App() {
   }
 
   async function persistCoaches(nextCoaches: CoachProfile[], message = "Coaches saved."): Promise<boolean> {
+    const saveVersion = ++coachSaveVersionRef.current;
+    beginAdminSave("coaches");
+    const isCurrentSave = () => coachSaveVersionRef.current === saveVersion;
     const snapshot = coachProfiles;
     const clean = cleanCoachProfiles(nextCoaches, coachAccount);
     const diagnostic: WorkspaceConfigDiagnostic = {
@@ -7570,13 +7693,17 @@ function App() {
         "coach_calendar_state_account_mismatch",
         diagnostic,
       );
+      if (!isCurrentSave()) return false;
       setCoachProfiles(loadedCoaches);
       setCoachSaveState("saved");
       setCoachEditorError("");
       setToast({ message });
-      window.setTimeout(() => setCoachSaveState("idle"), 1600);
+      window.setTimeout(() => {
+        if (isCurrentSave()) setCoachSaveState("idle");
+      }, 1600);
       return true;
     } catch (error) {
+      if (!isCurrentSave()) return false;
       setCoachProfiles(snapshot);
       setCoachSaveState("error");
       const errorMessage = workspaceSaveFailureMessage(
@@ -7590,6 +7717,8 @@ function App() {
       setCoachEditorError(errorMessage);
       setToast({ message: errorMessage });
       return false;
+    } finally {
+      endAdminSave("coaches");
     }
   }
 
@@ -8028,10 +8157,14 @@ function App() {
     details: {
       lessonId: string;
       calendarId: string;
+      expectedStatus?: "completed";
       expectedRevision?: string;
       backendRevision?: string;
       httpStatus?: number;
       conflictSource?: string;
+      backendMessage?: string;
+      backendError?: string;
+      backendDetails?: string;
     },
   ) {
     console.warn("calendar_state:lesson_complete", {
@@ -8039,11 +8172,62 @@ function App() {
       event: label,
       lessonId: details.lessonId,
       calendarId: details.calendarId,
+      expectedStatus: details.expectedStatus || "completed",
       expectedRevision: details.expectedRevision || "",
       backendRevision: details.backendRevision || "",
       httpStatus: details.httpStatus || 0,
       conflictSource: details.conflictSource || "",
+      backendMessage: details.backendMessage || "",
+      backendError: details.backendError || "",
+      backendDetails: details.backendDetails || "",
     });
+  }
+
+  function lessonCompleteDiagnosticText(diagnostic: LessonCompleteDiagnostic) {
+    return [
+      diagnostic.message,
+      `action: ${diagnostic.action}`,
+      `item id: ${diagnostic.itemId}`,
+      `expected status: ${diagnostic.expectedStatus}`,
+      `server response status: ${diagnostic.serverStatus || "n/a"}`,
+      diagnostic.backendMessage ? `backend message: ${diagnostic.backendMessage}` : "",
+      diagnostic.backendError ? `backend error: ${diagnostic.backendError}` : "",
+      diagnostic.backendDetails ? `backend details: ${diagnostic.backendDetails}` : "",
+      diagnostic.conflictSource ? `conflict source: ${diagnostic.conflictSource}` : "",
+      diagnostic.expectedRevision ? `expected revision: ${diagnostic.expectedRevision}` : "",
+      diagnostic.backendRevision ? `backend revision: ${diagnostic.backendRevision}` : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  function lessonCompleteDiagnosticFromResponse(
+    itemId: string,
+    responseStatus: number,
+    data: CalendarStateSaveResponse,
+    fallbackMessage: string,
+    revisions: { expectedRevision?: string; backendRevision?: string; conflictSource?: string } = {},
+  ): LessonCompleteDiagnostic {
+    const backendMessage = workspaceDiagnosticValue(data.message);
+    const backendError = workspaceDiagnosticValue(data.error);
+    const backendDetails = workspaceDiagnosticValue(data.details);
+    return {
+      action: "lesson_complete",
+      itemId,
+      expectedStatus: "completed",
+      serverStatus: responseStatus,
+      message: backendMessage || backendError || fallbackMessage,
+      backendMessage,
+      backendError,
+      backendDetails,
+      conflictSource: revisions.conflictSource || workspaceDiagnosticValue(data.conflictSource),
+      expectedRevision: revisions.expectedRevision,
+      backendRevision: revisions.backendRevision || data.backendUpdatedAt || data.updatedAt,
+    };
+  }
+
+  function lessonCompleteFailure(diagnostic: LessonCompleteDiagnostic) {
+    const error = new Error(diagnostic.message) as Error & { lessonCompleteDiagnostic?: LessonCompleteDiagnostic };
+    error.lessonCompleteDiagnostic = diagnostic;
+    return error;
   }
 
   async function readLatestCalendarStateForLessonComplete(itemId: string) {
@@ -8058,15 +8242,30 @@ function App() {
       throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
     }
     if (!response.ok) {
+      const diagnostic = lessonCompleteDiagnosticFromResponse(
+        itemId,
+        response.status,
+        data,
+        "Calendar state could not be loaded before completing the lesson.",
+        {
+          expectedRevision: calendarStateVersion,
+          backendRevision: data.backendUpdatedAt || data.updatedAt,
+          conflictSource: data.conflictSource || data.error,
+        },
+      );
       logLessonCompleteDiagnostic("fetch_latest_failed", {
         lessonId: itemId,
         calendarId: "unknown",
+        expectedStatus: "completed",
         expectedRevision: calendarStateVersion,
         backendRevision: data.backendUpdatedAt || data.updatedAt,
         httpStatus: response.status,
         conflictSource: data.conflictSource || data.error,
+        backendMessage: diagnostic.backendMessage,
+        backendError: diagnostic.backendError,
+        backendDetails: diagnostic.backendDetails,
       });
-      throw new Error(data.message || data.error || "Calendar state could not be loaded.");
+      throw lessonCompleteFailure(diagnostic);
     }
     return data;
   }
@@ -8083,14 +8282,24 @@ function App() {
       : "unknown";
     const expectedRevision = typeof latest.updatedAt === "string" ? latest.updatedAt : "";
     if (!latestItem) {
+      const diagnostic: LessonCompleteDiagnostic = {
+        action: "lesson_complete",
+        itemId,
+        expectedStatus: "completed",
+        serverStatus: 404,
+        message: "Lesson was not completed because it could not be found. Reload and try again.",
+        backendError: "missing_lesson",
+        expectedRevision,
+      };
       logLessonCompleteDiagnostic("lesson_missing", {
         lessonId: itemId,
         calendarId,
+        expectedStatus: "completed",
         expectedRevision,
         httpStatus: 404,
         conflictSource: "missing_lesson",
       });
-      throw new Error("Lesson was not completed because it could not be found. Reload and try again.");
+      throw lessonCompleteFailure(diagnostic);
     }
     const nextItems = latestItems.map((item) =>
       item.id === itemId && item.kind === "appointment" ? { ...item, status: "completed" as BookingStatus } : item,
@@ -8125,15 +8334,30 @@ function App() {
       throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
     }
     if (!response.ok) {
+      const diagnostic = lessonCompleteDiagnosticFromResponse(
+        itemId,
+        response.status,
+        data,
+        "Lesson completion failed.",
+        {
+          expectedRevision,
+          backendRevision,
+          conflictSource: data.conflictSource || data.error,
+        },
+      );
       logLessonCompleteDiagnostic("save_failed", {
         lessonId: itemId,
         calendarId,
+        expectedStatus: "completed",
         expectedRevision,
         backendRevision,
         httpStatus: response.status,
         conflictSource: data.conflictSource || data.error,
+        backendMessage: diagnostic.backendMessage,
+        backendError: diagnostic.backendError,
+        backendDetails: diagnostic.backendDetails,
       });
-      throw new Error(data.message || data.error || "Lesson completion failed.");
+      throw lessonCompleteFailure(diagnostic);
     }
     logLessonCompleteDiagnostic("saved", {
       lessonId: itemId,
@@ -8147,6 +8371,7 @@ function App() {
 
   async function completeAppointmentSafely(itemId: string) {
     if (pendingLessonCompleteIdRef.current) return;
+    const completeSaveVersion = beginAdminSave("lesson_complete");
     pendingLessonCompleteIdRef.current = itemId;
     setPendingLessonCompleteId(itemId);
     setLessonCompleteErrors((current) => {
@@ -8170,22 +8395,40 @@ function App() {
       setCalendarSaveStatus("saved");
       setCalendarSaveError("");
       setToast({ message: "Lesson marked completed." });
-      window.setTimeout(() => setCalendarSaveStatus((current) => (current === "saved" ? "idle" : current)), 1800);
+      window.setTimeout(() => {
+        if (calendarSaveVersionRef.current === completeSaveVersion) {
+          setCalendarSaveStatus((current) => (current === "saved" ? "idle" : current));
+        }
+      }, 1800);
       window.setTimeout(() => void refreshNotificationHistory(), 1500);
-      window.setTimeout(() => void processPendingAdminNotifications(), 32000);
+      scheduleAdminNotificationDebounceFlush();
     } catch (error) {
-      const message =
-        error instanceof Error && error.message.includes("Admin login")
-          ? error.message
-          : "Lesson was not completed because calendar data changed. Reload and try again.";
+      const errorDiagnostic =
+        error instanceof Error
+          ? (error as Error & { lessonCompleteDiagnostic?: LessonCompleteDiagnostic }).lessonCompleteDiagnostic
+          : undefined;
+      const diagnostic =
+        errorDiagnostic ??
+        ({
+          action: "lesson_complete",
+          itemId,
+          expectedStatus: "completed",
+          serverStatus: 0,
+          message:
+            error instanceof Error && error.message.includes("Admin login")
+              ? error.message
+              : "Lesson was not completed because calendar data changed. Reload and try again.",
+        } satisfies LessonCompleteDiagnostic);
+      const message = diagnostic.message;
       setCalendarFeedStatus(message.includes("Admin login") ? "offline" : "connected");
       setCalendarSaveStatus("failed");
-      setCalendarSaveError(message);
-      setLessonCompleteErrors((current) => ({ ...current, [itemId]: message }));
+      setCalendarSaveError(lessonCompleteDiagnosticText(diagnostic));
+      setLessonCompleteErrors((current) => ({ ...current, [itemId]: diagnostic }));
       setToast({ message });
     } finally {
       pendingLessonCompleteIdRef.current = "";
       setPendingLessonCompleteId("");
+      endAdminSave("lesson_complete");
     }
   }
 
@@ -8763,29 +9006,22 @@ function App() {
       const data = (await response.json()) as { authenticated?: boolean; message?: string; email?: string };
       if (!response.ok || !data.authenticated) {
         setAuthError(data.message || "Login failed.");
+        setAdminWorkspaceLoadStatus("idle");
+        setAdminWorkspaceLoadError("");
         return;
       }
       if (data.email) setAdminEmail(data.email);
-      try {
-        await loadAdminCalendarState();
-      } catch (error) {
-        hasLoadedCalendarApiRef.current = false;
-        setAuthStatus("guest");
-        setCalendarFeedStatus("offline");
-        await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-        const detail = error instanceof Error && error.message ? ` Details: ${error.message}` : "";
-        setAuthError(`Login worked, but the live database is not connected. Nothing will be editable until the database connection is fixed.${detail}`);
-        return;
-      }
       setAuthStatus("authenticated");
       setAdminPassword("");
-      setCalendarFeedStatus("connected");
       setAuthError("");
+      void startAdminWorkspaceHydration();
     } catch {
       hasLoadedCalendarApiRef.current = false;
       setAuthStatus("guest");
       setAuthError("Could not reach the booking server.");
       setCalendarFeedStatus("offline");
+      setAdminWorkspaceLoadStatus("idle");
+      setAdminWorkspaceLoadError("");
     } finally {
       setLoginState("idle");
     }
@@ -8851,12 +9087,14 @@ function App() {
       setResetState("idle");
       if (data.email) setAdminEmail(data.email);
       if (typeof window !== "undefined") window.history.replaceState(null, "", window.location.pathname);
-      await loadAdminCalendarState();
-      setCalendarFeedStatus("connected");
+      setAuthError("");
+      void startAdminWorkspaceHydration();
     } catch {
       setResetState("idle");
       setAuthError("Could not reach the booking server.");
       setCalendarFeedStatus("offline");
+      setAdminWorkspaceLoadStatus("idle");
+      setAdminWorkspaceLoadError("");
     }
   }
 
@@ -8910,8 +9148,11 @@ function App() {
 
   async function handleAdminLogout() {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    adminHydrationRunIdRef.current += 1;
     hasLoadedCalendarApiRef.current = false;
     setAuthStatus("guest");
+    setAdminWorkspaceLoadStatus("idle");
+    setAdminWorkspaceLoadError("");
     closeCalendarDetails();
     setCalendarFeedStatus("offline");
     setCalendarSaveStatus("idle");
@@ -8919,7 +9160,11 @@ function App() {
   }
 
   async function saveNotificationSettings() {
+    const saveVersion = ++settingsSaveVersionRef.current;
+    beginAdminSave("settings");
+    const isCurrentSave = () => settingsSaveVersionRef.current === saveVersion;
     setSettingsSaveState("saving");
+    setSettingsSaveError("");
     try {
       const response = await fetch("/api/admin-settings", {
         method: "PUT",
@@ -8932,14 +9177,30 @@ function App() {
       }
       if (!response.ok) throw new Error(await readApiFailure(response, "Settings save failed"));
       const settings = (await response.json()) as NotificationSettings;
+      if (!isCurrentSave()) return;
       applyNotificationSettings(settings);
       setSettingsSaveState("saved");
       setToast({ message: "Notification and text settings saved." });
-      window.setTimeout(() => setSettingsSaveState("idle"), 1600);
+      window.setTimeout(() => {
+        if (isCurrentSave()) setSettingsSaveState("idle");
+      }, 1600);
     } catch (error) {
+      if (!isCurrentSave()) return;
+      const message = error instanceof Error ? error.message : "Could not save notification settings.";
       setSettingsSaveState("idle");
-      setToast({ message: error instanceof Error ? error.message : "Could not save notification settings." });
+      setSettingsSaveError(message);
+      setToast({ message });
+    } finally {
+      endAdminSave("settings");
     }
+  }
+
+  function settingsSaveErrorNotice() {
+    return settingsSaveError ? (
+      <p className="workspace-save-error" role="alert">
+        {settingsSaveError}
+      </p>
+    ) : null;
   }
 
   async function refreshGoogleCalendarStatus() {
@@ -9222,7 +9483,7 @@ function App() {
       }
       setTestEmailState("sent");
       setToast({ message: data.message || "Test email sent." });
-      void loadAdminCalendarState().catch(() => undefined);
+      void startAdminWorkspaceHydration();
       window.setTimeout(() => setTestEmailState("idle"), 1600);
     } catch {
       setToast({ message: "Could not reach the email sender." });
@@ -10892,6 +11153,7 @@ function App() {
               ? "Saved"
               : "Save minimum notice"}
         </button>
+        {settingsSaveErrorNotice()}
       </details>
               <details className="settings-subsection">
                 <summary className="settings-subsection-title">
@@ -11131,7 +11393,11 @@ function App() {
               </button>
             ))}
           </div>
-          {lessonCompleteErrors[selected.id] ? <p className="inline-error">{lessonCompleteErrors[selected.id]}</p> : null}
+          {lessonCompleteErrors[selected.id] ? (
+            <p className="inline-error" role="alert">
+              {lessonCompleteDiagnosticText(lessonCompleteErrors[selected.id])}
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -11354,6 +11620,14 @@ function App() {
   const selectedDetails = selectedGroupSessionDetails
     ? selectedGroupSessionDetails
     : selectedAppointmentDetails;
+  const adminWorkspaceReady = isEmbedMode || adminWorkspaceLoadStatus === "loaded";
+  const adminWorkspaceLoading =
+    !isEmbedMode &&
+    authStatus === "authenticated" &&
+    adminWorkspaceLoadStatus !== "loaded" &&
+    adminWorkspaceLoadStatus !== "error";
+  const adminWorkspaceFailed =
+    !isEmbedMode && authStatus === "authenticated" && adminWorkspaceLoadStatus === "error";
 
   if (!isEmbedMode && authStatus !== "authenticated") {
     return (
@@ -11604,7 +11878,25 @@ function App() {
         </header>
         )}
 
-        {!isEmbedMode && activeView === "calendar" && (
+        {!isEmbedMode && (adminWorkspaceLoading || adminWorkspaceFailed) && (
+        <section className="workspace">
+          <div className="empty-panel compact" role={adminWorkspaceFailed ? "alert" : "status"}>
+            <h2>{adminWorkspaceFailed ? "Admin workspace could not load" : "Loading admin workspace"}</h2>
+            <p>
+              {adminWorkspaceFailed
+                ? adminWorkspaceLoadError || "Calendar, people, locations, coaches, and settings could not be loaded."
+                : "Calendar, people, locations, coaches, and settings are loading."}
+            </p>
+            {adminWorkspaceFailed ? (
+              <button className="outline-button" type="button" onClick={() => void startAdminWorkspaceHydration()}>
+                Retry
+              </button>
+            ) : null}
+          </div>
+        </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && (
         <div
           ref={dockRef}
           className={`appointment-dock ${dockBookings.length || flyingBooking ? "has-tiles" : ""} ${
@@ -11681,7 +11973,7 @@ function App() {
         </div>
         )}
 
-        {!isEmbedMode && activeView === "calendar" && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && (
         <section
           className={`workspace ${pointerSession?.mode === "place" || activeDockBooking ? "placing-from-dock" : ""}`}
         >
@@ -12299,7 +12591,7 @@ function App() {
         </section>
         )}
 
-        {!isEmbedMode && activeView === "calendar" && floatingDrag && floatingItem?.kind === "appointment" && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && floatingDrag && floatingItem?.kind === "appointment" && (
           <article
             className="calendar-item appointment floating-drag-tile"
             aria-hidden="true"
@@ -12321,7 +12613,7 @@ function App() {
           </article>
         )}
 
-        {!isEmbedMode && activeView === "calendar" && calendarHover && !pointerSession && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && calendarHover && !pointerSession && (
           <aside
             className="calendar-hover-card"
             style={{ left: calendarHover.x, top: calendarHover.y }}
@@ -12360,7 +12652,7 @@ function App() {
           </aside>
         )}
 
-        {!isEmbedMode && activeView === "clients" && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "clients" && (
           <section className="module-page clients-page">
             <div className="client-toolbar">
               <div className="client-search">
@@ -12448,7 +12740,7 @@ function App() {
           </section>
         )}
 
-        {!isEmbedMode && activeView === "billing" && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "billing" && (
           <section className="module-page billing-page">
             <div className="settings-tabs billing-tabs" role="tablist" aria-label="Billing sections">
               <button
@@ -13669,7 +13961,7 @@ function App() {
           </section>
         )}
 
-        {!isEmbedMode && activeView === "settings" && (
+        {!isEmbedMode && adminWorkspaceReady && activeView === "settings" && (
           <section className="module-page settings-page">
             <div className="settings-tabs" role="tablist" aria-label="Settings sections">
               <button
@@ -14475,6 +14767,7 @@ function App() {
                       ? "Saved"
                       : "Save Email Settings"}
                 </button>
+                {settingsSaveErrorNotice()}
               </article>
 
               <article className="data-card notification-card settings-section settings-experience settings-integrations">
@@ -14563,6 +14856,7 @@ function App() {
                       ? "Saved"
                       : "Save Text Settings"}
                 </button>
+                {settingsSaveErrorNotice()}
               </article>
 
               <article className="data-card notification-card email-template-card settings-section settings-experience">
@@ -14803,6 +15097,7 @@ function App() {
                       ? "Saved"
                       : "Save Template"}
                 </button>
+                {settingsSaveErrorNotice()}
               </article>
 
               <article className="data-card notification-card settings-section settings-branding">
@@ -15007,7 +15302,7 @@ function App() {
         )}
       </main>
 
-      {!isEmbedMode && activeView === "calendar" && selectedDetails && (
+      {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && selectedDetails && (
         <div className="details-overlay" role="presentation" onPointerDown={closeCalendarDetails}>
           <aside
             className="details-panel details-modal"
