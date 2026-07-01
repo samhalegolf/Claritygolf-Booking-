@@ -581,6 +581,7 @@ type ClientProfileTab = "bookings" | "notifications";
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
 type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
+type PublicBookingStateStatus = "loading" | "loaded" | "error";
 type AdminSaveOwner = "lesson_complete" | "locations" | "coaches" | "settings";
 type LessonCompleteDiagnostic = {
   action: "lesson_complete";
@@ -3002,6 +3003,10 @@ function cleanAvailability(availability?: AvailabilityWindow[][], fallbackCoachI
   });
 }
 
+function emptyAvailability(): AvailabilityWindow[][] {
+  return Array.from({ length: DAY_COUNT }, () => []);
+}
+
 function availabilityForCoach(availability: AvailabilityWindow[][], coachId: string, fallbackCoachId: string) {
   return availability.map((dayWindows) =>
     dayWindows.filter((window) => (window.coachId || fallbackCoachId) === coachId),
@@ -3302,8 +3307,8 @@ function App() {
   const [passwordChangeState, setPasswordChangeState] = useState<"idle" | "saving" | "saved">("idle");
   const [passwordChangeMessage, setPasswordChangeMessage] = useState("");
   const [items, setItems] = useState<CalendarItem[]>(initialItems);
-  const [services, setServices] = useState<Service[]>(() => cleanServices(defaultServices));
-  const [locations, setLocations] = useState<Location[]>(() => cleanLocations(undefined, getStoredCoachAccount()));
+  const [services, setServices] = useState<Service[]>(() => (isEmbedMode ? [] : cleanServices(defaultServices)));
+  const [locations, setLocations] = useState<Location[]>(() => (isEmbedMode ? [] : cleanLocations(undefined, getStoredCoachAccount())));
   const [locationEditor, setLocationEditor] = useState<Location>(() => defaultLocationFromCoachAccount(getStoredCoachAccount()));
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
   const [showLocationEditor, setShowLocationEditor] = useState(false);
@@ -3323,7 +3328,7 @@ function App() {
   const [groupOccurrenceInput, setGroupOccurrenceInput] = useState("");
   const [groupMinimumInput, setGroupMinimumInput] = useState("");
   const [groupMaximumInput, setGroupMaximumInput] = useState("");
-  const [availability, setAvailability] = useState<AvailabilityWindow[][]>(defaultAvailability);
+  const [availability, setAvailability] = useState<AvailabilityWindow[][]>(() => (isEmbedMode ? emptyAvailability() : defaultAvailability));
   const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
   const [people, setPeople] = useState<Person[]>([]);
@@ -3448,6 +3453,9 @@ function App() {
   const [calendarSyncKey, setCalendarSyncKey] = useState(generateSyncKey);
   const [copiedSync, setCopiedSync] = useState<"url" | "key" | null>(null);
   const [calendarFeedStatus, setCalendarFeedStatus] = useState<CalendarFeedStatus>("checking");
+  const [publicBookingStateStatus, setPublicBookingStateStatus] = useState<PublicBookingStateStatus>(
+    isEmbedMode ? "loading" : "loaded",
+  );
   const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
   const [calendarSaveError, setCalendarSaveError] = useState("");
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
@@ -4153,8 +4161,12 @@ function App() {
     async function loadInitialState() {
       try {
         if (isEmbedMode) {
+          setPublicBookingStateStatus("loading");
           await loadPublicBookingState();
-          if (!cancelled) setCalendarFeedStatus("connected");
+          if (!cancelled) {
+            setCalendarFeedStatus("connected");
+            setPublicBookingStateStatus("loaded");
+          }
           return;
         }
 
@@ -4190,6 +4202,7 @@ function App() {
         if (!cancelled) {
           hasLoadedCalendarApiRef.current = false;
           setCalendarFeedStatus("offline");
+          if (isEmbedMode) setPublicBookingStateStatus("error");
           setAdminWorkspaceLoadStatus("idle");
           setAdminWorkspaceLoadError("");
           if (!isEmbedMode) setAuthStatus("guest");
@@ -4850,7 +4863,10 @@ function App() {
   }
 
   async function loadPublicBookingState() {
-    const response = await fetch("/api/public-booking-state", { headers: { Accept: "application/json" } });
+    const response = await fetch("/api/public-booking-state", {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
     if (!response.ok) throw new Error("Public booking API unavailable");
     const data = (await response.json()) as {
       items?: CalendarItem[];
@@ -5437,6 +5453,7 @@ function App() {
   }
 
   const bookingSlots = useMemo<BookingSlot[]>(() => {
+    if (isEmbedMode && publicBookingStateStatus !== "loaded") return [];
     if (!bookingTargetService) return [];
 
     const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
@@ -5489,7 +5506,19 @@ function App() {
       }
     });
     return slots;
-  }, [accountAvailability, activeWeek, bookingDay, bookingDaySelected, bookingMode, bookingTargetService, publicBookingFallbackCoachId, selectedRescheduleMatch, items]);
+  }, [
+    accountAvailability,
+    activeWeek,
+    bookingDay,
+    bookingDaySelected,
+    bookingMode,
+    bookingTargetService,
+    isEmbedMode,
+    items,
+    publicBookingFallbackCoachId,
+    publicBookingStateStatus,
+    selectedRescheduleMatch,
+  ]);
   const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.start === bookingStart);
 
   const isAppointmentStepComplete = Boolean(selectedBookingService);
@@ -5512,6 +5541,7 @@ function App() {
   const isAppointmentSectionOpen = openPublicBookingSection === "appointment";
   const isDateTimeSectionOpen = openPublicBookingSection === "datetime";
   const isInformationSectionOpen = openPublicBookingSection === "information";
+  const publicBookingStateReady = !isEmbedMode || publicBookingStateStatus === "loaded";
 
   const appointmentSummaryName = selectedBookingService
     ? selectedBookingService.name
@@ -13586,6 +13616,22 @@ function App() {
                 >
                   {bookingConfirmation.kind === "cancelled" ? "Back to booking" : "Book another lesson"}
                 </button>
+              </div>
+            ) : !publicBookingStateReady ? (
+              <div className="booking-columns booking-progressive-flow">
+                <div className="booking-card reschedule-link-state" role={publicBookingStateStatus === "error" ? "alert" : "status"}>
+                  <span>Booking Calendar</span>
+                  <div className="booking-login-copy">
+                    <strong>
+                      {publicBookingStateStatus === "error" ? "Booking calendar unavailable" : "Loading live availability..."}
+                    </strong>
+                    <em>
+                      {publicBookingStateStatus === "error"
+                        ? "Please refresh and try again."
+                        : "Checking Sam Hale's Three Kings calendar before showing times."}
+                    </em>
+                  </div>
+                </div>
               </div>
             ) : (
             <div className="booking-columns booking-progressive-flow">
