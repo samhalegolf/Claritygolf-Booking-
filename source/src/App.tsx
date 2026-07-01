@@ -5502,6 +5502,10 @@ function App() {
   const isInformationStepComplete = isDateTimeStepComplete && isBookingInformationComplete;
   const showCapturedCustomerDetailsSummary =
     isBookingCustomerDetailsComplete && (!isCustomGroupBooking || isBookingInformationComplete || !isDateTimeStepComplete);
+  const bookingCustomerSummaryName =
+    [bookingForm.firstName.trim(), bookingForm.lastName.trim()].filter(Boolean).join(" ") || "Information complete";
+  const bookingCustomerSummaryContact =
+    [bookingForm.phone.trim(), bookingForm.email.trim()].filter(Boolean).join(" · ") || "Customer details captured";
 
   const isAppointmentSectionOpen = openPublicBookingSection === "appointment";
   const isDateTimeSectionOpen = openPublicBookingSection === "datetime";
@@ -11208,8 +11212,8 @@ function App() {
                       type="button"
                       disabled={!isDateTimeStepComplete}
                     >
-                      <strong>Information complete</strong>
-                      <span>Customer details captured</span>
+                      <strong>{bookingCustomerSummaryName}</strong>
+                      <span>{bookingCustomerSummaryContact}</span>
                     </button>
                   ) : (
             <button
@@ -13846,8 +13850,8 @@ function App() {
                       type="button"
                       disabled={!isDateTimeStepComplete}
                     >
-                      <strong>Information complete</strong>
-                      <span>Customer details captured</span>
+                      <strong>{bookingCustomerSummaryName}</strong>
+                      <span>{bookingCustomerSummaryContact}</span>
                     </button>
                   ) : (
                       <button
