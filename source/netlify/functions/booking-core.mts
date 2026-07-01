@@ -3398,7 +3398,10 @@ export function publicBookingState(state) {
       day: item.day,
       start: item.start,
       duration: item.duration,
+      coachId: item.coachId || item.coach?.coachId || "",
+      locationId: item.locationId || item.location?.locationId || "",
       serviceId: item.serviceId || "",
+      status: item.status || "booked",
       location: item.location,
     })),
   };
@@ -4697,7 +4700,29 @@ function isGroupServiceSlotMatch(service, candidate) {
   return true;
 }
 
-function hasCollision(items, candidate, service, state = {}) {
+function conflictItemSummary(item, state = {}) {
+  if (!item) return null;
+  const services = state.services || defaultServices;
+  const coaches = state.coaches || [];
+  const locations = state.locations || [];
+  const account = state.account || defaultCoachAccount();
+  const service = services.find((candidateService) => candidateService.id === item.serviceId);
+  return {
+    id: item.id,
+    kind: item.kind,
+    status: item.status || "booked",
+    serviceId: item.serviceId || "",
+    serviceName: service?.name || "",
+    week: itemWeek(item),
+    day: item.day,
+    start: item.start,
+    duration: item.duration,
+    coachId: resolvedCalendarItemCoachId(item, service, coaches, account),
+    locationId: resolvedCalendarItemLocationId(item, service, locations, account),
+  };
+}
+
+function findCollision(items, candidate, service, state = {}) {
   const services = state.services || defaultServices;
   const coaches = state.coaches || [];
   const locations = state.locations || [];
@@ -4738,14 +4763,30 @@ function hasCollision(items, candidate, service, state = {}) {
     ),
   );
   if (!isScheduledGroupService(service)) {
-    return overlapping.some(isAppointmentConflict);
+    const item = overlapping.find(isAppointmentConflict);
+    return item ? { reason: "blocking_item", item, candidateCoachId, candidateLocationId } : null;
   }
-  const sameServiceCount = overlapping.filter((item) => item.serviceId === service.id && !isInactiveForConflict(item)).length;
-  const blocksOrOtherService = overlapping.some(
+  const blockingItem = overlapping.find(
     (item) => (item.kind !== "appointment" || item.serviceId !== service.id) && isAppointmentConflict(item),
   );
-  if (blocksOrOtherService) return true;
-  return sameServiceCount >= service.capacity;
+  if (blockingItem) return { reason: "blocking_item", item: blockingItem, candidateCoachId, candidateLocationId };
+  const sameService = overlapping.filter((item) => item.serviceId === service.id && !isInactiveForConflict(item));
+  if (sameService.length >= service.capacity) {
+    return { reason: "capacity_full", item: sameService[0], candidateCoachId, candidateLocationId };
+  }
+  return null;
+}
+
+function hasCollision(items, candidate, service, state = {}) {
+  return Boolean(findCollision(items, candidate, service, state));
+}
+
+function publicSlotUnavailableError(detail) {
+  console.warn("public_booking:slot_rejected", detail);
+  return Object.assign(new Error("That time is no longer available."), {
+    status: 409,
+    detail,
+  });
 }
 
 async function createPublicBooking(payload, context = null) {
@@ -4804,19 +4845,46 @@ async function createPublicBooking(payload, context = null) {
 
   const slot = { week, day, start, duration: service.duration };
   const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
+  const serviceLocationId = serviceLocation(service, accountState.locations || [], accountState.account).id;
+  const rejectionBase = {
+    serviceId: service.id,
+    serviceName: service.name,
+    slot,
+    coachId: serviceCoachId,
+    locationId: serviceLocationId,
+    itemCount: accountState.items.length,
+  };
   if (isScheduledGroupService(service)) {
-    if (!isGroupServiceSlotMatch(service, slot) || hasCollision(accountState.items, slot, service, accountState)) {
-      throw Object.assign(new Error("That time is no longer available."), {
-        status: 409,
+    if (!isGroupServiceSlotMatch(service, slot)) {
+      throw publicSlotUnavailableError({ ...rejectionBase, reason: "group_schedule_mismatch" });
+    }
+    const collision = findCollision(accountState.items, slot, service, accountState);
+    if (collision) {
+      throw publicSlotUnavailableError({
+        ...rejectionBase,
+        reason: collision.reason,
+        candidateCoachId: collision.candidateCoachId,
+        candidateLocationId: collision.candidateLocationId,
+        conflictItem: conflictItemSummary(collision.item, accountState),
       });
     }
-  } else if (
-    !isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId) ||
-    hasCollision(accountState.items, slot, service, accountState)
-  ) {
-    throw Object.assign(new Error("That time is no longer available."), {
-      status: 409,
+  } else if (!isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId)) {
+    throw publicSlotUnavailableError({
+      ...rejectionBase,
+      reason: "outside_availability",
+      availability: accountState.availability[day] || [],
     });
+  } else {
+    const collision = findCollision(accountState.items, slot, service, accountState);
+    if (collision) {
+      throw publicSlotUnavailableError({
+        ...rejectionBase,
+        reason: collision.reason,
+        candidateCoachId: collision.candidateCoachId,
+        candidateLocationId: collision.candidateLocationId,
+        conflictItem: conflictItemSummary(collision.item, accountState),
+      });
+    }
   }
 
   const client = `${firstName} ${lastName}`;

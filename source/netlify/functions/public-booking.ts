@@ -138,9 +138,13 @@ function recordBelongsToAccount(record: any, accountId: string) {
 }
 
 function defaultCoachId(coaches: any[] = []) {
+  const fallbackCoachId = defaultCoachAccount().id || "sam-hale-golf";
   return cleanSlug(
-    coaches.find((coach) => coach?.active !== false && !coach?.archived)?.id || coaches[0]?.id || "sam-hale",
-    "sam-hale",
+    coaches.find((coach) => coach?.isDefault && coach?.active !== false && !coach?.archived)?.id ||
+      coaches.find((coach) => coach?.active !== false && !coach?.archived)?.id ||
+      coaches[0]?.id ||
+      fallbackCoachId,
+    fallbackCoachId,
   );
 }
 
@@ -220,6 +224,15 @@ class SupabaseRest {
   async readSettingsMap() {
     const rows = await this.request("settings", { query: "select=key,value" });
     return Object.fromEntries(rows.map((row: any) => [row.key, row.value || ""]));
+  }
+
+  async upsertSetting(key: string, value: string) {
+    await this.request("settings", {
+      method: "POST",
+      query: "on_conflict=key",
+      body: [{ key, value }],
+      prefer: "resolution=merge-duplicates,return=minimal",
+    });
   }
 
   async readItems() {
@@ -344,26 +357,96 @@ function slotOverlaps(a: any, b: any) {
 }
 
 function itemActiveForConflict(item: any) {
-  return !["cancelled", "completed", "no_show"].includes(item?.status || "");
+  return !["cancelled", "no_show"].includes(item?.status || "");
 }
 
-function hasCollision(items: any[], slot: any, service: any, state: any) {
+function explicitCoachId(item: any) {
+  return cleanSlug(item?.coachId || item?.coach?.coachId || "", "");
+}
+
+function explicitLocationId(item: any) {
+  return cleanSlug(item?.locationId || item?.location?.locationId || "", "");
+}
+
+function itemService(item: any, services: any[] = []) {
+  return services.find((service) => service?.id && service.id === item?.serviceId);
+}
+
+function isLocationOnlyBlock(item: any) {
+  return item?.kind === "block" && Boolean(explicitLocationId(item)) && !explicitCoachId(item);
+}
+
+function isCoachOnlyBlock(item: any) {
+  return item?.kind === "block" && Boolean(explicitCoachId(item)) && !explicitLocationId(item);
+}
+
+function isCoachLocationBlock(item: any) {
+  return item?.kind === "block" && Boolean(explicitCoachId(item)) && Boolean(explicitLocationId(item));
+}
+
+function resolvedItemCoachId(item: any, service: any, state: any) {
+  return explicitCoachId(item) || service?.coachId || (item?.kind === "appointment" ? defaultCoachId(state.coaches || []) : "");
+}
+
+function resolvedItemLocationId(item: any, service: any, state: any) {
+  const fallbackLocationId = serviceLocationSnapshot(service, state.locations || [], state.account).locationId;
+  return explicitLocationId(item) || service?.locationId || (item?.kind === "appointment" ? fallbackLocationId : "");
+}
+
+function conflictItemSummary(item: any, state: any) {
+  const service = itemService(item, state.services || []);
+  return item
+    ? {
+        id: item.id,
+        kind: item.kind,
+        status: item.status || "booked",
+        serviceId: item.serviceId || "",
+        serviceName: service?.name || "",
+        week: item.week ?? 0,
+        day: item.day,
+        start: item.start,
+        duration: item.duration,
+        coachId: resolvedItemCoachId(item, service, state) || explicitCoachId(item),
+        locationId: resolvedItemLocationId(item, service, state) || explicitLocationId(item),
+      }
+    : null;
+}
+
+function findCollision(items: any[], slot: any, service: any, state: any) {
   const candidateCoachId = service?.coachId || defaultCoachId(state.coaches || []);
   const candidateLocationId = serviceLocationSnapshot(service, state.locations || [], state.account).locationId;
   const overlaps = items.filter((item) => slotOverlaps(item, slot) && itemActiveForConflict(item));
+  const isCoachConflict = (item: any) => {
+    if (isLocationOnlyBlock(item)) return false;
+    const existingService = itemService(item, state.services || []);
+    const itemCoachId = resolvedItemCoachId(item, existingService, state);
+    return Boolean(candidateCoachId && itemCoachId && candidateCoachId === itemCoachId);
+  };
+  const isLocationConflict = (item: any) => {
+    const existingService = itemService(item, state.services || []);
+    const itemLocationId = resolvedItemLocationId(item, existingService, state);
+    if (!candidateLocationId || !itemLocationId || candidateLocationId !== itemLocationId) return false;
+    if (isLocationOnlyBlock(item)) return true;
+    if (isCoachOnlyBlock(item)) return false;
+    if (isCoachLocationBlock(item)) return isCoachConflict(item);
+    return false;
+  };
+  const isAppointmentConflict = (item: any) => isCoachConflict(item) || isLocationConflict(item);
   if (isScheduledGroupService(service)) {
-    const sameServiceCount = overlaps.filter((item) => item.serviceId === service.id && item.kind === "appointment").length;
-    const blocksOrOtherService = overlaps.some((item) => item.kind !== "appointment" || item.serviceId !== service.id);
-    return blocksOrOtherService || sameServiceCount >= Number(service.capacity || 1);
-  }
-  return overlaps.some((item) => {
-    const itemCoachId = item.coachId || item.coach?.coachId || candidateCoachId;
-    const itemLocationId = item.locationId || item.location?.locationId || "";
-    if (item.kind === "block") {
-      return !itemCoachId || itemCoachId === candidateCoachId || !itemLocationId || itemLocationId === candidateLocationId;
+    const blockingItem = overlaps.find((item) => (item.kind !== "appointment" || item.serviceId !== service.id) && isAppointmentConflict(item));
+    if (blockingItem) return { reason: "blocking_item", item: blockingItem, candidateCoachId, candidateLocationId };
+    const sameService = overlaps.filter((item) => item.serviceId === service.id && item.kind === "appointment");
+    if (sameService.length >= Number(service.capacity || 1)) {
+      return { reason: "capacity_full", item: sameService[0], candidateCoachId, candidateLocationId };
     }
-    return itemCoachId === candidateCoachId || (itemLocationId && itemLocationId === candidateLocationId && item.kind === "block");
-  });
+    return null;
+  }
+  const item = overlaps.find(isAppointmentConflict);
+  return item ? { reason: "blocking_item", item, candidateCoachId, candidateLocationId } : null;
+}
+
+function hasCollision(items: any[], slot: any, service: any, state: any) {
+  return Boolean(findCollision(items, slot, service, state));
 }
 
 function isInsideAvailability(availability: any[][], day: number, start: number, duration: number, coachId: string) {
@@ -372,6 +455,15 @@ function isInsideAvailability(availability: any[][], day: number, start: number,
   return windows.some((window) => {
     const windowCoachId = cleanSlug(window?.coachId || coachId, coachId);
     return windowCoachId === coachId && start >= Number(window?.start) && end <= Number(window?.end);
+  });
+}
+
+function publicSlotUnavailableError(detail: Record<string, unknown>, stateItems: any[]) {
+  console.warn("public_booking_lean:slot_rejected", detail);
+  return Object.assign(new Error("That time is no longer available."), {
+    status: 409,
+    detail,
+    stateItems,
   });
 }
 
@@ -551,16 +643,51 @@ async function createPublicBooking(payload: any) {
 
   const slot = { week, day, start, duration };
   const coachId = service.coachId || defaultCoachId(coaches);
+  const location = serviceLocationSnapshot(service, locations, state.account);
+  const rejectionBase = {
+    serviceId: service.id,
+    serviceName: service.name,
+    slot,
+    coachId,
+    locationId: location.locationId,
+    itemCount: scopedState.items.length,
+  };
   if (isScheduledGroupService(service)) {
-    if (!isGroupSlotMatch(service, slot) || hasCollision(scopedState.items, slot, service, scopedState)) {
-      throw Object.assign(new Error("That time is no longer available."), { status: 409 });
+    if (!isGroupSlotMatch(service, slot)) {
+      throw publicSlotUnavailableError({ ...rejectionBase, reason: "group_schedule_mismatch" }, scopedState.items);
     }
-  } else if (!isInsideAvailability(availability, day, start, duration, coachId) || hasCollision(scopedState.items, slot, service, scopedState)) {
-    throw Object.assign(new Error("That time is no longer available."), { status: 409 });
+    const collision = findCollision(scopedState.items, slot, service, scopedState);
+    if (collision) {
+      throw publicSlotUnavailableError(
+        {
+          ...rejectionBase,
+          reason: collision.reason,
+          candidateCoachId: collision.candidateCoachId,
+          candidateLocationId: collision.candidateLocationId,
+          conflictItem: conflictItemSummary(collision.item, scopedState),
+        },
+        scopedState.items,
+      );
+    }
+  } else if (!isInsideAvailability(availability, day, start, duration, coachId)) {
+    throw publicSlotUnavailableError({ ...rejectionBase, reason: "outside_availability", availability: availability[day] || [] }, scopedState.items);
+  } else {
+    const collision = findCollision(scopedState.items, slot, service, scopedState);
+    if (collision) {
+      throw publicSlotUnavailableError(
+        {
+          ...rejectionBase,
+          reason: collision.reason,
+          candidateCoachId: collision.candidateCoachId,
+          candidateLocationId: collision.candidateLocationId,
+          conflictItem: conflictItemSummary(collision.item, scopedState),
+        },
+        scopedState.items,
+      );
+    }
   }
 
   const client = `${firstName} ${lastName}`;
-  const location = serviceLocationSnapshot(service, locations, state.account);
   const coach = serviceCoachSnapshot(coachId, coaches, state.account);
   const appointment = {
     id: `appt-${Date.now()}`,
@@ -581,6 +708,7 @@ async function createPublicBooking(payload: any) {
   };
 
   try {
+    const savedAt = nowIso();
     await store.upsertCalendarItem({
       id: appointment.id,
       account_id: appointment.accountId,
@@ -601,8 +729,11 @@ async function createPublicBooking(payload: any) {
       custom_group: null,
       coach: appointment.coach,
       location: appointment.location,
-      created_at: nowIso(),
-      updated_at: nowIso(),
+      created_at: savedAt,
+      updated_at: savedAt,
+    });
+    await store.upsertSetting("updatedAt", savedAt).catch((error) => {
+      console.warn("public_booking_lean:updated_at_save_skipped", errorMessage(error));
     });
   } catch (error) {
     const fallbackId = `fallback-appt-${Date.now()}`;
@@ -648,6 +779,7 @@ async function createPublicBooking(payload: any) {
 }
 
 async function fallbackFromRawPayload(payload: any, originalError: unknown) {
+  const fallbackItems = Array.isArray((originalError as any)?.stateItems) ? (originalError as any).stateItems : [];
   const firstName = cleanString(payload?.firstName, "", 80);
   const lastName = cleanString(payload?.lastName, "", 80);
   const email = cleanEmail(payload?.email, "");
@@ -683,9 +815,9 @@ async function fallbackFromRawPayload(payload: any, originalError: unknown) {
     day,
     start,
     duration: Number(payload.duration ?? 0),
-    coachId: cleanSlug(payload.coachId, "sam-hale"),
+    coachId: cleanSlug(payload.coachId, account.id || "sam-hale-golf"),
     locationId: cleanSlug(payload.locationId, "default-location"),
-    coach: payload.coach || { coachId: cleanSlug(payload.coachId, "sam-hale"), name: account.coachName },
+    coach: payload.coach || { coachId: cleanSlug(payload.coachId, account.id || "sam-hale-golf"), name: account.coachName },
     serviceId: cleanString(payload.serviceId, "", 180),
     client: `${firstName} ${lastName}`,
     title: `${firstName} ${lastName}`,
@@ -714,7 +846,7 @@ async function fallbackFromRawPayload(payload: any, originalError: unknown) {
       fallbackEmailError: errorMessage(fallbackError),
     });
   }
-  return successPayload(appointment, [], true, fallbackEmailSent);
+  return successPayload(appointment, fallbackItems, true, fallbackEmailSent);
 }
 
 async function parseBody(req: Request) {

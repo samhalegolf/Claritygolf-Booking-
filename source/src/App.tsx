@@ -3585,6 +3585,7 @@ function App() {
   const accountLocations = useMemo(() => filterRecordsForAccount(locations, activeAccountId), [activeAccountId, locations]);
   const weekItems = useMemo(() => accountItems.filter((item) => itemWeek(item) === activeWeek), [activeWeek, accountItems]);
   const activeCoachId = currentAppUser.coachId || defaultCoachId(accountCoachProfiles);
+  const publicBookingFallbackCoachId = defaultCoachId(accountCoachProfiles);
   const activeCoachList = accountCoachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
   const effectiveCalendarPerspective: CalendarPerspective =
     isAdminUser && (calendarPerspective !== "location" || canUseFeature(activeAccount, "locationCalendar"))
@@ -4495,6 +4496,7 @@ function App() {
     error?: string;
     code?: string;
     reason?: string;
+    fallback?: boolean;
     state?: { items?: CalendarItem[] };
     appointment?: { id?: string; location?: BookingLocationSnapshot; locationId?: string; coach?: BookingCoachSnapshot };
     notifications?: EmailSendResult[];
@@ -5438,6 +5440,7 @@ function App() {
     if (!bookingTargetService) return [];
 
     const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
+    const publicBookingServiceCoachId = bookingTargetService.coachId || publicBookingFallbackCoachId;
 
     if (bookingMode === "book" && isScheduledGroupService(bookingTargetService)) {
       const schedule = bookingTargetService.groupSchedule;
@@ -5449,7 +5452,7 @@ function App() {
         duration: bookingTargetService.duration,
       };
       if (!isGroupServiceSlotMatch(bookingTargetService, activeWeek, schedule.dayOfWeek, schedule.startMinutes)) return [];
-      if (hasCollision(candidate, ignoreId, bookingTargetService)) return [];
+      if (hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: publicBookingServiceCoachId })) return [];
       const remainingSpots = getGroupSlotRemainingSpots(candidate, bookingTargetService);
       if (!remainingSpots) return [];
       return [
@@ -5464,8 +5467,7 @@ function App() {
 
     if (!bookingDaySelected) return [];
 
-    const serviceCoachId = bookingTargetService.coachId || activeCoachId;
-    const serviceAvailability = availabilityForCoach(accountAvailability, serviceCoachId, activeCoachId);
+    const serviceAvailability = availabilityForCoach(accountAvailability, publicBookingServiceCoachId, publicBookingFallbackCoachId);
     const windows = serviceAvailability[bookingDay] ?? [];
     const slots: BookingSlot[] = [];
     windows.forEach((window) => {
@@ -5476,7 +5478,7 @@ function App() {
           start,
           duration: bookingTargetService.duration,
         };
-        if (!hasCollision(candidate, ignoreId, bookingTargetService)) {
+        if (!hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: publicBookingServiceCoachId })) {
           slots.push({
             week: candidate.week,
             day: candidate.day,
@@ -5487,7 +5489,7 @@ function App() {
       }
     });
     return slots;
-  }, [accountAvailability, activeCoachId, activeWeek, bookingDay, bookingDaySelected, bookingMode, bookingTargetService, selectedRescheduleMatch, items]);
+  }, [accountAvailability, activeWeek, bookingDay, bookingDaySelected, bookingMode, bookingTargetService, publicBookingFallbackCoachId, selectedRescheduleMatch, items]);
   const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.start === bookingStart);
 
   const isAppointmentStepComplete = Boolean(selectedBookingService);
@@ -5810,9 +5812,14 @@ function App() {
     return availability[day].some((window) => start >= window.start && end <= window.end);
   }
 
-  function hasCollision(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
-    const candidateCoachId = service?.coachId || selectedCalendarCoachId || activeCoachId;
-    const candidateLocationId = serviceLocation(service, locations, coachAccount).id;
+  function hasCollision(
+    candidate: SlotCandidate,
+    ignoreId?: string,
+    service?: Service,
+    options: { candidateCoachId?: string; candidateLocationId?: string } = {},
+  ) {
+    const candidateCoachId = options.candidateCoachId || service?.coachId || selectedCalendarCoachId || activeCoachId;
+    const candidateLocationId = options.candidateLocationId || serviceLocation(service, locations, coachAccount).id;
     const candidateItem: Partial<CalendarItem> = {
       kind: "appointment",
       accountId: activeAccountId,
@@ -9631,7 +9638,7 @@ function App() {
       start: bookingStart,
       duration: bookingTargetService.duration,
       location: bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
-      coachId: bookingTargetService.coachId || defaultCoachId(coachProfiles),
+      coachId: bookingTargetService.coachId || publicBookingFallbackCoachId,
     };
     const selectedBookingCoach = bookingCoachSnapshotFor(selectedBooking.coachId, coachProfiles, coachAccount);
     const fallbackAppointmentId = `fallback-appt-${Date.now()}`;
@@ -9665,7 +9672,7 @@ function App() {
       start: selectedBooking.start,
       duration: selectedBooking.duration,
     };
-    if (hasCollision(candidate, undefined, bookingTargetService)) {
+    if (hasCollision(candidate, undefined, bookingTargetService, { candidateCoachId: selectedBooking.coachId })) {
       const message = "That time has just been taken. Pick another slot.";
       setBookingSubmitError(message);
       setOpenPublicBookingSection("information");
@@ -9710,7 +9717,7 @@ function App() {
           }
         })();
         const data = await readPublicBookingSubmitResponse(response);
-        if (data.state?.items) setItems(data.state.items);
+        if (data.state?.items && (!data.fallback || data.state.items.length)) setItems(data.state.items);
         const confirmationNotifications = data.notifications ?? [];
         const confirmation = response.ok && data.appointment?.id
           ? {
