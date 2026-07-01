@@ -561,6 +561,7 @@ type BookingConfirmation = {
   phone?: string;
   location?: BookingLocationSnapshot;
   notifications: EmailSendResult[];
+  notice?: string;
 };
 
 type SavedRescheduleLogin = {
@@ -3430,6 +3431,7 @@ function App() {
   const [rescheduleState, setRescheduleState] = useState<"idle" | "checking" | "saving">("idle");
   const [forceRescheduleLogin, setForceRescheduleLogin] = useState(false);
   const [bookingSubmitState, setBookingSubmitState] = useState<"idle" | "saving">("idle");
+  const [bookingSubmitError, setBookingSubmitError] = useState("");
   const [bookingConfirmation, setBookingConfirmation] = useState<BookingConfirmation | null>(null);
   const [copiedEmbed, setCopiedEmbed] = useState(false);
   const [selectedBookingScreenId, setSelectedBookingScreenId] = useState(BOOKING_SCREEN_PATHS[0]?.id || "main");
@@ -4486,6 +4488,32 @@ function App() {
 
   async function readApiFailure(response: Response, fallback: string) {
     return summarizeApiFailureDetail(await readApiFailureDetail(response, fallback)) || fallback;
+  }
+
+  type PublicBookingSubmitResponse = {
+    message?: string;
+    error?: string;
+    code?: string;
+    reason?: string;
+    state?: { items?: CalendarItem[] };
+    appointment?: { id?: string; location?: BookingLocationSnapshot; locationId?: string; coach?: BookingCoachSnapshot };
+    notifications?: EmailSendResult[];
+  };
+
+  async function readPublicBookingSubmitResponse(response: Response): Promise<PublicBookingSubmitResponse> {
+    try {
+      return (await response.json()) as PublicBookingSubmitResponse;
+    } catch {
+      return {};
+    }
+  }
+
+  function isSelectedSlotUnavailableResponse(response: Response, data: PublicBookingSubmitResponse) {
+    const detail = [data.code, data.error, data.reason, data.message].filter(Boolean).join(" ").toLowerCase();
+    if (!detail) return false;
+    if (detail.includes("slot") && (detail.includes("unavailable") || detail.includes("stale") || detail.includes("taken"))) return true;
+    if (detail.includes("time") && (detail.includes("unavailable") || detail.includes("stale") || detail.includes("taken"))) return true;
+    return response.status === 409 && (detail.includes("no longer available") || detail.includes("has just been taken"));
   }
 
   function workspaceRecordName(record: WorkspaceConfigRecord) {
@@ -6461,6 +6489,7 @@ function App() {
 
   function applyBookingClient(client: ClientSummary) {
     const { firstName, lastName } = splitClientName(client.name);
+    setBookingSubmitError("");
     setBookingForm({
       firstName,
       lastName,
@@ -6848,6 +6877,7 @@ function App() {
 
   function updateBookingForm(field: keyof BookingForm, value: string) {
     setBookingConfirmation(null);
+    setBookingSubmitError("");
     setBookingForm((current) => ({ ...current, [field]: value }));
   }
 
@@ -6956,6 +6986,7 @@ function App() {
   function changeBookingMode(nextMode: BookingMode, showLogin = false) {
     setBookingMode(nextMode);
     setBookingConfirmation(null);
+    setBookingSubmitError("");
     setBookingStart(null);
     setCustomGroupAttendees([]);
     setCustomGroupAttendeeDraft({ name: "", email: "" });
@@ -6988,6 +7019,7 @@ function App() {
   function handlePublicBookingServiceSelect(serviceId: string) {
     const isCurrent = serviceId === bookingServiceId;
     setBookingServiceId(isCurrent ? "" : serviceId);
+    setBookingSubmitError("");
     setCustomGroupAttendees([]);
     setCustomGroupAttendeeDraft({ name: "", email: "" });
     setBookingDaySelected(false);
@@ -7001,12 +7033,14 @@ function App() {
   function handlePublicBookingDaySelect(dayIndex: number) {
     setBookingDay(dayIndex);
     setBookingDaySelected(true);
+    setBookingSubmitError("");
     setBookingStart(null);
     setOpenPublicBookingSection("datetime");
   }
 
   function handlePublicBookingTimeSelect(slot: BookingSlot) {
     const next = bookingStart === slot.start ? null : slot.start;
+    setBookingSubmitError("");
     if (isScheduledGroupService(bookingTargetService)) {
       setBookingDay(slot.day);
       setBookingDaySelected(next !== null);
@@ -9542,9 +9576,12 @@ function App() {
   async function confirmPublicBooking() {
     if (bookingSubmitState === "saving") return;
     if (!bookingTargetService || bookingStart === null) {
-      setToast({ message: "Choose a lesson time before confirming." });
+      const message = "Choose a lesson time before confirming.";
+      setBookingSubmitError(message);
+      setToast({ message });
       return;
     }
+    setBookingSubmitError("");
     // Typed values are authoritative. A saved-client suggestion only changes
     // the booking after the user explicitly clicks it and fills these fields.
     const firstName = bookingForm.firstName.trim();
@@ -9554,29 +9591,41 @@ function App() {
     const client = [firstName, lastName].filter(Boolean).join(" ").trim();
 
     if (!firstName || !lastName || !email) {
-      setToast({ message: "First name, last name, and email are required." });
+      const message = "First name, last name, and email are required.";
+      setBookingSubmitError(message);
+      setToast({ message });
       return;
     }
     if (isCustomGroupBooking && customGroupAttendees.length < customGroupMinParticipants(bookingTargetService) - 1) {
-      setToast({ message: "Add at least one other person before confirming." });
+      const message = "Add at least one other person before confirming.";
+      setBookingSubmitError(message);
+      setToast({ message });
       return;
     }
 
-    const candidate = {
+    const selectedBooking = {
+      service: bookingTargetService,
       week: activeWeek,
       day: bookingDay,
       start: bookingStart,
       duration: bookingTargetService.duration,
+      location: bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
+      coachId: bookingTargetService.coachId || defaultCoachId(coachProfiles),
+    };
+    const selectedBookingCoach = bookingCoachSnapshotFor(selectedBooking.coachId, coachProfiles, coachAccount);
+    const candidate = {
+      week: selectedBooking.week,
+      day: selectedBooking.day,
+      start: selectedBooking.start,
+      duration: selectedBooking.duration,
     };
     if (hasCollision(candidate, undefined, bookingTargetService)) {
-      setToast({ message: "That time has just been taken. Pick another slot." });
-      setBookingStart(null);
+      const message = "That time has just been taken. Pick another slot.";
+      setBookingSubmitError(message);
+      setOpenPublicBookingSection("information");
+      setToast({ message });
       return;
     }
-
-    const bookingCoachId = bookingTargetService.coachId || defaultCoachId(coachProfiles);
-    const bookingLocation = bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount);
-    const bookingCoach = bookingCoachSnapshotFor(bookingCoachId, coachProfiles, coachAccount);
 
     if (isEmbedMode) {
       setBookingSubmitState("saving");
@@ -9586,60 +9635,67 @@ function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            serviceId: bookingTargetService.id,
-            week: activeWeek,
-            day: bookingDay,
-            start: bookingStart,
+            serviceId: selectedBooking.service.id,
+            week: selectedBooking.week,
+            day: selectedBooking.day,
+            start: selectedBooking.start,
             firstName,
             lastName,
             phone,
             email,
-            coachId: bookingCoachId,
-            locationId: bookingLocation.locationId,
-            coach: bookingCoach,
-            location: bookingLocation,
+            coachId: selectedBooking.coachId,
+            locationId: selectedBooking.location.locationId,
+            coach: selectedBookingCoach,
+            location: selectedBooking.location,
             attendees: isCustomGroupBooking ? customGroupAttendees.map((attendee) => ({
               name: attendee.name,
               email: attendee.email || "",
             })) : undefined,
           }),
         });
-        const data = (await response.json()) as {
-          message?: string;
-          state?: { items?: CalendarItem[] };
-          appointment?: { id?: string; location?: BookingLocationSnapshot; locationId?: string; coach?: BookingCoachSnapshot };
-          notifications?: EmailSendResult[];
-        };
-        if (!response.ok) {
-          setToast({ message: data.message || "That time is no longer available." });
-          setBookingStart(null);
+        const data = await readPublicBookingSubmitResponse(response);
+        if (!response.ok && !data.appointment?.id) {
+          const message = data.message || data.error || "Could not complete the booking. Please try again.";
+          setBookingSubmitError(message);
+          setOpenPublicBookingSection("information");
+          setToast({ message });
+          if (isSelectedSlotUnavailableResponse(response, data)) setBookingStart(null);
           if (data.state?.items) setItems(data.state.items);
           return;
         }
         if (data.state?.items) setItems(data.state.items);
         const confirmationNotifications = data.notifications ?? [];
+        const confirmationNotice = !response.ok
+          ? [data.message, "Your booking was created, but email or receipt details may still be processing."].filter(Boolean).join(" ")
+          : "";
         setBookingConfirmation({
           kind: "booking",
           appointmentId: data.appointment?.id,
           client,
-          service: bookingTargetService.name,
-          week: activeWeek,
-          day: bookingDay,
-          start: bookingStart,
-          duration: bookingTargetService.duration,
-          dayLabel: weekDays[bookingDay].label,
-          timeLabel: formatTime(bookingStart),
+          service: selectedBooking.service.name,
+          week: selectedBooking.week,
+          day: selectedBooking.day,
+          start: selectedBooking.start,
+          duration: selectedBooking.duration,
+          dayLabel: weekDays[selectedBooking.day].label,
+          timeLabel: formatTime(selectedBooking.start),
           email,
           phone,
-          location: data.appointment?.location ?? bookingLocation,
+          location: data.appointment?.location ?? selectedBooking.location,
           notifications: confirmationNotifications,
+          notice: confirmationNotice,
         });
+        if (confirmationNotice) setToast({ message: confirmationNotice });
         setEmailNoticeVisible(confirmationNotifications.some((result) => result.channel === "client" && result.sent));
+        setBookingSubmitError("");
         setBookingStart(null);
         setCustomGroupAttendees([]);
         setCustomGroupAttendeeDraft({ name: "", email: "" });
       } catch {
-        setToast({ message: "Could not complete the booking. Please try again." });
+        const message = "Could not complete the booking. Please try again.";
+        setBookingSubmitError(message);
+        setOpenPublicBookingSection("information");
+        setToast({ message });
       } finally {
         setBookingSubmitState("idle");
       }
@@ -9651,16 +9707,16 @@ function App() {
       kind: "appointment",
       accountId: activeAccountId,
       ...candidate,
-      serviceId: bookingTargetService.id,
-      coachId: bookingCoachId,
-      locationId: bookingLocation.locationId,
-      coach: bookingCoach,
+      serviceId: selectedBooking.service.id,
+      coachId: selectedBooking.coachId,
+      locationId: selectedBooking.location.locationId,
+      coach: selectedBookingCoach,
       client,
       title: client,
       phone,
       email,
       note: "Booked from public booking page.",
-      location: bookingLocation,
+      location: selectedBooking.location,
       ...(isCustomGroupBooking
         ? {
             customGroup: true as const,
@@ -9683,8 +9739,9 @@ function App() {
     setCustomGroupAttendees([]);
     setCustomGroupAttendeeDraft({ name: "", email: "" });
     setBookingForm({ firstName: "", lastName: "", phone: "", email: "" });
+    setBookingSubmitError("");
     setToast({
-      message: `${client} booked ${bookingTargetService.name} on ${weekDays[item.day].short} at ${formatTime(item.start)}.`,
+      message: `${client} booked ${selectedBooking.service.name} on ${weekDays[item.day].short} at ${formatTime(item.start)}.`,
     });
   }
 
@@ -11094,6 +11151,12 @@ function App() {
                 </span>
               </div>
               {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
+              {bookingSubmitError && (
+                <div className="email-status failed" role="alert">
+                  <X size={17} />
+                  <span>{bookingSubmitError}</span>
+                </div>
+              )}
               <button
                 className="primary-button confirm-booking"
                 disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving" || !isInformationStepComplete}
@@ -13445,6 +13508,12 @@ function App() {
                       })}
                   </div>
                 )}
+                {bookingConfirmation.notice && (
+                  <div className="email-status pending">
+                    <Mail size={17} />
+                    <span>{bookingConfirmation.notice}</span>
+                  </div>
+                )}
                 {bookingConfirmation.kind !== "cancelled" && (
                   <div className="calendar-add-actions">
                     <a className="outline-button" href={googleCalendarUrl(bookingConfirmation)} target="_blank" rel="noreferrer">
@@ -13733,6 +13802,12 @@ function App() {
                           </span>
                         </div>
                         {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
+                        {bookingSubmitError && (
+                          <div className="email-status failed" role="alert">
+                            <X size={17} />
+                            <span>{bookingSubmitError}</span>
+                          </div>
+                        )}
                         <button
                           className="primary-button confirm-booking"
                           disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving" || !isInformationStepComplete}
