@@ -473,10 +473,32 @@ async function sendFallbackBookingEmail(input: { appointment: any; service: any;
   if (!response.ok) throw new Error(`fallback email failed ${response.status}: ${responseText.slice(0, 500)}`);
 }
 
-function successPayload(appointment: any, items: any[], fallback = false) {
+function logUncapturedFallback(label: string, detail: { appointment: any; service?: any; supabaseError?: string; fallbackEmailError?: string; originalError?: string }) {
+  console.error(label, {
+    route: "public-booking",
+    timestamp: nowIso(),
+    serviceId: detail.appointment?.serviceId,
+    serviceName: detail.service?.name,
+    fallbackAppointmentId: detail.appointment?.id,
+    customer: detail.appointment?.client,
+    phone: detail.appointment?.phone,
+    email: detail.appointment?.email,
+    week: detail.appointment?.week,
+    day: detail.appointment?.day,
+    start: detail.appointment?.start,
+    duration: detail.appointment?.duration,
+    location: detail.appointment?.location,
+    coach: detail.appointment?.coach,
+    supabaseError: detail.supabaseError,
+    fallbackEmailError: detail.fallbackEmailError,
+    originalError: detail.originalError,
+  });
+}
+
+function successPayload(appointment: any, items: any[], fallback = false, fallbackEmailSent?: boolean) {
   return {
     ok: true,
-    ...(fallback ? { fallback: true } : {}),
+    ...(fallback ? { fallback: true, fallbackEmailSent: Boolean(fallbackEmailSent) } : {}),
     appointment: {
       id: appointment.id,
       week: appointment.week,
@@ -586,22 +608,28 @@ async function createPublicBooking(payload: any) {
     const fallbackId = `fallback-appt-${Date.now()}`;
     const fallbackAppointment = { ...appointment, id: fallbackId };
     const supabaseError = errorMessage(error);
-    console.error("public_booking_lean:calendar_save_failed_fallback_email", supabaseError);
-    await sendFallbackBookingEmail({
-      appointment: fallbackAppointment,
-      service,
-      settings,
-      account: state.account,
-      fallbackId,
-      error: supabaseError,
-    }).catch((fallbackError) => {
-      throw Object.assign(
-        new Error(`Supabase calendar save failed: ${supabaseError}; fallback email failed: ${errorMessage(fallbackError)}`),
-        { status: 500 },
-      );
-    });
-    console.warn("public_booking_lean:fallback_email_sent", fallbackId);
-    return successPayload(fallbackAppointment, state.items, true);
+    let fallbackEmailSent = false;
+    console.error("public_booking_lean:calendar_save_failed_customer_still_confirmed", supabaseError);
+    try {
+      await sendFallbackBookingEmail({
+        appointment: fallbackAppointment,
+        service,
+        settings,
+        account: state.account,
+        fallbackId,
+        error: supabaseError,
+      });
+      fallbackEmailSent = true;
+      console.warn("public_booking_lean:fallback_email_sent", fallbackId);
+    } catch (fallbackError) {
+      logUncapturedFallback("public_booking_lean:fallback_email_failed_customer_still_confirmed", {
+        appointment: fallbackAppointment,
+        service,
+        supabaseError,
+        fallbackEmailError: errorMessage(fallbackError),
+      });
+    }
+    return successPayload(fallbackAppointment, state.items, true, fallbackEmailSent);
   }
 
   await store.savePerson({
@@ -646,15 +674,26 @@ async function fallbackFromRawPayload(payload: any, originalError: unknown) {
     location: payload.location || { locationId: cleanSlug(payload.locationId, "default-location"), name: account.venueName, timezone: account.timezone },
     status: "booked",
   };
-  await sendFallbackBookingEmail({
-    appointment,
-    service: { id: appointment.serviceId, name: appointment.serviceId },
-    settings: {},
-    account,
-    fallbackId,
-    error: errorMessage(originalError),
-  });
-  return successPayload(appointment, [], true);
+  let fallbackEmailSent = false;
+  try {
+    await sendFallbackBookingEmail({
+      appointment,
+      service: { id: appointment.serviceId, name: appointment.serviceId },
+      settings: {},
+      account,
+      fallbackId,
+      error: errorMessage(originalError),
+    });
+    fallbackEmailSent = true;
+  } catch (fallbackError) {
+    logUncapturedFallback("public_booking_lean:raw_payload_fallback_email_failed_customer_still_confirmed", {
+      appointment,
+      service: { id: appointment.serviceId, name: appointment.serviceId },
+      originalError: errorMessage(originalError),
+      fallbackEmailError: errorMessage(fallbackError),
+    });
+  }
+  return successPayload(appointment, [], true, fallbackEmailSent);
 }
 
 async function parseBody(req: Request) {
@@ -676,10 +715,10 @@ export default async function handler(req: Request) {
     if (status >= 500) {
       try {
         const fallback = await fallbackFromRawPayload(payload, error);
-        console.warn("public_booking_lean:raw_payload_fallback_email_sent", fallback.appointment.id);
+        console.warn("public_booking_lean:raw_payload_fallback_confirmed", fallback.appointment.id);
         return json(fallback);
       } catch (fallbackError) {
-        console.error("public_booking_lean:raw_payload_fallback_failed", fallbackError);
+        console.error("public_booking_lean:raw_payload_fallback_unavailable", fallbackError);
       }
     }
     console.error("public_booking_lean:failed", error);
