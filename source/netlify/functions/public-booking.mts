@@ -12,7 +12,7 @@ const OPTIONAL_CALENDAR_ITEM_COLUMNS = [
   "location",
 ];
 const ACCOUNT_SCOPE_COLUMNS = ["account_id", "coach_id", "location_id", "coach", "location"];
-const JSON_COLUMNS = new Set(["custom_group", "coach", "location"]);
+const BASE_WEEK_START = Date.UTC(2026, 5, 1);
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -54,17 +54,12 @@ function cleanSlug(value: unknown, fallback = "sam-hale-golf") {
 }
 
 function safeJsonParse<T>(value: unknown, fallback: T): T {
-  if (!value) return fallback;
-  if (typeof value !== "string") return fallback;
+  if (!value || typeof value !== "string") return fallback;
   try {
     return JSON.parse(value) as T;
   } catch {
     return fallback;
   }
-}
-
-function encodeFilter(value: unknown) {
-  return encodeURIComponent(String(value ?? ""));
 }
 
 function defaultCoachAccount() {
@@ -116,7 +111,10 @@ function normalizeWorkspaceAccounts(rawAccounts: unknown, account = defaultCoach
       subscriptionStatus: cleanString(raw?.subscriptionStatus, fallback.subscriptionStatus, 40),
       billingProvider: cleanString(raw?.billingProvider, fallback.billingProvider, 40),
       active: raw?.active !== false || index === 0,
-      entitlementsOverride: raw?.entitlementsOverride && typeof raw.entitlementsOverride === "object" ? raw.entitlementsOverride : undefined,
+      entitlementsOverride:
+        raw?.entitlementsOverride && typeof raw.entitlementsOverride === "object"
+          ? raw.entitlementsOverride
+          : undefined,
     };
   });
 }
@@ -140,7 +138,10 @@ function recordBelongsToAccount(record: any, accountId: string) {
 }
 
 function defaultCoachId(coaches: any[] = []) {
-  return cleanSlug(coaches.find((coach) => coach?.active !== false && !coach?.archived)?.id || coaches[0]?.id || "sam-hale", "sam-hale");
+  return cleanSlug(
+    coaches.find((coach) => coach?.active !== false && !coach?.archived)?.id || coaches[0]?.id || "sam-hale",
+    "sam-hale",
+  );
 }
 
 function cleanJsonObject(value: unknown) {
@@ -172,7 +173,13 @@ function rowToItem(row: any) {
     status: ["completed", "cancelled", "no_show"].includes(row.status) ? row.status : "booked",
     ...(coach ? { coach } : {}),
     ...(location ? { location } : {}),
-    ...(customGroup ? { customGroup: Boolean((customGroup as any).customGroup), attendees: (customGroup as any).attendees || [], calculatedPrice: (customGroup as any).calculatedPrice || 0 } : {}),
+    ...(customGroup
+      ? {
+          customGroup: Boolean((customGroup as any).customGroup),
+          attendees: (customGroup as any).attendees || [],
+          calculatedPrice: (customGroup as any).calculatedPrice || 0,
+        }
+      : {}),
   };
 }
 
@@ -189,7 +196,10 @@ class SupabaseRest {
     }
   }
 
-  async request(table: string, { method = "GET", query = "", body, prefer = "" }: { method?: string; query?: string; body?: unknown; prefer?: string } = {}) {
+  async request(
+    table: string,
+    { method = "GET", query = "", body, prefer = "" }: { method?: string; query?: string; body?: unknown; prefer?: string } = {},
+  ) {
     const response = await fetch(`${this.url}/rest/v1/${table}${query ? `?${query}` : ""}`, {
       method,
       headers: {
@@ -281,6 +291,7 @@ function publicStateFromSettings(settings: Record<string, string>, items: any[])
     coaches: safeJsonParse<any[]>(settingsValue(settings, "coachProfilesJson"), []),
     locations: safeJsonParse<any[]>(settingsValue(settings, "locationsJson"), []),
     availability: safeJsonParse<any[][]>(settingsValue(settings, "availabilityJson"), []),
+    settings,
     items: items.filter((item) => recordBelongsToAccount(item, accountId)),
   };
 }
@@ -317,8 +328,7 @@ function currentWeekOffset() {
   const weekStart = new Date(today);
   weekStart.setHours(0, 0, 0, 0);
   weekStart.setDate(weekStart.getDate() + mondayOffset);
-  const base = Date.UTC(2026, 5, 1);
-  return Math.round((Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate()) - base) / (7 * 24 * 60 * 60 * 1000));
+  return Math.round((Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate()) - BASE_WEEK_START) / (7 * 24 * 60 * 60 * 1000));
 }
 
 function isGroupSlotMatch(service: any, slot: any) {
@@ -363,6 +373,124 @@ function isInsideAvailability(availability: any[][], day: number, start: number,
     const windowCoachId = cleanSlug(window?.coachId || coachId, coachId);
     return windowCoachId === coachId && start >= Number(window?.start) && end <= Number(window?.end);
   });
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error || "Unknown error");
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function slotDateLabel(week = 0, day = 0) {
+  const date = new Date(BASE_WEEK_START);
+  date.setUTCDate(date.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
+  return date.toLocaleDateString("en-NZ", { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+}
+
+function timeLabel(minutes = 0) {
+  const value = Number(minutes || 0);
+  const hour24 = Math.floor(value / 60);
+  const mins = value % 60;
+  const period = hour24 >= 12 ? "PM" : "AM";
+  const hour = hour24 % 12 || 12;
+  return `${hour}:${String(mins).padStart(2, "0")} ${period}`;
+}
+
+function rangeLabel(start = 0, duration = 0) {
+  return `${timeLabel(start)}-${timeLabel(Number(start || 0) + Number(duration || 0))}`;
+}
+
+function fallbackRecipient(settings: Record<string, string> = {}, account = defaultCoachAccount()) {
+  return (
+    cleanEmail(settings.notificationEmail, "") ||
+    cleanEmail(settings.coachEmail, "") ||
+    cleanEmail(account.contactEmail, "") ||
+    cleanEmail(env("CLARITY_NOTIFICATION_EMAIL"), "") ||
+    cleanEmail(env("CLARITY_CONTACT_EMAIL"), "") ||
+    "samhalegolf@gmail.com"
+  );
+}
+
+function emailFrom(settings: Record<string, string> = {}, account = defaultCoachAccount()) {
+  const businessName = cleanString(settings.accountBusinessName, account.businessName, 140) || "Sam Hale Golf";
+  return env("CLARITY_EMAIL_FROM", `${businessName} <onboarding@resend.dev>`);
+}
+
+function fallbackEmailBody(input: { appointment: any; service: any; settings: Record<string, string>; account: any; fallbackId: string; error: string }) {
+  const rows = [
+    ["Fallback appointment id", input.fallbackId],
+    ["Timestamp", nowIso()],
+    ["Route/function", "public-booking"],
+    ["Customer", input.appointment.client],
+    ["Phone", input.appointment.phone || "not supplied"],
+    ["Email", input.appointment.email],
+    ["Service", input.service?.name || input.appointment.serviceId || "Unknown service"],
+    ["Date", slotDateLabel(input.appointment.week, input.appointment.day)],
+    ["Time", rangeLabel(input.appointment.start, input.appointment.duration)],
+    ["Raw slot", `week=${input.appointment.week}, day=${input.appointment.day}, start=${input.appointment.start}, duration=${input.appointment.duration}`],
+    ["Location", [input.appointment.location?.name, input.appointment.location?.address].filter(Boolean).join(" · ") || input.appointment.locationId],
+    ["Coach", input.appointment.coach?.name || input.appointment.coachId],
+    ["Supabase error", input.error],
+  ] as Array<[string, string]>;
+  const text = ["URGENT fallback booking — Supabase save failed", "", ...rows.map(([label, value]) => `${label}: ${value}`)].join("\n");
+  const htmlRows = rows
+    .map(([label, value]) => `<tr><td style="font-weight:700;padding:6px 10px;border-bottom:1px solid #e8ede6">${escapeHtml(label)}</td><td style="padding:6px 10px;border-bottom:1px solid #e8ede6">${escapeHtml(value)}</td></tr>`)
+    .join("");
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#172017"><h1>URGENT fallback booking</h1><p>Supabase calendar save failed. Customer was shown the normal confirmed booking screen. Manually add this booking.</p><table cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff;border:1px solid #e8ede6">${htmlRows}</table></div>`;
+  return { text, html };
+}
+
+async function sendFallbackBookingEmail(input: { appointment: any; service: any; settings: Record<string, string>; account: any; fallbackId: string; error: string }) {
+  const apiKey = env("RESEND_API_KEY");
+  if (!apiKey) throw new Error("fallback email failed: missing RESEND_API_KEY");
+  const to = fallbackRecipient(input.settings, input.account);
+  if (!cleanEmail(to, "")) throw new Error("fallback email failed: missing fallback recipient");
+  const body = fallbackEmailBody(input);
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": `public-booking-fallback-${input.fallbackId}`,
+    },
+    body: JSON.stringify({
+      from: emailFrom(input.settings, input.account),
+      to: [to],
+      subject: "URGENT fallback booking — Supabase save failed",
+      html: body.html,
+      text: body.text,
+      reply_to: input.appointment.email,
+    }),
+  });
+  const responseText = await response.text().catch(() => "");
+  if (!response.ok) throw new Error(`fallback email failed ${response.status}: ${responseText.slice(0, 500)}`);
+}
+
+function successPayload(appointment: any, items: any[], fallback = false) {
+  return {
+    ok: true,
+    ...(fallback ? { fallback: true } : {}),
+    appointment: {
+      id: appointment.id,
+      week: appointment.week,
+      day: appointment.day,
+      start: appointment.start,
+      duration: appointment.duration,
+      coachId: appointment.coachId,
+      locationId: appointment.locationId,
+      coach: appointment.coach,
+      location: appointment.location,
+    },
+    state: { items },
+    notifications: [],
+  };
 }
 
 async function createPublicBooking(payload: any) {
@@ -430,29 +558,52 @@ async function createPublicBooking(payload: any) {
     status: "booked",
   };
 
-  await store.upsertCalendarItem({
-    id: appointment.id,
-    account_id: appointment.accountId,
-    kind: appointment.kind,
-    week: appointment.week,
-    day: appointment.day,
-    start: appointment.start,
-    duration: appointment.duration,
-    coach_id: appointment.coachId,
-    location_id: appointment.locationId,
-    service_id: appointment.serviceId,
-    client: appointment.client,
-    title: appointment.title,
-    phone: appointment.phone,
-    email: appointment.email,
-    note: appointment.note,
-    status: appointment.status,
-    custom_group: null,
-    coach: appointment.coach,
-    location: appointment.location,
-    created_at: nowIso(),
-    updated_at: nowIso(),
-  });
+  try {
+    await store.upsertCalendarItem({
+      id: appointment.id,
+      account_id: appointment.accountId,
+      kind: appointment.kind,
+      week: appointment.week,
+      day: appointment.day,
+      start: appointment.start,
+      duration: appointment.duration,
+      coach_id: appointment.coachId,
+      location_id: appointment.locationId,
+      service_id: appointment.serviceId,
+      client: appointment.client,
+      title: appointment.title,
+      phone: appointment.phone,
+      email: appointment.email,
+      note: appointment.note,
+      status: appointment.status,
+      custom_group: null,
+      coach: appointment.coach,
+      location: appointment.location,
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    });
+  } catch (error) {
+    const fallbackId = `fallback-appt-${Date.now()}`;
+    const fallbackAppointment = { ...appointment, id: fallbackId };
+    const supabaseError = errorMessage(error);
+    console.error("public_booking_lean:calendar_save_failed_fallback_email", supabaseError);
+    await sendFallbackBookingEmail({
+      appointment: fallbackAppointment,
+      service,
+      settings,
+      account: state.account,
+      fallbackId,
+      error: supabaseError,
+    }).catch((fallbackError) => {
+      throw Object.assign(
+        new Error(`Supabase calendar save failed: ${supabaseError}; fallback email failed: ${errorMessage(fallbackError)}`),
+        { status: 500 },
+      );
+    });
+    console.warn("public_booking_lean:fallback_email_sent", fallbackId);
+    return successPayload(fallbackAppointment, state.items, true);
+  }
+
   await store.savePerson({
     id: randomUUID(),
     name: client,
@@ -465,7 +616,45 @@ async function createPublicBooking(payload: any) {
   });
 
   const nextItems = [...items, appointment].sort((a, b) => a.week - b.week || a.day - b.day || a.start - b.start || String(a.id).localeCompare(String(b.id)));
-  return { appointment, state: { items: nextItems } };
+  return successPayload(appointment, nextItems, false);
+}
+
+async function fallbackFromRawPayload(payload: any, originalError: unknown) {
+  const firstName = cleanString(payload?.firstName, "", 80);
+  const lastName = cleanString(payload?.lastName, "", 80);
+  const email = cleanEmail(payload?.email, "");
+  if (!payload?.serviceId || !firstName || !lastName || !email) throw originalError;
+  const fallbackId = `fallback-appt-${Date.now()}`;
+  const account = defaultCoachAccount();
+  const appointment = {
+    id: fallbackId,
+    accountId: defaultWorkspaceAccountFromCoachAccount(account).id,
+    kind: "appointment",
+    week: Number(payload.week ?? 0),
+    day: Number(payload.day ?? 0),
+    start: Number(payload.start ?? 0),
+    duration: Number(payload.duration ?? 0),
+    coachId: cleanSlug(payload.coachId, "sam-hale"),
+    locationId: cleanSlug(payload.locationId, "default-location"),
+    coach: payload.coach || { coachId: cleanSlug(payload.coachId, "sam-hale"), name: account.coachName },
+    serviceId: cleanString(payload.serviceId, "", 180),
+    client: `${firstName} ${lastName}`,
+    title: `${firstName} ${lastName}`,
+    phone: cleanString(payload.phone, "", 80),
+    email,
+    note: "Booked from public booking page. Supabase read/save failed before full validation.",
+    location: payload.location || { locationId: cleanSlug(payload.locationId, "default-location"), name: account.venueName, timezone: account.timezone },
+    status: "booked",
+  };
+  await sendFallbackBookingEmail({
+    appointment,
+    service: { id: appointment.serviceId, name: appointment.serviceId },
+    settings: {},
+    account,
+    fallbackId,
+    error: errorMessage(originalError),
+  });
+  return successPayload(appointment, [], true);
 }
 
 async function parseBody(req: Request) {
@@ -475,29 +664,25 @@ async function parseBody(req: Request) {
 
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed", message: "Use POST." }, 405);
+  let payload: any = {};
   try {
+    payload = await parseBody(req);
     console.log("public_booking_lean:start");
-    const result = await createPublicBooking(await parseBody(req));
-    console.log("public_booking_lean:saved", result.appointment.id);
-    return json({
-      ok: true,
-      appointment: {
-        id: result.appointment.id,
-        week: result.appointment.week,
-        day: result.appointment.day,
-        start: result.appointment.start,
-        duration: result.appointment.duration,
-        coachId: result.appointment.coachId,
-        locationId: result.appointment.locationId,
-        coach: result.appointment.coach,
-        location: result.appointment.location,
-      },
-      state: { items: result.state.items },
-      notifications: [],
-    });
+    const result = await createPublicBooking(payload);
+    console.log(result.fallback ? "public_booking_lean:fallback_confirmed" : "public_booking_lean:saved", result.appointment.id);
+    return json(result);
   } catch (error) {
-    console.error("public_booking_lean:failed", error);
     const status = (error as any)?.status || 500;
+    if (status >= 500) {
+      try {
+        const fallback = await fallbackFromRawPayload(payload, error);
+        console.warn("public_booking_lean:raw_payload_fallback_email_sent", fallback.appointment.id);
+        return json(fallback);
+      } catch (fallbackError) {
+        console.error("public_booking_lean:raw_payload_fallback_failed", fallbackError);
+      }
+    }
+    console.error("public_booking_lean:failed", error);
     return json(
       {
         error: status === 500 ? "public_booking_error" : "request_error",
