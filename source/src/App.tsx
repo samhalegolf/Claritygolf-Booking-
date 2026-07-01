@@ -5492,12 +5492,16 @@ function App() {
 
   const isAppointmentStepComplete = Boolean(selectedBookingService);
   const isDateTimeStepComplete = bookingDaySelected && bookingStart !== null;
-  const isInformationStepComplete =
-    isDateTimeStepComplete &&
+  const isBookingCustomerDetailsComplete =
     bookingForm.firstName.trim() !== "" &&
     bookingForm.lastName.trim() !== "" &&
-    bookingForm.email.trim() !== "" &&
+    bookingForm.email.trim() !== "";
+  const isBookingInformationComplete =
+    isBookingCustomerDetailsComplete &&
     (!isCustomGroupBooking || customGroupAttendees.length >= customGroupMinParticipants(bookingTargetService) - 1);
+  const isInformationStepComplete = isDateTimeStepComplete && isBookingInformationComplete;
+  const showCapturedCustomerDetailsSummary =
+    isBookingCustomerDetailsComplete && (!isCustomGroupBooking || isBookingInformationComplete || !isDateTimeStepComplete);
 
   const isAppointmentSectionOpen = openPublicBookingSection === "appointment";
   const isDateTimeSectionOpen = openPublicBookingSection === "datetime";
@@ -11100,7 +11104,7 @@ function App() {
         </section>
 
         <section className={`booking-progressive-section ${isInformationSectionOpen ? "is-open" : ""} ${
-          isInformationStepComplete ? "is-complete" : ""
+          showCapturedCustomerDetailsSummary ? "is-complete" : ""
         }`}>
           <button
             className="booking-progressive-title"
@@ -11110,7 +11114,7 @@ function App() {
           >
             <span className="booking-progressive-title-label">3. Your Information</span>
             <span className="booking-progressive-title-state">
-              {isInformationStepComplete ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
+              {showCapturedCustomerDetailsSummary ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
             </span>
           </button>
           {isInformationSectionOpen ? (
@@ -11197,11 +11201,12 @@ function App() {
                 {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
               </button>
             </div>
-          ) : isInformationStepComplete ? (
+          ) : showCapturedCustomerDetailsSummary ? (
                     <button
                       className="booking-summary booking-progressive-summary"
                       onClick={() => setPublicBookingSection("information")}
                       type="button"
+                      disabled={!isDateTimeStepComplete}
                     >
                       <strong>Information complete</strong>
                       <span>Customer details captured</span>
@@ -13737,7 +13742,7 @@ function App() {
                   </section>
 
                   <section className={`booking-progressive-section ${isInformationSectionOpen ? "is-open" : ""} ${
-                    isInformationStepComplete ? "is-complete" : ""
+                    showCapturedCustomerDetailsSummary ? "is-complete" : ""
                   }`}>
                     <button
                       className="booking-progressive-title"
@@ -13747,7 +13752,7 @@ function App() {
                     >
                       <span className="booking-progressive-title-label">3. Your Information</span>
                       <span className="booking-progressive-title-state">
-              {isInformationStepComplete ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
+              {showCapturedCustomerDetailsSummary ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
             </span>
                     </button>
                     {isInformationSectionOpen ? (
@@ -13834,11 +13839,12 @@ function App() {
                           {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
                         </button>
                       </div>
-                    ) : isInformationStepComplete ? (
+                    ) : showCapturedCustomerDetailsSummary ? (
                       <button
                       className="booking-summary booking-progressive-summary"
                       onClick={() => setPublicBookingSection("information")}
                       type="button"
+                      disabled={!isDateTimeStepComplete}
                     >
                       <strong>Information complete</strong>
                       <span>Customer details captured</span>
