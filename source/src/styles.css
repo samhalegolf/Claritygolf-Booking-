@@ -5466,6 +5466,206 @@ button {
   font-weight: 700;
 }
 
+.developer-diagnostics {
+  margin: 0 0 14px;
+  border: 1px solid rgba(20, 25, 20, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 10px 24px rgba(20, 20, 20, 0.07);
+  overflow: hidden;
+}
+
+.developer-diagnostics-summary {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: #24251f;
+  cursor: pointer;
+  text-align: left;
+}
+
+.developer-diagnostics-title,
+.developer-diagnostics-readout {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.developer-diagnostics-title strong {
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.developer-diagnostics-readout {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  color: #5b5f51;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.developer-diagnostics-readout span {
+  padding: 4px 8px;
+  border: 1px solid rgba(20, 25, 20, 0.1);
+  border-radius: 999px;
+  background: rgba(246, 247, 241, 0.82);
+}
+
+.developer-diagnostics-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 12px 12px;
+}
+
+.developer-diagnostics-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-top: 1px solid rgba(20, 25, 20, 0.1);
+  padding-top: 12px;
+}
+
+.developer-diagnostics-tabs button {
+  padding: 6px 10px;
+  border: 1px solid rgba(20, 25, 20, 0.12);
+  border-radius: 999px;
+  background: #f6f7f1;
+  color: #4c5146;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.developer-diagnostics-tabs button.active {
+  border-color: rgba(42, 94, 60, 0.35);
+  background: #e7f1e5;
+  color: #1f6b3d;
+}
+
+.developer-diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.developer-diagnostics-grid div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(20, 25, 20, 0.1);
+  border-radius: 8px;
+  background: rgba(250, 250, 247, 0.82);
+}
+
+.developer-diagnostics-grid span,
+.developer-diagnostics-event span {
+  color: #62685c;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.developer-diagnostics-grid strong,
+.developer-diagnostics-event strong {
+  overflow: hidden;
+  color: #25251f;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.developer-diagnostics-events {
+  display: grid;
+  gap: 8px;
+  max-height: 380px;
+  overflow: auto;
+}
+
+.developer-diagnostics-event {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  padding: 9px;
+  border: 1px solid rgba(20, 25, 20, 0.1);
+  border-left: 4px solid #94a38b;
+  border-radius: 8px;
+  background: rgba(250, 250, 247, 0.9);
+}
+
+.developer-diagnostics-event.failed {
+  border-left-color: #b64f43;
+}
+
+.developer-diagnostics-event.warning {
+  border-left-color: #b78325;
+}
+
+.developer-diagnostics-event.verified,
+.developer-diagnostics-event.success {
+  border-left-color: #2e7d4f;
+}
+
+.developer-diagnostics-event > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.developer-diagnostics-event > div:last-of-type {
+  justify-items: end;
+}
+
+.developer-diagnostics-event code {
+  max-width: 220px;
+  overflow: hidden;
+  color: #244e35;
+  font-size: 11px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.developer-diagnostics-event p,
+.developer-diagnostics-event pre,
+.developer-diagnostics-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #555a50;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.developer-diagnostics-event pre {
+  max-height: 140px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 6px;
+  background: rgba(30, 34, 28, 0.06);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 980px) {
+  .developer-diagnostics-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .developer-diagnostics-readout {
+    justify-content: flex-start;
+  }
+
+  .developer-diagnostics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .billing-page {
   display: grid;
   gap: 16px;

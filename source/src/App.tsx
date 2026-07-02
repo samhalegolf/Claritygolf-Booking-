@@ -584,6 +584,55 @@ type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
 type PublicBookingStateStatus = "loading" | "loaded" | "error";
 type PublicBookingSlotStatus = "idle" | "loading" | "loaded" | "error";
 type AdminSaveOwner = "lesson_complete" | "locations" | "coaches" | "settings";
+type DiagnosticStatus = "started" | "success" | "failed" | "warning" | "skipped" | "verified";
+type DiagnosticSystem =
+  | "supabase"
+  | "auth"
+  | "calendar"
+  | "booking"
+  | "publicBooking"
+  | "save"
+  | "email"
+  | "notification"
+  | "admin"
+  | "ui";
+type DiagnosticTab = "overview" | "database" | "errors" | "raw";
+type DiagnosticEvent = {
+  id: string;
+  timestamp: string;
+  system: DiagnosticSystem;
+  action: string;
+  phase: string;
+  status: DiagnosticStatus;
+  durationMs?: number;
+  route?: string;
+  functionName?: string;
+  errorCode?: string;
+  humanMessage?: string;
+  httpStatus?: number;
+  expectedAccountId?: string;
+  returnedAccountId?: string;
+  objectType?: string;
+  objectId?: string;
+  details?: Record<string, string | number | boolean>;
+};
+type DiagnosticEventInput = Omit<DiagnosticEvent, "id" | "timestamp" | "details"> & {
+  id?: string;
+  timestamp?: string;
+  details?: Record<string, unknown>;
+};
+type DiagnosticTimerInput = {
+  system: DiagnosticSystem;
+  action: string;
+  phase?: string;
+  route?: string;
+  functionName?: string;
+  expectedAccountId?: string;
+  objectType?: string;
+  objectId?: string;
+  details?: Record<string, unknown>;
+};
+type DiagnosticTimer = DiagnosticTimerInput & { id: string; startedAt: number };
 type LessonCompleteDiagnostic = {
   action: "lesson_complete";
   itemId: string;
@@ -3117,6 +3166,37 @@ function loadImage(url: string) {
   });
 }
 
+const DIAGNOSTIC_EVENT_LIMIT = 150;
+
+function createDiagnosticId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `diag-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function sanitizeDiagnosticDetails(details?: Record<string, unknown>): Record<string, string | number | boolean> | undefined {
+  if (!details) return undefined;
+  const sanitized: Record<string, string | number | boolean> = {};
+  Object.entries(details).forEach(([key, value]) => {
+    const lowerKey = key.toLowerCase();
+    if (
+      lowerKey.includes("token") ||
+      lowerKey.includes("secret") ||
+      lowerKey.includes("authorization") ||
+      lowerKey.includes("password") ||
+      lowerKey.includes("emailbody") ||
+      lowerKey.includes("body")
+    ) {
+      return;
+    }
+    if (typeof value === "string") sanitized[key] = value.slice(0, 160);
+    if (typeof value === "number" && Number.isFinite(value)) sanitized[key] = value;
+    if (typeof value === "boolean") sanitized[key] = value;
+  });
+  return Object.keys(sanitized).length ? sanitized : undefined;
+}
+
 async function analyzeLogoFile(file: File): Promise<BrandSettings> {
   const objectUrl = URL.createObjectURL(file);
   try {
@@ -3464,6 +3544,9 @@ function App() {
   const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
   const [calendarSaveError, setCalendarSaveError] = useState("");
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
+  const [diagnosticEvents, setDiagnosticEvents] = useState<DiagnosticEvent[]>([]);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [diagnosticsTab, setDiagnosticsTab] = useState<DiagnosticTab>("overview");
   const [pendingLessonCompleteId, setPendingLessonCompleteId] = useState("");
   const [lessonCompleteErrors, setLessonCompleteErrors] = useState<LessonCompleteErrorMap>({});
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
@@ -3554,6 +3637,82 @@ function App() {
     } else {
       activeAdminSaveOwnersRef.current.delete(owner);
     }
+  }
+
+  function trackDiagnosticEvent(event: DiagnosticEventInput) {
+    if (isEmbedMode) return;
+    const next: DiagnosticEvent = {
+      ...event,
+      id: event.id || createDiagnosticId(),
+      timestamp: event.timestamp || new Date().toISOString(),
+      details: sanitizeDiagnosticDetails(event.details),
+    };
+    setDiagnosticEvents((current) => [next, ...current].slice(0, DIAGNOSTIC_EVENT_LIMIT));
+  }
+
+  function startDiagnosticTimer(input: DiagnosticTimerInput): DiagnosticTimer {
+    const timer: DiagnosticTimer = {
+      ...input,
+      id: createDiagnosticId(),
+      phase: input.phase || "request",
+      startedAt: performance.now(),
+    };
+    trackDiagnosticEvent({
+      ...timer,
+      phase: timer.phase || "request",
+      status: "started",
+    });
+    return timer;
+  }
+
+  function finishDiagnosticTimer(
+    timer: DiagnosticTimer,
+    status: DiagnosticStatus,
+    extra: Partial<DiagnosticEventInput> = {},
+  ) {
+    trackDiagnosticEvent({
+      system: timer.system,
+      action: timer.action,
+      phase: extra.phase || timer.phase || "request",
+      status,
+      route: extra.route || timer.route,
+      functionName: extra.functionName || timer.functionName,
+      errorCode: extra.errorCode,
+      humanMessage: extra.humanMessage,
+      httpStatus: extra.httpStatus,
+      expectedAccountId: extra.expectedAccountId || timer.expectedAccountId,
+      returnedAccountId: extra.returnedAccountId,
+      objectType: extra.objectType || timer.objectType,
+      objectId: extra.objectId || timer.objectId,
+      durationMs: Math.max(0, Math.round(performance.now() - timer.startedAt)),
+      details: { ...(timer.details ?? {}), ...(extra.details ?? {}) },
+    });
+  }
+
+  function trackDiagnosticError(
+    input: DiagnosticTimerInput & {
+      errorCode: string;
+      humanMessage: string;
+      httpStatus?: number;
+      returnedAccountId?: string;
+    },
+  ) {
+    trackDiagnosticEvent({
+      system: input.system,
+      action: input.action,
+      phase: input.phase || "request",
+      status: "failed",
+      route: input.route,
+      functionName: input.functionName,
+      errorCode: input.errorCode,
+      humanMessage: input.humanMessage,
+      httpStatus: input.httpStatus,
+      expectedAccountId: input.expectedAccountId,
+      returnedAccountId: input.returnedAccountId,
+      objectType: input.objectType,
+      objectId: input.objectId,
+      details: input.details,
+    });
   }
   const selectedLessonNote = selectedService?.lessonNote || selectedService?.location || "";
   const selectedGroupSessionService = selectedGroupSession
@@ -4209,12 +4368,23 @@ function App() {
         const sessionController = new AbortController();
         const sessionTimeout = window.setTimeout(() => sessionController.abort(), 8000);
         let sessionResponse: Response;
+        const sessionTimer = startDiagnosticTimer({
+          system: "auth",
+          action: "admin_session_load",
+          route: "GET /api/auth/session",
+          functionName: "loadInitialState",
+        });
         try {
           sessionResponse = await fetch("/api/auth/session", {
             credentials: "same-origin",
             cache: "no-store",
             headers: { Accept: "application/json" },
             signal: sessionController.signal,
+          });
+          finishDiagnosticTimer(sessionTimer, sessionResponse.ok ? "success" : "failed", {
+            httpStatus: sessionResponse.status,
+            errorCode: sessionResponse.ok ? undefined : "AUTH_SESSION_MISSING",
+            humanMessage: sessionResponse.ok ? undefined : "Admin session could not be loaded.",
           });
         } finally {
           window.clearTimeout(sessionTimeout);
@@ -4224,6 +4394,15 @@ function App() {
         if (cancelled) return;
 
         if (!session.authenticated) {
+          trackDiagnosticEvent({
+            system: "auth",
+            action: "admin_session_load",
+            phase: "session",
+            status: "warning",
+            route: "GET /api/auth/session",
+            errorCode: "AUTH_SESSION_MISSING",
+            humanMessage: "No authenticated admin session.",
+          });
           setAuthStatus("guest");
           setCalendarFeedStatus("offline");
           setAdminWorkspaceLoadStatus("idle");
@@ -4236,6 +4415,15 @@ function App() {
         void startAdminWorkspaceHydration();
       } catch {
         if (!cancelled) {
+          trackDiagnosticError({
+            system: "auth",
+            action: "admin_session_load",
+            phase: "request",
+            route: "GET /api/auth/session",
+            functionName: "loadInitialState",
+            errorCode: "AUTH_SESSION_MISSING",
+            humanMessage: "Admin session load failed.",
+          });
           hasLoadedCalendarApiRef.current = false;
           setCalendarFeedStatus("offline");
           if (isEmbedMode) setPublicBookingStateStatus("error");
@@ -4314,6 +4502,15 @@ function App() {
     const payload = JSON.stringify({ items, replaceItems: true, syncKey: calendarSyncKey, updatedAt: calendarStateVersion });
     let saveReachedServer = false;
     let sessionExpired = false;
+    const timer = startDiagnosticTimer({
+      system: "save",
+      action: "save_booking_calendar",
+      route: "PUT /api/calendar-state",
+      functionName: "calendar autosave",
+      expectedAccountId: activeAccountId,
+      objectType: "calendarState",
+      details: { itemCount: items.length },
+    });
     setCalendarSaveStatus("saving");
     setCalendarSaveError("");
 
@@ -4412,6 +4609,13 @@ function App() {
           : "";
         if (clientSyncWarning) setToast({ message: clientSyncWarning });
         applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar);
+        finishDiagnosticTimer(timer, "verified", {
+          httpStatus: response.status,
+          details: {
+            persistedItemCount: persistedItems.length,
+            notificationCount: Array.isArray(data.notifications) ? data.notifications.length : 0,
+          },
+        });
         if (data.googleCalendarSync && data.googleCalendarSync.ok === false && data.googleCalendarSync.error) {
           setToast({ message: `Saved booking calendar, but Google Calendar did not sync: ${data.googleCalendarSync.error}` });
         }
@@ -4428,6 +4632,10 @@ function App() {
             setCalendarFeedStatus("connected");
             setCalendarSaveStatus("saved");
             setCalendarSaveError("");
+            finishDiagnosticTimer(timer, "warning", {
+              errorCode: "BOOKING_UPDATE_VERIFY_MISSING",
+              humanMessage: `Calendar saved, but refresh details failed: ${message}`,
+            });
             setToast({ message: `Calendar saved, but the page could not refresh all save details: ${message}` });
             window.setTimeout(() => {
               if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
@@ -4440,6 +4648,10 @@ function App() {
           setCalendarFeedStatus(sessionExpired ? "offline" : "connected");
           setCalendarSaveStatus("failed");
           setCalendarSaveError(calmMessage);
+          finishDiagnosticTimer(timer, "failed", {
+            errorCode: sessionExpired ? "AUTH_SESSION_MISSING" : "BOOKING_UPDATE_FAILED",
+            humanMessage: calmMessage,
+          });
           setToast({ message: calmMessage });
         }
       });
@@ -4630,6 +4842,15 @@ function App() {
     ].filter(Boolean).join("\n");
   }
 
+  function workspaceDiagnosticErrorCode(label: "Location" | "Coach", stage: string) {
+    if (stage.includes("unauthorized")) return "AUTH_SESSION_MISSING";
+    if (stage.includes("account_mismatch")) return label === "Location" ? "LOCATION_SCOPE_MISMATCH" : "COACH_SCOPE_MISMATCH";
+    if (stage.includes("missing_expected_id")) {
+      return label === "Location" ? "LOCATION_SAVE_VERIFY_MISSING" : "COACH_SAVE_VERIFY_MISSING";
+    }
+    return label === "Location" ? "LOCATION_SAVE_FAILED" : "COACH_SAVE_FAILED";
+  }
+
   function throwWorkspaceSaveFailure(
     label: "Location" | "Coach",
     routeLabel: string,
@@ -4726,6 +4947,13 @@ function App() {
   async function startAdminWorkspaceHydration() {
     if (isEmbedMode || hasActiveAdminSave()) return;
     const runId = ++adminHydrationRunIdRef.current;
+    const timer = startDiagnosticTimer({
+      system: "admin",
+      action: "admin_workspace_load",
+      route: "GET /api/calendar-state",
+      functionName: "startAdminWorkspaceHydration",
+      expectedAccountId: activeAccountId,
+    });
     hasLoadedCalendarApiRef.current = false;
     setAdminWorkspaceLoadStatus("loading");
     setAdminWorkspaceLoadError("");
@@ -4738,8 +4966,20 @@ function App() {
       setAdminWorkspaceLoadStatus("loaded");
       setAdminWorkspaceLoadError("");
       setCalendarFeedStatus("connected");
+      finishDiagnosticTimer(timer, "success", {
+        details: {
+          bookingsLoaded: accountItems.length,
+          servicesLoaded: services.length,
+          locationsLoaded: locations.length,
+          coachesLoaded: coachProfiles.length,
+        },
+      });
     } catch (error) {
       if (adminHydrationRunIdRef.current !== runId) return;
+      finishDiagnosticTimer(timer, "failed", {
+        errorCode: "SUPABASE_READ_FAILED",
+        humanMessage: adminWorkspaceLoadMessage(error),
+      });
       hasLoadedCalendarApiRef.current = false;
       setAdminWorkspaceLoadStatus("error");
       setAdminWorkspaceLoadError(adminWorkspaceLoadMessage(error));
@@ -4749,6 +4989,13 @@ function App() {
 
   async function loadAdminCalendarState(runId = ++adminHydrationRunIdRef.current) {
     const isCurrentRun = () => adminHydrationRunIdRef.current === runId;
+    const timer = startDiagnosticTimer({
+      system: "supabase",
+      action: "calendar_bookings_load",
+      route: "GET /api/calendar-state",
+      functionName: "loadAdminCalendarState",
+      expectedAccountId: activeAccountId,
+    });
     hasLoadedCalendarApiRef.current = false;
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
@@ -4758,15 +5005,29 @@ function App() {
     try {
       response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
     } catch {
+      finishDiagnosticTimer(timer, "failed", {
+        errorCode: "SUPABASE_READ_FAILED",
+        humanMessage: "Calendar API unavailable.",
+      });
       const healthMessage = await fetchDatabaseHealthSummary();
       if (!isCurrentRun()) return false;
       throw new Error(["Calendar API unavailable", healthMessage].filter(Boolean).join(" · "));
     }
     if (response.status === 401) {
+      finishDiagnosticTimer(timer, "failed", {
+        httpStatus: response.status,
+        errorCode: "AUTH_SESSION_MISSING",
+        humanMessage: "Admin login required.",
+      });
       throw new Error("Admin login required");
     }
     if (!response.ok) {
       const apiMessage = await readApiFailure(response, "Calendar API unavailable");
+      finishDiagnosticTimer(timer, "failed", {
+        httpStatus: response.status,
+        errorCode: "SUPABASE_READ_FAILED",
+        humanMessage: apiMessage,
+      });
       const healthMessage = await fetchDatabaseHealthSummary();
       if (!isCurrentRun()) return false;
       throw new Error([apiMessage, healthMessage].filter(Boolean).join(" · "));
@@ -4821,6 +5082,18 @@ function App() {
     applyBrandSettings(data.brand);
     applyGoogleCalendarStatus(data.googleCalendar);
     hasLoadedCalendarApiRef.current = true;
+    finishDiagnosticTimer(timer, "success", {
+      httpStatus: response.status,
+      returnedAccountId: loadedAccountId,
+      details: {
+        bookingsLoaded: accountItems.length,
+        peopleLoaded: Array.isArray(data.people) ? data.people.length : 0,
+        servicesLoaded: Array.isArray(data.services) ? data.services.length : 0,
+        locationsLoaded: Array.isArray(data.locations) ? data.locations.length : 0,
+        coachesLoaded: Array.isArray(data.coaches) ? data.coaches.length : 0,
+        availabilityBlocks: Array.isArray(data.availability) ? data.availability.flat().length : 0,
+      },
+    });
     refreshAdminWorkspaceDetails(runId, fallbackAccount);
     return true;
   }
@@ -4899,11 +5172,24 @@ function App() {
   }
 
   async function loadPublicBookingCatalog() {
+    const timer = startDiagnosticTimer({
+      system: "publicBooking",
+      action: "public_booking_page_load",
+      route: "GET /api/public-booking-catalog",
+      functionName: "loadPublicBookingCatalog",
+    });
     const response = await fetch("/api/public-booking-catalog", {
       cache: "no-store",
       headers: { Accept: "application/json" },
     });
-    if (!response.ok) throw new Error("Public booking API unavailable");
+    if (!response.ok) {
+      finishDiagnosticTimer(timer, "failed", {
+        httpStatus: response.status,
+        errorCode: "BOOKING_PAGE_LOAD_FAILED",
+        humanMessage: "Public booking API unavailable.",
+      });
+      throw new Error("Public booking API unavailable");
+    }
     const data = (await response.json()) as {
       services?: Service[];
       locations?: Location[];
@@ -4923,6 +5209,15 @@ function App() {
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
     hasLoadedCalendarApiRef.current = true;
+    finishDiagnosticTimer(timer, "success", {
+      httpStatus: response.status,
+      returnedAccountId: loadedAccountId,
+      details: {
+        servicesFiltered: Array.isArray(data.services) ? data.services.length : 0,
+        locationsLoaded: Array.isArray(data.locations) ? data.locations.length : 0,
+        coachesLoaded: Array.isArray(data.coaches) ? data.coaches.length : 0,
+      },
+    });
   }
 
   function publicBookingSlotCacheKey(serviceId: string, week: number, ignoreId = "") {
@@ -4940,6 +5235,15 @@ function App() {
     const key = publicBookingSlotCacheKey(serviceId, week, ignoreId);
     if (!options.force && publicBookingSlotRequestsRef.current.has(key)) return;
     publicBookingSlotRequestsRef.current.add(key);
+    const timer = startDiagnosticTimer({
+      system: "calendar",
+      action: "public_booking_slots_load",
+      route: "GET /api/public-booking-slots",
+      functionName: "loadPublicBookingSlots",
+      objectType: "service",
+      objectId: serviceId,
+      details: { week, ignoreId: Boolean(ignoreId) },
+    });
     setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "loading" }));
     try {
       const params = new URLSearchParams({ serviceId, week: String(week) });
@@ -4960,8 +5264,16 @@ function App() {
           : [];
       setPublicBookingSlots((current) => ({ ...current, [key]: slots }));
       setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "loaded" }));
+      finishDiagnosticTimer(timer, "success", {
+        httpStatus: response.status,
+        details: { slotsGenerated: slots.length },
+      });
     } catch (error) {
       console.warn("public_booking_slots_load_failed", error);
+      finishDiagnosticTimer(timer, "failed", {
+        errorCode: "PUBLIC_BOOKING_SLOT_LOAD_FAILED",
+        humanMessage: error instanceof Error ? error.message : "Public booking slots unavailable.",
+      });
       setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "error" }));
     } finally {
       publicBookingSlotRequestsRef.current.delete(key);
@@ -7520,6 +7832,15 @@ function App() {
       activeAccountId,
       expected: clean.map((location) => ({ id: location.id, name: workspaceRecordName(location) })).filter((location) => location.id),
     };
+    const timer = startDiagnosticTimer({
+      system: "save",
+      action: "save_location",
+      route: "PUT /api/locations",
+      functionName: "persistLocations",
+      expectedAccountId: activeAccountId,
+      objectType: "location",
+      details: { expectedCount: diagnostic.expected.length },
+    });
     let failureRoute = "PUT /api/locations";
     let failureStage = "location_put_request_failed";
     setLocations(clean);
@@ -7642,6 +7963,12 @@ function App() {
       );
       if (!isCurrentSave()) return false;
       setLocations(loadedLocations);
+      finishDiagnosticTimer(timer, "verified", {
+        route: "GET /api/calendar-state",
+        httpStatus: calendarStateResponse.status,
+        returnedAccountId: summarizeWorkspaceAccountIds(calendarLocationRecords),
+        details: { returnedCount: loadedLocationRecords?.length ?? 0 },
+      });
       setLocationSaveState("saved");
       setLocationEditorError("");
       setToast({ message });
@@ -7661,6 +7988,13 @@ function App() {
         diagnostic,
         "Could not save locations.",
       );
+      finishDiagnosticTimer(timer, "failed", {
+        route: failureRoute,
+        httpStatus: workspaceRouteStatus(failureRoute, diagnostic),
+        errorCode: workspaceDiagnosticErrorCode("Location", failureStage),
+        humanMessage: errorMessage,
+        returnedAccountId: summarizeWorkspaceAccountIds(workspaceRouteRecords(failureRoute, diagnostic)),
+      });
       setLocationEditorError(errorMessage);
       setToast({ message: errorMessage });
       return false;
@@ -7779,6 +8113,15 @@ function App() {
       activeAccountId,
       expected: clean.map((coach) => ({ id: coach.id, name: workspaceRecordName(coach) })).filter((coach) => coach.id),
     };
+    const timer = startDiagnosticTimer({
+      system: "save",
+      action: "save_coach",
+      route: "PUT /api/coaches",
+      functionName: "persistCoaches",
+      expectedAccountId: activeAccountId,
+      objectType: "coach",
+      details: { expectedCount: diagnostic.expected.length },
+    });
     let failureRoute = "PUT /api/coaches";
     let failureStage = "coach_put_request_failed";
     setCoachProfiles(clean);
@@ -7901,6 +8244,12 @@ function App() {
       );
       if (!isCurrentSave()) return false;
       setCoachProfiles(loadedCoaches);
+      finishDiagnosticTimer(timer, "verified", {
+        route: "GET /api/calendar-state",
+        httpStatus: calendarStateResponse.status,
+        returnedAccountId: summarizeWorkspaceAccountIds(calendarCoachRecords),
+        details: { returnedCount: loadedCoachRecords?.length ?? 0 },
+      });
       setCoachSaveState("saved");
       setCoachEditorError("");
       setToast({ message });
@@ -7920,6 +8269,13 @@ function App() {
         diagnostic,
         "Could not save coaches.",
       );
+      finishDiagnosticTimer(timer, "failed", {
+        route: failureRoute,
+        httpStatus: workspaceRouteStatus(failureRoute, diagnostic),
+        errorCode: workspaceDiagnosticErrorCode("Coach", failureStage),
+        humanMessage: errorMessage,
+        returnedAccountId: summarizeWorkspaceAccountIds(workspaceRouteRecords(failureRoute, diagnostic)),
+      });
       setCoachEditorError(errorMessage);
       setToast({ message: errorMessage });
       return false;
@@ -8578,6 +8934,15 @@ function App() {
   async function completeAppointmentSafely(itemId: string) {
     if (pendingLessonCompleteIdRef.current) return;
     const completeSaveVersion = beginAdminSave("lesson_complete");
+    const timer = startDiagnosticTimer({
+      system: "booking",
+      action: "complete_lesson",
+      route: "PUT /api/calendar-state",
+      functionName: "completeAppointmentSafely",
+      expectedAccountId: activeAccountId,
+      objectType: "booking",
+      objectId: itemId,
+    });
     pendingLessonCompleteIdRef.current = itemId;
     setPendingLessonCompleteId(itemId);
     setLessonCompleteErrors((current) => {
@@ -8600,6 +8965,10 @@ function App() {
       setCalendarFeedStatus("connected");
       setCalendarSaveStatus("saved");
       setCalendarSaveError("");
+      finishDiagnosticTimer(timer, "verified", {
+        httpStatus: 200,
+        details: { verifiedStatus: "completed" },
+      });
       setToast({ message: "Lesson marked completed." });
       window.setTimeout(() => {
         if (calendarSaveVersionRef.current === completeSaveVersion) {
@@ -8626,6 +8995,11 @@ function App() {
               : "Lesson was not completed because calendar data changed. Reload and try again.",
         } satisfies LessonCompleteDiagnostic);
       const message = diagnostic.message;
+      finishDiagnosticTimer(timer, "failed", {
+        httpStatus: diagnostic.serverStatus || undefined,
+        errorCode: message.includes("Admin login") ? "AUTH_SESSION_MISSING" : "BOOKING_COMPLETE_FAILED",
+        humanMessage: lessonCompleteDiagnosticText(diagnostic),
+      });
       setCalendarFeedStatus(message.includes("Admin login") ? "offline" : "connected");
       setCalendarSaveStatus("failed");
       setCalendarSaveError(lessonCompleteDiagnosticText(diagnostic));
@@ -8844,6 +9218,16 @@ function App() {
     const payloadServices = nextServices.map((service) => ({ ...service }));
     const snapshot = services;
     const saveVersion = ++serviceSaveVersionRef.current;
+    const timer = startDiagnosticTimer({
+      system: "save",
+      action: "save_service",
+      route: "PUT /api/services",
+      functionName: "persistServices",
+      expectedAccountId: activeAccountId,
+      objectType: "service",
+      objectId: requiredServiceId || payloadServices.at(-1)?.id || "",
+      details: { expectedCount: payloadServices.length },
+    });
     setServices(cleanServices(payloadServices));
     setServiceSaveState("saving");
     try {
@@ -8873,12 +9257,23 @@ function App() {
         throw new Error(detail || `Services save failed (${response.status} ${response.statusText})`);
       }
       if (!Array.isArray(data?.services)) {
+        finishDiagnosticTimer(timer, "failed", {
+          httpStatus: response.status,
+          errorCode: "SERVICE_SAVE_VERIFY_MISSING",
+          humanMessage: "Services save response did not return services.",
+        });
         throw new Error("Services save response did not return services.");
       }
       const persistedServices = cleanServices(data.services);
       const expectedServiceId = requiredServiceId === undefined ? payloadServices.at(-1)?.id : requiredServiceId;
       const persistedServiceIds = new Set(persistedServices.map((service) => service.id));
       if (expectedServiceId && !persistedServiceIds.has(expectedServiceId)) {
+        finishDiagnosticTimer(timer, "failed", {
+          httpStatus: response.status,
+          errorCode: "SERVICE_SAVE_VERIFY_MISSING",
+          humanMessage: "Service did not persist. Reload and try again.",
+          objectId: expectedServiceId,
+        });
         throw new Error("Service did not persist. Reload and try again.");
       }
       const expectedService = expectedServiceId
@@ -8888,6 +9283,12 @@ function App() {
         ? persistedServices.find((service) => service.id === expectedServiceId)
         : null;
       if (expectedService && isCustomGroupService(expectedService) && !isCustomGroupService(persistedService)) {
+        finishDiagnosticTimer(timer, "failed", {
+          httpStatus: response.status,
+          errorCode: "SERVICE_SAVE_VERIFY_MISSING",
+          humanMessage: "Custom group lesson settings did not persist.",
+          objectId: expectedServiceId || "",
+        });
         throw new Error("Custom group lesson settings did not persist. Reload and try again.");
       }
       if (serviceSaveVersionRef.current !== saveVersion) return;
@@ -8899,12 +9300,20 @@ function App() {
         if (warning) setToast({ message: warning });
       }
       setServiceSaveState("saved");
+      finishDiagnosticTimer(timer, "verified", {
+        httpStatus: response.status,
+        details: { returnedCount: persistedServices.length },
+      });
       setToast({ message });
       window.setTimeout(() => setServiceSaveState("idle"), 1600);
     } catch (error) {
       if (serviceSaveVersionRef.current !== saveVersion) return;
       setServiceSaveState("error");
       const reason = error instanceof Error ? error.message : "Could not save lesson types.";
+      finishDiagnosticTimer(timer, "failed", {
+        errorCode: reason.includes("Admin login") ? "AUTH_SESSION_MISSING" : "SERVICE_SAVE_FAILED",
+        humanMessage: reason,
+      });
       setToast({ message: reason });
       setServices(snapshot);
     }
@@ -9811,6 +10220,21 @@ function App() {
     if (isEmbedMode) {
       setBookingSubmitState("saving");
       setEmailNoticeVisible(false);
+      const timer = startDiagnosticTimer({
+        system: "publicBooking",
+        action: "public_booking_create",
+        route: "POST /api/public-booking",
+        functionName: "submitBooking",
+        expectedAccountId: activeAccountId,
+        objectType: "booking",
+        objectId: fallbackAppointmentId,
+        details: {
+          serviceId: selectedBooking.service.id,
+          week: selectedBooking.week,
+          day: selectedBooking.day,
+          hasAttendees: isCustomGroupBooking,
+        },
+      });
       try {
         const controller = new AbortController();
         const timeoutId = window.setTimeout(() => controller.abort(), 15000);
@@ -9871,6 +10295,20 @@ function App() {
             status: response.status,
             message: data.message || data.error || "",
           });
+          finishDiagnosticTimer(timer, "warning", {
+            httpStatus: response.status,
+            errorCode: "BOOKING_CREATE_FAILED",
+            humanMessage: data.message || data.error || "Public booking used local fallback confirmation.",
+          });
+        } else {
+          finishDiagnosticTimer(timer, "verified", {
+            httpStatus: response.status,
+            objectId: data.appointment.id,
+            details: {
+              notificationCount: confirmationNotifications.length,
+              clientEmailRequested: confirmationNotifications.some((result) => result.channel === "client"),
+            },
+          });
         }
         setBookingConfirmation(confirmation);
         setEmailNoticeVisible(confirmationNotifications.some((result) => result.channel === "client" && result.sent));
@@ -9880,6 +10318,10 @@ function App() {
         setCustomGroupAttendeeDraft({ name: "", email: "" });
       } catch (error) {
         console.warn("public_booking_submit_customer_confirmed_after_fetch_failure", error);
+        finishDiagnosticTimer(timer, "warning", {
+          errorCode: "BOOKING_CREATE_FAILED",
+          humanMessage: error instanceof Error ? error.message : "Public booking fetch failed; local fallback confirmation shown.",
+        });
         confirmWithLocalFallback();
       } finally {
         setBookingSubmitState("idle");
@@ -11886,6 +12328,26 @@ function App() {
     adminWorkspaceLoadStatus !== "error";
   const adminWorkspaceFailed =
     !isEmbedMode && authStatus === "authenticated" && adminWorkspaceLoadStatus === "error";
+  const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
+  const latestDiagnosticEvent = diagnosticEvents[0];
+  const latestDiagnosticError = failedDiagnosticEvents[0];
+  const databaseDiagnosticEvents = diagnosticEvents.filter((event) =>
+    ["supabase", "save", "calendar", "auth"].includes(event.system),
+  );
+  const diagnosticEventsForActiveTab =
+    diagnosticsTab === "errors"
+      ? failedDiagnosticEvents
+      : diagnosticsTab === "database"
+        ? databaseDiagnosticEvents
+        : diagnosticEvents;
+  const averageDiagnosticDuration = Math.round(
+    diagnosticEvents.reduce((total, event) => total + (event.durationMs ?? 0), 0) /
+      Math.max(1, diagnosticEvents.filter((event) => typeof event.durationMs === "number").length),
+  );
+  const diagnosticsBySystem = diagnosticEvents.reduce<Record<string, number>>((counts, event) => {
+    counts[event.system] = (counts[event.system] ?? 0) + 1;
+    return counts;
+  }, {});
 
   if (!isEmbedMode && authStatus !== "authenticated") {
     return (
@@ -12151,6 +12613,100 @@ function App() {
               </button>
             ) : null}
           </div>
+        </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && isAdminUser && (
+        <section className={`developer-diagnostics ${diagnosticsOpen ? "is-open" : ""}`}>
+          <button
+            className="developer-diagnostics-summary"
+            type="button"
+            onClick={() => setDiagnosticsOpen((current) => !current)}
+            aria-expanded={diagnosticsOpen}
+          >
+            <span className="developer-diagnostics-title">
+              <Code2 size={16} />
+              <strong>Developer Diagnostics</strong>
+            </span>
+            <span className="developer-diagnostics-readout">
+              <span>{calendarFeedStatus === "connected" ? "Supabase connected" : "Supabase not connected"}</span>
+              <span>{diagnosticEvents.length} events</span>
+              <span>{failedDiagnosticEvents.length} errors</span>
+            </span>
+          </button>
+          {diagnosticsOpen ? (
+            <div className="developer-diagnostics-body">
+              <div className="developer-diagnostics-tabs" role="tablist" aria-label="Developer diagnostics views">
+                {(["overview", "database", "errors", "raw"] as DiagnosticTab[]).map((tab) => (
+                  <button
+                    key={tab}
+                    className={diagnosticsTab === tab ? "active" : ""}
+                    type="button"
+                    onClick={() => setDiagnosticsTab(tab)}
+                  >
+                    {tab === "raw" ? "Raw Events" : tab[0].toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              {diagnosticsTab === "overview" ? (
+                <div className="developer-diagnostics-grid">
+                  <div>
+                    <span>Connection</span>
+                    <strong>{calendarFeedStatus === "connected" ? "Connected" : "Not connected"}</strong>
+                  </div>
+                  <div>
+                    <span>Last event</span>
+                    <strong>{latestDiagnosticEvent ? `${latestDiagnosticEvent.system}:${latestDiagnosticEvent.action}` : "None yet"}</strong>
+                  </div>
+                  <div>
+                    <span>Last error</span>
+                    <strong>{latestDiagnosticError?.errorCode || "None"}</strong>
+                  </div>
+                  <div>
+                    <span>Avg duration</span>
+                    <strong>{averageDiagnosticDuration ? `${averageDiagnosticDuration}ms` : "n/a"}</strong>
+                  </div>
+                  <div>
+                    <span>Systems firing</span>
+                    <strong>{Object.keys(diagnosticsBySystem).length || 0}</strong>
+                  </div>
+                  <div>
+                    <span>Buffer</span>
+                    <strong>{diagnosticEvents.length}/{DIAGNOSTIC_EVENT_LIMIT}</strong>
+                  </div>
+                </div>
+              ) : null}
+
+              {diagnosticsTab !== "overview" ? (
+                <div className="developer-diagnostics-events">
+                  {diagnosticEventsForActiveTab.length ? (
+                    diagnosticEventsForActiveTab.slice(0, diagnosticsTab === "raw" ? 40 : 16).map((event) => (
+                      <div className={`developer-diagnostics-event ${event.status}`} key={event.id}>
+                        <div>
+                          <strong>{event.action}</strong>
+                          <span>
+                            {event.system} · {event.phase} · {event.status}
+                            {typeof event.durationMs === "number" ? ` · ${event.durationMs}ms` : ""}
+                          </span>
+                        </div>
+                        <div>
+                          <code>{event.errorCode || event.route || event.functionName || "OK"}</code>
+                          <span>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                        </div>
+                        {event.humanMessage ? <p>{event.humanMessage}</p> : null}
+                        {event.details && diagnosticsTab === "raw" ? (
+                          <pre>{JSON.stringify(event.details, null, 2)}</pre>
+                        ) : null}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="developer-diagnostics-empty">No events in this view yet.</p>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </section>
         )}
 
