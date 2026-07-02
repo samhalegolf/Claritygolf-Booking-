@@ -202,6 +202,10 @@ class SupabaseRestStore {
       const rows = await this.select("calendar_items", "select=id");
       return { rows };
     }
+    if (sql === "select id, account_id from calendar_items") {
+      const rows = await this.select("calendar_items", "select=id,account_id");
+      return { rows };
+    }
     if (sql === "select id from calendar_items where account_id = $1") {
       const rows = await this.select("calendar_items", `select=id&account_id=eq.${encodeFilter(values[0])}`);
       return { rows };

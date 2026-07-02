@@ -2525,10 +2525,11 @@ async function writeItems(items, options = {}) {
       const keepIds = new Set(cleanItems.map((item) => item.id));
       const existingRows = queryRows(
         options.accountId
-          ? await client.query("SELECT id FROM calendar_items WHERE account_id = $1", [options.accountId])
+          ? await client.query("SELECT id, account_id FROM calendar_items")
           : await client.query("SELECT id FROM calendar_items"),
       );
       const staleIds = existingRows
+        .filter((row) => !options.accountId || recordAccountId({ accountId: row?.account_id || "" }, options.accountId) === options.accountId)
         .map((row) => cleanString(row?.id, "", 140))
         .filter((id) => id && !keepIds.has(id));
       if (staleIds.length) {
@@ -2542,11 +2543,7 @@ async function writeItems(items, options = {}) {
         });
       }
       for (const staleId of staleIds) {
-        if (options.accountId) {
-          await client.query("DELETE FROM calendar_items WHERE account_id = $1 AND id = $2", [options.accountId, staleId]);
-        } else {
-          await client.query("DELETE FROM calendar_items WHERE id = $1", [staleId]);
-        }
+        await client.query("DELETE FROM calendar_items WHERE id = $1", [staleId]);
       }
     }
     await client.query("COMMIT");
@@ -3384,19 +3381,12 @@ async function deleteCalendarItemById(id, context = null) {
     assertCanWriteCalendarItem(context, existingItem, existingItem, current);
   }
 
-  const accountId = context?.accountId || existingItem?.accountId || "";
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
-    if (accountId) {
-      await client.query("DELETE FROM calendar_items WHERE account_id = $1 AND id = $2", [accountId, cleanId]);
-    } else {
-      await client.query("DELETE FROM calendar_items WHERE id = $1", [cleanId]);
-    }
+    await client.query("DELETE FROM calendar_items WHERE id = $1", [cleanId]);
     const verifyRows = queryRows(
-      accountId
-        ? await client.query("SELECT id FROM calendar_items WHERE account_id = $1 AND id = $2 LIMIT 1", [accountId, cleanId])
-        : await client.query("SELECT id FROM calendar_items WHERE id = $1 LIMIT 1", [cleanId]),
+      await client.query("SELECT id FROM calendar_items WHERE id = $1 LIMIT 1", [cleanId]),
     );
     if (verifyRows.length) {
       throw Object.assign(new Error("Deleted calendar item is still present after delete."), {
