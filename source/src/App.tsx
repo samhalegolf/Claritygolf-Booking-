@@ -677,6 +677,8 @@ type GoogleCalendarSyncStatus = {
   connectedAt: string;
   redirectUri: string;
   scope: string;
+  ok?: boolean;
+  skipped?: boolean;
 };
 type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting";
 type AuthStatus = "checking" | "authenticated" | "guest";
@@ -4572,6 +4574,27 @@ function App() {
     }
   }
 
+  async function refreshPeopleList(runId?: number) {
+    if (isEmbedMode || authStatus !== "authenticated") return;
+    try {
+      const response = await fetch("/api/people", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (runId !== undefined && !shouldApplyAdminWorkspaceDetail(runId)) return;
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => ({}))) as { people?: Person[] };
+      if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
+    } catch {
+      // Client profiles are secondary to the calendar frame.
+    }
+  }
+
   async function processPendingAdminNotifications() {
     if (isEmbedMode || authStatus !== "authenticated") return;
     try {
@@ -5171,6 +5194,19 @@ function App() {
     });
     let response: Response;
     try {
+      trackDiagnosticEvent({
+        system: "calendar",
+        action: "CALENDAR_SHELL_STATE_LOAD_STARTED",
+        phase: "request",
+        status: "started",
+        route: "GET /api/calendar-state",
+        functionName: "loadAdminCalendarState",
+        expectedAccountId: activeAccountId,
+        details: {
+          routeUsed: "shell",
+          waitingFor: "calendar_shell_state",
+        },
+      });
       response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
     } catch {
       finishDiagnosticTimer(timer, "failed", {
@@ -5216,6 +5252,16 @@ function App() {
       account?: Partial<CoachAccount>;
       googleCalendar?: Partial<GoogleCalendarSyncStatus>;
       updatedAt?: string;
+      diagnostics?: {
+        calendarState?: {
+          routeUsed?: string;
+          shellLoadDurationMs?: number;
+          itemCount?: number;
+          peopleDeferred?: boolean;
+          notificationsDeferred?: boolean;
+          googleSyncStatusDeferred?: boolean;
+        };
+      };
     };
     if (!isCurrentRun() || hasActiveAdminSave()) return false;
     const loadedItems = Array.isArray(data.items) ? data.items : [];
@@ -5244,8 +5290,81 @@ function App() {
         waitingFor: "calendar_items",
       },
     });
-    if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
-    if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+    const calendarStateDiagnostics = data.diagnostics?.calendarState;
+    const calendarStateRouteUsed = calendarStateDiagnostics?.routeUsed === "shell" ? "shell" : "full";
+    const peopleDeferred = calendarStateDiagnostics?.peopleDeferred === true;
+    const notificationsDeferred = calendarStateDiagnostics?.notificationsDeferred === true;
+    const googleSyncStatusDeferred = calendarStateDiagnostics?.googleSyncStatusDeferred === true;
+    if (calendarStateRouteUsed === "shell") {
+      trackDiagnosticEvent({
+        system: "calendar",
+        action: "CALENDAR_SHELL_STATE_LOAD_COMPLETED",
+        phase: "request",
+        status: "success",
+        route: "GET /api/calendar-state",
+        functionName: "loadAdminCalendarState",
+        expectedAccountId: activeAccountId,
+        returnedAccountId: loadedAccountId,
+        details: {
+          routeUsed: calendarStateRouteUsed,
+          shellLoadDurationMs: calendarStateDiagnostics?.shellLoadDurationMs ?? 0,
+          itemCount: calendarStateDiagnostics?.itemCount ?? accountItems.length,
+          peopleDeferred,
+          notificationsDeferred,
+          googleSyncStatusDeferred,
+        },
+      });
+      trackDiagnosticEvent({
+        system: "cache",
+        action: "NON_CRITICAL_DATA_DEFERRED",
+        phase: "admin_workspace",
+        status: "success",
+        route: "GET /api/calendar-state",
+        functionName: "loadAdminCalendarState",
+        details: {
+          routeUsed: calendarStateRouteUsed,
+          peopleDeferred,
+          notificationsDeferred,
+          googleSyncStatusDeferred,
+          blockingCalendar: false,
+        },
+      });
+      if (peopleDeferred) {
+        trackDiagnosticEvent({
+          system: "cache",
+          action: "PEOPLE_LOAD_DEFERRED",
+          phase: "admin_workspace",
+          status: "success",
+          route: "GET /api/calendar-state",
+          functionName: "loadAdminCalendarState",
+          details: { routeUsed: calendarStateRouteUsed, blockingCalendar: false },
+        });
+      }
+      if (notificationsDeferred) {
+        trackDiagnosticEvent({
+          system: "cache",
+          action: "NOTIFICATION_HISTORY_DEFERRED",
+          phase: "admin_workspace",
+          status: "success",
+          route: "GET /api/calendar-state",
+          functionName: "loadAdminCalendarState",
+          details: { routeUsed: calendarStateRouteUsed, blockingCalendar: false },
+        });
+      }
+      if (googleSyncStatusDeferred) {
+        trackDiagnosticEvent({
+          system: "cache",
+          action: "GOOGLE_SYNC_STATUS_DEFERRED",
+          phase: "admin_workspace",
+          status: "success",
+          route: "GET /api/calendar-state",
+          functionName: "loadAdminCalendarState",
+          details: { routeUsed: calendarStateRouteUsed, blockingCalendar: false },
+        });
+      }
+    }
+    if (Array.isArray(data.people) && !peopleDeferred) setPeople(cleanPeople(data.people));
+    if (Array.isArray(data.notifications) && !notificationsDeferred) setNotifications(cleanNotificationRecords(data.notifications));
     if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
     const fallbackAccount = data.account ?? coachAccount;
     if (Array.isArray(data.locations) && data.locations.length) {
@@ -5276,6 +5395,11 @@ function App() {
         locationsLoaded: Array.isArray(data.locations) ? data.locations.length : 0,
         coachesLoaded: Array.isArray(data.coaches) ? data.coaches.length : 0,
         availabilityBlocks: Array.isArray(data.availability) ? data.availability.flat().length : 0,
+        routeUsed: calendarStateRouteUsed,
+        shellLoadDurationMs: calendarStateDiagnostics?.shellLoadDurationMs ?? 0,
+        peopleDeferred,
+        notificationsDeferred,
+        googleSyncStatusDeferred,
       },
     });
     return true;
@@ -5301,11 +5425,17 @@ function App() {
         locations: true,
         coaches: true,
         settings: true,
+        people: true,
+        notifications: true,
+        googleSyncStatus: true,
         backgroundRefresh: true,
         blockingCalendar: false,
         calendarFrameRendered: calendarWasRendered,
       },
     });
+    window.setTimeout(() => void refreshPeopleList(runId), 0);
+    window.setTimeout(() => void refreshNotificationHistory(), 0);
+    window.setTimeout(() => void refreshGoogleCalendarStatus(), 0);
 
     void (async () => {
       const timer = startDiagnosticTimer({

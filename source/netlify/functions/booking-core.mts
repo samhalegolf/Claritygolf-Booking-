@@ -3026,6 +3026,95 @@ async function readCalendarState() {
   };
 }
 
+async function readAdminCalendarShellState() {
+  const startedAt = Date.now();
+  console.info("CALENDAR_SHELL_STATE_LOAD_STARTED", {
+    route: "/api/calendar-state",
+    routeUsed: "shell",
+  });
+
+  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
+  const account = coachAccountFromSettings(settingsMap);
+  const items = await readItems();
+  const shellLoadDurationMs = Date.now() - startedAt;
+  const deferred = {
+    people: true,
+    notifications: true,
+    googleSyncStatus: true,
+  };
+
+  console.info("PEOPLE_LOAD_DEFERRED", {
+    route: "/api/calendar-state",
+    routeUsed: "shell",
+  });
+  console.info("NOTIFICATION_HISTORY_DEFERRED", {
+    route: "/api/calendar-state",
+    routeUsed: "shell",
+  });
+  console.info("GOOGLE_SYNC_STATUS_DEFERRED", {
+    route: "/api/calendar-state",
+    routeUsed: "shell",
+  });
+  console.info("NON_CRITICAL_DATA_DEFERRED", {
+    route: "/api/calendar-state",
+    routeUsed: "shell",
+    peopleDeferred: deferred.people,
+    notificationsDeferred: deferred.notifications,
+    googleSyncStatusDeferred: deferred.googleSyncStatus,
+  });
+  console.info("CALENDAR_SHELL_STATE_LOAD_COMPLETED", {
+    route: "/api/calendar-state",
+    routeUsed: "shell",
+    shellLoadDurationMs,
+    itemCount: items.length,
+    peopleDeferred: deferred.people,
+    notificationsDeferred: deferred.notifications,
+    googleSyncStatusDeferred: deferred.googleSyncStatus,
+  });
+
+  return {
+    syncKey,
+    updatedAt,
+    items,
+    services: servicesFromSettings(settingsMap),
+    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
+    coaches: coachProfilesFromSettings(settingsMap, account),
+    currentUser: appUsersFromSettings(settingsMap, account)[0],
+    locations: locationsFromSettings(settingsMap, account),
+    availability: availabilityFromSettings(settingsMap),
+    people: [],
+    notifications: [],
+    settings: adminSettingsFromSettings(settingsMap),
+    brand: brandSettingsFromSettings(settingsMap, account),
+    account,
+    googleCalendar: {
+      configured: false,
+      connected: false,
+      calendarId: "primary",
+      autoSync: true,
+      accountEmail: "",
+      lastSyncAt: "",
+      lastSyncStatus: "",
+      lastSyncError: "",
+      connectedAt: "",
+      redirectUri: "",
+      scope: "",
+      ok: true,
+      skipped: true,
+    },
+    diagnostics: {
+      calendarState: {
+        routeUsed: "shell",
+        shellLoadDurationMs,
+        itemCount: items.length,
+        peopleDeferred: deferred.people,
+        notificationsDeferred: deferred.notifications,
+        googleSyncStatusDeferred: deferred.googleSyncStatus,
+      },
+    },
+  };
+}
+
 async function readColdSetupState() {
   const { settings: settingsMap } = await readStateSettingsSnapshot();
   const account = coachAccountFromSettings(settingsMap);
@@ -3489,6 +3578,7 @@ function publicCalendarState(state) {
     account: state.account,
     googleCalendar: state.googleCalendar,
     googleCalendarSync: state.googleCalendarSync,
+    diagnostics: state.diagnostics,
   };
 }
 
@@ -6252,7 +6342,7 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/calendar-state") {
-      const state = await readCalendarState();
+      const state = await readAdminCalendarShellState();
       const requestContext = await resolveBackendRequestContext(req, state);
       return json(publicCalendarState(filterCalendarStateForContext(state, requestContext)));
     }
