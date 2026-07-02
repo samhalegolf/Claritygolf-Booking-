@@ -3626,6 +3626,7 @@ function App() {
   const calendarFrameRenderedRef = useRef(false);
   const bookingCardsFirstRenderedRef = useRef(false);
   const bookingCardsHydratedRef = useRef(false);
+  const adminWorkspaceDetailRefreshRunIdRef = useRef(0);
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
@@ -3849,7 +3850,12 @@ function App() {
       startedAt: adminBootStartedAtRef.current,
       details: { visibleWeek: activeWeek },
     });
-  }, [activeView, activeWeek, adminWorkspaceLoadStatus, authStatus, isEmbedMode]);
+    const runId = adminHydrationRunIdRef.current;
+    if (adminWorkspaceDetailRefreshRunIdRef.current !== runId) {
+      adminWorkspaceDetailRefreshRunIdRef.current = runId;
+      window.setTimeout(() => refreshAdminWorkspaceDetails(runId, coachAccount), 0);
+    }
+  }, [activeView, activeWeek, adminWorkspaceLoadStatus, authStatus, coachAccount, isEmbedMode]);
   useEffect(() => {
     if (
       isEmbedMode ||
@@ -5241,7 +5247,6 @@ function App() {
         availabilityBlocks: Array.isArray(data.availability) ? data.availability.flat().length : 0,
       },
     });
-    refreshAdminWorkspaceDetails(runId, fallbackAccount);
     return true;
   }
 
@@ -5254,13 +5259,21 @@ function App() {
     const coachVersion = coachSaveVersionRef.current;
     const settingsSaveVersion = settingsSaveVersionRef.current;
     const settingsDraftVersion = notificationSettingsDraftVersionRef.current;
+    const calendarWasRendered = calendarFrameRenderedRef.current;
     trackDiagnosticEvent({
       system: "cache",
       action: "NON_CRITICAL_DATA_DEFERRED",
       phase: "admin_workspace",
       status: "success",
       functionName: "refreshAdminWorkspaceDetails",
-      details: { locations: true, coaches: true, settings: true },
+      details: {
+        locations: true,
+        coaches: true,
+        settings: true,
+        backgroundRefresh: true,
+        blockingCalendar: false,
+        calendarFrameRendered: calendarWasRendered,
+      },
     });
 
     void (async () => {
@@ -5270,6 +5283,12 @@ function App() {
         route: "GET /api/locations",
         functionName: "refreshAdminWorkspaceDetails",
         objectType: "location",
+        details: {
+          cacheHit: locations.length > 0,
+          backgroundRefresh: true,
+          blockingCalendar: false,
+          calendarFrameRendered: calendarWasRendered,
+        },
       });
       try {
         const response = await fetch("/api/locations", {
@@ -5287,14 +5306,22 @@ function App() {
           console.warn("admin_workspace_detail_load_failed", { detail: "locations", status: response.status });
           return;
         }
-        const data = (await response.json()) as { locations?: Location[] };
+        const responseText = await response.text();
+        const data = (responseText ? JSON.parse(responseText) : {}) as { locations?: Location[] };
         if (Array.isArray(data.locations) && data.locations.length) {
           setLocations(cleanLocations(data.locations, fallbackAccount));
         }
         finishDiagnosticTimer(timer, "success", {
           httpStatus: response.status,
           phase: "COLD_REFRESH_COMPLETED",
-          details: { returnedCount: Array.isArray(data.locations) ? data.locations.length : 0 },
+          details: {
+            rowsReturned: Array.isArray(data.locations) ? data.locations.length : 0,
+            payloadBytes: responseText.length,
+            cacheHit: locations.length > 0,
+            backgroundRefresh: true,
+            blockingCalendar: false,
+            calendarFrameRendered: calendarWasRendered,
+          },
         });
       } catch (error) {
         finishDiagnosticTimer(timer, "warning", {
@@ -5312,6 +5339,12 @@ function App() {
         route: "GET /api/coaches",
         functionName: "refreshAdminWorkspaceDetails",
         objectType: "coach",
+        details: {
+          cacheHit: coachProfiles.length > 0,
+          backgroundRefresh: true,
+          blockingCalendar: false,
+          calendarFrameRendered: calendarWasRendered,
+        },
       });
       try {
         const response = await fetch("/api/coaches", {
@@ -5329,14 +5362,22 @@ function App() {
           console.warn("admin_workspace_detail_load_failed", { detail: "coaches", status: response.status });
           return;
         }
-        const data = (await response.json()) as { coaches?: CoachProfile[] };
+        const responseText = await response.text();
+        const data = (responseText ? JSON.parse(responseText) : {}) as { coaches?: CoachProfile[] };
         if (Array.isArray(data.coaches) && data.coaches.length) {
           setCoachProfiles(cleanCoachProfiles(data.coaches, fallbackAccount));
         }
         finishDiagnosticTimer(timer, "success", {
           httpStatus: response.status,
           phase: "COLD_REFRESH_COMPLETED",
-          details: { returnedCount: Array.isArray(data.coaches) ? data.coaches.length : 0 },
+          details: {
+            rowsReturned: Array.isArray(data.coaches) ? data.coaches.length : 0,
+            payloadBytes: responseText.length,
+            cacheHit: coachProfiles.length > 0,
+            backgroundRefresh: true,
+            blockingCalendar: false,
+            calendarFrameRendered: calendarWasRendered,
+          },
         });
       } catch (error) {
         finishDiagnosticTimer(timer, "warning", {
@@ -5354,6 +5395,12 @@ function App() {
         route: "GET /api/admin-settings",
         functionName: "refreshAdminWorkspaceDetails",
         objectType: "settings",
+        details: {
+          cacheHit: true,
+          backgroundRefresh: true,
+          blockingCalendar: false,
+          calendarFrameRendered: calendarWasRendered,
+        },
       });
       try {
         const response = await fetch("/api/admin-settings", { headers: { Accept: "application/json" } });
@@ -5373,10 +5420,19 @@ function App() {
           console.warn("admin_workspace_detail_load_failed", { detail: "admin-settings", status: response.status });
           return;
         }
-        applyNotificationSettings((await response.json()) as Partial<NotificationSettings>);
+        const responseText = await response.text();
+        applyNotificationSettings((responseText ? JSON.parse(responseText) : {}) as Partial<NotificationSettings>);
         finishDiagnosticTimer(timer, "success", {
           httpStatus: response.status,
           phase: "COLD_REFRESH_COMPLETED",
+          details: {
+            rowsReturned: 1,
+            payloadBytes: responseText.length,
+            cacheHit: true,
+            backgroundRefresh: true,
+            blockingCalendar: false,
+            calendarFrameRendered: calendarWasRendered,
+          },
         });
       } catch (error) {
         finishDiagnosticTimer(timer, "warning", {

@@ -3007,6 +3007,18 @@ async function readCalendarState() {
   };
 }
 
+async function readColdSetupState() {
+  const { settings: settingsMap } = await readStateSettingsSnapshot();
+  const account = coachAccountFromSettings(settingsMap);
+  return {
+    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
+    coaches: coachProfilesFromSettings(settingsMap, account),
+    currentUser: appUsersFromSettings(settingsMap, account)[0],
+    locations: locationsFromSettings(settingsMap, account),
+    account,
+  };
+}
+
 async function readPublicCalendarState() {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
   const account = coachAccountFromSettings(settingsMap);
@@ -6359,7 +6371,7 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/locations") {
-      const state = await readCalendarState();
+      const state = await readColdSetupState();
       const requestContext = await resolveBackendRequestContext(req, state);
       return json({ locations: filterLocationsForContext(state.locations, requestContext, state.coaches) });
     }
@@ -6373,7 +6385,7 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/coaches") {
-      const state = await readCalendarState();
+      const state = await readColdSetupState();
       const requestContext = await resolveBackendRequestContext(req, state);
       return json({
         coaches: filterCoachesForContext(state.coaches, requestContext),
