@@ -49,6 +49,8 @@ export const config: Config = {
     "/api/system-smoke",
     "/api/google-calendar/*",
     "/api/google-calendar-sync",
+    "/api/public-booking-catalog",
+    "/api/public-booking-slots",
     "/api/public-booking-state",
     "/api/public-notification-status",
     "/api/public-booking",

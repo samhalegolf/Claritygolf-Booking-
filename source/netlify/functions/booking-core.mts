@@ -15,6 +15,7 @@ const sessionDays = 7;
 const passwordResetMinutes = 30;
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
+const PUBLIC_SLOT_STEP_MINUTES = 30;
 const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
 const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
 const CUSTOM_GROUP_DEFAULTS = {
@@ -3023,6 +3024,21 @@ async function readPublicCalendarState() {
   };
 }
 
+async function readPublicCatalogState() {
+  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
+  const account = coachAccountFromSettings(settingsMap);
+  return {
+    syncKey,
+    updatedAt,
+    services: servicesFromSettings(settingsMap),
+    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
+    coaches: coachProfilesFromSettings(settingsMap, account),
+    locations: locationsFromSettings(settingsMap, account),
+    brand: brandSettingsFromSettings(settingsMap, account),
+    account,
+  };
+}
+
 async function readFastPublicCalendarState() {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
   const account = coachAccountFromSettings(settingsMap);
@@ -3226,6 +3242,15 @@ export async function handlePublicBookingStateRequest() {
   }
 }
 
+export async function handlePublicBookingCatalogRequest() {
+  try {
+    return json(publicBookingCatalog(await readPublicCatalogState()));
+  } catch (error) {
+    console.error("public_booking_catalog_error", error);
+    throw error;
+  }
+}
+
 async function writeCalendarState(nextState, context = null) {
   const current = await readCalendarState();
   if (context) {
@@ -3404,6 +3429,27 @@ export function publicBookingState(state) {
       status: item.status || "booked",
       location: item.location,
     })),
+  };
+}
+
+export function publicBookingCatalog(state) {
+  const workspaceAccount = publicWorkspaceAccount(state);
+  assertAccountFeature(workspaceAccount, "publicBooking");
+  const accountServices = (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id));
+  return {
+    updatedAt: state.updatedAt,
+    services: accountServices.filter(
+      (service) =>
+        service.active &&
+        service.archived !== true &&
+        service.visibility === "public" &&
+        service.lessonFormat !== "package",
+    ),
+    workspaceAccounts: (state.workspaceAccounts || []).filter((account) => recordBelongsToAccount(account, workspaceAccount.id)),
+    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
+    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
+    brand: state.brand,
+    account: state.account,
   };
 }
 
@@ -4781,6 +4827,166 @@ function hasCollision(items, candidate, service, state = {}) {
   return Boolean(findCollision(items, candidate, service, state));
 }
 
+function publicAccountState(state) {
+  const workspaceAccount = publicWorkspaceAccount(state);
+  assertAccountFeature(workspaceAccount, "publicBooking");
+  return {
+    workspaceAccount,
+    state: {
+      ...state,
+      items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
+      services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
+      coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
+      locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
+      availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+    },
+  };
+}
+
+function publicBookableServices(services = []) {
+  return services.filter(
+    (service) =>
+      service.active &&
+      service.archived !== true &&
+      service.visibility === "public" &&
+      service.lessonFormat !== "package",
+  );
+}
+
+function groupSlotRemainingSpots(items, candidate, service) {
+  const capacity = Math.max(1, Math.round(Number(service.capacity || 1)));
+  const bookedCount = items.filter(
+    (item) =>
+      item.serviceId === service.id &&
+      !isInactiveForConflict(item) &&
+      slotOverlaps(
+        {
+          week: itemWeek(item),
+          day: item.day,
+          start: item.start,
+          duration: item.duration,
+        },
+        candidate,
+      ),
+  ).length;
+  return Math.max(0, capacity - bookedCount);
+}
+
+function publicSlotsForService(accountState, service, week, ignoreId = "") {
+  const ignoredItemId = cleanString(ignoreId, "", 160);
+  const items = ignoredItemId ? accountState.items.filter((item) => item.id !== ignoredItemId) : accountState.items;
+  const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
+  const serviceLocationId = serviceLocation(service, accountState.locations || [], accountState.account).id;
+
+  if (isScheduledGroupService(service)) {
+    const schedule = service.groupSchedule;
+    if (!schedule?.active) return [];
+    const candidate = {
+      week,
+      day: schedule.dayOfWeek,
+      start: schedule.startMinutes,
+      duration: service.duration,
+    };
+    if (!isGroupServiceSlotMatch(service, candidate)) return [];
+    if (hasCollision(items, candidate, service, accountState)) return [];
+    const remainingSpots = groupSlotRemainingSpots(items, candidate, service);
+    if (!remainingSpots) return [];
+    return [
+      {
+        week: candidate.week,
+        day: candidate.day,
+        start: candidate.start,
+        remainingSpots,
+        coachId: serviceCoachId,
+        locationId: serviceLocationId,
+      },
+    ];
+  }
+
+  const slots = [];
+  for (let day = 0; day < 7; day += 1) {
+    const windows = accountState.availability[day] || [];
+    for (const window of windows) {
+      const windowCoachId = window.coachId || defaultCoachProfileFromAccount().id;
+      if (windowCoachId !== serviceCoachId) continue;
+      for (let start = window.start; start + service.duration <= window.end; start += PUBLIC_SLOT_STEP_MINUTES) {
+        const candidate = {
+          week,
+          day,
+          start,
+          duration: service.duration,
+        };
+        if (
+          isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId) &&
+          !hasCollision(items, candidate, service, accountState)
+        ) {
+          slots.push({
+            week: candidate.week,
+            day: candidate.day,
+            start: candidate.start,
+            remainingSpots: 0,
+            coachId: serviceCoachId,
+            locationId: serviceLocationId,
+          });
+        }
+      }
+    }
+  }
+  return slots;
+}
+
+export function publicBookingSlots(state, options = {}) {
+  const { state: accountState } = publicAccountState(state);
+  const rawWeek = Number(options.week ?? currentWeekOffset());
+  const week = Number.isInteger(rawWeek) ? rawWeek : currentWeekOffset();
+  const serviceId = cleanString(options.serviceId, "", 140);
+  const ignoreId = cleanString(options.ignoreId, "", 160);
+  const services = publicBookableServices(accountState.services);
+  const targetServices = serviceId ? services.filter((service) => service.id === serviceId) : services;
+  if (serviceId && !targetServices.length) {
+    throw Object.assign(new Error("Choose a public lesson type."), { status: 404 });
+  }
+  const servicesById = {};
+  for (const service of targetServices) {
+    servicesById[service.id] = {
+      serviceId: service.id,
+      week,
+      slots: publicSlotsForService(accountState, service, week, ignoreId),
+    };
+  }
+  return {
+    updatedAt: state.updatedAt,
+    week,
+    serviceId,
+    ignoreId,
+    slots: serviceId && targetServices[0] ? servicesById[targetServices[0].id].slots : undefined,
+    services: servicesById,
+  };
+}
+
+export async function handlePublicBookingSlotsRequest(req) {
+  try {
+    const url = new URL(req.url);
+    return json(
+      publicBookingSlots(await readPublicCalendarState(), {
+        serviceId: url.searchParams.get("serviceId") || "",
+        week: url.searchParams.get("week") || "",
+        ignoreId: url.searchParams.get("ignoreId") || "",
+      }),
+    );
+  } catch (error) {
+    console.error("public_booking_slots_error", error);
+    const status = error?.status || 500;
+    return json(
+      {
+        error: status === 500 ? "public_booking_slots_error" : "request_error",
+        message: error instanceof Error ? error.message : "Unknown public booking slots error",
+      },
+      status,
+    );
+  }
+}
+
 function publicSlotUnavailableError(detail) {
   console.warn("public_booking:slot_rejected", detail);
   return Object.assign(new Error("That time is no longer available."), {
@@ -5706,6 +5912,14 @@ export async function handleBookingApiRoute(
       return handlePublicBookingStateRequest();
     }
 
+    if (req.method === "GET" && pathname === "/api/public-booking-catalog") {
+      return handlePublicBookingCatalogRequest();
+    }
+
+    if (req.method === "GET" && pathname === "/api/public-booking-slots") {
+      return handlePublicBookingSlotsRequest(req);
+    }
+
     if (req.method === "POST" && pathname === "/api/public-booking") {
       return handlePublicBookingRequest(req, context);
     }
@@ -5888,6 +6102,14 @@ export async function handleBookingApiRoute(
 
     if (req.method === "GET" && pathname === "/api/public-booking-state") {
       return handlePublicBookingStateRequest();
+    }
+
+    if (req.method === "GET" && pathname === "/api/public-booking-catalog") {
+      return handlePublicBookingCatalogRequest();
+    }
+
+    if (req.method === "GET" && pathname === "/api/public-booking-slots") {
+      return handlePublicBookingSlotsRequest(req);
     }
 
     if (req.method === "POST" && pathname === "/api/public-booking") {

@@ -582,6 +582,7 @@ type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
 type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
 type PublicBookingStateStatus = "loading" | "loaded" | "error";
+type PublicBookingSlotStatus = "idle" | "loading" | "loaded" | "error";
 type AdminSaveOwner = "lesson_complete" | "locations" | "coaches" | "settings";
 type LessonCompleteDiagnostic = {
   action: "lesson_complete";
@@ -902,6 +903,8 @@ type BookingSlot = {
   day: number;
   start: number;
   remainingSpots: number;
+  coachId?: string;
+  locationId?: string;
 };
 
 type QuickCreateState = {
@@ -3456,6 +3459,8 @@ function App() {
   const [publicBookingStateStatus, setPublicBookingStateStatus] = useState<PublicBookingStateStatus>(
     isEmbedMode ? "loading" : "loaded",
   );
+  const [publicBookingSlots, setPublicBookingSlots] = useState<Record<string, BookingSlot[]>>({});
+  const [publicBookingSlotStatuses, setPublicBookingSlotStatuses] = useState<Record<string, PublicBookingSlotStatus>>({});
   const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
   const [calendarSaveError, setCalendarSaveError] = useState("");
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
@@ -3521,6 +3526,7 @@ function App() {
   const pendingLessonCompleteIdRef = useRef("");
   const activeAdminSaveOwnersRef = useRef<Map<AdminSaveOwner, number>>(new Map());
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
+  const publicBookingSlotRequestsRef = useRef<Set<string>>(new Set());
   const pendingQuickCreateRef = useRef<QuickCreateState | null>(null);
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
@@ -3787,6 +3793,7 @@ function App() {
   const currentScreenPublicServices = publicServices.filter((service) =>
     (service.bookingScreenIds ?? ["main"]).includes(currentBookingScreenId),
   );
+  const currentScreenPublicServiceIds = currentScreenPublicServices.map((service) => service.id).join("|");
   const quickCreateServices = effectiveCalendarPerspective === "location" ? [] : appointmentServices;
   const quickCreateService = quickCreate?.serviceId
     ? quickCreateServices.find((service) => service.id === quickCreate.serviceId) ?? null
@@ -4152,6 +4159,35 @@ function App() {
   }, [bookingMode, bookingServiceId, currentScreenPublicServices]);
 
   useEffect(() => {
+    if (!isEmbedMode || publicBookingStateStatus !== "loaded" || bookingMode !== "book") return;
+    currentScreenPublicServices.forEach((service) => {
+      const key = publicBookingSlotCacheKey(service.id, activeWeek);
+      const status = publicBookingSlotStatuses[key] ?? "idle";
+      if (status === "idle" || status === "error") {
+        void loadPublicBookingSlots(service.id, activeWeek);
+      }
+    });
+  }, [activeWeek, bookingMode, currentScreenPublicServiceIds, isEmbedMode, publicBookingStateStatus]);
+
+  useEffect(() => {
+    if (!isEmbedMode || publicBookingStateStatus !== "loaded" || bookingMode !== "reschedule" || !bookingTargetService || !selectedRescheduleMatch) {
+      return;
+    }
+    const key = publicBookingSlotCacheKey(bookingTargetService.id, activeWeek, selectedRescheduleMatch.id);
+    const status = publicBookingSlotStatuses[key] ?? "idle";
+    if (status === "idle" || status === "error") {
+      void loadPublicBookingSlots(bookingTargetService.id, activeWeek, selectedRescheduleMatch.id);
+    }
+  }, [
+    activeWeek,
+    bookingMode,
+    bookingTargetService?.id,
+    isEmbedMode,
+    publicBookingStateStatus,
+    selectedRescheduleMatch?.id,
+  ]);
+
+  useEffect(() => {
     if (!quickCreate) setQuickClientSearch("");
   }, [quickCreate]);
 
@@ -4162,7 +4198,7 @@ function App() {
       try {
         if (isEmbedMode) {
           setPublicBookingStateStatus("loading");
-          await loadPublicBookingState();
+          await loadPublicBookingCatalog();
           if (!cancelled) {
             setCalendarFeedStatus("connected");
             setPublicBookingStateStatus("loaded");
@@ -4862,20 +4898,17 @@ function App() {
     })();
   }
 
-  async function loadPublicBookingState() {
-    const response = await fetch("/api/public-booking-state", {
+  async function loadPublicBookingCatalog() {
+    const response = await fetch("/api/public-booking-catalog", {
       cache: "no-store",
       headers: { Accept: "application/json" },
     });
     if (!response.ok) throw new Error("Public booking API unavailable");
     const data = (await response.json()) as {
-      items?: CalendarItem[];
       services?: Service[];
       locations?: Location[];
       coaches?: CoachProfile[];
       workspaceAccounts?: WorkspaceAccount[];
-      availability?: AvailabilityWindow[][];
-      notifications?: NotificationRecord[];
       brand?: Partial<BrandSettings>;
       account?: Partial<CoachAccount>;
       updatedAt?: string;
@@ -4884,15 +4917,55 @@ function App() {
     const loadedAccountId = defaultAccountId(loadedAccounts);
     if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
     setWorkspaceAccounts(loadedAccounts);
-    if (Array.isArray(data.items)) setItems(data.items.map((item) => ({ ...item, accountId: item.accountId || loadedAccountId })));
-    if (Array.isArray(data.notifications)) setNotifications(data.notifications);
     if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
     if (Array.isArray(data.locations) && data.locations.length) setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
     setCoachProfiles(cleanCoachProfiles(data.coaches, data.account ?? coachAccount));
-    if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
     hasLoadedCalendarApiRef.current = true;
+  }
+
+  function publicBookingSlotCacheKey(serviceId: string, week: number, ignoreId = "") {
+    return [serviceId, week, ignoreId].join(":");
+  }
+
+  function clearPublicBookingSlotCache() {
+    publicBookingSlotRequestsRef.current.clear();
+    setPublicBookingSlots({});
+    setPublicBookingSlotStatuses({});
+  }
+
+  async function loadPublicBookingSlots(serviceId: string, week: number, ignoreId = "", options: { force?: boolean } = {}) {
+    if (!serviceId) return;
+    const key = publicBookingSlotCacheKey(serviceId, week, ignoreId);
+    if (!options.force && publicBookingSlotRequestsRef.current.has(key)) return;
+    publicBookingSlotRequestsRef.current.add(key);
+    setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "loading" }));
+    try {
+      const params = new URLSearchParams({ serviceId, week: String(week) });
+      if (ignoreId) params.set("ignoreId", ignoreId);
+      const response = await fetch(`/api/public-booking-slots?${params.toString()}`, {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("Public booking slots unavailable");
+      const data = (await response.json()) as {
+        slots?: BookingSlot[];
+        services?: Record<string, { slots?: BookingSlot[] }>;
+      };
+      const slots = Array.isArray(data.slots)
+        ? data.slots
+        : Array.isArray(data.services?.[serviceId]?.slots)
+          ? data.services?.[serviceId]?.slots ?? []
+          : [];
+      setPublicBookingSlots((current) => ({ ...current, [key]: slots }));
+      setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "loaded" }));
+    } catch (error) {
+      console.warn("public_booking_slots_load_failed", error);
+      setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "error" }));
+    } finally {
+      publicBookingSlotRequestsRef.current.delete(key);
+    }
   }
 
   function requireLiveDatabase(action = "edit the calendar") {
@@ -5452,9 +5525,28 @@ function App() {
     return openGroupSessionForItem(item);
   }
 
+  const publicBookingSlotIgnoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id ?? "" : "";
+  const publicBookingSlotKey = bookingTargetService
+    ? publicBookingSlotCacheKey(bookingTargetService.id, activeWeek, publicBookingSlotIgnoreId)
+    : "";
+  const publicBookingSlotStatus = publicBookingSlotKey
+    ? publicBookingSlotStatuses[publicBookingSlotKey] ?? "idle"
+    : "idle";
+  const publicBookingNeedsSlots = Boolean(bookingTargetService) && (isScheduledGroupService(bookingTargetService) || bookingDaySelected);
+  const publicBookingSlotsLoading =
+    isEmbedMode &&
+    publicBookingStateStatus === "loaded" &&
+    publicBookingNeedsSlots &&
+    (publicBookingSlotStatus === "idle" || publicBookingSlotStatus === "loading");
+
   const bookingSlots = useMemo<BookingSlot[]>(() => {
-    if (isEmbedMode && publicBookingStateStatus !== "loaded") return [];
     if (!bookingTargetService) return [];
+    if (isEmbedMode) {
+      if (publicBookingStateStatus !== "loaded") return [];
+      const cachedSlots = publicBookingSlotKey ? publicBookingSlots[publicBookingSlotKey] ?? [] : [];
+      if (isScheduledGroupService(bookingTargetService)) return cachedSlots;
+      return bookingDaySelected ? cachedSlots.filter((slot) => slot.day === bookingDay) : [];
+    }
 
     const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
     const publicBookingServiceCoachId = bookingTargetService.coachId || publicBookingFallbackCoachId;
@@ -5513,6 +5605,8 @@ function App() {
     bookingDaySelected,
     bookingMode,
     bookingTargetService,
+    publicBookingSlotKey,
+    publicBookingSlots,
     isEmbedMode,
     items,
     publicBookingFallbackCoachId,
@@ -7239,11 +7333,13 @@ function App() {
       if (!response.ok) {
         setToast({ message: data.message || "That time is no longer available." });
         if (data.state?.items) setItems(data.state.items);
+        clearPublicBookingSlotCache();
         setBookingStart(null);
         return;
       }
 
       if (data.state?.items) setItems(data.state.items);
+      clearPublicBookingSlotCache();
       setBookingConfirmation({
         kind: "reschedule",
         appointmentId: selectedRescheduleMatch.id,
@@ -7310,6 +7406,7 @@ function App() {
       } else {
         setItems((current) => current.filter((item) => item.id !== original.id));
       }
+      clearPublicBookingSlotCache();
       const confirmationNotifications = data.notifications ?? [];
       const originalWeekDays = buildWeekDays(original.week);
       setBookingConfirmation({
@@ -9692,6 +9789,7 @@ function App() {
       setBookingConfirmation(localFallbackConfirmation());
       setEmailNoticeVisible(false);
       setBookingSubmitError("");
+      clearPublicBookingSlotCache();
       setBookingStart(null);
       setCustomGroupAttendees([]);
       setCustomGroupAttendeeDraft({ name: "", email: "" });
@@ -9748,6 +9846,7 @@ function App() {
         })();
         const data = await readPublicBookingSubmitResponse(response);
         if (data.state?.items && (!data.fallback || data.state.items.length)) setItems(data.state.items);
+        clearPublicBookingSlotCache();
         const confirmationNotifications = data.notifications ?? [];
         const confirmation = response.ok && data.appointment?.id
           ? {
@@ -11092,7 +11191,9 @@ function App() {
               ) : null}
               <div className="time-slots">
                 {selectedBookingService ? (
-                  bookingSlots.length ? (
+                  publicBookingSlotsLoading ? (
+                    <p>Loading</p>
+                  ) : bookingSlots.length ? (
                     visibleBookingSlots.map((slot) => {
                       const slotLabel = isGroupBookingTimeSelection
                         ? `${dateForSlot(slot.week, slot.day).toLocaleDateString("en-NZ", { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
@@ -13623,13 +13724,8 @@ function App() {
                   <span>Booking Calendar</span>
                   <div className="booking-login-copy">
                     <strong>
-                      {publicBookingStateStatus === "error" ? "Booking calendar unavailable" : "Loading live availability..."}
+                      {publicBookingStateStatus === "error" ? "Booking unavailable" : "Loading"}
                     </strong>
-                    <em>
-                      {publicBookingStateStatus === "error"
-                        ? "Please refresh and try again."
-                        : "Checking Sam Hale's Three Kings calendar before showing times."}
-                    </em>
                   </div>
                 </div>
               </div>
@@ -13746,7 +13842,9 @@ function App() {
                         ) : null}
                         <div className="time-slots">
                           {selectedBookingService ? (
-                            bookingSlots.length ? (
+                            publicBookingSlotsLoading ? (
+                              <p>Loading</p>
+                            ) : bookingSlots.length ? (
                               visibleBookingSlots.map((slot) => {
                                 const slotLabel = isGroupBookingTimeSelection
                                   ? `${dateForSlot(slot.week, slot.day).toLocaleDateString("en-NZ", { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
@@ -14041,7 +14139,9 @@ function App() {
                     </div>
                     <div className="time-slots">
                       {selectedRescheduleMatch ? (
-                        bookingSlots.length ? (
+                        publicBookingSlotsLoading ? (
+                          <p>Loading</p>
+                        ) : bookingSlots.length ? (
                           bookingSlots.map((slot) => (
                             <button
                               className={bookingStart === slot.start ? "selected-time" : ""}
