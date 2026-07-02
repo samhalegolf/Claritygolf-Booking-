@@ -583,7 +583,7 @@ type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
 type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
 type PublicBookingStateStatus = "loading" | "loaded" | "error";
 type PublicBookingSlotStatus = "idle" | "loading" | "loaded" | "error";
-type AdminSaveOwner = "lesson_complete" | "locations" | "coaches" | "settings";
+type AdminSaveOwner = "lesson_complete" | "calendar_delete" | "locations" | "coaches" | "settings";
 type DiagnosticStatus = "started" | "success" | "failed" | "warning" | "skipped" | "verified";
 type DiagnosticSystem =
   | "supabase"
@@ -3553,6 +3553,7 @@ function App() {
   const [publicBookingSlotStatuses, setPublicBookingSlotStatuses] = useState<Record<string, PublicBookingSlotStatus>>({});
   const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
   const [calendarSaveError, setCalendarSaveError] = useState("");
+  const [deleteInFlightId, setDeleteInFlightId] = useState("");
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
   const [diagnosticEvents, setDiagnosticEvents] = useState<DiagnosticEvent[]>([]);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
@@ -3858,12 +3859,11 @@ function App() {
   }, [activeView, activeWeek, adminWorkspaceLoadStatus, authStatus, coachAccount, isEmbedMode]);
   useEffect(() => {
     if (
-      isEmbedMode ||
-      authStatus !== "authenticated" ||
-      adminWorkspaceLoadStatus !== "loaded" ||
-      activeView !== "calendar" ||
-      bookingCardsFirstRenderedRef.current ||
-      visibleWeekItems.length === 0
+	      isEmbedMode ||
+	      authStatus !== "authenticated" ||
+	      activeView !== "calendar" ||
+	      bookingCardsFirstRenderedRef.current ||
+	      visibleWeekItems.length === 0
     ) {
       return;
     }
@@ -3876,11 +3876,12 @@ function App() {
       functionName: "App",
       startedAt: adminBootStartedAtRef.current,
       details: {
-        visibleWeek: activeWeek,
-        visibleCards: visibleWeekItems.length,
-      },
-    });
-  }, [activeView, activeWeek, adminWorkspaceLoadStatus, authStatus, isEmbedMode, visibleWeekItems]);
+	        visibleWeek: activeWeek,
+	        visibleCards: visibleWeekItems.length,
+	        waitingFor: hasLoadedCalendarApiRef.current ? "full_admin_hydration" : "visible_calendar_data",
+	      },
+	    });
+	  }, [activeView, activeWeek, authStatus, isEmbedMode, visibleWeekItems]);
   useEffect(() => {
     if (
       isEmbedMode ||
@@ -5154,6 +5155,20 @@ function App() {
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
     if (!isCurrentRun() || hasActiveAdminSave()) return false;
+    const visibleRangeStartedAt = performance.now();
+    trackDiagnosticEvent({
+      system: "calendar",
+      action: "CALENDAR_VISIBLE_RANGE_LOAD_STARTED",
+      phase: "request",
+      status: "started",
+      route: "GET /api/calendar-state",
+      functionName: "loadAdminCalendarState",
+      expectedAccountId: activeAccountId,
+      details: {
+        activeWeek,
+        waitingFor: "calendar_items",
+      },
+    });
     let response: Response;
     try {
       response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
@@ -5213,6 +5228,22 @@ function App() {
     if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
     setWorkspaceAccounts(loadedAccounts);
     if (Array.isArray(data.items)) setItems(accountItems);
+    trackDiagnosticMilestone({
+      system: "calendar",
+      action: "CALENDAR_VISIBLE_RANGE_LOAD_COMPLETED",
+      phase: "request",
+      status: "success",
+      route: "GET /api/calendar-state",
+      functionName: "loadAdminCalendarState",
+      expectedAccountId: activeAccountId,
+      returnedAccountId: loadedAccountId,
+      startedAt: visibleRangeStartedAt,
+      details: {
+        activeWeek,
+        itemCount: accountItems.length,
+        waitingFor: "calendar_items",
+      },
+    });
     if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
     if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
     if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
@@ -10739,16 +10770,161 @@ function App() {
     setToast({ message: "Calendar sync key regenerated. Update Google Calendar with the new URL." });
   }
 
-  function removeSelected() {
+  async function removeSelected() {
     if (!selected) return;
     if (!requireLiveDatabase("remove calendar items")) return;
-    const previous = items;
-    setItems(items.filter((item) => item.id !== selected.id));
-    closeCalendarDetails();
-    setToast({
-      message: `${selected.kind === "block" ? "Block" : "Appointment"} removed.`,
-      undo: () => setItems(previous),
+    const calendarItemId = selected.id;
+    const saveVersion = beginAdminSave("calendar_delete");
+    const timer = startDiagnosticTimer({
+      system: "save",
+      action: "BOOKING_DELETE_STARTED",
+      route: "DELETE /api/calendar-state",
+      functionName: "removeSelected",
+      expectedAccountId: activeAccountId,
+      objectType: selected.kind === "block" ? "calendarBlock" : "booking",
+      objectId: calendarItemId,
+      details: {
+        targetedDelete: true,
+        accountId: selected.accountId || activeAccountId,
+      },
     });
+    setDeleteInFlightId(calendarItemId);
+    setCalendarSaveStatus("saving");
+    setCalendarSaveError("");
+    try {
+      const response = await fetch(`/api/calendar-state?id=${encodeURIComponent(calendarItemId)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        message?: string;
+        detail?: string;
+        error?: string;
+        items?: CalendarItem[];
+        notifications?: NotificationRecord[];
+        updatedAt?: string;
+        syncKey?: string;
+        googleCalendar?: Partial<GoogleCalendarSyncStatus>;
+        googleCalendarSync?: Partial<GoogleCalendarSyncStatus> & { ok?: boolean; error?: string };
+        diagnostics?: Record<string, unknown>;
+      };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw Object.assign(new Error(data.message || "Admin login expired. Sign in again before editing the calendar."), {
+          code: "AUTH_SESSION_MISSING",
+        });
+      }
+      if (!response.ok) {
+        throw Object.assign(
+          new Error(data.detail || data.message || data.error || `Delete failed (${response.status} ${response.statusText})`),
+          { code: data.error || "BOOKING_DELETE_FAILED" },
+        );
+      }
+      trackDiagnosticEvent({
+        system: "save",
+        action: "BOOKING_DELETE_VERIFY_STARTED",
+        phase: "verify",
+        status: "started",
+        route: "DELETE /api/calendar-state",
+        functionName: "removeSelected",
+        expectedAccountId: activeAccountId,
+        objectType: selected.kind === "block" ? "calendarBlock" : "booking",
+        objectId: calendarItemId,
+        details: {
+          targetedDelete: true,
+          accountId: selected.accountId || activeAccountId,
+        },
+      });
+      const deletedStillReturned = Array.isArray(data.items)
+        ? data.items.some((item) => item.id === calendarItemId)
+        : true;
+      if (deletedStillReturned) {
+        throw Object.assign(new Error("Deleted booking was returned by the next calendar read."), {
+          code: "BOOKING_DELETE_VERIFY_FAILED",
+        });
+      }
+      const persistedItems = (data.items || []).map((item) => ({ ...item, accountId: item.accountId || activeAccountId }));
+      const persistedSyncKey = typeof data.syncKey === "string" ? data.syncKey : calendarSyncKey;
+      if (calendarSaveVersionRef.current === saveVersion) {
+        lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
+        setItems(persistedItems);
+        if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+        if (typeof data.syncKey === "string" && data.syncKey !== calendarSyncKey) setCalendarSyncKey(data.syncKey);
+        if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+        applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar);
+        setCalendarFeedStatus("connected");
+        setCalendarSaveStatus("saved");
+        setCalendarSaveError("");
+        closeCalendarDetails();
+        setToast({ message: `${selected.kind === "block" ? "Block" : "Appointment"} removed.` });
+        window.setTimeout(() => {
+          if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
+        }, 1800);
+      }
+      finishDiagnosticTimer(timer, "verified", {
+        httpStatus: response.status,
+        errorCode: "BOOKING_DELETE_VERIFY_COMPLETED",
+        details: {
+          targetedDelete: true,
+          verificationResult: "not_found",
+          returnedItemCount: persistedItems.length,
+          backendDiagnostics: Boolean(data.diagnostics),
+        },
+      });
+      trackDiagnosticEvent({
+        system: "save",
+        action: "BOOKING_DELETE_COMPLETED",
+        phase: "request",
+        status: "success",
+        route: "DELETE /api/calendar-state",
+        functionName: "removeSelected",
+        expectedAccountId: activeAccountId,
+        objectType: selected.kind === "block" ? "calendarBlock" : "booking",
+        objectId: calendarItemId,
+        details: {
+          targetedDelete: true,
+          verificationResult: "not_found",
+        },
+      });
+      scheduleAdminNotificationDebounceFlush();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The booking could not be deleted.";
+      const code = (error as { code?: string })?.code || "BOOKING_DELETE_FAILED";
+      finishDiagnosticTimer(timer, "failed", {
+        errorCode: code,
+        humanMessage: message,
+        details: {
+          targetedDelete: true,
+          backendMessage: message,
+        },
+      });
+      trackDiagnosticEvent({
+        system: "save",
+        action: code === "BOOKING_DELETE_VERIFY_FAILED" ? "BOOKING_DELETE_VERIFY_FAILED" : "BOOKING_DELETE_FAILED",
+        phase: "request",
+        status: "failed",
+        route: "DELETE /api/calendar-state",
+        functionName: "removeSelected",
+        expectedAccountId: activeAccountId,
+        objectType: selected.kind === "block" ? "calendarBlock" : "booking",
+        objectId: calendarItemId,
+        errorCode: code,
+        humanMessage: message,
+        details: {
+          targetedDelete: true,
+          backendMessage: message,
+        },
+      });
+      setCalendarFeedStatus(code === "AUTH_SESSION_MISSING" ? "offline" : "connected");
+      setCalendarSaveStatus("failed");
+      setCalendarSaveError("The booking was not deleted. Please try again.");
+      setToast({ message: "The booking was not deleted. Please try again." });
+    } finally {
+      endAdminSave("calendar_delete");
+      setDeleteInFlightId((current) => (current === calendarItemId ? "" : current));
+    }
   }
 
   const customGroupAttendeePanel = isCustomGroupBooking ? (
@@ -12481,8 +12657,12 @@ function App() {
             Book Next
           </button>
         )}
-        <button className="danger-button" onClick={removeSelected}>
-          {selected.kind === "appointment" ? "Cancel Lesson" : "Remove Block"}
+        <button className="danger-button" disabled={deleteInFlightId === selected.id} onClick={removeSelected}>
+          {deleteInFlightId === selected.id
+            ? "Removing..."
+            : selected.kind === "appointment"
+              ? "Cancel Lesson"
+              : "Remove Block"}
         </button>
       </div>
     </>

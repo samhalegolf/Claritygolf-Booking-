@@ -291,6 +291,31 @@ class SupabaseRestStore {
       return [{ count: rows.length }];
     }
 
+    if (sql === "select id from calendar_items") {
+      const rows = await this.select("calendar_items", "select=id");
+      return { rows };
+    }
+    if (sql === "select id from calendar_items where account_id = $1") {
+      const rows = await this.select(
+        "calendar_items",
+        `select=id&account_id=eq.${encodeFilter(values[0])}`,
+      );
+      return { rows };
+    }
+    if (sql === "select id from calendar_items where id = $1 limit 1") {
+      const rows = await this.select(
+        "calendar_items",
+        `select=id&id=eq.${encodeFilter(values[0])}&limit=1`,
+      );
+      return { rows };
+    }
+    if (sql === "select id from calendar_items where account_id = $1 and id = $2 limit 1") {
+      const rows = await this.select(
+        "calendar_items",
+        `select=id&account_id=eq.${encodeFilter(values[0])}&id=eq.${encodeFilter(values[1])}&limit=1`,
+      );
+      return { rows };
+    }
     if (sql.startsWith("select * from calendar_items")) {
       return this.select(
         "calendar_items",
@@ -299,6 +324,17 @@ class SupabaseRestStore {
     }
     if (sql === "delete from calendar_items") {
       await this.delete("calendar_items", "id=not.is.null");
+      return { rows: [] };
+    }
+    if (sql === "delete from calendar_items where id = $1") {
+      await this.delete("calendar_items", `id=eq.${encodeFilter(values[0])}`);
+      return { rows: [] };
+    }
+    if (sql === "delete from calendar_items where account_id = $1 and id = $2") {
+      await this.delete(
+        "calendar_items",
+        `account_id=eq.${encodeFilter(values[0])}&id=eq.${encodeFilter(values[1])}`,
+      );
       return { rows: [] };
     }
     if (sql.includes("insert into calendar_items")) {

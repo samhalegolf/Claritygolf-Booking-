@@ -2133,6 +2133,10 @@ async function readItems() {
   return rows.map(rowToItem);
 }
 
+function queryRows(result) {
+  return Array.isArray(result) ? result : result?.rows || [];
+}
+
 function rowToPerson(row) {
   return {
     id: row.id,
@@ -2518,13 +2522,31 @@ async function writeItems(items, options = {}) {
       );
     }
     if (options.replaceItems === true && cleanItems.length) {
-      if (options.accountId) {
-        await client.query("DELETE FROM calendar_items WHERE account_id = $1 AND NOT (id = ANY($2::text[]))", [
-          options.accountId,
-          cleanItems.map((item) => item.id),
-        ]);
-      } else {
-        await client.query("DELETE FROM calendar_items WHERE NOT (id = ANY($1::text[]))", [cleanItems.map((item) => item.id)]);
+      const keepIds = new Set(cleanItems.map((item) => item.id));
+      const existingRows = queryRows(
+        options.accountId
+          ? await client.query("SELECT id FROM calendar_items WHERE account_id = $1", [options.accountId])
+          : await client.query("SELECT id FROM calendar_items"),
+      );
+      const staleIds = existingRows
+        .map((row) => cleanString(row?.id, "", 140))
+        .filter((id) => id && !keepIds.has(id));
+      if (staleIds.length) {
+        console.info("CALENDAR_STATE_REPLACE_UNSUPPORTED_QUERY", {
+          action: "replace_stale_cleanup",
+          route: "/api/calendar-state",
+          accountId: options.accountId || "",
+          targetedDelete: false,
+          staleCount: staleIds.length,
+          supportedCleanup: true,
+        });
+      }
+      for (const staleId of staleIds) {
+        if (options.accountId) {
+          await client.query("DELETE FROM calendar_items WHERE account_id = $1 AND id = $2", [options.accountId, staleId]);
+        } else {
+          await client.query("DELETE FROM calendar_items WHERE id = $1", [staleId]);
+        }
       }
     }
     await client.query("COMMIT");
@@ -3337,6 +3359,77 @@ async function writeCalendarState(nextState, context = null) {
     brand: await readBrandSettings(),
     account: await readCoachAccount(),
     googleCalendar: await getGoogleCalendarSyncStatus(),
+    googleCalendarSync,
+  };
+}
+
+async function deleteCalendarItemById(id, context = null) {
+  const cleanId = cleanString(id, "", 140);
+  if (!cleanId) {
+    throw Object.assign(new Error("Calendar item id is required for delete."), {
+      status: 400,
+      code: "BOOKING_DELETE_INVALID_ID",
+    });
+  }
+  const current = await readCalendarState();
+  if (context) assertAccountFeature(context.account, "coachCalendar");
+  const existingItem = current.items.find((item) => item.id === cleanId);
+  if (context) {
+    if (!existingItem) {
+      throw Object.assign(new Error("Booking was not found in this workspace."), {
+        status: 404,
+        code: "BOOKING_DELETE_NOT_FOUND",
+      });
+    }
+    assertCanWriteCalendarItem(context, existingItem, existingItem, current);
+  }
+
+  const accountId = context?.accountId || existingItem?.accountId || "";
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+    if (accountId) {
+      await client.query("DELETE FROM calendar_items WHERE account_id = $1 AND id = $2", [accountId, cleanId]);
+    } else {
+      await client.query("DELETE FROM calendar_items WHERE id = $1", [cleanId]);
+    }
+    const verifyRows = queryRows(
+      accountId
+        ? await client.query("SELECT id FROM calendar_items WHERE account_id = $1 AND id = $2 LIMIT 1", [accountId, cleanId])
+        : await client.query("SELECT id FROM calendar_items WHERE id = $1 LIMIT 1", [cleanId]),
+    );
+    if (verifyRows.length) {
+      throw Object.assign(new Error("Deleted calendar item is still present after delete."), {
+        code: "BOOKING_DELETE_VERIFY_FAILED",
+      });
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  const updatedAt = nowIso();
+  await setSetting("updatedAt", updatedAt);
+  await importPeople(current.items.filter((item) => item.id !== cleanId).map(personFromAppointment).filter(Boolean), "appointment");
+  let googleCalendarSync = null;
+  try {
+    googleCalendarSync = await syncGoogleCalendarIfEnabled();
+  } catch (error) {
+    googleCalendarSync = {
+      ...(await getGoogleCalendarSyncStatus()),
+      ok: false,
+      skipped: false,
+      error: error instanceof Error ? error.message : "Google Calendar sync failed.",
+    };
+  }
+  const nextState = await readCalendarState();
+  return {
+    ...nextState,
+    items: context ? nextState.items.filter((item) => canReadCalendarItem(context, item, nextState)) : nextState.items,
+    updatedAt,
     googleCalendarSync,
   };
 }
@@ -6213,6 +6306,101 @@ export async function handleBookingApiRoute(
           ? { warnings: [...new Set([...existingWarnings, notificationWarning])] }
           : {}),
       });
+    }
+
+    if (req.method === "DELETE" && pathname === "/api/calendar-state") {
+      const current = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, current);
+      const calendarItemId = cleanString(url.searchParams.get("id"), "", 140);
+      const startedAt = Date.now();
+      const baseDetails = {
+        action: "delete_calendar_item",
+        route: "/api/calendar-state",
+        calendarItemId,
+        accountId: requestContext.accountId || "",
+        targetedDelete: true,
+      };
+      console.info("BOOKING_DELETE_STARTED", baseDetails);
+      console.info("BOOKING_DELETE_VERIFY_STARTED", baseDetails);
+      try {
+        const nextState = await deleteCalendarItemById(calendarItemId, requestContext);
+        const verificationResult = nextState.items.some((item) => item.id === calendarItemId)
+          ? "found"
+          : "not_found";
+        if (verificationResult !== "not_found") {
+          throw Object.assign(new Error("Deleted calendar item was returned by the next calendar read."), {
+            code: "BOOKING_DELETE_VERIFY_FAILED",
+          });
+        }
+        const durationMs = Date.now() - startedAt;
+        console.info("BOOKING_DELETE_COMPLETED", {
+          ...baseDetails,
+          durationMs,
+          verificationResult,
+        });
+        console.info("BOOKING_DELETE_VERIFY_COMPLETED", {
+          ...baseDetails,
+          durationMs,
+          verificationResult,
+        });
+        let notificationResults = [];
+        let notificationWarning = "";
+        try {
+          notificationResults = await processAdminNotificationDebounce(
+            current.items,
+            nextState.items,
+            { timeZone: nextState.account?.timezone },
+          );
+        } catch (error) {
+          notificationWarning =
+            "Calendar saved, but booking alerts could not be processed.";
+          console.error("calendar_state:notification_failed", error);
+        }
+        const existingWarnings = Array.isArray(nextState.warnings)
+          ? nextState.warnings
+          : [];
+        return json({
+          ...publicCalendarState({
+            ...nextState,
+            notifications: await readNotificationHistory(),
+          }),
+          notificationResults,
+          ...(notificationWarning
+            ? { warnings: [...new Set([...existingWarnings, notificationWarning])] }
+            : {}),
+          diagnostics: {
+            code: "BOOKING_DELETE_VERIFY_COMPLETED",
+            ...baseDetails,
+            durationMs,
+            verificationResult,
+          },
+        });
+      } catch (error) {
+        const anyError = error as { code?: string; status?: number; message?: string };
+        const message = anyError?.message || "Calendar delete failed.";
+        const code = anyError?.code || "BOOKING_DELETE_FAILED";
+        const durationMs = Date.now() - startedAt;
+        console.error(code === "BOOKING_DELETE_VERIFY_FAILED" ? "BOOKING_DELETE_VERIFY_FAILED" : "BOOKING_DELETE_FAILED", {
+          ...baseDetails,
+          durationMs,
+          errorCode: code,
+          backendMessage: message,
+        });
+        return json(
+          {
+            error: code,
+            message: "The booking could not be deleted. The calendar was not changed.",
+            detail: message,
+            diagnostics: {
+              code,
+              ...baseDetails,
+              durationMs,
+              backendMessage: message,
+            },
+          },
+          anyError?.status || 500,
+        );
+      }
     }
 
     if (req.method === "POST" && pathname === "/api/admin-notification-debounce") {
