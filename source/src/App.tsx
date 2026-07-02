@@ -595,8 +595,10 @@ type DiagnosticSystem =
   | "email"
   | "notification"
   | "admin"
-  | "ui";
-type DiagnosticTab = "overview" | "database" | "errors" | "raw";
+  | "ui"
+  | "cache"
+  | "reload";
+type DiagnosticTab = "overview" | "database" | "calendar" | "cache" | "errors" | "raw";
 type DiagnosticEvent = {
   id: string;
   timestamp: string;
@@ -3197,6 +3199,14 @@ function sanitizeDiagnosticDetails(details?: Record<string, unknown>): Record<st
   return Object.keys(sanitized).length ? sanitized : undefined;
 }
 
+function diagnosticDurationBand(durationMs?: number) {
+  if (typeof durationMs !== "number") return "";
+  if (durationMs < 300) return "Fast";
+  if (durationMs < 1000) return "Okay";
+  if (durationMs < 3000) return "Slow";
+  return "Problem";
+}
+
 async function analyzeLogoFile(file: File): Promise<BrandSettings> {
   const objectUrl = URL.createObjectURL(file);
   try {
@@ -3611,6 +3621,11 @@ function App() {
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
   const publicBookingSlotRequestsRef = useRef<Set<string>>(new Set());
   const pendingQuickCreateRef = useRef<QuickCreateState | null>(null);
+  const adminBootStartedAtRef = useRef(typeof performance !== "undefined" ? performance.now() : Date.now());
+  const adminShellRenderedRef = useRef(false);
+  const calendarFrameRenderedRef = useRef(false);
+  const bookingCardsFirstRenderedRef = useRef(false);
+  const bookingCardsHydratedRef = useRef(false);
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
@@ -3714,6 +3729,17 @@ function App() {
       details: input.details,
     });
   }
+
+  function trackDiagnosticMilestone(input: DiagnosticEventInput & { startedAt?: number }) {
+    const { startedAt, ...event } = input;
+    trackDiagnosticEvent({
+      ...event,
+      durationMs:
+        typeof startedAt === "number"
+          ? Math.max(0, Math.round(performance.now() - startedAt))
+          : input.durationMs,
+    });
+  }
   const selectedLessonNote = selectedService?.lessonNote || selectedService?.location || "";
   const selectedGroupSessionService = selectedGroupSession
     ? services.find((service) => service.id === selectedGroupSession.serviceId) ?? null
@@ -3791,6 +3817,93 @@ function App() {
       weekItems,
     ],
   );
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || adminShellRenderedRef.current) return;
+    adminShellRenderedRef.current = true;
+    trackDiagnosticMilestone({
+      system: "ui",
+      action: "ADMIN_SHELL_RENDERED",
+      phase: "render",
+      status: "success",
+      functionName: "App",
+      startedAt: adminBootStartedAtRef.current,
+    });
+  }, [authStatus, isEmbedMode]);
+  useEffect(() => {
+    if (
+      isEmbedMode ||
+      authStatus !== "authenticated" ||
+      adminWorkspaceLoadStatus !== "loaded" ||
+      activeView !== "calendar" ||
+      calendarFrameRenderedRef.current
+    ) {
+      return;
+    }
+    calendarFrameRenderedRef.current = true;
+    trackDiagnosticMilestone({
+      system: "calendar",
+      action: "CALENDAR_FRAME_RENDERED",
+      phase: "render",
+      status: "success",
+      functionName: "App",
+      startedAt: adminBootStartedAtRef.current,
+      details: { visibleWeek: activeWeek },
+    });
+  }, [activeView, activeWeek, adminWorkspaceLoadStatus, authStatus, isEmbedMode]);
+  useEffect(() => {
+    if (
+      isEmbedMode ||
+      authStatus !== "authenticated" ||
+      adminWorkspaceLoadStatus !== "loaded" ||
+      activeView !== "calendar" ||
+      bookingCardsFirstRenderedRef.current ||
+      visibleWeekItems.length === 0
+    ) {
+      return;
+    }
+    bookingCardsFirstRenderedRef.current = true;
+    trackDiagnosticMilestone({
+      system: "calendar",
+      action: "BOOKING_CARDS_FIRST_RENDERED",
+      phase: "render",
+      status: "success",
+      functionName: "App",
+      startedAt: adminBootStartedAtRef.current,
+      details: {
+        visibleWeek: activeWeek,
+        visibleCards: visibleWeekItems.length,
+      },
+    });
+  }, [activeView, activeWeek, adminWorkspaceLoadStatus, authStatus, isEmbedMode, visibleWeekItems]);
+  useEffect(() => {
+    if (
+      isEmbedMode ||
+      authStatus !== "authenticated" ||
+      adminWorkspaceLoadStatus !== "loaded" ||
+      activeView !== "calendar" ||
+      bookingCardsHydratedRef.current ||
+      visibleWeekItems.length === 0
+    ) {
+      return;
+    }
+    const hasSetupData = services.length > 0 && coachProfiles.length > 0 && locations.length > 0;
+    if (!hasSetupData) return;
+    bookingCardsHydratedRef.current = true;
+    trackDiagnosticMilestone({
+      system: "calendar",
+      action: "BOOKING_CARDS_HYDRATED",
+      phase: "hydrate",
+      status: "success",
+      functionName: "App",
+      startedAt: adminBootStartedAtRef.current,
+      details: {
+        visibleCards: visibleWeekItems.length,
+        services: services.length,
+        coaches: coachProfiles.length,
+        locations: locations.length,
+      },
+    });
+  }, [activeView, adminWorkspaceLoadStatus, authStatus, coachProfiles.length, isEmbedMode, locations.length, services.length, visibleWeekItems]);
   const locationCalendarCoachGroups = useMemo(() => {
     if (effectiveCalendarPerspective !== "location") return [];
     const coachIds = new Set(
@@ -4947,9 +5060,22 @@ function App() {
   async function startAdminWorkspaceHydration() {
     if (isEmbedMode || hasActiveAdminSave()) return;
     const runId = ++adminHydrationRunIdRef.current;
+    adminBootStartedAtRef.current = performance.now();
+    calendarFrameRenderedRef.current = false;
+    bookingCardsFirstRenderedRef.current = false;
+    bookingCardsHydratedRef.current = false;
     const timer = startDiagnosticTimer({
       system: "admin",
       action: "admin_workspace_load",
+      route: "GET /api/calendar-state",
+      functionName: "startAdminWorkspaceHydration",
+      expectedAccountId: activeAccountId,
+    });
+    trackDiagnosticEvent({
+      system: "reload",
+      action: "FULL_ADMIN_RELOAD_STARTED",
+      phase: "admin_workspace",
+      status: "started",
       route: "GET /api/calendar-state",
       functionName: "startAdminWorkspaceHydration",
       expectedAccountId: activeAccountId,
@@ -4966,6 +5092,16 @@ function App() {
       setAdminWorkspaceLoadStatus("loaded");
       setAdminWorkspaceLoadError("");
       setCalendarFeedStatus("connected");
+      trackDiagnosticEvent({
+        system: "reload",
+        action: "FULL_ADMIN_RELOAD_COMPLETED",
+        phase: "admin_workspace",
+        status: "success",
+        route: "GET /api/calendar-state",
+        functionName: "startAdminWorkspaceHydration",
+        expectedAccountId: activeAccountId,
+        details: { nonCriticalRefreshDeferred: true },
+      });
       finishDiagnosticTimer(timer, "success", {
         details: {
           bookingsLoaded: accountItems.length,
@@ -4977,6 +5113,17 @@ function App() {
     } catch (error) {
       if (adminHydrationRunIdRef.current !== runId) return;
       finishDiagnosticTimer(timer, "failed", {
+        errorCode: "SUPABASE_READ_FAILED",
+        humanMessage: adminWorkspaceLoadMessage(error),
+      });
+      trackDiagnosticEvent({
+        system: "reload",
+        action: "FULL_ADMIN_RELOAD_COMPLETED",
+        phase: "admin_workspace",
+        status: "failed",
+        route: "GET /api/calendar-state",
+        functionName: "startAdminWorkspaceHydration",
+        expectedAccountId: activeAccountId,
         errorCode: "SUPABASE_READ_FAILED",
         humanMessage: adminWorkspaceLoadMessage(error),
       });
@@ -5107,8 +5254,23 @@ function App() {
     const coachVersion = coachSaveVersionRef.current;
     const settingsSaveVersion = settingsSaveVersionRef.current;
     const settingsDraftVersion = notificationSettingsDraftVersionRef.current;
+    trackDiagnosticEvent({
+      system: "cache",
+      action: "NON_CRITICAL_DATA_DEFERRED",
+      phase: "admin_workspace",
+      status: "success",
+      functionName: "refreshAdminWorkspaceDetails",
+      details: { locations: true, coaches: true, settings: true },
+    });
 
     void (async () => {
+      const timer = startDiagnosticTimer({
+        system: "cache",
+        action: "COLD_REFRESH_STARTED",
+        route: "GET /api/locations",
+        functionName: "refreshAdminWorkspaceDetails",
+        objectType: "location",
+      });
       try {
         const response = await fetch("/api/locations", {
           credentials: "same-origin",
@@ -5117,6 +5279,11 @@ function App() {
         });
         if (!shouldApplyAdminWorkspaceDetail(runId) || locationSaveVersionRef.current !== locationVersion) return;
         if (!response.ok) {
+          finishDiagnosticTimer(timer, "warning", {
+            httpStatus: response.status,
+            errorCode: "CACHE_REFRESH_FAILED",
+            humanMessage: "Locations background refresh failed.",
+          });
           console.warn("admin_workspace_detail_load_failed", { detail: "locations", status: response.status });
           return;
         }
@@ -5124,12 +5291,28 @@ function App() {
         if (Array.isArray(data.locations) && data.locations.length) {
           setLocations(cleanLocations(data.locations, fallbackAccount));
         }
+        finishDiagnosticTimer(timer, "success", {
+          httpStatus: response.status,
+          phase: "COLD_REFRESH_COMPLETED",
+          details: { returnedCount: Array.isArray(data.locations) ? data.locations.length : 0 },
+        });
       } catch (error) {
+        finishDiagnosticTimer(timer, "warning", {
+          errorCode: "CACHE_REFRESH_FAILED",
+          humanMessage: "Locations background refresh failed.",
+        });
         console.warn("admin_workspace_detail_load_failed", { detail: "locations", error });
       }
     })();
 
     void (async () => {
+      const timer = startDiagnosticTimer({
+        system: "cache",
+        action: "COLD_REFRESH_STARTED",
+        route: "GET /api/coaches",
+        functionName: "refreshAdminWorkspaceDetails",
+        objectType: "coach",
+      });
       try {
         const response = await fetch("/api/coaches", {
           credentials: "same-origin",
@@ -5138,6 +5321,11 @@ function App() {
         });
         if (!shouldApplyAdminWorkspaceDetail(runId) || coachSaveVersionRef.current !== coachVersion) return;
         if (!response.ok) {
+          finishDiagnosticTimer(timer, "warning", {
+            httpStatus: response.status,
+            errorCode: "CACHE_REFRESH_FAILED",
+            humanMessage: "Coaches background refresh failed.",
+          });
           console.warn("admin_workspace_detail_load_failed", { detail: "coaches", status: response.status });
           return;
         }
@@ -5145,12 +5333,28 @@ function App() {
         if (Array.isArray(data.coaches) && data.coaches.length) {
           setCoachProfiles(cleanCoachProfiles(data.coaches, fallbackAccount));
         }
+        finishDiagnosticTimer(timer, "success", {
+          httpStatus: response.status,
+          phase: "COLD_REFRESH_COMPLETED",
+          details: { returnedCount: Array.isArray(data.coaches) ? data.coaches.length : 0 },
+        });
       } catch (error) {
+        finishDiagnosticTimer(timer, "warning", {
+          errorCode: "CACHE_REFRESH_FAILED",
+          humanMessage: "Coaches background refresh failed.",
+        });
         console.warn("admin_workspace_detail_load_failed", { detail: "coaches", error });
       }
     })();
 
     void (async () => {
+      const timer = startDiagnosticTimer({
+        system: "cache",
+        action: "COLD_REFRESH_STARTED",
+        route: "GET /api/admin-settings",
+        functionName: "refreshAdminWorkspaceDetails",
+        objectType: "settings",
+      });
       try {
         const response = await fetch("/api/admin-settings", { headers: { Accept: "application/json" } });
         if (
@@ -5161,11 +5365,24 @@ function App() {
           return;
         }
         if (!response.ok) {
+          finishDiagnosticTimer(timer, "warning", {
+            httpStatus: response.status,
+            errorCode: "CACHE_REFRESH_FAILED",
+            humanMessage: "Admin settings background refresh failed.",
+          });
           console.warn("admin_workspace_detail_load_failed", { detail: "admin-settings", status: response.status });
           return;
         }
         applyNotificationSettings((await response.json()) as Partial<NotificationSettings>);
+        finishDiagnosticTimer(timer, "success", {
+          httpStatus: response.status,
+          phase: "COLD_REFRESH_COMPLETED",
+        });
       } catch (error) {
+        finishDiagnosticTimer(timer, "warning", {
+          errorCode: "CACHE_REFRESH_FAILED",
+          humanMessage: "Admin settings background refresh failed.",
+        });
         console.warn("admin_workspace_detail_load_failed", { detail: "admin-settings", error });
       }
     })();
@@ -5233,7 +5450,20 @@ function App() {
   async function loadPublicBookingSlots(serviceId: string, week: number, ignoreId = "", options: { force?: boolean } = {}) {
     if (!serviceId) return;
     const key = publicBookingSlotCacheKey(serviceId, week, ignoreId);
-    if (!options.force && publicBookingSlotRequestsRef.current.has(key)) return;
+    if (!options.force && publicBookingSlotRequestsRef.current.has(key)) {
+      trackDiagnosticEvent({
+        system: "cache",
+        action: "DUPLICATE_REQUEST_DETECTED",
+        phase: "public_booking_slots",
+        status: "skipped",
+        route: "GET /api/public-booking-slots",
+        functionName: "loadPublicBookingSlots",
+        objectType: "service",
+        objectId: serviceId,
+        details: { week, ignoreId: Boolean(ignoreId) },
+      });
+      return;
+    }
     publicBookingSlotRequestsRef.current.add(key);
     const timer = startDiagnosticTimer({
       system: "calendar",
@@ -10098,7 +10328,24 @@ function App() {
       }
       setTestEmailState("sent");
       setToast({ message: data.message || "Test email sent." });
-      void startAdminWorkspaceHydration();
+      trackDiagnosticEvent({
+        system: "reload",
+        action: "TARGETED_REFRESH_STARTED",
+        phase: "notification_history",
+        status: "started",
+        route: "GET /api/notification-history",
+        functionName: "sendTestEmail",
+      });
+      void refreshNotificationHistory().then(() =>
+        trackDiagnosticEvent({
+          system: "reload",
+          action: "TARGETED_REFRESH_COMPLETED",
+          phase: "notification_history",
+          status: "success",
+          route: "GET /api/notification-history",
+          functionName: "sendTestEmail",
+        }),
+      );
       window.setTimeout(() => setTestEmailState("idle"), 1600);
     } catch {
       setToast({ message: "Could not reach the email sender." });
@@ -12334,16 +12581,36 @@ function App() {
   const databaseDiagnosticEvents = diagnosticEvents.filter((event) =>
     ["supabase", "save", "calendar", "auth"].includes(event.system),
   );
+  const calendarDiagnosticEvents = diagnosticEvents.filter(
+    (event) =>
+      event.system === "calendar" ||
+      event.action.includes("CALENDAR") ||
+      event.action.includes("BOOKING_CARDS") ||
+      event.route?.includes("calendar"),
+  );
+  const cacheDiagnosticEvents = diagnosticEvents.filter((event) =>
+    ["cache", "reload"].includes(event.system),
+  );
   const diagnosticEventsForActiveTab =
     diagnosticsTab === "errors"
       ? failedDiagnosticEvents
       : diagnosticsTab === "database"
         ? databaseDiagnosticEvents
-        : diagnosticEvents;
+        : diagnosticsTab === "calendar"
+          ? calendarDiagnosticEvents
+          : diagnosticsTab === "cache"
+            ? cacheDiagnosticEvents
+            : diagnosticEvents;
   const averageDiagnosticDuration = Math.round(
     diagnosticEvents.reduce((total, event) => total + (event.durationMs ?? 0), 0) /
       Math.max(1, diagnosticEvents.filter((event) => typeof event.durationMs === "number").length),
   );
+  const slowestDiagnosticEvent = diagnosticEvents.reduce<DiagnosticEvent | null>((slowest, event) => {
+    if (typeof event.durationMs !== "number") return slowest;
+    if (!slowest || (slowest.durationMs ?? 0) < event.durationMs) return event;
+    return slowest;
+  }, null);
+  const latestReloadEvent = diagnosticEvents.find((event) => event.system === "reload");
   const diagnosticsBySystem = diagnosticEvents.reduce<Record<string, number>>((counts, event) => {
     counts[event.system] = (counts[event.system] ?? 0) + 1;
     return counts;
@@ -12637,14 +12904,14 @@ function App() {
           {diagnosticsOpen ? (
             <div className="developer-diagnostics-body">
               <div className="developer-diagnostics-tabs" role="tablist" aria-label="Developer diagnostics views">
-                {(["overview", "database", "errors", "raw"] as DiagnosticTab[]).map((tab) => (
+                {(["overview", "database", "calendar", "cache", "errors", "raw"] as DiagnosticTab[]).map((tab) => (
                   <button
                     key={tab}
                     className={diagnosticsTab === tab ? "active" : ""}
                     type="button"
                     onClick={() => setDiagnosticsTab(tab)}
                   >
-                    {tab === "raw" ? "Raw Events" : tab[0].toUpperCase() + tab.slice(1)}
+                    {tab === "raw" ? "Raw Events" : tab === "cache" ? "Cache / Reloads" : tab[0].toUpperCase() + tab.slice(1)}
                   </button>
                 ))}
               </div>
@@ -12668,6 +12935,18 @@ function App() {
                     <strong>{averageDiagnosticDuration ? `${averageDiagnosticDuration}ms` : "n/a"}</strong>
                   </div>
                   <div>
+                    <span>Slowest recent action</span>
+                    <strong>
+                      {slowestDiagnosticEvent
+                        ? `${slowestDiagnosticEvent.action} - ${slowestDiagnosticEvent.durationMs}ms`
+                        : "None"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Last full reload</span>
+                    <strong>{latestReloadEvent ? `${latestReloadEvent.action} ${latestReloadEvent.status}` : "None"}</strong>
+                  </div>
+                  <div>
                     <span>Systems firing</span>
                     <strong>{Object.keys(diagnosticsBySystem).length || 0}</strong>
                   </div>
@@ -12688,6 +12967,7 @@ function App() {
                           <span>
                             {event.system} · {event.phase} · {event.status}
                             {typeof event.durationMs === "number" ? ` · ${event.durationMs}ms` : ""}
+                            {diagnosticDurationBand(event.durationMs) ? ` · ${diagnosticDurationBand(event.durationMs)}` : ""}
                           </span>
                         </div>
                         <div>
