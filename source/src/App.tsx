@@ -3201,8 +3201,12 @@ function sanitizeDiagnosticDetails(details?: Record<string, unknown>): Record<st
   return Object.keys(sanitized).length ? sanitized : undefined;
 }
 
-function diagnosticDurationBand(durationMs?: number) {
+function diagnosticDurationBand(event: Pick<DiagnosticEvent, "details" | "durationMs">) {
+  const durationMs = event.durationMs;
   if (typeof durationMs !== "number") return "";
+  if (event.details?.blockingCalendar === false || event.details?.backgroundRefresh === true) {
+    return durationMs < 1000 ? "Okay" : "Background";
+  }
   if (durationMs < 300) return "Fast";
   if (durationMs < 1000) return "Okay";
   if (durationMs < 3000) return "Slow";
@@ -5084,7 +5088,7 @@ function App() {
 
   function adminWorkspaceLoadMessage(error: unknown) {
     if (error instanceof Error && error.message) return error.message;
-    return "Calendar, people, locations, coaches, and settings could not be loaded.";
+    return "Calendar bookings could not be loaded.";
   }
 
   async function startAdminWorkspaceHydration() {
@@ -12941,6 +12945,9 @@ function App() {
     adminWorkspaceLoadStatus !== "error";
   const adminWorkspaceFailed =
     !isEmbedMode && authStatus === "authenticated" && adminWorkspaceLoadStatus === "error";
+  const calendarSummaryText = adminWorkspaceLoading
+    ? "Loading calendar bookings"
+    : `${appointments} appointments · ${blocks} blocked ${blocks === 1 ? "time" : "times"}`;
   const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
   const latestDiagnosticEvent = diagnosticEvents[0];
   const latestDiagnosticError = failedDiagnosticEvents[0];
@@ -13206,9 +13213,7 @@ function App() {
             <p className="eyebrow">{activeView === "booking" ? "Public Booking" : activeView}</p>
             <h1>{activeView === "calendar" ? calendarTitle : sectionTitle(activeView)}</h1>
             {activeView === "calendar" ? (
-              <span>
-                {appointments} appointments · {blocks} blocked {blocks === 1 ? "time" : "times"}
-              </span>
+              <span>{calendarSummaryText}</span>
             ) : (
               <span>{settingsLocationLine}</span>
             )}
@@ -13234,11 +13239,11 @@ function App() {
         {!isEmbedMode && (adminWorkspaceLoading || adminWorkspaceFailed) && (
         <section className="workspace">
           <div className="empty-panel compact" role={adminWorkspaceFailed ? "alert" : "status"}>
-            <h2>{adminWorkspaceFailed ? "Admin workspace could not load" : "Loading admin workspace"}</h2>
+            <h2>{adminWorkspaceFailed ? "Calendar could not load" : "Loading calendar"}</h2>
             <p>
               {adminWorkspaceFailed
-                ? adminWorkspaceLoadError || "Calendar, people, locations, coaches, and settings could not be loaded."
-                : "Calendar, people, locations, coaches, and settings are loading."}
+                ? adminWorkspaceLoadError || "Calendar bookings could not be loaded."
+                : "Bookings are loading first. Client profiles, notifications, and integrations will refresh in the background."}
             </p>
             {adminWorkspaceFailed ? (
               <button className="outline-button" type="button" onClick={() => void startAdminWorkspaceHydration()}>
@@ -13333,7 +13338,7 @@ function App() {
                           <span>
                             {event.system} · {event.phase} · {event.status}
                             {typeof event.durationMs === "number" ? ` · ${event.durationMs}ms` : ""}
-                            {diagnosticDurationBand(event.durationMs) ? ` · ${diagnosticDurationBand(event.durationMs)}` : ""}
+                            {diagnosticDurationBand(event) ? ` · ${diagnosticDurationBand(event)}` : ""}
                           </span>
                         </div>
                         <div>
