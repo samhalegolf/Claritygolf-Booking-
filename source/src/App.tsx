@@ -5259,6 +5259,7 @@ function App() {
       diagnostics?: {
         calendarState?: {
           routeUsed?: string;
+          entrypoint?: string;
           shellLoadDurationMs?: number;
           itemCount?: number;
           peopleDeferred?: boolean;
@@ -5311,6 +5312,7 @@ function App() {
         returnedAccountId: loadedAccountId,
         details: {
           routeUsed: calendarStateRouteUsed,
+          entrypoint: calendarStateDiagnostics?.entrypoint || "",
           shellLoadDurationMs: calendarStateDiagnostics?.shellLoadDurationMs ?? 0,
           itemCount: calendarStateDiagnostics?.itemCount ?? accountItems.length,
           peopleDeferred,
@@ -5400,6 +5402,7 @@ function App() {
         coachesLoaded: Array.isArray(data.coaches) ? data.coaches.length : 0,
         availabilityBlocks: Array.isArray(data.availability) ? data.availability.flat().length : 0,
         routeUsed: calendarStateRouteUsed,
+        entrypoint: calendarStateDiagnostics?.entrypoint || "",
         shellLoadDurationMs: calendarStateDiagnostics?.shellLoadDurationMs ?? 0,
         peopleDeferred,
         notificationsDeferred,
