@@ -69,6 +69,37 @@ function relatedMissingCalendarItemColumns(column) {
     : [column];
 }
 
+function rememberMissingCalendarItemAccountScope(store, label, error) {
+  if (missingOptionalCalendarItemColumn(error) !== "account_id") return false;
+  const columns = relatedMissingCalendarItemColumns("account_id");
+  store.omittedCalendarItemColumns ||= new Set();
+  columns.forEach((column) => store.omittedCalendarItemColumns.add(column));
+  console.warn("supabase_storage:calendar_items_account_scope_filter_omitted", {
+    label,
+    columns,
+    error: error instanceof Error ? error.message : String(error || ""),
+  });
+  return true;
+}
+
+async function selectCalendarItemsWithAccountFallback(store, query, fallbackQuery, label) {
+  try {
+    return await store.select("calendar_items", query);
+  } catch (error) {
+    if (!rememberMissingCalendarItemAccountScope(store, label, error)) throw error;
+    return store.select("calendar_items", fallbackQuery);
+  }
+}
+
+async function deleteCalendarItemsWithAccountFallback(store, query, fallbackQuery, label) {
+  try {
+    await store.delete("calendar_items", query);
+  } catch (error) {
+    if (!rememberMissingCalendarItemAccountScope(store, label, error)) throw error;
+    await store.delete("calendar_items", fallbackQuery);
+  }
+}
+
 function parseJsonParam(value, column) {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value === "object") return value;
@@ -131,7 +162,9 @@ async function deleteCalendarItemsByIds(store, ids) {
 async function deleteCalendarItemsExceptIds(store, keepIds, accountId) {
   const keep = new Set(cleanIdList(keepIds));
   const filter = accountId ? `select=id&account_id=eq.${encodeFilter(accountId)}` : "select=id";
-  const rows = await store.select("calendar_items", filter);
+  const rows = accountId
+    ? await selectCalendarItemsWithAccountFallback(store, filter, "select=id", "delete_except_ids")
+    : await store.select("calendar_items", filter);
   const idsToDelete = rows
     .map((row) => String(row?.id || ""))
     .map((id) => id.trim())
@@ -252,11 +285,11 @@ class SupabaseRestStore {
       return { rows };
     }
     if (sql === "select id, account_id from calendar_items") {
-      const rows = await this.select("calendar_items", "select=id,account_id");
+      const rows = await selectCalendarItemsWithAccountFallback(this, "select=id,account_id", "select=id", "select_id_account_id");
       return { rows };
     }
     if (sql === "select id from calendar_items where account_id = $1") {
-      const rows = await this.select("calendar_items", `select=id&account_id=eq.${encodeFilter(values[0])}`);
+      const rows = await selectCalendarItemsWithAccountFallback(this, `select=id&account_id=eq.${encodeFilter(values[0])}`, "select=id", "select_id_by_account");
       return { rows };
     }
     if (sql === "select id from calendar_items where id = $1 limit 1") {
@@ -264,12 +297,12 @@ class SupabaseRestStore {
       return { rows };
     }
     if (sql === "select id from calendar_items where account_id = $1 and id = $2 limit 1") {
-      const rows = await this.select("calendar_items", `select=id&account_id=eq.${encodeFilter(values[0])}&id=eq.${encodeFilter(values[1])}&limit=1`);
+      const rows = await selectCalendarItemsWithAccountFallback(this, `select=id&account_id=eq.${encodeFilter(values[0])}&id=eq.${encodeFilter(values[1])}&limit=1`, `select=id&id=eq.${encodeFilter(values[1])}&limit=1`, "select_id_by_account_and_id");
       return { rows };
     }
     if (sql.startsWith("select * from calendar_items")) return this.select("calendar_items", "select=*&order=week.asc,day.asc,start.asc,id.asc");
     if (sql === "delete from calendar_items where account_id = $1") {
-      await this.delete("calendar_items", `account_id=eq.${encodeFilter(values[0])}`);
+      await deleteCalendarItemsWithAccountFallback(this, `account_id=eq.${encodeFilter(values[0])}`, "id=not.is.null", "delete_by_account");
       return { rows: [] };
     }
     if (sql === "delete from calendar_items where account_id = $1 and not (id = any($2::text[]))") {
@@ -289,7 +322,7 @@ class SupabaseRestStore {
       return { rows: [] };
     }
     if (sql === "delete from calendar_items where account_id = $1 and id = $2") {
-      await this.delete("calendar_items", `account_id=eq.${encodeFilter(values[0])}&id=eq.${encodeFilter(values[1])}`);
+      await deleteCalendarItemsWithAccountFallback(this, `account_id=eq.${encodeFilter(values[0])}&id=eq.${encodeFilter(values[1])}`, `id=eq.${encodeFilter(values[1])}`, "delete_by_account_and_id");
       return { rows: [] };
     }
     if (sql.includes("insert into calendar_items")) {
