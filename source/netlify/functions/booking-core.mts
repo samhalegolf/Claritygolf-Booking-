@@ -3392,6 +3392,9 @@ async function writeCalendarState(nextState, context = null) {
       ),
       {
         status: 409,
+        expectedUpdatedAt,
+        backendUpdatedAt: current.updatedAt,
+        conflictSource: "calendar_updated_at_mismatch",
       },
     );
   }
@@ -6775,12 +6778,24 @@ export async function handleBookingApiRoute(
 
     return json({ error: "not_found", message: "Route not found." }, 404);
   } catch (error) {
-    const status = error?.status || 500;
+    const anyError = error as {
+      status?: number;
+      code?: string;
+      expectedUpdatedAt?: string;
+      backendUpdatedAt?: string;
+      conflictSource?: string;
+      details?: unknown;
+    };
+    const status = anyError?.status || 500;
     return json(
       {
-        error: status === 500 ? "booking_api_error" : "request_error",
+        error: anyError?.code || (status === 500 ? "booking_api_error" : "request_error"),
         message:
           error instanceof Error ? error.message : "Unknown booking API error",
+        ...(anyError?.expectedUpdatedAt ? { expectedUpdatedAt: anyError.expectedUpdatedAt } : {}),
+        ...(anyError?.backendUpdatedAt ? { backendUpdatedAt: anyError.backendUpdatedAt } : {}),
+        ...(anyError?.conflictSource ? { conflictSource: anyError.conflictSource } : {}),
+        ...(anyError?.details !== undefined ? { details: anyError.details } : {}),
       },
       status,
     );

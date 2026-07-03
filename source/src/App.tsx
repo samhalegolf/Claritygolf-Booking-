@@ -2880,6 +2880,48 @@ function calendarItemsEquivalent(first?: Partial<CalendarItem>[], second?: Parti
   return calendarItemsFingerprint(first) === calendarItemsFingerprint(second);
 }
 
+function calendarItemEquivalent(first?: Partial<CalendarItem>, second?: Partial<CalendarItem>) {
+  if (!first && !second) return true;
+  if (!first || !second) return false;
+  return calendarItemsEquivalent([first], [second]);
+}
+
+function calendarItemsById(itemList: CalendarItem[] = []) {
+  return new Map(itemList.filter((item) => item.id).map((item) => [item.id, item]));
+}
+
+function mergeCalendarItemsAfterConflict(
+  latestItems: CalendarItem[],
+  baselineItems: CalendarItem[],
+  desiredItems: CalendarItem[],
+) {
+  const latestById = calendarItemsById(latestItems);
+  const baselineById = calendarItemsById(baselineItems);
+  const desiredById = calendarItemsById(desiredItems);
+  const candidateIds = new Set([...baselineById.keys(), ...desiredById.keys()]);
+  const changedIds = new Set<string>();
+
+  candidateIds.forEach((id) => {
+    if (!calendarItemEquivalent(baselineById.get(id), desiredById.get(id))) changedIds.add(id);
+  });
+  if (!changedIds.size) return latestItems;
+
+  for (const id of changedIds) {
+    const baselineItem = baselineById.get(id);
+    const latestItem = latestById.get(id);
+    const desiredItem = desiredById.get(id);
+    if (!baselineItem && latestItem) return null;
+    if (baselineItem && latestItem && !calendarItemEquivalent(latestItem, baselineItem)) return null;
+    if (baselineItem && !latestItem && desiredItem) return null;
+  }
+
+  const merged = latestItems.filter((item) => !changedIds.has(item.id));
+  desiredItems.forEach((item) => {
+    if (changedIds.has(item.id)) merged.push(item);
+  });
+  return merged;
+}
+
 function servicePriceLabel(service?: (Pick<Service, "price" | "priceMode"> & Partial<Service>) | null) {
   if (!service) return "No charge";
   if (isCustomGroupService(service)) {
@@ -3632,6 +3674,7 @@ function App() {
   const settingsSaveVersionRef = useRef(0);
   const notificationSettingsDraftVersionRef = useRef(0);
   const lastPersistedCalendarFingerprintRef = useRef("");
+  const lastPersistedCalendarItemsRef = useRef<CalendarItem[]>([]);
   const pendingLessonCompleteIdRef = useRef("");
   const activeAdminSaveOwnersRef = useRef<Map<AdminSaveOwner, number>>(new Map());
   const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
@@ -4662,7 +4705,8 @@ function App() {
     const requestedFingerprint = calendarStateFingerprint(items, calendarSyncKey);
     if (requestedFingerprint === lastPersistedCalendarFingerprintRef.current) return;
     const saveVersion = ++calendarSaveVersionRef.current;
-    const payload = JSON.stringify({ items, replaceItems: true, syncKey: calendarSyncKey, updatedAt: calendarStateVersion });
+    const desiredItems = items;
+    const baselineItems = lastPersistedCalendarItemsRef.current;
     let saveReachedServer = false;
     let sessionExpired = false;
     const timer = startDiagnosticTimer({
@@ -4678,13 +4722,22 @@ function App() {
     setCalendarSaveError("");
 
     const saveTimer = window.setTimeout(() => {
-      const saveRequest = () =>
+      const saveRequest = (
+        requestItems = desiredItems,
+        requestSyncKey = calendarSyncKey,
+        requestUpdatedAt = calendarStateVersion,
+      ) =>
         fetch("/api/calendar-state", {
           method: "PUT",
           credentials: "same-origin",
           cache: "no-store",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: payload,
+          body: JSON.stringify({
+            items: requestItems,
+            replaceItems: true,
+            syncKey: requestSyncKey,
+            updatedAt: requestUpdatedAt,
+          }),
         });
       const readLiveState = () =>
         fetch("/api/calendar-state", {
@@ -4693,12 +4746,16 @@ function App() {
           headers: { Accept: "application/json" },
         });
       const retryDelay = (delay = 700) => new Promise((resolve) => window.setTimeout(resolve, delay));
-      const saveWithRetries = async () => {
+      const saveWithRetries = async (
+        requestItems = desiredItems,
+        requestSyncKey = calendarSyncKey,
+        requestUpdatedAt = calendarStateVersion,
+      ) => {
         let lastError: unknown;
         for (const delay of [0, 700, 1400, 2600]) {
           if (delay) await retryDelay(delay);
           try {
-            return await saveRequest();
+            return await saveRequest(requestItems, requestSyncKey, requestUpdatedAt);
           } catch (error) {
             lastError = error;
           }
@@ -4708,24 +4765,18 @@ function App() {
 
       void (async () => {
         let response: Response;
-        let recoveredData: {
-          items?: CalendarItem[];
-          notifications?: NotificationRecord[];
-          updatedAt?: string;
-          googleCalendar?: Partial<GoogleCalendarSyncStatus>;
-        } | null = null;
+        let submittedItems = desiredItems;
+        let submittedSyncKey = calendarSyncKey;
+        let submittedUpdatedAt = calendarStateVersion;
+        let recoveredData: CalendarStateSaveResponse | null = null;
+        let recoveredFromConflict = false;
         try {
           response = await saveWithRetries();
         } catch (networkError) {
           const liveResponse = await readLiveState().catch(() => null);
           if (!liveResponse?.ok) throw networkError;
-          recoveredData = (await liveResponse.json().catch(() => ({}))) as {
-            items?: CalendarItem[];
-            notifications?: NotificationRecord[];
-            updatedAt?: string;
-            googleCalendar?: Partial<GoogleCalendarSyncStatus>;
-          };
-          if (calendarItemsEquivalent(recoveredData.items, items)) {
+          recoveredData = (await liveResponse.json().catch(() => ({}))) as CalendarStateSaveResponse;
+          if (calendarItemsEquivalent(recoveredData.items, desiredItems)) {
             response = liveResponse;
           } else {
             recoveredData = null;
@@ -4733,21 +4784,37 @@ function App() {
           }
         }
         if (calendarSaveVersionRef.current !== saveVersion) return;
-        let data = (recoveredData ?? (await response.json().catch(() => ({})))) as {
-          message?: string;
-          error?: string;
-          notifications?: NotificationRecord[];
-          notificationResults?: EmailSendResult[];
-          updatedAt?: string;
-          items?: CalendarItem[];
-          googleCalendar?: Partial<GoogleCalendarSyncStatus>;
-          googleCalendarSync?: Partial<GoogleCalendarSyncStatus> & { ok?: boolean; error?: string };
-          syncKey?: string;
-          warnings?: string[];
-        };
+        let data = (recoveredData ?? (await response.json().catch(() => ({})))) as CalendarStateSaveResponse;
+        if (response.status === 409) {
+          const liveResponse = await readLiveState();
+          const latestData = (await liveResponse.json().catch(() => ({}))) as CalendarStateSaveResponse;
+          if (liveResponse.status === 401) {
+            sessionExpired = true;
+            setAuthStatus("guest");
+            throw new Error(latestData.message || "Admin login expired. Sign in again before editing the calendar.");
+          }
+          if (!liveResponse.ok || !Array.isArray(latestData.items)) {
+            throw new Error(data.message || data.error || "Calendar save failed because the live calendar could not be reloaded.");
+          }
+          const mergedItems = mergeCalendarItemsAfterConflict(latestData.items, baselineItems, desiredItems);
+          if (!mergedItems) {
+            throw new Error(data.message || "Calendar changed elsewhere. Reload before saving so you do not overwrite live bookings.");
+          }
+          recoveredFromConflict = true;
+          submittedItems = mergedItems;
+          submittedSyncKey = typeof latestData.syncKey === "string" ? latestData.syncKey : calendarSyncKey;
+          submittedUpdatedAt = typeof latestData.updatedAt === "string" ? latestData.updatedAt : "";
+          response = await saveWithRetries(
+            mergedItems,
+            submittedSyncKey,
+            submittedUpdatedAt,
+          );
+          if (calendarSaveVersionRef.current !== saveVersion) return;
+          data = (await response.json().catch(() => ({}))) as CalendarStateSaveResponse;
+        }
         if (!response.ok && response.status >= 500) {
           await retryDelay(900);
-          response = await saveWithRetries();
+          response = await saveWithRetries(submittedItems, submittedSyncKey, submittedUpdatedAt);
           if (calendarSaveVersionRef.current !== saveVersion) return;
           data = (await response.json().catch(() => ({}))) as typeof data;
         }
@@ -4763,8 +4830,10 @@ function App() {
         setCalendarSaveError("");
         if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
         const persistedSyncKey = typeof data.syncKey === "string" ? data.syncKey : calendarSyncKey;
-        const persistedItems = Array.isArray(data.items) ? data.items : items;
+        const persistedItems = Array.isArray(data.items) ? data.items : submittedItems;
         lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
+        lastPersistedCalendarItemsRef.current = persistedItems;
+        if (recoveredFromConflict && !calendarItemsEquivalent(persistedItems, desiredItems)) setItems(persistedItems);
         if (typeof data.syncKey === "string" && data.syncKey !== calendarSyncKey) setCalendarSyncKey(data.syncKey);
         if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
         const clientSyncWarning = Array.isArray(data.warnings)
@@ -5302,6 +5371,7 @@ function App() {
     const loadedSyncKey =
       typeof data.syncKey === "string" && data.syncKey.startsWith("cg_") ? data.syncKey : calendarSyncKey;
     lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(accountItems, loadedSyncKey);
+    lastPersistedCalendarItemsRef.current = accountItems;
     if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
     setWorkspaceAccounts(loadedAccounts);
     if (Array.isArray(data.items)) setItems(accountItems);
@@ -9438,6 +9508,7 @@ function App() {
       const persistedSyncKey = typeof data.syncKey === "string" ? data.syncKey : fallbackSyncKey;
       setItems(persistedItems);
       lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
+      lastPersistedCalendarItemsRef.current = persistedItems;
       if (typeof data.syncKey === "string" && data.syncKey !== calendarSyncKey) setCalendarSyncKey(data.syncKey);
       if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
       if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
@@ -11047,6 +11118,7 @@ function App() {
       const persistedSyncKey = typeof data.syncKey === "string" ? data.syncKey : calendarSyncKey;
       if (calendarSaveVersionRef.current === saveVersion) {
         lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
+        lastPersistedCalendarItemsRef.current = persistedItems;
         setItems(persistedItems);
         if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
         if (typeof data.syncKey === "string" && data.syncKey !== calendarSyncKey) setCalendarSyncKey(data.syncKey);
