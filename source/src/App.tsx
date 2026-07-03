@@ -3855,7 +3855,11 @@ function App() {
       status: "success",
       functionName: "App",
       startedAt: adminBootStartedAtRef.current,
-      details: { visibleWeek: activeWeek },
+      details: {
+        visibleWeek: activeWeek,
+        renderedFrom: "calendar_shell_state",
+        deferredDataBlocksCalendar: false,
+      },
     });
     const runId = adminHydrationRunIdRef.current;
     if (adminWorkspaceDetailRefreshRunIdRef.current !== runId) {
@@ -3865,11 +3869,11 @@ function App() {
   }, [activeView, activeWeek, adminWorkspaceLoadStatus, authStatus, coachAccount, isEmbedMode]);
   useEffect(() => {
     if (
-	      isEmbedMode ||
-	      authStatus !== "authenticated" ||
-	      activeView !== "calendar" ||
-	      bookingCardsFirstRenderedRef.current ||
-	      visibleWeekItems.length === 0
+      isEmbedMode ||
+      authStatus !== "authenticated" ||
+      activeView !== "calendar" ||
+      bookingCardsFirstRenderedRef.current ||
+      visibleWeekItems.length === 0
     ) {
       return;
     }
@@ -3882,12 +3886,13 @@ function App() {
       functionName: "App",
       startedAt: adminBootStartedAtRef.current,
       details: {
-	        visibleWeek: activeWeek,
-	        visibleCards: visibleWeekItems.length,
-	        waitingFor: hasLoadedCalendarApiRef.current ? "full_admin_hydration" : "visible_calendar_data",
-	      },
-	    });
-	  }, [activeView, activeWeek, authStatus, isEmbedMode, visibleWeekItems]);
+        visibleWeek: activeWeek,
+        visibleCards: visibleWeekItems.length,
+        renderedFrom: hasLoadedCalendarApiRef.current ? "calendar_shell_state" : "visible_calendar_data",
+        deferredDataBlocksCards: false,
+      },
+    });
+  }, [activeView, activeWeek, authStatus, isEmbedMode, visibleWeekItems]);
   useEffect(() => {
     if (
       isEmbedMode ||
@@ -3914,6 +3919,8 @@ function App() {
         services: services.length,
         coaches: coachProfiles.length,
         locations: locations.length,
+        renderedFrom: "calendar_shell_state",
+        deferredDataBlocksCards: false,
       },
     });
   }, [activeView, adminWorkspaceLoadStatus, authStatus, coachProfiles.length, isEmbedMode, locations.length, services.length, visibleWeekItems]);
@@ -5099,20 +5106,28 @@ function App() {
     bookingCardsFirstRenderedRef.current = false;
     bookingCardsHydratedRef.current = false;
     const timer = startDiagnosticTimer({
-      system: "admin",
-      action: "admin_workspace_load",
+      system: "calendar",
+      action: "admin_calendar_shell_load",
       route: "GET /api/calendar-state",
       functionName: "startAdminWorkspaceHydration",
       expectedAccountId: activeAccountId,
+      details: {
+        routeUsed: "shell",
+        waitingFor: "calendar_shell_state",
+      },
     });
     trackDiagnosticEvent({
       system: "reload",
-      action: "FULL_ADMIN_RELOAD_STARTED",
+      action: "ADMIN_CALENDAR_SHELL_RELOAD_STARTED",
       phase: "admin_workspace",
       status: "started",
       route: "GET /api/calendar-state",
       functionName: "startAdminWorkspaceHydration",
       expectedAccountId: activeAccountId,
+      details: {
+        routeUsed: "shell",
+        nonCriticalRefreshDeferred: true,
+      },
     });
     hasLoadedCalendarApiRef.current = false;
     setAdminWorkspaceLoadStatus("loading");
@@ -5128,20 +5143,22 @@ function App() {
       setCalendarFeedStatus("connected");
       trackDiagnosticEvent({
         system: "reload",
-        action: "FULL_ADMIN_RELOAD_COMPLETED",
+        action: "ADMIN_CALENDAR_SHELL_RELOAD_COMPLETED",
         phase: "admin_workspace",
         status: "success",
         route: "GET /api/calendar-state",
         functionName: "startAdminWorkspaceHydration",
         expectedAccountId: activeAccountId,
-        details: { nonCriticalRefreshDeferred: true },
+        details: {
+          routeUsed: "shell",
+          nonCriticalRefreshDeferred: true,
+        },
       });
       finishDiagnosticTimer(timer, "success", {
         details: {
-          bookingsLoaded: accountItems.length,
-          servicesLoaded: services.length,
-          locationsLoaded: locations.length,
-          coachesLoaded: coachProfiles.length,
+          routeUsed: "shell",
+          calendarShellApplied: true,
+          nonCriticalRefreshDeferred: true,
         },
       });
     } catch (error) {
@@ -5152,7 +5169,7 @@ function App() {
       });
       trackDiagnosticEvent({
         system: "reload",
-        action: "FULL_ADMIN_RELOAD_COMPLETED",
+        action: "ADMIN_CALENDAR_SHELL_RELOAD_COMPLETED",
         phase: "admin_workspace",
         status: "failed",
         route: "GET /api/calendar-state",
