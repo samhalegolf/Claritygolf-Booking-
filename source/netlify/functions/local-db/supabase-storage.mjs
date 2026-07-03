@@ -90,6 +90,55 @@ function calendarItemInsertColumns(sqlText) {
   return match[1].split(",").map((column) => column.trim()).filter(Boolean);
 }
 
+function cleanIdList(values) {
+  const rawValues = Array.isArray(values) ? values : [];
+  if (rawValues.length === 0) return [];
+  const candidates = (rawValues.length === 1 && Array.isArray(rawValues[0])) ? rawValues[0] : rawValues;
+  const parsePgTextArray = (text) => {
+    const value = String(text ?? "").trim();
+    if (!value.startsWith("{") || !value.endsWith("}")) return [value];
+    const inner = value.slice(1, -1).trim();
+    if (!inner) return [];
+    return inner.split(",").map((item) => item.trim().replace(/^"|"$/g, ""));
+  };
+
+  const parsed = candidates.flatMap((candidate) => {
+    if (candidate == null) return [];
+    if (Array.isArray(candidate)) return candidate;
+    if (typeof candidate === "string") return parsePgTextArray(candidate);
+    return [candidate];
+  });
+
+  const unique = [];
+  const seen = new Set();
+  for (const value of parsed) {
+    if (value == null) continue;
+    const id = String(value).trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    unique.push(id);
+  }
+  return unique;
+}
+
+async function deleteCalendarItemsByIds(store, ids) {
+  const idList = cleanIdList(ids);
+  if (!idList.length) return [];
+  await Promise.all(idList.map((id) => store.delete("calendar_items", `id=eq.${encodeFilter(id)}`)));
+  return idList;
+}
+
+async function deleteCalendarItemsExceptIds(store, keepIds, accountId) {
+  const keep = new Set(cleanIdList(keepIds));
+  const filter = accountId ? `select=id&account_id=eq.${encodeFilter(accountId)}` : "select=id";
+  const rows = await store.select("calendar_items", filter);
+  const idsToDelete = rows
+    .map((row) => String(row?.id || ""))
+    .map((id) => id.trim())
+    .filter((id) => id && !keep.has(id));
+  return deleteCalendarItemsByIds(store, idsToDelete);
+}
+
 async function upsertCalendarItemsAccepting(store, rows) {
   store.omittedCalendarItemColumns ||= new Set();
   const omittedColumns = [...store.omittedCalendarItemColumns];
@@ -171,7 +220,7 @@ class SupabaseRestStore {
   async savePerson(row) {
     const email = String(row?.email || "").toLowerCase();
     if (email) {
-      const existing = await this.select("people", `select=id,email&email=eq.${encodeFilter(email)}&limit=1`);
+      const existing = await this.select("people", `select=id,email&email=ilike.${encodeFilter(email)}&limit=1`);
       const existingId = existing[0]?.id || "";
       if (existingId) {
         await this.upsert("people", [{ ...row, id: existingId, email }], "id");
@@ -219,6 +268,18 @@ class SupabaseRestStore {
       return { rows };
     }
     if (sql.startsWith("select * from calendar_items")) return this.select("calendar_items", "select=*&order=week.asc,day.asc,start.asc,id.asc");
+    if (sql === "delete from calendar_items where account_id = $1") {
+      await this.delete("calendar_items", `account_id=eq.${encodeFilter(values[0])}`);
+      return { rows: [] };
+    }
+    if (sql === "delete from calendar_items where account_id = $1 and not (id = any($2::text[]))") {
+      await deleteCalendarItemsExceptIds(this, values[1], values[0]);
+      return { rows: [] };
+    }
+    if (sql === "delete from calendar_items where not (id = any($1::text[]))") {
+      await deleteCalendarItemsExceptIds(this, values[0]);
+      return { rows: [] };
+    }
     if (sql === "delete from calendar_items") {
       await this.delete("calendar_items", "id=not.is.null");
       return { rows: [] };
@@ -245,7 +306,7 @@ class SupabaseRestStore {
       return { rows };
     }
     if (sql === "select id from people where lower(email) = lower($1) limit 1") {
-      const rows = await this.select("people", `select=id&email=eq.${encodeFilter(String(values[0] || "").toLowerCase())}&limit=1`);
+      const rows = await this.select("people", `select=id&email=ilike.${encodeFilter(String(values[0] || "").toLowerCase())}&limit=1`);
       return { rows };
     }
     if (sql === "select id from people where lower(name) = lower($1) and phone = $2 limit 1") {
