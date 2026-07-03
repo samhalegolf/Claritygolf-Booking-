@@ -45,6 +45,7 @@ export const config: Config = {
     "/api/locations",
     "/api/admin-settings",
     "/api/notification-history",
+    "/api/booking-confirmation-resend",
     "/api/test-email",
     "/api/system-smoke",
     "/api/google-calendar/*",
