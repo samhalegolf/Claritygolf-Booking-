@@ -499,6 +499,7 @@ button {
 }
 
 .settings-grid.settings-tab-experience > .settings-experience,
+.settings-grid.settings-tab-email > .settings-email,
 .settings-grid.settings-tab-account > .settings-account,
 .settings-grid.settings-tab-branding > .settings-branding,
 .settings-grid.settings-tab-integrations > .settings-integrations,
@@ -508,6 +509,7 @@ button {
 
 .settings-services,
 .settings-availability,
+.settings-email,
 .settings-experience,
 .settings-branding,
 .settings-integrations,
@@ -5133,6 +5135,77 @@ button {
   padding: 12px;
   border: 1px solid var(--border);
   background: var(--panel-soft);
+}
+
+.booking-records-tab {
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+}
+
+.booking-records-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  cursor: pointer;
+  color: var(--heading);
+  font-weight: 800;
+}
+
+.booking-records-summary::-webkit-details-marker {
+  display: none;
+}
+
+.booking-records-summary em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.booking-records-body {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.booking-resend-button {
+  justify-self: start;
+}
+
+.booking-email-records {
+  display: grid;
+  gap: 6px;
+}
+
+.booking-email-record {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.booking-email-record strong,
+.booking-email-record span,
+.booking-email-record em {
+  display: inline;
+  font-size: inherit;
+  font-style: normal;
+}
+
+.booking-email-record strong {
+  color: var(--heading);
+}
+
+.booking-email-record.failed em {
+  color: #a33d2d;
+}
+
+.booking-email-record.delivered em,
+.booking-email-record.sent em {
+  color: var(--coach-primary);
 }
 
 .receipt-panel-title {

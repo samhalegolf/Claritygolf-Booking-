@@ -4289,7 +4289,7 @@ function bookingEmailText({ title, intro, footer, variables }) {
 
 async function sendBookingNotifications(
   appointment,
-  { kind = "booking", testRecipient = "" } = {},
+  { kind = "booking", testRecipient = "", clientOnly = false, idempotencyNonce = "" } = {},
 ) {
   const settings = await readAdminSettings();
   const account = await readCoachAccount();
@@ -4308,13 +4308,14 @@ async function sendBookingNotifications(
 
   async function sendAndRecord(channel, recipient, subject, html, text, key) {
     const notificationKind = `${kind}_${channel}_email`;
+    const deliveryKey = idempotencyNonce ? `${key}-${idempotencyNonce}` : key;
     const result = await sendEmail({
       to: recipient,
       subject,
       html,
       text,
       replyTo,
-      idempotencyKey: key,
+      idempotencyKey: deliveryKey,
     });
     const status = result.sent ? "sent" : "failed";
 
@@ -4441,7 +4442,7 @@ async function sendBookingNotifications(
   const inviteAttendees = Array.isArray(appointment.attendees)
     ? appointment.attendees.filter((attendee) => attendee?.email && attendee?.token && attendee.status === "invited")
     : [];
-  if ((kind === "booking" || kind === "updated") && inviteAttendees.length) {
+  if (!clientOnly && (kind === "booking" || kind === "updated") && inviteAttendees.length) {
     for (const attendee of inviteAttendees) {
       const invite = customGroupInviteEmail({ appointment, attendee, service, account });
       if (settings.sendClientEmail) {
@@ -4461,7 +4462,7 @@ async function sendBookingNotifications(
     }
   }
 
-  if (settings.sendCoachEmail && kind !== "test") {
+  if (!clientOnly && settings.sendCoachEmail && kind !== "test") {
     const recipient = settings.coachEmail || "";
     const subject = renderTemplate(settings.adminEmailSubject, variables);
     const intro = renderTemplate(settings.adminEmailIntro, variables);
@@ -4479,12 +4480,12 @@ async function sendBookingNotifications(
     } else {
       jobs.push(recordSkipped("coach", "", subject, "missing_coach_email"));
     }
-  } else if (kind !== "test") {
+  } else if (!clientOnly && kind !== "test") {
     const subject = renderTemplate(settings.adminEmailSubject, variables);
     jobs.push(recordSkipped("coach", settings.coachEmail || "", subject, "disabled_in_notification_settings"));
   }
 
-  if (settings.sendAdminEmail && kind !== "test") {
+  if (!clientOnly && settings.sendAdminEmail && kind !== "test") {
     const recipient = settings.notificationEmail || account.contactEmail;
     const subject = renderTemplate(settings.adminEmailSubject, variables);
     const intro = renderTemplate(settings.adminEmailIntro, variables);
@@ -4508,7 +4509,7 @@ async function sendBookingNotifications(
         `${kind}-admin-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
       ),
     );
-  } else if (kind !== "test") {
+  } else if (!clientOnly && kind !== "test") {
     const recipient = settings.notificationEmail || account.contactEmail;
     const subject = renderTemplate(settings.adminEmailSubject, variables);
     jobs.push(
@@ -4523,6 +4524,32 @@ async function sendBookingNotifications(
 
   if (!jobs.length) return [];
   return Promise.all(jobs);
+}
+
+async function resendBookingConfirmation(appointmentId, context, state = null) {
+  assertAccountAdminContext(context, "You do not have permission to resend booking confirmations.");
+  assertAccountFeature(context.account, "notifications");
+  const current = state || await readCalendarState();
+  const cleanId = cleanString(appointmentId, "", 140);
+  const appointment = (current.items || []).find((item) => item.id === cleanId);
+  if (!appointment || appointment.kind !== "appointment" || !canReadCalendarItem(context, appointment, current)) {
+    throw Object.assign(new Error("Booking was not found in this workspace."), { status: 404 });
+  }
+  if (!cleanEmail(appointment.email, "")) {
+    throw Object.assign(new Error("This booking does not have a customer email address."), { status: 400 });
+  }
+
+  const results = await sendBookingNotifications(appointment, {
+    kind: "booking",
+    clientOnly: true,
+    idempotencyNonce: `admin-resend-${Date.now()}-${randomUUID().slice(0, 8)}`,
+  });
+  const notifications = filterNotificationsForContext(await readNotificationHistory(), context, current);
+  return {
+    ok: results.some((result) => result.sent),
+    results,
+    notifications,
+  };
 }
 
 async function sendInitialBookingNotifications(appointment, kind = "booking") {
@@ -6548,6 +6575,13 @@ export async function handleBookingApiRoute(
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "notifications");
       return json({ notifications: filterNotificationsForContext(await readNotificationHistory(), requestContext, state) });
+    }
+
+    if (req.method === "POST" && pathname === "/api/booking-confirmation-resend") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      return json(await resendBookingConfirmation(body.appointmentId || body.id, requestContext, state));
     }
 
     if (req.method === "POST" && pathname === "/api/test-email") {

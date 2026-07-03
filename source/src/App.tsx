@@ -485,6 +485,7 @@ type SettingsTab =
   | "coaches"
   | "locations"
   | "availability"
+  | "email"
   | "experience"
   | "account"
   | "branding"
@@ -664,6 +665,13 @@ type CalendarStateSaveResponse = {
   googleCalendarSync?: Partial<GoogleCalendarSyncStatus> & { ok?: boolean; error?: string };
   syncKey?: string;
   warnings?: string[];
+};
+type BookingConfirmationResendResponse = {
+  message?: string;
+  error?: string;
+  ok?: boolean;
+  results?: EmailSendResult[];
+  notifications?: NotificationRecord[];
 };
 type GoogleCalendarSyncStatus = {
   configured: boolean;
@@ -3560,6 +3568,7 @@ function App() {
   const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
   const [calendarSaveError, setCalendarSaveError] = useState("");
   const [deleteInFlightId, setDeleteInFlightId] = useState("");
+  const [resendConfirmationState, setResendConfirmationState] = useState<Record<string, "sending" | "sent" | "failed">>({});
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
   const [diagnosticEvents, setDiagnosticEvents] = useState<DiagnosticEvent[]>([]);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
@@ -3589,7 +3598,7 @@ function App() {
   const isAdminUser = currentAppUser.role === "admin" || currentAppUser.role === "account_admin" || currentAppUser.role === "platform_admin";
   useEffect(() => {
     if (isAdminUser) return;
-    if (["coaches", "locations", "experience", "account", "branding", "integrations", "data"].includes(settingsTab)) {
+    if (["coaches", "locations", "email", "experience", "account", "branding", "integrations", "data"].includes(settingsTab)) {
       setSettingsTab("services");
     }
   }, [isAdminUser, settingsTab]);
@@ -7784,7 +7793,7 @@ function App() {
     if (isEmbedMode && view !== "booking") return;
     setActiveView(view);
     setQuickCreate(null);
-    if (view === "settings") setSettingsTab("none");
+    if (view === "settings") setSettingsTab("services");
     if (view === "billing") setBillingSection("none");
     if (view !== "calendar") closeCalendarDetails();
   }
@@ -10594,6 +10603,41 @@ function App() {
     }
   }
 
+  async function resendBookingConfirmation(appointment: CalendarItem) {
+    if (appointment.kind !== "appointment") return;
+    if (!appointment.email?.trim()) {
+      setToast({ message: "This booking does not have a customer email address." });
+      return;
+    }
+    setResendConfirmationState((current) => ({ ...current, [appointment.id]: "sending" }));
+    try {
+      const response = await fetch("/api/booking-confirmation-resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ appointmentId: appointment.id }),
+      });
+      const data = (await response.json().catch(() => ({}))) as BookingConfirmationResendResponse;
+      if (!response.ok || data.ok === false) {
+        setResendConfirmationState((current) => ({ ...current, [appointment.id]: "failed" }));
+        setToast({ message: data.message || "Confirmation email could not be sent." });
+        return;
+      }
+      if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+      setResendConfirmationState((current) => ({ ...current, [appointment.id]: "sent" }));
+      setToast({ message: "Confirmation email sent." });
+      void refreshNotificationHistory();
+      window.setTimeout(() => {
+        setResendConfirmationState((current) => {
+          const { [appointment.id]: _done, ...rest } = current;
+          return rest;
+        });
+      }, 1800);
+    } catch {
+      setResendConfirmationState((current) => ({ ...current, [appointment.id]: "failed" }));
+      setToast({ message: "Could not reach the email sender." });
+    }
+  }
+
   async function saveClientProfile() {
     if (!clientEditor.name.trim() && !clientEditor.email.trim()) {
       setToast({ message: "A client needs a name or email." });
@@ -12766,29 +12810,48 @@ function App() {
       )}
 
       {selected.kind === "appointment" && (
-        <div className="lesson-receipts-panel">
-          <div className="receipt-panel-title">
+        <details className="booking-records-tab">
+          <summary className="booking-records-summary">
             <Mail size={16} />
-            <span>Email receipts</span>
+            <span>Booking records</span>
+            <em>{selectedAppointmentNotifications.length ? `${selectedAppointmentNotifications.length} email records` : "No email records"}</em>
+          </summary>
+          <div className="booking-records-body">
+            <button
+              className="outline-button booking-resend-button"
+              disabled={resendConfirmationState[selected.id] === "sending"}
+              onClick={() => resendBookingConfirmation(selected)}
+              type="button"
+            >
+              <Mail size={16} />
+              {resendConfirmationState[selected.id] === "sending"
+                ? "Sending"
+                : resendConfirmationState[selected.id] === "sent"
+                  ? "Sent"
+                  : resendConfirmationState[selected.id] === "failed"
+                    ? "Try again"
+                    : "Resend confirmation"}
+            </button>
+            <div className="booking-email-records">
+              {selectedAppointmentNotifications.length ? (
+                selectedAppointmentNotifications.map((notification) => (
+                  <p className={`booking-email-record ${notificationTone(notification.status)}`} key={notification.id}>
+                    <strong>{notificationKindLabel(notification.kind)}</strong>
+                    {" to "}
+                    <span>{notification.recipient || "No recipient"}</span>
+                    {" - "}
+                    <em>
+                      {notificationStatusLabel(notification)}
+                      {notification.createdAt ? `, ${notificationTimeLabel(notification.createdAt)}` : ""}
+                    </em>
+                  </p>
+                ))
+              ) : (
+                <p className="booking-email-record muted">No email receipts recorded for this lesson yet.</p>
+              )}
+            </div>
           </div>
-          {selectedAppointmentNotifications.length ? (
-            selectedAppointmentNotifications.map((notification) => (
-              <div className="email-receipt-row" key={notification.id}>
-                <span className={`email-status-dot ${notificationTone(notification.status)}`} aria-hidden="true" />
-                <div>
-                  <strong>{notificationKindLabel(notification.kind)}</strong>
-                  <span>{notification.recipient || "No recipient"}</span>
-                </div>
-                <em>
-                  {notificationStatusLabel(notification)}
-                  {notification.createdAt ? ` · ${notificationTimeLabel(notification.createdAt)}` : ""}
-                </em>
-              </div>
-            ))
-          ) : (
-            <p>No email receipts recorded for this lesson yet.</p>
-          )}
-        </div>
+        </details>
       )}
 
       {selected.kind === "block" && (
@@ -15508,6 +15571,16 @@ function App() {
               {isAdminUser ? (
                 <>
                   <button
+                    className={settingsTab === "email" ? "active" : ""}
+                    onClick={() => setSettingsTab("email")}
+                    role="tab"
+                    aria-selected={settingsTab === "email"}
+                    type="button"
+                  >
+                    <Mail size={16} />
+                    Email
+                  </button>
+                  <button
                     className={settingsTab === "experience" ? "active" : ""}
                     onClick={() => setSettingsTab("experience")}
                     role="tab"
@@ -16139,7 +16212,7 @@ function App() {
                 </details>
               </article>
 
-              <article className="data-card notification-card settings-section settings-experience settings-integrations">
+              <article className="data-card notification-card settings-section settings-email">
                 <span>Email Notifications</span>
                 <h2>Confirmation emails</h2>
                 <div className="settings-summary-grid">
@@ -16342,7 +16415,7 @@ function App() {
                 {settingsSaveErrorNotice()}
               </article>
 
-              <article className="data-card notification-card email-template-card settings-section settings-experience settings-branding">
+              <article className="data-card notification-card email-template-card settings-section settings-email">
                 <span>Email Template</span>
                 <h2>Customer experience</h2>
                 <div className="email-preview">
