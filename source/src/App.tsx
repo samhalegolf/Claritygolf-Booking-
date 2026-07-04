@@ -400,10 +400,26 @@ function cleanNotificationRecords(notifications: unknown[]): NotificationRecord[
 }
 
 type PeopleImportResult = {
+  ok?: boolean;
+  imported?: number;
+  created?: number;
+  updated?: number;
+  skipped?: number;
+  failed?: number;
+  errors?: Array<{ rowNumber?: string | number; name?: string; message?: string; reason?: string }>;
+  people?: Person[];
+};
+
+type PeopleImportDiagnostic = {
+  endpoint: string;
+  status: number;
+  ok: boolean;
   imported: number;
   updated: number;
   skipped: number;
-  people: Person[];
+  failed: number;
+  errors: string[];
+  message: string;
 };
 
 type PeopleUpdateResult = {
@@ -1855,6 +1871,53 @@ function parsePeopleImport(text: string): Person[] {
       };
     })
     .filter(Boolean) as Person[];
+}
+
+const PEOPLE_IMPORT_ENDPOINT = "/api/people/import-lite";
+
+function importNumber(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+}
+
+function importErrorMessages(result: PeopleImportResult) {
+  return Array.isArray(result.errors)
+    ? result.errors
+        .map((error) =>
+          [
+            error.rowNumber !== undefined ? `Row ${error.rowNumber}` : error.name,
+            error.message || error.reason,
+          ].filter(Boolean).join(": "),
+        )
+        .filter(Boolean)
+        .slice(0, 4)
+    : [];
+}
+
+function buildPeopleImportDiagnostic(
+  endpoint: string,
+  status: number,
+  ok: boolean,
+  result: PeopleImportResult,
+  fallbackMessage: string,
+): PeopleImportDiagnostic {
+  const imported = importNumber(result.imported ?? result.created);
+  const updated = importNumber(result.updated);
+  const skipped = importNumber(result.skipped);
+  const errors = importErrorMessages(result);
+  const failed = importNumber(result.failed ?? errors.length);
+  const summary = `${imported} imported, ${updated} updated, ${skipped} skipped${failed ? `, ${failed} failed` : ""}`;
+  return {
+    endpoint,
+    status,
+    ok,
+    imported,
+    updated,
+    skipped,
+    failed,
+    errors,
+    message: ok ? summary : errors[0] || fallbackMessage,
+  };
 }
 
 function generateSyncKey() {
@@ -3484,6 +3547,7 @@ function App() {
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [peopleImportText, setPeopleImportText] = useState("");
   const [peopleImportState, setPeopleImportState] = useState<"idle" | "importing" | "imported">("idle");
+  const [peopleImportDiagnostic, setPeopleImportDiagnostic] = useState<PeopleImportDiagnostic | null>(null);
   const [clientSearch, setClientSearch] = useState("");
   const [showClientImport, setShowClientImport] = useState(false);
   const [isAddingClient, setIsAddingClient] = useState(false);
@@ -10564,6 +10628,17 @@ function App() {
     void saveBrandSettings(defaultBrandSettings);
   }
 
+  async function handlePeopleImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const text = await file.text();
+    setPeopleImportState("idle");
+    setPeopleImportDiagnostic(null);
+    setPeopleImportText(text);
+    setShowClientImport(true);
+  }
+
   async function importPeopleFromText() {
     const parsedPeople = parsePeopleImport(peopleImportText);
     if (!parsedPeople.length) {
@@ -10572,24 +10647,40 @@ function App() {
     }
 
     setPeopleImportState("importing");
+    setPeopleImportDiagnostic(null);
     try {
-      const response = await fetch("/api/people/import", {
+      const response = await fetch(PEOPLE_IMPORT_ENDPOINT, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ people: parsedPeople }),
       });
+      const text = await response.text().catch(() => "");
+      let result: PeopleImportResult = {};
+      try {
+        result = text ? JSON.parse(text) as PeopleImportResult : {};
+      } catch {
+        result = { errors: [{ message: text.slice(0, 280) || response.statusText }] };
+      }
+      const diagnostic = buildPeopleImportDiagnostic(
+        PEOPLE_IMPORT_ENDPOINT,
+        response.status,
+        response.ok && result.ok !== false,
+        result,
+        "People import failed",
+      );
+      setPeopleImportDiagnostic(diagnostic);
       if (response.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "People import failed"));
-      const result = (await response.json()) as PeopleImportResult;
+      if (!response.ok || result.ok === false) throw new Error(diagnostic.message);
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       setPeopleImportText("");
       setShowClientImport(false);
       setPeopleImportState("imported");
       setToast({
-        message: `${result.imported} added, ${result.updated} updated${result.skipped ? `, ${result.skipped} skipped` : ""}.`,
+        message: diagnostic.message,
       });
       window.setTimeout(() => setPeopleImportState("idle"), 1600);
     } catch (error) {
@@ -14311,26 +14402,48 @@ function App() {
                   </div>
                   <Upload size={24} />
                 </div>
-                <textarea
-                  value={peopleImportText}
-                  onChange={(event) => {
-                    setPeopleImportState("idle");
-                    setPeopleImportText(event.target.value);
-                  }}
-                  placeholder="name,email,phone,notes,caddyProfileUrl"
-                />
-                <div className="import-actions">
-                  <span>{peopleImportPreview} ready</span>
-                  <button
-                    className="primary-button"
-                    onClick={importPeopleFromText}
-                    disabled={peopleImportState === "importing" || peopleImportPreview === 0}
-                  >
-                    {peopleImportState === "importing" ? "Importing" : peopleImportState === "imported" ? "Imported" : "Import"}
-                  </button>
-                </div>
-              </article>
-            )}
+	                <textarea
+	                  value={peopleImportText}
+	                  onChange={(event) => {
+	                    setPeopleImportState("idle");
+                      setPeopleImportDiagnostic(null);
+	                    setPeopleImportText(event.target.value);
+	                  }}
+	                  placeholder="name,email,phone,notes,caddyProfileUrl"
+	                />
+	                <div className="import-actions">
+                    <div className="import-action-tools">
+                      <label className="outline-button import-file-button">
+                        <Upload size={16} />
+                        CSV file
+                        <input accept=".csv,text/csv,text/plain" onChange={handlePeopleImportFile} type="file" />
+                      </label>
+	                    <span>{peopleImportPreview} ready</span>
+                    </div>
+	                  <button
+	                    className="primary-button"
+	                    onClick={importPeopleFromText}
+	                    disabled={peopleImportState === "importing" || peopleImportPreview === 0}
+	                  >
+	                    {peopleImportState === "importing" ? "Importing" : peopleImportState === "imported" ? "Imported" : "Import"}
+	                  </button>
+	                </div>
+                  {peopleImportDiagnostic && (
+                    <div className={`import-diagnostics${peopleImportDiagnostic.ok ? "" : " error"}`} role={peopleImportDiagnostic.ok ? "status" : "alert"}>
+                      <strong>{peopleImportDiagnostic.message}</strong>
+                      <span>Endpoint: {peopleImportDiagnostic.endpoint}</span>
+                      <span>HTTP: {peopleImportDiagnostic.status}</span>
+                      <span>
+                        Imported {peopleImportDiagnostic.imported} · Updated {peopleImportDiagnostic.updated} · Skipped {peopleImportDiagnostic.skipped}
+                        {peopleImportDiagnostic.failed ? ` · Failed ${peopleImportDiagnostic.failed}` : ""}
+                      </span>
+                      {peopleImportDiagnostic.errors.map((message) => (
+                        <em key={message}>{message}</em>
+                      ))}
+                    </div>
+                  )}
+	              </article>
+	            )}
 
             <div className="client-table">
               {filteredClients.length ? (
@@ -16905,25 +17018,47 @@ function App() {
                       <strong>{peopleImportPreview} ready</strong>
                     </div>
                   </summary>
-                  <textarea
-                    value={peopleImportText}
-                    onChange={(event) => {
-                      setPeopleImportState("idle");
-                      setPeopleImportText(event.target.value);
-                    }}
-                    placeholder="name,email,phone,notes,caddyProfileUrl"
-                  />
-                  <div className="import-actions">
-                    <span>{peopleImportPreview} ready</span>
-                    <button
-                      className="primary-button"
-                      onClick={importPeopleFromText}
-                      disabled={peopleImportState === "importing" || peopleImportPreview === 0}
-                    >
-                      {peopleImportState === "importing" ? "Importing" : peopleImportState === "imported" ? "Imported" : "Import"}
-                    </button>
-                  </div>
-                </details>
+	                  <textarea
+	                    value={peopleImportText}
+	                    onChange={(event) => {
+	                      setPeopleImportState("idle");
+                        setPeopleImportDiagnostic(null);
+	                      setPeopleImportText(event.target.value);
+	                    }}
+	                    placeholder="name,email,phone,notes,caddyProfileUrl"
+	                  />
+	                  <div className="import-actions">
+                      <div className="import-action-tools">
+                        <label className="outline-button import-file-button">
+                          <Upload size={16} />
+                          CSV file
+                          <input accept=".csv,text/csv,text/plain" onChange={handlePeopleImportFile} type="file" />
+                        </label>
+	                      <span>{peopleImportPreview} ready</span>
+                      </div>
+	                    <button
+	                      className="primary-button"
+	                      onClick={importPeopleFromText}
+	                      disabled={peopleImportState === "importing" || peopleImportPreview === 0}
+	                    >
+	                      {peopleImportState === "importing" ? "Importing" : peopleImportState === "imported" ? "Imported" : "Import"}
+	                    </button>
+	                  </div>
+                    {peopleImportDiagnostic && (
+                      <div className={`import-diagnostics${peopleImportDiagnostic.ok ? "" : " error"}`} role={peopleImportDiagnostic.ok ? "status" : "alert"}>
+                        <strong>{peopleImportDiagnostic.message}</strong>
+                        <span>Endpoint: {peopleImportDiagnostic.endpoint}</span>
+                        <span>HTTP: {peopleImportDiagnostic.status}</span>
+                        <span>
+                          Imported {peopleImportDiagnostic.imported} · Updated {peopleImportDiagnostic.updated} · Skipped {peopleImportDiagnostic.skipped}
+                          {peopleImportDiagnostic.failed ? ` · Failed ${peopleImportDiagnostic.failed}` : ""}
+                        </span>
+                        {peopleImportDiagnostic.errors.map((message) => (
+                          <em key={message}>{message}</em>
+                        ))}
+                      </div>
+                    )}
+	                </details>
               </article>
             </div>
           </section>

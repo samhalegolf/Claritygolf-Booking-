@@ -1075,9 +1075,60 @@ button {
   justify-content: space-between;
 }
 
+.import-action-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .import-actions > span {
   color: #76736d;
   font-size: 12px;
+}
+
+.import-action-tools > span {
+  color: #76736d;
+  font-size: 12px;
+}
+
+.import-file-button {
+  position: relative;
+  overflow: hidden;
+  min-height: 36px;
+}
+
+.import-file-button input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.import-diagnostics {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #d8d6cf;
+  background: #f7f6f1;
+  color: #191815;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.import-diagnostics strong {
+  font-size: 13px;
+}
+
+.import-diagnostics em {
+  color: #7f2d2d;
+  font-style: normal;
+}
+
+.import-diagnostics.error {
+  border-color: #e4b4b4;
+  background: #fff4f4;
+  color: #6f1d1d;
 }
 
 .client-table {

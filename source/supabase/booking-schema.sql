@@ -40,6 +40,7 @@ create index if not exists idx_calendar_items_account_slot
 
 create table if not exists public.people (
   id text primary key,
+  account_id text,
   name text not null,
   email text,
   phone text,
@@ -62,6 +63,9 @@ create index if not exists idx_people_email_lookup
 create index if not exists idx_people_name_phone_lookup
   on public.people (lower(name), phone)
   where phone is not null and phone <> '';
+
+create index if not exists idx_people_account_name_lookup
+  on public.people (account_id, lower(name), lower(email), id);
 
 create table if not exists public.admin_users (
   id text primary key,

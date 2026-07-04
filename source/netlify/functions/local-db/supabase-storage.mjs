@@ -40,6 +40,7 @@ function cleanRow(row) {
 const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["account_id", "status", "custom_group", "coach_id", "location_id", "coach", "location"]);
 const CALENDAR_ITEM_JSON_COLUMNS = new Set(["custom_group", "coach", "location"]);
 const CALENDAR_ITEM_ACCOUNT_SCOPE_COLUMNS = ["account_id", "coach_id", "location_id", "coach", "location"];
+const OPTIONAL_PEOPLE_COLUMNS = new Set(["account_id"]);
 
 function missingOptionalCalendarItemColumn(error) {
   const message = error instanceof Error ? error.message : String(error || "");
@@ -52,11 +53,27 @@ function missingOptionalCalendarItemColumn(error) {
   return "";
 }
 
+function missingOptionalPeopleColumn(error) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (!/people/i.test(message)) return "";
+  if (!/(schema cache|column|PGRST204|42703|Could not find)/i.test(message)) return "";
+  for (const column of OPTIONAL_PEOPLE_COLUMNS) {
+    const escaped = column.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`['"\`]${escaped}['"\`]|\\b${escaped}\\b`, "i").test(message)) return column;
+  }
+  return "";
+}
+
 function omitCalendarItemColumn(rows, column) {
   return rows.map((row) => {
     const { [column]: _omitted, ...rest } = row;
     return rest;
   });
+}
+
+function omitRowColumns(row, columns) {
+  const omitted = new Set(columns);
+  return Object.fromEntries(Object.entries(row || {}).filter(([key]) => !omitted.has(key)));
 }
 
 function omitCalendarItemColumns(rows, columns) {
@@ -201,6 +218,51 @@ async function upsertCalendarItemsAccepting(store, rows) {
   }
 }
 
+function peopleRowWithKnownColumns(store, row) {
+  store.omittedPeopleColumns ||= new Set();
+  return omitRowColumns(row, store.omittedPeopleColumns);
+}
+
+async function upsertPersonAccepting(store, row) {
+  let nextRow = peopleRowWithKnownColumns(store, row);
+  while (true) {
+    try {
+      await store.upsert("people", [nextRow], "id");
+      return;
+    } catch (error) {
+      const column = missingOptionalPeopleColumn(error);
+      if (!column || store.omittedPeopleColumns?.has(column)) throw error;
+      store.omittedPeopleColumns.add(column);
+      nextRow = peopleRowWithKnownColumns(store, row);
+      console.warn("supabase_storage:people_optional_column_omitted", {
+        column,
+        error: error instanceof Error ? error.message : String(error || ""),
+      });
+    }
+  }
+}
+
+async function updatePeopleAccepting(store, query, patch) {
+  let nextPatch = peopleRowWithKnownColumns(store, patch);
+  while (true) {
+    if (!Object.keys(nextPatch).length) return;
+    try {
+      await store.update("people", query, nextPatch);
+      return;
+    } catch (error) {
+      const column = missingOptionalPeopleColumn(error);
+      if (!column || store.omittedPeopleColumns?.has(column)) throw error;
+      store.omittedPeopleColumns.add(column);
+      nextPatch = peopleRowWithKnownColumns(store, patch);
+      if (!Object.keys(nextPatch).length) return;
+      console.warn("supabase_storage:people_optional_column_omitted", {
+        column,
+        error: error instanceof Error ? error.message : String(error || ""),
+      });
+    }
+  }
+}
+
 class SupabaseRestStore {
   constructor() {
     this.url = env("SUPABASE_URL").replace(/\/$/, "");
@@ -256,11 +318,11 @@ class SupabaseRestStore {
       const existing = await this.select("people", `select=id,email&email=ilike.${encodeFilter(email)}&limit=1`);
       const existingId = existing[0]?.id || "";
       if (existingId) {
-        await this.upsert("people", [{ ...row, id: existingId, email }], "id");
+        await upsertPersonAccepting(this, { ...row, id: existingId, email });
         return;
       }
     }
-    await this.upsert("people", [{ ...row, email: email || row.email }], "id");
+    await upsertPersonAccepting(this, { ...row, email: email || row.email });
   }
 
   async query(sqlText, values = []) {
@@ -355,8 +417,14 @@ class SupabaseRestStore {
       await this.savePerson(personFromParams(values));
       return { rows: [] };
     }
+    if (sql === "update people set account_id = $1 where account_id is null or btrim(account_id) = ''") {
+      const patch = { account_id: values[0] };
+      await updatePeopleAccepting(this, "account_id=is.null", patch);
+      await updatePeopleAccepting(this, `account_id=eq.${encodeFilter("")}`, patch);
+      return { rows: [] };
+    }
     if (sql.startsWith("update people")) {
-      await this.update("people", `id=eq.${encodeFilter(values[0])}`, personPatchFromParams(values));
+      await updatePeopleAccepting(this, `id=eq.${encodeFilter(values[0])}`, personPatchFromParams(values));
       return { rows: [] };
     }
 
@@ -494,13 +562,13 @@ function calendarItemFromParams(values, sqlText = "") {
 }
 
 function personFromParams(values) {
-  const [id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url] = values;
-  return cleanRow({ id, name, email: email || null, phone: phone || null, notes: notes || null, source, caddy_profile_id: caddy_profile_id || null, caddy_profile_url: caddy_profile_url || null, created_at: nowIso(), updated_at: nowIso() });
+  const [id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id] = values;
+  return cleanRow({ id, account_id: account_id || null, name, email: email || null, phone: phone || null, notes: notes || null, source, caddy_profile_id: caddy_profile_id || null, caddy_profile_url: caddy_profile_url || null, created_at: nowIso(), updated_at: nowIso() });
 }
 
 function personPatchFromParams(values) {
-  const [, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url] = values;
-  return { name, email: email || null, phone: phone || null, notes: notes || null, source: source || null, caddy_profile_id: caddy_profile_id || null, caddy_profile_url: caddy_profile_url || null, updated_at: nowIso() };
+  const [, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id] = values;
+  return { name, ...(account_id !== undefined ? { account_id: account_id || null } : {}), email: email || null, phone: phone || null, notes: notes || null, source: source || null, caddy_profile_id: caddy_profile_id || null, caddy_profile_url: caddy_profile_url || null, updated_at: nowIso() };
 }
 
 class SupabaseClientShim {

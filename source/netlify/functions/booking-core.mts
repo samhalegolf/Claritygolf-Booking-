@@ -1189,6 +1189,10 @@ function recordBelongsToAccount(record, accountId) {
   return recordAccountId(record, accountId) === accountId;
 }
 
+function peopleAccountIdFromSettings(settings, account = coachAccountFromSettings(settings)) {
+  return defaultAccountId(workspaceAccountsFromSettings(settings, account));
+}
+
 function calendarItemBelongsToAccount(item, accountId) {
   return recordBelongsToAccount(item, accountId);
 }
@@ -1329,9 +1333,10 @@ function personMatchesCalendarItem(person, item) {
 }
 
 function filterPeopleForContext(people, context, state) {
-  if (context.isAdmin) return people || [];
+  const accountPeople = (people || []).filter((person) => recordBelongsToAccount(person, context.accountId));
+  if (context.isAdmin) return accountPeople;
   const visibleItems = (state.items || []).filter((item) => canReadCalendarItem(context, item, state));
-  return (people || []).filter((person) => visibleItems.some((item) => personMatchesCalendarItem(person, item)));
+  return accountPeople.filter((person) => visibleItems.some((item) => personMatchesCalendarItem(person, item)));
 }
 
 function filterNotificationsForContext(notifications, context, state) {
@@ -1552,30 +1557,36 @@ async function ensureCoreTables() {
     CREATE INDEX IF NOT EXISTS idx_calendar_items_slot
     ON calendar_items (week, day, start)
   `;
-  await db().sql`
-    CREATE TABLE IF NOT EXISTS people (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT,
-      phone TEXT,
-      notes TEXT,
-      source TEXT,
+	  await db().sql`
+	    CREATE TABLE IF NOT EXISTS people (
+	      id TEXT PRIMARY KEY,
+	      account_id TEXT,
+	      name TEXT NOT NULL,
+	      email TEXT,
+	      phone TEXT,
+	      notes TEXT,
+	      source TEXT,
       caddy_profile_id TEXT,
       caddy_profile_url TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
-  await db().sql`DROP INDEX IF EXISTS idx_people_email_unique`;
+	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	    )
+	  `;
+  await db().sql`ALTER TABLE people ADD COLUMN IF NOT EXISTS account_id TEXT`;
+	  await db().sql`DROP INDEX IF EXISTS idx_people_email_unique`;
+	  await db().sql`
+	    CREATE INDEX IF NOT EXISTS idx_people_email_lookup
+	    ON people (LOWER(email))
+	    WHERE email IS NOT NULL AND email <> ''
+	  `;
+	  await db().sql`
+	    CREATE INDEX IF NOT EXISTS idx_people_name_phone_lookup
+	    ON people (LOWER(name), phone)
+	    WHERE phone IS NOT NULL AND phone <> ''
+	  `;
   await db().sql`
-    CREATE INDEX IF NOT EXISTS idx_people_email_lookup
-    ON people (LOWER(email))
-    WHERE email IS NOT NULL AND email <> ''
-  `;
-  await db().sql`
-    CREATE INDEX IF NOT EXISTS idx_people_name_phone_lookup
-    ON people (LOWER(name), phone)
-    WHERE phone IS NOT NULL AND phone <> ''
+    CREATE INDEX IF NOT EXISTS idx_people_account_name_lookup
+    ON people (account_id, LOWER(name), LOWER(email), id)
   `;
   await db().sql`
     CREATE TABLE IF NOT EXISTS admin_users (
@@ -1881,11 +1892,21 @@ async function ensureNotificationHistoryTable() {
   `;
 }
 
+async function backfillLegacyPeopleAccountIds(accountId) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  await db().sql`
+    UPDATE people
+    SET account_id = ${cleanAccountId}
+    WHERE account_id IS NULL OR BTRIM(account_id) = ''
+  `;
+}
+
 async function ensureSeeded() {
   if (!seedReadyPromise) {
     seedReadyPromise = (async () => {
       await ensureCoreTables();
       await seedSettings();
+      await backfillLegacyPeopleAccountIds(peopleAccountIdFromSettings(await readSettingsMap()));
       await ensureNotificationHistoryTable();
       await seedItems();
       await seedPeopleFromAppointments();
@@ -1998,7 +2019,7 @@ function normalizeItems(items) {
     : initialItems;
 }
 
-function cleanPerson(person, source = "import") {
+function cleanPerson(person, source = "import", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
   if (!person || typeof person !== "object") return null;
   const joinedName = [person.firstName, person.lastName]
     .filter(Boolean)
@@ -2013,6 +2034,7 @@ function cleanPerson(person, source = "import") {
 
   return {
     id: cleanString(person.id, "", 120),
+    accountId: cleanSlug(person.accountId || person.account_id, accountId),
     name: name || email,
     email,
     phone: cleanString(person.phone, "", 80),
@@ -2045,10 +2067,12 @@ function normalizedPersonPhone(value) {
 
 function compatiblePersonMatch(candidate, rows = []) {
   if (!candidate || !Array.isArray(rows) || !rows.length) return null;
+  const accountId = cleanSlug(candidate.accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const scopedRows = rows.filter((row) => recordBelongsToAccount(row, accountId));
 
   const candidateId = cleanString(candidate.id, "", 120);
   if (candidateId && !candidateId.startsWith("appointment-")) {
-    const exactId = rows.find((row) => String(row?.id || "") === candidateId);
+    const exactId = scopedRows.find((row) => String(row?.id || "") === candidateId);
     if (exactId) return exactId;
   }
 
@@ -2057,7 +2081,7 @@ function compatiblePersonMatch(candidate, rows = []) {
   const phone = normalizedPersonPhone(candidate.phone);
 
   if (name && email) {
-    const matches = rows.filter(
+    const matches = scopedRows.filter(
       (row) =>
         normalizedPersonName(row?.name) === name &&
         normalizedPersonEmail(row?.email) === email,
@@ -2070,7 +2094,7 @@ function compatiblePersonMatch(candidate, rows = []) {
   }
 
   if (name && phone) {
-    const exact = rows.find(
+    const exact = scopedRows.find(
       (row) =>
         normalizedPersonName(row?.name) === name &&
         normalizedPersonPhone(row?.phone) === phone,
@@ -2081,7 +2105,7 @@ function compatiblePersonMatch(candidate, rows = []) {
   // Use a lone contact-method match only when it is unambiguous and names do
   // not conflict. Shared family or organisation details must remain separate.
   if (email) {
-    const matches = rows.filter(
+    const matches = scopedRows.filter(
       (row) => normalizedPersonEmail(row?.email) === email,
     );
     if (matches.length === 1) {
@@ -2098,7 +2122,7 @@ function compatiblePersonMatch(candidate, rows = []) {
   }
 
   if (phone) {
-    const matches = rows.filter(
+    const matches = scopedRows.filter(
       (row) => normalizedPersonPhone(row?.phone) === phone,
     );
     if (matches.length === 1) {
@@ -2137,9 +2161,10 @@ function queryRows(result) {
   return Array.isArray(result) ? result : result?.rows || [];
 }
 
-function rowToPerson(row) {
+function rowToPerson(row, fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
   return {
     id: row.id,
+    accountId: row.account_id || fallbackAccountId,
     name: row.name,
     email: row.email || "",
     phone: row.phone || "",
@@ -2292,27 +2317,30 @@ async function recordNotification({
   return record;
 }
 
-async function readPeople() {
+async function readPeople(fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
   const rows = await db().sql`
     SELECT * FROM people
     ORDER BY LOWER(name), LOWER(email), id
   `;
-  return rows.map(rowToPerson);
+  return rows.map((row) => rowToPerson(row, fallbackAccountId));
 }
 
-async function importPeople(rawPeople, source = "import") {
+async function importPeople(rawPeople, source = "import", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
   const people = Array.isArray(rawPeople)
-    ? rawPeople.map((person) => cleanPerson(person, source)).filter(Boolean)
+    ? rawPeople.map((person) => cleanPerson(person, source, cleanAccountId)).filter(Boolean)
     : [];
   const result = {
     imported: 0,
     updated: 0,
     skipped: Array.isArray(rawPeople) ? rawPeople.length - people.length : 0,
+    failed: 0,
+    errors: [],
     people: [],
   };
   if (!Array.isArray(rawPeople)) return result;
 
-  const knownPeople = await readPeople();
+  const knownPeople = await readPeople(cleanAccountId);
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
@@ -2327,24 +2355,27 @@ async function importPeople(rawPeople, source = "import") {
                email = COALESCE(NULLIF($3, ''), email),
                phone = COALESCE(NULLIF($4, ''), phone),
                notes = COALESCE(NULLIF($5, ''), notes),
-               source = COALESCE(NULLIF($6, ''), source),
-               caddy_profile_id = COALESCE(NULLIF($7, ''), caddy_profile_id),
-               caddy_profile_url = COALESCE(NULLIF($8, ''), caddy_profile_url),
-               updated_at = NOW()
-           WHERE id = $1`,
-          [
+	               source = COALESCE(NULLIF($6, ''), source),
+	               caddy_profile_id = COALESCE(NULLIF($7, ''), caddy_profile_id),
+	               caddy_profile_url = COALESCE(NULLIF($8, ''), caddy_profile_url),
+	               account_id = COALESCE(NULLIF($9, ''), account_id),
+	               updated_at = NOW()
+	           WHERE id = $1`,
+	          [
             existingId,
             person.name,
             person.email,
             person.phone,
             person.notes,
-            person.source || source,
-            person.caddyProfileId,
-            person.caddyProfileUrl,
-          ],
-        );
-        Object.assign(existing, {
-          name: person.name || existing.name,
+	            person.source || source,
+	            person.caddyProfileId,
+	            person.caddyProfileUrl,
+              person.accountId || cleanAccountId,
+	          ],
+	        );
+	        Object.assign(existing, {
+            accountId: person.accountId || cleanAccountId,
+	          name: person.name || existing.name,
           email: person.email || existing.email,
           phone: person.phone || existing.phone,
           notes: person.notes || existing.notes,
@@ -2355,21 +2386,22 @@ async function importPeople(rawPeople, source = "import") {
         result.updated += 1;
       } else {
         const personId = person.id || randomUUID();
-        await client.query(
-          `INSERT INTO people (
-             id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
-           ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), NOW())`,
-          [
+	        await client.query(
+	          `INSERT INTO people (
+	             id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id, created_at, updated_at
+	           ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NOW(), NOW())`,
+	          [
             personId,
             person.name,
             person.email,
             person.phone,
             person.notes,
-            person.source || source,
-            person.caddyProfileId,
-            person.caddyProfileUrl,
-          ],
-        );
+	            person.source || source,
+	            person.caddyProfileId,
+	            person.caddyProfileUrl,
+              person.accountId || cleanAccountId,
+	          ],
+	        );
         knownPeople.push({ ...person, id: personId });
         result.imported += 1;
       }
@@ -2382,19 +2414,20 @@ async function importPeople(rawPeople, source = "import") {
     client.release();
   }
 
-  result.people = await readPeople();
+  result.people = await readPeople(cleanAccountId);
   return result;
 }
 
-async function updatePerson(rawPerson) {
-  const person = cleanPerson(rawPerson, "manual_update");
+async function updatePerson(rawPerson, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const person = cleanPerson(rawPerson, "manual_update", cleanAccountId);
   if (!person) {
     const error = new Error("A person needs a name or email.");
     error.status = 400;
     throw error;
   }
 
-  const knownPeople = await readPeople();
+  const knownPeople = await readPeople(cleanAccountId);
   const existing = compatiblePersonMatch(person, knownPeople);
   const existingId = existing?.id || "";
   const personId =
@@ -2413,38 +2446,41 @@ async function updatePerson(rawPerson) {
              email = NULLIF($3, ''),
              phone = NULLIF($4, ''),
              notes = NULLIF($5, ''),
-             source = COALESCE(NULLIF($6, ''), source),
-             caddy_profile_id = NULLIF($7, ''),
-             caddy_profile_url = NULLIF($8, ''),
-             updated_at = NOW()
-         WHERE id = $1`,
-        [
+	             source = COALESCE(NULLIF($6, ''), source),
+	             caddy_profile_id = NULLIF($7, ''),
+	             caddy_profile_url = NULLIF($8, ''),
+	             account_id = COALESCE(NULLIF($9, ''), account_id),
+	             updated_at = NOW()
+	         WHERE id = $1`,
+	        [
           personId,
           person.name,
           person.email,
           person.phone,
           person.notes,
-          person.source,
-          person.caddyProfileId,
-          person.caddyProfileUrl,
-        ],
-      );
-    } else {
-      await client.query(
-        `INSERT INTO people (
-          id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
-        ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), NOW())`,
-        [
+	          person.source,
+	          person.caddyProfileId,
+	          person.caddyProfileUrl,
+            person.accountId || cleanAccountId,
+	        ],
+	      );
+	    } else {
+	      await client.query(
+	        `INSERT INTO people (
+	          id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id, created_at, updated_at
+	        ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NOW(), NOW())`,
+	        [
           personId,
           person.name,
           person.email,
           person.phone,
           person.notes,
-          person.source,
-          person.caddyProfileId,
-          person.caddyProfileUrl,
-        ],
-      );
+	          person.source,
+	          person.caddyProfileId,
+	          person.caddyProfileUrl,
+            person.accountId || cleanAccountId,
+	        ],
+	      );
     }
 
     const saved = await client.query(
@@ -2452,7 +2488,7 @@ async function updatePerson(rawPerson) {
       [personId],
     );
     await client.query("COMMIT");
-    return { person: rowToPerson(saved.rows[0]), people: await readPeople() };
+    return { person: rowToPerson(saved.rows[0], cleanAccountId), people: await readPeople(cleanAccountId) };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -2559,9 +2595,11 @@ async function writeItems(items, options = {}) {
 async function seedPeopleFromAppointments() {
   const countRows = await db().sql`SELECT COUNT(*) AS count FROM people`;
   if ((countRows[0]?.count ?? 0) > 0) return;
+  const settings = await readSettingsMap();
   await importPeople(
     initialItems.map(personFromAppointment).filter(Boolean),
     "appointment",
+    peopleAccountIdFromSettings(settings),
   );
 }
 
@@ -3001,9 +3039,10 @@ async function writeBrandSettings(settings) {
 async function readCalendarState() {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
   const account = coachAccountFromSettings(settingsMap);
+  const peopleAccountId = peopleAccountIdFromSettings(settingsMap, account);
   const [items, people, notifications, googleCalendar] = await Promise.all([
     readItems(),
-    readPeople(),
+    readPeople(peopleAccountId),
     readNotificationHistory(),
     getGoogleCalendarSyncStatus(),
   ]);
@@ -3420,7 +3459,8 @@ async function writeCalendarState(nextState, context = null) {
   const updatedAt = nowIso();
   await setSetting("syncKey", syncKey);
   await setSetting("updatedAt", updatedAt);
-  await importPeople(items.map(personFromAppointment).filter(Boolean), "appointment");
+  const peopleAccountId = context?.accountId || defaultAccountId(current.workspaceAccounts);
+  await importPeople(items.map(personFromAppointment).filter(Boolean), "appointment", peopleAccountId);
   let googleCalendarSync = null;
   try {
     googleCalendarSync = await syncGoogleCalendarIfEnabled();
@@ -3442,7 +3482,7 @@ async function writeCalendarState(nextState, context = null) {
     coaches: current.coaches,
     locations: current.locations,
     availability: current.availability,
-    people: await readPeople(),
+    people: await readPeople(peopleAccountId),
     notifications: await readNotificationHistory(),
     settings: await readAdminSettings(),
     brand: await readBrandSettings(),
@@ -3495,7 +3535,8 @@ async function deleteCalendarItemById(id, context = null) {
 
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  await importPeople(current.items.filter((item) => item.id !== cleanId).map(personFromAppointment).filter(Boolean), "appointment");
+  const peopleAccountId = context?.accountId || defaultAccountId(current.workspaceAccounts);
+  await importPeople(current.items.filter((item) => item.id !== cleanId).map(personFromAppointment).filter(Boolean), "appointment", peopleAccountId);
   let googleCalendarSync = null;
   try {
     googleCalendarSync = await syncGoogleCalendarIfEnabled();
@@ -3520,7 +3561,8 @@ async function writePublicBookingState(currentState, items) {
   const cleanItems = await writeItems(items);
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  await importPeople(cleanItems.map(personFromAppointment).filter(Boolean), "appointment");
+  const peopleAccountId = cleanItems.find((item) => item.accountId)?.accountId || defaultAccountId(currentState.workspaceAccounts || []);
+  await importPeople(cleanItems.map(personFromAppointment).filter(Boolean), "appointment", peopleAccountId);
   await syncGoogleCalendarIfEnabled().catch((error) => console.error("public_booking_state:google_calendar_sync_failed", error));
   return {
     syncKey: currentState.syncKey,
@@ -3535,7 +3577,7 @@ async function writePublicBookingState(currentState, items) {
 
 function schedulePublicBookingSideEffects(context, appointment) {
   const task = (async () => {
-    await importPeople([personFromAppointment(appointment)].filter(Boolean), "appointment");
+    await importPeople([personFromAppointment(appointment)].filter(Boolean), "appointment", appointment?.accountId || defaultWorkspaceAccountFromCoachAccount().id);
     await syncGoogleCalendarIfEnabled().catch((error) =>
       console.error("public_booking:google_calendar_sync_failed", error),
     );
@@ -6752,24 +6794,32 @@ export async function handleBookingApiRoute(
       const state = await readCalendarState();
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
-      return json({ people: filterPeopleForContext(await readPeople(), requestContext, state) });
+      return json({ people: filterPeopleForContext(await readPeople(requestContext.accountId), requestContext, state) });
     }
 
-    if (req.method === "POST" && pathname === "/api/people/import") {
-      const body = await parseBody(req);
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountAdminContext(requestContext, "You do not have permission to import clients.");
-      assertAccountFeature(requestContext.account, "clients");
-      return json(await importPeople(body.people, "manual_import"), 201);
-    }
+	    if (req.method === "POST" && (pathname === "/api/people/import" || pathname === "/api/people/import-lite")) {
+	      const body = await parseBody(req);
+	      const state = await readCalendarState();
+	      const requestContext = await resolveBackendRequestContext(req, state);
+	      assertAccountAdminContext(requestContext, "You do not have permission to import clients.");
+	      assertAccountFeature(requestContext.account, "clients");
+      const result = await importPeople(body.people || body.clients || [], body.source || "manual_import", requestContext.accountId);
+	      return json(
+        {
+          ok: true,
+          ...result,
+          people: filterPeopleForContext(result.people, requestContext, state),
+        },
+        201,
+      );
+	    }
 
     if (req.method === "PUT" && pathname === "/api/people") {
       const body = await parseBody(req);
       const state = await readCalendarState();
       const requestContext = await resolveBackendRequestContext(req, state);
       assertCanManagePerson(requestContext, body.person || body, state);
-      const result = await updatePerson(body.person || body);
+	      const result = await updatePerson(body.person || body, requestContext.accountId);
       return json({
         ...result,
         people: filterPeopleForContext(result.people, requestContext, state),
