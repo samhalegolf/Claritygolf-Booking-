@@ -52,13 +52,16 @@ create table if not exists public.people (
   updated_at timestamptz not null default now()
 );
 
--- Email is a contact channel, not a person identity. Families, schools and
--- organisations may legitimately share one address.
+-- Email uniqueness is scoped by workspace account, not global across all clients.
 drop index if exists public.idx_people_email_unique;
+
+create unique index if not exists idx_people_account_email_unique
+  on public.people (account_id, lower(email))
+  where email is not null and btrim(email) <> '';
 
 create index if not exists idx_people_email_lookup
   on public.people (lower(email))
-  where email is not null and email <> '';
+  where email is not null and btrim(email) <> '';
 
 create index if not exists idx_people_name_phone_lookup
   on public.people (lower(name), phone)
