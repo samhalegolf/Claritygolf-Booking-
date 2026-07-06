@@ -223,6 +223,35 @@ function peopleRowWithKnownColumns(store, row) {
   return omitRowColumns(row, store.omittedPeopleColumns);
 }
 
+function peoplePatchDuplicateEmailError(error, query, patch) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  if (!/(supabase patch people failed 409|idx_people_email_unique|duplicate key)/i.test(message)) return null;
+  const idMatch = String(query || "").match(/(?:^|&)id=eq\.([^&]+)/);
+  let personId = idMatch ? idMatch[1] : "";
+  try {
+    personId = decodeURIComponent(personId);
+  } catch {
+    // Keep the encoded id if it is not valid URI text.
+  }
+  const email = String(patch?.email || "").trim().toLowerCase();
+  return Object.assign(new Error("Another person already uses that email address."), {
+    status: 409,
+    code: "DUPLICATE_PERSON_EMAIL",
+    operationOwner: "people_patch",
+    route: "PATCH people",
+    personId,
+    email,
+    details: {
+      operationOwner: "people_patch",
+      route: "PATCH people",
+      httpStatus: 409,
+      personId,
+      email,
+      backendMessage: message.slice(0, 500),
+    },
+  });
+}
+
 async function upsertPersonAccepting(store, row) {
   let nextRow = peopleRowWithKnownColumns(store, row);
   while (true) {
@@ -250,6 +279,8 @@ async function updatePeopleAccepting(store, query, patch) {
       await store.update("people", query, nextPatch);
       return;
     } catch (error) {
+      const duplicateEmailError = peoplePatchDuplicateEmailError(error, query, nextPatch);
+      if (duplicateEmailError) throw duplicateEmailError;
       const column = missingOptionalPeopleColumn(error);
       if (!column || store.omittedPeopleColumns?.has(column)) throw error;
       store.omittedPeopleColumns.add(column);
@@ -424,7 +455,7 @@ class SupabaseRestStore {
       return { rows: [] };
     }
     if (sql.startsWith("update people")) {
-      await updatePeopleAccepting(this, `id=eq.${encodeFilter(values[0])}`, personPatchFromParams(values));
+      await updatePeopleAccepting(this, `id=eq.${encodeFilter(values[0])}`, personPatchFromParams(values, sql));
       return { rows: [] };
     }
 
@@ -566,9 +597,10 @@ function personFromParams(values) {
   return cleanRow({ id, account_id: account_id || null, name, email: email || null, phone: phone || null, notes: notes || null, source, caddy_profile_id: caddy_profile_id || null, caddy_profile_url: caddy_profile_url || null, created_at: nowIso(), updated_at: nowIso() });
 }
 
-function personPatchFromParams(values) {
+function personPatchFromParams(values, sqlText = "") {
   const [, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id] = values;
-  return { name, ...(account_id !== undefined ? { account_id: account_id || null } : {}), email: email || null, phone: phone || null, notes: notes || null, source: source || null, caddy_profile_id: caddy_profile_id || null, caddy_profile_url: caddy_profile_url || null, updated_at: nowIso() };
+  const writesEmail = !sqlText || /\bemail\s*=/.test(normalizeSql(sqlText));
+  return { name, ...(account_id !== undefined ? { account_id: account_id || null } : {}), ...(writesEmail ? { email: email || null } : {}), phone: phone || null, notes: notes || null, source: source || null, caddy_profile_id: caddy_profile_id || null, caddy_profile_url: caddy_profile_url || null, updated_at: nowIso() };
 }
 
 class SupabaseClientShim {

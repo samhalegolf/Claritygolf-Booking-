@@ -1553,6 +1553,7 @@ async function ensureCoreTables() {
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach JSONB`;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location JSONB`;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
+  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS completed_at TEXT`;
   await db().sql`
     CREATE INDEX IF NOT EXISTS idx_calendar_items_slot
     ON calendar_items (week, day, start)
@@ -1920,6 +1921,8 @@ async function ensureSeeded() {
 }
 
 function rowToItem(row) {
+  const updatedAt = cleanString(typeof row?.updated_at === "string" ? row.updated_at : String(row?.updated_at || ""), "", 120);
+  const completedAt = cleanString(typeof row?.completed_at === "string" ? row.completed_at : String(row?.completed_at || ""), "", 120);
   const status = ["completed", "cancelled", "no_show"].includes(row.status)
     ? row.status
     : "booked";
@@ -1944,10 +1947,157 @@ function rowToItem(row) {
     coach: cleanBookingCoachSnapshot(row.coach),
     location: cleanBookingLocationSnapshot(row.location),
     status: cancelledGroupSession ? "cancelled" : status,
+    updatedAt,
+    completedAt,
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
     ...(customGroup || {}),
 	  };
 	}
+
+function lessonCompleteActionFailure(error, baseDetails, durationMs) {
+  const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+  const code = cleanString(error?.code, "BOOKING_COMPLETE_FAILED", 120);
+  const backendMessage = error instanceof Error ? error.message : String(error?.message || error || "Lesson completion failed.");
+  return {
+    ...baseDetails,
+    httpStatus: status,
+    durationMs,
+    errorCode: code,
+    backendMessage,
+  };
+}
+
+async function completeCalendarItemById(currentState, itemId, requestContext) {
+  const startedAt = Date.now();
+  const requestTimed = { startedAt, dbLookupMs: 0, writeMs: 0, settingsUpdateMs: 0 };
+  const cleanItemId = cleanString(itemId, "", 140);
+  const baseDetails = {
+    action: "lesson_complete",
+    route: "PUT /api/calendar-state",
+    operationOwner: "lesson_complete",
+    calendarItemId: cleanItemId,
+    accountId: requestContext?.accountId || "",
+  };
+
+  if (!cleanItemId) {
+    throw Object.assign(new Error("Lesson completion requires a booking id."), {
+      status: 400,
+      code: "BOOKING_COMPLETE_INVALID_ID",
+      ...baseDetails,
+    });
+  }
+
+  const lookupStart = Date.now();
+  const target = currentState.items.find((item) => item.id === cleanItemId);
+  requestTimed.dbLookupMs = Date.now() - lookupStart;
+
+  if (!target) {
+    throw Object.assign(new Error("Lesson was not found in this workspace."), {
+      status: 404,
+      code: "BOOKING_COMPLETE_NOT_FOUND",
+      ...baseDetails,
+    });
+  }
+
+  if (target.kind !== "appointment") {
+    throw Object.assign(new Error("Only appointments can be marked completed."), {
+      status: 400,
+      code: "BOOKING_COMPLETE_INVALID_ITEM",
+      ...baseDetails,
+    });
+  }
+
+  assertCanWriteCalendarItem(requestContext, target, target, currentState);
+
+  if (target.status === "completed") {
+    const alreadyCompletedTimings = {
+      ...requestTimed,
+      writeMs: 0,
+      totalMs: Date.now() - startedAt,
+    };
+    console.info("lesson_complete_saved", {
+      ...baseDetails,
+      httpStatus: 200,
+      itemId: cleanItemId,
+      calendarId: target.accountId || "",
+      message: "lesson already completed",
+      durationMs: alreadyCompletedTimings.totalMs,
+      stageTimings: alreadyCompletedTimings,
+      idempotent: true,
+    });
+    return {
+      action: "lesson_complete",
+      itemId: cleanItemId,
+      item: target,
+      status: "completed",
+      calendarId: target.accountId || "",
+      updatedAt: currentState.updatedAt,
+      stageTimings: alreadyCompletedTimings,
+      idempotent: true,
+    };
+  }
+
+  const completionAt = nowIso();
+  const updateStarted = Date.now();
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+    const rows = queryRows(
+      await client.query(
+        `UPDATE calendar_items
+         SET status = $2,
+             completed_at = $3,
+             updated_at = NOW()
+         WHERE id = $1
+           AND account_id = $4
+         RETURNING *`,
+        [cleanItemId, "completed", completionAt, target.accountId || requestContext.accountId || ""],
+      ),
+    );
+    if (!rows.length) {
+      throw Object.assign(new Error("Lesson was not found in your workspace."), {
+        status: 404,
+        code: "BOOKING_COMPLETE_NOT_FOUND",
+        ...baseDetails,
+      });
+    }
+    await client.query("COMMIT");
+    requestTimed.writeMs = Date.now() - updateStarted;
+    const row = rows[0];
+    const item = rowToItem(row);
+    const updateSettingStarted = Date.now();
+    await setSetting("updatedAt", row.updated_at || nowIso());
+    requestTimed.settingsUpdateMs = Date.now() - updateSettingStarted;
+    const stageTimings = {
+      ...requestTimed,
+      totalMs: Date.now() - startedAt,
+    };
+    console.info("lesson_complete_saved", {
+      ...baseDetails,
+      itemId: cleanItemId,
+      calendarId: item.accountId || "",
+      httpStatus: 200,
+      durationMs: stageTimings.totalMs,
+      stageTimings,
+      idempotent: false,
+      updatedAt: item.updatedAt || currentState.updatedAt,
+    });
+    return {
+      action: "lesson_complete",
+      itemId: cleanItemId,
+      item,
+      status: "completed",
+      calendarId: item.accountId || "",
+      updatedAt: item.updatedAt || currentState.updatedAt,
+      stageTimings,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 function isCancelledGroupSessionLike(item) {
   return (
@@ -2133,6 +2283,44 @@ function compatiblePersonMatch(candidate, rows = []) {
   }
 
   return null;
+}
+
+function personByEmail(rows = [], email = "", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const normalizedEmail = normalizedPersonEmail(email);
+  if (!normalizedEmail || !Array.isArray(rows)) return null;
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  return (
+    rows.find(
+      (row) =>
+        recordBelongsToAccount(row, cleanAccountId) &&
+        normalizedPersonEmail(row?.email) === normalizedEmail,
+    ) || null
+  );
+}
+
+function duplicatePersonEmailError(person, existing, route = "PUT /api/people") {
+  const email = normalizedPersonEmail(person?.email);
+  const personId = cleanString(person?.id, "", 120);
+  const duplicatePersonId = cleanString(existing?.id, "", 120);
+  return Object.assign(
+    new Error("Another person already uses that email address."),
+    {
+      status: 409,
+      code: "DUPLICATE_PERSON_EMAIL",
+      operationOwner: "people_patch",
+      route,
+      personId,
+      email,
+      details: {
+        operationOwner: "people_patch",
+        route,
+        httpStatus: 409,
+        personId,
+        duplicatePersonId,
+        email,
+      },
+    },
+  );
 }
 
 function personFromAppointment(item) {
@@ -2435,24 +2623,42 @@ async function updatePerson(rawPerson, accountId = defaultWorkspaceAccountFromCo
     (person.id && !person.id.startsWith("appointment-")
       ? person.id
       : randomUUID());
+  const emailOwner = personByEmail(knownPeople, person.email, cleanAccountId);
+  const emailOwnerId = cleanString(emailOwner?.id, "", 120);
+  if (emailOwnerId && emailOwnerId !== personId) {
+    throw duplicatePersonEmailError({ ...person, id: personId }, emailOwner);
+  }
 
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
     if (existingId) {
+      const emailUnchanged =
+        normalizedPersonEmail(existing?.email) === normalizedPersonEmail(person.email);
       await client.query(
-        `UPDATE people
-         SET name = $2,
-             email = NULLIF($3, ''),
-             phone = NULLIF($4, ''),
-             notes = NULLIF($5, ''),
-	             source = COALESCE(NULLIF($6, ''), source),
-	             caddy_profile_id = NULLIF($7, ''),
-	             caddy_profile_url = NULLIF($8, ''),
-	             account_id = COALESCE(NULLIF($9, ''), account_id),
-	             updated_at = NOW()
-	         WHERE id = $1`,
-	        [
+        emailUnchanged
+          ? `UPDATE people
+             SET name = $2,
+                 phone = NULLIF($4, ''),
+                 notes = NULLIF($5, ''),
+                 source = COALESCE(NULLIF($6, ''), source),
+                 caddy_profile_id = NULLIF($7, ''),
+                 caddy_profile_url = NULLIF($8, ''),
+                 account_id = COALESCE(NULLIF($9, ''), account_id),
+                 updated_at = NOW()
+             WHERE id = $1`
+          : `UPDATE people
+             SET name = $2,
+                 email = NULLIF($3, ''),
+                 phone = NULLIF($4, ''),
+                 notes = NULLIF($5, ''),
+                 source = COALESCE(NULLIF($6, ''), source),
+                 caddy_profile_id = NULLIF($7, ''),
+                 caddy_profile_url = NULLIF($8, ''),
+                 account_id = COALESCE(NULLIF($9, ''), account_id),
+                 updated_at = NOW()
+             WHERE id = $1`,
+        [
           personId,
           person.name,
           person.email,
@@ -3492,12 +3698,76 @@ async function writeCalendarState(nextState, context = null) {
   };
 }
 
+function deleteErrorIsPeoplePatch(error) {
+  const code = cleanString(error?.code, "", 120);
+  const message = error instanceof Error ? error.message : String(error?.message || error || "");
+  return (
+    code === "DUPLICATE_PERSON_EMAIL" ||
+    /patch people|update people|people.*duplicate|idx_people_email_unique/i.test(message)
+  );
+}
+
+function deleteErrorOperationOwner(error) {
+  const explicitOwner = cleanString(error?.operationOwner, "", 120);
+  if (explicitOwner) return explicitOwner;
+  if (deleteErrorIsPeoplePatch(error)) return "people_patch";
+  const code = cleanString(error?.code, "", 120);
+  if (code === "BOOKING_DELETE_VERIFY_FAILED") return "calendar_reload_verify";
+  if (code === "BOOKING_DELETE_RELOAD_FAILED") return "calendar_reload";
+  if (code === "BOOKING_DELETE_INVALID_ID" || code === "BOOKING_DELETE_NOT_FOUND") return "calendar_delete_request";
+  return "calendar_delete";
+}
+
+function deleteErrorCode(error, operationOwner) {
+  if (operationOwner === "people_patch") return "BOOKING_DELETE_OWNERSHIP_VIOLATION";
+  const code = cleanString(error?.code, "", 120);
+  if (code) return code;
+  if (operationOwner === "calendar_reload") return "BOOKING_DELETE_RELOAD_FAILED";
+  return "BOOKING_DELETE_FAILED";
+}
+
+function deleteUserMessage(operationOwner, code) {
+  if (operationOwner === "people_patch") {
+    return "Booking delete triggered an unexpected people save. The calendar result was not trusted.";
+  }
+  if (code === "BOOKING_DELETE_VERIFY_FAILED") {
+    return "The booking delete could not be verified because the backend still returned the deleted booking.";
+  }
+  if (operationOwner === "calendar_reload") {
+    return "The booking delete reached storage, but calendar state could not be reloaded for verification.";
+  }
+  return "The booking could not be deleted. The calendar was not changed.";
+}
+
+function deleteFailureDiagnostics(error, baseDetails, durationMs) {
+  const operationOwner = deleteErrorOperationOwner(error);
+  const code = deleteErrorCode(error, operationOwner);
+  const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+  const backendMessage = error instanceof Error ? error.message : String(error?.message || error || "Calendar delete failed.");
+  const details = error?.details && typeof error.details === "object" ? error.details : {};
+  const route = cleanString(error?.route, "", 120) || baseDetails.route;
+  return {
+    ...baseDetails,
+    ...details,
+    route,
+    operationOwner,
+    httpStatus: status,
+    durationMs,
+    errorCode: code,
+    backendMessage,
+    personId: cleanString(error?.personId || details.personId || baseDetails.personId, "", 120),
+    email: normalizedPersonEmail(error?.email || details.email || baseDetails.email),
+  };
+}
+
 async function deleteCalendarItemById(id, context = null) {
   const cleanId = cleanString(id, "", 140);
   if (!cleanId) {
     throw Object.assign(new Error("Calendar item id is required for delete."), {
       status: 400,
       code: "BOOKING_DELETE_INVALID_ID",
+      operationOwner: "calendar_delete_request",
+      route: "DELETE /api/calendar-state",
     });
   }
   const current = await readCalendarState();
@@ -3508,6 +3778,8 @@ async function deleteCalendarItemById(id, context = null) {
       throw Object.assign(new Error("Booking was not found in this workspace."), {
         status: 404,
         code: "BOOKING_DELETE_NOT_FOUND",
+        operationOwner: "calendar_delete_request",
+        route: "DELETE /api/calendar-state",
       });
     }
     assertCanWriteCalendarItem(context, existingItem, existingItem, current);
@@ -3522,7 +3794,10 @@ async function deleteCalendarItemById(id, context = null) {
     );
     if (verifyRows.length) {
       throw Object.assign(new Error("Deleted calendar item is still present after delete."), {
+        status: 409,
         code: "BOOKING_DELETE_VERIFY_FAILED",
+        operationOwner: "calendar_delete_verify",
+        route: "DELETE /api/calendar-state",
       });
     }
     await client.query("COMMIT");
@@ -3535,8 +3810,6 @@ async function deleteCalendarItemById(id, context = null) {
 
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  const peopleAccountId = context?.accountId || defaultAccountId(current.workspaceAccounts);
-  await importPeople(current.items.filter((item) => item.id !== cleanId).map(personFromAppointment).filter(Boolean), "appointment", peopleAccountId);
   let googleCalendarSync = null;
   try {
     googleCalendarSync = await syncGoogleCalendarIfEnabled();
@@ -3548,7 +3821,24 @@ async function deleteCalendarItemById(id, context = null) {
       error: error instanceof Error ? error.message : "Google Calendar sync failed.",
     };
   }
-  const nextState = await readCalendarState();
+  let nextState = null;
+  try {
+    nextState = await readCalendarState();
+  } catch (error) {
+    throw Object.assign(
+      new Error(
+        `Calendar delete persisted, but verification reload failed: ${
+          error instanceof Error ? error.message : String(error || "unknown reload error")
+        }`,
+      ),
+      {
+        status: 502,
+        code: "BOOKING_DELETE_RELOAD_FAILED",
+        operationOwner: "calendar_reload",
+        route: "GET /api/calendar-state",
+      },
+    );
+  }
   return {
     ...nextState,
     items: context ? nextState.items.filter((item) => canReadCalendarItem(context, item, nextState)) : nextState.items,
@@ -6422,6 +6712,62 @@ export async function handleBookingApiRoute(
     if (req.method === "PUT" && pathname === "/api/calendar-state") {
       const body = await parseBody(req);
       const current = await readCalendarState();
+      const action = cleanString(body?.action, "", 120);
+      if (action === "complete_lesson") {
+        const startAt = Date.now();
+        const requestContext = await resolveBackendRequestContext(req, current);
+        const itemId = cleanString(body?.itemId, "", 140);
+        const timedDetails = {
+          action: "lesson_complete",
+          itemId,
+          calendarId: current.account?.id || "",
+          route: "PUT /api/calendar-state",
+          operationOwner: "lesson_complete",
+          accountId: requestContext.accountId || "",
+        };
+        console.info("lesson_complete_started", {
+          ...timedDetails,
+          expectedStatus: "completed",
+          expectedRevision: cleanString(body?.updatedAt, "", 140),
+          httpStatus: 0,
+        });
+        try {
+          const response = await completeCalendarItemById(
+            current,
+            itemId,
+            requestContext,
+          );
+          const durationMs = Date.now() - startAt;
+          console.info("lesson_complete_saved", {
+            ...timedDetails,
+            httpStatus: 200,
+            backendUpdatedAt: response.updatedAt || current.updatedAt,
+            itemId,
+            itemStatus: "completed",
+            durationMs,
+            stageTimings: response.stageTimings || {
+              totalMs: durationMs,
+            },
+          });
+          return json(response);
+        } catch (error) {
+          const durationMs = Date.now() - startAt;
+          const diagnostics = lessonCompleteActionFailure(
+            error,
+            timedDetails,
+            durationMs,
+          );
+          console.error("lesson_complete_failed", diagnostics);
+          return json(
+            {
+              error: diagnostics.errorCode,
+              message: diagnostics.backendMessage,
+              ...diagnostics,
+            },
+            diagnostics.httpStatus || 500,
+          );
+        }
+      }
       const requestContext = await resolveBackendRequestContext(req, current);
       const nextState = await writeCalendarState({
         syncKey:
@@ -6464,16 +6810,26 @@ export async function handleBookingApiRoute(
       const current = await readCalendarState();
       const requestContext = await resolveBackendRequestContext(req, current);
       const calendarItemId = cleanString(url.searchParams.get("id"), "", 140);
+      const targetItem = current.items.find((item) => item.id === calendarItemId) || {};
       const startedAt = Date.now();
       const baseDetails = {
         action: "delete_calendar_item",
-        route: "/api/calendar-state",
+        route: "DELETE /api/calendar-state",
+        verificationRoute: "GET /api/calendar-state",
+        operationOwner: "calendar_delete",
+        bookingId: calendarItemId,
         calendarItemId,
+        personId: cleanString(targetItem.personId || targetItem.person?.id, "", 120),
+        email: normalizedPersonEmail(targetItem.email),
         accountId: requestContext.accountId || "",
         targetedDelete: true,
       };
       console.info("BOOKING_DELETE_STARTED", baseDetails);
-      console.info("BOOKING_DELETE_VERIFY_STARTED", baseDetails);
+      console.info("BOOKING_DELETE_VERIFY_STARTED", {
+        ...baseDetails,
+        route: "GET /api/calendar-state",
+        operationOwner: "calendar_reload_verify",
+      });
       try {
         const nextState = await deleteCalendarItemById(calendarItemId, requestContext);
         const verificationResult = nextState.items.some((item) => item.id === calendarItemId)
@@ -6482,16 +6838,23 @@ export async function handleBookingApiRoute(
         if (verificationResult !== "not_found") {
           throw Object.assign(new Error("Deleted calendar item was returned by the next calendar read."), {
             code: "BOOKING_DELETE_VERIFY_FAILED",
+            status: 409,
+            operationOwner: "calendar_reload_verify",
+            route: "GET /api/calendar-state",
           });
         }
         const durationMs = Date.now() - startedAt;
         console.info("BOOKING_DELETE_COMPLETED", {
           ...baseDetails,
+          httpStatus: 200,
           durationMs,
           verificationResult,
         });
         console.info("BOOKING_DELETE_VERIFY_COMPLETED", {
           ...baseDetails,
+          route: "GET /api/calendar-state",
+          operationOwner: "calendar_reload_verify",
+          httpStatus: 200,
           durationMs,
           verificationResult,
         });
@@ -6523,34 +6886,31 @@ export async function handleBookingApiRoute(
           diagnostics: {
             code: "BOOKING_DELETE_VERIFY_COMPLETED",
             ...baseDetails,
+            route: "GET /api/calendar-state",
+            operationOwner: "calendar_reload_verify",
+            httpStatus: 200,
             durationMs,
             verificationResult,
           },
         });
       } catch (error) {
-        const anyError = error as { code?: string; status?: number; message?: string };
-        const message = anyError?.message || "Calendar delete failed.";
-        const code = anyError?.code || "BOOKING_DELETE_FAILED";
         const durationMs = Date.now() - startedAt;
-        console.error(code === "BOOKING_DELETE_VERIFY_FAILED" ? "BOOKING_DELETE_VERIFY_FAILED" : "BOOKING_DELETE_FAILED", {
-          ...baseDetails,
-          durationMs,
-          errorCode: code,
-          backendMessage: message,
-        });
+        const failure = deleteFailureDiagnostics(error, baseDetails, durationMs);
+        if (failure.operationOwner === "people_patch") {
+          console.error("BOOKING_DELETE_OWNERSHIP_VIOLATION", failure);
+        }
+        console.error(failure.errorCode === "BOOKING_DELETE_VERIFY_FAILED" ? "BOOKING_DELETE_VERIFY_FAILED" : "BOOKING_DELETE_FAILED", failure);
         return json(
           {
-            error: code,
-            message: "The booking could not be deleted. The calendar was not changed.",
-            detail: message,
+            error: failure.errorCode,
+            message: deleteUserMessage(failure.operationOwner, failure.errorCode),
+            detail: failure.backendMessage,
             diagnostics: {
-              code,
-              ...baseDetails,
-              durationMs,
-              backendMessage: message,
+              code: failure.errorCode,
+              ...failure,
             },
           },
-          anyError?.status || 500,
+          failure.httpStatus || 500,
         );
       }
     }
@@ -6831,6 +7191,10 @@ export async function handleBookingApiRoute(
     const anyError = error as {
       status?: number;
       code?: string;
+      operationOwner?: string;
+      route?: string;
+      personId?: string;
+      email?: string;
       expectedUpdatedAt?: string;
       backendUpdatedAt?: string;
       conflictSource?: string;
@@ -6845,6 +7209,10 @@ export async function handleBookingApiRoute(
         ...(anyError?.expectedUpdatedAt ? { expectedUpdatedAt: anyError.expectedUpdatedAt } : {}),
         ...(anyError?.backendUpdatedAt ? { backendUpdatedAt: anyError.backendUpdatedAt } : {}),
         ...(anyError?.conflictSource ? { conflictSource: anyError.conflictSource } : {}),
+        ...(anyError?.operationOwner ? { operationOwner: anyError.operationOwner } : {}),
+        ...(anyError?.route ? { route: anyError.route } : {}),
+        ...(anyError?.personId ? { personId: anyError.personId } : {}),
+        ...(anyError?.email ? { email: anyError.email } : {}),
         ...(anyError?.details !== undefined ? { details: anyError.details } : {}),
       },
       status,

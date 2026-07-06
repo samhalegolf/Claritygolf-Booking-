@@ -129,6 +129,8 @@ type CalendarItem = {
   location?: BookingLocationSnapshot;
   coach?: BookingCoachSnapshot;
   status?: BookingStatus;
+  updatedAt?: string;
+  completedAt?: string;
   customGroup?: true;
   attendees?: CustomGroupAttendee[];
   calculatedPrice?: number;
@@ -664,12 +666,29 @@ type LessonCompleteDiagnostic = {
   conflictSource?: string;
   expectedRevision?: string;
   backendRevision?: string;
+  durationMs?: number;
+  stageTimings?: Record<string, number>;
 };
 type LessonCompleteErrorMap = Record<string, LessonCompleteDiagnostic>;
+type BookingDeleteDiagnostics = {
+  code?: string;
+  operationOwner?: string;
+  route?: string;
+  httpStatus?: number;
+  bookingId?: string;
+  calendarItemId?: string;
+  personId?: string;
+  email?: string;
+  backendMessage?: string;
+  verificationResult?: string;
+  [key: string]: unknown;
+};
 type CalendarStateSaveResponse = {
   message?: string;
   error?: string;
+  detail?: string;
   details?: unknown;
+  diagnostics?: BookingDeleteDiagnostics;
   expectedUpdatedAt?: string;
   backendUpdatedAt?: string;
   conflictSource?: string;
@@ -682,6 +701,25 @@ type CalendarStateSaveResponse = {
   syncKey?: string;
   warnings?: string[];
 };
+
+type LessonCompleteResponse = {
+  message?: string;
+  error?: string;
+  detail?: string;
+  durationMs?: number;
+  action?: "lesson_complete";
+  itemId?: string;
+  item?: CalendarItem;
+  status?: "completed";
+  updatedAt?: string;
+  stageTimings?: Record<string, number>;
+  calendarId?: string;
+  backendMessage?: string;
+  backendError?: string;
+  backendDetails?: string;
+  stage?: string;
+  idempotent?: boolean;
+} & CalendarStateSaveResponse;
 type BookingConfirmationResendResponse = {
   message?: string;
   error?: string;
@@ -9337,6 +9375,8 @@ function App() {
       expectedRevision?: string;
       backendRevision?: string;
       httpStatus?: number;
+      durationMs?: number;
+      stageTimings?: Record<string, number>;
       conflictSource?: string;
       backendMessage?: string;
       backendError?: string;
@@ -9352,6 +9392,8 @@ function App() {
       expectedRevision: details.expectedRevision || "",
       backendRevision: details.backendRevision || "",
       httpStatus: details.httpStatus || 0,
+      durationMs: details.durationMs || 0,
+      stageTimings: details.stageTimings || {},
       conflictSource: details.conflictSource || "",
       backendMessage: details.backendMessage || "",
       backendError: details.backendError || "",
@@ -9375,16 +9417,28 @@ function App() {
     ].filter(Boolean).join(" · ");
   }
 
+  function normalizeStageTimings(value: unknown): Record<string, number> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const staged = value as Record<string, unknown>;
+    return Object.entries(staged).reduce<Record<string, number>>((acc, [key, raw]) => {
+      const valueNumber = Number(raw);
+      if (Number.isFinite(valueNumber)) {
+        acc[key] = valueNumber;
+      }
+      return acc;
+    }, {});
+  }
+
   function lessonCompleteDiagnosticFromResponse(
     itemId: string,
     responseStatus: number,
-    data: CalendarStateSaveResponse,
+    data: LessonCompleteResponse,
     fallbackMessage: string,
     revisions: { expectedRevision?: string; backendRevision?: string; conflictSource?: string } = {},
   ): LessonCompleteDiagnostic {
     const backendMessage = workspaceDiagnosticValue(data.message);
     const backendError = workspaceDiagnosticValue(data.error);
-    const backendDetails = workspaceDiagnosticValue(data.details);
+    const backendDetails = workspaceDiagnosticValue(data.details || data.backendDetails);
     return {
       action: "lesson_complete",
       itemId,
@@ -9396,7 +9450,9 @@ function App() {
       backendDetails,
       conflictSource: revisions.conflictSource || workspaceDiagnosticValue(data.conflictSource),
       expectedRevision: revisions.expectedRevision,
-      backendRevision: revisions.backendRevision || data.backendUpdatedAt || data.updatedAt,
+      backendRevision: revisions.backendRevision || data.backendUpdatedAt || data.updatedAt || "",
+      durationMs: typeof data.durationMs === "number" && Number.isFinite(data.durationMs) ? data.durationMs : undefined,
+      stageTimings: normalizeStageTimings(data.stageTimings),
     };
   }
 
@@ -9406,143 +9462,20 @@ function App() {
     return error;
   }
 
-  async function readLatestCalendarStateForLessonComplete(itemId: string) {
-    const response = await fetch("/api/calendar-state", {
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    });
-    const data = (await response.json().catch(() => ({}))) as CalendarStateSaveResponse;
-    if (response.status === 401) {
-      setAuthStatus("guest");
-      throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
-    }
-    if (!response.ok) {
-      const diagnostic = lessonCompleteDiagnosticFromResponse(
-        itemId,
-        response.status,
-        data,
-        "Calendar state could not be loaded before completing the lesson.",
-        {
-          expectedRevision: calendarStateVersion,
-          backendRevision: data.backendUpdatedAt || data.updatedAt,
-          conflictSource: data.conflictSource || data.error,
-        },
-      );
-      logLessonCompleteDiagnostic("fetch_latest_failed", {
-        lessonId: itemId,
-        calendarId: "unknown",
-        expectedStatus: "completed",
-        expectedRevision: calendarStateVersion,
-        backendRevision: data.backendUpdatedAt || data.updatedAt,
-        httpStatus: response.status,
-        conflictSource: data.conflictSource || data.error,
-        backendMessage: diagnostic.backendMessage,
-        backendError: diagnostic.backendError,
-        backendDetails: diagnostic.backendDetails,
-      });
-      throw lessonCompleteFailure(diagnostic);
-    }
-    return data;
-  }
-
-  async function saveCompletedLessonFromLatest(itemId: string, attempt: number) {
-    const latest = await readLatestCalendarStateForLessonComplete(itemId);
-    const latestItems = Array.isArray(latest.items) ? latest.items : [];
-    const latestItem = latestItems.find((item) => item.id === itemId && item.kind === "appointment");
-    const calendarId = latestItem
-      ? resolvedCalendarItemCoachId(latestItem, itemService(latestItem, services), coachProfiles, coachAccount) ||
-        latestItem.locationId ||
-        latestItem.accountId ||
-        "unknown"
-      : "unknown";
-    const expectedRevision = typeof latest.updatedAt === "string" ? latest.updatedAt : "";
-    if (!latestItem) {
-      const diagnostic: LessonCompleteDiagnostic = {
-        action: "lesson_complete",
-        itemId,
-        expectedStatus: "completed",
-        serverStatus: 404,
-        message: "Lesson was not completed because it could not be found. Reload and try again.",
-        backendError: "missing_lesson",
-        expectedRevision,
-      };
-      logLessonCompleteDiagnostic("lesson_missing", {
-        lessonId: itemId,
-        calendarId,
-        expectedStatus: "completed",
-        expectedRevision,
-        httpStatus: 404,
-        conflictSource: "missing_lesson",
-      });
-      throw lessonCompleteFailure(diagnostic);
-    }
-    const nextItems = latestItems.map((item) =>
-      item.id === itemId && item.kind === "appointment" ? { ...item, status: "completed" as BookingStatus } : item,
-    );
+  async function requestCompleteAppointment(itemId: string, expectedRevision: string) {
     const response = await fetch("/api/calendar-state", {
       method: "PUT",
       credentials: "same-origin",
       cache: "no-store",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
-        items: nextItems,
-        replaceItems: true,
-        syncKey: typeof latest.syncKey === "string" ? latest.syncKey : calendarSyncKey,
+        action: "complete_lesson",
+        itemId,
         updatedAt: expectedRevision,
       }),
     });
-    const data = (await response.json().catch(() => ({}))) as CalendarStateSaveResponse;
-    const backendRevision = data.backendUpdatedAt || data.updatedAt || "";
-    if (response.status === 409 && attempt === 0) {
-      logLessonCompleteDiagnostic("conflict_retry", {
-        lessonId: itemId,
-        calendarId,
-        expectedRevision,
-        backendRevision,
-        httpStatus: response.status,
-        conflictSource: data.conflictSource || data.error,
-      });
-      return saveCompletedLessonFromLatest(itemId, attempt + 1);
-    }
-    if (response.status === 401) {
-      setAuthStatus("guest");
-      throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
-    }
-    if (!response.ok) {
-      const diagnostic = lessonCompleteDiagnosticFromResponse(
-        itemId,
-        response.status,
-        data,
-        "Lesson completion failed.",
-        {
-          expectedRevision,
-          backendRevision,
-          conflictSource: data.conflictSource || data.error,
-        },
-      );
-      logLessonCompleteDiagnostic("save_failed", {
-        lessonId: itemId,
-        calendarId,
-        expectedStatus: "completed",
-        expectedRevision,
-        backendRevision,
-        httpStatus: response.status,
-        conflictSource: data.conflictSource || data.error,
-        backendMessage: diagnostic.backendMessage,
-        backendError: diagnostic.backendError,
-        backendDetails: diagnostic.backendDetails,
-      });
-      throw lessonCompleteFailure(diagnostic);
-    }
-    logLessonCompleteDiagnostic("saved", {
-      lessonId: itemId,
-      calendarId,
-      expectedRevision,
-      backendRevision: data.updatedAt || backendRevision,
-      httpStatus: response.status,
-    });
-    return { data, fallbackItems: nextItems, fallbackSyncKey: typeof latest.syncKey === "string" ? latest.syncKey : calendarSyncKey };
+    const data = (await response.json().catch(() => ({}))) as LessonCompleteResponse;
+    return { response, data };
   }
 
   async function completeAppointmentSafely(itemId: string) {
@@ -9557,6 +9490,7 @@ function App() {
       objectType: "booking",
       objectId: itemId,
     });
+    const startAt = Date.now();
     pendingLessonCompleteIdRef.current = itemId;
     setPendingLessonCompleteId(itemId);
     setLessonCompleteErrors((current) => {
@@ -9566,23 +9500,142 @@ function App() {
     });
     setCalendarSaveStatus("saving");
     setCalendarSaveError("");
+    const expectedRevision = typeof calendarStateVersion === "string" ? calendarStateVersion : "";
+    const targetItem = items.find((item) => item.id === itemId && item.kind === "appointment");
+    const calendarId = targetItem
+      ? resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles, coachAccount) ||
+        targetItem.locationId ||
+        targetItem.accountId ||
+        "unknown"
+      : "unknown";
+    if (!targetItem) {
+      const missingDiagnostic: LessonCompleteDiagnostic = {
+        action: "lesson_complete",
+        itemId,
+        expectedStatus: "completed",
+        expectedRevision,
+        serverStatus: 404,
+        message: "Lesson was not completed because it could not be found. Reload and try again.",
+        backendError: "missing_lesson",
+      };
+      logLessonCompleteDiagnostic("lesson_missing", {
+        lessonId: itemId,
+        calendarId,
+        expectedStatus: "completed",
+        expectedRevision,
+        httpStatus: 404,
+        conflictSource: "missing_lesson",
+      });
+      throw lessonCompleteFailure(missingDiagnostic);
+    }
+    const optimisticAt = new Date().toISOString();
+  const optimisticItems = items.map((item) =>
+      item.id === itemId && item.kind === "appointment"
+        ? {
+            ...item,
+            status: "completed" as BookingStatus,
+            completedAt: optimisticAt,
+            updatedAt: optimisticAt,
+          }
+        : item,
+    );
+    const previousItems = items;
+    setItems(optimisticItems);
+    logLessonCompleteDiagnostic("lesson_complete_started", {
+      lessonId: itemId,
+      calendarId,
+      expectedStatus: "completed",
+      expectedRevision,
+      httpStatus: 0,
+      backendMessage: "Submitting single-item completion request",
+      stageTimings: {
+        optimisticMs: Date.now() - startAt,
+      },
+    });
     try {
-      const { data, fallbackItems, fallbackSyncKey } = await saveCompletedLessonFromLatest(itemId, 0);
-      const persistedItems = Array.isArray(data.items) ? data.items : fallbackItems;
-      const persistedSyncKey = typeof data.syncKey === "string" ? data.syncKey : fallbackSyncKey;
+      const { response, data } = await requestCompleteAppointment(itemId, expectedRevision);
+      const durationMs = Date.now() - startAt;
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
+      }
+      if (!response.ok) {
+        const diagnostic = lessonCompleteDiagnosticFromResponse(
+          itemId,
+          response.status,
+          data,
+          "Lesson completion failed.",
+          {
+            expectedRevision,
+            backendRevision: data.backendUpdatedAt || data.updatedAt || "",
+            conflictSource: data.conflictSource || data.error,
+          },
+        );
+        logLessonCompleteDiagnostic("lesson_complete_failed", {
+          lessonId: itemId,
+          calendarId,
+          expectedStatus: "completed",
+          expectedRevision,
+          backendRevision: data.updatedAt || data.backendUpdatedAt || "",
+          httpStatus: response.status,
+          conflictSource: data.conflictSource || data.error,
+          backendMessage: diagnostic.backendMessage,
+          backendError: diagnostic.backendError,
+          backendDetails: diagnostic.backendDetails,
+          durationMs,
+          stageTimings: data.stageTimings,
+        });
+        throw lessonCompleteFailure(diagnostic);
+      }
+      if (!data.item || data.item.id !== itemId) {
+        const diagnostic = lessonCompleteDiagnosticFromResponse(
+          itemId,
+          response.status,
+          data,
+          "Lesson completion response was missing the updated item.",
+          {
+            expectedRevision,
+            backendRevision: data.updatedAt || data.backendUpdatedAt || "",
+          },
+        );
+        throw lessonCompleteFailure(diagnostic);
+      }
+      const persistedItem = {
+        ...targetItem,
+        ...data.item,
+        status: "completed" as BookingStatus,
+      } as CalendarItem;
+      const persistedItems = optimisticItems.map((item) => (item.id === itemId ? persistedItem : item));
       setItems(persistedItems);
-      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
       lastPersistedCalendarItemsRef.current = persistedItems;
-      if (typeof data.syncKey === "string" && data.syncKey !== calendarSyncKey) setCalendarSyncKey(data.syncKey);
-      if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-      if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
-      applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar);
-      setCalendarFeedStatus("connected");
+      if (typeof data.updatedAt === "string") {
+        setCalendarStateVersion(data.updatedAt);
+      }
       setCalendarSaveStatus("saved");
       setCalendarSaveError("");
-      finishDiagnosticTimer(timer, "verified", {
-        httpStatus: 200,
-        details: { verifiedStatus: "completed" },
+      setCalendarFeedStatus("connected");
+      logLessonCompleteDiagnostic("lesson_complete_saved", {
+        lessonId: itemId,
+        calendarId,
+        expectedStatus: "completed",
+        expectedRevision,
+        backendRevision: data.updatedAt || "",
+        httpStatus: response.status,
+        durationMs,
+        stageTimings: data.stageTimings,
+      });
+      finishDiagnosticTimer(timer, "success", {
+        httpStatus: response.status,
+        details: {
+          action: "lesson_complete",
+          itemId,
+          expectedStatus: "completed",
+          serverStatus: response.status,
+          backendRevision: data.updatedAt || "",
+          stageTimings: data.stageTimings,
+          durationMs,
+        },
       });
       setToast({ message: "Lesson marked completed." });
       window.setTimeout(() => {
@@ -9603,6 +9656,7 @@ function App() {
           action: "lesson_complete",
           itemId,
           expectedStatus: "completed",
+          expectedRevision,
           serverStatus: 0,
           message:
             error instanceof Error && error.message.includes("Admin login")
@@ -9610,12 +9664,15 @@ function App() {
               : "Lesson was not completed because calendar data changed. Reload and try again.",
         } satisfies LessonCompleteDiagnostic);
       const message = diagnostic.message;
+      setItems(previousItems);
+      if (message.includes("Admin login")) {
+        setCalendarFeedStatus("offline");
+      }
       finishDiagnosticTimer(timer, "failed", {
         httpStatus: diagnostic.serverStatus || undefined,
         errorCode: message.includes("Admin login") ? "AUTH_SESSION_MISSING" : "BOOKING_COMPLETE_FAILED",
         humanMessage: lessonCompleteDiagnosticText(diagnostic),
       });
-      setCalendarFeedStatus(message.includes("Admin login") ? "offline" : "connected");
       setCalendarSaveStatus("failed");
       setCalendarSaveError(lessonCompleteDiagnosticText(diagnostic));
       setLessonCompleteErrors((current) => ({ ...current, [itemId]: diagnostic }));
@@ -11158,28 +11215,28 @@ function App() {
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
-      const data = (await response.json().catch(() => ({}))) as {
-        message?: string;
-        detail?: string;
-        error?: string;
-        items?: CalendarItem[];
-        notifications?: NotificationRecord[];
-        updatedAt?: string;
-        syncKey?: string;
-        googleCalendar?: Partial<GoogleCalendarSyncStatus>;
-        googleCalendarSync?: Partial<GoogleCalendarSyncStatus> & { ok?: boolean; error?: string };
-        diagnostics?: Record<string, unknown>;
-      };
+      const data = (await response.json().catch(() => ({}))) as CalendarStateSaveResponse;
       if (response.status === 401) {
         setAuthStatus("guest");
         throw Object.assign(new Error(data.message || "Admin login expired. Sign in again before editing the calendar."), {
           code: "AUTH_SESSION_MISSING",
+          httpStatus: response.status,
+          operationOwner: "calendar_delete",
+          failureRoute: "DELETE /api/calendar-state",
         });
       }
       if (!response.ok) {
         throw Object.assign(
           new Error(data.detail || data.message || data.error || `Delete failed (${response.status} ${response.statusText})`),
-          { code: data.error || "BOOKING_DELETE_FAILED" },
+          {
+            code: data.error || data.diagnostics?.code || "BOOKING_DELETE_FAILED",
+            diagnostics: data.diagnostics,
+            httpStatus: response.status,
+            operationOwner: data.diagnostics?.operationOwner || "calendar_delete",
+            failureRoute: data.diagnostics?.route || "DELETE /api/calendar-state",
+            personId: data.diagnostics?.personId,
+            email: data.diagnostics?.email,
+          },
         );
       }
       trackDiagnosticEvent({
@@ -11187,7 +11244,7 @@ function App() {
         action: "BOOKING_DELETE_VERIFY_STARTED",
         phase: "verify",
         status: "started",
-        route: "DELETE /api/calendar-state",
+        route: "GET /api/calendar-state",
         functionName: "removeSelected",
         expectedAccountId: activeAccountId,
         objectType: selected.kind === "block" ? "calendarBlock" : "booking",
@@ -11195,26 +11252,71 @@ function App() {
         details: {
           targetedDelete: true,
           accountId: selected.accountId || activeAccountId,
+          operationOwner: "calendar_reload_verify",
+          deleteHttpStatus: response.status,
         },
       });
-      const deletedStillReturned = Array.isArray(data.items)
-        ? data.items.some((item) => item.id === calendarItemId)
-        : true;
-      if (deletedStillReturned) {
-        throw Object.assign(new Error("Deleted booking was returned by the next calendar read."), {
-          code: "BOOKING_DELETE_VERIFY_FAILED",
+      const verifyResponse = await fetch("/api/calendar-state", {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      const verifyData = (await verifyResponse.json().catch(() => ({}))) as CalendarStateSaveResponse;
+      if (verifyResponse.status === 401) {
+        setAuthStatus("guest");
+        throw Object.assign(new Error(verifyData.message || "Admin login expired during delete verification."), {
+          code: "AUTH_SESSION_MISSING",
+          httpStatus: verifyResponse.status,
+          operationOwner: "calendar_reload_verify",
+          failureRoute: "GET /api/calendar-state",
         });
       }
-      const persistedItems = (data.items || []).map((item) => ({ ...item, accountId: item.accountId || activeAccountId }));
-      const persistedSyncKey = typeof data.syncKey === "string" ? data.syncKey : calendarSyncKey;
+      if (!verifyResponse.ok) {
+        throw Object.assign(
+          new Error(verifyData.detail || verifyData.message || verifyData.error || `Delete verification failed (${verifyResponse.status} ${verifyResponse.statusText})`),
+          {
+            code: verifyData.error || verifyData.diagnostics?.code || "BOOKING_DELETE_RELOAD_FAILED",
+            diagnostics: verifyData.diagnostics,
+            httpStatus: verifyResponse.status,
+            operationOwner: verifyData.diagnostics?.operationOwner || "calendar_reload",
+            failureRoute: verifyData.diagnostics?.route || "GET /api/calendar-state",
+          },
+        );
+      }
+      if (!Array.isArray(verifyData.items)) {
+        throw Object.assign(new Error("Calendar reload did not return booking items for delete verification."), {
+          code: "BOOKING_DELETE_RELOAD_FAILED",
+          httpStatus: verifyResponse.status,
+          operationOwner: "calendar_reload",
+          failureRoute: "GET /api/calendar-state",
+        });
+      }
+      const deletedStillReturned = verifyData.items.some((item) => item.id === calendarItemId);
+      if (deletedStillReturned) {
+        throw Object.assign(new Error("Deleted booking was returned by the backend refetch."), {
+          code: "BOOKING_DELETE_VERIFY_FAILED",
+          httpStatus: verifyResponse.status,
+          operationOwner: "calendar_reload_verify",
+          failureRoute: "GET /api/calendar-state",
+        });
+      }
+      const persistedItems = verifyData.items.map((item) => ({ ...item, accountId: item.accountId || activeAccountId }));
+      const persistedSyncKey =
+        typeof verifyData.syncKey === "string"
+          ? verifyData.syncKey
+          : typeof data.syncKey === "string"
+            ? data.syncKey
+            : calendarSyncKey;
       if (calendarSaveVersionRef.current === saveVersion) {
         lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
         lastPersistedCalendarItemsRef.current = persistedItems;
         setItems(persistedItems);
-        if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-        if (typeof data.syncKey === "string" && data.syncKey !== calendarSyncKey) setCalendarSyncKey(data.syncKey);
-        if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
-        applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar);
+        if (typeof verifyData.updatedAt === "string") setCalendarStateVersion(verifyData.updatedAt);
+        else if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+        if (persistedSyncKey && persistedSyncKey !== calendarSyncKey) setCalendarSyncKey(persistedSyncKey);
+        const nextNotifications = Array.isArray(verifyData.notifications) ? verifyData.notifications : data.notifications;
+        if (Array.isArray(nextNotifications)) setNotifications(cleanNotificationRecords(nextNotifications));
+        applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar || verifyData.googleCalendarSync || verifyData.googleCalendar);
         setCalendarFeedStatus("connected");
         setCalendarSaveStatus("saved");
         setCalendarSaveError("");
@@ -11225,13 +11327,17 @@ function App() {
         }, 1800);
       }
       finishDiagnosticTimer(timer, "verified", {
-        httpStatus: response.status,
+        httpStatus: verifyResponse.status,
         errorCode: "BOOKING_DELETE_VERIFY_COMPLETED",
         details: {
           targetedDelete: true,
+          operationOwner: "calendar_reload_verify",
+          deleteHttpStatus: response.status,
+          verifyHttpStatus: verifyResponse.status,
+          verificationRoute: "GET /api/calendar-state",
           verificationResult: "not_found",
           returnedItemCount: persistedItems.length,
-          backendDiagnostics: Boolean(data.diagnostics),
+          backendDiagnostics: Boolean(data.diagnostics || verifyData.diagnostics),
         },
       });
       trackDiagnosticEvent({
@@ -11246,27 +11352,71 @@ function App() {
         objectId: calendarItemId,
         details: {
           targetedDelete: true,
+          operationOwner: "calendar_reload_verify",
+          deleteHttpStatus: response.status,
+          verifyHttpStatus: verifyResponse.status,
           verificationResult: "not_found",
         },
       });
       scheduleAdminNotificationDebounceFlush();
     } catch (error) {
       const message = error instanceof Error ? error.message : "The booking could not be deleted.";
-      const code = (error as { code?: string })?.code || "BOOKING_DELETE_FAILED";
+      const errorDetails = error as {
+        code?: string;
+        diagnostics?: BookingDeleteDiagnostics;
+        httpStatus?: number;
+        operationOwner?: string;
+        failureRoute?: string;
+        personId?: string;
+        email?: string;
+      };
+      const code = errorDetails?.code || "BOOKING_DELETE_FAILED";
+      const diagnostics = errorDetails?.diagnostics;
+      const operationOwner =
+        safeText(errorDetails?.operationOwner || diagnostics?.operationOwner) ||
+        (code === "BOOKING_DELETE_VERIFY_FAILED" ? "calendar_reload_verify" : "calendar_delete");
+      const failureRoute = safeText(errorDetails?.failureRoute || diagnostics?.route) || "DELETE /api/calendar-state";
+      const httpStatus =
+        typeof errorDetails?.httpStatus === "number"
+          ? errorDetails.httpStatus
+          : typeof diagnostics?.httpStatus === "number"
+            ? diagnostics.httpStatus
+            : undefined;
+      const personId = safeText(errorDetails?.personId || diagnostics?.personId);
+      const email = safeText(errorDetails?.email || diagnostics?.email);
+      const deleteFailureMessage =
+        operationOwner === "people_patch"
+          ? "Delete attempted an unexpected client save. Check diagnostics before retrying."
+          : code === "BOOKING_DELETE_VERIFY_FAILED"
+            ? "Deleted booking reappeared after backend refetch. Stale cache or persistence verification failed."
+            : code === "BOOKING_DELETE_RELOAD_FAILED"
+              ? "The booking delete could not be verified because the calendar reload failed."
+              : "The booking was not deleted. Please try again.";
       finishDiagnosticTimer(timer, "failed", {
+        httpStatus,
         errorCode: code,
         humanMessage: message,
         details: {
           targetedDelete: true,
+          operationOwner,
+          route: failureRoute,
+          personId,
+          email,
           backendMessage: message,
         },
       });
+      const failureAction =
+        operationOwner === "people_patch"
+          ? "BOOKING_DELETE_OWNERSHIP_VIOLATION"
+          : code === "BOOKING_DELETE_VERIFY_FAILED" || code === "BOOKING_DELETE_RELOAD_FAILED"
+            ? code
+            : "BOOKING_DELETE_FAILED";
       trackDiagnosticEvent({
         system: "save",
-        action: code === "BOOKING_DELETE_VERIFY_FAILED" ? "BOOKING_DELETE_VERIFY_FAILED" : "BOOKING_DELETE_FAILED",
+        action: failureAction,
         phase: "request",
         status: "failed",
-        route: "DELETE /api/calendar-state",
+        route: failureRoute,
         functionName: "removeSelected",
         expectedAccountId: activeAccountId,
         objectType: selected.kind === "block" ? "calendarBlock" : "booking",
@@ -11275,13 +11425,17 @@ function App() {
         humanMessage: message,
         details: {
           targetedDelete: true,
+          operationOwner,
+          httpStatus,
+          personId,
+          email,
           backendMessage: message,
         },
       });
       setCalendarFeedStatus(code === "AUTH_SESSION_MISSING" ? "offline" : "connected");
       setCalendarSaveStatus("failed");
-      setCalendarSaveError("The booking was not deleted. Please try again.");
-      setToast({ message: "The booking was not deleted. Please try again." });
+      setCalendarSaveError(deleteFailureMessage);
+      setToast({ message: deleteFailureMessage });
     } finally {
       endAdminSave("calendar_delete");
       setDeleteInFlightId((current) => (current === calendarItemId ? "" : current));
