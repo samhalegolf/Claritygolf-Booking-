@@ -24,7 +24,6 @@ const defaultInvoiceSettings = {
   businessAddress: "",
   headerText: "",
   footerText: "Thank you for training with Sam Hale Golf.",
-  defaultCustomerNote: "Thanks for your work on the lesson programme. Invoice attached below.",
   paymentInstructions: "Please pay by bank transfer and use the invoice number as reference.",
   customFields: [],
 };

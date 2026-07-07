@@ -1,7 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 
-const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const googleScopes = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -9,9 +8,9 @@ const googleScopes = [
 ];
 
 const defaultServices = [
-  { id: "lesson-30", name: "30min Lesson", duration: 30, price: 100, lessonNote: "Bay hire included", location: "Bay hire included" },
-  { id: "lesson-60", name: "1 Hour Golf Lesson", duration: 60, price: 180, lessonNote: "Bay hire included", location: "Bay hire included" },
-  { id: "lesson-pair", name: "2 Person Golf Lesson", duration: 60, price: 200, lessonNote: "Bay hire included", location: "Bay hire included" },
+  { id: "lesson-30", name: "30min Lesson", duration: 30, price: 100, location: "Bay hire included" },
+  { id: "lesson-60", name: "1 Hour Golf Lesson", duration: 60, price: 180, location: "Bay hire included" },
+  { id: "lesson-pair", name: "2 Person Golf Lesson", duration: 60, price: 200, location: "Bay hire included" },
 ];
 
 function env(name: string, fallback = "") {
@@ -24,26 +23,6 @@ function nowIso() {
 
 function cleanString(value: unknown, fallback = "", max = 1200) {
   return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
-}
-
-function hashToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-function parseCookies(req: Request) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
-      }),
-  );
 }
 
 function supabaseConfig() {
@@ -68,15 +47,6 @@ async function supabase(table: string, options: { method?: string; query?: strin
   const text = await response.text();
   if (!response.ok) throw new Error(`Supabase ${options.method || "GET"} ${table} failed ${response.status}: ${text.slice(0, 500)}`);
   return text ? JSON.parse(text) : [];
-}
-
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return false;
-  const rows = await supabase("admin_sessions", {
-    query: `select=id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
-  });
-  return rows.length > 0;
 }
 
 function settingMap(rows: Array<{ key: string; value: string }>) {
@@ -113,43 +83,6 @@ function parseJson<T>(value: string | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-function cleanUrl(value: unknown, fallback = "") {
-  if (typeof value !== "string" || !value.trim()) return fallback;
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString().replace(/\/$/, "") : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function cleanBookingLocationSnapshot(raw: any, fallback: any = {}) {
-  let source = raw;
-  if (typeof raw === "string") {
-    try {
-      source = JSON.parse(raw);
-    } catch {
-      source = null;
-    }
-  }
-  const base = source?.name ? source : fallback;
-  if (!base?.name) return null;
-  return {
-    locationId: cleanString(base.locationId, "", 120) || undefined,
-    name: cleanString(base.name, fallback.name || "", 140),
-    shortName: cleanString(base.shortName, fallback.shortName || base.name || "", 80) || undefined,
-    address: cleanString(base.address, "", 240) || undefined,
-    mapUrl: cleanUrl(base.mapUrl, "") || undefined,
-    arrivalInstructions: cleanString(base.arrivalInstructions, "", 500) || undefined,
-    publicNotes: cleanString(base.publicNotes, "", 500) || undefined,
-    timezone: cleanString(base.timezone, fallback.timezone || "", 80) || undefined,
-  };
-}
-
-function bookingLocationDisplay(location: any) {
-  return [location?.name, location?.address].filter(Boolean).join(" · ");
 }
 
 function configuredRedirectUri(req: Request) {
@@ -334,16 +267,12 @@ function rowToItem(row: any) {
     day: Number(row.day ?? 0),
     start: Number(row.start ?? 0),
     duration: Number(row.duration ?? 0),
-    coachId: row.coach_id || "",
-    locationId: row.location_id || cleanBookingLocationSnapshot(row.location)?.locationId || "",
     serviceId: row.service_id || "",
     client: row.client || "",
     title: row.title || row.client || "Booking",
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
-    coach: row.coach || undefined,
-    location: cleanBookingLocationSnapshot(row.location),
   };
 }
 
@@ -357,29 +286,6 @@ function isCancelledGroupSessionItem(item: any) {
 
 function serviceName(serviceId: string, services: any[]) {
   return services.find((service) => service?.id === serviceId)?.name || "Golf Lesson";
-}
-
-function defaultLocationFromAccount(account: ReturnType<typeof accountFromSettings>) {
-  return {
-    id: "default-location",
-    name: account.venueName,
-    shortName: account.venueShortName || account.venueName,
-    address: "",
-    timezone: account.timezone,
-    active: true,
-    archived: false,
-    isDefault: true,
-  };
-}
-
-function resolveLocation(item: any, service: any, locations: any[], account: ReturnType<typeof accountFromSettings>) {
-  const activeLocations = Array.isArray(locations)
-    ? locations.filter((location) => location?.active !== false && location?.archived !== true)
-    : [];
-  const byItem = activeLocations.find((location) => location.id && location.id === item?.locationId);
-  const byService = activeLocations.find((location) => location.id && location.id === service?.locationId);
-  const fallback = activeLocations.find((location) => location.isDefault) || activeLocations[0] || defaultLocationFromAccount(account);
-  return cleanBookingLocationSnapshot(item.location, byItem || byService || fallback);
 }
 
 function dateForSlot(week: number, day: number) {
@@ -422,16 +328,13 @@ function eventSummary(item: any, account: ReturnType<typeof accountFromSettings>
   return `${item.client || item.title} - ${serviceName(item.serviceId, services)}`;
 }
 
-function eventDescription(item: any, services: any[], location: any) {
+function eventDescription(item: any, services: any[]) {
   const rows =
     item.kind === "block"
       ? ["Blocked time", item.note]
       : [
           `Service: ${serviceName(item.serviceId, services)}`,
           `Client: ${item.client || item.title}`,
-          location?.address ? `Address: ${location.address}` : "",
-          location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
-          location?.mapUrl ? `Map: ${location.mapUrl}` : "",
           item.phone ? `Phone: ${item.phone}` : "",
           item.email ? `Email: ${item.email}` : "",
           item.note,
@@ -439,19 +342,17 @@ function eventDescription(item: any, services: any[], location: any) {
   return [...rows.filter(Boolean), "", `Clarity booking ID: ${item.id}`].join("\n");
 }
 
-function googleEventForItem(item: any, settings: Record<string, string>, services: any[], locations: any[], eventId: string) {
+function googleEventForItem(item: any, settings: Record<string, string>, services: any[], eventId: string) {
   const account = accountFromSettings(settings);
-  const service = services.find((candidate) => candidate?.id === item.serviceId);
-  const location = resolveLocation(item, service, locations, account);
   const week = Number(item.week ?? 0);
-  const timezone = location?.timezone || account.timezone;
+  const timezone = account.timezone;
   const start = googleLocalDateTime(week, item.day, item.start);
   const end = googleLocalDateTime(week, item.day, item.start + item.duration);
   return {
     id: eventId,
     summary: eventSummary(item, account, services),
-    description: eventDescription(item, services, location),
-    location: bookingLocationDisplay(location),
+    description: eventDescription(item, services),
+    location: account.venueName,
     start: { dateTime: start, timeZone: timezone },
     end: { dateTime: end, timeZone: timezone },
     transparency: "opaque",
@@ -528,12 +429,11 @@ async function calendarSyncPayload() {
     settings,
     items: itemRows.map(rowToItem).filter((item) => !isCancelledGroupSessionItem(item)),
     services: parseJson(settings.servicesJson, defaultServices),
-    locations: parseJson(settings.locationsJson, []),
   };
 }
 
 export async function syncGoogleCalendarNow() {
-  const { settings, items, services, locations } = await calendarSyncPayload();
+  const { settings, items, services } = await calendarSyncPayload();
   const status = await getGoogleCalendarSyncStatus();
   if (!status.configured) return { ...status, ok: false, skipped: true, reason: "google_oauth_not_configured" };
   if (!settings.googleCalendarRefreshToken) return { ...status, ok: false, skipped: true, reason: "google_calendar_not_connected" };
@@ -548,7 +448,7 @@ export async function syncGoogleCalendarNow() {
   try {
     for (const item of items) {
       const eventId = previousMap[item.id] || googleEventId(item.id);
-      const event = googleEventForItem(item, settings, services, locations, eventId);
+      const event = googleEventForItem(item, settings, services, eventId);
       const result = await upsertGoogleEvent(accessToken, calendarId, eventId, event);
       nextMap[item.id] = result.id || eventId;
       upserted += 1;
@@ -603,14 +503,8 @@ function json(value: unknown, status = 200) {
 
 export default async function googleCalendarSyncHandler(req: Request) {
   try {
-    if (req.method === "GET") {
-      if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-      return json(await getGoogleCalendarSyncStatus(req));
-    }
-    if (req.method === "POST") {
-      if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-      return json(await syncGoogleCalendarIfEnabled());
-    }
+    if (req.method === "GET") return json(await getGoogleCalendarSyncStatus(req));
+    if (req.method === "POST") return json(await syncGoogleCalendarIfEnabled());
     return json({ error: "method_not_allowed", message: "Use GET for status or POST to sync." }, 405);
   } catch (error: any) {
     console.error("google_calendar_sync:function_failed", error);

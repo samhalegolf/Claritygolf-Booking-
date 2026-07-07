@@ -309,144 +309,6 @@ function normalizeServices(serviceList) {
   });
 }
 
-function defaultLocationFromAccount(account = defaultCoachAccount()) {
-  const cleanAccount = cleanCoachAccount(account);
-  return {
-    id: "default-location",
-    accountId: cleanAccount.id,
-    name: cleanAccount.venueName,
-    shortName: cleanAccount.venueShortName || cleanAccount.venueName,
-    address: "",
-    timezone: cleanAccount.timezone,
-    active: true,
-    archived: false,
-    isDefault: true,
-    sortOrder: 0,
-  };
-}
-
-function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
-  const cleanAccount = cleanCoachAccount(account);
-  return {
-    id: cleanAccount.id || "sam-hale",
-    accountId: cleanAccount.id,
-    name: cleanAccount.coachName,
-    displayName: cleanAccount.coachName || cleanAccount.businessName,
-    shortName: "Sam",
-    email: cleanAccount.contactEmail,
-    active: true,
-    archived: false,
-    isDefault: true,
-    bookable: true,
-    assignedLocationIds: ["default-location"],
-    defaultLocationId: "default-location",
-    sortOrder: 0,
-  };
-}
-
-function cleanLocation(location, fallback = defaultLocationFromAccount(), index = 0) {
-  const name = cleanString(location?.name, fallback.name, 140);
-  const id = cleanSlug(location?.id, cleanSlug(name, `location-${index + 1}`));
-  return {
-    id,
-    accountId: cleanSlug(location?.accountId, fallback.accountId || defaultCoachAccount().id),
-    name,
-    shortName: cleanString(location?.shortName, name, 80),
-    address: cleanString(location?.address, fallback.address || "", 240),
-    mapUrl: cleanUrl(location?.mapUrl, "") || undefined,
-    arrivalInstructions: cleanString(location?.arrivalInstructions, "", 500) || undefined,
-    publicNotes: cleanString(location?.publicNotes, "", 500) || undefined,
-    timezone: cleanString(location?.timezone, fallback.timezone || defaultCoachAccount().timezone, 80),
-    active: location?.active !== false,
-    archived: location?.archived === true,
-    isDefault: location?.isDefault === true || fallback.isDefault === true,
-    sortOrder: Number.isFinite(Number(location?.sortOrder)) ? Math.round(Number(location.sortOrder)) : index,
-  };
-}
-
-function normalizeLocations(locationList, account = defaultCoachAccount()) {
-  const fallback = defaultLocationFromAccount(account);
-  const source = Array.isArray(locationList) && locationList.length ? locationList : [fallback];
-  const seen = new Set();
-  const cleaned = source.map((location, index) => {
-    const clean = cleanLocation(location, index === 0 ? fallback : undefined, index);
-    let id = clean.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${clean.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...clean, id };
-  });
-  if (!cleaned.some((location) => location.active && !location.archived)) {
-    cleaned[0] = { ...cleaned[0], active: true, archived: false };
-  }
-  const defaultIndex = cleaned.findIndex((location) => location.isDefault && location.active && !location.archived);
-  const nextDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((location) => location.active && !location.archived);
-  return cleaned
-    .map((location, index) => ({ ...location, isDefault: index === nextDefaultIndex }))
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
-}
-
-function cleanCoachProfile(coach, fallback = defaultCoachProfileFromAccount(), index = 0) {
-  const name = cleanString(coach?.name, fallback.name, 120);
-  const assignedLocationIds = Array.isArray(coach?.assignedLocationIds)
-    ? coach.assignedLocationIds.map((id) => cleanSlug(id, "")).filter(Boolean)
-    : fallback.assignedLocationIds || ["default-location"];
-  const defaultLocationId = cleanSlug(
-    coach?.defaultLocationId,
-    assignedLocationIds[0] || fallback.defaultLocationId || "default-location",
-  );
-  return {
-    id: cleanSlug(coach?.id, cleanSlug(name, `coach-${index + 1}`)),
-    accountId: cleanSlug(coach?.accountId, fallback.accountId || defaultCoachAccount().id),
-    name,
-    displayName: cleanString(coach?.displayName, name, 120),
-    shortName: cleanString(
-      coach?.shortName,
-      name.split(/\s+/).map((part) => part[0]).join("").slice(0, 4).toUpperCase(),
-      60,
-    ),
-    email: cleanEmail(coach?.email, fallback.email || defaultCoachAccount().contactEmail),
-    phone: cleanString(coach?.phone, "", 80) || undefined,
-    bio: cleanString(coach?.bio, "", 600) || undefined,
-    photoUrl: cleanUrl(coach?.photoUrl, "") || undefined,
-    active: coach?.active !== false,
-    archived: coach?.archived === true,
-    isDefault: coach?.isDefault === true || fallback.isDefault === true,
-    bookable: coach?.bookable !== false,
-    assignedLocationIds,
-    defaultLocationId: defaultLocationId || undefined,
-    sortOrder: Number.isFinite(Number(coach?.sortOrder)) ? Math.round(Number(coach.sortOrder)) : index,
-  };
-}
-
-function normalizeCoachProfiles(coachList, account = defaultCoachAccount()) {
-  const fallback = defaultCoachProfileFromAccount(account);
-  const source = Array.isArray(coachList) && coachList.length ? coachList : [fallback];
-  const seen = new Set();
-  const cleaned = source.map((coach, index) => {
-    const clean = cleanCoachProfile(coach, index === 0 ? fallback : undefined, index);
-    let id = clean.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${clean.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...clean, id };
-  });
-  if (!cleaned.some((coach) => coach.active && !coach.archived && coach.bookable)) {
-    cleaned[0] = { ...cleaned[0], active: true, archived: false, bookable: true };
-  }
-  const defaultIndex = cleaned.findIndex((coach) => coach.isDefault && coach.active && !coach.archived && coach.bookable);
-  const nextDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((coach) => coach.active && !coach.archived && coach.bookable);
-  return cleaned
-    .map((coach, index) => ({ ...coach, isDefault: index === nextDefaultIndex }))
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
-}
-
 function normalizeAvailability(availability) {
   const source = Array.isArray(availability) ? availability : defaultAvailability;
   return Array.from({ length: 7 }, (_, day) => {
@@ -774,16 +636,6 @@ function setSetting(key, value) {
     .run(key, String(value ?? ""), nowIso());
 }
 
-function readJsonSetting(key) {
-  const raw = getSetting(key);
-  if (!raw) return undefined;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-}
-
 function seedDatabase() {
   const database = db;
   const settings = defaultSettings();
@@ -955,28 +807,6 @@ export function writeServices(serviceList) {
   const services = writeServicesToDb(serviceList);
   setSetting("updatedAt", nowIso());
   return services;
-}
-
-export async function readLocations() {
-  return normalizeLocations(readJsonSetting("locationsJson"), await readCoachAccount());
-}
-
-export async function writeLocations(locationList) {
-  const locations = normalizeLocations(locationList, await readCoachAccount());
-  setSetting("locationsJson", JSON.stringify(locations));
-  setSetting("updatedAt", nowIso());
-  return locations;
-}
-
-export async function readCoaches() {
-  return normalizeCoachProfiles(readJsonSetting("coachesJson"), await readCoachAccount());
-}
-
-export async function writeCoaches(coachList) {
-  const coaches = normalizeCoachProfiles(coachList, await readCoachAccount());
-  setSetting("coachesJson", JSON.stringify(coaches));
-  setSetting("updatedAt", nowIso());
-  return coaches;
 }
 
 function rowToAvailabilityWindow(row) {
@@ -1364,8 +1194,6 @@ export async function readCalendarState() {
     updatedAt: getSetting("updatedAt") || nowIso(),
     items: readItemsFromDb(),
     services: readServices(),
-    locations: await readLocations(),
-    coaches: await readCoaches(),
     availability: readAvailability(),
     people: readPeople(),
     settings: await readAdminSettings(),
@@ -1380,8 +1208,6 @@ export async function writeCalendarState(nextState) {
   const current = await readCalendarState();
   const syncKey = cleanString(nextState?.syncKey, current.syncKey, 140);
   const items = normalizeItems(nextState?.items ?? current.items);
-  const locations = Array.isArray(nextState?.locations) ? await writeLocations(nextState.locations) : current.locations;
-  const coaches = Array.isArray(nextState?.coaches) ? await writeCoaches(nextState.coaches) : current.coaches;
   const updatedAt = nowIso();
   writeItemsToDb(items);
   setSetting("syncKey", syncKey);
@@ -1392,8 +1218,6 @@ export async function writeCalendarState(nextState) {
     items,
     updatedAt,
     services: current.services,
-    locations,
-    coaches,
     availability: current.availability,
     people: readPeople(),
     settings: await readAdminSettings(),
@@ -1514,8 +1338,6 @@ export function publicCalendarState(state) {
     updatedAt: state.updatedAt,
     items: state.items,
     services: state.services || [],
-    locations: state.locations || [],
-    coaches: state.coaches || [],
     availability: state.availability || [],
     people: state.people || [],
     settings: state.settings,
@@ -1528,8 +1350,6 @@ export function publicBookingState(state) {
   return {
     updatedAt: state.updatedAt,
     services: (state.services || []).filter((service) => service.active && service.visibility === "public"),
-    locations: state.locations || [],
-    coaches: state.coaches || [],
     availability: state.availability || [],
     brand: state.brand,
     account: state.account,

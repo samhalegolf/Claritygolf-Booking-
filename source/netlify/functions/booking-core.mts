@@ -8,14 +8,13 @@ import {
 } from "node:crypto";
 
 import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
-import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
+import { notifyBookingEvent } from "./notification-engine.mts";
 
 const sessionCookieName = "clarity_session";
 const sessionDays = 7;
 const passwordResetMinutes = 30;
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
-const PUBLIC_SLOT_STEP_MINUTES = 30;
 const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
 const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
 const CUSTOM_GROUP_DEFAULTS = {
@@ -25,8 +24,6 @@ const CUSTOM_GROUP_DEFAULTS = {
   minParticipants: 2,
   maxParticipants: 5,
 };
-const ADMIN_NOTIFICATION_DEBOUNCE_MS = 30_000;
-const ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY = "adminNotificationDebounceQueueJson";
 const BOOKING_SCREEN_IDS = new Set([
   "main",
   "range-three-kings",
@@ -34,9 +31,6 @@ const BOOKING_SCREEN_IDS = new Set([
   "private-lessons",
 ]);
 let authReadyPromise = null;
-let authReady = false;
-let authReadyConfigSignature = "";
-let seedReadyPromise = null;
 const defaultEmailTemplates = {
   clientEmailSubject: "Your {{service}} is confirmed",
   clientEmailIntro:
@@ -60,7 +54,6 @@ const defaultInvoiceSettings = {
   businessAddress: "",
   headerText: "",
   footerText: "Thank you for training with Sam Hale Golf.",
-  defaultCustomerNote: "Thanks for your work on the lesson programme. Invoice attached below.",
   paymentInstructions:
     "Please pay by bank transfer and use the invoice number as reference.",
   customFields: [],
@@ -79,7 +72,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -94,7 +86,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -109,7 +100,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    lessonNote: "Bay hire included",
     location: "Bay hire included",
   },
   {
@@ -124,7 +114,6 @@ const defaultServices = [
     minParticipants: 3,
     lessonFormat: "group",
     priceMode: "per-person",
-    lessonNote: "Group coaching bay",
     location: "Group coaching bay",
     groupSchedule: {
       dayOfWeek: 2,
@@ -145,7 +134,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    lessonNote: "Bay hire deducted from membership account",
     location: "Range 24/7 member bay",
   },
   {
@@ -160,7 +148,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
-    lessonNote: "Bay hire deducted from membership account",
     location: "Range 24/7 member bay",
   },
   {
@@ -175,7 +162,6 @@ const defaultServices = [
     minParticipants: 1,
     lessonFormat: "package",
     priceMode: "session",
-    lessonNote: "Package allowance",
     location: "Package allowance",
     packageAllowance: 5,
     packageCoverageMode: "upfront",
@@ -497,7 +483,6 @@ function cleanService(service, index = 0) {
   const fallback = defaultServices[index] ?? defaultServices[0];
   const descriptionFallback = service ? "" : fallback.description;
   const locationFallback = service ? "" : fallback.location;
-  const lessonNoteFallback = service ? service.location || "" : fallback.lessonNote || fallback.location || "";
   const name = cleanString(service?.name, fallback.name, 120);
   const duration = Number.isFinite(Number(service?.duration)) ? Number(service.duration) : fallback.duration;
   const price = Number.isFinite(Number(service?.price)) ? Number(service.price) : fallback.price;
@@ -540,8 +525,6 @@ function cleanService(service, index = 0) {
       service?.id,
       cleanSlug(name, `service-${Date.now()}-${index}`),
     ),
-    accountId: cleanSlug(service?.accountId, defaultWorkspaceAccountFromCoachAccount().id),
-    coachId: cleanSlug(service?.coachId, defaultCoachProfileFromAccount().id),
     name,
     duration: Math.max(15, Math.min(240, Math.round(duration))),
     price: Math.max(0, Math.round(price)),
@@ -555,8 +538,6 @@ function cleanService(service, index = 0) {
     minParticipants,
     lessonFormat,
     priceMode,
-    locationId: cleanSlug(service?.locationId, "") || undefined,
-    lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
@@ -616,14 +597,13 @@ function normalizeAvailability(availability) {
           start + 15,
           Math.min(dayEndMinutes, Math.round(rawEnd / 15) * 15),
         );
-        const coachId = cleanSlug(window?.coachId, defaultCoachProfileFromAccount().id);
-        return end > start ? { start, end, coachId } : null;
+        return end > start ? { start, end } : null;
       })
       .filter(Boolean)
-      .sort((a, b) => (a.coachId || "").localeCompare(b.coachId || "") || a.start - b.start)
+      .sort((a, b) => a.start - b.start)
       .reduce((merged, window) => {
         const previous = merged.at(-1);
-        if (previous && previous.coachId === window.coachId && window.start < previous.end) {
+        if (previous && window.start < previous.end) {
           previous.end = Math.max(previous.end, window.end);
         } else {
           merged.push({ ...window });
@@ -709,11 +689,6 @@ function cleanInvoiceSettings(settings = {}) {
       defaultInvoiceSettings.footerText,
       400,
     ),
-    defaultCustomerNote: cleanString(
-      settings?.defaultCustomerNote,
-      defaultInvoiceSettings.defaultCustomerNote,
-      400,
-    ),
     paymentInstructions: cleanString(
       settings?.paymentInstructions,
       defaultInvoiceSettings.paymentInstructions,
@@ -756,645 +731,6 @@ function cleanCoachAccount(account) {
 	  };
 	}
 
-const accountFeatureKeys = [
-  "publicBooking",
-  "coachCalendar",
-  "locationCalendar",
-  "multiCoach",
-  "multiLocation",
-  "services",
-  "groupLessons",
-  "packages",
-  "clients",
-  "notifications",
-  "googleCalendarSync",
-  "invoicing",
-  "checkout",
-  "customBranding",
-  "customDomains",
-  "staffUsers",
-  "advancedPermissions",
-];
-
-function accountFeatures(enabled) {
-  return Object.fromEntries(accountFeatureKeys.map((feature) => [feature, enabled.includes(feature)]));
-}
-
-const allAccountFeatures = accountFeatures(accountFeatureKeys);
-const accountPlanCatalog = {
-  solo: {
-    features: accountFeatures(["publicBooking", "coachCalendar", "services", "groupLessons", "packages", "clients", "notifications", "googleCalendarSync"]),
-    limits: { maxCoaches: 1, maxLocations: 1, maxUsers: 1, maxServices: 10, maxBookingScreens: 1 },
-  },
-  studio: {
-    features: accountFeatures(["publicBooking", "coachCalendar", "locationCalendar", "multiCoach", "multiLocation", "services", "groupLessons", "packages", "clients", "notifications", "googleCalendarSync", "invoicing", "customBranding", "staffUsers"]),
-    limits: { maxCoaches: 5, maxLocations: 3, maxUsers: 8, maxServices: 40, maxBookingScreens: 4 },
-  },
-  academy: { features: allAccountFeatures, limits: { maxCoaches: 20, maxLocations: 10, maxUsers: 30, maxServices: 120, maxBookingScreens: 12 } },
-  enterprise: { features: allAccountFeatures, limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 } },
-  founder: { features: allAccountFeatures, limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 } },
-};
-
-function mergeEntitlementOverrides(base, override) {
-  return {
-    features: { ...base.features, ...(override?.features || {}) },
-    limits: { ...base.limits, ...(override?.limits || {}) },
-  };
-}
-
-function accountEntitlements(account) {
-  return mergeEntitlementOverrides(accountPlanCatalog[account?.planKey] || accountPlanCatalog.solo, account?.entitlementsOverride);
-}
-
-function accountHasFeature(account, feature) {
-  return accountEntitlements(account).features[feature] === true;
-}
-
-function accountLimit(account, limit) {
-  return accountEntitlements(account).limits[limit];
-}
-
-function isAccountActive(account) {
-  return account?.active !== false && ["trialing", "active", "comped", "internal"].includes(account?.subscriptionStatus);
-}
-
-function entitlementError(message, status = 403) {
-  return Object.assign(new Error(message), { status });
-}
-
-function assertAccountActive(account) {
-  if (!isAccountActive(account)) {
-    throw entitlementError("This workspace subscription is not active.");
-  }
-}
-
-function assertAccountFeature(account, feature) {
-  assertAccountActive(account);
-  if (!accountHasFeature(account, feature)) {
-    throw entitlementError(`${feature} is not included in this workspace plan.`);
-  }
-}
-
-function assertAccountLimit(account, currentUsage, limitName) {
-  const limit = accountLimit(account, limitName);
-  if (Number.isFinite(limit) && currentUsage > limit) {
-    throw entitlementError(`This workspace plan allows ${limit} ${String(limitName).replace(/^max/, "").toLowerCase()}.`, 409);
-  }
-}
-
-function forbidden(message = "Permission denied.", code = "permission_denied") {
-  const error = Object.assign(new Error(message), { status: 403, code });
-  return error;
-}
-
-function permissionDenied(message = "You do not have permission to perform this action.") {
-  return forbidden(message, "permission_denied");
-}
-
-function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
-  const clean = cleanCoachAccount(account);
-  const slug = cleanSlug(clean.calendarSlug || clean.businessName, "sam-hale-golf");
-  return {
-    id: slug,
-    name: clean.businessName || "Sam Hale Golf",
-    slug,
-    planKey: "founder",
-    subscriptionStatus: "comped",
-    billingProvider: "none",
-    active: true,
-  };
-}
-
-function cleanWorkspaceAccount(raw = {}, fallback = defaultWorkspaceAccountFromCoachAccount()) {
-  const name = cleanString(raw?.name, fallback.name, 120);
-  const slug = cleanSlug(raw?.slug || raw?.id || name, fallback.slug);
-  const planKey = accountPlanCatalog[raw?.planKey] ? raw.planKey : fallback.planKey;
-  const subscriptionStatus = ["trialing", "active", "past_due", "paused", "cancelled", "comped", "internal"].includes(raw?.subscriptionStatus)
-    ? raw.subscriptionStatus
-    : fallback.subscriptionStatus;
-  return {
-    id: cleanSlug(raw?.id, slug),
-    name,
-    slug,
-    planKey,
-    subscriptionStatus,
-    ownerUserId: cleanString(raw?.ownerUserId, fallback.ownerUserId || "", 120) || undefined,
-    billingProvider: ["stripe", "manual", "none"].includes(raw?.billingProvider) ? raw.billingProvider : fallback.billingProvider,
-    billingCustomerId: cleanString(raw?.billingCustomerId, "", 160) || undefined,
-    billingSubscriptionId: cleanString(raw?.billingSubscriptionId, "", 160) || undefined,
-    trialEndsAt: cleanString(raw?.trialEndsAt, "", 80) || undefined,
-    currentPeriodEndsAt: cleanString(raw?.currentPeriodEndsAt, "", 80) || undefined,
-    entitlementsOverride: raw?.entitlementsOverride && typeof raw.entitlementsOverride === "object" ? raw.entitlementsOverride : undefined,
-    active: raw?.active !== false,
-    createdAt: cleanString(raw?.createdAt, fallback.createdAt || "", 80) || undefined,
-    updatedAt: cleanString(raw?.updatedAt, fallback.updatedAt || "", 80) || undefined,
-  };
-}
-
-function normalizeWorkspaceAccounts(rawAccounts, account = defaultCoachAccount()) {
-  const fallback = defaultWorkspaceAccountFromCoachAccount(account);
-  const source = Array.isArray(rawAccounts) && rawAccounts.length ? rawAccounts : [fallback];
-  const seen = new Set();
-  return source.map((raw, index) => {
-    const clean = cleanWorkspaceAccount(raw, index === 0 ? fallback : defaultWorkspaceAccountFromCoachAccount(account));
-    let id = clean.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${clean.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...clean, id, active: clean.active || index === 0 };
-  });
-}
-
-function defaultAccountId(accounts) {
-  return (accounts || []).find((account) => account.active)?.id || accounts?.[0]?.id || defaultWorkspaceAccountFromCoachAccount().id;
-}
-
-function defaultLocationFromCoachAccount(account = defaultCoachAccount()) {
-  const clean = cleanCoachAccount(account);
-  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(clean);
-  return {
-    id: "default-location",
-    accountId: workspaceAccount.id,
-    name: clean.venueName,
-    shortName: clean.venueShortName || clean.venueName,
-    address: "",
-    timezone: clean.timezone,
-    active: true,
-    archived: false,
-    isDefault: true,
-    sortOrder: 0,
-  };
-}
-
-function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
-  const clean = cleanCoachAccount(account);
-  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(clean);
-  return {
-    id: clean.id || "sam-hale-golf",
-    accountId: workspaceAccount.id,
-    name: clean.coachName,
-    displayName: clean.coachName || clean.businessName,
-    shortName: "Sam",
-    email: clean.contactEmail,
-    active: true,
-    archived: false,
-    isDefault: true,
-    bookable: true,
-    assignedLocationIds: ["default-location"],
-    defaultLocationId: "default-location",
-    sortOrder: 0,
-  };
-}
-
-function defaultAppUserFromAccount(account = defaultCoachAccount()) {
-  const coach = defaultCoachProfileFromAccount(account);
-  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(account);
-  return {
-    id: `${coach.id}-admin`,
-    accountId: workspaceAccount.id,
-    email: coach.email,
-    name: coach.displayName,
-    role: "admin",
-    coachId: coach.id,
-    permissions: {
-      bookings: "all",
-      services: "all",
-      availability: "all",
-      locations: "all",
-      clients: "all",
-      settings: "all",
-    },
-  };
-}
-
-function cleanCoachProfile(raw = {}, fallback = defaultCoachProfileFromAccount(), index = 0) {
-  const name = cleanString(raw?.name, fallback.name, 120);
-  return {
-    id: cleanSlug(raw?.id, cleanSlug(name, `coach-${index + 1}`)),
-    accountId: cleanSlug(raw?.accountId, fallback.accountId || defaultWorkspaceAccountFromCoachAccount().id),
-    name,
-    displayName: cleanString(raw?.displayName, name, 120),
-    shortName: cleanString(raw?.shortName, name.split(/\s+/).map((part) => part[0]).join("").slice(0, 4).toUpperCase(), 60),
-    email: cleanEmail(raw?.email, fallback.email),
-    phone: cleanString(raw?.phone, "", 80) || undefined,
-    bio: cleanString(raw?.bio, "", 600) || undefined,
-    photoUrl: cleanUrl(raw?.photoUrl, "", 300) || undefined,
-    active: raw?.active !== false,
-    archived: raw?.archived === true,
-    isDefault: raw?.isDefault === true || fallback.isDefault === true,
-    bookable: raw?.bookable !== false,
-    assignedLocationIds: Array.isArray(raw?.assignedLocationIds)
-      ? raw.assignedLocationIds.map((id) => cleanSlug(id, "")).filter(Boolean)
-      : fallback.assignedLocationIds,
-    defaultLocationId: cleanSlug(raw?.defaultLocationId, raw?.assignedLocationIds?.[0] || fallback.assignedLocationIds?.[0] || "") || undefined,
-    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw.sortOrder)) : index,
-  };
-}
-
-function normalizeCoachProfiles(rawProfiles, account = defaultCoachAccount()) {
-  const fallback = defaultCoachProfileFromAccount(account);
-  const source = Array.isArray(rawProfiles) && rawProfiles.length ? rawProfiles : [fallback];
-  const seen = new Set();
-  const cleaned = source.map((raw, index) => {
-    const coach = cleanCoachProfile(raw, index === 0 ? fallback : undefined, index);
-    let id = coach.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${coach.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...coach, id };
-  });
-  if (!cleaned.some((coach) => coach.active && !coach.archived && coach.bookable)) {
-    cleaned[0] = { ...cleaned[0], active: true, archived: false, bookable: true };
-  }
-  const defaultIndex = cleaned.findIndex((coach) => coach.isDefault && coach.active && !coach.archived);
-  const fallbackDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((coach) => coach.active && !coach.archived);
-  return cleaned
-    .map((coach, index) => ({ ...coach, isDefault: index === fallbackDefaultIndex }))
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName));
-}
-
-function defaultCoachId(coaches) {
-  return coaches.find((coach) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || defaultCoachProfileFromAccount().id;
-}
-
-function coachById(coaches, id) {
-  if (!id) return null;
-  return (coaches || []).find((coach) => coach.id === id) || null;
-}
-
-function coachSnapshot(coach) {
-  return {
-    coachId: coach.id,
-    name: coach.name,
-    displayName: coach.displayName,
-    email: coach.email || undefined,
-    phone: coach.phone || undefined,
-  };
-}
-
-function bookingCoachSnapshotFor(coachId, coaches, account) {
-  const profile =
-    coachById(coaches, coachId) ||
-    coachById(coaches, defaultCoachId(coaches)) ||
-    defaultCoachProfileFromAccount(account);
-  return coachSnapshot(profile);
-}
-
-function cleanBookingCoachSnapshot(raw, fallback) {
-  const source = raw?.name ? raw : fallback;
-  if (!source?.name) return undefined;
-  return {
-    coachId: cleanSlug(source.coachId, "") || undefined,
-    name: cleanString(source.name, "", 120),
-    displayName: cleanString(source.displayName, "", 120) || undefined,
-    email: cleanEmail(source.email, "") || undefined,
-    phone: cleanString(source.phone, "", 80) || undefined,
-  };
-}
-
-function cleanLocation(raw = {}, fallback = defaultLocationFromCoachAccount(), index = 0) {
-  const name = cleanString(raw?.name, fallback.name, 140);
-  const shortName = cleanString(raw?.shortName, name, 80);
-  return {
-    id: cleanSlug(raw?.id, cleanSlug(name, `location-${index + 1}`)),
-    accountId: cleanSlug(raw?.accountId, fallback.accountId || defaultWorkspaceAccountFromCoachAccount().id),
-    name,
-    shortName,
-    address: cleanString(raw?.address, fallback.address || "", 240),
-    mapUrl: cleanUrl(raw?.mapUrl, "", 300) || undefined,
-    arrivalInstructions: cleanString(raw?.arrivalInstructions, "", 500) || undefined,
-    publicNotes: cleanString(raw?.publicNotes, "", 500) || undefined,
-    timezone: cleanString(raw?.timezone, fallback.timezone, 80),
-    active: raw?.active !== false,
-    archived: raw?.archived === true,
-    isDefault: raw?.isDefault === true || fallback.isDefault === true,
-    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw.sortOrder)) : index,
-  };
-}
-
-function normalizeLocations(rawLocations, account = defaultCoachAccount()) {
-  const fallback = defaultLocationFromCoachAccount(account);
-  const source = Array.isArray(rawLocations) && rawLocations.length ? rawLocations : [fallback];
-  const seen = new Set();
-  const cleaned = source.map((raw, index) => {
-    const location = cleanLocation(raw, index === 0 ? fallback : undefined, index);
-    let id = location.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${location.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...location, id };
-  });
-  if (!cleaned.some((location) => location.active && !location.archived)) {
-    cleaned[0] = { ...cleaned[0], active: true, archived: false };
-  }
-  const defaultIndex = cleaned.findIndex((location) => location.isDefault && location.active && !location.archived);
-  const fallbackDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((location) => location.active && !location.archived);
-  return cleaned
-    .map((location, index) => ({ ...location, isDefault: index === fallbackDefaultIndex }))
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
-}
-
-function activeLocations(locations) {
-  return (locations || []).filter((location) => location.active && !location.archived);
-}
-
-function defaultLocationId(locations) {
-  return activeLocations(locations).find((location) => location.isDefault)?.id || activeLocations(locations)[0]?.id || locations?.[0]?.id || "";
-}
-
-function locationById(locations, id) {
-  if (!id) return null;
-  return (locations || []).find((location) => location.id === id) || null;
-}
-
-function locationSnapshot(location) {
-  return {
-    locationId: location.id,
-    name: location.name,
-    shortName: location.shortName,
-    address: location.address || undefined,
-    mapUrl: location.mapUrl || undefined,
-    arrivalInstructions: location.arrivalInstructions || undefined,
-    publicNotes: location.publicNotes || undefined,
-    timezone: location.timezone || undefined,
-  };
-}
-
-function serviceLocation(service, locations, account) {
-  return (
-    locationById(locations, service?.locationId) ||
-    locationById(locations, defaultLocationId(locations)) ||
-    defaultLocationFromCoachAccount(account)
-  );
-}
-
-function cleanBookingLocationSnapshot(raw, fallback) {
-  const source = raw?.name ? raw : fallback;
-  if (!source?.name) return undefined;
-  return {
-    locationId: cleanString(source.locationId, "", 120) || undefined,
-    name: cleanString(source.name, "", 140),
-    shortName: cleanString(source.shortName, "", 80) || undefined,
-    address: cleanString(source.address, "", 240) || undefined,
-    mapUrl: cleanUrl(source.mapUrl, "", 300) || undefined,
-    arrivalInstructions: cleanString(source.arrivalInstructions, "", 500) || undefined,
-    publicNotes: cleanString(source.publicNotes, "", 500) || undefined,
-    timezone: cleanString(source.timezone, "", 80) || undefined,
-  };
-}
-
-function bookingLocationSnapshotFor(service, locations, account) {
-  return locationSnapshot(serviceLocation(service, locations, account));
-}
-
-function calendarItemLocation(item, service, locations, account) {
-  return (
-    cleanBookingLocationSnapshot(item?.location) ||
-    cleanBookingLocationSnapshot(
-      item?.locationId
-        ? locationSnapshot(locationById(locations, item.locationId) || serviceLocation(service, locations, account))
-        : undefined,
-    ) ||
-    bookingLocationSnapshotFor(service, locations, account)
-  );
-}
-
-function calendarItemCoach(item, coaches, account) {
-  return (
-    cleanBookingCoachSnapshot(item?.coach) ||
-    bookingCoachSnapshotFor(item?.coachId, coaches, account)
-  );
-}
-
-function resolvedCalendarItemCoachId(item, service, coaches, account) {
-  return item?.coachId || item?.coach?.coachId || service?.coachId || calendarItemCoach(item, coaches, account).coachId || defaultCoachId(coaches);
-}
-
-function resolvedCalendarItemLocationId(item, service, locations, account) {
-  return item?.locationId || item?.location?.locationId || service?.locationId || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
-}
-
-function serviceForCalendarItem(item, services = []) {
-  return (services || []).find((service) => service.id && service.id === item?.serviceId) || null;
-}
-
-function recordAccountId(record, fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  return record?.accountId || fallbackAccountId;
-}
-
-function recordBelongsToAccount(record, accountId) {
-  return recordAccountId(record, accountId) === accountId;
-}
-
-function peopleAccountIdFromSettings(settings, account = coachAccountFromSettings(settings)) {
-  return defaultAccountId(workspaceAccountsFromSettings(settings, account));
-}
-
-function calendarItemBelongsToAccount(item, accountId) {
-  return recordBelongsToAccount(item, accountId);
-}
-
-function calendarItemBelongsToCoach(item, coachId, services = [], coaches = [], account = defaultCoachAccount()) {
-  if (!coachId) return false;
-  if (isLocationOnlyBlock(item)) return true;
-  return resolvedCalendarItemCoachId(item, serviceForCalendarItem(item, services), coaches, account) === coachId;
-}
-
-function canReadCalendarItem(context, item, state) {
-  if (!calendarItemBelongsToAccount(item, context.accountId)) return false;
-  if (context.isAdmin) return true;
-  return calendarItemBelongsToCoach(item, context.coachId, state.services, state.coaches, state.account);
-}
-
-function assertCanWriteCalendarItem(context, item, previousItem, state) {
-  if (!calendarItemBelongsToAccount(item, context.accountId)) {
-    throw permissionDenied("This booking does not belong to your workspace.");
-  }
-  if (context.isAdmin) return;
-  if (!hasPermission(context.user, "bookings", "own")) {
-    throw permissionDenied("You do not have permission to edit bookings.");
-  }
-  if (isLocationOnlyBlock(item)) {
-    throw permissionDenied("You do not have permission to block an entire location.");
-  }
-  if (previousItem && !calendarItemBelongsToCoach(previousItem, context.coachId, state.services, state.coaches, state.account)) {
-    throw permissionDenied("You do not have permission to edit another coach's calendar.");
-  }
-  if (!calendarItemBelongsToCoach(item, context.coachId, state.services, state.coaches, state.account)) {
-    throw permissionDenied("You do not have permission to move bookings to another coach.");
-  }
-}
-
-function normalizeCalendarItemsForContext(items, context) {
-  return normalizeItems(items).map((item) => ({ ...item, accountId: context.accountId }));
-}
-
-function filterCalendarStateForContext(state, context) {
-  const filteredItems = (state.items || []).filter((item) => canReadCalendarItem(context, item, state));
-  const visibleItemIds = new Set(filteredItems.map((item) => item.id));
-  return {
-    ...state,
-    items: filteredItems,
-    services: context.isAdmin
-      ? (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId))
-      : (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId) && (service.coachId || defaultCoachId(state.coaches)) === context.coachId),
-    availability: context.isAdmin
-      ? (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId)))
-      : (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId) && (window.coachId || defaultCoachId(state.coaches)) === context.coachId)),
-    notifications: context.isAdmin
-      ? state.notifications
-      : (state.notifications || []).filter((notification) => visibleItemIds.has(notification.calendarItemId)),
-    people: context.isAdmin
-      ? state.people
-      : (state.people || []).filter((person) => filteredItems.some((item) => item.email && person.email && item.email === person.email)),
-  };
-}
-
-function serviceBelongsToContext(service, context, coaches = []) {
-  if (!recordBelongsToAccount(service, context.accountId)) return false;
-  if (context.isAdmin) return true;
-  return (service?.coachId || defaultCoachId(coaches)) === context.coachId;
-}
-
-function assertCanWriteService(context, service, previousService, coaches = []) {
-  if (!recordBelongsToAccount(service, context.accountId)) {
-    throw permissionDenied("This service does not belong to your workspace.");
-  }
-  if (context.isAdmin) return;
-  if (!hasPermission(context.user, "services", "own")) {
-    throw permissionDenied("You do not have permission to edit lesson services.");
-  }
-  if (previousService && !serviceBelongsToContext(previousService, context, coaches)) {
-    throw permissionDenied("You do not have permission to edit another coach's service.");
-  }
-  if (!serviceBelongsToContext(service, context, coaches)) {
-    throw permissionDenied("You do not have permission to assign services to another coach.");
-  }
-}
-
-function mergeServicesForContext(incomingServices, currentServices, context, coaches = []) {
-  if (context.isAdmin) return incomingServices.map((service) => ({ ...service, accountId: context.accountId }));
-  const previousById = new Map((currentServices || []).map((service) => [service.id, service]));
-  const ownedIncoming = incomingServices.map((service) => ({
-    ...service,
-    accountId: context.accountId,
-    coachId: service.coachId || context.coachId,
-  }));
-  ownedIncoming.forEach((service) => assertCanWriteService(context, service, previousById.get(service.id), coaches));
-  const ownedIds = new Set(ownedIncoming.map((service) => service.id));
-  const preserved = (currentServices || []).filter(
-    (service) => !ownedIds.has(service.id) && !serviceBelongsToContext(service, context, coaches),
-  );
-  return [...preserved, ...ownedIncoming];
-}
-
-function availabilityWindowBelongsToContext(window, context, fallbackCoachId) {
-  if (!recordBelongsToAccount(window, context.accountId)) return false;
-  if (context.isAdmin) return true;
-  return (window?.coachId || fallbackCoachId) === context.coachId;
-}
-
-function mergeAvailabilityForContext(incomingAvailability, currentAvailability, context, fallbackCoachId) {
-  const incoming = normalizeAvailability(incomingAvailability).map((dayWindows) =>
-    dayWindows.map((window) => ({
-      ...window,
-      accountId: context.accountId,
-      coachId: window.coachId || (context.isAdmin ? fallbackCoachId : context.coachId),
-    })),
-  );
-  if (context.isAdmin) return incoming;
-  if (!hasPermission(context.user, "availability", "own")) {
-    throw permissionDenied("You do not have permission to edit availability.");
-  }
-  return incoming.map((dayWindows, index) => {
-    dayWindows.forEach((window) => {
-      if (!availabilityWindowBelongsToContext(window, context, fallbackCoachId)) {
-        throw permissionDenied("You do not have permission to edit another coach's availability.");
-      }
-    });
-    const preserved = (currentAvailability[index] || []).filter(
-      (window) => !availabilityWindowBelongsToContext(window, context, fallbackCoachId),
-    );
-    return [...preserved, ...dayWindows];
-  });
-}
-
-function personMatchesCalendarItem(person, item) {
-  const email = cleanString(person?.email, "", 180).toLowerCase();
-  const phone = cleanString(person?.phone, "", 80).replace(/\D/g, "");
-  const itemEmail = cleanString(item?.email, "", 180).toLowerCase();
-  const itemPhone = cleanString(item?.phone, "", 80).replace(/\D/g, "");
-  if (email && itemEmail && email === itemEmail) return true;
-  if (phone && itemPhone && phone === itemPhone) return true;
-  return false;
-}
-
-function filterPeopleForContext(people, context, state) {
-  const accountPeople = (people || []).filter((person) => recordBelongsToAccount(person, context.accountId));
-  if (context.isAdmin) return accountPeople;
-  const visibleItems = (state.items || []).filter((item) => canReadCalendarItem(context, item, state));
-  return accountPeople.filter((person) => visibleItems.some((item) => personMatchesCalendarItem(person, item)));
-}
-
-function filterNotificationsForContext(notifications, context, state) {
-  if (context.isAdmin) return notifications || [];
-  const visibleItemIds = new Set((state.items || []).filter((item) => canReadCalendarItem(context, item, state)).map((item) => item.id));
-  return (notifications || []).filter((notification) => visibleItemIds.has(notification.calendarItemId));
-}
-
-function filterCoachesForContext(coaches, context) {
-  if (context.isAdmin) return (coaches || []).filter((coach) => recordBelongsToAccount(coach, context.accountId));
-  return (coaches || []).filter((coach) => recordBelongsToAccount(coach, context.accountId) && coach.id === context.coachId);
-}
-
-function filterLocationsForContext(locations, context, coaches = []) {
-  const accountLocations = (locations || []).filter((location) => recordBelongsToAccount(location, context.accountId));
-  if (context.isAdmin) return accountLocations;
-  const coach = (coaches || []).find((candidate) => candidate.id === context.coachId);
-  const assigned = new Set([...(coach?.assignedLocationIds || []), coach?.defaultLocationId].filter(Boolean));
-  return accountLocations.filter((location) => assigned.has(location.id) || location.isDefault);
-}
-
-function assertCanManagePerson(context, person, state) {
-  assertAccountFeature(context.account, "clients");
-  if (context.isAdmin) return;
-  if (!hasPermission(context.user, "clients", "own")) {
-    throw permissionDenied("You do not have permission to edit clients.");
-  }
-  if (!filterPeopleForContext([person], context, state).length) {
-    throw permissionDenied("You do not have permission to edit this client.");
-  }
-}
-
-function isLocationOnlyBlock(item) {
-  return item?.kind === "block" && Boolean(item.locationId || item.location?.locationId) && !item.coachId && !item.coach?.coachId;
-}
-
-function isCoachOnlyBlock(item) {
-  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && !item.locationId && !item.location?.locationId;
-}
-
-function isCoachLocationBlock(item) {
-  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && Boolean(item.locationId || item.location?.locationId);
-}
-
-function isInactiveForConflict(item) {
-  return item?.status === "cancelled" || item?.status === "no_show";
-}
-
-function bookingLocationDisplay(location) {
-  return [location?.name, location?.address].filter(Boolean).join(" · ");
-}
-
 function generateSyncKey() {
   return `cg_${randomUUID().replaceAll("-", "")}`;
 }
@@ -1406,35 +742,6 @@ function hashToken(token) {
 function hashPassword(password, salt = randomBytes(16).toString("hex")) {
   const passwordHash = scryptSync(password, salt, 64).toString("hex");
   return { passwordHash, salt };
-}
-
-function logAuthTiming(step, startedAt, details = {}) {
-  console.log("auth_timing", {
-    step,
-    ms: Date.now() - startedAt,
-    ...details,
-  });
-}
-
-function authBootstrapSignature() {
-  const email = cleanEmail(env("CLARITY_ADMIN_EMAIL"), "");
-  const password = env("CLARITY_ADMIN_PASSWORD");
-  return hashToken(
-    JSON.stringify({
-      email,
-      passwordSeed: email && password ? hashToken(`${email}:${password}`) : "",
-      passwordConfigured: Boolean(password),
-    }),
-  );
-}
-
-function hasValidStoredPasswordHash(user) {
-  return (
-    typeof user?.password_hash === "string" &&
-    /^[a-f0-9]{128}$/i.test(user.password_hash) &&
-    typeof user?.password_salt === "string" &&
-    user.password_salt.length >= 16
-  );
 }
 
 function cookieHeader(token, req, maxAgeSeconds) {
@@ -1506,19 +813,6 @@ async function getSetting(key) {
   return rows[0]?.value || "";
 }
 
-async function readSettingsMap() {
-  const rows = await db().sql`SELECT key, value FROM settings`;
-  return Object.fromEntries(rows.map((row) => [row.key, row.value || ""]));
-}
-
-function settingValue(settings, key) {
-  return settings?.[key] || "";
-}
-
-function parseSettingJson(settings, key, fallback) {
-  return safeJsonParse(settingValue(settings, key), fallback);
-}
-
 async function ensureCoreTables() {
   await db().sql`
     CREATE TABLE IF NOT EXISTS settings (
@@ -1530,70 +824,53 @@ async function ensureCoreTables() {
   await db().sql`
     CREATE TABLE IF NOT EXISTS calendar_items (
       id TEXT PRIMARY KEY,
-      account_id TEXT,
       kind TEXT NOT NULL,
       week INTEGER NOT NULL DEFAULT 0,
       day INTEGER NOT NULL,
       start INTEGER NOT NULL,
       duration INTEGER NOT NULL,
-      coach_id TEXT,
-      location_id TEXT,
       service_id TEXT,
       client TEXT,
       title TEXT NOT NULL,
 	      phone TEXT,
 	      email TEXT,
-      note TEXT,
-      coach JSONB,
-      location JSONB,
+	      note TEXT,
       custom_group JSONB,
       status TEXT NOT NULL DEFAULT 'booked',
 	      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	    )
 	  `;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS account_id TEXT`;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location JSONB`;
   await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS completed_at TEXT`;
   await db().sql`
     CREATE INDEX IF NOT EXISTS idx_calendar_items_slot
     ON calendar_items (week, day, start)
   `;
-	  await db().sql`
-	    CREATE TABLE IF NOT EXISTS people (
-	      id TEXT PRIMARY KEY,
-	      account_id TEXT,
-	      name TEXT NOT NULL,
-	      email TEXT,
-	      phone TEXT,
-	      notes TEXT,
-	      source TEXT,
+  await db().sql`
+    CREATE TABLE IF NOT EXISTS people (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      notes TEXT,
+      source TEXT,
       caddy_profile_id TEXT,
       caddy_profile_url TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-	    )
-	  `;
-  await db().sql`ALTER TABLE people ADD COLUMN IF NOT EXISTS account_id TEXT`;
-	  await db().sql`DROP INDEX IF EXISTS idx_people_email_unique`;
-	  await db().sql`
-	    CREATE INDEX IF NOT EXISTS idx_people_email_lookup
-	    ON people (LOWER(email))
-	    WHERE email IS NOT NULL AND email <> ''
-	  `;
-	  await db().sql`
-	    CREATE INDEX IF NOT EXISTS idx_people_name_phone_lookup
-	    ON people (LOWER(name), phone)
-	    WHERE phone IS NOT NULL AND phone <> ''
-	  `;
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `;
+  await db().sql`DROP INDEX IF EXISTS idx_people_email_unique`;
   await db().sql`
-    CREATE INDEX IF NOT EXISTS idx_people_account_name_lookup
-    ON people (account_id, LOWER(name), LOWER(email), id)
+    CREATE INDEX IF NOT EXISTS idx_people_email_lookup
+    ON people (LOWER(email))
+    WHERE email IS NOT NULL AND email <> ''
+  `;
+  await db().sql`
+    CREATE INDEX IF NOT EXISTS idx_people_name_phone_lookup
+    ON people (LOWER(name), phone)
+    WHERE phone IS NOT NULL AND phone <> ''
   `;
   await db().sql`
     CREATE TABLE IF NOT EXISTS admin_users (
@@ -1666,37 +943,16 @@ async function ensureAuthTables() {
 }
 
 async function ensureAuthReady() {
-  const startedAt = Date.now();
-  const configSignature = authBootstrapSignature();
-  if (authReady && authReadyConfigSignature === configSignature) {
-    logAuthTiming("ensureAuthReady", startedAt, { cache: "hit" });
-    return;
-  }
-  if (authReady && authReadyConfigSignature !== configSignature) {
-    authReady = false;
-    authReadyPromise = null;
-    authReadyConfigSignature = "";
-    console.warn("auth_bootstrap_config_changed");
-  }
-  const cacheState = authReadyPromise ? "wait" : "miss";
   if (!authReadyPromise) {
-    const setupStartedAt = Date.now();
     authReadyPromise = (async () => {
       await ensureAuthTables();
       await ensureAdminUser();
-      authReady = true;
-      authReadyConfigSignature = configSignature;
-      logAuthTiming("ensureAuthReady.setup", setupStartedAt, { ok: true });
     })().catch((error) => {
       authReadyPromise = null;
-      authReady = false;
-      authReadyConfigSignature = "";
-      logAuthTiming("ensureAuthReady.setup", setupStartedAt, { ok: false });
       throw error;
     });
   }
   await authReadyPromise;
-  logAuthTiming("ensureAuthReady", startedAt, { cache: cacheState });
 }
 
 async function defaultSettings() {
@@ -1732,10 +988,6 @@ async function defaultSettings() {
     accountCaddyWorkspaceUrl: account.caddyWorkspaceUrl,
     accountInvoiceSettingsJson: JSON.stringify(account.invoiceSettings),
     coachName: account.businessName,
-    workspaceAccountsJson: JSON.stringify(normalizeWorkspaceAccounts([], account)),
-    coachProfilesJson: JSON.stringify(normalizeCoachProfiles([], account)),
-    appUsersJson: JSON.stringify([defaultAppUserFromAccount(account)]),
-    locationsJson: JSON.stringify(normalizeLocations([], account)),
     servicesJson: JSON.stringify(defaultServices),
     availabilityJson: JSON.stringify(defaultAvailability),
     brandLogoName: "",
@@ -1772,12 +1024,11 @@ async function seedItems() {
     for (const item of initialItems) {
       await client.query(
         `INSERT INTO calendar_items (
-          id, account_id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
-	        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
+          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
+	        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
 	        ON CONFLICT (id) DO NOTHING`,
         [
           item.id,
-          item.accountId || defaultWorkspaceAccountFromCoachAccount(account).id,
           item.kind,
           item.week,
           item.day,
@@ -1803,60 +1054,41 @@ async function seedItems() {
 }
 
 async function ensureAdminUser() {
-  const startedAt = Date.now();
-  let outcome = "unknown";
-  let wrote = false;
-  let hashed = false;
   const email = cleanEmail(env("CLARITY_ADMIN_EMAIL"), "");
   const password = env("CLARITY_ADMIN_PASSWORD");
 
-  try {
-    if (!email || !password) {
-      outcome = "missing_seed_env";
-      console.warn(
-        "Admin user not seeded because CLARITY_ADMIN_EMAIL or CLARITY_ADMIN_PASSWORD is not set.",
-      );
-      return;
-    }
+  if (!email || !password) {
+    console.warn(
+      "Admin user not seeded because CLARITY_ADMIN_EMAIL or CLARITY_ADMIN_PASSWORD is not set.",
+    );
+    return;
+  }
 
-    const seedKey = hashToken(`${email}:${password}`);
-    const existing = await db()
-      .sql`SELECT id, password_hash, password_salt FROM admin_users WHERE email = ${email}`;
+  const existing = await db()
+    .sql`SELECT id FROM admin_users WHERE email = ${email}`;
 
-    if (existing.length) {
-      const currentSeedKey = await getSetting("adminPasswordSeedKey");
-      if (currentSeedKey === seedKey && hasValidStoredPasswordHash(existing[0])) {
-        outcome = "ready";
-        return;
-      }
-      hashed = true;
-      const { passwordHash, salt } = hashPassword(password);
-      await db().sql`
-        UPDATE admin_users
-        SET password_hash = ${passwordHash},
-            password_salt = ${salt},
-            updated_at = NOW()
-        WHERE email = ${email}
-      `;
-      await setSetting("adminPasswordSeedKey", seedKey);
-      wrote = true;
-      outcome = "updated_seed";
-      return;
-    }
-
-    hashed = true;
-    const { passwordHash, salt } = hashPassword(password);
+  const { passwordHash, salt } = hashPassword(password);
+  const seedKey = hashToken(`${email}:${password}`);
+  if (existing.length) {
+    const currentSeedKey = await getSetting("adminPasswordSeedKey");
+    if (currentSeedKey === seedKey) return;
     await db().sql`
-      INSERT INTO admin_users (id, email, password_hash, password_salt, created_at, updated_at)
-      VALUES (${randomUUID()}, ${email}, ${passwordHash}, ${salt}, NOW(), NOW())
-      ON CONFLICT (email) DO NOTHING
+      UPDATE admin_users
+      SET password_hash = ${passwordHash},
+          password_salt = ${salt},
+          updated_at = NOW()
+      WHERE email = ${email}
     `;
     await setSetting("adminPasswordSeedKey", seedKey);
-    wrote = true;
-    outcome = "inserted_seed";
-  } finally {
-    logAuthTiming("ensureAdminUser", startedAt, { outcome, wrote, hashed });
+    return;
   }
+
+  await db().sql`
+    INSERT INTO admin_users (id, email, password_hash, password_salt, created_at, updated_at)
+    VALUES (${randomUUID()}, ${email}, ${passwordHash}, ${salt}, NOW(), NOW())
+    ON CONFLICT (email) DO NOTHING
+  `;
+  await setSetting("adminPasswordSeedKey", seedKey);
 }
 
 async function ensureNotificationHistoryTable() {
@@ -1899,36 +1131,16 @@ async function ensureNotificationHistoryTable() {
   `;
 }
 
-async function backfillLegacyPeopleAccountIds(accountId) {
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  await db().sql`
-    UPDATE people
-    SET account_id = ${cleanAccountId}
-    WHERE account_id IS NULL OR BTRIM(account_id) = ''
-  `;
-}
-
 async function ensureSeeded() {
-  if (!seedReadyPromise) {
-    seedReadyPromise = (async () => {
-      await ensureCoreTables();
-      await seedSettings();
-      await backfillLegacyPeopleAccountIds(peopleAccountIdFromSettings(await readSettingsMap()));
-      await ensureNotificationHistoryTable();
-      await seedItems();
-      await seedPeopleFromAppointments();
-      await ensureAdminUser();
-    })().catch((error) => {
-      seedReadyPromise = null;
-      throw error;
-    });
-  }
-  await seedReadyPromise;
+  await ensureCoreTables();
+  await seedSettings();
+  await ensureNotificationHistoryTable();
+  await seedItems();
+  await seedPeopleFromAppointments();
+  await ensureAdminUser();
 }
 
 function rowToItem(row) {
-  const updatedAt = cleanString(typeof row?.updated_at === "string" ? row.updated_at : String(row?.updated_at || ""), "", 120);
-  const completedAt = cleanString(typeof row?.completed_at === "string" ? row.completed_at : String(row?.completed_at || ""), "", 120);
   const status = ["completed", "cancelled", "no_show"].includes(row.status)
     ? row.status
     : "booked";
@@ -1936,396 +1148,22 @@ function rowToItem(row) {
   const cancelledGroupSession = isCancelledGroupSessionLike(row);
   return {
     id: row.id,
-    accountId: row.accountId || row.account_id || defaultWorkspaceAccountFromCoachAccount().id,
     kind: row.kind,
     week: Number(row.week ?? 0),
     day: Number(row.day ?? 0),
     start: Number(row.start ?? 0),
     duration: Number(row.duration ?? 0),
-    coachId: row.coach_id || defaultCoachProfileFromAccount().id,
-    locationId: row.location_id || cleanBookingLocationSnapshot(row.location)?.locationId || "",
     serviceId: row.service_id || "",
     client: row.client || "",
     title: row.title,
-    phone: row.phone || "",
-    email: row.email || "",
-    note: row.note || "",
-    coach: cleanBookingCoachSnapshot(row.coach),
-    location: cleanBookingLocationSnapshot(row.location),
+	    phone: row.phone || "",
+	    email: row.email || "",
+	    note: row.note || "",
     status: cancelledGroupSession ? "cancelled" : status,
-    updatedAt,
-    completedAt,
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
     ...(customGroup || {}),
 	  };
 	}
-
-function lessonCompleteActionFailure(error, baseDetails, durationMs) {
-  const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
-  const code = cleanString(error?.code, "BOOKING_COMPLETE_FAILED", 120);
-  const details = cleanString(error?.details, "", 1200);
-  const hint = cleanString(error?.hint, "", 1200);
-  const backendMessage = error instanceof Error ? error.message : String(error?.message || error || "Lesson completion failed.");
-  return {
-    ...baseDetails,
-    httpStatus: status,
-    durationMs,
-    errorCode: code,
-    backendDetails: details || hint || undefined,
-    backendHint: hint || undefined,
-    backendMessage,
-  };
-}
-
-function supabaseStorageConfig() {
-  const url = env("SUPABASE_URL").replace(/\/$/, "");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
-  if (!url || !key) throw new Error("Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_KEY in Netlify.");
-  return { url, key };
-}
-
-async function requestSupabaseRows(table, options = {}) {
-  const { url, key } = supabaseStorageConfig();
-  const {
-    method = "GET",
-    query = "",
-    body,
-    prefer = "",
-  } = options;
-  const response = await fetch(`${url}/rest/v1/${table}${query ? `?${query}` : ""}`, {
-    method,
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      ...(prefer ? { Prefer: prefer } : {}),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  const text = await response.text();
-  let payload = null;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = text;
-    }
-  }
-  if (!response.ok) {
-    const payloadObject = payload && typeof payload === "object" ? payload : {};
-    const payloadCode = cleanString(payloadObject.code, "", 120);
-    const payloadMessage = cleanString(payloadObject.message, "", 400);
-    const payloadDetails = cleanString(payloadObject.details, "", 1200);
-    const payloadHint = cleanString(payloadObject.hint, "", 1200);
-    const fallbackMessage = `${method} ${table} failed ${response.status}: ${String(text || "").slice(0, 500)}`;
-    throw Object.assign(new Error(payloadMessage || fallbackMessage), {
-      status: response.status,
-      code: payloadCode,
-      details: payloadDetails,
-      hint: payloadHint,
-    });
-  }
-  return payload || [];
-}
-
-function isSupabaseColumnMissingError(error, column) {
-  const code = cleanString(error?.code, "", 120).toUpperCase();
-  const message = error instanceof Error ? error.message : "";
-  const details = cleanString(error?.details, "", 1200);
-  const hint = cleanString(error?.hint, "", 1200);
-  const combined = [
-    message,
-    details,
-    hint,
-  ].join(" ");
-  const missingSignal = /does not exist|unknown column|could not find|not found|no such column/i.test(combined);
-  const hasColumnMention = new RegExp(`\\b${column}\\b`, "i").test(combined);
-  return hasColumnMention && (
-    (code === "PGRST204" || code === "PGRST116" || code === "42703") ||
-    missingSignal ||
-    !code
-  );
-}
-
-function isSupabaseAccountScopeMissingError(error) {
-  return isSupabaseColumnMissingError(error, "account_id");
-}
-
-function isSupabaseCompletedAtMissingError(error) {
-  return isSupabaseColumnMissingError(error, "completed_at");
-}
-
-function lessonCompletePatchFilter(itemId, accountId, useAccountScope) {
-  return useAccountScope
-    ? `id=eq.${encodeURIComponent(itemId)}&account_id=eq.${encodeURIComponent(accountId)}&select=*`
-    : `id=eq.${encodeURIComponent(itemId)}&select=*`;
-}
-
-function lessonCompleteReadFilter(itemId, accountId, useAccountScope) {
-  return useAccountScope
-    ? `select=*&id=eq.${encodeURIComponent(itemId)}&account_id=eq.${encodeURIComponent(accountId)}&limit=1`
-    : `select=*&id=eq.${encodeURIComponent(itemId)}&limit=1`;
-}
-
-async function readLessonItemForCompletion(itemId, accountId, useAccountScope = true) {
-  const rows = await requestSupabaseRows("calendar_items", {
-    query: lessonCompleteReadFilter(itemId, accountId, useAccountScope),
-    method: "GET",
-  });
-  return Array.isArray(rows) && rows.length ? rows[0] : null;
-}
-
-async function patchLessonItemComplete(itemId, accountId, completedAt, includeCompletedAt, useAccountScope = true) {
-  const patch = includeCompletedAt
-    ? {
-      status: "completed",
-      completed_at: completedAt,
-      updated_at: completedAt,
-    }
-    : {
-      status: "completed",
-      updated_at: completedAt,
-    };
-
-  return requestSupabaseRows("calendar_items", {
-    method: "PATCH",
-    query: lessonCompletePatchFilter(itemId, accountId, useAccountScope),
-    body: patch,
-    prefer: "return=representation",
-  });
-}
-
-async function completeCalendarItemById(currentState, itemId, requestContext) {
-  const startedAt = Date.now();
-  const requestTimed = { startedAt, dbLookupMs: 0, writeMs: 0, settingsUpdateMs: 0 };
-  const cleanItemId = cleanString(itemId, "", 140);
-  const baseDetails = {
-    action: "lesson_complete",
-    route: "PUT /api/calendar-state",
-    operationOwner: "lesson_complete",
-    calendarItemId: cleanItemId,
-    accountId: requestContext?.accountId || "",
-  };
-
-  if (!cleanItemId) {
-    throw Object.assign(new Error("Lesson completion requires a booking id."), {
-      status: 400,
-      code: "BOOKING_COMPLETE_INVALID_ID",
-      ...baseDetails,
-    });
-  }
-
-  const lookupStart = Date.now();
-  const target = currentState.items.find((item) => item.id === cleanItemId);
-  requestTimed.dbLookupMs = Date.now() - lookupStart;
-
-  if (!target) {
-    throw Object.assign(new Error("Lesson was not found in this workspace."), {
-      status: 404,
-      code: "BOOKING_COMPLETE_NOT_FOUND",
-      ...baseDetails,
-    });
-  }
-
-  if (target.kind !== "appointment") {
-    throw Object.assign(new Error("Only appointments can be marked completed."), {
-      status: 400,
-      code: "BOOKING_COMPLETE_INVALID_ITEM",
-      ...baseDetails,
-    });
-  }
-
-  assertCanWriteCalendarItem(requestContext, target, target, currentState);
-
-  if (target.status === "completed") {
-    const alreadyCompletedTimings = {
-      ...requestTimed,
-      writeMs: 0,
-      totalMs: Date.now() - startedAt,
-    };
-    console.info("lesson_complete_saved", {
-      ...baseDetails,
-      httpStatus: 200,
-      itemId: cleanItemId,
-      calendarId: target.accountId || "",
-      message: "lesson already completed",
-      durationMs: alreadyCompletedTimings.totalMs,
-      stageTimings: alreadyCompletedTimings,
-      idempotent: true,
-    });
-    return {
-      ok: true,
-      action: "lesson_complete",
-      itemId: cleanItemId,
-      item: target,
-      status: "completed",
-      calendarId: target.accountId || "",
-      updatedAt: currentState.updatedAt,
-      stageTimings: alreadyCompletedTimings,
-      idempotent: true,
-    };
-  }
-
-  const completionAt = nowIso();
-  const accountId = cleanString(
-    target.accountId || requestContext.accountId || defaultWorkspaceAccountFromCoachAccount().id,
-    "",
-    140,
-  );
-  const updateStarted = Date.now();
-  let rows = [];
-  let usedCompletedAtColumn = true;
-  let usedAccountScope = true;
-  console.info("lesson_complete_update_attempted", {
-    ...baseDetails,
-    itemId: cleanItemId,
-    calendarId: accountId || target.accountId || "",
-    httpStatus: 0,
-    action: "lesson_complete",
-    durationMs: 0,
-  });
-
-  try {
-    while (!rows.length) {
-      try {
-        rows = queryRows(
-          await patchLessonItemComplete(
-            cleanItemId,
-            accountId,
-            completionAt,
-            usedCompletedAtColumn,
-            usedAccountScope,
-          ),
-        );
-        break;
-      } catch (error) {
-        if (isSupabaseAccountScopeMissingError(error) && usedAccountScope) {
-          usedAccountScope = false;
-          continue;
-        }
-        if (isSupabaseCompletedAtMissingError(error) && usedCompletedAtColumn) {
-          usedCompletedAtColumn = false;
-          continue;
-        }
-        throw error;
-      }
-    }
-    requestTimed.writeMs = Date.now() - updateStarted;
-
-    if (!rows.length) {
-      let existing = null;
-      try {
-        existing = await readLessonItemForCompletion(cleanItemId, accountId, usedAccountScope);
-      } catch (error) {
-        if (isSupabaseAccountScopeMissingError(error) && usedAccountScope) {
-          usedAccountScope = false;
-          existing = await readLessonItemForCompletion(cleanItemId, accountId, false);
-        } else {
-          throw error;
-        }
-      }
-      if (existing && existing.status === "completed") {
-        const idempotentItem = rowToItem(existing);
-        const idempotentTimings = {
-          ...requestTimed,
-          totalMs: Date.now() - startedAt,
-        };
-        console.info("lesson_complete_saved", {
-          ...baseDetails,
-          itemId: cleanItemId,
-          calendarId: idempotentItem.accountId || accountId || "",
-          httpStatus: 200,
-          durationMs: idempotentTimings.totalMs,
-          stageTimings: idempotentTimings,
-          idempotent: true,
-          updatedAt: idempotentItem.updatedAt || currentState.updatedAt,
-          usedAccountScope,
-          usedCompletedAtColumn,
-        });
-        return {
-          ok: true,
-          action: "lesson_complete",
-          itemId: cleanItemId,
-          item: idempotentItem,
-          status: "completed",
-          calendarId: idempotentItem.accountId || accountId || "",
-          updatedAt: idempotentItem.updatedAt || currentState.updatedAt,
-          stageTimings: idempotentTimings,
-          usedAccountScope,
-          idempotent: true,
-        };
-      }
-
-      throw Object.assign(new Error("Lesson was not found in your workspace."), {
-        status: 404,
-        code: "BOOKING_COMPLETE_NOT_FOUND",
-        ...baseDetails,
-      });
-    }
-
-    const row = rows[0];
-    const item = rowToItem(row);
-    const updateSettingStarted = Date.now();
-    await setSetting("updatedAt", row.updated_at || nowIso());
-    requestTimed.settingsUpdateMs = Date.now() - updateSettingStarted;
-    const stageTimings = {
-      ...requestTimed,
-      totalMs: Date.now() - startedAt,
-    };
-    console.info("lesson_complete_saved", {
-      ...baseDetails,
-      itemId: cleanItemId,
-      calendarId: item.accountId || accountId || "",
-      httpStatus: 200,
-      durationMs: stageTimings.totalMs,
-      stageTimings,
-      idempotent: false,
-      updatedAt: item.updatedAt || currentState.updatedAt,
-      usedAccountScope,
-      usedCompletedAtColumn,
-    });
-    return {
-      ok: true,
-      action: "lesson_complete",
-      itemId: cleanItemId,
-      item,
-      status: "completed",
-      calendarId: item.accountId || accountId || "",
-      updatedAt: item.updatedAt || currentState.updatedAt,
-      stageTimings,
-      idempotent: false,
-      usedAccountScope,
-      usedCompletedAtColumn,
-    };
-  } catch (error) {
-    const durationMs = Date.now() - startedAt;
-    const errorStatus = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
-    const errorCode = cleanString(error?.code, "BOOKING_COMPLETE_FAILED", 120);
-    const backendMessage = error instanceof Error ? error.message : String(error || "Lesson completion failed.");
-    const errorDetails = cleanString(error?.details, "", 1200);
-    const errorHint = cleanString(error?.hint, "", 1200);
-    console.error("lesson_complete_failed", {
-      ...baseDetails,
-      httpStatus: errorStatus,
-      durationMs,
-      message: backendMessage,
-      backendMessage,
-      backendDetails: errorDetails || errorHint || undefined,
-      backendHint: errorHint || undefined,
-      itemId: cleanItemId,
-      calendarId: accountId || "",
-      errorCode,
-      usedAccountScope,
-      usedCompletedAtColumn,
-      stageTimings: {
-        ...requestTimed,
-        writeMs: Math.max(1, Date.now() - updateStarted),
-        totalMs: durationMs,
-      },
-    });
-    throw error;
-  }
-}
 
 function isCancelledGroupSessionLike(item) {
   return (
@@ -2361,14 +1199,11 @@ function cleanCalendarItem(item) {
   const cancelledGroupSession = isCancelledGroupSessionLike({ ...item, kind });
   return {
     id: cleanString(item.id, `${kind}-${Date.now()}`),
-    accountId: cleanSlug(item.accountId, defaultWorkspaceAccountFromCoachAccount().id),
     kind,
     week: Number.isInteger(Number(item.week)) ? Number(item.week) : 0,
     day,
     start,
     duration,
-    coachId: cleanSlug(item.coachId || item.coach?.coachId, kind === "appointment" ? defaultCoachProfileFromAccount().id : "") || undefined,
-    locationId: cleanSlug(item.locationId || item.location?.locationId, ""),
     serviceId: cleanString(item.serviceId),
     client: cancelledGroupSession ? "" : cleanString(item.client),
     title: cancelledGroupSession
@@ -2377,8 +1212,6 @@ function cleanCalendarItem(item) {
     phone: cancelledGroupSession ? "" : cleanString(item.phone),
     email: cancelledGroupSession ? "" : cleanString(item.email),
     note: cancelledGroupSession ? CANCELLED_GROUP_SESSION_NOTE : cleanString(item.note),
-    coach: cancelledGroupSession ? undefined : cleanBookingCoachSnapshot(item.coach),
-    location: cancelledGroupSession ? undefined : cleanBookingLocationSnapshot(item.location),
     status:
       cancelledGroupSession
         ? "cancelled"
@@ -2397,7 +1230,7 @@ function normalizeItems(items) {
     : initialItems;
 }
 
-function cleanPerson(person, source = "import", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+function cleanPerson(person, source = "import") {
   if (!person || typeof person !== "object") return null;
   const joinedName = [person.firstName, person.lastName]
     .filter(Boolean)
@@ -2412,7 +1245,6 @@ function cleanPerson(person, source = "import", accountId = defaultWorkspaceAcco
 
   return {
     id: cleanString(person.id, "", 120),
-    accountId: cleanSlug(person.accountId || person.account_id, accountId),
     name: name || email,
     email,
     phone: cleanString(person.phone, "", 80),
@@ -2445,12 +1277,10 @@ function normalizedPersonPhone(value) {
 
 function compatiblePersonMatch(candidate, rows = []) {
   if (!candidate || !Array.isArray(rows) || !rows.length) return null;
-  const accountId = cleanSlug(candidate.accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  const scopedRows = rows.filter((row) => recordBelongsToAccount(row, accountId));
 
   const candidateId = cleanString(candidate.id, "", 120);
   if (candidateId && !candidateId.startsWith("appointment-")) {
-    const exactId = scopedRows.find((row) => String(row?.id || "") === candidateId);
+    const exactId = rows.find((row) => String(row?.id || "") === candidateId);
     if (exactId) return exactId;
   }
 
@@ -2459,7 +1289,7 @@ function compatiblePersonMatch(candidate, rows = []) {
   const phone = normalizedPersonPhone(candidate.phone);
 
   if (name && email) {
-    const matches = scopedRows.filter(
+    const matches = rows.filter(
       (row) =>
         normalizedPersonName(row?.name) === name &&
         normalizedPersonEmail(row?.email) === email,
@@ -2472,7 +1302,7 @@ function compatiblePersonMatch(candidate, rows = []) {
   }
 
   if (name && phone) {
-    const exact = scopedRows.find(
+    const exact = rows.find(
       (row) =>
         normalizedPersonName(row?.name) === name &&
         normalizedPersonPhone(row?.phone) === phone,
@@ -2483,7 +1313,7 @@ function compatiblePersonMatch(candidate, rows = []) {
   // Use a lone contact-method match only when it is unambiguous and names do
   // not conflict. Shared family or organisation details must remain separate.
   if (email) {
-    const matches = scopedRows.filter(
+    const matches = rows.filter(
       (row) => normalizedPersonEmail(row?.email) === email,
     );
     if (matches.length === 1) {
@@ -2500,7 +1330,7 @@ function compatiblePersonMatch(candidate, rows = []) {
   }
 
   if (phone) {
-    const matches = scopedRows.filter(
+    const matches = rows.filter(
       (row) => normalizedPersonPhone(row?.phone) === phone,
     );
     if (matches.length === 1) {
@@ -2511,44 +1341,6 @@ function compatiblePersonMatch(candidate, rows = []) {
   }
 
   return null;
-}
-
-function personByEmail(rows = [], email = "", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const normalizedEmail = normalizedPersonEmail(email);
-  if (!normalizedEmail || !Array.isArray(rows)) return null;
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  return (
-    rows.find(
-      (row) =>
-        recordBelongsToAccount(row, cleanAccountId) &&
-        normalizedPersonEmail(row?.email) === normalizedEmail,
-    ) || null
-  );
-}
-
-function duplicatePersonEmailError(person, existing, route = "PUT /api/people") {
-  const email = normalizedPersonEmail(person?.email);
-  const personId = cleanString(person?.id, "", 120);
-  const duplicatePersonId = cleanString(existing?.id, "", 120);
-  return Object.assign(
-    new Error("Another person already uses that email address."),
-    {
-      status: 409,
-      code: "DUPLICATE_PERSON_EMAIL",
-      operationOwner: "people_patch",
-      route,
-      personId,
-      email,
-      details: {
-        operationOwner: "people_patch",
-        route,
-        httpStatus: 409,
-        personId,
-        duplicatePersonId,
-        email,
-      },
-    },
-  );
 }
 
 function personFromAppointment(item) {
@@ -2573,14 +1365,9 @@ async function readItems() {
   return rows.map(rowToItem);
 }
 
-function queryRows(result) {
-  return Array.isArray(result) ? result : result?.rows || [];
-}
-
-function rowToPerson(row, fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
+function rowToPerson(row) {
   return {
     id: row.id,
-    accountId: row.account_id || fallbackAccountId,
     name: row.name,
     email: row.email || "",
     phone: row.phone || "",
@@ -2733,30 +1520,27 @@ async function recordNotification({
   return record;
 }
 
-async function readPeople(fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
+async function readPeople() {
   const rows = await db().sql`
     SELECT * FROM people
     ORDER BY LOWER(name), LOWER(email), id
   `;
-  return rows.map((row) => rowToPerson(row, fallbackAccountId));
+  return rows.map(rowToPerson);
 }
 
-async function importPeople(rawPeople, source = "import", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+async function importPeople(rawPeople, source = "import") {
   const people = Array.isArray(rawPeople)
-    ? rawPeople.map((person) => cleanPerson(person, source, cleanAccountId)).filter(Boolean)
+    ? rawPeople.map((person) => cleanPerson(person, source)).filter(Boolean)
     : [];
   const result = {
     imported: 0,
     updated: 0,
     skipped: Array.isArray(rawPeople) ? rawPeople.length - people.length : 0,
-    failed: 0,
-    errors: [],
     people: [],
   };
   if (!Array.isArray(rawPeople)) return result;
 
-  const knownPeople = await readPeople(cleanAccountId);
+  const knownPeople = await readPeople();
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
@@ -2771,27 +1555,24 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
                email = COALESCE(NULLIF($3, ''), email),
                phone = COALESCE(NULLIF($4, ''), phone),
                notes = COALESCE(NULLIF($5, ''), notes),
-	               source = COALESCE(NULLIF($6, ''), source),
-	               caddy_profile_id = COALESCE(NULLIF($7, ''), caddy_profile_id),
-	               caddy_profile_url = COALESCE(NULLIF($8, ''), caddy_profile_url),
-	               account_id = COALESCE(NULLIF($9, ''), account_id),
-	               updated_at = NOW()
-	           WHERE id = $1`,
-	          [
+               source = COALESCE(NULLIF($6, ''), source),
+               caddy_profile_id = COALESCE(NULLIF($7, ''), caddy_profile_id),
+               caddy_profile_url = COALESCE(NULLIF($8, ''), caddy_profile_url),
+               updated_at = NOW()
+           WHERE id = $1`,
+          [
             existingId,
             person.name,
             person.email,
             person.phone,
             person.notes,
-	            person.source || source,
-	            person.caddyProfileId,
-	            person.caddyProfileUrl,
-              person.accountId || cleanAccountId,
-	          ],
-	        );
-	        Object.assign(existing, {
-            accountId: person.accountId || cleanAccountId,
-	          name: person.name || existing.name,
+            person.source || source,
+            person.caddyProfileId,
+            person.caddyProfileUrl,
+          ],
+        );
+        Object.assign(existing, {
+          name: person.name || existing.name,
           email: person.email || existing.email,
           phone: person.phone || existing.phone,
           notes: person.notes || existing.notes,
@@ -2802,22 +1583,21 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
         result.updated += 1;
       } else {
         const personId = person.id || randomUUID();
-	        await client.query(
-	          `INSERT INTO people (
-	             id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id, created_at, updated_at
-	           ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NOW(), NOW())`,
-	          [
+        await client.query(
+          `INSERT INTO people (
+             id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
+           ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), NOW())`,
+          [
             personId,
             person.name,
             person.email,
             person.phone,
             person.notes,
-	            person.source || source,
-	            person.caddyProfileId,
-	            person.caddyProfileUrl,
-              person.accountId || cleanAccountId,
-	          ],
-	        );
+            person.source || source,
+            person.caddyProfileId,
+            person.caddyProfileUrl,
+          ],
+        );
         knownPeople.push({ ...person, id: personId });
         result.imported += 1;
       }
@@ -2830,20 +1610,19 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
     client.release();
   }
 
-  result.people = await readPeople(cleanAccountId);
+  result.people = await readPeople();
   return result;
 }
 
-async function updatePerson(rawPerson, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  const person = cleanPerson(rawPerson, "manual_update", cleanAccountId);
+async function updatePerson(rawPerson) {
+  const person = cleanPerson(rawPerson, "manual_update");
   if (!person) {
     const error = new Error("A person needs a name or email.");
     error.status = 400;
     throw error;
   }
 
-  const knownPeople = await readPeople(cleanAccountId);
+  const knownPeople = await readPeople();
   const existing = compatiblePersonMatch(person, knownPeople);
   const existingId = existing?.id || "";
   const personId =
@@ -2851,70 +1630,49 @@ async function updatePerson(rawPerson, accountId = defaultWorkspaceAccountFromCo
     (person.id && !person.id.startsWith("appointment-")
       ? person.id
       : randomUUID());
-  const emailOwner = personByEmail(knownPeople, person.email, cleanAccountId);
-  const emailOwnerId = cleanString(emailOwner?.id, "", 120);
-  if (emailOwnerId && emailOwnerId !== personId) {
-    throw duplicatePersonEmailError({ ...person, id: personId }, emailOwner);
-  }
 
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
     if (existingId) {
-      const emailUnchanged =
-        normalizedPersonEmail(existing?.email) === normalizedPersonEmail(person.email);
       await client.query(
-        emailUnchanged
-          ? `UPDATE people
-             SET name = $2,
-                 phone = NULLIF($4, ''),
-                 notes = NULLIF($5, ''),
-                 source = COALESCE(NULLIF($6, ''), source),
-                 caddy_profile_id = NULLIF($7, ''),
-                 caddy_profile_url = NULLIF($8, ''),
-                 account_id = COALESCE(NULLIF($9, ''), account_id),
-                 updated_at = NOW()
-             WHERE id = $1`
-          : `UPDATE people
-             SET name = $2,
-                 email = NULLIF($3, ''),
-                 phone = NULLIF($4, ''),
-                 notes = NULLIF($5, ''),
-                 source = COALESCE(NULLIF($6, ''), source),
-                 caddy_profile_id = NULLIF($7, ''),
-                 caddy_profile_url = NULLIF($8, ''),
-                 account_id = COALESCE(NULLIF($9, ''), account_id),
-                 updated_at = NOW()
-             WHERE id = $1`,
+        `UPDATE people
+         SET name = $2,
+             email = NULLIF($3, ''),
+             phone = NULLIF($4, ''),
+             notes = NULLIF($5, ''),
+             source = COALESCE(NULLIF($6, ''), source),
+             caddy_profile_id = NULLIF($7, ''),
+             caddy_profile_url = NULLIF($8, ''),
+             updated_at = NOW()
+         WHERE id = $1`,
         [
           personId,
           person.name,
           person.email,
           person.phone,
           person.notes,
-	          person.source,
-	          person.caddyProfileId,
-	          person.caddyProfileUrl,
-            person.accountId || cleanAccountId,
-	        ],
-	      );
-	    } else {
-	      await client.query(
-	        `INSERT INTO people (
-	          id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id, created_at, updated_at
-	        ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NOW(), NOW())`,
-	        [
+          person.source,
+          person.caddyProfileId,
+          person.caddyProfileUrl,
+        ],
+      );
+    } else {
+      await client.query(
+        `INSERT INTO people (
+          id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
+        ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), NOW())`,
+        [
           personId,
           person.name,
           person.email,
           person.phone,
           person.notes,
-	          person.source,
-	          person.caddyProfileId,
-	          person.caddyProfileUrl,
-            person.accountId || cleanAccountId,
-	        ],
-	      );
+          person.source,
+          person.caddyProfileId,
+          person.caddyProfileUrl,
+        ],
+      );
     }
 
     const saved = await client.query(
@@ -2922,7 +1680,7 @@ async function updatePerson(rawPerson, accountId = defaultWorkspaceAccountFromCo
       [personId],
     );
     await client.query("COMMIT");
-    return { person: rowToPerson(saved.rows[0], cleanAccountId), people: await readPeople(cleanAccountId) };
+    return { person: rowToPerson(saved.rows[0]), people: await readPeople() };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -2937,26 +1695,19 @@ async function writeItems(items, options = {}) {
   try {
     await client.query("BEGIN");
     if (options.clearItems === true) {
-      if (options.accountId) {
-        await client.query("DELETE FROM calendar_items WHERE account_id = $1", [options.accountId]);
-      } else {
-        await client.query("DELETE FROM calendar_items");
-      }
+      await client.query("DELETE FROM calendar_items");
     }
     for (const item of cleanItems) {
       await client.query(
         `INSERT INTO calendar_items (
-          id, account_id, kind, week, day, start, duration, coach_id, location_id, service_id, client, title, phone, email, note, status, custom_group, coach, location, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb, $19::jsonb, NOW(), NOW())
+          id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, custom_group, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, NOW(), NOW())
         ON CONFLICT (id) DO UPDATE SET
-          account_id = EXCLUDED.account_id,
           kind = EXCLUDED.kind,
           week = EXCLUDED.week,
           day = EXCLUDED.day,
           start = EXCLUDED.start,
           duration = EXCLUDED.duration,
-          coach_id = EXCLUDED.coach_id,
-          location_id = EXCLUDED.location_id,
           service_id = EXCLUDED.service_id,
           client = EXCLUDED.client,
           title = EXCLUDED.title,
@@ -2965,19 +1716,14 @@ async function writeItems(items, options = {}) {
           note = EXCLUDED.note,
           status = EXCLUDED.status,
           custom_group = EXCLUDED.custom_group,
-          coach = EXCLUDED.coach,
-          location = EXCLUDED.location,
           updated_at = NOW()`,
         [
           item.id,
-          item.accountId || defaultWorkspaceAccountFromCoachAccount().id,
           item.kind,
           item.week ?? 0,
           item.day,
           item.start,
           item.duration,
-          item.coachId || defaultCoachProfileFromAccount().id,
-          item.locationId || item.location?.locationId || "",
           item.serviceId || "",
           item.client || "",
           item.title,
@@ -2986,35 +1732,11 @@ async function writeItems(items, options = {}) {
           item.note || "",
           item.status || "booked",
           item.customGroup ? JSON.stringify(cleanCustomGroupData(item)) : null,
-          item.coach ? JSON.stringify(cleanBookingCoachSnapshot(item.coach)) : null,
-          item.location ? JSON.stringify(cleanBookingLocationSnapshot(item.location)) : null,
         ],
       );
     }
     if (options.replaceItems === true && cleanItems.length) {
-      const keepIds = new Set(cleanItems.map((item) => item.id));
-      const existingRows = queryRows(
-        options.accountId
-          ? await client.query("SELECT id, account_id FROM calendar_items")
-          : await client.query("SELECT id FROM calendar_items"),
-      );
-      const staleIds = existingRows
-        .filter((row) => !options.accountId || recordAccountId({ accountId: row?.account_id || "" }, options.accountId) === options.accountId)
-        .map((row) => cleanString(row?.id, "", 140))
-        .filter((id) => id && !keepIds.has(id));
-      if (staleIds.length) {
-        console.info("CALENDAR_STATE_REPLACE_UNSUPPORTED_QUERY", {
-          action: "replace_stale_cleanup",
-          route: "/api/calendar-state",
-          accountId: options.accountId || "",
-          targetedDelete: false,
-          staleCount: staleIds.length,
-          supportedCleanup: true,
-        });
-      }
-      for (const staleId of staleIds) {
-        await client.query("DELETE FROM calendar_items WHERE id = $1", [staleId]);
-      }
+      await client.query("DELETE FROM calendar_items WHERE NOT (id = ANY($1::text[]))", [cleanItems.map((item) => item.id)]);
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -3029,146 +1751,9 @@ async function writeItems(items, options = {}) {
 async function seedPeopleFromAppointments() {
   const countRows = await db().sql`SELECT COUNT(*) AS count FROM people`;
   if ((countRows[0]?.count ?? 0) > 0) return;
-  const settings = await readSettingsMap();
   await importPeople(
     initialItems.map(personFromAppointment).filter(Boolean),
     "appointment",
-    peopleAccountIdFromSettings(settings),
-  );
-}
-
-async function readStateSettingsSnapshot() {
-  await ensureSeeded();
-  const settings = await readSettingsMap();
-  let syncKey = settingValue(settings, "syncKey");
-  if (!syncKey) {
-    syncKey = generateSyncKey();
-    await setSetting("syncKey", syncKey);
-    settings.syncKey = syncKey;
-  }
-  let updatedAt = settingValue(settings, "updatedAt");
-  if (!updatedAt) {
-    updatedAt = nowIso();
-    await setSetting("updatedAt", updatedAt);
-    settings.updatedAt = updatedAt;
-  }
-  return { settings, syncKey, updatedAt };
-}
-
-function coachAccountFromSettings(settings) {
-  const defaults = defaultCoachAccount();
-  return cleanCoachAccount({
-    id: settingValue(settings, "accountId") || defaults.id,
-    coachName: settingValue(settings, "accountCoachName") || defaults.coachName,
-    businessName:
-      settingValue(settings, "accountBusinessName") ||
-      settingValue(settings, "coachName") ||
-      defaults.businessName,
-    venueName: settingValue(settings, "accountVenueName") || defaults.venueName,
-    venueShortName:
-      settingValue(settings, "accountVenueShortName") || defaults.venueShortName,
-    timezone: settingValue(settings, "accountTimezone") || defaults.timezone,
-    contactEmail:
-      settingValue(settings, "accountContactEmail") || defaults.contactEmail,
-    bookingUrl: settingValue(settings, "accountBookingUrl") || defaults.bookingUrl,
-    calendarSlug:
-      settingValue(settings, "accountCalendarSlug") || defaults.calendarSlug,
-    caddyWorkspaceUrl:
-      settingValue(settings, "accountCaddyWorkspaceUrl") ||
-      defaults.caddyWorkspaceUrl,
-    invoiceSettings: parseSettingJson(
-      settings,
-      "accountInvoiceSettingsJson",
-      defaults.invoiceSettings,
-    ),
-  });
-}
-
-function adminSettingsFromSettings(settings) {
-  const delaySeconds = Number(settingValue(settings, "notificationDelaySeconds") || 30);
-  return {
-    emailNotificationsEnabled: settingValue(settings, "emailNotificationsEnabled") !== "false",
-    notificationEmail: settingValue(settings, "notificationEmail"),
-    coachEmail: settingValue(settings, "coachEmail"),
-    replyToEmail: settingValue(settings, "replyToEmail"),
-    notificationDelaySeconds: Number.isFinite(delaySeconds)
-      ? Math.max(30, Math.min(3600, delaySeconds))
-      : 30,
-    sendClientEmail: settingValue(settings, "sendClientEmail") !== "false",
-    sendCoachEmail: settingValue(settings, "sendCoachEmail") !== "false",
-    sendAdminEmail: settingValue(settings, "sendAdminEmail") !== "false",
-    clientEmailSubject:
-      settingValue(settings, "clientEmailSubject") ||
-      defaultEmailTemplates.clientEmailSubject,
-    clientEmailIntro:
-      settingValue(settings, "clientEmailIntro") ||
-      defaultEmailTemplates.clientEmailIntro,
-    clientEmailFooter: modernClientEmailFooter(
-      settingValue(settings, "clientEmailFooter") ||
-        defaultEmailTemplates.clientEmailFooter,
-    ),
-    adminEmailSubject:
-      settingValue(settings, "adminEmailSubject") ||
-      defaultEmailTemplates.adminEmailSubject,
-    adminEmailIntro:
-      settingValue(settings, "adminEmailIntro") ||
-      defaultEmailTemplates.adminEmailIntro,
-    smsProviderName: settingValue(settings, "smsProviderName"),
-    smsWebhookUrl: settingValue(settings, "smsWebhookUrl"),
-    smsFromNumber: settingValue(settings, "smsFromNumber"),
-    sendClientSms: settingValue(settings, "sendClientSms") === "true",
-    sendAdminSms: settingValue(settings, "sendAdminSms") === "true",
-  };
-}
-
-function brandSettingsFromSettings(settings, account) {
-  return {
-    coachName: settingValue(settings, "coachName") || account.businessName,
-    logoName: settingValue(settings, "brandLogoName"),
-    logoPreview: settingValue(settings, "brandLogoPreview"),
-    showLogo: settingValue(settings, "brandShowLogo") === "true",
-    neutral: settingValue(settings, "brandNeutral") || "#ffffff",
-    primary: settingValue(settings, "brandPrimary") || "#1fd36d",
-    secondary: settingValue(settings, "brandSecondary") || "#d7b06b",
-    accent: settingValue(settings, "brandAccent") || "#07100a",
-    bookingTheme:
-      settingValue(settings, "brandBookingTheme") === "light" ? "light" : "dark",
-  };
-}
-
-function servicesFromSettings(settings) {
-  return normalizeServices(parseSettingJson(settings, "servicesJson", defaultServices));
-}
-
-function workspaceAccountsFromSettings(settings, account) {
-  return normalizeWorkspaceAccounts(
-    parseSettingJson(settings, "workspaceAccountsJson", []),
-    account,
-  );
-}
-
-function coachProfilesFromSettings(settings, account) {
-  return normalizeCoachProfiles(
-    parseSettingJson(settings, "coachProfilesJson", []),
-    account,
-  );
-}
-
-function appUsersFromSettings(settings, account) {
-  const users = parseSettingJson(settings, "appUsersJson", []);
-  return Array.isArray(users) && users.length ? users : [defaultAppUserFromAccount(account)];
-}
-
-function locationsFromSettings(settings, account) {
-  return normalizeLocations(
-    parseSettingJson(settings, "locationsJson", []),
-    account,
-  );
-}
-
-function availabilityFromSettings(settings) {
-  return normalizeAvailability(
-    parseSettingJson(settings, "availabilityJson", defaultAvailability),
   );
 }
 
@@ -3249,109 +1834,9 @@ async function readServices() {
   }
 }
 
-async function writeServices(services, context = null) {
-  const clean = normalizeServices(services).map((service) =>
-    context ? { ...service, accountId: context.accountId } : service,
-  );
-  const account = context?.account || await readDefaultWorkspaceAccount();
-  assertAccountFeature(account, "services");
-  const activeServices = clean.filter((service) => service.accountId === account.id && service.archived !== true).length;
-  assertAccountLimit(account, activeServices, "maxServices");
+async function writeServices(services) {
+  const clean = normalizeServices(services);
   await setSetting("servicesJson", JSON.stringify(clean));
-  await setSetting("updatedAt", nowIso());
-  return clean;
-}
-
-async function readWorkspaceAccounts() {
-  await ensureSeeded();
-  const account = await readCoachAccount();
-  try {
-    return normalizeWorkspaceAccounts(
-      JSON.parse((await getSetting("workspaceAccountsJson")) || "[]"),
-      account,
-    );
-  } catch {
-    return normalizeWorkspaceAccounts([], account);
-  }
-}
-
-async function writeWorkspaceAccounts(accounts) {
-  const account = await readCoachAccount();
-  const clean = normalizeWorkspaceAccounts(accounts, account);
-  await setSetting("workspaceAccountsJson", JSON.stringify(clean));
-  await setSetting("updatedAt", nowIso());
-  return clean;
-}
-
-async function readDefaultWorkspaceAccount() {
-  const accounts = await readWorkspaceAccounts();
-  const id = defaultAccountId(accounts);
-  return accounts.find((account) => account.id === id) || accounts[0] || defaultWorkspaceAccountFromCoachAccount();
-}
-
-async function readCoachProfiles() {
-  await ensureSeeded();
-  const account = await readCoachAccount();
-  try {
-    return normalizeCoachProfiles(
-      JSON.parse((await getSetting("coachProfilesJson")) || "[]"),
-      account,
-    );
-  } catch {
-    return normalizeCoachProfiles([], account);
-  }
-}
-
-async function writeCoachProfiles(coaches, context = null) {
-  const account = await readCoachAccount();
-  const workspaceAccount = context?.account || await readDefaultWorkspaceAccount();
-  const clean = normalizeCoachProfiles(coaches, account).map((coach) => ({
-    ...coach,
-    accountId: workspaceAccount.id,
-  }));
-  const activeCoaches = clean.filter((coach) => coach.accountId === workspaceAccount.id && coach.active && coach.archived !== true).length;
-  if (activeCoaches > 1) assertAccountFeature(workspaceAccount, "multiCoach");
-  assertAccountLimit(workspaceAccount, activeCoaches, "maxCoaches");
-  await setSetting("coachProfilesJson", JSON.stringify(clean));
-  await setSetting("updatedAt", nowIso());
-  return clean;
-}
-
-async function readAppUsers() {
-  await ensureSeeded();
-  const account = await readCoachAccount();
-  try {
-    const users = JSON.parse((await getSetting("appUsersJson")) || "[]");
-    return Array.isArray(users) && users.length ? users : [defaultAppUserFromAccount(account)];
-  } catch {
-    return [defaultAppUserFromAccount(account)];
-  }
-}
-
-async function readLocations() {
-  await ensureSeeded();
-  const account = await readCoachAccount();
-  try {
-    return normalizeLocations(
-      JSON.parse((await getSetting("locationsJson")) || "[]"),
-      account,
-    );
-  } catch {
-    return normalizeLocations([], account);
-  }
-}
-
-async function writeLocations(locations, context = null) {
-  const account = await readCoachAccount();
-  const workspaceAccount = context?.account || await readDefaultWorkspaceAccount();
-  const clean = normalizeLocations(locations, account).map((location) => ({
-    ...location,
-    accountId: workspaceAccount.id,
-  }));
-  const activeLocations = clean.filter((location) => location.accountId === workspaceAccount.id && location.active && location.archived !== true).length;
-  if (activeLocations > 1) assertAccountFeature(workspaceAccount, "multiLocation");
-  assertAccountLimit(workspaceAccount, activeLocations, "maxLocations");
-  await setSetting("locationsJson", JSON.stringify(clean));
   await setSetting("updatedAt", nowIso());
   return clean;
 }
@@ -3367,13 +1852,8 @@ async function readAvailability() {
   }
 }
 
-async function writeAvailability(availability, context = null) {
-  const clean = normalizeAvailability(availability).map((dayWindows) =>
-    dayWindows.map((window) => ({
-      ...window,
-      ...(context ? { accountId: context.accountId } : {}),
-    })),
-  );
+async function writeAvailability(availability) {
+  const clean = normalizeAvailability(availability);
   await setSetting("availabilityJson", JSON.stringify(clean));
   await setSetting("updatedAt", nowIso());
   return clean;
@@ -3471,181 +1951,54 @@ async function writeBrandSettings(settings) {
 }
 
 async function readCalendarState() {
-  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
-  const account = coachAccountFromSettings(settingsMap);
-  const peopleAccountId = peopleAccountIdFromSettings(settingsMap, account);
-  const [items, people, notifications, googleCalendar] = await Promise.all([
-    readItems(),
-    readPeople(peopleAccountId),
-    readNotificationHistory(),
-    getGoogleCalendarSyncStatus(),
-  ]);
+  await ensureSeeded();
+  let syncKey = await getSetting("syncKey");
+  if (!syncKey) {
+    syncKey = generateSyncKey();
+    await setSetting("syncKey", syncKey);
+  }
   return {
     syncKey,
-    updatedAt,
-    items,
-    services: servicesFromSettings(settingsMap),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap),
-    people,
-    notifications,
-    settings: adminSettingsFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
-    googleCalendar,
-  };
-}
-
-async function readAdminCalendarShellState() {
-  const startedAt = Date.now();
-  console.info("CALENDAR_SHELL_STATE_LOAD_STARTED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-
-  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
-  const account = coachAccountFromSettings(settingsMap);
-  const items = await readItems();
-  const shellLoadDurationMs = Date.now() - startedAt;
-  const deferred = {
-    people: true,
-    notifications: true,
-    googleSyncStatus: true,
-  };
-
-  console.info("PEOPLE_LOAD_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-  console.info("NOTIFICATION_HISTORY_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-  console.info("GOOGLE_SYNC_STATUS_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-  console.info("NON_CRITICAL_DATA_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-    peopleDeferred: deferred.people,
-    notificationsDeferred: deferred.notifications,
-    googleSyncStatusDeferred: deferred.googleSyncStatus,
-  });
-  console.info("CALENDAR_SHELL_STATE_LOAD_COMPLETED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-    shellLoadDurationMs,
-    itemCount: items.length,
-    peopleDeferred: deferred.people,
-    notificationsDeferred: deferred.notifications,
-    googleSyncStatusDeferred: deferred.googleSyncStatus,
-  });
-
-  return {
-    syncKey,
-    updatedAt,
-    items,
-    services: servicesFromSettings(settingsMap),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap),
-    people: [],
-    notifications: [],
-    settings: adminSettingsFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
-    googleCalendar: {
-      configured: false,
-      connected: false,
-      calendarId: "primary",
-      autoSync: true,
-      accountEmail: "",
-      lastSyncAt: "",
-      lastSyncStatus: "",
-      lastSyncError: "",
-      connectedAt: "",
-      redirectUri: "",
-      scope: "",
-      ok: true,
-      skipped: true,
-    },
-    diagnostics: {
-      calendarState: {
-        routeUsed: "shell",
-        shellLoadDurationMs,
-        itemCount: items.length,
-        peopleDeferred: deferred.people,
-        notificationsDeferred: deferred.notifications,
-        googleSyncStatusDeferred: deferred.googleSyncStatus,
-      },
-    },
-  };
-}
-
-async function readColdSetupState() {
-  const { settings: settingsMap } = await readStateSettingsSnapshot();
-  const account = coachAccountFromSettings(settingsMap);
-  return {
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    account,
+    updatedAt: (await getSetting("updatedAt")) || nowIso(),
+    items: await readItems(),
+    services: await readServices(),
+    availability: await readAvailability(),
+    people: await readPeople(),
+    notifications: await readNotificationHistory(),
+    settings: await readAdminSettings(),
+    brand: await readBrandSettings(),
+    account: await readCoachAccount(),
+    googleCalendar: await getGoogleCalendarSyncStatus(),
   };
 }
 
 async function readPublicCalendarState() {
-  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
-  const account = coachAccountFromSettings(settingsMap);
+  await ensureSeeded();
+  let syncKey = await getSetting("syncKey");
+  if (!syncKey) {
+    syncKey = generateSyncKey();
+    await setSetting("syncKey", syncKey);
+  }
   return {
     syncKey,
-    updatedAt,
+    updatedAt: (await getSetting("updatedAt")) || nowIso(),
     items: await readItems(),
-    services: servicesFromSettings(settingsMap),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
-  };
-}
-
-async function readPublicCatalogState() {
-  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
-  const account = coachAccountFromSettings(settingsMap);
-  return {
-    syncKey,
-    updatedAt,
-    services: servicesFromSettings(settingsMap),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
+    services: await readServices(),
+    availability: await readAvailability(),
+    brand: await readBrandSettings(),
+    account: await readCoachAccount(),
   };
 }
 
 async function readFastPublicCalendarState() {
-  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
-  const account = coachAccountFromSettings(settingsMap);
   return {
-    syncKey,
-    updatedAt,
+    syncKey: await getSetting("syncKey"),
+    updatedAt: (await getSetting("updatedAt")) || nowIso(),
     items: await readItems(),
-    services: servicesFromSettings(settingsMap),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
+    services: await readServices(),
+    availability: await readAvailability(),
+    brand: await readBrandSettings(),
+    account: await readCoachAccount(),
   };
 }
 
@@ -3805,18 +2158,8 @@ export async function handleCalendarFeedRequest(req: Request) {
     const state = await readPublicCalendarState();
     const key = new URL(req.url).searchParams.get("key");
     if (key !== state.syncKey) return text("Invalid calendar sync key.", 401);
-    const workspaceAccount = publicWorkspaceAccount(state);
-    assertAccountFeature(workspaceAccount, "coachCalendar");
-    const scopedState = {
-      ...state,
-      items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
-      services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-      coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-      locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-      availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
-    };
     return text(
-      generateCalendarFeed(scopedState),
+      generateCalendarFeed(state),
       200,
       "text/calendar; charset=utf-8",
     );
@@ -3835,20 +2178,8 @@ export async function handlePublicBookingStateRequest() {
   }
 }
 
-export async function handlePublicBookingCatalogRequest() {
-  try {
-    return json(publicBookingCatalog(await readPublicCatalogState()));
-  } catch (error) {
-    console.error("public_booking_catalog_error", error);
-    throw error;
-  }
-}
-
-async function writeCalendarState(nextState, context = null) {
+async function writeCalendarState(nextState) {
   const current = await readCalendarState();
-  if (context) {
-    assertAccountFeature(context.account, "coachCalendar");
-  }
   const expectedUpdatedAt = cleanString(
     nextState?.updatedAt || nextState?.previousUpdatedAt,
     "",
@@ -3865,36 +2196,18 @@ async function writeCalendarState(nextState, context = null) {
       ),
       {
         status: 409,
-        expectedUpdatedAt,
-        backendUpdatedAt: current.updatedAt,
-        conflictSource: "calendar_updated_at_mismatch",
       },
     );
   }
   const syncKey = cleanString(nextState?.syncKey, current.syncKey, 140);
-  if (context && nextState?.clearItems === true && !context.isAdmin) {
-    throw permissionDenied("You do not have permission to clear the account calendar.");
-  }
-  let requestedItems = nextState?.items ?? current.items;
-  if (context) {
-    requestedItems = normalizeCalendarItemsForContext(requestedItems, context);
-    const previousById = new Map((current.items || []).map((item) => [item.id, item]));
-    requestedItems.forEach((item) => assertCanWriteCalendarItem(context, item, previousById.get(item.id), current));
-    if (!context.isAdmin && (nextState?.replaceItems === true || nextState?.itemsOperation === "replace")) {
-      const preservedItems = current.items.filter((item) => !canReadCalendarItem(context, item, current));
-      requestedItems = [...preservedItems, ...requestedItems];
-    }
-  }
-  const items = await writeItems(requestedItems, {
+  const items = await writeItems(nextState?.items ?? current.items, {
     replaceItems: nextState?.replaceItems === true || nextState?.itemsOperation === "replace",
     clearItems: nextState?.clearItems === true,
-    accountId: context?.accountId,
   });
   const updatedAt = nowIso();
   await setSetting("syncKey", syncKey);
   await setSetting("updatedAt", updatedAt);
-  const peopleAccountId = context?.accountId || defaultAccountId(current.workspaceAccounts);
-  await importPeople(items.map(personFromAppointment).filter(Boolean), "appointment", peopleAccountId);
+  await importPeople(items.map(personFromAppointment).filter(Boolean), "appointment");
   let googleCalendarSync = null;
   try {
     googleCalendarSync = await syncGoogleCalendarIfEnabled();
@@ -3908,15 +2221,11 @@ async function writeCalendarState(nextState, context = null) {
   }
   return {
     syncKey,
-    items: context ? items.filter((item) => canReadCalendarItem(context, item, { ...current, items })) : items,
+    items,
     updatedAt,
     services: current.services,
-    workspaceAccounts: current.workspaceAccounts,
-    currentUser: current.currentUser,
-    coaches: current.coaches,
-    locations: current.locations,
     availability: current.availability,
-    people: await readPeople(peopleAccountId),
+    people: await readPeople(),
     notifications: await readNotificationHistory(),
     settings: await readAdminSettings(),
     brand: await readBrandSettings(),
@@ -3926,161 +2235,11 @@ async function writeCalendarState(nextState, context = null) {
   };
 }
 
-function deleteErrorIsPeoplePatch(error) {
-  const code = cleanString(error?.code, "", 120);
-  const message = error instanceof Error ? error.message : String(error?.message || error || "");
-  return (
-    code === "DUPLICATE_PERSON_EMAIL" ||
-    /patch people|update people|people.*duplicate|idx_people_email_unique/i.test(message)
-  );
-}
-
-function deleteErrorOperationOwner(error) {
-  const explicitOwner = cleanString(error?.operationOwner, "", 120);
-  if (explicitOwner) return explicitOwner;
-  if (deleteErrorIsPeoplePatch(error)) return "people_patch";
-  const code = cleanString(error?.code, "", 120);
-  if (code === "BOOKING_DELETE_VERIFY_FAILED") return "calendar_reload_verify";
-  if (code === "BOOKING_DELETE_RELOAD_FAILED") return "calendar_reload";
-  if (code === "BOOKING_DELETE_INVALID_ID" || code === "BOOKING_DELETE_NOT_FOUND") return "calendar_delete_request";
-  return "calendar_delete";
-}
-
-function deleteErrorCode(error, operationOwner) {
-  if (operationOwner === "people_patch") return "BOOKING_DELETE_OWNERSHIP_VIOLATION";
-  const code = cleanString(error?.code, "", 120);
-  if (code) return code;
-  if (operationOwner === "calendar_reload") return "BOOKING_DELETE_RELOAD_FAILED";
-  return "BOOKING_DELETE_FAILED";
-}
-
-function deleteUserMessage(operationOwner, code) {
-  if (operationOwner === "people_patch") {
-    return "Booking delete triggered an unexpected people save. The calendar result was not trusted.";
-  }
-  if (code === "BOOKING_DELETE_VERIFY_FAILED") {
-    return "The booking delete could not be verified because the backend still returned the deleted booking.";
-  }
-  if (operationOwner === "calendar_reload") {
-    return "The booking delete reached storage, but calendar state could not be reloaded for verification.";
-  }
-  return "The booking could not be deleted. The calendar was not changed.";
-}
-
-function deleteFailureDiagnostics(error, baseDetails, durationMs) {
-  const operationOwner = deleteErrorOperationOwner(error);
-  const code = deleteErrorCode(error, operationOwner);
-  const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
-  const backendMessage = error instanceof Error ? error.message : String(error?.message || error || "Calendar delete failed.");
-  const details = error?.details && typeof error.details === "object" ? error.details : {};
-  const route = cleanString(error?.route, "", 120) || baseDetails.route;
-  return {
-    ...baseDetails,
-    ...details,
-    route,
-    operationOwner,
-    httpStatus: status,
-    durationMs,
-    errorCode: code,
-    backendMessage,
-    personId: cleanString(error?.personId || details.personId || baseDetails.personId, "", 120),
-    email: normalizedPersonEmail(error?.email || details.email || baseDetails.email),
-  };
-}
-
-async function deleteCalendarItemById(id, context = null) {
-  const cleanId = cleanString(id, "", 140);
-  if (!cleanId) {
-    throw Object.assign(new Error("Calendar item id is required for delete."), {
-      status: 400,
-      code: "BOOKING_DELETE_INVALID_ID",
-      operationOwner: "calendar_delete_request",
-      route: "DELETE /api/calendar-state",
-    });
-  }
-  const current = await readCalendarState();
-  if (context) assertAccountFeature(context.account, "coachCalendar");
-  const existingItem = current.items.find((item) => item.id === cleanId);
-  if (context) {
-    if (!existingItem) {
-      throw Object.assign(new Error("Booking was not found in this workspace."), {
-        status: 404,
-        code: "BOOKING_DELETE_NOT_FOUND",
-        operationOwner: "calendar_delete_request",
-        route: "DELETE /api/calendar-state",
-      });
-    }
-    assertCanWriteCalendarItem(context, existingItem, existingItem, current);
-  }
-
-  const client = await db().pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("DELETE FROM calendar_items WHERE id = $1", [cleanId]);
-    const verifyRows = queryRows(
-      await client.query("SELECT id FROM calendar_items WHERE id = $1 LIMIT 1", [cleanId]),
-    );
-    if (verifyRows.length) {
-      throw Object.assign(new Error("Deleted calendar item is still present after delete."), {
-        status: 409,
-        code: "BOOKING_DELETE_VERIFY_FAILED",
-        operationOwner: "calendar_delete_verify",
-        route: "DELETE /api/calendar-state",
-      });
-    }
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-
-  const updatedAt = nowIso();
-  await setSetting("updatedAt", updatedAt);
-  let googleCalendarSync = null;
-  try {
-    googleCalendarSync = await syncGoogleCalendarIfEnabled();
-  } catch (error) {
-    googleCalendarSync = {
-      ...(await getGoogleCalendarSyncStatus()),
-      ok: false,
-      skipped: false,
-      error: error instanceof Error ? error.message : "Google Calendar sync failed.",
-    };
-  }
-  let nextState = null;
-  try {
-    nextState = await readCalendarState();
-  } catch (error) {
-    throw Object.assign(
-      new Error(
-        `Calendar delete persisted, but verification reload failed: ${
-          error instanceof Error ? error.message : String(error || "unknown reload error")
-        }`,
-      ),
-      {
-        status: 502,
-        code: "BOOKING_DELETE_RELOAD_FAILED",
-        operationOwner: "calendar_reload",
-        route: "GET /api/calendar-state",
-      },
-    );
-  }
-  return {
-    ...nextState,
-    items: context ? nextState.items.filter((item) => canReadCalendarItem(context, item, nextState)) : nextState.items,
-    updatedAt,
-    googleCalendarSync,
-  };
-}
-
 async function writePublicBookingState(currentState, items) {
   const cleanItems = await writeItems(items);
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  const peopleAccountId = cleanItems.find((item) => item.accountId)?.accountId || defaultAccountId(currentState.workspaceAccounts || []);
-  await importPeople(cleanItems.map(personFromAppointment).filter(Boolean), "appointment", peopleAccountId);
+  await importPeople(cleanItems.map(personFromAppointment).filter(Boolean), "appointment");
   await syncGoogleCalendarIfEnabled().catch((error) => console.error("public_booking_state:google_calendar_sync_failed", error));
   return {
     syncKey: currentState.syncKey,
@@ -4095,7 +2254,7 @@ async function writePublicBookingState(currentState, items) {
 
 function schedulePublicBookingSideEffects(context, appointment) {
   const task = (async () => {
-    await importPeople([personFromAppointment(appointment)].filter(Boolean), "appointment", appointment?.accountId || defaultWorkspaceAccountFromCoachAccount().id);
+    await importPeople([personFromAppointment(appointment)].filter(Boolean), "appointment");
     await syncGoogleCalendarIfEnabled().catch((error) =>
       console.error("public_booking:google_calendar_sync_failed", error),
     );
@@ -4129,10 +2288,6 @@ function publicCalendarState(state) {
     updatedAt: state.updatedAt,
     items: state.items,
     services: state.services || [],
-    workspaceAccounts: state.workspaceAccounts || [],
-    currentUser: state.currentUser || null,
-    coaches: state.coaches || [],
-    locations: state.locations || [],
     availability: state.availability || [],
     people: state.people || [],
     notifications: state.notifications || [],
@@ -4141,376 +2296,132 @@ function publicCalendarState(state) {
     account: state.account,
     googleCalendar: state.googleCalendar,
     googleCalendarSync: state.googleCalendarSync,
-    diagnostics: state.diagnostics,
   };
 }
 
 export function publicBookingState(state) {
-  const workspaceAccount = publicWorkspaceAccount(state);
-  assertAccountFeature(workspaceAccount, "publicBooking");
-  const accountServices = (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id));
-  const accountItems = (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id));
   return {
     updatedAt: state.updatedAt,
-    services: accountServices.filter(
+    services: (state.services || []).filter(
       (service) =>
         service.active &&
         service.archived !== true &&
         service.visibility === "public" &&
         service.lessonFormat !== "package",
     ),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+    availability: state.availability || [],
     brand: state.brand,
     account: state.account,
-    items: accountItems.map((item) => ({
+    items: state.items.map((item) => ({
       id: item.id,
       kind: item.kind,
       week: item.week ?? 0,
       day: item.day,
       start: item.start,
       duration: item.duration,
-      coachId: item.coachId || item.coach?.coachId || "",
-      locationId: item.locationId || item.location?.locationId || "",
-      serviceId: item.serviceId || "",
-      status: item.status || "booked",
-      location: item.location,
     })),
   };
 }
 
-export function publicBookingCatalog(state) {
-  const workspaceAccount = publicWorkspaceAccount(state);
-  assertAccountFeature(workspaceAccount, "publicBooking");
-  const accountServices = (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id));
-  return {
-    updatedAt: state.updatedAt,
-    services: accountServices.filter(
-      (service) =>
-        service.active &&
-        service.archived !== true &&
-        service.visibility === "public" &&
-        service.lessonFormat !== "package",
-    ),
-    workspaceAccounts: (state.workspaceAccounts || []).filter((account) => recordBelongsToAccount(account, workspaceAccount.id)),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-    brand: state.brand,
-    account: state.account,
-  };
-}
-
-function appointmentPositionSignature(item) {
-  if (!item) return "";
-  return JSON.stringify({
-    week: Number(item.week ?? 0),
-    day: Number(item.day ?? 0),
-    start: Number(item.start ?? 0),
-    duration: Number(item.duration ?? 0),
-    serviceId: cleanString(item.serviceId || item.service_id, "", 140),
+function queueBookingNotifications(appointment, options = {}, context = null) {
+  if (!appointment?.email && options.kind !== "admin") return;
+  const task = sendBookingNotifications(appointment, options).catch((error) => {
+    console.error("Queued booking notifications failed", error);
   });
+  if (context?.waitUntil) {
+    context.waitUntil(task);
+    return;
+  }
+  void task;
 }
 
-function appointmentNotificationSignature(item) {
-  if (!item) return "";
-  return JSON.stringify({
-    position: appointmentPositionSignature(item),
-    client: cleanString(item.client || item.title, "", 160),
-    title: cleanString(item.title, "", 160),
-    phone: cleanString(item.phone, "", 80),
-    email: cleanEmail(item.email, ""),
-    status: cleanString(item.status, "booked", 40),
-    customGroup: item.customGroup === true,
-    calculatedPrice: Number(item.calculatedPrice ?? 0),
-    attendees: Array.isArray(item.attendees)
-      ? item.attendees.map((attendee) => ({
-          id: cleanString(attendee?.id, "", 120),
-          name: cleanString(attendee?.name, "", 120),
-          email: cleanEmail(attendee?.email, ""),
-          status: cleanString(attendee?.status, "", 40),
-          token: cleanString(attendee?.token, "", 220),
-        }))
-      : [],
-  });
+function appointmentSlotSignature(item) {
+  return [
+    itemWeek(item),
+    item.day,
+    item.start,
+    item.duration,
+    item.serviceId || "",
+  ].join(":");
 }
 
-function appointmentById(items = []) {
-  return new Map(
-    items
-      .filter((item) => item?.kind === "appointment" && item?.id)
-      .map((item) => [String(item.id), item]),
+function appointmentContactSignature(item) {
+  return [item.client || item.title || "", item.email || "", item.phone || ""]
+    .join(":")
+    .toLowerCase();
+}
+
+function notificationJobsForCalendarChange(previousItems = [], nextItems = []) {
+  const previousById = new Map(
+    previousItems
+      .filter((item) => item.kind === "appointment")
+      .map((item) => [item.id, item]),
   );
+  return nextItems
+    .filter((item) => item.kind === "appointment" && item.email)
+    .map((item) => {
+      const previous = previousById.get(item.id);
+      if (!previous) return { appointment: item, kind: "booking" };
+      if (
+        appointmentSlotSignature(previous) !== appointmentSlotSignature(item)
+      ) {
+        return { appointment: item, kind: "reschedule" };
+      }
+      if (!previous.email && item.email)
+        return { appointment: item, kind: "booking" };
+      if (
+        appointmentContactSignature(previous) !==
+        appointmentContactSignature(item)
+      )
+        return null;
+      return null;
+    })
+    .filter(Boolean);
 }
 
-function parseTimestamp(value) {
-  const timestamp = Date.parse(typeof value === "string" ? value : "");
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-function slotDateParts(week = 0, day = 0) {
-  const date = new Date(baseWeekStart);
-  date.setUTCDate(baseWeekStart.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
-  return {
-    year: date.getUTCFullYear(),
-    month: date.getUTCMonth() + 1,
-    day: date.getUTCDate(),
-  };
-}
-
-function nowInTimeZoneParts(timeZone = "Pacific/Auckland") {
-  let parts;
-  try {
-    parts = new Intl.DateTimeFormat("en-NZ", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(new Date());
-  } catch {
-    parts = new Intl.DateTimeFormat("en-NZ", {
-      timeZone: "Pacific/Auckland",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(new Date());
-  }
-  const value = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
-  return {
-    year: value("year"),
-    month: value("month"),
-    day: value("day"),
-    minutes: value("hour") * 60 + value("minute"),
-  };
-}
-
-function dateSortValue(parts) {
-  return parts.year * 10000 + parts.month * 100 + parts.day;
-}
-
-function isAppointmentInPast(item, timeZone = "Pacific/Auckland") {
-  if (!item || item.kind !== "appointment") return false;
-  const slotDate = slotDateParts(Number(item.week ?? 0), Number(item.day ?? 0));
-  const now = nowInTimeZoneParts(timeZone);
-  const slotValue = dateSortValue(slotDate);
-  const nowValue = dateSortValue(now);
-  if (slotValue !== nowValue) return slotValue < nowValue;
-  return Number(item.start ?? 0) < now.minutes;
-}
-
-function cleanPendingAdminNotification(value) {
-  const calendarItemId = cleanString(value?.calendarItemId, "", 180);
-  const action =
-    value?.action === "rescheduled" || value?.action === "updated"
-      ? value.action
-      : value?.action === "booking"
-        ? "booking"
-        : "";
-  if (!calendarItemId || !action || !value?.appointment) return null;
-  return {
-    calendarItemId,
-    action,
-    queuedAt: cleanString(value?.queuedAt, nowIso(), 80),
-    fireAfter: cleanString(value?.fireAfter, nowIso(), 80),
-    originalPositionSignature: cleanString(value?.originalPositionSignature, "", 800),
-    targetSignature: cleanString(value?.targetSignature, "", 1600),
-    appointment: value.appointment,
-    previousAppointment: value.previousAppointment || null,
-  };
-}
-
-async function readPendingAdminNotifications() {
-  try {
-    const parsed = JSON.parse((await getSetting(ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY)) || "[]");
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(cleanPendingAdminNotification).filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-async function writePendingAdminNotifications(queue) {
-  await setSetting(ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY, JSON.stringify(queue));
-}
-
-async function processAdminNotificationDebounce(
+async function sendCalendarChangeNotifications(
   previousItems = [],
   nextItems = [],
-  options = {},
 ) {
-  const now = Date.now();
-  const timeZone = cleanString(options.timeZone, "Pacific/Auckland", 80);
-  const queueById = new Map(
-    (await readPendingAdminNotifications()).map((entry) => [
-      entry.calendarItemId,
-      entry,
-    ]),
-  );
-  const previousById = appointmentById(previousItems);
-  const nextById = appointmentById(nextItems);
   const results = [];
-  let queueChanged = false;
-
-  if (options.queueDiffs !== false) {
-    const ids = new Set([...previousById.keys(), ...nextById.keys()]);
-    const queuedAt = nowIso();
-    const fireAfter = new Date(now + ADMIN_NOTIFICATION_DEBOUNCE_MS).toISOString();
-
-    for (const id of ids) {
-      const previous = previousById.get(id);
-      const next = nextById.get(id);
-      const action = inferBookingAction(previous, next);
-      if (!action) continue;
-
-      const existing = queueById.get(id);
-      if (next && isAppointmentInPast(next, timeZone)) {
-        if (existing) {
-          queueById.delete(id);
-          queueChanged = true;
-        }
-        continue;
-      }
-
-      if (action === "booking" && next) {
-        queueById.set(id, {
-          calendarItemId: id,
-          action: "booking",
-          queuedAt,
-          fireAfter,
-          originalPositionSignature: "",
-          targetSignature: appointmentNotificationSignature(next),
-          appointment: next,
-          previousAppointment: null,
-        });
-        queueChanged = true;
-        continue;
-      }
-
-      if ((action === "rescheduled" || action === "updated") && next) {
-        const isPendingInitialBooking = existing?.action === "booking";
-        const originalPrevious = isPendingInitialBooking
-          ? null
-          : existing?.previousAppointment || previous || null;
-        const originalPositionSignature =
-          existing?.originalPositionSignature ||
-          (previous ? appointmentPositionSignature(previous) : "");
-        if (
-          existing &&
-          !isPendingInitialBooking &&
-          originalPositionSignature &&
-          appointmentPositionSignature(next) === originalPositionSignature
-        ) {
-          queueById.delete(id);
-          queueChanged = true;
-          continue;
-        }
-
-        queueById.set(id, {
-          calendarItemId: id,
-          action: isPendingInitialBooking ? "booking" : action,
-          queuedAt,
-          fireAfter,
-          originalPositionSignature: isPendingInitialBooking ? "" : originalPositionSignature,
-          targetSignature: appointmentNotificationSignature(next),
-          appointment: next,
-          previousAppointment: originalPrevious,
-        });
-        queueChanged = true;
-        continue;
-      }
-
-      if (action === "cancelled" && previous) {
-        if (isAppointmentInPast(previous, timeZone)) {
-          if (existing) {
-            queueById.delete(id);
-            queueChanged = true;
-          }
-          continue;
-        }
-        if (existing?.action === "booking") {
-          queueById.delete(id);
-          queueChanged = true;
-          continue;
-        }
-        if (existing) {
-          queueById.delete(id);
-          queueChanged = true;
-        }
-        results.push(
-          ...(await notifyBookingEvent({
-            action,
-            appointment: previous,
-            previousAppointment: previous,
-            source: "calendar-state",
-          })),
-        );
-      }
+  for (const { appointment, kind } of notificationJobsForCalendarChange(
+    previousItems,
+    nextItems,
+  )) {
+    try {
+      results.push(...(await sendBookingNotifications(appointment, { kind })));
+    } catch (error) {
+      console.error(
+        "Calendar change notification failed",
+        appointment?.id,
+        kind,
+        error,
+      );
     }
   }
-
-  for (const [id, pending] of [...queueById.entries()]) {
-    if (parseTimestamp(pending.fireAfter) > now) continue;
-
-    const current = nextById.get(id);
-    queueById.delete(id);
-    queueChanged = true;
-    if (!current) continue;
-    if (isAppointmentInPast(current, timeZone)) continue;
-    if (appointmentNotificationSignature(current) !== pending.targetSignature) continue;
-    if (
-      pending.originalPositionSignature &&
-      appointmentPositionSignature(current) === pending.originalPositionSignature
-    ) {
-      continue;
-    }
-
-    results.push(
-      ...(await notifyBookingEvent({
-        action: pending.action,
-        appointment: current,
-        previousAppointment: pending.previousAppointment,
-        source: "calendar-state-admin-debounce",
-      })),
-    );
-  }
-
-  if (queueChanged) await writePendingAdminNotifications([...queueById.values()]);
   return results;
 }
 
 async function verifyAdminPassword(email, password) {
-  const startedAt = Date.now();
-  let ok = false;
-  try {
-    const rows = await db().sql`
-      SELECT * FROM admin_users
-      WHERE email = ${cleanString(email, "", 180)}
-    `;
-    const row = rows[0];
-    if (!row || typeof password !== "string") return null;
+  const rows = await db().sql`
+    SELECT * FROM admin_users
+    WHERE email = ${cleanString(email, "", 180)}
+  `;
+  const row = rows[0];
+  if (!row || typeof password !== "string") return null;
 
-    const { passwordHash } = hashPassword(password, row.password_salt);
-    const saved = Buffer.from(row.password_hash, "hex");
-    const attempt = Buffer.from(passwordHash, "hex");
-    if (saved.length !== attempt.length || !timingSafeEqual(saved, attempt))
-      return null;
+  const { passwordHash } = hashPassword(password, row.password_salt);
+  const saved = Buffer.from(row.password_hash, "hex");
+  const attempt = Buffer.from(passwordHash, "hex");
+  if (saved.length !== attempt.length || !timingSafeEqual(saved, attempt))
+    return null;
 
-    ok = true;
-    return {
-      id: row.id,
-      email: row.email,
-      password_hash: row.password_hash,
-      password_salt: row.password_salt,
-    };
-  } finally {
-    logAuthTiming("verifyAdminPassword", startedAt, { ok });
-  }
+  return {
+    id: row.id,
+    email: row.email,
+    password_hash: row.password_hash,
+    password_salt: row.password_salt,
+  };
 }
 
 async function cleanupExpiredPasswordResets() {
@@ -4637,11 +2548,6 @@ async function sendPasswordResetEmail(reset, req) {
 
 function bookingGoogleCalendarUrl({ appointment, service, account, rescheduleUrl }) {
   const week = itemWeek(appointment);
-  const location = cleanBookingLocationSnapshot(appointment.location, {
-    name: account.venueName,
-    shortName: account.venueShortName,
-    timezone: account.timezone,
-  });
   const start = formatLocalDateTime(week, appointment.day, appointment.start);
   const end = formatLocalDateTime(
     week,
@@ -4654,15 +2560,12 @@ function bookingGoogleCalendarUrl({ appointment, service, account, rescheduleUrl
     dates: `${start}/${end}`,
     details: [
       `${service?.name || "Golf Lesson"} for ${appointment.client || appointment.title || "Client"}.`,
-      location?.address ? `Address: ${location.address}` : "",
-      location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
-      location?.mapUrl ? `Map: ${location.mapUrl}` : "",
       rescheduleUrl ? `Manage or reschedule: ${rescheduleUrl}` : "",
     ]
       .filter(Boolean)
       .join("\n"),
-    location: bookingLocationDisplay(location),
-    ctz: location?.timezone || account.timezone || "Pacific/Auckland",
+    location: account.venueName,
+    ctz: account.timezone || "Pacific/Auckland",
   });
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
@@ -4746,11 +2649,6 @@ function modernClientEmailFooter(value) {
 
 function bookingEmailVariables({ appointment, service, account }) {
   const client = appointment.client || appointment.title || "Client";
-  const location = cleanBookingLocationSnapshot(appointment.location, {
-    name: account.venueName,
-    shortName: account.venueShortName,
-    timezone: account.timezone,
-  });
   const rescheduleUrl = new URL(
     account.bookingUrl || "https://book.claritygolf.app",
   );
@@ -4768,13 +2666,7 @@ function bookingEmailVariables({ appointment, service, account }) {
     service: service?.name || "Golf Lesson",
     date: formatBookingDate(itemWeek(appointment), appointment.day),
     time: formatRange(appointment.start, appointment.duration),
-    venue: location?.name || account.venueName,
-    location: location?.name || account.venueName,
-    locationShortName: location?.shortName || location?.name || account.venueShortName || account.venueName,
-    locationAddress: location?.address || "",
-    mapUrl: location?.mapUrl || "",
-    arrivalInstructions: location?.arrivalInstructions || "",
-    publicNotes: location?.publicNotes || "",
+    venue: account.venueName,
     price: appointment.customGroup && Number.isFinite(Number(appointment.calculatedPrice))
       ? `NZ$${Number(appointment.calculatedPrice)}.00`
       : servicePriceLabel(service),
@@ -4852,7 +2744,7 @@ function bookingEmailText({ title, intro, footer, variables }) {
 
 async function sendBookingNotifications(
   appointment,
-  { kind = "booking", testRecipient = "", clientOnly = false, idempotencyNonce = "" } = {},
+  { kind = "booking", testRecipient = "" } = {},
 ) {
   const settings = await readAdminSettings();
   const account = await readCoachAccount();
@@ -4871,14 +2763,13 @@ async function sendBookingNotifications(
 
   async function sendAndRecord(channel, recipient, subject, html, text, key) {
     const notificationKind = `${kind}_${channel}_email`;
-    const deliveryKey = idempotencyNonce ? `${key}-${idempotencyNonce}` : key;
     const result = await sendEmail({
       to: recipient,
       subject,
       html,
       text,
       replyTo,
-      idempotencyKey: deliveryKey,
+      idempotencyKey: key,
     });
     const status = result.sent ? "sent" : "failed";
 
@@ -5005,7 +2896,7 @@ async function sendBookingNotifications(
   const inviteAttendees = Array.isArray(appointment.attendees)
     ? appointment.attendees.filter((attendee) => attendee?.email && attendee?.token && attendee.status === "invited")
     : [];
-  if (!clientOnly && (kind === "booking" || kind === "updated") && inviteAttendees.length) {
+  if ((kind === "booking" || kind === "updated") && inviteAttendees.length) {
     for (const attendee of inviteAttendees) {
       const invite = customGroupInviteEmail({ appointment, attendee, service, account });
       if (settings.sendClientEmail) {
@@ -5025,7 +2916,7 @@ async function sendBookingNotifications(
     }
   }
 
-  if (!clientOnly && settings.sendCoachEmail && kind !== "test") {
+  if (settings.sendCoachEmail && kind !== "test") {
     const recipient = settings.coachEmail || "";
     const subject = renderTemplate(settings.adminEmailSubject, variables);
     const intro = renderTemplate(settings.adminEmailIntro, variables);
@@ -5043,12 +2934,12 @@ async function sendBookingNotifications(
     } else {
       jobs.push(recordSkipped("coach", "", subject, "missing_coach_email"));
     }
-  } else if (!clientOnly && kind !== "test") {
+  } else if (kind !== "test") {
     const subject = renderTemplate(settings.adminEmailSubject, variables);
     jobs.push(recordSkipped("coach", settings.coachEmail || "", subject, "disabled_in_notification_settings"));
   }
 
-  if (!clientOnly && settings.sendAdminEmail && kind !== "test") {
+  if (settings.sendAdminEmail && kind !== "test") {
     const recipient = settings.notificationEmail || account.contactEmail;
     const subject = renderTemplate(settings.adminEmailSubject, variables);
     const intro = renderTemplate(settings.adminEmailIntro, variables);
@@ -5072,7 +2963,7 @@ async function sendBookingNotifications(
         `${kind}-admin-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
       ),
     );
-  } else if (!clientOnly && kind !== "test") {
+  } else if (kind !== "test") {
     const recipient = settings.notificationEmail || account.contactEmail;
     const subject = renderTemplate(settings.adminEmailSubject, variables);
     jobs.push(
@@ -5087,32 +2978,6 @@ async function sendBookingNotifications(
 
   if (!jobs.length) return [];
   return Promise.all(jobs);
-}
-
-async function resendBookingConfirmation(appointmentId, context, state = null) {
-  assertAccountAdminContext(context, "You do not have permission to resend booking confirmations.");
-  assertAccountFeature(context.account, "notifications");
-  const current = state || await readCalendarState();
-  const cleanId = cleanString(appointmentId, "", 140);
-  const appointment = (current.items || []).find((item) => item.id === cleanId);
-  if (!appointment || appointment.kind !== "appointment" || !canReadCalendarItem(context, appointment, current)) {
-    throw Object.assign(new Error("Booking was not found in this workspace."), { status: 404 });
-  }
-  if (!cleanEmail(appointment.email, "")) {
-    throw Object.assign(new Error("This booking does not have a customer email address."), { status: 400 });
-  }
-
-  const results = await sendBookingNotifications(appointment, {
-    kind: "booking",
-    clientOnly: true,
-    idempotencyNonce: `admin-resend-${Date.now()}-${randomUUID().slice(0, 8)}`,
-  });
-  const notifications = filterNotificationsForContext(await readNotificationHistory(), context, current);
-  return {
-    ok: results.some((result) => result.sent),
-    results,
-    notifications,
-  };
 }
 
 async function sendInitialBookingNotifications(appointment, kind = "booking") {
@@ -5313,22 +3178,15 @@ async function changeAdminPassword(session, currentPassword, nextPassword) {
 }
 
 async function createAdminSession(userOrId) {
-  const startedAt = Date.now();
-  let ok = false;
   const userId = typeof userOrId === "object" ? userOrId.id : userOrId;
   const token = randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + sessionDays * 24 * 60 * 60 * 1000).toISOString();
-  try {
-    await db().sql`
-      INSERT INTO admin_sessions (id, token_hash, user_id, expires_at, created_at)
-      VALUES (${randomUUID()}, ${tokenHash}, ${userId}, ${expiresAt}, NOW())
-    `;
-    ok = true;
-    return { token, expiresAt };
-  } finally {
-    logAuthTiming("createAdminSession", startedAt, { ok });
-  }
+  await db().sql`
+    INSERT INTO admin_sessions (id, token_hash, user_id, expires_at, created_at)
+    VALUES (${randomUUID()}, ${tokenHash}, ${userId}, ${expiresAt}, NOW())
+  `;
+  return { token, expiresAt };
 }
 
 async function readAdminSession(token) {
@@ -5364,104 +3222,6 @@ async function requireAdmin(req) {
   return session;
 }
 
-async function readBackendSettings() {
-  return readCalendarState();
-}
-
-function defaultWorkspaceAccount(settings = {}) {
-  const accounts = normalizeWorkspaceAccounts(settings.workspaceAccounts || [], settings.account || defaultCoachAccount());
-  const id = defaultAccountId(accounts);
-  return accounts.find((account) => account.id === id) || accounts[0] || defaultWorkspaceAccountFromCoachAccount(settings.account);
-}
-
-function publicWorkspaceAccount(state = {}) {
-  return defaultWorkspaceAccount(state);
-}
-
-function resolveWorkspaceAccount(_req, settings = {}) {
-  return defaultWorkspaceAccount(settings);
-}
-
-function defaultAppUserForAccount(account, settings = {}) {
-  const accountSettings = settings.account || defaultCoachAccount();
-  const users = Array.isArray(settings.currentUser)
-    ? settings.currentUser
-    : Array.isArray(settings.appUsers)
-      ? settings.appUsers
-      : [];
-  const cleanUsers = users.length ? users : [settings.currentUser].filter(Boolean);
-  const fallback = { ...defaultAppUserFromAccount(accountSettings), accountId: account.id };
-  return cleanUsers.find((user) => user?.accountId === account.id) || fallback;
-}
-
-async function readCurrentSessionUser(req, settings = {}) {
-  const session = await readAdminSession(sessionTokenFromRequest(req));
-  if (!session) return null;
-  const account = defaultWorkspaceAccount(settings);
-  const appUsers = await readAppUsers();
-  const matched =
-    appUsers.find((user) => user.accountId === account.id && user.email && session.email && user.email.toLowerCase() === session.email.toLowerCase()) ||
-    appUsers.find((user) => user.accountId === account.id && isAdminUser(user)) ||
-    defaultAppUserForAccount(account, { ...settings, currentUser: settings.currentUser });
-  return { ...matched, accountId: matched.accountId || account.id };
-}
-
-function isAdminUser(user) {
-  return ["admin", "account_admin", "platform_admin"].includes(user?.role) || Object.values(user?.permissions || {}).includes("all");
-}
-
-function userBelongsToAccount(user, accountId) {
-  return Boolean(user && (!user.accountId || user.accountId === accountId));
-}
-
-function userCoachId(user) {
-  return cleanSlug(user?.coachId, "") || undefined;
-}
-
-function hasPermission(user, permissionKey, scope = "own") {
-  if (isAdminUser(user)) return true;
-  const grant = user?.permissions?.[permissionKey];
-  if (!grant) return false;
-  if (grant === "all") return true;
-  if (scope === "assigned") return grant === "assigned";
-  if (scope === "own") return grant === "own" || grant === "assigned";
-  return false;
-}
-
-function assertUserBelongsToAccount(user, accountId) {
-  if (!userBelongsToAccount(user, accountId)) {
-    throw permissionDenied("This user does not belong to the requested workspace.");
-  }
-}
-
-function assertAuthenticatedContext(context) {
-  if (!context?.user) throw Object.assign(new Error("Admin login required."), { status: 401, code: "unauthorized" });
-  assertAccountActive(context.account);
-  assertUserBelongsToAccount(context.user, context.accountId);
-}
-
-function assertAccountAdminContext(context, message = "You do not have permission to change account settings.") {
-  assertAuthenticatedContext(context);
-  if (!context.isAdmin) throw permissionDenied(message);
-}
-
-async function resolveBackendRequestContext(req, settings = null) {
-  const resolvedSettings = settings || await readBackendSettings();
-  const account = resolveWorkspaceAccount(req, resolvedSettings);
-  const user = await readCurrentSessionUser(req, resolvedSettings);
-  const context = {
-    account,
-    accountId: account.id,
-    user,
-    userId: user?.id || "",
-    coachId: userCoachId(user),
-    isAdmin: isAdminUser(user),
-    entitlements: accountEntitlements(account),
-  };
-  assertAuthenticatedContext(context);
-  return context;
-}
-
 function itemWeek(item) {
   return item.week ?? 0;
 }
@@ -5475,15 +3235,11 @@ function slotOverlaps(a, b) {
   );
 }
 
-function isInsideAvailability(availability, day, start, duration, coachId = defaultCoachProfileFromAccount().id) {
+function isInsideAvailability(availability, day, start, duration) {
   const end = start + duration;
-  const fallbackCoachId = defaultCoachProfileFromAccount().id;
   return (
     availability[day]?.some(
-      (window) =>
-        (window.coachId || fallbackCoachId) === coachId &&
-        start >= window.start &&
-        end <= window.end,
+      (window) => start >= window.start && end <= window.end,
     ) ?? false
   );
 }
@@ -5521,57 +3277,7 @@ function isGroupServiceSlotMatch(service, candidate) {
   return true;
 }
 
-function conflictItemSummary(item, state = {}) {
-  if (!item) return null;
-  const services = state.services || defaultServices;
-  const coaches = state.coaches || [];
-  const locations = state.locations || [];
-  const account = state.account || defaultCoachAccount();
-  const service = services.find((candidateService) => candidateService.id === item.serviceId);
-  return {
-    id: item.id,
-    kind: item.kind,
-    status: item.status || "booked",
-    serviceId: item.serviceId || "",
-    serviceName: service?.name || "",
-    week: itemWeek(item),
-    day: item.day,
-    start: item.start,
-    duration: item.duration,
-    coachId: resolvedCalendarItemCoachId(item, service, coaches, account),
-    locationId: resolvedCalendarItemLocationId(item, service, locations, account),
-  };
-}
-
-function findCollision(items, candidate, service, state = {}) {
-  const services = state.services || defaultServices;
-  const coaches = state.coaches || [];
-  const locations = state.locations || [];
-  const account = state.account || defaultCoachAccount();
-  const candidateCoachId = service?.coachId || defaultCoachId(coaches);
-  const candidateLocationId = serviceLocation(service, locations, account).id;
-  const candidateItem = {
-    kind: "appointment",
-    coachId: candidateCoachId,
-    locationId: candidateLocationId,
-    ...candidate,
-  };
-  const existingService = (item) => services.find((candidateService) => candidateService.id === item.serviceId);
-  const isCoachConflict = (item) => {
-    if (isInactiveForConflict(item) || isLocationOnlyBlock(item)) return false;
-    const itemCoachId = resolvedCalendarItemCoachId(item, existingService(item), coaches, account);
-    return Boolean(candidateCoachId && itemCoachId && candidateCoachId === itemCoachId);
-  };
-  const isLocationConflict = (item) => {
-    if (isInactiveForConflict(item)) return false;
-    const itemLocationId = resolvedCalendarItemLocationId(item, existingService(item), locations, account);
-    if (!candidateLocationId || !itemLocationId || candidateLocationId !== itemLocationId) return false;
-    if (isLocationOnlyBlock(item)) return true;
-    if (isCoachOnlyBlock(item)) return false;
-    if (isCoachLocationBlock(item)) return isCoachConflict(item);
-    return candidateItem.kind === "block" && isLocationOnlyBlock(candidateItem);
-  };
-  const isAppointmentConflict = (item) => isCoachConflict(item) || isLocationConflict(item);
+function hasCollision(items, candidate, service) {
   const overlapping = items.filter((item) =>
     slotOverlaps(
       {
@@ -5584,208 +3290,19 @@ function findCollision(items, candidate, service, state = {}) {
     ),
   );
   if (!isScheduledGroupService(service)) {
-    const item = overlapping.find(isAppointmentConflict);
-    return item ? { reason: "blocking_item", item, candidateCoachId, candidateLocationId } : null;
+    return overlapping.length > 0;
   }
-  const blockingItem = overlapping.find(
-    (item) => (item.kind !== "appointment" || item.serviceId !== service.id) && isAppointmentConflict(item),
+  const sameServiceCount = overlapping.filter((item) => item.serviceId === service.id).length;
+  const blocksOrOtherService = overlapping.some(
+    (item) => item.kind !== "appointment" || item.serviceId !== service.id,
   );
-  if (blockingItem) return { reason: "blocking_item", item: blockingItem, candidateCoachId, candidateLocationId };
-  const sameService = overlapping.filter((item) => item.serviceId === service.id && !isInactiveForConflict(item));
-  if (sameService.length >= service.capacity) {
-    return { reason: "capacity_full", item: sameService[0], candidateCoachId, candidateLocationId };
-  }
-  return null;
-}
-
-function hasCollision(items, candidate, service, state = {}) {
-  return Boolean(findCollision(items, candidate, service, state));
-}
-
-function publicAccountState(state) {
-  const workspaceAccount = publicWorkspaceAccount(state);
-  assertAccountFeature(workspaceAccount, "publicBooking");
-  return {
-    workspaceAccount,
-    state: {
-      ...state,
-      items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
-      services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-      coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-      locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-      availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
-    },
-  };
-}
-
-function publicBookableServices(services = []) {
-  return services.filter(
-    (service) =>
-      service.active &&
-      service.archived !== true &&
-      service.visibility === "public" &&
-      service.lessonFormat !== "package",
-  );
-}
-
-function groupSlotRemainingSpots(items, candidate, service) {
-  const capacity = Math.max(1, Math.round(Number(service.capacity || 1)));
-  const bookedCount = items.filter(
-    (item) =>
-      item.serviceId === service.id &&
-      !isInactiveForConflict(item) &&
-      slotOverlaps(
-        {
-          week: itemWeek(item),
-          day: item.day,
-          start: item.start,
-          duration: item.duration,
-        },
-        candidate,
-      ),
-  ).length;
-  return Math.max(0, capacity - bookedCount);
-}
-
-function publicSlotsForService(accountState, service, week, ignoreId = "") {
-  const ignoredItemId = cleanString(ignoreId, "", 160);
-  const items = ignoredItemId ? accountState.items.filter((item) => item.id !== ignoredItemId) : accountState.items;
-  const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
-  const serviceLocationId = serviceLocation(service, accountState.locations || [], accountState.account).id;
-
-  if (isScheduledGroupService(service)) {
-    const schedule = service.groupSchedule;
-    if (!schedule?.active) return [];
-    const candidate = {
-      week,
-      day: schedule.dayOfWeek,
-      start: schedule.startMinutes,
-      duration: service.duration,
-    };
-    if (!isGroupServiceSlotMatch(service, candidate)) return [];
-    if (hasCollision(items, candidate, service, accountState)) return [];
-    const remainingSpots = groupSlotRemainingSpots(items, candidate, service);
-    if (!remainingSpots) return [];
-    return [
-      {
-        week: candidate.week,
-        day: candidate.day,
-        start: candidate.start,
-        remainingSpots,
-        coachId: serviceCoachId,
-        locationId: serviceLocationId,
-      },
-    ];
-  }
-
-  const slots = [];
-  for (let day = 0; day < 7; day += 1) {
-    const windows = accountState.availability[day] || [];
-    for (const window of windows) {
-      const windowCoachId = window.coachId || defaultCoachProfileFromAccount().id;
-      if (windowCoachId !== serviceCoachId) continue;
-      for (let start = window.start; start + service.duration <= window.end; start += PUBLIC_SLOT_STEP_MINUTES) {
-        const candidate = {
-          week,
-          day,
-          start,
-          duration: service.duration,
-        };
-        if (
-          isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId) &&
-          !hasCollision(items, candidate, service, accountState)
-        ) {
-          slots.push({
-            week: candidate.week,
-            day: candidate.day,
-            start: candidate.start,
-            remainingSpots: 0,
-            coachId: serviceCoachId,
-            locationId: serviceLocationId,
-          });
-        }
-      }
-    }
-  }
-  return slots;
-}
-
-export function publicBookingSlots(state, options = {}) {
-  const { state: accountState } = publicAccountState(state);
-  const rawWeek = Number(options.week ?? currentWeekOffset());
-  const week = Number.isInteger(rawWeek) ? rawWeek : currentWeekOffset();
-  const serviceId = cleanString(options.serviceId, "", 140);
-  const ignoreId = cleanString(options.ignoreId, "", 160);
-  const services = publicBookableServices(accountState.services);
-  const targetServices = serviceId ? services.filter((service) => service.id === serviceId) : services;
-  if (serviceId && !targetServices.length) {
-    throw Object.assign(new Error("Choose a public lesson type."), { status: 404 });
-  }
-  const servicesById = {};
-  for (const service of targetServices) {
-    servicesById[service.id] = {
-      serviceId: service.id,
-      week,
-      slots: publicSlotsForService(accountState, service, week, ignoreId),
-    };
-  }
-  return {
-    updatedAt: state.updatedAt,
-    week,
-    serviceId,
-    ignoreId,
-    slots: serviceId && targetServices[0] ? servicesById[targetServices[0].id].slots : undefined,
-    services: servicesById,
-  };
-}
-
-export async function handlePublicBookingSlotsRequest(req) {
-  try {
-    const url = new URL(req.url);
-    return json(
-      publicBookingSlots(await readPublicCalendarState(), {
-        serviceId: url.searchParams.get("serviceId") || "",
-        week: url.searchParams.get("week") || "",
-        ignoreId: url.searchParams.get("ignoreId") || "",
-      }),
-    );
-  } catch (error) {
-    console.error("public_booking_slots_error", error);
-    const status = error?.status || 500;
-    return json(
-      {
-        error: status === 500 ? "public_booking_slots_error" : "request_error",
-        message: error instanceof Error ? error.message : "Unknown public booking slots error",
-      },
-      status,
-    );
-  }
-}
-
-function publicSlotUnavailableError(detail) {
-  console.warn("public_booking:slot_rejected", detail);
-  return Object.assign(new Error("That time is no longer available."), {
-    status: 409,
-    detail,
-  });
+  if (blocksOrOtherService) return true;
+  return sameServiceCount >= service.capacity;
 }
 
 async function createPublicBooking(payload, context = null) {
   const state = await readFastPublicCalendarState();
-  const workspaceAccount =
-    (state.workspaceAccounts || []).find((account) => account.id === defaultAccountId(state.workspaceAccounts)) ||
-    (state.workspaceAccounts || [])[0] ||
-    defaultWorkspaceAccountFromCoachAccount(state.account);
-  assertAccountFeature(workspaceAccount, "publicBooking");
-  const accountState = {
-    ...state,
-    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
-    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
-  };
-  const service = accountState.services.find(
+  const service = state.services.find(
     (candidate) =>
       candidate.id === payload?.serviceId &&
       candidate.active &&
@@ -5825,47 +3342,19 @@ async function createPublicBooking(payload, context = null) {
   }
 
   const slot = { week, day, start, duration: service.duration };
-  const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
-  const serviceLocationId = serviceLocation(service, accountState.locations || [], accountState.account).id;
-  const rejectionBase = {
-    serviceId: service.id,
-    serviceName: service.name,
-    slot,
-    coachId: serviceCoachId,
-    locationId: serviceLocationId,
-    itemCount: accountState.items.length,
-  };
   if (isScheduledGroupService(service)) {
-    if (!isGroupServiceSlotMatch(service, slot)) {
-      throw publicSlotUnavailableError({ ...rejectionBase, reason: "group_schedule_mismatch" });
-    }
-    const collision = findCollision(accountState.items, slot, service, accountState);
-    if (collision) {
-      throw publicSlotUnavailableError({
-        ...rejectionBase,
-        reason: collision.reason,
-        candidateCoachId: collision.candidateCoachId,
-        candidateLocationId: collision.candidateLocationId,
-        conflictItem: conflictItemSummary(collision.item, accountState),
+    if (!isGroupServiceSlotMatch(service, slot) || hasCollision(state.items, slot, service)) {
+      throw Object.assign(new Error("That time is no longer available."), {
+        status: 409,
       });
     }
-  } else if (!isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId)) {
-    throw publicSlotUnavailableError({
-      ...rejectionBase,
-      reason: "outside_availability",
-      availability: accountState.availability[day] || [],
+  } else if (
+    !isInsideAvailability(state.availability, day, start, service.duration) ||
+    hasCollision(state.items, slot, service)
+  ) {
+    throw Object.assign(new Error("That time is no longer available."), {
+      status: 409,
     });
-  } else {
-    const collision = findCollision(accountState.items, slot, service, accountState);
-    if (collision) {
-      throw publicSlotUnavailableError({
-        ...rejectionBase,
-        reason: collision.reason,
-        candidateCoachId: collision.candidateCoachId,
-        candidateLocationId: collision.candidateLocationId,
-        conflictItem: conflictItemSummary(collision.item, accountState),
-      });
-    }
   }
 
   const client = `${firstName} ${lastName}`;
@@ -5916,28 +3405,16 @@ async function createPublicBooking(payload, context = null) {
       calculatedPrice: calculateCustomGroupPrice(service, participantCount),
     };
   }
-  const coachId = serviceCoachId;
-  const location = cleanBookingLocationSnapshot(
-    bookingLocationSnapshotFor(service, accountState.locations || [], accountState.account),
-  );
-  const coach = cleanBookingCoachSnapshot(
-    bookingCoachSnapshotFor(coachId, accountState.coaches || [], accountState.account),
-  );
   const appointment = {
     id: `appt-${Date.now()}`,
-    accountId: service.accountId || workspaceAccount.id,
     kind: "appointment",
     ...slot,
-    coachId,
-    locationId: cleanSlug(location?.locationId || service.locationId, ""),
-    coach,
     serviceId: service.id,
     client,
     title: client,
     phone,
     email,
     note: "Booked from public booking page.",
-    location,
     ...(customGroup || {}),
   };
   const nextState = await writePublicBookingAppointment(state, appointment, context);
@@ -5957,10 +3434,6 @@ export async function handlePublicBookingRequest(req, context = null) {
         day: result.appointment.day,
         start: result.appointment.start,
         duration: result.appointment.duration,
-        coachId: result.appointment.coachId,
-        locationId: result.appointment.locationId,
-        coach: result.appointment.coach,
-        location: result.appointment.location,
       },
       state: { items: result.state?.items || [] },
       notifications: clientNotificationResults(result.notifications),
@@ -5987,12 +3460,9 @@ export async function handleCustomGroupConfirmRequest(req) {
     if (!token) return text("This confirmation link is missing its token.", 400);
 
     const state = await readPublicCalendarState();
-    const workspaceAccount = publicWorkspaceAccount(state);
-    assertAccountFeature(workspaceAccount, "publicBooking");
     let confirmedAttendee = null;
     let confirmedAppointment = null;
     const nextItems = state.items.map((item) => {
-      if (!recordBelongsToAccount(item, workspaceAccount.id)) return item;
       if (!item.customGroup || !Array.isArray(item.attendees)) return item;
       let changed = false;
       const attendees = item.attendees.map((attendee) => {
@@ -6010,7 +3480,7 @@ export async function handleCustomGroupConfirmRequest(req) {
     }
 
     await writePublicBookingState(state, nextItems);
-    const service = state.services.find((candidate) => recordBelongsToAccount(candidate, workspaceAccount.id) && candidate.id === confirmedAppointment.serviceId);
+    const service = state.services.find((candidate) => candidate.id === confirmedAppointment.serviceId);
     const title = "Attendance confirmed";
     return text(
       `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="font-family:Arial,sans-serif;line-height:1.5;color:#101612;padding:32px;max-width:640px;margin:auto"><h1>${title}</h1><p>${escapeHtml(confirmedAttendee.name)} is confirmed for ${escapeHtml(service?.name || "the custom group lesson")}.</p><p>You can close this page.</p></body></html>`,
@@ -6040,10 +3510,8 @@ export async function handlePublicNotificationStatusRequest(req) {
     if (!appointmentId || (!email && !phone)) return json({ sent: false }, 400);
 
     const state = await readPublicCalendarState();
-    const workspaceAccount = publicWorkspaceAccount(state);
-    assertAccountFeature(workspaceAccount, "publicBooking");
-    const appointment = state.items.find((item) => recordBelongsToAccount(item, workspaceAccount.id) && item.id === appointmentId);
-    if (!appointment || !matchesNotificationContact(appointment, email, phone)) {
+    const appointment = state.items.find((item) => item.id === appointmentId);
+    if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
       return json({ sent: false }, 404);
     }
 
@@ -6155,7 +3623,6 @@ function publicRescheduleItem(item, serviceList = defaultServices) {
     day: item.day,
     start: item.start,
     client: item.client || item.title,
-    location: item.location,
   };
 }
 
@@ -6225,17 +3692,7 @@ async function triggerPublicBookingNotifications(payload) {
   }
 
   const state = await readPublicCalendarState();
-  const workspaceAccount = publicWorkspaceAccount(state);
-  assertAccountFeature(workspaceAccount, "publicBooking");
-  const accountState = {
-    ...state,
-    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
-    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
-  };
-  const appointment = accountState.items.find((item) => item.id === appointmentId);
+  const appointment = state.items.find((item) => item.id === appointmentId);
   if (!appointment || !matchesNotificationContact(appointment, email, phone)) {
     throw Object.assign(
       new Error("That booking could not be verified for email notification."),
@@ -6283,15 +3740,8 @@ async function lookupPublicReschedule(payload) {
   }
 
   const state = await readPublicCalendarState();
-  const workspaceAccount = publicWorkspaceAccount(state);
-  assertAccountFeature(workspaceAccount, "publicBooking");
-  const accountState = {
-    ...state,
-    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
-    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-  };
-  const serviceList = accountState.services || defaultServices;
-  const matches = accountState.items
+  const serviceList = state.services || defaultServices;
+  const matches = state.items
     .filter((item) => matchesRescheduleContact(item, email, phone))
     .sort(
       (a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start,
@@ -6327,31 +3777,20 @@ async function reschedulePublicBooking(payload, context = null) {
   }
 
   const state = await readPublicCalendarState();
-  const workspaceAccount = publicWorkspaceAccount(state);
-  assertAccountFeature(workspaceAccount, "publicBooking");
-  const accountState = {
-    ...state,
-    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
-    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
-  };
-  const appointment = accountState.items.find((item) => item.id === appointmentId);
+  const appointment = state.items.find((item) => item.id === appointmentId);
   if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
     throw Object.assign(new Error("That booking could not be verified."), {
       status: 404,
     });
   }
 
-  const serviceList = accountState.services || defaultServices;
+  const serviceList = state.services || defaultServices;
   const service = serviceList.find(
     (candidate) => candidate.id === appointment.serviceId,
   );
   const duration = service?.duration || appointment.duration;
-  const serviceCoachId = appointment.coachId || service?.coachId || defaultCoachId(accountState.coaches || []);
   const slot = { week, day, start, duration };
-  const itemsWithoutOriginal = accountState.items.filter(
+  const itemsWithoutOriginal = state.items.filter(
     (item) => item.id !== appointment.id,
   );
   if (
@@ -6361,14 +3800,13 @@ async function reschedulePublicBooking(payload, context = null) {
     (isScheduledGroupService(service)
       ? !isGroupServiceSlotMatch(service, slot)
       : !isInsideAvailability(
-          accountState.availability || defaultAvailability,
+          state.availability || defaultAvailability,
           day,
           start,
           duration,
-          serviceCoachId,
         ) ||
         !Number.isInteger(duration)) ||
-    hasCollision(itemsWithoutOriginal, slot, service, accountState)
+    hasCollision(itemsWithoutOriginal, slot, service)
   ) {
     throw Object.assign(new Error("That time is no longer available."), {
       status: 409,
@@ -6416,9 +3854,7 @@ async function cancelPublicBooking(payload) {
   }
 
   const state = await readPublicCalendarState();
-  const workspaceAccount = publicWorkspaceAccount(state);
-  assertAccountFeature(workspaceAccount, "publicBooking");
-  const appointment = state.items.find((item) => recordBelongsToAccount(item, workspaceAccount.id) && item.id === appointmentId);
+  const appointment = state.items.find((item) => item.id === appointmentId);
   if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
     throw Object.assign(new Error("That booking could not be verified."), {
       status: 404,
@@ -6476,7 +3912,6 @@ export async function handlePublicRescheduleRequest(req, context = null) {
         day: result.appointment.day,
         start: result.appointment.start,
         duration: result.appointment.duration,
-        location: result.appointment.location,
       },
       notifications: clientNotificationResults(result.notifications),
     });
@@ -6511,7 +3946,7 @@ export async function handlePublicCancelRequest(req) {
         start: result.appointment.start,
         duration: result.appointment.duration,
       },
-      state: { items: publicBookingState(result.state).items },
+      state: { items: result.state.items },
       notifications: clientNotificationResults(result.notifications),
     });
   } catch (error) {
@@ -6585,15 +4020,12 @@ function formatLocalDateTime(week, day, minutes) {
   return `${date.year}${pad(date.month)}${pad(date.day)}T${pad(hour)}${pad(minute)}00`;
 }
 
-function eventDescription(item, serviceList, location) {
+function eventDescription(item, serviceList) {
   const rows =
     item.kind === "block"
       ? ["Blocked time", item.note]
       : [
           serviceName(item.serviceId, serviceList),
-          location?.address ? `Address: ${location.address}` : "",
-          location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
-          location?.mapUrl ? `Map: ${location.mapUrl}` : "",
           item.phone ? `Phone: ${item.phone}` : "",
           item.email ? `Email: ${item.email}` : "",
           item.note,
@@ -6611,7 +4043,6 @@ function generateCalendarFeed(state) {
   const account = cleanCoachAccount(state.account);
   const timezone = account.timezone;
   const serviceList = state.services || defaultServices;
-  const locationList = normalizeLocations(state.locations || [], account);
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -6631,17 +4062,15 @@ function generateCalendarFeed(state) {
     )
     .forEach((item) => {
       const week = itemWeek(item);
-      const service = serviceList.find((candidate) => candidate.id === item.serviceId);
-      const location = calendarItemLocation(item, service, locationList, account);
       lines.push(
         "BEGIN:VEVENT",
         `UID:${escapeText(item.id)}@clarity-golf-booking`,
         `DTSTAMP:${stamp}`,
-        `DTSTART;TZID=${location?.timezone || timezone}:${formatLocalDateTime(week, item.day, item.start)}`,
-        `DTEND;TZID=${location?.timezone || timezone}:${formatLocalDateTime(week, item.day, item.start + item.duration)}`,
+        `DTSTART;TZID=${timezone}:${formatLocalDateTime(week, item.day, item.start)}`,
+        `DTEND;TZID=${timezone}:${formatLocalDateTime(week, item.day, item.start + item.duration)}`,
         `SUMMARY:${escapeText(eventSummary(item, account, serviceList))}`,
-        `DESCRIPTION:${escapeText(eventDescription(item, serviceList, location))}`,
-        `LOCATION:${escapeText(bookingLocationDisplay(location))}`,
+        `DESCRIPTION:${escapeText(eventDescription(item, serviceList))}`,
+        `LOCATION:${escapeText(account.venueName)}`,
         `ORGANIZER;CN=${escapeText(account.businessName)}:MAILTO:${account.contactEmail}`,
         item.kind === "block" ? "CATEGORIES:Busy" : "CATEGORIES:Golf Lesson",
         "STATUS:CONFIRMED",
@@ -6685,14 +4114,6 @@ export async function handleBookingApiRoute(
 
     if (req.method === "GET" && pathname === "/api/public-booking-state") {
       return handlePublicBookingStateRequest();
-    }
-
-    if (req.method === "GET" && pathname === "/api/public-booking-catalog") {
-      return handlePublicBookingCatalogRequest();
-    }
-
-    if (req.method === "GET" && pathname === "/api/public-booking-slots") {
-      return handlePublicBookingSlotsRequest(req);
     }
 
     if (req.method === "POST" && pathname === "/api/public-booking") {
@@ -6879,14 +4300,6 @@ export async function handleBookingApiRoute(
       return handlePublicBookingStateRequest();
     }
 
-    if (req.method === "GET" && pathname === "/api/public-booking-catalog") {
-      return handlePublicBookingCatalogRequest();
-    }
-
-    if (req.method === "GET" && pathname === "/api/public-booking-slots") {
-      return handlePublicBookingSlotsRequest(req);
-    }
-
     if (req.method === "POST" && pathname === "/api/public-booking") {
       return handlePublicBookingRequest(req, context);
     }
@@ -6932,71 +4345,12 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/calendar-state") {
-      const state = await readAdminCalendarShellState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      return json(publicCalendarState(filterCalendarStateForContext(state, requestContext)));
+      return json(publicCalendarState(await readCalendarState()));
     }
 
     if (req.method === "PUT" && pathname === "/api/calendar-state") {
       const body = await parseBody(req);
       const current = await readCalendarState();
-      const action = cleanString(body?.action, "", 120);
-      if (action === "complete_lesson") {
-        const startAt = Date.now();
-        const requestContext = await resolveBackendRequestContext(req, current);
-        const itemId = cleanString(body?.itemId, "", 140);
-        const timedDetails = {
-          action: "lesson_complete",
-          itemId,
-          calendarId: current.account?.id || "",
-          route: "PUT /api/calendar-state",
-          operationOwner: "lesson_complete",
-          accountId: requestContext.accountId || "",
-        };
-        console.info("lesson_complete_started", {
-          ...timedDetails,
-          expectedStatus: "completed",
-          expectedRevision: cleanString(body?.updatedAt, "", 140),
-          httpStatus: 0,
-        });
-        try {
-          const response = await completeCalendarItemById(
-            current,
-            itemId,
-            requestContext,
-          );
-          const durationMs = Date.now() - startAt;
-          console.info("lesson_complete_saved", {
-            ...timedDetails,
-            httpStatus: 200,
-            backendUpdatedAt: response.updatedAt || current.updatedAt,
-            itemId,
-            itemStatus: "completed",
-            durationMs,
-            stageTimings: response.stageTimings || {
-              totalMs: durationMs,
-            },
-          });
-          return json(response);
-        } catch (error) {
-          const durationMs = Date.now() - startAt;
-          const diagnostics = lessonCompleteActionFailure(
-            error,
-            timedDetails,
-            durationMs,
-          );
-          console.error("lesson_complete_failed", diagnostics);
-          return json(
-            {
-              error: diagnostics.errorCode,
-              message: diagnostics.backendMessage,
-              ...diagnostics,
-            },
-            diagnostics.httpStatus || 500,
-          );
-        }
-      }
-      const requestContext = await resolveBackendRequestContext(req, current);
       const nextState = await writeCalendarState({
         syncKey:
           typeof body.syncKey === "string" ? body.syncKey : current.syncKey,
@@ -7005,177 +4359,23 @@ export async function handleBookingApiRoute(
         clearItems: body.clearItems === true,
         itemsOperation: body.itemsOperation,
         updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
-      }, requestContext);
-      let notificationResults = [];
-      let notificationWarning = "";
-      try {
-        notificationResults = await processAdminNotificationDebounce(
-          current.items,
-          nextState.items,
-          { timeZone: nextState.account?.timezone },
-        );
-      } catch (error) {
-        notificationWarning =
-          "Calendar saved, but booking alerts could not be processed.";
-        console.error("calendar_state:notification_failed", error);
-      }
-      const existingWarnings = Array.isArray(nextState.warnings)
-        ? nextState.warnings
-        : [];
+      });
+      const notificationResults = await sendCalendarChangeNotifications(
+        current.items,
+        nextState.items,
+      );
       return json({
         ...publicCalendarState({
           ...nextState,
           notifications: await readNotificationHistory(),
         }),
         notificationResults,
-        ...(notificationWarning
-          ? { warnings: [...new Set([...existingWarnings, notificationWarning])] }
-          : {}),
-      });
-    }
-
-    if (req.method === "DELETE" && pathname === "/api/calendar-state") {
-      const current = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, current);
-      const calendarItemId = cleanString(url.searchParams.get("id"), "", 140);
-      const targetItem = current.items.find((item) => item.id === calendarItemId) || {};
-      const startedAt = Date.now();
-      const baseDetails = {
-        action: "delete_calendar_item",
-        route: "DELETE /api/calendar-state",
-        verificationRoute: "GET /api/calendar-state",
-        operationOwner: "calendar_delete",
-        bookingId: calendarItemId,
-        calendarItemId,
-        personId: cleanString(targetItem.personId || targetItem.person?.id, "", 120),
-        email: normalizedPersonEmail(targetItem.email),
-        accountId: requestContext.accountId || "",
-        targetedDelete: true,
-      };
-      console.info("BOOKING_DELETE_STARTED", baseDetails);
-      console.info("BOOKING_DELETE_VERIFY_STARTED", {
-        ...baseDetails,
-        route: "GET /api/calendar-state",
-        operationOwner: "calendar_reload_verify",
-      });
-      try {
-        const nextState = await deleteCalendarItemById(calendarItemId, requestContext);
-        const verificationResult = nextState.items.some((item) => item.id === calendarItemId)
-          ? "found"
-          : "not_found";
-        if (verificationResult !== "not_found") {
-          throw Object.assign(new Error("Deleted calendar item was returned by the next calendar read."), {
-            code: "BOOKING_DELETE_VERIFY_FAILED",
-            status: 409,
-            operationOwner: "calendar_reload_verify",
-            route: "GET /api/calendar-state",
-          });
-        }
-        const durationMs = Date.now() - startedAt;
-        console.info("BOOKING_DELETE_COMPLETED", {
-          ...baseDetails,
-          httpStatus: 200,
-          durationMs,
-          verificationResult,
-        });
-        console.info("BOOKING_DELETE_VERIFY_COMPLETED", {
-          ...baseDetails,
-          route: "GET /api/calendar-state",
-          operationOwner: "calendar_reload_verify",
-          httpStatus: 200,
-          durationMs,
-          verificationResult,
-        });
-        let notificationResults = [];
-        let notificationWarning = "";
-        try {
-          notificationResults = await processAdminNotificationDebounce(
-            current.items,
-            nextState.items,
-            { timeZone: nextState.account?.timezone },
-          );
-        } catch (error) {
-          notificationWarning =
-            "Calendar saved, but booking alerts could not be processed.";
-          console.error("calendar_state:notification_failed", error);
-        }
-        const existingWarnings = Array.isArray(nextState.warnings)
-          ? nextState.warnings
-          : [];
-        return json({
-          ...publicCalendarState({
-            ...nextState,
-            notifications: await readNotificationHistory(),
-          }),
-          notificationResults,
-          ...(notificationWarning
-            ? { warnings: [...new Set([...existingWarnings, notificationWarning])] }
-            : {}),
-          diagnostics: {
-            code: "BOOKING_DELETE_VERIFY_COMPLETED",
-            ...baseDetails,
-            route: "GET /api/calendar-state",
-            operationOwner: "calendar_reload_verify",
-            httpStatus: 200,
-            durationMs,
-            verificationResult,
-          },
-        });
-      } catch (error) {
-        const durationMs = Date.now() - startedAt;
-        const failure = deleteFailureDiagnostics(error, baseDetails, durationMs);
-        if (failure.operationOwner === "people_patch") {
-          console.error("BOOKING_DELETE_OWNERSHIP_VIOLATION", failure);
-        }
-        console.error(failure.errorCode === "BOOKING_DELETE_VERIFY_FAILED" ? "BOOKING_DELETE_VERIFY_FAILED" : "BOOKING_DELETE_FAILED", failure);
-        return json(
-          {
-            error: failure.errorCode,
-            message: deleteUserMessage(failure.operationOwner, failure.errorCode),
-            detail: failure.backendMessage,
-            diagnostics: {
-              code: failure.errorCode,
-              ...failure,
-            },
-          },
-          failure.httpStatus || 500,
-        );
-      }
-    }
-
-    if (req.method === "POST" && pathname === "/api/admin-notification-debounce") {
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      let notificationResults = [];
-      let notificationWarning = "";
-      try {
-        notificationResults = await processAdminNotificationDebounce(
-          state.items,
-          state.items,
-          { queueDiffs: false, timeZone: state.account?.timezone },
-        );
-      } catch (error) {
-        notificationWarning =
-          "Booking alerts could not be processed.";
-        console.error("calendar_state:notification_debounce_failed", error);
-      }
-      const refreshedState = notificationResults.length ? await readCalendarState() : state;
-      return json({
-        notifications: filterNotificationsForContext(
-          await readNotificationHistory(),
-          requestContext,
-          refreshedState,
-        ),
-        notificationResults,
-        ...(notificationWarning ? { warnings: [notificationWarning] } : {}),
       });
     }
 
     if (req.method === "PUT" && pathname === "/api/calendar-sync-key") {
       const body = await parseBody(req);
       const current = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, current);
-      assertAccountAdminContext(requestContext, "You do not have permission to rotate the calendar sync key.");
       return json(
         publicCalendarState(
           await writeCalendarState({
@@ -7190,39 +4390,19 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "GET" && pathname === "/api/admin-settings") {
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountAdminContext(requestContext, "You do not have permission to view account settings.");
       return json(await readAdminSettings());
     }
 
     if ((req.method === "PUT" || req.method === "POST") && pathname === "/api/admin-settings") {
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountAdminContext(requestContext, "You do not have permission to change account settings.");
       return json(await writeAdminSettings(await parseBody(req)));
     }
 
     if (req.method === "GET" && pathname === "/api/notification-history") {
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountFeature(requestContext.account, "notifications");
-      return json({ notifications: filterNotificationsForContext(await readNotificationHistory(), requestContext, state) });
-    }
-
-    if (req.method === "POST" && pathname === "/api/booking-confirmation-resend") {
-      const body = await parseBody(req);
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      return json(await resendBookingConfirmation(body.appointmentId || body.id, requestContext, state));
+      return json({ notifications: await readNotificationHistory() });
     }
 
     if (req.method === "POST" && pathname === "/api/test-email") {
       const body = await parseBody(req);
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountAdminContext(requestContext, "You do not have permission to send test emails.");
-      assertAccountFeature(requestContext.account, "notifications");
       const recipient = cleanEmail(body.email, "");
       if (!recipient)
         return json(
@@ -7232,12 +4412,11 @@ export async function handleBookingApiRoute(
           },
           400,
         );
-      const services = state.services;
+      const services = await readServices();
       const service =
         services.find((candidate) => candidate.active) || defaultServices[0];
       const appointment = {
         id: `test-${Date.now()}`,
-        accountId: requestContext.account.id,
         kind: "appointment",
         week: 0,
         day: 0,
@@ -7277,93 +4456,25 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "PUT" && pathname === "/api/coach-account") {
-      const body = await parseBody(req);
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountAdminContext(requestContext, "You do not have permission to change business account settings.");
-      if (body?.invoiceSettings?.enabled) assertAccountFeature(requestContext.account, "invoicing");
-      return json(await writeCoachAccount(body));
+      return json(await writeCoachAccount(await parseBody(req)));
     }
 
     if (req.method === "GET" && pathname === "/api/services") {
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      return json({
-        services: state.services.filter((service) => serviceBelongsToContext(service, requestContext, state.coaches)),
-      });
+      return json({ services: await readServices() });
     }
 
     if (req.method === "PUT" && pathname === "/api/services") {
       const body = await parseBody(req);
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountFeature(requestContext.account, "services");
-      const nextServices = mergeServicesForContext(body.services || [], state.services, requestContext, state.coaches);
-      const savedServices = await writeServices(nextServices, requestContext);
-      return json({
-        services: savedServices.filter((service) => serviceBelongsToContext(service, requestContext, state.coaches)),
-      });
-    }
-
-    if (req.method === "GET" && pathname === "/api/locations") {
-      const state = await readColdSetupState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      return json({ locations: filterLocationsForContext(state.locations, requestContext, state.coaches) });
-    }
-
-    if (req.method === "PUT" && pathname === "/api/locations") {
-      const body = await parseBody(req);
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountAdminContext(requestContext, "You do not have permission to manage locations.");
-      return json({ locations: await writeLocations(body.locations, requestContext) });
-    }
-
-    if (req.method === "GET" && pathname === "/api/coaches") {
-      const state = await readColdSetupState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      return json({
-        coaches: filterCoachesForContext(state.coaches, requestContext),
-        currentUser: requestContext.user,
-      });
-    }
-
-    if (req.method === "PUT" && pathname === "/api/coaches") {
-      const body = await parseBody(req);
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountAdminContext(requestContext, "You do not have permission to manage coaches.");
-      return json({ coaches: await writeCoachProfiles(body.coaches, requestContext) });
+      return json({ services: await writeServices(body.services) });
     }
 
     if (req.method === "GET" && pathname === "/api/availability") {
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      const fallbackCoachId = defaultCoachId(state.coaches);
-      return json({
-        availability: state.availability.map((dayWindows) =>
-          dayWindows.filter((window) => availabilityWindowBelongsToContext(window, requestContext, fallbackCoachId)),
-        ),
-      });
+      return json({ availability: await readAvailability() });
     }
 
     if (req.method === "PUT" && pathname === "/api/availability") {
       const body = await parseBody(req);
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      const nextAvailability = mergeAvailabilityForContext(
-        body.availability || [],
-        state.availability,
-        requestContext,
-        defaultCoachId(state.coaches),
-      );
-      const savedAvailability = await writeAvailability(nextAvailability, requestContext);
-      const fallbackCoachId = defaultCoachId(state.coaches);
-      return json({
-        availability: savedAvailability.map((dayWindows) =>
-          dayWindows.filter((window) => availabilityWindowBelongsToContext(window, requestContext, fallbackCoachId)),
-        ),
-      });
+      return json({ availability: await writeAvailability(body.availability) });
     }
 
     if (req.method === "GET" && pathname === "/api/brand-settings") {
@@ -7371,77 +4482,31 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "PUT" && pathname === "/api/brand-settings") {
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountAdminContext(requestContext, "You do not have permission to change brand settings.");
-      assertAccountFeature(requestContext.account, "customBranding");
       return json(await writeBrandSettings(await parseBody(req)));
     }
 
     if (req.method === "GET" && pathname === "/api/people") {
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountFeature(requestContext.account, "clients");
-      return json({ people: filterPeopleForContext(await readPeople(requestContext.accountId), requestContext, state) });
+      return json({ people: await readPeople() });
     }
 
-	    if (req.method === "POST" && (pathname === "/api/people/import" || pathname === "/api/people/import-lite")) {
-	      const body = await parseBody(req);
-	      const state = await readCalendarState();
-	      const requestContext = await resolveBackendRequestContext(req, state);
-	      assertAccountAdminContext(requestContext, "You do not have permission to import clients.");
-	      assertAccountFeature(requestContext.account, "clients");
-      const result = await importPeople(body.people || body.clients || [], body.source || "manual_import", requestContext.accountId);
-	      return json(
-        {
-          ok: true,
-          ...result,
-          people: filterPeopleForContext(result.people, requestContext, state),
-        },
-        201,
-      );
-	    }
+    if (req.method === "POST" && pathname === "/api/people/import") {
+      const body = await parseBody(req);
+      return json(await importPeople(body.people, "manual_import"), 201);
+    }
 
     if (req.method === "PUT" && pathname === "/api/people") {
       const body = await parseBody(req);
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertCanManagePerson(requestContext, body.person || body, state);
-	      const result = await updatePerson(body.person || body, requestContext.accountId);
-      return json({
-        ...result,
-        people: filterPeopleForContext(result.people, requestContext, state),
-      });
+      return json(await updatePerson(body.person || body));
     }
 
     return json({ error: "not_found", message: "Route not found." }, 404);
   } catch (error) {
-    const anyError = error as {
-      status?: number;
-      code?: string;
-      operationOwner?: string;
-      route?: string;
-      personId?: string;
-      email?: string;
-      expectedUpdatedAt?: string;
-      backendUpdatedAt?: string;
-      conflictSource?: string;
-      details?: unknown;
-    };
-    const status = anyError?.status || 500;
+    const status = error?.status || 500;
     return json(
       {
-        error: anyError?.code || (status === 500 ? "booking_api_error" : "request_error"),
+        error: status === 500 ? "booking_api_error" : "request_error",
         message:
           error instanceof Error ? error.message : "Unknown booking API error",
-        ...(anyError?.expectedUpdatedAt ? { expectedUpdatedAt: anyError.expectedUpdatedAt } : {}),
-        ...(anyError?.backendUpdatedAt ? { backendUpdatedAt: anyError.backendUpdatedAt } : {}),
-        ...(anyError?.conflictSource ? { conflictSource: anyError.conflictSource } : {}),
-        ...(anyError?.operationOwner ? { operationOwner: anyError.operationOwner } : {}),
-        ...(anyError?.route ? { route: anyError.route } : {}),
-        ...(anyError?.personId ? { personId: anyError.personId } : {}),
-        ...(anyError?.email ? { email: anyError.email } : {}),
-        ...(anyError?.details !== undefined ? { details: anyError.details } : {}),
       },
       status,
     );
