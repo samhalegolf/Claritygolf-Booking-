@@ -496,7 +496,7 @@ type Toast = {
 };
 
 type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings";
-type BillingSection = "none" | "dashboard" | "new-invoice" | "reports";
+type BillingSection = "none" | "dashboard" | "new-invoice" | "reports" | "settings";
 type SettingsTab =
   | "none"
   | "services"
@@ -703,6 +703,7 @@ type CalendarStateSaveResponse = {
 };
 
 type LessonCompleteResponse = {
+  ok?: boolean;
   message?: string;
   error?: string;
   detail?: string;
@@ -902,6 +903,7 @@ type InvoiceSettings = {
   businessAddress: string;
   headerText: string;
   footerText: string;
+  defaultCustomerNote: string;
   paymentInstructions: string;
   customFields: InvoiceCustomField[];
 };
@@ -976,6 +978,7 @@ type BillingCatalogItem = {
   price: number;
   taxRate: number;
   sourceServiceId?: string;
+  active?: boolean;
 };
 
 type InvoiceLineSource = "manual" | "catalog" | "booking_snapshot" | "package_sale";
@@ -1004,6 +1007,24 @@ type InvoiceDraft = {
   message: string;
   lineSearch: string;
   lines: InvoiceLine[];
+};
+
+// Shape returned by /api/billing/invoices (billing-api.mts). This is the
+// persisted, backend-owned invoice record - distinct from InvoiceDraft, which
+// is just the in-progress editor state before an invoice has been saved.
+type BillingInvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "void";
+
+type BillingInvoiceRecord = {
+  id: string;
+  invoiceNumber: string;
+  status: BillingInvoiceStatus;
+  customerName: string;
+  customerEmail: string;
+  issueDate: string;
+  dueDate: string | null;
+  currency: string;
+  total: number;
+  amountPaid: number;
 };
 
 type SlotCandidate = {
@@ -1122,6 +1143,7 @@ const defaultInvoiceSettings: InvoiceSettings = {
   businessAddress: "",
   headerText: "",
   footerText: "Thank you for training with Sam Hale Golf.",
+  defaultCustomerNote: "Thanks for your work on the lesson programme. Invoice attached below.",
   paymentInstructions: "Please pay by bank transfer and use the invoice number as reference.",
   customFields: [],
 };
@@ -1509,6 +1531,7 @@ function getInitialView(): View {
   if (typeof window === "undefined") return "calendar";
   const requestedView = new URLSearchParams(window.location.search).get("view");
   if (requestedView === "settings") return "settings";
+  if (requestedView === "billing") return "billing";
   return isPublicBookingMode() ? "booking" : "calendar";
 }
 
@@ -2080,6 +2103,10 @@ function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): InvoiceSetti
       typeof settings?.footerText === "string" && settings.footerText.trim()
         ? settings.footerText.trim().slice(0, 400)
         : defaultInvoiceSettings.footerText,
+    defaultCustomerNote:
+      typeof settings?.defaultCustomerNote === "string" && settings.defaultCustomerNote.trim()
+        ? settings.defaultCustomerNote.trim().slice(0, 400)
+        : defaultInvoiceSettings.defaultCustomerNote,
     paymentInstructions:
       typeof settings?.paymentInstructions === "string" && settings.paymentInstructions.trim()
         ? settings.paymentInstructions.trim().slice(0, 400)
@@ -3140,7 +3167,7 @@ function emptyInvoiceDraft(settings = defaultInvoiceSettings, coachId = defaultC
     reference: "",
     discountLabel: "",
     discountAmount: 0,
-    message: "Thanks for your work on the lesson programme. Invoice attached below.",
+    message: settings.defaultCustomerNote,
     lineSearch: "",
     lines: [],
   };
@@ -3598,7 +3625,7 @@ function App() {
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
-  const [billingSection, setBillingSection] = useState<BillingSection>("none");
+  const [billingSection, setBillingSection] = useState<BillingSection>("dashboard");
   const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
     emptyInvoiceDraft(getStoredCoachAccount().invoiceSettings),
   );
@@ -3629,24 +3656,10 @@ function App() {
     setGroupMinimumInput(String(normalizedMinimum));
   }, [serviceEditor.id, serviceEditor.lessonFormat, serviceEditor.customGroup, serviceEditor.customGroupEnabled]);
 
-  const [catalogItems, setCatalogItems] = useState<BillingCatalogItem[]>([
-    {
-      id: "catalog-swing-review",
-      kind: "service",
-      name: "Remote Swing Review",
-      description: "Video review and written practice notes",
-      price: 75,
-      taxRate: defaultInvoiceSettings.taxRate,
-    },
-    {
-      id: "catalog-bay-hire",
-      kind: "product",
-      name: "Bay Hire",
-      description: "Simulator bay hire add-on",
-      price: 30,
-      taxRate: defaultInvoiceSettings.taxRate,
-    },
-  ]);
+  // Products/services and invoices are backend-persisted (billing-api.mts,
+  // billing_products_services / billing_invoices tables) rather than local
+  // state. They start empty and are populated by loadBillingWorkspace().
+  const [catalogItems, setCatalogItems] = useState<BillingCatalogItem[]>([]);
   const [catalogEditor, setCatalogEditor] = useState<BillingCatalogItem>({
     id: "",
     kind: "service",
@@ -3655,6 +3668,12 @@ function App() {
     price: 0,
     taxRate: defaultInvoiceSettings.taxRate,
   });
+  const [catalogSaveState, setCatalogSaveState] = useState<"idle" | "saving">("idle");
+  const [billingDataLoadState, setBillingDataLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [activeInvoiceId, setActiveInvoiceId] = useState("");
+  const [invoiceIssueState, setInvoiceIssueState] = useState<"idle" | "saving">("idle");
+  const [recentInvoices, setRecentInvoices] = useState<BillingInvoiceRecord[]>([]);
+  const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pointerSession, setPointerSession] = useState<PointerSession>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -4342,7 +4361,11 @@ function App() {
         .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start),
     [coachAccount, coachProfiles, isAdminUser, items, services, serviceScopeCoachId],
   );
-  const completedUninvoicedCount = completedAppointments.length;
+  const uninvoicedCompletedAppointments = useMemo(
+    () => completedAppointments.filter((item) => !invoicedBookingIds[item.id]),
+    [completedAppointments, invoicedBookingIds],
+  );
+  const completedUninvoicedCount = uninvoicedCompletedAppointments.length;
   const invoiceLineSubtotal = invoiceDraft.lines.reduce(
     (total, line) => total + Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0),
     0,
@@ -7966,14 +7989,13 @@ function App() {
     setActiveView(view);
     setQuickCreate(null);
     if (view === "settings") setSettingsTab("services");
-    if (view === "billing") setBillingSection("none");
+    if (view === "billing") setBillingSection("dashboard");
     if (view !== "calendar") closeCalendarDetails();
   }
 
   function openInvoiceCoachSettings() {
-    setActiveView("settings");
-    setSettingsTab("account");
-    setBillingSection("none");
+    setActiveView("billing");
+    setBillingSection("settings");
     closeCalendarDetails();
     setQuickCreate(null);
   }
@@ -9587,6 +9609,32 @@ function App() {
         });
         throw lessonCompleteFailure(diagnostic);
       }
+      if (data?.ok === false) {
+        const diagnostic = lessonCompleteDiagnosticFromResponse(
+          itemId,
+          response.status,
+          data,
+          data.message || "Lesson completion failed.",
+          {
+            expectedRevision,
+            backendRevision: data.updatedAt || data.backendUpdatedAt || "",
+          },
+        );
+        logLessonCompleteDiagnostic("lesson_complete_failed", {
+          lessonId: itemId,
+          calendarId,
+          expectedStatus: "completed",
+          expectedRevision,
+          backendRevision: data.updatedAt || data.backendUpdatedAt || "",
+          backendMessage: diagnostic.backendMessage,
+          backendError: diagnostic.backendError,
+          backendDetails: diagnostic.backendDetails,
+          httpStatus: response.status,
+          durationMs,
+          stageTimings: data.stageTimings,
+        });
+        throw lessonCompleteFailure(diagnostic);
+      }
       if (!data.item || data.item.id !== itemId) {
         const diagnostic = lessonCompleteDiagnosticFromResponse(
           itemId,
@@ -9697,10 +9745,22 @@ function App() {
   function markInvoiceDraftDirty() {
     if (confirmedInvoiceNumber && sentInvoiceNumber === confirmedInvoiceNumber) {
       const voidedNumber = confirmedInvoiceNumber;
+      const voidedInvoiceId = activeInvoiceId;
       setVoidedInvoiceNumbers((current) => (current.includes(voidedNumber) ? current : [...current, voidedNumber]));
       setSentInvoiceNumber("");
       setConfirmedInvoiceNumber("");
+      setActiveInvoiceId("");
       setToast({ message: `${voidedNumber} voided. Edits will use ${invoiceNumber}.` });
+      if (voidedInvoiceId) {
+        fetch(`/api/billing/invoices/${encodeURIComponent(voidedInvoiceId)}`, {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "void" }),
+        })
+          .then(() => fetchRecentInvoices())
+          .catch(() => {});
+      }
     }
   }
 
@@ -9802,7 +9862,77 @@ function App() {
     setShowInvoiceLinePicker(false);
   }
 
+  // --- Billing backend (billing-api.mts) --------------------------------
+  // Products/services, invoices, and booking-invoice dedupe all live behind
+  // /api/billing/*. This section fetches and pushes that state; it does not
+  // touch any booking/calendar endpoint or table.
+
+  async function fetchBillingProducts() {
+    const response = await fetch("/api/billing/products", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load products and services."));
+    const data = (await response.json()) as { products?: BillingCatalogItem[] };
+    setCatalogItems(Array.isArray(data.products) ? data.products : []);
+  }
+
+  async function fetchRecentInvoices() {
+    const response = await fetch("/api/billing/invoices?limit=50", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load invoices."));
+    const data = (await response.json()) as { invoices?: BillingInvoiceRecord[] };
+    setRecentInvoices(Array.isArray(data.invoices) ? data.invoices : []);
+  }
+
+  async function fetchInvoicedBookingIds(bookingIds: string[]) {
+    if (!bookingIds.length) {
+      setInvoicedBookingIds({});
+      return;
+    }
+    const response = await fetch(`/api/billing/booking-links?bookingIds=${bookingIds.map(encodeURIComponent).join(",")}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (!response.ok) return;
+    const data = (await response.json()) as { links?: Record<string, string> };
+    setInvoicedBookingIds(data.links || {});
+  }
+
+  async function loadBillingWorkspace() {
+    setBillingDataLoadState("loading");
+    try {
+      await Promise.all([fetchBillingProducts(), fetchRecentInvoices()]);
+      setBillingDataLoadState("loaded");
+    } catch (error) {
+      setBillingDataLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load billing data." });
+    }
+  }
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (billingDataLoadState !== "idle") return;
+    void loadBillingWorkspace();
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, billingDataLoadState]);
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+    // Only re-check when the set of completed bookings changes; invoice
+    // creation also refreshes this map directly after a successful pull.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, completedAppointments.map((item) => item.id).join(",")]);
+
   function addCompletedBookingLine(item: CalendarItem) {
+    if (invoicedBookingIds[item.id]) {
+      setToast({ message: "This booking has already been invoiced." });
+      return;
+    }
     const service = itemService(item, services);
     markInvoiceDraftDirty();
     setInvoiceCustomerSearch("");
@@ -9829,27 +9959,50 @@ function App() {
     setBillingSection("new-invoice");
   }
 
-  function addCatalogItem() {
+  async function addCatalogItem() {
     const name = catalogEditor.name.trim();
     if (!name) {
       setToast({ message: "Name the product or service before adding it." });
       return;
     }
-    const item: BillingCatalogItem = {
-      ...catalogEditor,
-      id: catalogEditor.id || `catalog-${Date.now()}`,
+    const payload = {
       name,
+      kind: catalogEditor.kind,
       description: catalogEditor.description.trim(),
       price: Math.max(0, Math.round(Number(catalogEditor.price) || 0)),
       taxRate: clamp(Number(catalogEditor.taxRate) || 0, 0, 30),
+      active: true,
     };
-    setCatalogItems((current) =>
-      current.some((candidate) => candidate.id === item.id)
-        ? current.map((candidate) => (candidate.id === item.id ? item : candidate))
-        : [...current, item],
-    );
-    setCatalogEditor({ id: "", kind: "service", name: "", description: "", price: 0, taxRate: invoiceSettings.taxRate });
-    setToast({ message: `${item.name} added to invoice products and services.` });
+    const isUpdate = Boolean(catalogEditor.id);
+    setCatalogSaveState("saving");
+    try {
+      const response = await fetch(isUpdate ? `/api/billing/products/${encodeURIComponent(catalogEditor.id)}` : "/api/billing/products", {
+        method: isUpdate ? "PUT" : "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not save product or service."));
+      const data = (await response.json()) as { product?: BillingCatalogItem };
+      const saved = data.product;
+      if (!saved) throw new Error("Save response did not return the product.");
+      setCatalogItems((current) =>
+        current.some((candidate) => candidate.id === saved.id)
+          ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
+          : [...current, saved],
+      );
+      setCatalogEditor({ id: "", kind: "service", name: "", description: "", price: 0, taxRate: invoiceSettings.taxRate });
+      setToast({ message: `${saved.name} ${isUpdate ? "updated" : "added"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save product or service." });
+    } finally {
+      setCatalogSaveState("idle");
+    }
   }
 
   function resetInvoiceDraft() {
@@ -9858,28 +10011,120 @@ function App() {
     setShowInvoiceLinePicker(false);
     setConfirmedInvoiceNumber("");
     setSentInvoiceNumber("");
+    setActiveInvoiceId("");
   }
 
-  function issueInvoiceDraft() {
+  function billingSourceType(source: InvoiceLineSource): "booking" | "product" | "manual" {
+    if (source === "booking_snapshot") return "booking";
+    if (source === "catalog" || source === "package_sale") return "product";
+    return "manual";
+  }
+
+  async function issueInvoiceDraft() {
     if (!invoiceDraft.payerName.trim()) {
       setToast({ message: "Choose or enter a payer before issuing." });
       return;
     }
-    if (!invoiceDraft.lines.some((line) => line.description.trim() && Number(line.unitPrice) > 0)) {
+    const billableLines = invoiceDraft.lines.filter((line) => line.description.trim() && Number(line.unitPrice) > 0);
+    if (!billableLines.length) {
       setToast({ message: "Add at least one invoice line before issuing." });
       return;
     }
     const issuedNumber = invoiceNumber;
-    setConfirmedInvoiceNumber(issuedNumber);
-    setSentInvoiceNumber("");
-    updateInvoiceSettings("nextNumber", invoiceSettings.nextNumber + 1);
-    setToast({ message: `${issuedNumber} confirmed. Delivery actions are ready.` });
+    setInvoiceIssueState("saving");
+    try {
+      const response = await fetch("/api/billing/invoices", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          invoiceNumber: issuedNumber,
+          status: "draft",
+          customerName: invoiceDraft.payerName.trim(),
+          customerEmail: invoiceDraft.payerEmail.trim(),
+          customerPhone: invoiceDraft.payerPhone.trim(),
+          issueDate: invoiceDraft.invoiceDate,
+          dueDate: invoiceDraft.dueDate,
+          currency: invoiceSettings.currency,
+          reference: invoiceDraft.reference,
+          customerNote: invoiceDraft.message,
+          discountLabel: invoiceDraft.discountLabel,
+          discountAmount: invoiceDraft.discountAmount,
+          items: billableLines.map((line) => ({
+            sourceType: billingSourceType(line.source),
+            sourceId: line.sourceId,
+            description: line.description,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            taxRate: line.taxRate,
+          })),
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { id?: string; error?: string; message?: string } | null;
+      if (!response.ok) {
+        if (data?.error === "BOOKING_ALREADY_INVOICED") {
+          void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+        }
+        throw new Error(data?.message || (await readApiFailure(response, "Could not issue invoice.")));
+      }
+      setActiveInvoiceId(data?.id || "");
+      setConfirmedInvoiceNumber(issuedNumber);
+      setSentInvoiceNumber("");
+      updateInvoiceSettings("nextNumber", invoiceSettings.nextNumber + 1);
+      setToast({ message: `${issuedNumber} saved as a draft invoice.` });
+      void fetchRecentInvoices();
+      void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not issue invoice." });
+    } finally {
+      setInvoiceIssueState("idle");
+    }
   }
 
-  function markConfirmedInvoiceSent() {
+  async function patchActiveInvoiceStatus(status: BillingInvoiceStatus) {
+    if (!activeInvoiceId) {
+      setToast({ message: "This invoice has not been saved yet." });
+      return;
+    }
+    try {
+      const response = await fetch(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ status }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, `Could not mark invoice ${status}.`));
+      void fetchRecentInvoices();
+      return true;
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : `Could not mark invoice ${status}.` });
+      return false;
+    }
+  }
+
+  async function markConfirmedInvoiceSent() {
     if (!confirmedInvoiceNumber) return;
-    setSentInvoiceNumber(confirmedInvoiceNumber);
-    setToast({ message: `${confirmedInvoiceNumber} marked sent.` });
+    if (await patchActiveInvoiceStatus("sent")) {
+      setSentInvoiceNumber(confirmedInvoiceNumber);
+      setToast({ message: `${confirmedInvoiceNumber} marked sent.` });
+    }
+  }
+
+  async function markActiveInvoicePaid() {
+    if (!confirmedInvoiceNumber) return;
+    if (await patchActiveInvoiceStatus("paid")) {
+      setToast({ message: `${confirmedInvoiceNumber} marked paid.` });
+    }
   }
 
   async function persistServices(
@@ -14660,6 +14905,16 @@ function App() {
                 <BarChart3 size={16} />
                 Reports
               </button>
+              <button
+                className={billingSection === "settings" ? "active" : ""}
+                onClick={() => setBillingSection("settings")}
+                role="tab"
+                aria-selected={billingSection === "settings"}
+                type="button"
+              >
+                <Settings size={16} />
+                Settings
+              </button>
             </div>
 
             {billingSection === "dashboard" && (
@@ -14688,8 +14943,8 @@ function App() {
                       <CalendarDays size={24} />
                     </div>
                     <div className="completed-booking-list compact">
-                      {completedAppointments.length ? (
-                        completedAppointments.slice(0, 4).map((item) => {
+                      {uninvoicedCompletedAppointments.length ? (
+                        uninvoicedCompletedAppointments.slice(0, 4).map((item) => {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
                           return (
@@ -14704,6 +14959,8 @@ function App() {
                             </button>
                           );
                         })
+                      ) : completedAppointments.length ? (
+                        <p>All completed bookings have already been invoiced.</p>
                       ) : (
                         <p>No completed bookings yet. Mark a lesson completed from the appointment details panel.</p>
                       )}
@@ -14723,6 +14980,44 @@ function App() {
                     </button>
                   </article>
                 </div>
+                <article className="data-card recent-invoices-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Invoices</span>
+                      <h2>Recent invoices</h2>
+                    </div>
+                  </div>
+                  {billingDataLoadState === "loading" && !recentInvoices.length ? (
+                    <p>Loading invoices...</p>
+                  ) : recentInvoices.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Invoice</th>
+                          <th>Customer</th>
+                          <th>Date</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recentInvoices.map((invoiceRecord) => (
+                          <tr key={invoiceRecord.id}>
+                            <td>{invoiceRecord.invoiceNumber}</td>
+                            <td>{invoiceRecord.customerName}</td>
+                            <td>{invoiceRecord.issueDate}</td>
+                            <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
+                            <td>
+                              <span className={`invoice-status-pill invoice-status-${invoiceRecord.status}`}>{invoiceRecord.status}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p>No invoices yet. Issue your first invoice to see it here.</p>
+                  )}
+                </article>
               </div>
             )}
 
@@ -14763,7 +15058,7 @@ function App() {
                       {hasMissingInvoiceCoachSettings && (
                         <button className="outline-button small-action" onClick={openInvoiceCoachSettings} type="button">
                           <Settings size={15} />
-                          Coach Account
+                          Billing Settings
                         </button>
                       )}
                     </div>
@@ -15101,14 +15396,24 @@ function App() {
                           <Send size={16} />
                           {sentInvoiceNumber === confirmedInvoiceNumber ? "Sent" : "Send Email"}
                         </button>
+                        {sentInvoiceNumber === confirmedInvoiceNumber && (
+                          <button className="outline-button" onClick={markActiveInvoicePaid} type="button">
+                            Mark Paid
+                          </button>
+                        )}
                         <a className="outline-button" href={gmailComposeUrl} target="_blank" rel="noreferrer">
                           <Mail size={16} />
                           Gmail Draft
                         </a>
                       </>
                     )}
-                    <button className="primary-button" disabled={Boolean(confirmedInvoiceNumber)} onClick={issueInvoiceDraft} type="button">
-                      {confirmedInvoiceNumber ? "Invoice Confirmed" : "Confirm Invoice"}
+                    <button
+                      className="primary-button"
+                      disabled={Boolean(confirmedInvoiceNumber) || invoiceIssueState === "saving"}
+                      onClick={issueInvoiceDraft}
+                      type="button"
+                    >
+                      {confirmedInvoiceNumber ? "Invoice Confirmed" : invoiceIssueState === "saving" ? "Saving..." : "Confirm Invoice"}
                     </button>
                   </div>
                 </article>
@@ -15127,15 +15432,22 @@ function App() {
                         completedAppointments.map((item) => {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
+                          const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
                           return (
-                            <button key={item.id} onClick={() => addCompletedBookingLine(item)} type="button">
+                            <button
+                              key={item.id}
+                              className={alreadyInvoiced ? "already-invoiced" : ""}
+                              disabled={alreadyInvoiced}
+                              onClick={() => addCompletedBookingLine(item)}
+                              type="button"
+                            >
                               <span>
                                 <strong>{item.client || item.title}</strong>
                                 <em>
                                   {service?.name ?? "Lesson"} - {days[item.day].label}, {formatRange(item.start, item.duration)}
                                 </em>
                               </span>
-                              <Plus size={16} />
+                              {alreadyInvoiced ? <em>Already invoiced</em> : <Plus size={16} />}
                             </button>
                           );
                         })
@@ -15190,10 +15502,41 @@ function App() {
                           />
                         </label>
                       </div>
-                      <button className="outline-button" onClick={addCatalogItem} type="button">
+                      <button className="outline-button" disabled={catalogSaveState === "saving"} onClick={addCatalogItem} type="button">
                         <Plus size={16} />
-                        Add Product/Service
+                        {catalogEditor.id ? (catalogSaveState === "saving" ? "Saving..." : "Save Changes") : catalogSaveState === "saving" ? "Saving..." : "Add Product/Service"}
                       </button>
+                      {Boolean(catalogEditor.id) && (
+                        <button
+                          className="outline-button"
+                          onClick={() => setCatalogEditor({ id: "", kind: "service", name: "", description: "", price: 0, taxRate: invoiceSettings.taxRate })}
+                          type="button"
+                        >
+                          Cancel Edit
+                        </button>
+                      )}
+                    </div>
+                    <div className="billing-catalog-list">
+                      {catalogItems.length ? (
+                        catalogItems.map((product) => (
+                          <button
+                            key={product.id}
+                            className={`billing-catalog-list-item${product.active === false ? " inactive" : ""}`}
+                            onClick={() => setCatalogEditor(product)}
+                            type="button"
+                          >
+                            <span>
+                              <strong>{product.name}</strong>
+                              <em>
+                                {product.kind} - {formatMoney(product.price, invoiceSettings.currency)}
+                                {product.active === false ? " - inactive" : ""}
+                              </em>
+                            </span>
+                          </button>
+                        ))
+                      ) : (
+                        <p>No products or services yet.</p>
+                      )}
                     </div>
                   </section>
                 </aside>
@@ -15232,6 +15575,110 @@ function App() {
                   <span>Uninvoiced</span>
                   <h2>{completedUninvoicedCount} completed lessons</h2>
                   <p>These are ready to pull into a manual invoice without making calendar pull the only workflow.</p>
+                </article>
+              </div>
+            )}
+
+            {billingSection === "settings" && (
+              <div className="billing-dashboard">
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Billing Settings</span>
+                      <h2>Defaults for new invoices</h2>
+                    </div>
+                    <Settings size={24} />
+                  </div>
+                  <p className="field-help">
+                    These defaults are used when creating a new invoice and are saved on the Coach Account record.
+                    Current next number: {invoiceNumber}
+                  </p>
+                  <div className="service-form-row">
+                    <label className="settings-field">
+                      <span>Currency</span>
+                      <input
+                        value={invoiceSettings.currency}
+                        onChange={(event) => updateInvoiceSettings("currency", event.target.value)}
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Time zone</span>
+                      <input value={coachAccount.timezone} onChange={(event) => updateCoachAccount("timezone", event.target.value)} />
+                    </label>
+                  </div>
+                  <div className="service-form-row">
+                    <label className="settings-field">
+                      <span>Invoice prefix</span>
+                      <input value={invoiceSettings.prefix} onChange={(event) => updateInvoiceSettings("prefix", event.target.value)} />
+                    </label>
+                    <label className="settings-field">
+                      <span>Start / next number</span>
+                      <input
+                        value={invoiceSettings.nextNumber}
+                        inputMode="numeric"
+                        onChange={(event) => updateInvoiceSettings("nextNumber", parseQuantityInput(event.target.value))}
+                        type="text"
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Payment terms (days)</span>
+                      <input
+                        value={invoiceSettings.paymentTermsDays}
+                        inputMode="numeric"
+                        onChange={(event) => updateInvoiceSettings("paymentTermsDays", parseQuantityInput(event.target.value))}
+                        type="text"
+                      />
+                    </label>
+                  </div>
+                  <div className="service-form-row">
+                    <label className="settings-field">
+                      <span>GST / tax name</span>
+                      <input
+                        value={invoiceSettings.taxName}
+                        onChange={(event) => updateInvoiceSettings("taxName", event.target.value)}
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Tax number</span>
+                      <input
+                        value={invoiceSettings.taxNumber}
+                        onChange={(event) => updateInvoiceSettings("taxNumber", event.target.value)}
+                        placeholder="GST / tax number"
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Tax rate</span>
+                      <input
+                        value={invoiceSettings.taxRate}
+                        inputMode="decimal"
+                        onChange={(event) => updateInvoiceSettings("taxRate", parseMoneyInput(event.target.value))}
+                        type="text"
+                      />
+                    </label>
+                  </div>
+                  <label className="settings-field">
+                    <span>Default customer note</span>
+                    <textarea
+                      value={invoiceSettings.defaultCustomerNote}
+                      onChange={(event) => updateInvoiceSettings("defaultCustomerNote", event.target.value)}
+                      rows={2}
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <span>Payment instructions</span>
+                    <textarea
+                      value={invoiceSettings.paymentInstructions}
+                      onChange={(event) => updateInvoiceSettings("paymentInstructions", event.target.value)}
+                      rows={2}
+                    />
+                  </label>
+                  <button className="primary-button settings-save" onClick={saveCoachAccount}>
+                    {coachAccountSaveState === "saving"
+                      ? "Saving"
+                      : coachAccountSaveState === "saved"
+                        ? "Saved"
+                        : "Save Billing Settings"}
+                  </button>
                 </article>
               </div>
             )}

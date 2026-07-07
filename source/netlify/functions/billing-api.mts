@@ -1,0 +1,491 @@
+import type { Config } from "@netlify/functions";
+import { createHash, randomUUID } from "node:crypto";
+
+// Billing is a new, isolated top-level app section. This function owns its
+// own tables (billing_products_services, billing_invoices,
+// billing_invoice_items, billing_booking_invoice_links) and its own Supabase
+// REST helper below. It deliberately does not import booking-core.mts or the
+// local-db adapter: it reads calendar_items (completed bookings) and the
+// shared settings table directly and read-only, and otherwise must not
+// depend on booking/calendar code, per the billing build plan's "protected
+// rules" (billing may read completed bookings/account settings, but does not
+// own booking creation, completion, or calendar state).
+
+const sessionCookieName = "clarity_session";
+
+function env(name: string, fallback = "") {
+  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function json(value: unknown, status = 200) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+  });
+}
+
+function hashToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function parseCookies(req: Request) {
+  const cookieHeaderValue = req.headers.get("cookie") || "";
+  return Object.fromEntries(
+    cookieHeaderValue
+      .split(";")
+      .map((pair) => pair.trim())
+      .filter(Boolean)
+      .map((pair) => {
+        const index = pair.indexOf("=");
+        return index === -1
+          ? [decodeURIComponent(pair), ""]
+          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
+      }),
+  );
+}
+
+function cleanString(value: unknown, fallback = "", max = 600) {
+  return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
+}
+
+function cleanSlug(value: unknown, fallback = "") {
+  const cleaned = cleanString(value, fallback, 160)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return cleaned || fallback;
+}
+
+function cleanNumber(value: unknown, fallback = 0, { min = -1e12, max = 1e12 } = {}) {
+  const num = Number(value);
+  return Number.isFinite(num) ? Math.max(min, Math.min(max, num)) : fallback;
+}
+
+function round2(value: number) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+// --- Supabase REST helper -------------------------------------------------
+// Self-contained on purpose: does not go through source/netlify/functions/
+// local-db (the hand-rolled SQL-string-pattern shim used by booking-core.mts)
+// so adding billing tables never requires touching that adapter or its
+// pattern list. See supabase-storage.mts's own header comment for context on
+// why that shim exists; billing intentionally avoids it.
+function supabaseConfig() {
+  const url = env("SUPABASE_URL").replace(/\/$/, "");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  if (!url || !key) throw new Error("Supabase is not configured.");
+  return { url, key };
+}
+
+async function supabase(
+  table: string,
+  options: { method?: string; query?: string; body?: unknown; prefer?: string } = {},
+) {
+  const { url, key } = supabaseConfig();
+  const response = await fetch(`${url}/rest/v1/${table}${options.query ? `?${options.query}` : ""}`, {
+    method: options.method || "GET",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      ...(options.prefer ? { Prefer: options.prefer } : {}),
+    },
+    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(`Supabase ${options.method || "GET"} ${table} failed ${response.status}: ${text.slice(0, 500)}`) as Error & {
+      status?: number;
+      supabaseStatus?: number;
+    };
+    error.supabaseStatus = response.status;
+    throw error;
+  }
+  return text ? JSON.parse(text) : [];
+}
+
+function encodeFilter(value: unknown) {
+  return encodeURIComponent(String(value ?? ""));
+}
+
+// --- Auth + account scoping ------------------------------------------------
+
+async function requireAdmin(req: Request) {
+  const token = parseCookies(req)[sessionCookieName] || "";
+  if (!token) return false;
+  const rows = await supabase("admin_sessions", {
+    query: `select=id&token_hash=eq.${encodeFilter(hashToken(token))}&expires_at=gt.${encodeFilter(nowIso())}&limit=1`,
+  });
+  return rows.length > 0;
+}
+
+// Billing is read-only here against the shared settings table: it mirrors
+// how calendar-state.mts resolves the active workspace account id, without
+// importing booking-core.mts or writing to any booking/calendar table.
+async function resolveAccountId() {
+  const rows = await supabase("settings", {
+    query: `select=key,value&key=in.(${["accountCalendarSlug", "accountBusinessName", "coachName"].join(",")})`,
+  });
+  const map = Object.fromEntries(rows.map((row: { key: string; value: string }) => [row.key, row.value]));
+  const businessName = map.accountBusinessName || map.coachName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf");
+  const slugSource = map.accountCalendarSlug || businessName;
+  return cleanSlug(slugSource, env("CLARITY_COACH_ACCOUNT_ID", "sam-hale-golf"));
+}
+
+async function parseBody(req: Request) {
+  const raw = await req.text();
+  return raw ? JSON.parse(raw) : {};
+}
+
+// --- Products / services ----------------------------------------------------
+
+function cleanProductPayload(raw: Record<string, unknown>) {
+  const kind = ["service", "product", "package", "lesson-type"].includes(String(raw?.kind)) ? String(raw.kind) : "service";
+  return {
+    name: cleanString(raw?.name, "", 140),
+    kind,
+    description: cleanString(raw?.description, "", 600) || null,
+    default_price: round2(cleanNumber(raw?.price ?? raw?.defaultPrice, 0, { min: 0 })),
+    tax_rate: round2(cleanNumber(raw?.taxRate, 0, { min: 0, max: 100 })),
+    active: raw?.active !== false,
+  };
+}
+
+function productRowToApi(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    description: row.description || "",
+    price: Number(row.default_price) || 0,
+    taxRate: Number(row.tax_rate) || 0,
+    active: row.active !== false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function listProducts(accountId: string) {
+  const rows = await supabase("billing_products_services", {
+    query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=active.desc,name.asc`,
+  });
+  return { products: rows.map(productRowToApi) };
+}
+
+async function createProduct(accountId: string, body: Record<string, unknown>) {
+  const clean = cleanProductPayload(body);
+  if (!clean.name) throw Object.assign(new Error("Product name is required."), { status: 400 });
+  const row = { id: randomUUID(), account_id: accountId, ...clean, created_at: nowIso(), updated_at: nowIso() };
+  await supabase("billing_products_services", { method: "POST", body: [row], prefer: "return=minimal" });
+  return { product: productRowToApi(row) };
+}
+
+async function updateProduct(accountId: string, id: string, body: Record<string, unknown>) {
+  const clean = cleanProductPayload(body);
+  if (!clean.name) throw Object.assign(new Error("Product name is required."), { status: 400 });
+  const patch = { ...clean, updated_at: nowIso() };
+  const rows = await supabase("billing_products_services", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: patch,
+    prefer: "return=representation",
+  });
+  if (!rows.length) throw Object.assign(new Error("Product not found."), { status: 404 });
+  return { product: productRowToApi(rows[0]) };
+}
+
+// --- Invoices ----------------------------------------------------------------
+
+type InvoiceItemInput = {
+  sourceType?: string;
+  sourceId?: string;
+  description?: string;
+  quantity?: number;
+  unitPrice?: number;
+  taxRate?: number;
+  discountAmount?: number;
+};
+
+function cleanInvoiceItem(raw: InvoiceItemInput) {
+  const sourceType = ["booking", "product", "manual"].includes(String(raw?.sourceType)) ? String(raw.sourceType) : "manual";
+  const quantity = cleanNumber(raw?.quantity, 1, { min: 0 });
+  const unitPrice = round2(cleanNumber(raw?.unitPrice, 0, { min: 0 }));
+  const taxRate = round2(cleanNumber(raw?.taxRate, 0, { min: 0, max: 100 }));
+  const discountAmount = round2(cleanNumber(raw?.discountAmount, 0, { min: 0 }));
+  const lineSubtotal = Math.max(0, round2(quantity * unitPrice) - discountAmount);
+  const taxAmount = round2(lineSubtotal * (taxRate / 100));
+  return {
+    id: randomUUID(),
+    source_type: sourceType,
+    source_id: cleanString(raw?.sourceId, "", 160) || null,
+    description: cleanString(raw?.description, "", 400),
+    quantity,
+    unit_price: unitPrice,
+    tax_rate: taxRate,
+    tax_amount: taxAmount,
+    discount_amount: discountAmount,
+    line_total: round2(lineSubtotal + taxAmount),
+  };
+}
+
+function invoiceRowToApi(row: Record<string, unknown>, items: Array<Record<string, unknown>> = []) {
+  return {
+    id: row.id,
+    invoiceNumber: row.invoice_number,
+    status: row.status,
+    customerId: row.customer_id || null,
+    customerName: row.customer_name,
+    customerEmail: row.customer_email || "",
+    customerPhone: row.customer_phone || "",
+    issueDate: row.issue_date,
+    dueDate: row.due_date || null,
+    currency: row.currency,
+    subtotal: Number(row.subtotal) || 0,
+    taxTotal: Number(row.tax_total) || 0,
+    discountTotal: Number(row.discount_total) || 0,
+    discountLabel: row.discount_label || "",
+    total: Number(row.total) || 0,
+    amountPaid: Number(row.amount_paid) || 0,
+    customerNote: row.customer_note || "",
+    internalNote: row.internal_note || "",
+    reference: row.reference || "",
+    sentAt: row.sent_at || null,
+    paidAt: row.paid_at || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    items: items.map((item) => ({
+      id: item.id,
+      sourceType: item.source_type,
+      sourceId: item.source_id || null,
+      description: item.description,
+      quantity: Number(item.quantity) || 0,
+      unitPrice: Number(item.unit_price) || 0,
+      taxRate: Number(item.tax_rate) || 0,
+      taxAmount: Number(item.tax_amount) || 0,
+      discountAmount: Number(item.discount_amount) || 0,
+      lineTotal: Number(item.line_total) || 0,
+    })),
+  };
+}
+
+async function listInvoices(accountId: string, url: URL) {
+  const status = cleanString(url.searchParams.get("status"), "", 20);
+  const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 50));
+  const filters = [`account_id=eq.${encodeFilter(accountId)}`];
+  if (status) filters.push(`status=eq.${encodeFilter(status)}`);
+  const rows = await supabase("billing_invoices", {
+    query: `select=*&${filters.join("&")}&order=issue_date.desc,created_at.desc&limit=${limit}`,
+  });
+  return { invoices: rows.map((row: Record<string, unknown>) => invoiceRowToApi(row)) };
+}
+
+async function getInvoiceWithItems(accountId: string, id: string) {
+  const rows = await supabase("billing_invoices", {
+    query: `select=*&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+  });
+  const row = rows[0];
+  if (!row) return null;
+  const items = await supabase("billing_invoice_items", {
+    query: `select=*&invoice_id=eq.${encodeFilter(id)}&order=created_at.asc`,
+  });
+  return invoiceRowToApi(row, items);
+}
+
+async function createBookingLinks(accountId: string, invoiceId: string, bookingIds: string[]) {
+  if (!bookingIds.length) return;
+  const rows = bookingIds.map((bookingId) => ({
+    id: randomUUID(),
+    account_id: accountId,
+    booking_id: bookingId,
+    invoice_id: invoiceId,
+    created_at: nowIso(),
+  }));
+  try {
+    await supabase("billing_booking_invoice_links", { method: "POST", body: rows, prefer: "return=minimal" });
+  } catch (error) {
+    const status = (error as { supabaseStatus?: number })?.supabaseStatus;
+    if (status === 409) {
+      // At least one booking already has an invoice. Roll back the invoice
+      // we just created so a failed pull doesn't leave an orphaned draft,
+      // then surface which bookings were already invoiced.
+      await supabase("billing_invoices", {
+        method: "DELETE",
+        query: `id=eq.${encodeFilter(invoiceId)}&account_id=eq.${encodeFilter(accountId)}`,
+      }).catch(() => {});
+      throw Object.assign(new Error("One or more of these bookings has already been invoiced."), {
+        status: 409,
+        code: "BOOKING_ALREADY_INVOICED",
+      });
+    }
+    throw error;
+  }
+}
+
+async function createInvoice(accountId: string, body: Record<string, unknown>) {
+  const invoiceNumber = cleanString(body?.invoiceNumber, "", 60);
+  const customerName = cleanString(body?.customerName, "", 140);
+  if (!invoiceNumber) throw Object.assign(new Error("Invoice number is required."), { status: 400 });
+  if (!customerName) throw Object.assign(new Error("Customer is required."), { status: 400 });
+
+  const itemsInput = Array.isArray(body?.items) ? (body.items as InvoiceItemInput[]) : [];
+  const items = itemsInput.map(cleanInvoiceItem).filter((item) => item.description && item.quantity > 0);
+  if (!items.length) throw Object.assign(new Error("Add at least one invoice line."), { status: 400 });
+
+  const subtotal = round2(items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0));
+  const discountTotal = round2(Math.min(subtotal, cleanNumber(body?.discountAmount, 0, { min: 0 })));
+  const taxTotal = round2(items.reduce((sum, item) => sum + item.tax_amount, 0));
+  const total = round2(Math.max(0, subtotal - discountTotal) + taxTotal);
+
+  const status = ["draft", "sent"].includes(String(body?.status)) ? String(body.status) : "draft";
+  const invoiceId = randomUUID();
+  const invoiceRow = {
+    id: invoiceId,
+    account_id: accountId,
+    invoice_number: invoiceNumber,
+    status,
+    customer_id: cleanString(body?.customerId, "", 160) || null,
+    customer_name: customerName,
+    customer_email: cleanString(body?.customerEmail, "", 180) || null,
+    customer_phone: cleanString(body?.customerPhone, "", 80) || null,
+    issue_date: cleanString(body?.issueDate, new Date().toISOString().slice(0, 10), 20),
+    due_date: cleanString(body?.dueDate, "", 20) || null,
+    currency: cleanString(body?.currency, "NZD", 10),
+    subtotal,
+    tax_total: taxTotal,
+    discount_total: discountTotal,
+    discount_label: cleanString(body?.discountLabel, "", 120) || null,
+    total,
+    amount_paid: 0,
+    customer_note: cleanString(body?.customerNote, "", 2000) || null,
+    internal_note: cleanString(body?.internalNote, "", 2000) || null,
+    reference: cleanString(body?.reference, "", 160) || null,
+    sent_at: status === "sent" ? nowIso() : null,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+
+  try {
+    await supabase("billing_invoices", { method: "POST", body: [invoiceRow], prefer: "return=minimal" });
+  } catch (error) {
+    const status = (error as { supabaseStatus?: number })?.supabaseStatus;
+    if (status === 409) {
+      throw Object.assign(new Error(`Invoice number ${invoiceNumber} is already in use.`), {
+        status: 409,
+        code: "INVOICE_NUMBER_CONFLICT",
+      });
+    }
+    throw error;
+  }
+
+  const itemRows = items.map((item) => ({ ...item, invoice_id: invoiceId, account_id: accountId, created_at: nowIso() }));
+  await supabase("billing_invoice_items", { method: "POST", body: itemRows, prefer: "return=minimal" });
+
+  const bookingIds = [...new Set(
+    itemsInput
+      .filter((item) => item.sourceType === "booking" && item.sourceId)
+      .map((item) => String(item.sourceId)),
+  )];
+  await createBookingLinks(accountId, invoiceId, bookingIds);
+
+  return getInvoiceWithItems(accountId, invoiceId);
+}
+
+async function updateInvoiceStatus(accountId: string, id: string, body: Record<string, unknown>) {
+  const nextStatus = String(body?.status || "");
+  if (!["draft", "sent", "paid", "overdue", "void"].includes(nextStatus)) {
+    throw Object.assign(new Error("Invalid invoice status."), { status: 400 });
+  }
+  const patch: Record<string, unknown> = { status: nextStatus, updated_at: nowIso() };
+  if (nextStatus === "sent") patch.sent_at = nowIso();
+  if (nextStatus === "paid") {
+    patch.paid_at = nowIso();
+    if (body?.amountPaid !== undefined) patch.amount_paid = round2(cleanNumber(body.amountPaid, 0, { min: 0 }));
+  }
+  const rows = await supabase("billing_invoices", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: patch,
+    prefer: "return=representation",
+  });
+  if (!rows.length) throw Object.assign(new Error("Invoice not found."), { status: 404 });
+  if (nextStatus === "paid" && body?.amountPaid === undefined) {
+    // Default "mark paid" to the invoice total unless a partial amount was given.
+    const full = await supabase("billing_invoices", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+      body: { amount_paid: rows[0].total },
+      prefer: "return=representation",
+    });
+    return getInvoiceWithItems(accountId, id) ?? invoiceRowToApi(full[0]);
+  }
+  return getInvoiceWithItems(accountId, id);
+}
+
+// --- Booking / invoice link lookups ------------------------------------------
+
+async function checkBookingLinks(accountId: string, bookingIds: string[]) {
+  if (!bookingIds.length) return { links: {} };
+  const filter = bookingIds.map((id) => `"${id.replace(/"/g, '\\"')}"`).join(",");
+  const rows = await supabase("billing_booking_invoice_links", {
+    query: `select=booking_id,invoice_id&account_id=eq.${encodeFilter(accountId)}&booking_id=in.(${filter})`,
+  });
+  const links = Object.fromEntries(rows.map((row: Record<string, unknown>) => [row.booking_id, row.invoice_id]));
+  return { links };
+}
+
+// --- Router ------------------------------------------------------------------
+
+export default async function handler(req: Request) {
+  const url = new URL(req.url);
+  const action = url.pathname.replace(/^\/api\/billing\/?/, "").replace(/\/$/, "");
+
+  try {
+    if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+    const accountId = await resolveAccountId();
+
+    if (action === "products" && req.method === "GET") return json(await listProducts(accountId));
+    if (action === "products" && req.method === "POST") return json(await createProduct(accountId, await parseBody(req)));
+    if (action.startsWith("products/") && (req.method === "PUT" || req.method === "PATCH")) {
+      return json(await updateProduct(accountId, action.slice("products/".length), await parseBody(req)));
+    }
+
+    if (action === "invoices" && req.method === "GET") return json(await listInvoices(accountId, url));
+    if (action === "invoices" && req.method === "POST") return json(await createInvoice(accountId, await parseBody(req)), 201);
+    if (action.startsWith("invoices/") && req.method === "GET") {
+      const invoice = await getInvoiceWithItems(accountId, action.slice("invoices/".length));
+      if (!invoice) return json({ error: "not_found", message: "Invoice not found." }, 404);
+      return json({ invoice });
+    }
+    if (action.startsWith("invoices/") && (req.method === "PATCH" || req.method === "PUT")) {
+      const invoice = await updateInvoiceStatus(accountId, action.slice("invoices/".length), await parseBody(req));
+      return json({ invoice });
+    }
+
+    if (action === "booking-links" && req.method === "GET") {
+      const ids = (url.searchParams.get("bookingIds") || "").split(",").map((id) => id.trim()).filter(Boolean);
+      return json(await checkBookingLinks(accountId, ids));
+    }
+
+    return json({ error: "not_found", message: "Billing route not found." }, 404);
+  } catch (error) {
+    console.error("billing_api:failed", action, error);
+    const status = Number((error as { status?: unknown })?.status);
+    const httpStatus = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
+    return json(
+      {
+        error: (error as { code?: string })?.code || "billing_api_error",
+        message: error instanceof Error ? error.message : "Billing request failed.",
+      },
+      httpStatus,
+    );
+  }
+}
+
+export const config: Config = {
+  path: "/api/billing/*",
+};
