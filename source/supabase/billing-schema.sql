@@ -95,7 +95,32 @@ create unique index if not exists idx_billing_booking_invoice_links_booking
 create index if not exists idx_billing_booking_invoice_links_invoice
   on public.billing_booking_invoice_links (invoice_id);
 
+-- Discount presets (10%, $20, Member, Family, Package credit, etc). Kept out
+-- of the default invoice flow - these are picked from an optional preset
+-- list, not required to create an invoice.
+create table if not exists public.billing_discounts (
+  id text primary key,
+  account_id text not null,
+  name text not null,
+  discount_type text not null default 'fixed'
+    check (discount_type in ('percentage', 'fixed')),
+  value numeric not null default 0,
+  coupon_code text,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_billing_discounts_account
+  on public.billing_discounts (account_id, active);
+
+-- Coupon codes only need to be unique per account, and only when set.
+create unique index if not exists idx_billing_discounts_account_coupon
+  on public.billing_discounts (account_id, lower(coupon_code))
+  where coupon_code is not null and btrim(coupon_code) <> '';
+
 alter table public.billing_products_services enable row level security;
 alter table public.billing_invoices enable row level security;
+alter table public.billing_discounts enable row level security;
 alter table public.billing_invoice_items enable row level security;
 alter table public.billing_booking_invoice_links enable row level security;

@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Archive,
   ArrowLeft,
   ArrowRight,
@@ -23,6 +24,7 @@ import {
   Moon,
   Package,
   Palette,
+  Percent,
   Phone,
   Plus,
   Pencil,
@@ -906,6 +908,11 @@ type InvoiceSettings = {
   defaultCustomerNote: string;
   paymentInstructions: string;
   customFields: InvoiceCustomField[];
+  // How insistently the Dashboard should call out unpaid/overdue invoices.
+  // 1 = subtle count only, 2 = highlighted banner, 3 = urgent banner + row
+  // highlighting in Recent Invoices. Purely a display setting - it doesn't
+  // change invoice status, send reminders, or touch any other data.
+  unpaidLoudness: 1 | 2 | 3;
 };
 
 type CoachAccount = {
@@ -1027,6 +1034,40 @@ type BillingInvoiceRecord = {
   amountPaid: number;
 };
 
+// Shape returned by GET /api/billing/reports/revenue.
+type BillingRevenueBucket = {
+  label: string;
+  rangeStart: string;
+  rangeEnd: string;
+  total: number;
+};
+
+type BillingRevenueReport = {
+  period: "week" | "month" | "year";
+  currency: string;
+  rangeStart: string;
+  rangeEnd: string;
+  total: number;
+  previousYearTotal: number | null;
+  previousYearRangeStart: string;
+  previousYearRangeEnd: string;
+  buckets: BillingRevenueBucket[];
+};
+
+// Shape returned by /api/billing/discounts. Presets only - applying one to an
+// invoice just fills invoiceDraft.discountLabel/discountAmount, it does not
+// change how the invoice itself stores its discount.
+type BillingDiscountType = "percentage" | "fixed";
+
+type BillingDiscount = {
+  id: string;
+  name: string;
+  discountType: BillingDiscountType;
+  value: number;
+  couponCode: string;
+  active: boolean;
+};
+
 type SlotCandidate = {
   week: number;
   day: number;
@@ -1146,6 +1187,7 @@ const defaultInvoiceSettings: InvoiceSettings = {
   defaultCustomerNote: "Thanks for your work on the lesson programme. Invoice attached below.",
   paymentInstructions: "Please pay by bank transfer and use the invoice number as reference.",
   customFields: [],
+  unpaidLoudness: 2,
 };
 
 const defaultServices: Service[] = [
@@ -2112,6 +2154,9 @@ function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): InvoiceSetti
         ? settings.paymentInstructions.trim().slice(0, 400)
         : defaultInvoiceSettings.paymentInstructions,
     customFields,
+    unpaidLoudness: [1, 2, 3].includes(Number(settings?.unpaidLoudness))
+      ? (Number(settings?.unpaidLoudness) as 1 | 2 | 3)
+      : defaultInvoiceSettings.unpaidLoudness,
   };
 }
 
@@ -3122,6 +3167,16 @@ function addDaysInputValue(days: number) {
   return dateInputValue(date);
 }
 
+// Whole days between two "YYYY-MM-DD" strings, computed via UTC midnight so
+// it isn't affected by daylight saving or the browser's local time zone.
+function isoDateDiffDays(laterIso: string, earlierIso: string) {
+  const toUtcMillis = (iso: string) => {
+    const [year, month, day] = iso.split("-").map(Number);
+    return Date.UTC(year, (month || 1) - 1, day || 1);
+  };
+  return Math.round((toUtcMillis(laterIso) - toUtcMillis(earlierIso)) / 86400000);
+}
+
 function formatMoney(amount: number, currency = "NZD") {
   return new Intl.NumberFormat("en-NZ", {
     style: "currency",
@@ -3673,7 +3728,24 @@ function App() {
   const [activeInvoiceId, setActiveInvoiceId] = useState("");
   const [invoiceIssueState, setInvoiceIssueState] = useState<"idle" | "saving">("idle");
   const [recentInvoices, setRecentInvoices] = useState<BillingInvoiceRecord[]>([]);
+  const [revenuePeriod, setRevenuePeriod] = useState<"week" | "month" | "year">("month");
+  const [revenueReport, setRevenueReport] = useState<BillingRevenueReport | null>(null);
+  const [revenueLoadState, setRevenueLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [discountPresets, setDiscountPresets] = useState<BillingDiscount[]>([]);
+  const [discountEditor, setDiscountEditor] = useState<{ id: string; name: string; discountType: BillingDiscountType; value: number; couponCode: string }>({
+    id: "",
+    name: "",
+    discountType: "percentage",
+    value: 10,
+    couponCode: "",
+  });
+  const [discountSaveState, setDiscountSaveState] = useState<"idle" | "saving">("idle");
+  const [selectedDiscountPresetId, setSelectedDiscountPresetId] = useState("");
   const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, string>>({});
+  // Ready to Pull date range. Empty string on either side means "no bound" -
+  // i.e. defaults to showing everything, same as before this filter existed.
+  const [pullRangeFrom, setPullRangeFrom] = useState("");
+  const [pullRangeTo, setPullRangeTo] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pointerSession, setPointerSession] = useState<PointerSession>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -4366,6 +4438,27 @@ function App() {
     [completedAppointments, invoicedBookingIds],
   );
   const completedUninvoicedCount = uninvoicedCompletedAppointments.length;
+  // "Ready to Pull" with an adjustable date range, per the billing build plan.
+  // itemDateValue converts a calendar item's week/day slot back into a real
+  // calendar date the same way the rest of the app already does (dateForSlot),
+  // so this stays correct if baseWeekStart or the week numbering ever changes.
+  const itemDateValue = (item: CalendarItem) => dateInputValue(dateForSlot(itemWeek(item), item.day));
+  const inPullRange = (item: CalendarItem) => {
+    const itemDate = itemDateValue(item);
+    if (pullRangeFrom && itemDate < pullRangeFrom) return false;
+    if (pullRangeTo && itemDate > pullRangeTo) return false;
+    return true;
+  };
+  const pullableCompletedAppointments = useMemo(
+    () => uninvoicedCompletedAppointments.filter(inPullRange),
+    [uninvoicedCompletedAppointments, pullRangeFrom, pullRangeTo],
+  );
+  // Same range, but keeps already-invoiced items in (as "Already invoiced")
+  // for the fuller Calendar Pull panel in the invoice builder.
+  const calendarPullRangeList = useMemo(
+    () => completedAppointments.filter(inPullRange),
+    [completedAppointments, pullRangeFrom, pullRangeTo],
+  );
   const invoiceLineSubtotal = invoiceDraft.lines.reduce(
     (total, line) => total + Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0),
     0,
@@ -9878,6 +9971,17 @@ function App() {
     setCatalogItems(Array.isArray(data.products) ? data.products : []);
   }
 
+  async function fetchBillingDiscounts() {
+    const response = await fetch("/api/billing/discounts", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load discount presets."));
+    const data = (await response.json()) as { discounts?: BillingDiscount[] };
+    setDiscountPresets(Array.isArray(data.discounts) ? data.discounts : []);
+  }
+
   async function fetchRecentInvoices() {
     const response = await fetch("/api/billing/invoices?limit=50", { credentials: "same-origin", cache: "no-store" });
     if (response.status === 401) {
@@ -9906,7 +10010,7 @@ function App() {
   async function loadBillingWorkspace() {
     setBillingDataLoadState("loading");
     try {
-      await Promise.all([fetchBillingProducts(), fetchRecentInvoices()]);
+      await Promise.all([fetchBillingProducts(), fetchRecentInvoices(), fetchBillingDiscounts()]);
       setBillingDataLoadState("loaded");
     } catch (error) {
       setBillingDataLoadState("error");
@@ -9927,6 +10031,57 @@ function App() {
     // creation also refreshes this map directly after a successful pull.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEmbedMode, authStatus, billingWorkspaceEnabled, completedAppointments.map((item) => item.id).join(",")]);
+
+  async function fetchRevenueReport(period: "week" | "month" | "year") {
+    setRevenueLoadState("loading");
+    try {
+      const response = await fetch(`/api/billing/reports/revenue?period=${period}`, { credentials: "same-origin", cache: "no-store" });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load revenue."));
+      const data = (await response.json()) as BillingRevenueReport;
+      setRevenueReport(data);
+      setRevenueLoadState("loaded");
+    } catch (error) {
+      setRevenueLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load revenue." });
+    }
+  }
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    void fetchRevenueReport(revenuePeriod);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, revenuePeriod]);
+
+  const revenueMaxBucketTotal = Math.max(1, ...(revenueReport?.buckets.map((bucket) => bucket.total) ?? [0]));
+  const revenueYoyDeltaPct =
+    revenueReport && revenueReport.previousYearTotal !== null && revenueReport.previousYearTotal > 0
+      ? Math.round(((revenueReport.total - revenueReport.previousYearTotal) / revenueReport.previousYearTotal) * 100)
+      : null;
+
+  // Unpaid/overdue is derived here rather than trusting invoiceRecord.status
+  // alone: an invoice left as "sent" past its due date is just as overdue as
+  // one someone remembered to flip to "overdue". Draft/paid/void never count.
+  const todayDateValue = dateInputValue();
+  const overdueInvoiceRecords = recentInvoices.filter(
+    (invoiceRecord) =>
+      invoiceRecord.status !== "draft" &&
+      invoiceRecord.status !== "paid" &&
+      invoiceRecord.status !== "void" &&
+      Boolean(invoiceRecord.dueDate) &&
+      (invoiceRecord.dueDate as string) < todayDateValue,
+  );
+  const overdueInvoiceIds = new Set(overdueInvoiceRecords.map((invoiceRecord) => invoiceRecord.id));
+  const overdueTotalOutstanding = overdueInvoiceRecords.reduce(
+    (sum, invoiceRecord) => sum + Math.max(0, invoiceRecord.total - invoiceRecord.amountPaid),
+    0,
+  );
+  const overdueOldestDays = overdueInvoiceRecords.length
+    ? Math.max(...overdueInvoiceRecords.map((invoiceRecord) => isoDateDiffDays(todayDateValue, invoiceRecord.dueDate as string)))
+    : 0;
 
   function addCompletedBookingLine(item: CalendarItem) {
     if (invoicedBookingIds[item.id]) {
@@ -10003,6 +10158,99 @@ function App() {
     } finally {
       setCatalogSaveState("idle");
     }
+  }
+
+  async function addDiscountPreset() {
+    const name = discountEditor.name.trim();
+    if (!name) {
+      setToast({ message: "Name the discount before saving it." });
+      return;
+    }
+    const payload = {
+      name,
+      discountType: discountEditor.discountType,
+      value: Math.max(0, Number(discountEditor.value) || 0),
+      couponCode: discountEditor.couponCode.trim(),
+      active: true,
+    };
+    const isUpdate = Boolean(discountEditor.id);
+    setDiscountSaveState("saving");
+    try {
+      const response = await fetch(isUpdate ? `/api/billing/discounts/${encodeURIComponent(discountEditor.id)}` : "/api/billing/discounts", {
+        method: isUpdate ? "PUT" : "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { discount?: BillingDiscount; error?: string; message?: string } | null;
+      if (!response.ok) {
+        if (data?.error === "COUPON_CODE_CONFLICT") {
+          throw new Error(data.message || "That coupon code is already in use.");
+        }
+        throw new Error(data?.message || (await readApiFailure(response, "Could not save discount.")));
+      }
+      const saved = data?.discount;
+      if (!saved) throw new Error("Save response did not return the discount.");
+      setDiscountPresets((current) =>
+        current.some((candidate) => candidate.id === saved.id)
+          ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
+          : [...current, saved],
+      );
+      setDiscountEditor({ id: "", name: "", discountType: "percentage", value: 10, couponCode: "" });
+      setToast({ message: `${saved.name} ${isUpdate ? "updated" : "added"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save discount." });
+    } finally {
+      setDiscountSaveState("idle");
+    }
+  }
+
+  async function toggleDiscountActive(discount: BillingDiscount) {
+    try {
+      const response = await fetch(`/api/billing/discounts/${encodeURIComponent(discount.id)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          name: discount.name,
+          discountType: discount.discountType,
+          value: discount.value,
+          couponCode: discount.couponCode,
+          active: !discount.active,
+        }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update discount."));
+      const data = (await response.json()) as { discount?: BillingDiscount };
+      const saved = data.discount;
+      if (!saved) return;
+      setDiscountPresets((current) => current.map((candidate) => (candidate.id === saved.id ? saved : candidate)));
+      if (!saved.active && selectedDiscountPresetId === saved.id) setSelectedDiscountPresetId("");
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update discount." });
+    }
+  }
+
+  function applyDiscountPreset(presetId: string) {
+    setSelectedDiscountPresetId(presetId);
+    if (!presetId) return;
+    const preset = discountPresets.find((candidate) => candidate.id === presetId);
+    if (!preset) return;
+    markInvoiceDraftDirty();
+    const amount =
+      preset.discountType === "percentage"
+        ? Math.round(((invoiceLineSubtotal * preset.value) / 100) * 100) / 100
+        : Math.round(preset.value * 100) / 100;
+    setInvoiceDraft((current) => ({
+      ...current,
+      discountLabel: preset.name,
+      discountAmount: amount,
+    }));
   }
 
   function resetInvoiceDraft() {
@@ -14919,6 +15167,69 @@ function App() {
 
             {billingSection === "dashboard" && (
               <div className="billing-dashboard">
+                {overdueInvoiceRecords.length > 0 && invoiceSettings.unpaidLoudness >= 2 && (
+                  <article className={`data-card unpaid-banner unpaid-banner-level-${invoiceSettings.unpaidLoudness}`}>
+                    <AlertTriangle size={invoiceSettings.unpaidLoudness === 3 ? 28 : 22} />
+                    <div>
+                      <strong>
+                        {overdueInvoiceRecords.length} unpaid invoice{overdueInvoiceRecords.length === 1 ? "" : "s"} overdue
+                        {invoiceSettings.unpaidLoudness === 3 ? " - follow up now" : ""}
+                      </strong>
+                      <span>
+                        {formatMoney(overdueTotalOutstanding, invoiceSettings.currency)} outstanding - oldest is {overdueOldestDays} day
+                        {overdueOldestDays === 1 ? "" : "s"} overdue
+                      </span>
+                    </div>
+                  </article>
+                )}
+                <article className="data-card revenue-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Revenue</span>
+                      <h2>{formatMoney(revenueReport?.total ?? 0, revenueReport?.currency ?? invoiceSettings.currency)}</h2>
+                    </div>
+                    <div className="revenue-period-toggle" role="tablist" aria-label="Revenue period">
+                      {(["week", "month", "year"] as const).map((period) => (
+                        <button
+                          key={period}
+                          className={revenuePeriod === period ? "active" : ""}
+                          onClick={() => setRevenuePeriod(period)}
+                          role="tab"
+                          aria-selected={revenuePeriod === period}
+                          type="button"
+                        >
+                          {period === "week" ? "Weekly" : period === "month" ? "Monthly" : "Yearly"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {revenueLoadState === "loading" && !revenueReport ? (
+                    <p>Loading revenue...</p>
+                  ) : revenueReport ? (
+                    <>
+                      <div className="revenue-chart" aria-hidden="true">
+                        {revenueReport.buckets.map((bucket) => (
+                          <div key={bucket.rangeStart} className="revenue-chart-bar-track" title={`${bucket.label}: ${formatMoney(bucket.total, revenueReport.currency)}`}>
+                            <div
+                              className="revenue-chart-bar"
+                              style={{ height: `${Math.max(2, Math.round((bucket.total / revenueMaxBucketTotal) * 100))}%` }}
+                            />
+                            <span>{bucket.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="revenue-comparison">
+                        {revenueReport.previousYearTotal === null
+                          ? "No data from the same period last year yet."
+                          : revenueYoyDeltaPct === null
+                            ? `Same period last year: ${formatMoney(revenueReport.previousYearTotal, revenueReport.currency)}`
+                            : `${revenueYoyDeltaPct >= 0 ? "Up" : "Down"} ${Math.abs(revenueYoyDeltaPct)}% vs. same period last year (${formatMoney(revenueReport.previousYearTotal, revenueReport.currency)})`}
+                      </p>
+                    </>
+                  ) : (
+                    <p>No revenue yet. Issue an invoice to see it here.</p>
+                  )}
+                </article>
                 <div className="billing-dashboard-grid">
                   <article className="data-card">
                     <div className="data-card-header">
@@ -14934,7 +15245,7 @@ function App() {
                       New Invoice
                     </button>
                   </article>
-                  <article className="data-card">
+                  <article className="data-card ready-to-pull-card">
                     <div className="data-card-header">
                       <div>
                         <span>Completed Bookings</span>
@@ -14942,9 +15253,31 @@ function App() {
                       </div>
                       <CalendarDays size={24} />
                     </div>
+                    <div className="ready-to-pull-range">
+                      <label className="settings-field">
+                        <span>From</span>
+                        <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
+                      </label>
+                      <label className="settings-field">
+                        <span>To</span>
+                        <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
+                      </label>
+                      {(pullRangeFrom || pullRangeTo) && (
+                        <button
+                          className="outline-button small-action"
+                          onClick={() => {
+                            setPullRangeFrom("");
+                            setPullRangeTo("");
+                          }}
+                          type="button"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
                     <div className="completed-booking-list compact">
-                      {uninvoicedCompletedAppointments.length ? (
-                        uninvoicedCompletedAppointments.slice(0, 4).map((item) => {
+                      {pullableCompletedAppointments.length ? (
+                        pullableCompletedAppointments.slice(0, 6).map((item) => {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
                           return (
@@ -14959,12 +15292,19 @@ function App() {
                             </button>
                           );
                         })
+                      ) : uninvoicedCompletedAppointments.length ? (
+                        <p>No completed bookings in this date range.</p>
                       ) : completedAppointments.length ? (
                         <p>All completed bookings have already been invoiced.</p>
                       ) : (
                         <p>No completed bookings yet. Mark a lesson completed from the appointment details panel.</p>
                       )}
                     </div>
+                    {pullableCompletedAppointments.length > 6 && (
+                      <p className="ready-to-pull-overflow">
+                        +{pullableCompletedAppointments.length - 6} more in this range - open New Invoice to see the rest.
+                      </p>
+                    )}
                   </article>
                   <article className="data-card">
                     <div className="data-card-header">
@@ -14984,7 +15324,12 @@ function App() {
                   <div className="data-card-header">
                     <div>
                       <span>Invoices</span>
-                      <h2>Recent invoices</h2>
+                      <h2>
+                        Recent invoices
+                        {overdueInvoiceRecords.length > 0 && invoiceSettings.unpaidLoudness === 1 && (
+                          <span className="unpaid-count-badge">{overdueInvoiceRecords.length} unpaid</span>
+                        )}
+                      </h2>
                     </div>
                   </div>
                   {billingDataLoadState === "loading" && !recentInvoices.length ? (
@@ -15002,7 +15347,10 @@ function App() {
                       </thead>
                       <tbody>
                         {recentInvoices.map((invoiceRecord) => (
-                          <tr key={invoiceRecord.id}>
+                          <tr
+                            key={invoiceRecord.id}
+                            className={invoiceSettings.unpaidLoudness === 3 && overdueInvoiceIds.has(invoiceRecord.id) ? "overdue-row" : ""}
+                          >
                             <td>{invoiceRecord.invoiceNumber}</td>
                             <td>{invoiceRecord.customerName}</td>
                             <td>{invoiceRecord.issueDate}</td>
@@ -15318,6 +15666,24 @@ function App() {
 
                     <div className="invoice-total-box">
                       <div className="invoice-discount-controls">
+                        {discountPresets.some((preset) => preset.active) && (
+                          <label className="settings-field">
+                            <span>Preset discount</span>
+                            <select
+                              value={selectedDiscountPresetId}
+                              onChange={(event) => applyDiscountPreset(event.target.value)}
+                            >
+                              <option value="">None (manual)</option>
+                              {discountPresets
+                                .filter((preset) => preset.active)
+                                .map((preset) => (
+                                  <option key={preset.id} value={preset.id}>
+                                    {preset.name} ({preset.discountType === "percentage" ? `${preset.value}%` : formatMoney(preset.value, invoiceSettings.currency)})
+                                  </option>
+                                ))}
+                            </select>
+                          </label>
+                        )}
                         <label className="settings-field">
                           <span>Discount / coupon</span>
                           <input
@@ -15427,9 +15793,31 @@ function App() {
                       </div>
                       <CalendarDays size={24} />
                     </div>
+                    <div className="ready-to-pull-range">
+                      <label className="settings-field">
+                        <span>From</span>
+                        <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
+                      </label>
+                      <label className="settings-field">
+                        <span>To</span>
+                        <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
+                      </label>
+                      {(pullRangeFrom || pullRangeTo) && (
+                        <button
+                          className="outline-button small-action"
+                          onClick={() => {
+                            setPullRangeFrom("");
+                            setPullRangeTo("");
+                          }}
+                          type="button"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
                     <div className="completed-booking-list">
-                      {completedAppointments.length ? (
-                        completedAppointments.map((item) => {
+                      {calendarPullRangeList.length ? (
+                        calendarPullRangeList.map((item) => {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
                           const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
@@ -15451,6 +15839,8 @@ function App() {
                             </button>
                           );
                         })
+                      ) : completedAppointments.length ? (
+                        <p>No completed bookings in this date range.</p>
                       ) : (
                         <p>Mark bookings completed from the calendar to pull them into invoices.</p>
                       )}
@@ -15657,6 +16047,21 @@ function App() {
                     </label>
                   </div>
                   <label className="settings-field">
+                    <span>Unpaid invoice loudness</span>
+                    <select
+                      value={invoiceSettings.unpaidLoudness}
+                      onChange={(event) => updateInvoiceSettings("unpaidLoudness", Number(event.target.value) as 1 | 2 | 3)}
+                    >
+                      <option value={1}>Level 1 - Subtle (small count only)</option>
+                      <option value={2}>Level 2 - Noticeable (dashboard banner)</option>
+                      <option value={3}>Level 3 - Urgent (banner + highlighted rows)</option>
+                    </select>
+                    <span className="field-help">
+                      Controls how strongly the Dashboard calls out overdue, unpaid invoices. Doesn't change
+                      invoice status or send anything - display only.
+                    </span>
+                  </label>
+                  <label className="settings-field">
                     <span>Default customer note</span>
                     <textarea
                       value={invoiceSettings.defaultCustomerNote}
@@ -15679,6 +16084,103 @@ function App() {
                         ? "Saved"
                         : "Save Billing Settings"}
                   </button>
+                </article>
+
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Presets</span>
+                      <h2>Discount Settings</h2>
+                    </div>
+                    <Percent size={24} />
+                  </div>
+                  <p className="field-help">
+                    Optional presets for discounts you use often (a percentage off, a flat amount, a named
+                    discount, or a coupon code). These are picked from the invoice's discount field when
+                    needed - creating an invoice never requires one.
+                  </p>
+                  <div className="billing-catalog-editor">
+                    <label className="settings-field">
+                      <span>Name</span>
+                      <input
+                        value={discountEditor.name}
+                        onChange={(event) => setDiscountEditor((current) => ({ ...current, name: event.target.value }))}
+                        placeholder="e.g. Member discount"
+                      />
+                    </label>
+                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Type</span>
+                        <select
+                          value={discountEditor.discountType}
+                          onChange={(event) =>
+                            setDiscountEditor((current) => ({
+                              ...current,
+                              discountType: event.target.value === "fixed" ? "fixed" : "percentage",
+                            }))
+                          }
+                        >
+                          <option value="percentage">Percentage</option>
+                          <option value="fixed">Fixed amount</option>
+                        </select>
+                      </label>
+                      <label className="settings-field">
+                        <span>{discountEditor.discountType === "percentage" ? "Percent off" : "Amount off"}</span>
+                        <input
+                          value={discountEditor.value}
+                          inputMode="decimal"
+                          onChange={(event) =>
+                            setDiscountEditor((current) => ({ ...current, value: parseMoneyInput(event.target.value) }))
+                          }
+                          type="text"
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Coupon code (optional)</span>
+                        <input
+                          value={discountEditor.couponCode}
+                          onChange={(event) => setDiscountEditor((current) => ({ ...current, couponCode: event.target.value }))}
+                          placeholder="Optional"
+                        />
+                      </label>
+                    </div>
+                    <button className="outline-button" disabled={discountSaveState === "saving"} onClick={addDiscountPreset} type="button">
+                      <Plus size={16} />
+                      {discountEditor.id ? (discountSaveState === "saving" ? "Saving..." : "Save Changes") : discountSaveState === "saving" ? "Saving..." : "Add Discount"}
+                    </button>
+                    {Boolean(discountEditor.id) && (
+                      <button
+                        className="outline-button"
+                        onClick={() => setDiscountEditor({ id: "", name: "", discountType: "percentage", value: 10, couponCode: "" })}
+                        type="button"
+                      >
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                  <div className="billing-catalog-list">
+                    {discountPresets.length ? (
+                      discountPresets.map((preset) => (
+                        <div key={preset.id} className={`billing-catalog-list-item${preset.active === false ? " inactive" : ""}`}>
+                          <button onClick={() => setDiscountEditor(preset)} type="button">
+                            <span>
+                              <strong>{preset.name}</strong>
+                              <em>
+                                {preset.discountType === "percentage" ? `${preset.value}% off` : `${formatMoney(preset.value, invoiceSettings.currency)} off`}
+                                {preset.couponCode ? ` - Code: ${preset.couponCode}` : ""}
+                                {preset.active === false ? " - inactive" : ""}
+                              </em>
+                            </span>
+                          </button>
+                          <button className="text-link-button" onClick={() => toggleDiscountActive(preset)} type="button">
+                            {preset.active === false ? "Reactivate" : "Deactivate"}
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p>No discount presets yet.</p>
+                    )}
+                  </div>
                 </article>
               </div>
             )}
