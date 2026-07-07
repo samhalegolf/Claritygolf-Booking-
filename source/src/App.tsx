@@ -1027,6 +1027,26 @@ type BillingInvoiceRecord = {
   amountPaid: number;
 };
 
+// Shape returned by GET /api/billing/reports/revenue.
+type BillingRevenueBucket = {
+  label: string;
+  rangeStart: string;
+  rangeEnd: string;
+  total: number;
+};
+
+type BillingRevenueReport = {
+  period: "week" | "month" | "year";
+  currency: string;
+  rangeStart: string;
+  rangeEnd: string;
+  total: number;
+  previousYearTotal: number | null;
+  previousYearRangeStart: string;
+  previousYearRangeEnd: string;
+  buckets: BillingRevenueBucket[];
+};
+
 type SlotCandidate = {
   week: number;
   day: number;
@@ -3673,7 +3693,14 @@ function App() {
   const [activeInvoiceId, setActiveInvoiceId] = useState("");
   const [invoiceIssueState, setInvoiceIssueState] = useState<"idle" | "saving">("idle");
   const [recentInvoices, setRecentInvoices] = useState<BillingInvoiceRecord[]>([]);
+  const [revenuePeriod, setRevenuePeriod] = useState<"week" | "month" | "year">("month");
+  const [revenueReport, setRevenueReport] = useState<BillingRevenueReport | null>(null);
+  const [revenueLoadState, setRevenueLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, string>>({});
+  // Ready to Pull date range. Empty string on either side means "no bound" -
+  // i.e. defaults to showing everything, same as before this filter existed.
+  const [pullRangeFrom, setPullRangeFrom] = useState("");
+  const [pullRangeTo, setPullRangeTo] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pointerSession, setPointerSession] = useState<PointerSession>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -4366,6 +4393,27 @@ function App() {
     [completedAppointments, invoicedBookingIds],
   );
   const completedUninvoicedCount = uninvoicedCompletedAppointments.length;
+  // "Ready to Pull" with an adjustable date range, per the billing build plan.
+  // itemDateValue converts a calendar item's week/day slot back into a real
+  // calendar date the same way the rest of the app already does (dateForSlot),
+  // so this stays correct if baseWeekStart or the week numbering ever changes.
+  const itemDateValue = (item: CalendarItem) => dateInputValue(dateForSlot(itemWeek(item), item.day));
+  const inPullRange = (item: CalendarItem) => {
+    const itemDate = itemDateValue(item);
+    if (pullRangeFrom && itemDate < pullRangeFrom) return false;
+    if (pullRangeTo && itemDate > pullRangeTo) return false;
+    return true;
+  };
+  const pullableCompletedAppointments = useMemo(
+    () => uninvoicedCompletedAppointments.filter(inPullRange),
+    [uninvoicedCompletedAppointments, pullRangeFrom, pullRangeTo],
+  );
+  // Same range, but keeps already-invoiced items in (as "Already invoiced")
+  // for the fuller Calendar Pull panel in the invoice builder.
+  const calendarPullRangeList = useMemo(
+    () => completedAppointments.filter(inPullRange),
+    [completedAppointments, pullRangeFrom, pullRangeTo],
+  );
   const invoiceLineSubtotal = invoiceDraft.lines.reduce(
     (total, line) => total + Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0),
     0,
@@ -9928,6 +9976,36 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEmbedMode, authStatus, billingWorkspaceEnabled, completedAppointments.map((item) => item.id).join(",")]);
 
+  async function fetchRevenueReport(period: "week" | "month" | "year") {
+    setRevenueLoadState("loading");
+    try {
+      const response = await fetch(`/api/billing/reports/revenue?period=${period}`, { credentials: "same-origin", cache: "no-store" });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load revenue."));
+      const data = (await response.json()) as BillingRevenueReport;
+      setRevenueReport(data);
+      setRevenueLoadState("loaded");
+    } catch (error) {
+      setRevenueLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load revenue." });
+    }
+  }
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    void fetchRevenueReport(revenuePeriod);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, revenuePeriod]);
+
+  const revenueMaxBucketTotal = Math.max(1, ...(revenueReport?.buckets.map((bucket) => bucket.total) ?? [0]));
+  const revenueYoyDeltaPct =
+    revenueReport && revenueReport.previousYearTotal !== null && revenueReport.previousYearTotal > 0
+      ? Math.round(((revenueReport.total - revenueReport.previousYearTotal) / revenueReport.previousYearTotal) * 100)
+      : null;
+
   function addCompletedBookingLine(item: CalendarItem) {
     if (invoicedBookingIds[item.id]) {
       setToast({ message: "This booking has already been invoiced." });
@@ -14919,6 +14997,54 @@ function App() {
 
             {billingSection === "dashboard" && (
               <div className="billing-dashboard">
+                <article className="data-card revenue-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Revenue</span>
+                      <h2>{formatMoney(revenueReport?.total ?? 0, revenueReport?.currency ?? invoiceSettings.currency)}</h2>
+                    </div>
+                    <div className="revenue-period-toggle" role="tablist" aria-label="Revenue period">
+                      {(["week", "month", "year"] as const).map((period) => (
+                        <button
+                          key={period}
+                          className={revenuePeriod === period ? "active" : ""}
+                          onClick={() => setRevenuePeriod(period)}
+                          role="tab"
+                          aria-selected={revenuePeriod === period}
+                          type="button"
+                        >
+                          {period === "week" ? "Weekly" : period === "month" ? "Monthly" : "Yearly"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {revenueLoadState === "loading" && !revenueReport ? (
+                    <p>Loading revenue...</p>
+                  ) : revenueReport ? (
+                    <>
+                      <div className="revenue-chart" aria-hidden="true">
+                        {revenueReport.buckets.map((bucket) => (
+                          <div key={bucket.rangeStart} className="revenue-chart-bar-track" title={`${bucket.label}: ${formatMoney(bucket.total, revenueReport.currency)}`}>
+                            <div
+                              className="revenue-chart-bar"
+                              style={{ height: `${Math.max(2, Math.round((bucket.total / revenueMaxBucketTotal) * 100))}%` }}
+                            />
+                            <span>{bucket.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="revenue-comparison">
+                        {revenueReport.previousYearTotal === null
+                          ? "No data from the same period last year yet."
+                          : revenueYoyDeltaPct === null
+                            ? `Same period last year: ${formatMoney(revenueReport.previousYearTotal, revenueReport.currency)}`
+                            : `${revenueYoyDeltaPct >= 0 ? "Up" : "Down"} ${Math.abs(revenueYoyDeltaPct)}% vs. same period last year (${formatMoney(revenueReport.previousYearTotal, revenueReport.currency)})`}
+                      </p>
+                    </>
+                  ) : (
+                    <p>No revenue yet. Issue an invoice to see it here.</p>
+                  )}
+                </article>
                 <div className="billing-dashboard-grid">
                   <article className="data-card">
                     <div className="data-card-header">
@@ -14934,7 +15060,7 @@ function App() {
                       New Invoice
                     </button>
                   </article>
-                  <article className="data-card">
+                  <article className="data-card ready-to-pull-card">
                     <div className="data-card-header">
                       <div>
                         <span>Completed Bookings</span>
@@ -14942,9 +15068,31 @@ function App() {
                       </div>
                       <CalendarDays size={24} />
                     </div>
+                    <div className="ready-to-pull-range">
+                      <label className="settings-field">
+                        <span>From</span>
+                        <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
+                      </label>
+                      <label className="settings-field">
+                        <span>To</span>
+                        <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
+                      </label>
+                      {(pullRangeFrom || pullRangeTo) && (
+                        <button
+                          className="outline-button small-action"
+                          onClick={() => {
+                            setPullRangeFrom("");
+                            setPullRangeTo("");
+                          }}
+                          type="button"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
                     <div className="completed-booking-list compact">
-                      {uninvoicedCompletedAppointments.length ? (
-                        uninvoicedCompletedAppointments.slice(0, 4).map((item) => {
+                      {pullableCompletedAppointments.length ? (
+                        pullableCompletedAppointments.slice(0, 6).map((item) => {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
                           return (
@@ -14959,12 +15107,19 @@ function App() {
                             </button>
                           );
                         })
+                      ) : uninvoicedCompletedAppointments.length ? (
+                        <p>No completed bookings in this date range.</p>
                       ) : completedAppointments.length ? (
                         <p>All completed bookings have already been invoiced.</p>
                       ) : (
                         <p>No completed bookings yet. Mark a lesson completed from the appointment details panel.</p>
                       )}
                     </div>
+                    {pullableCompletedAppointments.length > 6 && (
+                      <p className="ready-to-pull-overflow">
+                        +{pullableCompletedAppointments.length - 6} more in this range - open New Invoice to see the rest.
+                      </p>
+                    )}
                   </article>
                   <article className="data-card">
                     <div className="data-card-header">
@@ -15427,9 +15582,31 @@ function App() {
                       </div>
                       <CalendarDays size={24} />
                     </div>
+                    <div className="ready-to-pull-range">
+                      <label className="settings-field">
+                        <span>From</span>
+                        <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
+                      </label>
+                      <label className="settings-field">
+                        <span>To</span>
+                        <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
+                      </label>
+                      {(pullRangeFrom || pullRangeTo) && (
+                        <button
+                          className="outline-button small-action"
+                          onClick={() => {
+                            setPullRangeFrom("");
+                            setPullRangeTo("");
+                          }}
+                          type="button"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
                     <div className="completed-booking-list">
-                      {completedAppointments.length ? (
-                        completedAppointments.map((item) => {
+                      {calendarPullRangeList.length ? (
+                        calendarPullRangeList.map((item) => {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
                           const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
@@ -15451,6 +15628,8 @@ function App() {
                             </button>
                           );
                         })
+                      ) : completedAppointments.length ? (
+                        <p>No completed bookings in this date range.</p>
                       ) : (
                         <p>Mark bookings completed from the calendar to pull them into invoices.</p>
                       )}

@@ -438,6 +438,161 @@ async function checkBookingLinks(accountId: string, bookingIds: string[]) {
   return { links };
 }
 
+// --- Revenue report -----------------------------------------------------------
+// Deliberately simple per the billing build plan ("Reports should be simple
+// summaries, not heavy accounting dashboards"): fetch the invoice rows for the
+// widest date range needed (current period + the matching period a year ago)
+// in one request and bucket/sum them here, rather than standing up SQL
+// aggregation. Revenue = invoiced totals for status in (sent, paid, overdue);
+// drafts and voided invoices are excluded since they aren't committed income.
+// All date math is done on plain "YYYY-MM-DD" values in UTC, matching how
+// issue_date is stored (a date column, no time/timezone component).
+
+const REVENUE_STATUSES = ["sent", "paid", "overdue"];
+const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function parseDateOnly(value: unknown): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ""));
+  if (!match) return null;
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+}
+
+function formatDateOnly(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function addDaysUTC(date: Date, days: number) {
+  return new Date(date.getTime() + days * 86400000);
+}
+
+function startOfWeekUTC(date: Date) {
+  const day = date.getUTCDay();
+  const diff = (day === 0 ? -6 : 1) - day;
+  return addDaysUTC(date, diff);
+}
+
+function startOfMonthUTC(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function endOfMonthUTC(date: Date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
+}
+
+function shiftYearsUTC(date: Date, years: number) {
+  return new Date(Date.UTC(date.getUTCFullYear() + years, date.getUTCMonth(), date.getUTCDate()));
+}
+
+type RevenuePeriod = "week" | "month" | "year";
+
+function periodRange(period: RevenuePeriod, refDate: Date) {
+  if (period === "week") {
+    const start = startOfWeekUTC(refDate);
+    return { start, end: addDaysUTC(start, 6) };
+  }
+  if (period === "year") {
+    return { start: new Date(Date.UTC(refDate.getUTCFullYear(), 0, 1)), end: new Date(Date.UTC(refDate.getUTCFullYear(), 11, 31)) };
+  }
+  return { start: startOfMonthUTC(refDate), end: endOfMonthUTC(refDate) };
+}
+
+function sumInvoiceTotals(rows: Array<{ issue_date: string; total: unknown }>, start: string, end: string) {
+  return round2(
+    rows
+      .filter((row) => row.issue_date >= start && row.issue_date <= end)
+      .reduce((sum, row) => sum + (Number(row.total) || 0), 0),
+  );
+}
+
+function bucketizeRevenue(period: RevenuePeriod, start: Date, end: Date, rows: Array<{ issue_date: string; total: unknown }>) {
+  if (period === "week") {
+    return Array.from({ length: 7 }, (_, i) => {
+      const day = addDaysUTC(start, i);
+      const key = formatDateOnly(day);
+      return { label: WEEKDAY_LABELS[i], rangeStart: key, rangeEnd: key, total: sumInvoiceTotals(rows, key, key) };
+    });
+  }
+  if (period === "year") {
+    const year = start.getUTCFullYear();
+    return Array.from({ length: 12 }, (_, i) => {
+      const monthStart = new Date(Date.UTC(year, i, 1));
+      const monthEnd = new Date(Date.UTC(year, i + 1, 0));
+      const rangeStart = formatDateOnly(monthStart);
+      const rangeEnd = formatDateOnly(monthEnd);
+      return { label: MONTH_LABELS[i], rangeStart, rangeEnd, total: sumInvoiceTotals(rows, rangeStart, rangeEnd) };
+    });
+  }
+  // Month: bucket by week so it stays readable (4-5 bars instead of 28-31).
+  const buckets: Array<{ label: string; rangeStart: string; rangeEnd: string; total: number }> = [];
+  let cursor = start;
+  while (cursor.getTime() <= end.getTime()) {
+    const bucketEnd = new Date(Math.min(addDaysUTC(cursor, 6).getTime(), end.getTime()));
+    const rangeStart = formatDateOnly(cursor);
+    const rangeEnd = formatDateOnly(bucketEnd);
+    buckets.push({
+      label: `${cursor.getUTCDate()}-${bucketEnd.getUTCDate()}`,
+      rangeStart,
+      rangeEnd,
+      total: sumInvoiceTotals(rows, rangeStart, rangeEnd),
+    });
+    cursor = addDaysUTC(bucketEnd, 1);
+  }
+  return buckets;
+}
+
+async function resolveDefaultCurrency() {
+  const rows = await supabase("settings", {
+    query: `select=value&key=eq.${encodeFilter("accountInvoiceSettingsJson")}&limit=1`,
+  });
+  try {
+    const parsed = rows[0]?.value ? JSON.parse(rows[0].value) : null;
+    return cleanString(parsed?.currency, "NZD", 10);
+  } catch {
+    return "NZD";
+  }
+}
+
+async function revenueReport(accountId: string, url: URL) {
+  const period: RevenuePeriod = ["week", "month", "year"].includes(String(url.searchParams.get("period")))
+    ? (url.searchParams.get("period") as RevenuePeriod)
+    : "month";
+  const refDate = parseDateOnly(url.searchParams.get("date")) || parseDateOnly(formatDateOnly(new Date())) || new Date();
+  const { start, end } = periodRange(period, refDate);
+  const previousStart = shiftYearsUTC(start, -1);
+  const previousEnd = shiftYearsUTC(end, -1);
+
+  const [currency, rows] = await Promise.all([
+    resolveDefaultCurrency(),
+    supabase("billing_invoices", {
+      query: `select=issue_date,total&account_id=eq.${encodeFilter(accountId)}&status=in.(${REVENUE_STATUSES.join(",")})&issue_date=gte.${encodeFilter(formatDateOnly(previousStart))}&issue_date=lte.${encodeFilter(formatDateOnly(end))}`,
+    }),
+  ]);
+
+  const rangeStart = formatDateOnly(start);
+  const rangeEnd = formatDateOnly(end);
+  const previousRangeStart = formatDateOnly(previousStart);
+  const previousRangeEnd = formatDateOnly(previousEnd);
+
+  const total = sumInvoiceTotals(rows, rangeStart, rangeEnd);
+  const previousYearRows = rows.filter((row: { issue_date: string }) => row.issue_date >= previousRangeStart && row.issue_date <= previousRangeEnd);
+  // null (not 0) means "no invoices at all in that period last year" so the
+  // frontend can show a soft empty state instead of claiming a 100% drop.
+  const previousYearTotal = previousYearRows.length ? sumInvoiceTotals(rows, previousRangeStart, previousRangeEnd) : null;
+
+  return {
+    period,
+    currency,
+    rangeStart,
+    rangeEnd,
+    total,
+    previousYearTotal,
+    previousYearRangeStart: previousRangeStart,
+    previousYearRangeEnd: previousRangeEnd,
+    buckets: bucketizeRevenue(period, start, end, rows),
+  };
+}
+
 // --- Router ------------------------------------------------------------------
 
 export default async function handler(req: Request) {
@@ -470,6 +625,8 @@ export default async function handler(req: Request) {
       const ids = (url.searchParams.get("bookingIds") || "").split(",").map((id) => id.trim()).filter(Boolean);
       return json(await checkBookingLinks(accountId, ids));
     }
+
+    if (action === "reports/revenue" && req.method === "GET") return json(await revenueReport(accountId, url));
 
     return json({ error: "not_found", message: "Billing route not found." }, 404);
   } catch (error) {
