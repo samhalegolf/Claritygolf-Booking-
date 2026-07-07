@@ -9,17 +9,22 @@ create table if not exists public.settings (
 
 create table if not exists public.calendar_items (
   id text primary key,
+  account_id text,
   kind text not null,
   week integer not null default 0,
   day integer not null,
   start integer not null,
   duration integer not null,
+  coach_id text,
+  location_id text,
   service_id text,
   client text,
   title text not null,
   phone text,
   email text,
   note text,
+  coach jsonb,
+  location jsonb,
   custom_group jsonb,
   status text not null default 'booked'
     check (status in ('booked', 'completed', 'cancelled', 'no_show')),
@@ -30,8 +35,12 @@ create table if not exists public.calendar_items (
 create index if not exists idx_calendar_items_slot
   on public.calendar_items (week, day, start);
 
+create index if not exists idx_calendar_items_account_slot
+  on public.calendar_items (account_id, week, day, start);
+
 create table if not exists public.people (
   id text primary key,
+  account_id text,
   name text not null,
   email text,
   phone text,
@@ -43,17 +52,23 @@ create table if not exists public.people (
   updated_at timestamptz not null default now()
 );
 
--- Email is a contact channel, not a person identity. Families, schools and
--- organisations may legitimately share one address.
+-- Email uniqueness is scoped by workspace account, not global across all clients.
 drop index if exists public.idx_people_email_unique;
+
+create unique index if not exists idx_people_account_email_unique
+  on public.people (account_id, lower(email))
+  where email is not null and btrim(email) <> '';
 
 create index if not exists idx_people_email_lookup
   on public.people (lower(email))
-  where email is not null and email <> '';
+  where email is not null and btrim(email) <> '';
 
 create index if not exists idx_people_name_phone_lookup
   on public.people (lower(name), phone)
   where phone is not null and phone <> '';
+
+create index if not exists idx_people_account_name_lookup
+  on public.people (account_id, lower(name), lower(email), id);
 
 create table if not exists public.admin_users (
   id text primary key,

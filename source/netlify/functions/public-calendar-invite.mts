@@ -15,6 +15,42 @@ function cleanEmail(value: unknown, fallback = "") {
   return email.includes("@") ? email : fallback;
 }
 
+function cleanUrl(value: unknown, fallback = "") {
+  if (typeof value !== "string" || !value.trim()) return fallback;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString().replace(/\/$/, "") : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function cleanBookingLocationSnapshot(raw: any, fallback: any = {}) {
+  let source = raw;
+  if (typeof raw === "string") {
+    try {
+      source = JSON.parse(raw);
+    } catch {
+      source = null;
+    }
+  }
+  const base = source?.name ? source : fallback;
+  if (!base?.name) return null;
+  return {
+    name: cleanText(base.name, fallback.name || "", 140),
+    shortName: cleanText(base.shortName, fallback.shortName || base.name || "", 80),
+    address: cleanText(base.address, "", 240),
+    mapUrl: cleanUrl(base.mapUrl, ""),
+    arrivalInstructions: cleanText(base.arrivalInstructions, "", 500),
+    publicNotes: cleanText(base.publicNotes, "", 500),
+    timezone: cleanText(base.timezone, fallback.timezone || "", 80),
+  };
+}
+
+function bookingLocationDisplay(location: any) {
+  return [location?.name, location?.address].filter(Boolean).join(" · ");
+}
+
 function normalizePhone(value: unknown) {
   return cleanText(value, "", 80).replace(/\D/g, "");
 }
@@ -44,12 +80,26 @@ async function readSettings() {
   const rows = await supabase("settings", "select=key,value");
   const settings = Object.fromEntries(rows.map((row: any) => [row.key, row.value]));
   let services: any[] = [];
+  let workspaceAccounts: any[] = [];
   try {
     services = settings.servicesJson ? JSON.parse(settings.servicesJson) : [];
   } catch {
     services = [];
   }
+  try {
+    workspaceAccounts = settings.workspaceAccountsJson ? JSON.parse(settings.workspaceAccountsJson) : [];
+  } catch {
+    workspaceAccounts = [];
+  }
+  const fallbackAccount = {
+    id: settings.accountCalendarSlug || settings.accountId || "sam-hale-golf",
+    planKey: "founder",
+    subscriptionStatus: "comped",
+    active: true,
+  };
+  const account = workspaceAccounts.find((candidate: any) => candidate?.active !== false) || fallbackAccount;
   return {
+    account,
     services,
     businessName: settings.accountBusinessName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
     coachName: settings.accountCoachName || env("CLARITY_COACH_NAME", "Sam Hale"),
@@ -58,6 +108,14 @@ async function readSettings() {
     contactEmail: cleanEmail(settings.accountContactEmail, env("CLARITY_CONTACT_EMAIL", "")),
     bookingUrl: settings.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
   };
+}
+
+function accountHasPublicBooking(account: any) {
+  if (account?.active === false) return false;
+  if (!["trialing", "active", "comped", "internal"].includes(account?.subscriptionStatus || "active")) return false;
+  if (account?.entitlementsOverride?.features?.publicBooking === false) return false;
+  if (account?.entitlementsOverride?.features?.publicBooking === true) return true;
+  return ["solo", "studio", "academy", "enterprise", "founder"].includes(account?.planKey || "solo");
 }
 
 function pad(value: number) {
@@ -115,12 +173,19 @@ function manageUrl(appointment: any, settings: any) {
 }
 
 function generateInvite(appointment: any, settings: any) {
-  const service = settings.services.find((candidate: any) => candidate.id === appointment.service_id);
+  const service = settings.services.find((candidate: any) => candidate.id === appointment.service_id && (!candidate.accountId || candidate.accountId === settings.account.id));
   const serviceName = cleanText(service?.name, "Golf Lesson", 160);
   const client = cleanText(appointment.client || appointment.title, "Client", 160);
+  const location = cleanBookingLocationSnapshot(appointment.location, {
+    name: settings.venueName,
+    timezone: settings.timezone,
+  });
   const manage = manageUrl(appointment, settings);
   const description = [
     `${serviceName} for ${client}.`,
+    location?.address ? `Address: ${location.address}` : "",
+    location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
+    location?.mapUrl ? `Map: ${location.mapUrl}` : "",
     manage ? `Manage / Reschedule: ${manage}` : "",
   ]
     .filter(Boolean)
@@ -139,7 +204,7 @@ function generateInvite(appointment: any, settings: any) {
     `DTEND;TZID=${escapeIcs(settings.timezone)}:${formatLocalDateTime(appointment.week, appointment.day, Number(appointment.start || 0) + Number(appointment.duration || 0))}`,
     `SUMMARY:${escapeIcs(`${serviceName} with ${settings.coachName || settings.businessName}`)}`,
     `DESCRIPTION:${escapeIcs(description)}`,
-    `LOCATION:${escapeIcs(settings.venueName)}`,
+    `LOCATION:${escapeIcs(bookingLocationDisplay(location))}`,
     settings.contactEmail ? `ORGANIZER;CN=${escapeIcs(settings.businessName)}:MAILTO:${escapeIcs(settings.contactEmail)}` : "",
     manage ? `URL:${escapeIcs(manage)}` : "",
     "CATEGORIES:Golf Lesson",
@@ -185,6 +250,13 @@ export default async function handler(req: Request) {
     }
 
     const settings = await readSettings();
+    if (!accountHasPublicBooking(settings.account)) {
+      return json({ error: "feature_unavailable", message: "Public booking is not available for this account." }, 403);
+    }
+    const appointmentAccountId = appointment.account_id || settings.account.id;
+    if (appointmentAccountId !== settings.account.id) {
+      return json({ error: "not_found", message: "Booking not found." }, 404);
+    }
     const ics = generateInvite(appointment, settings);
     return new Response(ics, {
       status: 200,

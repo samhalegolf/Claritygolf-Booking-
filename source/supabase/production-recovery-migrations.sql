@@ -14,7 +14,7 @@ ALTER TABLE public.calendar_items
   ADD CONSTRAINT calendar_items_status_check
   CHECK (status IN ('booked', 'completed', 'cancelled', 'no_show'));
 
--- Email is a shared contact channel, not a globally unique person identity.
+-- Email uniqueness is scoped by workspace account, not global across all clients.
 ALTER TABLE public.people
   ADD COLUMN IF NOT EXISTS account_id TEXT;
 
@@ -28,9 +28,13 @@ WHERE account_id IS NULL OR BTRIM(account_id) = '';
 
 DROP INDEX IF EXISTS public.idx_people_email_unique;
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_people_account_email_unique
+  ON public.people (account_id, LOWER(email))
+  WHERE email IS NOT NULL AND BTRIM(email) <> '';
+
 CREATE INDEX IF NOT EXISTS idx_people_email_lookup
   ON public.people (LOWER(email))
-  WHERE email IS NOT NULL AND email <> '';
+  WHERE email IS NOT NULL AND BTRIM(email) <> '';
 
 CREATE INDEX IF NOT EXISTS idx_people_name_phone_lookup
   ON public.people (LOWER(name), phone)
