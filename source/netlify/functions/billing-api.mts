@@ -199,6 +199,80 @@ async function updateProduct(accountId: string, id: string, body: Record<string,
   return { product: productRowToApi(rows[0]) };
 }
 
+// --- Discount presets --------------------------------------------------------
+
+function cleanDiscountPayload(raw: Record<string, unknown>) {
+  const discountType = String(raw?.discountType) === "percentage" ? "percentage" : "fixed";
+  const maxValue = discountType === "percentage" ? 100 : 1e9;
+  const couponCode = cleanString(raw?.couponCode, "", 40).toUpperCase();
+  return {
+    name: cleanString(raw?.name, "", 140),
+    discount_type: discountType,
+    value: round2(cleanNumber(raw?.value, 0, { min: 0, max: maxValue })),
+    coupon_code: couponCode || null,
+    active: raw?.active !== false,
+  };
+}
+
+function discountRowToApi(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    name: row.name,
+    discountType: row.discount_type,
+    value: Number(row.value) || 0,
+    couponCode: row.coupon_code || "",
+    active: row.active !== false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function listDiscounts(accountId: string) {
+  const rows = await supabase("billing_discounts", {
+    query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=active.desc,name.asc`,
+  });
+  return { discounts: rows.map(discountRowToApi) };
+}
+
+async function createDiscount(accountId: string, body: Record<string, unknown>) {
+  const clean = cleanDiscountPayload(body);
+  if (!clean.name) throw Object.assign(new Error("Discount name is required."), { status: 400 });
+  const row = { id: randomUUID(), account_id: accountId, ...clean, created_at: nowIso(), updated_at: nowIso() };
+  try {
+    await supabase("billing_discounts", { method: "POST", body: [row], prefer: "return=minimal" });
+  } catch (error) {
+    const status = (error as { supabaseStatus?: number })?.supabaseStatus;
+    if (status === 409) {
+      throw Object.assign(new Error(`Coupon code ${clean.coupon_code} is already in use.`), { status: 409, code: "COUPON_CODE_CONFLICT" });
+    }
+    throw error;
+  }
+  return { discount: discountRowToApi(row) };
+}
+
+async function updateDiscount(accountId: string, id: string, body: Record<string, unknown>) {
+  const clean = cleanDiscountPayload(body);
+  if (!clean.name) throw Object.assign(new Error("Discount name is required."), { status: 400 });
+  const patch = { ...clean, updated_at: nowIso() };
+  let rows;
+  try {
+    rows = await supabase("billing_discounts", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+      body: patch,
+      prefer: "return=representation",
+    });
+  } catch (error) {
+    const status = (error as { supabaseStatus?: number })?.supabaseStatus;
+    if (status === 409) {
+      throw Object.assign(new Error(`Coupon code ${clean.coupon_code} is already in use.`), { status: 409, code: "COUPON_CODE_CONFLICT" });
+    }
+    throw error;
+  }
+  if (!rows.length) throw Object.assign(new Error("Discount not found."), { status: 404 });
+  return { discount: discountRowToApi(rows[0]) };
+}
+
 // --- Invoices ----------------------------------------------------------------
 
 type InvoiceItemInput = {
@@ -607,6 +681,12 @@ export default async function handler(req: Request) {
     if (action === "products" && req.method === "POST") return json(await createProduct(accountId, await parseBody(req)));
     if (action.startsWith("products/") && (req.method === "PUT" || req.method === "PATCH")) {
       return json(await updateProduct(accountId, action.slice("products/".length), await parseBody(req)));
+    }
+
+    if (action === "discounts" && req.method === "GET") return json(await listDiscounts(accountId));
+    if (action === "discounts" && req.method === "POST") return json(await createDiscount(accountId, await parseBody(req)));
+    if (action.startsWith("discounts/") && (req.method === "PUT" || req.method === "PATCH")) {
+      return json(await updateDiscount(accountId, action.slice("discounts/".length), await parseBody(req)));
     }
 
     if (action === "invoices" && req.method === "GET") return json(await listInvoices(accountId, url));

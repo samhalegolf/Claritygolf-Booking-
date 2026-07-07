@@ -23,6 +23,7 @@ import {
   Moon,
   Package,
   Palette,
+  Percent,
   Phone,
   Plus,
   Pencil,
@@ -1045,6 +1046,20 @@ type BillingRevenueReport = {
   previousYearRangeStart: string;
   previousYearRangeEnd: string;
   buckets: BillingRevenueBucket[];
+};
+
+// Shape returned by /api/billing/discounts. Presets only - applying one to an
+// invoice just fills invoiceDraft.discountLabel/discountAmount, it does not
+// change how the invoice itself stores its discount.
+type BillingDiscountType = "percentage" | "fixed";
+
+type BillingDiscount = {
+  id: string;
+  name: string;
+  discountType: BillingDiscountType;
+  value: number;
+  couponCode: string;
+  active: boolean;
 };
 
 type SlotCandidate = {
@@ -3696,6 +3711,16 @@ function App() {
   const [revenuePeriod, setRevenuePeriod] = useState<"week" | "month" | "year">("month");
   const [revenueReport, setRevenueReport] = useState<BillingRevenueReport | null>(null);
   const [revenueLoadState, setRevenueLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [discountPresets, setDiscountPresets] = useState<BillingDiscount[]>([]);
+  const [discountEditor, setDiscountEditor] = useState<{ id: string; name: string; discountType: BillingDiscountType; value: number; couponCode: string }>({
+    id: "",
+    name: "",
+    discountType: "percentage",
+    value: 10,
+    couponCode: "",
+  });
+  const [discountSaveState, setDiscountSaveState] = useState<"idle" | "saving">("idle");
+  const [selectedDiscountPresetId, setSelectedDiscountPresetId] = useState("");
   const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, string>>({});
   // Ready to Pull date range. Empty string on either side means "no bound" -
   // i.e. defaults to showing everything, same as before this filter existed.
@@ -9926,6 +9951,17 @@ function App() {
     setCatalogItems(Array.isArray(data.products) ? data.products : []);
   }
 
+  async function fetchBillingDiscounts() {
+    const response = await fetch("/api/billing/discounts", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load discount presets."));
+    const data = (await response.json()) as { discounts?: BillingDiscount[] };
+    setDiscountPresets(Array.isArray(data.discounts) ? data.discounts : []);
+  }
+
   async function fetchRecentInvoices() {
     const response = await fetch("/api/billing/invoices?limit=50", { credentials: "same-origin", cache: "no-store" });
     if (response.status === 401) {
@@ -9954,7 +9990,7 @@ function App() {
   async function loadBillingWorkspace() {
     setBillingDataLoadState("loading");
     try {
-      await Promise.all([fetchBillingProducts(), fetchRecentInvoices()]);
+      await Promise.all([fetchBillingProducts(), fetchRecentInvoices(), fetchBillingDiscounts()]);
       setBillingDataLoadState("loaded");
     } catch (error) {
       setBillingDataLoadState("error");
@@ -10081,6 +10117,99 @@ function App() {
     } finally {
       setCatalogSaveState("idle");
     }
+  }
+
+  async function addDiscountPreset() {
+    const name = discountEditor.name.trim();
+    if (!name) {
+      setToast({ message: "Name the discount before saving it." });
+      return;
+    }
+    const payload = {
+      name,
+      discountType: discountEditor.discountType,
+      value: Math.max(0, Number(discountEditor.value) || 0),
+      couponCode: discountEditor.couponCode.trim(),
+      active: true,
+    };
+    const isUpdate = Boolean(discountEditor.id);
+    setDiscountSaveState("saving");
+    try {
+      const response = await fetch(isUpdate ? `/api/billing/discounts/${encodeURIComponent(discountEditor.id)}` : "/api/billing/discounts", {
+        method: isUpdate ? "PUT" : "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { discount?: BillingDiscount; error?: string; message?: string } | null;
+      if (!response.ok) {
+        if (data?.error === "COUPON_CODE_CONFLICT") {
+          throw new Error(data.message || "That coupon code is already in use.");
+        }
+        throw new Error(data?.message || (await readApiFailure(response, "Could not save discount.")));
+      }
+      const saved = data?.discount;
+      if (!saved) throw new Error("Save response did not return the discount.");
+      setDiscountPresets((current) =>
+        current.some((candidate) => candidate.id === saved.id)
+          ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
+          : [...current, saved],
+      );
+      setDiscountEditor({ id: "", name: "", discountType: "percentage", value: 10, couponCode: "" });
+      setToast({ message: `${saved.name} ${isUpdate ? "updated" : "added"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save discount." });
+    } finally {
+      setDiscountSaveState("idle");
+    }
+  }
+
+  async function toggleDiscountActive(discount: BillingDiscount) {
+    try {
+      const response = await fetch(`/api/billing/discounts/${encodeURIComponent(discount.id)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          name: discount.name,
+          discountType: discount.discountType,
+          value: discount.value,
+          couponCode: discount.couponCode,
+          active: !discount.active,
+        }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update discount."));
+      const data = (await response.json()) as { discount?: BillingDiscount };
+      const saved = data.discount;
+      if (!saved) return;
+      setDiscountPresets((current) => current.map((candidate) => (candidate.id === saved.id ? saved : candidate)));
+      if (!saved.active && selectedDiscountPresetId === saved.id) setSelectedDiscountPresetId("");
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update discount." });
+    }
+  }
+
+  function applyDiscountPreset(presetId: string) {
+    setSelectedDiscountPresetId(presetId);
+    if (!presetId) return;
+    const preset = discountPresets.find((candidate) => candidate.id === presetId);
+    if (!preset) return;
+    markInvoiceDraftDirty();
+    const amount =
+      preset.discountType === "percentage"
+        ? Math.round(((invoiceLineSubtotal * preset.value) / 100) * 100) / 100
+        : Math.round(preset.value * 100) / 100;
+    setInvoiceDraft((current) => ({
+      ...current,
+      discountLabel: preset.name,
+      discountAmount: amount,
+    }));
   }
 
   function resetInvoiceDraft() {
@@ -15473,6 +15602,24 @@ function App() {
 
                     <div className="invoice-total-box">
                       <div className="invoice-discount-controls">
+                        {discountPresets.some((preset) => preset.active) && (
+                          <label className="settings-field">
+                            <span>Preset discount</span>
+                            <select
+                              value={selectedDiscountPresetId}
+                              onChange={(event) => applyDiscountPreset(event.target.value)}
+                            >
+                              <option value="">None (manual)</option>
+                              {discountPresets
+                                .filter((preset) => preset.active)
+                                .map((preset) => (
+                                  <option key={preset.id} value={preset.id}>
+                                    {preset.name} ({preset.discountType === "percentage" ? `${preset.value}%` : formatMoney(preset.value, invoiceSettings.currency)})
+                                  </option>
+                                ))}
+                            </select>
+                          </label>
+                        )}
                         <label className="settings-field">
                           <span>Discount / coupon</span>
                           <input
@@ -15858,6 +16005,103 @@ function App() {
                         ? "Saved"
                         : "Save Billing Settings"}
                   </button>
+                </article>
+
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Presets</span>
+                      <h2>Discount Settings</h2>
+                    </div>
+                    <Percent size={24} />
+                  </div>
+                  <p className="field-help">
+                    Optional presets for discounts you use often (a percentage off, a flat amount, a named
+                    discount, or a coupon code). These are picked from the invoice's discount field when
+                    needed - creating an invoice never requires one.
+                  </p>
+                  <div className="billing-catalog-editor">
+                    <label className="settings-field">
+                      <span>Name</span>
+                      <input
+                        value={discountEditor.name}
+                        onChange={(event) => setDiscountEditor((current) => ({ ...current, name: event.target.value }))}
+                        placeholder="e.g. Member discount"
+                      />
+                    </label>
+                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Type</span>
+                        <select
+                          value={discountEditor.discountType}
+                          onChange={(event) =>
+                            setDiscountEditor((current) => ({
+                              ...current,
+                              discountType: event.target.value === "fixed" ? "fixed" : "percentage",
+                            }))
+                          }
+                        >
+                          <option value="percentage">Percentage</option>
+                          <option value="fixed">Fixed amount</option>
+                        </select>
+                      </label>
+                      <label className="settings-field">
+                        <span>{discountEditor.discountType === "percentage" ? "Percent off" : "Amount off"}</span>
+                        <input
+                          value={discountEditor.value}
+                          inputMode="decimal"
+                          onChange={(event) =>
+                            setDiscountEditor((current) => ({ ...current, value: parseMoneyInput(event.target.value) }))
+                          }
+                          type="text"
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Coupon code (optional)</span>
+                        <input
+                          value={discountEditor.couponCode}
+                          onChange={(event) => setDiscountEditor((current) => ({ ...current, couponCode: event.target.value }))}
+                          placeholder="Optional"
+                        />
+                      </label>
+                    </div>
+                    <button className="outline-button" disabled={discountSaveState === "saving"} onClick={addDiscountPreset} type="button">
+                      <Plus size={16} />
+                      {discountEditor.id ? (discountSaveState === "saving" ? "Saving..." : "Save Changes") : discountSaveState === "saving" ? "Saving..." : "Add Discount"}
+                    </button>
+                    {Boolean(discountEditor.id) && (
+                      <button
+                        className="outline-button"
+                        onClick={() => setDiscountEditor({ id: "", name: "", discountType: "percentage", value: 10, couponCode: "" })}
+                        type="button"
+                      >
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                  <div className="billing-catalog-list">
+                    {discountPresets.length ? (
+                      discountPresets.map((preset) => (
+                        <div key={preset.id} className={`billing-catalog-list-item${preset.active === false ? " inactive" : ""}`}>
+                          <button onClick={() => setDiscountEditor(preset)} type="button">
+                            <span>
+                              <strong>{preset.name}</strong>
+                              <em>
+                                {preset.discountType === "percentage" ? `${preset.value}% off` : `${formatMoney(preset.value, invoiceSettings.currency)} off`}
+                                {preset.couponCode ? ` - Code: ${preset.couponCode}` : ""}
+                                {preset.active === false ? " - inactive" : ""}
+                              </em>
+                            </span>
+                          </button>
+                          <button className="text-link-button" onClick={() => toggleDiscountActive(preset)} type="button">
+                            {preset.active === false ? "Reactivate" : "Deactivate"}
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p>No discount presets yet.</p>
+                    )}
+                  </div>
                 </article>
               </div>
             )}
