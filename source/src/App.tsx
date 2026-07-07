@@ -15667,7 +15667,7 @@ function App() {
                     <div className="invoice-total-box">
                       <div className="invoice-discount-controls">
                         {discountPresets.some((preset) => preset.active) && (
-                          <label className="settings-field">
+                          <label className="settings-field invoice-discount-preset">
                             <span>Preset discount</span>
                             <select
                               value={selectedDiscountPresetId}

@@ -6676,17 +6676,40 @@ button {
   background: none;
   border: none;
   padding: 0;
-  color: var(--accent, #2f6f4e);
+  color: var(--coach-primary);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
 }
 
+/* Billing forms reuse .settings-field inside .service-form-row exactly like
+   the rest of the app, but that class has no layout rules anywhere else
+   either - fields just stack full-width instead of sitting side by side.
+   Scoped to .billing-page only so this doesn't change any other tab. */
+.billing-page .service-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+/* The preset dropdown is a 3rd field dropped into a grid built for 2
+   (label + amount); without this it eats the label's column and pushes
+   Amount onto its own row. Give it the full row instead. */
+.invoice-discount-preset {
+  grid-column: 1 / -1;
+}
+
+/* Both loudness levels reuse the app's one existing "overdue" color
+   (--danger / --danger-soft, already used for invoice-status-overdue)
+   rather than introducing a new amber tier - level 2 vs 3 is a difference
+   in weight and motion, not hue. */
 .unpaid-banner {
   display: flex;
   align-items: center;
   gap: 14px;
   flex-direction: row;
+  background: var(--danger-soft);
+  border: 1px solid var(--border);
 }
 
 .unpaid-banner > div {
@@ -6700,38 +6723,30 @@ button {
   color: var(--muted);
 }
 
-.unpaid-banner-level-2 {
-  background: var(--warning-soft, #fff6e0);
-  border: 1px solid var(--warning, #d9a300);
-  color: #7a5c00;
-}
-
 .unpaid-banner-level-2 svg {
-  color: #d9a300;
+  color: var(--danger);
+  opacity: 0.75;
 }
 
 .unpaid-banner-level-3 {
-  background: var(--danger-soft, #fff1ed);
-  border: 1px solid var(--danger, #b52f1f);
-  color: var(--danger, #b52f1f);
+  border-color: var(--danger);
   animation: unpaid-banner-pulse 2.4s ease-in-out infinite;
 }
 
-.unpaid-banner-level-3 svg {
-  color: var(--danger, #b52f1f);
+.unpaid-banner-level-3 strong {
+  color: var(--danger);
 }
 
-.unpaid-banner-level-3 span {
-  color: var(--danger, #b52f1f);
-  opacity: 0.85;
+.unpaid-banner-level-3 svg {
+  color: var(--danger);
 }
 
 @keyframes unpaid-banner-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(181, 47, 31, 0.25);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 25%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(181, 47, 31, 0.12);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 12%, transparent);
   }
 }
 
@@ -6740,19 +6755,19 @@ button {
   margin-left: 8px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--warning-soft, #fff6e0);
-  color: #7a5c00;
+  background: var(--danger-soft);
+  color: var(--danger);
   font-size: 11px;
   font-weight: 800;
   vertical-align: middle;
 }
 
 .overdue-row {
-  background: var(--danger-soft, #fff1ed);
+  background: var(--danger-soft);
 }
 
 .overdue-row td {
-  color: var(--danger, #b52f1f);
+  color: var(--danger);
   font-weight: 600;
 }
 
