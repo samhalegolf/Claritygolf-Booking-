@@ -492,14 +492,11 @@ button {
 }
 
 .settings-grid.settings-tab-services > .settings-services,
-.settings-grid.settings-tab-coaches > .settings-coaches,
-.settings-grid.settings-tab-locations > .settings-locations,
 .settings-grid.settings-tab-availability > .settings-availability {
   display: block !important;
 }
 
 .settings-grid.settings-tab-experience > .settings-experience,
-.settings-grid.settings-tab-email > .settings-email,
 .settings-grid.settings-tab-account > .settings-account,
 .settings-grid.settings-tab-branding > .settings-branding,
 .settings-grid.settings-tab-integrations > .settings-integrations,
@@ -509,7 +506,6 @@ button {
 
 .settings-services,
 .settings-availability,
-.settings-email,
 .settings-experience,
 .settings-branding,
 .settings-integrations,
@@ -1075,60 +1071,9 @@ button {
   justify-content: space-between;
 }
 
-.import-action-tools {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .import-actions > span {
   color: #76736d;
   font-size: 12px;
-}
-
-.import-action-tools > span {
-  color: #76736d;
-  font-size: 12px;
-}
-
-.import-file-button {
-  position: relative;
-  overflow: hidden;
-  min-height: 36px;
-}
-
-.import-file-button input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.import-diagnostics {
-  display: grid;
-  gap: 4px;
-  border: 1px solid #d8d6cf;
-  background: #f7f6f1;
-  color: #191815;
-  padding: 10px 12px;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.import-diagnostics strong {
-  font-size: 13px;
-}
-
-.import-diagnostics em {
-  color: #7f2d2d;
-  font-style: normal;
-}
-
-.import-diagnostics.error {
-  border-color: #e4b4b4;
-  background: #fff4f4;
-  color: #6f1d1d;
 }
 
 .client-table {
@@ -1816,7 +1761,6 @@ button {
 }
 
 .booking-required-field input {
-  box-sizing: border-box;
   width: 100%;
   padding-right: 24px;
 }
@@ -2214,18 +2158,6 @@ button {
   margin-top: 10px;
 }
 
-.workspace-save-error {
-  margin: 4px 0 0;
-  padding: 10px 12px;
-  border: 1px solid #f0c7bd;
-  background: #fff3f0;
-  color: #8f2a18;
-  font-size: 12px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .email-template-card {
   align-content: start;
 }
@@ -2506,67 +2438,10 @@ button {
   line-height: 1.05;
 }
 
-.calendar-scope-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.calendar-scope-controls select {
-  min-height: 34px;
-  border: 1px solid #d3d1c8;
-  border-radius: 6px;
-  background: #fff;
-  color: #24231f;
-  font: inherit;
-  font-size: 13px;
-  padding: 0 30px 0 10px;
-}
-
-.calendar-scope-note {
-  color: #6e6b65;
-  font-size: 12px;
-  white-space: nowrap;
-}
-
 .calendar-header-row {
   display: grid;
   grid-template-columns: 64px repeat(7, minmax(92px, 1fr));
   border-bottom: 1px solid #d7d7cf;
-}
-
-.location-coach-columns {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  gap: 2px;
-  width: 100%;
-  margin-top: 4px;
-}
-
-.location-coach-columns em {
-  overflow: hidden;
-  color: #6b6a62;
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.location-coach-columns em span,
-.location-coach-columns em small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.location-coach-columns em small {
-  color: #8a877d;
-  font-size: 9px;
-  font-weight: 600;
 }
 
 .time-gutter,
@@ -2693,19 +2568,6 @@ button {
   box-shadow: none;
 }
 
-.calendar-item.location-wide-block {
-  border-style: dashed;
-  background: #efe8d9;
-}
-
-.calendar-item.coach-location-block {
-  background: #ddd8cc;
-}
-
-.calendar-item.coach-only-block {
-  border-style: dotted;
-}
-
 .calendar-item.appointment {
   z-index: 3;
 }
@@ -2756,8 +2618,7 @@ button {
 
 .item-content strong,
 .item-content span,
-.item-content em,
-.item-content small {
+.item-content em {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5088,23 +4949,12 @@ button {
 }
 
 .calendar-item.appointment .item-content span,
-.calendar-item.appointment .item-content em,
-.calendar-item.appointment .item-content small {
+.calendar-item.appointment .item-content em {
   max-height: 0;
   opacity: 0;
   overflow: hidden;
   transform: translateY(-2px);
   transition: opacity 150ms ease, max-height 150ms ease, transform 150ms ease;
-}
-
-.item-location-tag {
-  color: #1f5d3a;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.2;
-  max-height: 14px !important;
-  opacity: 0.82 !important;
-  transform: translateY(0) !important;
 }
 
 .calendar-item.appointment:hover,
@@ -5115,13 +4965,10 @@ button {
 
 .calendar-item.appointment:hover .item-content span,
 .calendar-item.appointment:hover .item-content em,
-.calendar-item.appointment:hover .item-content small,
 .calendar-item.appointment.selected .item-content span,
 .calendar-item.appointment.selected .item-content em,
-.calendar-item.appointment.selected .item-content small,
 .floating-drag-tile .item-content span,
-.floating-drag-tile .item-content em,
-.floating-drag-tile .item-content small {
+.floating-drag-tile .item-content em {
   max-height: 16px;
   opacity: 0.76;
   transform: translateY(0);
@@ -5186,77 +5033,6 @@ button {
   padding: 12px;
   border: 1px solid var(--border);
   background: var(--panel-soft);
-}
-
-.booking-records-tab {
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
-}
-
-.booking-records-summary {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 0 12px;
-  cursor: pointer;
-  color: var(--heading);
-  font-weight: 800;
-}
-
-.booking-records-summary::-webkit-details-marker {
-  display: none;
-}
-
-.booking-records-summary em {
-  color: var(--muted);
-  font-size: 12px;
-  font-style: normal;
-  font-weight: 700;
-}
-
-.booking-records-body {
-  display: grid;
-  gap: 10px;
-  padding: 0 12px 12px;
-}
-
-.booking-resend-button {
-  justify-self: start;
-}
-
-.booking-email-records {
-  display: grid;
-  gap: 6px;
-}
-
-.booking-email-record {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.booking-email-record strong,
-.booking-email-record span,
-.booking-email-record em {
-  display: inline;
-  font-size: inherit;
-  font-style: normal;
-}
-
-.booking-email-record strong {
-  color: var(--heading);
-}
-
-.booking-email-record.failed em {
-  color: #a33d2d;
-}
-
-.booking-email-record.delivered em,
-.booking-email-record.sent em {
-  color: var(--coach-primary);
 }
 
 .receipt-panel-title {
@@ -5588,206 +5364,6 @@ button {
   color: #5f501f;
   font-size: 13px;
   font-weight: 700;
-}
-
-.developer-diagnostics {
-  margin: 0 0 14px;
-  border: 1px solid rgba(20, 25, 20, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.76);
-  box-shadow: 0 10px 24px rgba(20, 20, 20, 0.07);
-  overflow: hidden;
-}
-
-.developer-diagnostics-summary {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 10px 12px;
-  border: 0;
-  background: transparent;
-  color: #24251f;
-  cursor: pointer;
-  text-align: left;
-}
-
-.developer-diagnostics-title,
-.developer-diagnostics-readout {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.developer-diagnostics-title strong {
-  font-size: 13px;
-  font-weight: 900;
-}
-
-.developer-diagnostics-readout {
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  color: #5b5f51;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.developer-diagnostics-readout span {
-  padding: 4px 8px;
-  border: 1px solid rgba(20, 25, 20, 0.1);
-  border-radius: 999px;
-  background: rgba(246, 247, 241, 0.82);
-}
-
-.developer-diagnostics-body {
-  display: grid;
-  gap: 12px;
-  padding: 0 12px 12px;
-}
-
-.developer-diagnostics-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  border-top: 1px solid rgba(20, 25, 20, 0.1);
-  padding-top: 12px;
-}
-
-.developer-diagnostics-tabs button {
-  padding: 6px 10px;
-  border: 1px solid rgba(20, 25, 20, 0.12);
-  border-radius: 999px;
-  background: #f6f7f1;
-  color: #4c5146;
-  font-size: 12px;
-  font-weight: 900;
-  cursor: pointer;
-}
-
-.developer-diagnostics-tabs button.active {
-  border-color: rgba(42, 94, 60, 0.35);
-  background: #e7f1e5;
-  color: #1f6b3d;
-}
-
-.developer-diagnostics-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.developer-diagnostics-grid div {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  padding: 9px;
-  border: 1px solid rgba(20, 25, 20, 0.1);
-  border-radius: 8px;
-  background: rgba(250, 250, 247, 0.82);
-}
-
-.developer-diagnostics-grid span,
-.developer-diagnostics-event span {
-  color: #62685c;
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.developer-diagnostics-grid strong,
-.developer-diagnostics-event strong {
-  overflow: hidden;
-  color: #25251f;
-  font-size: 12px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.developer-diagnostics-events {
-  display: grid;
-  gap: 8px;
-  max-height: 380px;
-  overflow: auto;
-}
-
-.developer-diagnostics-event {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 12px;
-  padding: 9px;
-  border: 1px solid rgba(20, 25, 20, 0.1);
-  border-left: 4px solid #94a38b;
-  border-radius: 8px;
-  background: rgba(250, 250, 247, 0.9);
-}
-
-.developer-diagnostics-event.failed {
-  border-left-color: #b64f43;
-}
-
-.developer-diagnostics-event.warning {
-  border-left-color: #b78325;
-}
-
-.developer-diagnostics-event.verified,
-.developer-diagnostics-event.success {
-  border-left-color: #2e7d4f;
-}
-
-.developer-diagnostics-event > div {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.developer-diagnostics-event > div:last-of-type {
-  justify-items: end;
-}
-
-.developer-diagnostics-event code {
-  max-width: 220px;
-  overflow: hidden;
-  color: #244e35;
-  font-size: 11px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.developer-diagnostics-event p,
-.developer-diagnostics-event pre,
-.developer-diagnostics-empty {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: #555a50;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.developer-diagnostics-event pre {
-  max-height: 140px;
-  overflow: auto;
-  padding: 8px;
-  border-radius: 6px;
-  background: rgba(30, 34, 28, 0.06);
-  white-space: pre-wrap;
-}
-
-@media (max-width: 980px) {
-  .developer-diagnostics-summary {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .developer-diagnostics-readout {
-    justify-content: flex-start;
-  }
-
-  .developer-diagnostics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 .billing-page {

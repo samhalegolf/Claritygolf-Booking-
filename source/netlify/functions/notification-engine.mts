@@ -60,33 +60,6 @@ function cleanUrl(value: unknown, fallback: string) {
   }
 }
 
-function cleanBookingLocationSnapshot(raw: any, fallback: any = {}) {
-  let source = raw;
-  if (typeof raw === "string") {
-    try {
-      source = JSON.parse(raw);
-    } catch {
-      source = null;
-    }
-  }
-  if (!source?.name && !fallback?.name) return null;
-  const base = source?.name ? source : fallback;
-  return {
-    locationId: cleanText(base.locationId, "", 120) || undefined,
-    name: cleanText(base.name, fallback.name || "", 140),
-    shortName: cleanText(base.shortName, fallback.shortName || base.name || "", 80) || undefined,
-    address: cleanText(base.address, "", 240) || undefined,
-    mapUrl: cleanUrl(base.mapUrl, "") || undefined,
-    arrivalInstructions: cleanText(base.arrivalInstructions, "", 500) || undefined,
-    publicNotes: cleanText(base.publicNotes, "", 500) || undefined,
-    timezone: cleanText(base.timezone, fallback.timezone || "", 80) || undefined,
-  };
-}
-
-function bookingLocationDisplay(location: any) {
-  return [location?.name, location?.address].filter(Boolean).join(" · ");
-}
-
 function hash(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value ?? "")).digest("hex");
 }
@@ -250,7 +223,6 @@ function normaliseAppointment(raw: any = {}) {
     phone: cleanText(raw.phone, "", 80),
     email: cleanEmail(raw.email, ""),
     note: cleanText(raw.note || raw.notes, "", 1200),
-    location: cleanBookingLocationSnapshot(raw.location),
     customGroup: raw.customGroup === true || raw.customGroupEnabled === true || attendees.length > 0,
     attendees,
     calculatedPrice: Number.isFinite(Number(raw.calculatedPrice)) ? Number(raw.calculatedPrice) : 0,
@@ -317,17 +289,10 @@ function rescheduleUrlFor(appt: any, settings: any) {
 }
 
 function googleCalendarUrlFor(appt: any, serviceName: string, settings: any, rescheduleUrl: string) {
-  const location = cleanBookingLocationSnapshot(appt.location, {
-    name: settings.venueName,
-    timezone: settings.timezone,
-  });
   const start = compactLocalDateTime(appt.week, appt.day, appt.start);
   const end = compactLocalDateTime(appt.week, appt.day, Number(appt.start || 0) + Number(appt.duration || 0));
   const details = [
     `${serviceName} for ${appt.client || appt.title || "Client"}.`,
-    location?.address ? `Address: ${location.address}` : "",
-    location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
-    location?.mapUrl ? `Map: ${location.mapUrl}` : "",
     rescheduleUrl ? `Manage or reschedule: ${rescheduleUrl}` : "",
   ]
     .filter(Boolean)
@@ -337,8 +302,8 @@ function googleCalendarUrlFor(appt: any, serviceName: string, settings: any, res
     text: `${serviceName} with ${settings.coachName || settings.businessName}`,
     dates: `${start}/${end}`,
     details,
-    location: bookingLocationDisplay(location),
-    ctz: location?.timezone || settings.timezone || "Pacific/Auckland",
+    location: settings.venueName,
+    ctz: settings.timezone || "Pacific/Auckland",
   });
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
@@ -439,10 +404,6 @@ function actionLabels(action: BookingAction) {
 
 function variablesFor(action: BookingAction, appt: any, previous: any, serviceName: string, settings: any) {
   const rescheduleUrl = rescheduleUrlFor(appt, settings);
-  const location = cleanBookingLocationSnapshot(appt.location, {
-    name: settings.venueName,
-    timezone: settings.timezone,
-  });
   return {
     client: appt.client || appt.title,
     firstName: String(appt.client || appt.title || "Client").split(/\s+/)[0] || "Client",
@@ -453,13 +414,7 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
     time: rangeLabel(appt.start, appt.duration),
     previousDate: previous ? slotDateLabel(previous.week, previous.day) : "",
     previousTime: previous ? rangeLabel(previous.start, previous.duration) : "",
-    venue: location?.name || settings.venueName,
-    location: location?.name || settings.venueName,
-    locationShortName: location?.shortName || location?.name || settings.venueName,
-    locationAddress: location?.address || "",
-    mapUrl: location?.mapUrl || "",
-    arrivalInstructions: location?.arrivalInstructions || "",
-    publicNotes: location?.publicNotes || "",
+    venue: settings.venueName,
     phone: appt.phone || "Not supplied",
     email: appt.email || "Not supplied",
     action,

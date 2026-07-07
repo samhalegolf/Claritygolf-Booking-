@@ -2,9 +2,6 @@ node_modules/
 dist/
 source/node_modules/
 source/dist/
-source/.netlify/
-.netlify/
-.DS_Store
 
 .env
 .env.*
