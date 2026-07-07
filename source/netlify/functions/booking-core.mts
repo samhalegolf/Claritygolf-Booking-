@@ -60,6 +60,7 @@ const defaultInvoiceSettings = {
   businessAddress: "",
   headerText: "",
   footerText: "Thank you for training with Sam Hale Golf.",
+  defaultCustomerNote: "Thanks for your work on the lesson programme. Invoice attached below.",
   paymentInstructions:
     "Please pay by bank transfer and use the invoice number as reference.",
   customFields: [],
@@ -706,6 +707,11 @@ function cleanInvoiceSettings(settings = {}) {
     footerText: cleanString(
       settings?.footerText,
       defaultInvoiceSettings.footerText,
+      400,
+    ),
+    defaultCustomerNote: cleanString(
+      settings?.defaultCustomerNote,
+      defaultInvoiceSettings.defaultCustomerNote,
       400,
     ),
     paymentInstructions: cleanString(
@@ -1930,7 +1936,7 @@ function rowToItem(row) {
   const cancelledGroupSession = isCancelledGroupSessionLike(row);
   return {
     id: row.id,
-    accountId: row.account_id || defaultWorkspaceAccountFromCoachAccount().id,
+    accountId: row.accountId || row.account_id || defaultWorkspaceAccountFromCoachAccount().id,
     kind: row.kind,
     week: Number(row.week ?? 0),
     day: Number(row.day ?? 0),
@@ -1957,14 +1963,136 @@ function rowToItem(row) {
 function lessonCompleteActionFailure(error, baseDetails, durationMs) {
   const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
   const code = cleanString(error?.code, "BOOKING_COMPLETE_FAILED", 120);
+  const details = cleanString(error?.details, "", 1200);
+  const hint = cleanString(error?.hint, "", 1200);
   const backendMessage = error instanceof Error ? error.message : String(error?.message || error || "Lesson completion failed.");
   return {
     ...baseDetails,
     httpStatus: status,
     durationMs,
     errorCode: code,
+    backendDetails: details || hint || undefined,
+    backendHint: hint || undefined,
     backendMessage,
   };
+}
+
+function supabaseStorageConfig() {
+  const url = env("SUPABASE_URL").replace(/\/$/, "");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  if (!url || !key) throw new Error("Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_KEY in Netlify.");
+  return { url, key };
+}
+
+async function requestSupabaseRows(table, options = {}) {
+  const { url, key } = supabaseStorageConfig();
+  const {
+    method = "GET",
+    query = "",
+    body,
+    prefer = "",
+  } = options;
+  const response = await fetch(`${url}/rest/v1/${table}${query ? `?${query}` : ""}`, {
+    method,
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      ...(prefer ? { Prefer: prefer } : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const text = await response.text();
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+  if (!response.ok) {
+    const payloadObject = payload && typeof payload === "object" ? payload : {};
+    const payloadCode = cleanString(payloadObject.code, "", 120);
+    const payloadMessage = cleanString(payloadObject.message, "", 400);
+    const payloadDetails = cleanString(payloadObject.details, "", 1200);
+    const payloadHint = cleanString(payloadObject.hint, "", 1200);
+    const fallbackMessage = `${method} ${table} failed ${response.status}: ${String(text || "").slice(0, 500)}`;
+    throw Object.assign(new Error(payloadMessage || fallbackMessage), {
+      status: response.status,
+      code: payloadCode,
+      details: payloadDetails,
+      hint: payloadHint,
+    });
+  }
+  return payload || [];
+}
+
+function isSupabaseColumnMissingError(error, column) {
+  const code = cleanString(error?.code, "", 120).toUpperCase();
+  const message = error instanceof Error ? error.message : "";
+  const details = cleanString(error?.details, "", 1200);
+  const hint = cleanString(error?.hint, "", 1200);
+  const combined = [
+    message,
+    details,
+    hint,
+  ].join(" ");
+  const missingSignal = /does not exist|unknown column|could not find|not found|no such column/i.test(combined);
+  const hasColumnMention = new RegExp(`\\b${column}\\b`, "i").test(combined);
+  return hasColumnMention && (
+    (code === "PGRST204" || code === "PGRST116" || code === "42703") ||
+    missingSignal ||
+    !code
+  );
+}
+
+function isSupabaseAccountScopeMissingError(error) {
+  return isSupabaseColumnMissingError(error, "account_id");
+}
+
+function isSupabaseCompletedAtMissingError(error) {
+  return isSupabaseColumnMissingError(error, "completed_at");
+}
+
+function lessonCompletePatchFilter(itemId, accountId, useAccountScope) {
+  return useAccountScope
+    ? `id=eq.${encodeURIComponent(itemId)}&account_id=eq.${encodeURIComponent(accountId)}&select=*`
+    : `id=eq.${encodeURIComponent(itemId)}&select=*`;
+}
+
+function lessonCompleteReadFilter(itemId, accountId, useAccountScope) {
+  return useAccountScope
+    ? `select=*&id=eq.${encodeURIComponent(itemId)}&account_id=eq.${encodeURIComponent(accountId)}&limit=1`
+    : `select=*&id=eq.${encodeURIComponent(itemId)}&limit=1`;
+}
+
+async function readLessonItemForCompletion(itemId, accountId, useAccountScope = true) {
+  const rows = await requestSupabaseRows("calendar_items", {
+    query: lessonCompleteReadFilter(itemId, accountId, useAccountScope),
+    method: "GET",
+  });
+  return Array.isArray(rows) && rows.length ? rows[0] : null;
+}
+
+async function patchLessonItemComplete(itemId, accountId, completedAt, includeCompletedAt, useAccountScope = true) {
+  const patch = includeCompletedAt
+    ? {
+      status: "completed",
+      completed_at: completedAt,
+      updated_at: completedAt,
+    }
+    : {
+      status: "completed",
+      updated_at: completedAt,
+    };
+
+  return requestSupabaseRows("calendar_items", {
+    method: "PATCH",
+    query: lessonCompletePatchFilter(itemId, accountId, useAccountScope),
+    body: patch,
+    prefer: "return=representation",
+  });
 }
 
 async function completeCalendarItemById(currentState, itemId, requestContext) {
@@ -2026,6 +2154,7 @@ async function completeCalendarItemById(currentState, itemId, requestContext) {
       idempotent: true,
     });
     return {
+      ok: true,
       action: "lesson_complete",
       itemId: cleanItemId,
       item: target,
@@ -2038,31 +2167,102 @@ async function completeCalendarItemById(currentState, itemId, requestContext) {
   }
 
   const completionAt = nowIso();
+  const accountId = cleanString(
+    target.accountId || requestContext.accountId || defaultWorkspaceAccountFromCoachAccount().id,
+    "",
+    140,
+  );
   const updateStarted = Date.now();
-  const client = await db().pool.connect();
+  let rows = [];
+  let usedCompletedAtColumn = true;
+  let usedAccountScope = true;
+  console.info("lesson_complete_update_attempted", {
+    ...baseDetails,
+    itemId: cleanItemId,
+    calendarId: accountId || target.accountId || "",
+    httpStatus: 0,
+    action: "lesson_complete",
+    durationMs: 0,
+  });
+
   try {
-    await client.query("BEGIN");
-    const rows = queryRows(
-      await client.query(
-        `UPDATE calendar_items
-         SET status = $2,
-             completed_at = $3,
-             updated_at = NOW()
-         WHERE id = $1
-           AND account_id = $4
-         RETURNING *`,
-        [cleanItemId, "completed", completionAt, target.accountId || requestContext.accountId || ""],
-      ),
-    );
+    while (!rows.length) {
+      try {
+        rows = queryRows(
+          await patchLessonItemComplete(
+            cleanItemId,
+            accountId,
+            completionAt,
+            usedCompletedAtColumn,
+            usedAccountScope,
+          ),
+        );
+        break;
+      } catch (error) {
+        if (isSupabaseAccountScopeMissingError(error) && usedAccountScope) {
+          usedAccountScope = false;
+          continue;
+        }
+        if (isSupabaseCompletedAtMissingError(error) && usedCompletedAtColumn) {
+          usedCompletedAtColumn = false;
+          continue;
+        }
+        throw error;
+      }
+    }
+    requestTimed.writeMs = Date.now() - updateStarted;
+
     if (!rows.length) {
+      let existing = null;
+      try {
+        existing = await readLessonItemForCompletion(cleanItemId, accountId, usedAccountScope);
+      } catch (error) {
+        if (isSupabaseAccountScopeMissingError(error) && usedAccountScope) {
+          usedAccountScope = false;
+          existing = await readLessonItemForCompletion(cleanItemId, accountId, false);
+        } else {
+          throw error;
+        }
+      }
+      if (existing && existing.status === "completed") {
+        const idempotentItem = rowToItem(existing);
+        const idempotentTimings = {
+          ...requestTimed,
+          totalMs: Date.now() - startedAt,
+        };
+        console.info("lesson_complete_saved", {
+          ...baseDetails,
+          itemId: cleanItemId,
+          calendarId: idempotentItem.accountId || accountId || "",
+          httpStatus: 200,
+          durationMs: idempotentTimings.totalMs,
+          stageTimings: idempotentTimings,
+          idempotent: true,
+          updatedAt: idempotentItem.updatedAt || currentState.updatedAt,
+          usedAccountScope,
+          usedCompletedAtColumn,
+        });
+        return {
+          ok: true,
+          action: "lesson_complete",
+          itemId: cleanItemId,
+          item: idempotentItem,
+          status: "completed",
+          calendarId: idempotentItem.accountId || accountId || "",
+          updatedAt: idempotentItem.updatedAt || currentState.updatedAt,
+          stageTimings: idempotentTimings,
+          usedAccountScope,
+          idempotent: true,
+        };
+      }
+
       throw Object.assign(new Error("Lesson was not found in your workspace."), {
         status: 404,
         code: "BOOKING_COMPLETE_NOT_FOUND",
         ...baseDetails,
       });
     }
-    await client.query("COMMIT");
-    requestTimed.writeMs = Date.now() - updateStarted;
+
     const row = rows[0];
     const item = rowToItem(row);
     const updateSettingStarted = Date.now();
@@ -2075,27 +2275,55 @@ async function completeCalendarItemById(currentState, itemId, requestContext) {
     console.info("lesson_complete_saved", {
       ...baseDetails,
       itemId: cleanItemId,
-      calendarId: item.accountId || "",
+      calendarId: item.accountId || accountId || "",
       httpStatus: 200,
       durationMs: stageTimings.totalMs,
       stageTimings,
       idempotent: false,
       updatedAt: item.updatedAt || currentState.updatedAt,
+      usedAccountScope,
+      usedCompletedAtColumn,
     });
     return {
+      ok: true,
       action: "lesson_complete",
       itemId: cleanItemId,
       item,
       status: "completed",
-      calendarId: item.accountId || "",
+      calendarId: item.accountId || accountId || "",
       updatedAt: item.updatedAt || currentState.updatedAt,
       stageTimings,
+      idempotent: false,
+      usedAccountScope,
+      usedCompletedAtColumn,
     };
   } catch (error) {
-    await client.query("ROLLBACK");
+    const durationMs = Date.now() - startedAt;
+    const errorStatus = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    const errorCode = cleanString(error?.code, "BOOKING_COMPLETE_FAILED", 120);
+    const backendMessage = error instanceof Error ? error.message : String(error || "Lesson completion failed.");
+    const errorDetails = cleanString(error?.details, "", 1200);
+    const errorHint = cleanString(error?.hint, "", 1200);
+    console.error("lesson_complete_failed", {
+      ...baseDetails,
+      httpStatus: errorStatus,
+      durationMs,
+      message: backendMessage,
+      backendMessage,
+      backendDetails: errorDetails || errorHint || undefined,
+      backendHint: errorHint || undefined,
+      itemId: cleanItemId,
+      calendarId: accountId || "",
+      errorCode,
+      usedAccountScope,
+      usedCompletedAtColumn,
+      stageTimings: {
+        ...requestTimed,
+        writeMs: Math.max(1, Date.now() - updateStarted),
+        totalMs: durationMs,
+      },
+    });
     throw error;
-  } finally {
-    client.release();
   }
 }
 
