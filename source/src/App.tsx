@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   Archive,
   ArrowLeft,
   ArrowRight,
@@ -907,6 +908,11 @@ type InvoiceSettings = {
   defaultCustomerNote: string;
   paymentInstructions: string;
   customFields: InvoiceCustomField[];
+  // How insistently the Dashboard should call out unpaid/overdue invoices.
+  // 1 = subtle count only, 2 = highlighted banner, 3 = urgent banner + row
+  // highlighting in Recent Invoices. Purely a display setting - it doesn't
+  // change invoice status, send reminders, or touch any other data.
+  unpaidLoudness: 1 | 2 | 3;
 };
 
 type CoachAccount = {
@@ -1181,6 +1187,7 @@ const defaultInvoiceSettings: InvoiceSettings = {
   defaultCustomerNote: "Thanks for your work on the lesson programme. Invoice attached below.",
   paymentInstructions: "Please pay by bank transfer and use the invoice number as reference.",
   customFields: [],
+  unpaidLoudness: 2,
 };
 
 const defaultServices: Service[] = [
@@ -2147,6 +2154,9 @@ function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): InvoiceSetti
         ? settings.paymentInstructions.trim().slice(0, 400)
         : defaultInvoiceSettings.paymentInstructions,
     customFields,
+    unpaidLoudness: [1, 2, 3].includes(Number(settings?.unpaidLoudness))
+      ? (Number(settings?.unpaidLoudness) as 1 | 2 | 3)
+      : defaultInvoiceSettings.unpaidLoudness,
   };
 }
 
@@ -3155,6 +3165,16 @@ function addDaysInputValue(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
   return dateInputValue(date);
+}
+
+// Whole days between two "YYYY-MM-DD" strings, computed via UTC midnight so
+// it isn't affected by daylight saving or the browser's local time zone.
+function isoDateDiffDays(laterIso: string, earlierIso: string) {
+  const toUtcMillis = (iso: string) => {
+    const [year, month, day] = iso.split("-").map(Number);
+    return Date.UTC(year, (month || 1) - 1, day || 1);
+  };
+  return Math.round((toUtcMillis(laterIso) - toUtcMillis(earlierIso)) / 86400000);
 }
 
 function formatMoney(amount: number, currency = "NZD") {
@@ -10042,6 +10062,27 @@ function App() {
       ? Math.round(((revenueReport.total - revenueReport.previousYearTotal) / revenueReport.previousYearTotal) * 100)
       : null;
 
+  // Unpaid/overdue is derived here rather than trusting invoiceRecord.status
+  // alone: an invoice left as "sent" past its due date is just as overdue as
+  // one someone remembered to flip to "overdue". Draft/paid/void never count.
+  const todayDateValue = dateInputValue();
+  const overdueInvoiceRecords = recentInvoices.filter(
+    (invoiceRecord) =>
+      invoiceRecord.status !== "draft" &&
+      invoiceRecord.status !== "paid" &&
+      invoiceRecord.status !== "void" &&
+      Boolean(invoiceRecord.dueDate) &&
+      (invoiceRecord.dueDate as string) < todayDateValue,
+  );
+  const overdueInvoiceIds = new Set(overdueInvoiceRecords.map((invoiceRecord) => invoiceRecord.id));
+  const overdueTotalOutstanding = overdueInvoiceRecords.reduce(
+    (sum, invoiceRecord) => sum + Math.max(0, invoiceRecord.total - invoiceRecord.amountPaid),
+    0,
+  );
+  const overdueOldestDays = overdueInvoiceRecords.length
+    ? Math.max(...overdueInvoiceRecords.map((invoiceRecord) => isoDateDiffDays(todayDateValue, invoiceRecord.dueDate as string)))
+    : 0;
+
   function addCompletedBookingLine(item: CalendarItem) {
     if (invoicedBookingIds[item.id]) {
       setToast({ message: "This booking has already been invoiced." });
@@ -15126,6 +15167,21 @@ function App() {
 
             {billingSection === "dashboard" && (
               <div className="billing-dashboard">
+                {overdueInvoiceRecords.length > 0 && invoiceSettings.unpaidLoudness >= 2 && (
+                  <article className={`data-card unpaid-banner unpaid-banner-level-${invoiceSettings.unpaidLoudness}`}>
+                    <AlertTriangle size={invoiceSettings.unpaidLoudness === 3 ? 28 : 22} />
+                    <div>
+                      <strong>
+                        {overdueInvoiceRecords.length} unpaid invoice{overdueInvoiceRecords.length === 1 ? "" : "s"} overdue
+                        {invoiceSettings.unpaidLoudness === 3 ? " - follow up now" : ""}
+                      </strong>
+                      <span>
+                        {formatMoney(overdueTotalOutstanding, invoiceSettings.currency)} outstanding - oldest is {overdueOldestDays} day
+                        {overdueOldestDays === 1 ? "" : "s"} overdue
+                      </span>
+                    </div>
+                  </article>
+                )}
                 <article className="data-card revenue-card">
                   <div className="data-card-header">
                     <div>
@@ -15268,7 +15324,12 @@ function App() {
                   <div className="data-card-header">
                     <div>
                       <span>Invoices</span>
-                      <h2>Recent invoices</h2>
+                      <h2>
+                        Recent invoices
+                        {overdueInvoiceRecords.length > 0 && invoiceSettings.unpaidLoudness === 1 && (
+                          <span className="unpaid-count-badge">{overdueInvoiceRecords.length} unpaid</span>
+                        )}
+                      </h2>
                     </div>
                   </div>
                   {billingDataLoadState === "loading" && !recentInvoices.length ? (
@@ -15286,7 +15347,10 @@ function App() {
                       </thead>
                       <tbody>
                         {recentInvoices.map((invoiceRecord) => (
-                          <tr key={invoiceRecord.id}>
+                          <tr
+                            key={invoiceRecord.id}
+                            className={invoiceSettings.unpaidLoudness === 3 && overdueInvoiceIds.has(invoiceRecord.id) ? "overdue-row" : ""}
+                          >
                             <td>{invoiceRecord.invoiceNumber}</td>
                             <td>{invoiceRecord.customerName}</td>
                             <td>{invoiceRecord.issueDate}</td>
@@ -15982,6 +16046,21 @@ function App() {
                       />
                     </label>
                   </div>
+                  <label className="settings-field">
+                    <span>Unpaid invoice loudness</span>
+                    <select
+                      value={invoiceSettings.unpaidLoudness}
+                      onChange={(event) => updateInvoiceSettings("unpaidLoudness", Number(event.target.value) as 1 | 2 | 3)}
+                    >
+                      <option value={1}>Level 1 - Subtle (small count only)</option>
+                      <option value={2}>Level 2 - Noticeable (dashboard banner)</option>
+                      <option value={3}>Level 3 - Urgent (banner + highlighted rows)</option>
+                    </select>
+                    <span className="field-help">
+                      Controls how strongly the Dashboard calls out overdue, unpaid invoices. Doesn't change
+                      invoice status or send anything - display only.
+                    </span>
+                  </label>
                   <label className="settings-field">
                     <span>Default customer note</span>
                     <textarea

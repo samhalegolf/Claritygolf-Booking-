@@ -6682,6 +6682,80 @@ button {
   cursor: pointer;
 }
 
+.unpaid-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-direction: row;
+}
+
+.unpaid-banner > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.unpaid-banner span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.unpaid-banner-level-2 {
+  background: var(--warning-soft, #fff6e0);
+  border: 1px solid var(--warning, #d9a300);
+  color: #7a5c00;
+}
+
+.unpaid-banner-level-2 svg {
+  color: #d9a300;
+}
+
+.unpaid-banner-level-3 {
+  background: var(--danger-soft, #fff1ed);
+  border: 1px solid var(--danger, #b52f1f);
+  color: var(--danger, #b52f1f);
+  animation: unpaid-banner-pulse 2.4s ease-in-out infinite;
+}
+
+.unpaid-banner-level-3 svg {
+  color: var(--danger, #b52f1f);
+}
+
+.unpaid-banner-level-3 span {
+  color: var(--danger, #b52f1f);
+  opacity: 0.85;
+}
+
+@keyframes unpaid-banner-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(181, 47, 31, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(181, 47, 31, 0.12);
+  }
+}
+
+.unpaid-count-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--warning-soft, #fff6e0);
+  color: #7a5c00;
+  font-size: 11px;
+  font-weight: 800;
+  vertical-align: middle;
+}
+
+.overdue-row {
+  background: var(--danger-soft, #fff1ed);
+}
+
+.overdue-row td {
+  color: var(--danger, #b52f1f);
+  font-weight: 600;
+}
+
 @media (max-width: 720px) {
   .revenue-chart {
     height: 90px;
