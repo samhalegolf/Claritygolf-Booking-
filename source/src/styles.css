@@ -6052,3 +6052,293 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Billing: revenue card, ready-to-pull range, recent invoices, catalog list.
+   Added alongside the reports/pull-range build - the rest of the billing
+   section (.billing-dashboard, .data-card, etc.) already existed above. */
+
+.revenue-card {
+  display: grid;
+  gap: 14px;
+}
+
+.revenue-period-toggle {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.revenue-period-toggle button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.revenue-period-toggle button.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.revenue-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 120px;
+  padding-top: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.revenue-chart-bar-track {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.revenue-chart-bar {
+  width: 100%;
+  max-width: 34px;
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  background: var(--primary);
+}
+
+.revenue-chart-bar-track span {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.revenue-comparison {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ready-to-pull-range {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ready-to-pull-range .settings-field {
+  flex: 1;
+  min-width: 120px;
+}
+
+.ready-to-pull-overflow {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.completed-booking-list button.already-invoiced,
+.completed-booking-list button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.completed-booking-list button.already-invoiced em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.recent-invoices-card {
+  overflow-x: auto;
+}
+
+.recent-invoices-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.recent-invoices-table th {
+  text-align: left;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.recent-invoices-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.invoice-status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: capitalize;
+  background: var(--panel-soft, #f2f2f2);
+  color: var(--text);
+}
+
+.invoice-status-paid {
+  background: var(--success-soft, #eaf8ed);
+  color: #1a7431;
+}
+
+.invoice-status-overdue {
+  background: var(--danger-soft, #fff1ed);
+  color: var(--danger, #b52f1f);
+}
+
+.invoice-status-void {
+  text-decoration: line-through;
+}
+
+.billing-catalog-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.billing-catalog-list-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+}
+
+.billing-catalog-list-item.inactive {
+  opacity: 0.55;
+}
+
+.billing-catalog-list-item em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.billing-catalog-list-item > button:first-child {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.text-link-button {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent, #2f6f4e);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.unpaid-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-direction: row;
+}
+
+.unpaid-banner > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.unpaid-banner span {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.unpaid-banner-level-2 {
+  background: var(--warning-soft, #fff6e0);
+  border: 1px solid var(--warning, #d9a300);
+  color: #7a5c00;
+}
+
+.unpaid-banner-level-2 svg {
+  color: #d9a300;
+}
+
+.unpaid-banner-level-3 {
+  background: var(--danger-soft, #fff1ed);
+  border: 1px solid var(--danger, #b52f1f);
+  color: var(--danger, #b52f1f);
+  animation: unpaid-banner-pulse 2.4s ease-in-out infinite;
+}
+
+.unpaid-banner-level-3 svg {
+  color: var(--danger, #b52f1f);
+}
+
+.unpaid-banner-level-3 span {
+  color: var(--danger, #b52f1f);
+  opacity: 0.85;
+}
+
+@keyframes unpaid-banner-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(181, 47, 31, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(181, 47, 31, 0.12);
+  }
+}
+
+.unpaid-count-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--warning-soft, #fff6e0);
+  color: #7a5c00;
+  font-size: 11px;
+  font-weight: 800;
+  vertical-align: middle;
+}
+
+.overdue-row {
+  background: var(--danger-soft, #fff1ed);
+}
+
+.overdue-row td {
+  color: var(--danger, #b52f1f);
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .revenue-chart {
+    height: 90px;
+  }
+
+  .ready-to-pull-range {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
