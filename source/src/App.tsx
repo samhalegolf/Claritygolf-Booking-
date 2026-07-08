@@ -740,6 +740,10 @@ type GoogleCalendarSyncStatus = {
   lastSyncAt: string;
   lastSyncStatus: string;
   lastSyncError: string;
+  cooldownUntil: string;
+  inFlightUntil: string;
+  lastSyncPayloadHash?: string;
+  reason?: string;
   connectedAt: string;
   redirectUri: string;
   scope: string;
@@ -3178,6 +3182,22 @@ function googleSyncTimeLabel(createdAt = "") {
   return Number.isNaN(time.getTime()) ? "Not synced yet" : time.toLocaleString();
 }
 
+function googleCalendarStatusTimestampMs(value: string) {
+  const parsed = Date.parse(value || "");
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function googleCalendarStatusInProgress(at = "") {
+  const parsed = googleCalendarStatusTimestampMs(at);
+  return Number.isFinite(parsed) && parsed > Date.now();
+}
+
+function googleCalendarCooldownLabel(until = "") {
+  const parsed = googleCalendarStatusTimestampMs(until);
+  if (!Number.isFinite(parsed) || parsed <= Date.now()) return "rate limit ended";
+  return googleSyncTimeLabel(until);
+}
+
 function dateInputValue(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -3704,6 +3724,8 @@ const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
   lastSyncAt: "",
   lastSyncStatus: "",
   lastSyncError: "",
+  cooldownUntil: "",
+  inFlightUntil: "",
   connectedAt: "",
   redirectUri: "",
   scope: "",
@@ -4527,6 +4549,10 @@ function App() {
   const invoiceNumber = `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`;
   const billingWorkspaceEnabled = invoiceSettings.enabled && invoiceSettings.showBillingWorkspace && canUseFeature(activeAccount, "invoicing");
   const googleCalendarSyncEnabled = canUseFeature(activeAccount, "googleCalendarSync");
+  const googleCalendarSyncCooldownActive = googleCalendarStatusInProgress(googleCalendar.cooldownUntil);
+  const googleCalendarSyncInFlightActive = googleCalendarStatusInProgress(googleCalendar.inFlightUntil);
+  const googleCalendarSyncBusy =
+    googleCalendarAction !== "idle" || googleCalendarSyncCooldownActive || googleCalendarSyncInFlightActive;
   const hasMissingInvoiceCoachSettings =
     !invoiceSettings.bankAccount.trim() || !invoiceSettings.taxNumber.trim() || !invoiceSettings.businessAddress.trim();
   const activeAccountEntitlements = accountEntitlements(activeAccount);
@@ -4551,10 +4577,36 @@ function App() {
   const hasSavedRescheduleLogin = Boolean(rescheduleForm.email.trim() && rescheduleForm.phone.trim());
   const isEmailLinkReschedule = Boolean(
     bookingMode === "reschedule" &&
-      initialRescheduleLoginRef.current?.appointmentId &&
-      rescheduleForm.email.trim() &&
-      rescheduleForm.phone.trim(),
+    initialRescheduleLoginRef.current?.appointmentId &&
+    rescheduleForm.email.trim() &&
+    rescheduleForm.phone.trim(),
   );
+  const isGoogleCalendarRateLimited = googleCalendar.lastSyncStatus === "rate_limited";
+  const directGoogleSyncStatusLabel = !googleCalendarSyncEnabled
+    ? featureUnavailableMessage("googleCalendarSync")
+    : !googleCalendar.configured
+      ? "Needs OAuth credentials"
+      : !googleCalendar.connected
+        ? "Ready to connect"
+        : isGoogleCalendarRateLimited
+          ? "Rate limited"
+          : googleCalendar.lastSyncStatus === "unchanged"
+            ? "Already synced"
+            : googleCalendar.lastSyncStatus === "failed"
+              ? "Connected, sync failed"
+              : "Connected";
+
+  const directGoogleSyncStatusMessage = !googleCalendarSyncEnabled
+    ? featureUnavailableMessage("googleCalendarSync")
+    : !googleCalendar.configured
+      ? googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify."
+      : !googleCalendar.connected
+        ? googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify."
+        : isGoogleCalendarRateLimited
+          ? `Rate limit reached. Direct sync will retry after ${googleCalendarCooldownLabel(googleCalendar.cooldownUntil).toLowerCase()}.`
+          : googleCalendar.lastSyncError
+            ? `${googleCalendar.lastSyncError}. iCal fallback is still connected.`
+            : `${googleCalendar.accountEmail || "Google account"} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`;
   const showRescheduleLoginPanel = bookingMode === "reschedule" && (forceRescheduleLogin || !isEmailLinkReschedule);
   const bookingLoginUrl = bookingConfirmation
     ? buildRescheduleLink(coachAccount.bookingUrl, {
@@ -5215,7 +5267,15 @@ function App() {
             notificationCount: Array.isArray(data.notifications) ? data.notifications.length : 0,
           },
         });
-        if (data.googleCalendarSync && data.googleCalendarSync.ok === false && data.googleCalendarSync.error) {
+        const googleCalendarSyncErrorReason = String(data.googleCalendarSync?.reason || "");
+        if (
+          data.googleCalendarSync &&
+          data.googleCalendarSync.ok === false &&
+          data.googleCalendarSync.error &&
+          googleCalendarSyncErrorReason !== "rate_limited" &&
+          googleCalendarSyncErrorReason !== "in_flight" &&
+          googleCalendarSyncErrorReason !== "cooldown"
+        ) {
           setToast({ message: `Saved booking calendar, but Google Calendar did not sync: ${data.googleCalendarSync.error}` });
         }
         window.setTimeout(() => {
@@ -11511,6 +11571,8 @@ function App() {
       });
       const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & {
         ok?: boolean;
+        reason?: string;
+        cooldownUntil?: string;
         upserted?: number;
         deleted?: number;
         message?: string;
@@ -11519,8 +11581,28 @@ function App() {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok || data.ok === false) throw new Error(data.message || data.lastSyncError || "Google Calendar sync failed.");
+      if (!response.ok) throw new Error(data.message || data.lastSyncError || "Google Calendar sync failed.");
       applyGoogleCalendarStatus(data);
+      const skipReason = String(data.reason || "");
+      if (skipReason === "in_flight") {
+        setToast({ message: "Google Calendar sync already running." });
+        return;
+      }
+      if (skipReason === "cooldown") {
+        setToast({ message: `Google Calendar sync is waiting for cooldown until ${googleCalendarCooldownLabel(data.cooldownUntil || "").toLowerCase()}.` });
+        return;
+      }
+      if (data.lastSyncStatus === "rate_limited" || skipReason === "rate_limited") {
+        setToast({ message: "Rate limit reached. Direct sync will retry after cooldown." });
+        return;
+      }
+      if (skipReason === "unchanged") {
+        setToast({ message: "Google Calendar is already up to date." });
+        return;
+      }
+      if (data.ok === false) {
+        throw new Error(data.message || data.lastSyncError || "Google Calendar sync failed.");
+      }
       setToast({ message: `Google Calendar synced${typeof data.upserted === "number" ? ` (${data.upserted} upserted, ${data.deleted ?? 0} deleted)` : ""}.` });
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Google Calendar sync failed." });
@@ -18162,26 +18244,23 @@ function App() {
                   <KeyRound size={24} />
                 </div>
 
-                <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
+                  <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
                   <span>Direct Google API</span>
                   <strong>
-                    {!googleCalendarSyncEnabled
-                      ? "Plan feature unavailable"
-                      : !googleCalendar.configured
-                      ? "Needs OAuth credentials"
-                      : googleCalendar.connected
-                        ? googleCalendar.lastSyncStatus === "failed"
-                          ? "Connected, sync failed"
-                          : "Connected"
-                        : "Ready to connect"}
+                    {googleCalendarSyncBusy
+                      ? googleCalendarSyncInFlightActive
+                        ? "Syncing"
+                        : googleCalendarSyncCooldownActive
+                          ? "Rate limited"
+                          : "Sync status pending"
+                      : directGoogleSyncStatusLabel}
                   </strong>
                   <em>
-                    {!googleCalendarSyncEnabled
-                      ? featureUnavailableMessage("googleCalendarSync")
-                      : googleCalendar.lastSyncError ||
-                      (googleCalendar.connected
-                        ? `${googleCalendar.accountEmail || "Google account"} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`
-                        : googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify.")}
+                    {googleCalendarSyncBusy && googleCalendarSyncInFlightActive
+                      ? "A direct sync is already running."
+                      : googleCalendarSyncBusy && googleCalendarSyncCooldownActive
+                        ? "Direct sync is cooling down after rate limit."
+                        : directGoogleSyncStatusMessage}
                   </em>
                 </div>
 
@@ -18230,7 +18309,7 @@ function App() {
                       <>
                         <button
                           className="primary-button"
-                          disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                          disabled={!googleCalendarSyncEnabled || googleCalendarSyncBusy}
                           onClick={syncGoogleCalendarNow}
                           type="button"
                         >

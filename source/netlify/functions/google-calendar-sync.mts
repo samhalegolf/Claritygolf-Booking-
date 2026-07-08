@@ -3,6 +3,8 @@ import { createHash, randomUUID } from "node:crypto";
 
 const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
+const googleCalendarSyncInFlightTtlMs = 60_000;
+const googleCalendarRateLimitCooldownMs = 60_000;
 const googleScopes = [
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/userinfo.email",
@@ -20,6 +22,186 @@ function env(name: string, fallback = "") {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function toIsoDate(value: string) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : "";
+}
+
+function timestampMs(value: string) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function isActiveTimestamp(value: string) {
+  const parsed = timestampMs(value);
+  return Number.isFinite(parsed) && parsed > Date.now();
+}
+
+function parseRetryAfterHeaderValue(value: string | null, now = Date.now()) {
+  if (!value) return toIsoDate(new Date(now + googleCalendarRateLimitCooldownMs).toISOString());
+  const trimmed = value.trim();
+  if (!trimmed) return toIsoDate(new Date(now + googleCalendarRateLimitCooldownMs).toISOString());
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return toIsoDate(new Date(now + seconds * 1000).toISOString());
+  }
+  const parsed = Date.parse(trimmed);
+  if (Number.isFinite(parsed)) return toIsoDate(new Date(parsed).toISOString());
+  return toIsoDate(new Date(now + googleCalendarRateLimitCooldownMs).toISOString());
+}
+
+function stableText(value: unknown, fallback = "") {
+  return typeof value === "string" ? value.slice(0, 200) : fallback;
+}
+
+function normaliseCalendarSyncLocationSnapshot(raw: any) {
+  const value = cleanBookingLocationSnapshot(raw, {});
+  return value
+    ? {
+        locationId: stableText(value.locationId, ""),
+        name: stableText(value.name, ""),
+        shortName: stableText(value.shortName, value.name || ""),
+        address: stableText(value.address, ""),
+        mapUrl: stableText(value.mapUrl, ""),
+        arrivalInstructions: stableText(value.arrivalInstructions, ""),
+        publicNotes: stableText(value.publicNotes, ""),
+        timezone: stableText(value.timezone, ""),
+      }
+    : null;
+}
+
+function normaliseCalendarSyncItem(item: ReturnType<typeof rowToItem>) {
+  return {
+    id: stableText(item.id),
+    kind: item.kind === "block" ? "block" : "appointment",
+    week: Number(item.week ?? 0),
+    day: Number(item.day ?? 0),
+    start: Number(item.start ?? 0),
+    duration: Number(item.duration ?? 0),
+    serviceId: stableText(item.serviceId, ""),
+    coachId: stableText(item.coachId, ""),
+    client: stableText(item.client, ""),
+    title: stableText(item.title, ""),
+    phone: stableText(item.phone, ""),
+    email: stableText(item.email, ""),
+    note: stableText(item.note, ""),
+    location: normaliseCalendarSyncLocationSnapshot(item.location),
+    coach: item.coach ? {
+      id: stableText(item.coach.id, ""),
+      name: stableText(item.coach.name, ""),
+    } : null,
+  };
+}
+
+function normaliseCalendarSyncPayload(value: unknown, fallback = "") {
+  return typeof value === "string"
+    ? value
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .slice(0, 180)
+    : fallback;
+}
+
+function normaliseCalendarSyncLocation(location: any, fallback: any = {}) {
+  return {
+    id: normaliseCalendarSyncPayload(location?.id),
+    name: normaliseCalendarSyncPayload(location?.name),
+    shortName: normaliseCalendarSyncPayload(location?.shortName),
+    address: normaliseCalendarSyncPayload(location?.address),
+    timezone: normaliseCalendarSyncPayload(location?.timezone),
+    isDefault: location?.isDefault === true,
+    archived: location?.archived === true,
+    active: location?.active !== false,
+  };
+}
+
+function normaliseCalendarSyncService(service: any, fallback: any = {}) {
+  return {
+    id: normaliseCalendarSyncPayload(service?.id, fallback.id || ""),
+    name: normaliseCalendarSyncPayload(service?.name, fallback.name || ""),
+    locationId: normaliseCalendarSyncPayload(service?.locationId),
+    lessonNote: normaliseCalendarSyncPayload(service?.lessonNote, fallback.lessonNote || ""),
+    location: normaliseCalendarSyncPayload(service?.location, fallback.location || ""),
+    duration: Number(service?.duration ?? fallback.duration ?? 0),
+    price: Number(service?.price ?? fallback.price ?? 0),
+    active: service?.archived === true ? false : service?.active !== false,
+    archived: service?.archived === true,
+  };
+}
+
+function stableGoogleCalendarSyncPayloadHash(
+  settings: Record<string, string>,
+  items: ReturnType<typeof rowToItem>[],
+  services: any[],
+  locations: any[],
+  calendarId: string,
+) {
+  const account = {
+    businessName: settings.accountBusinessName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
+    venueName: settings.accountVenueName || env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
+    venueShortName: settings.accountVenueShortName || env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
+    timezone: settings.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
+    contactEmail: settings.accountContactEmail || env("CLARITY_CONTACT_EMAIL", ""),
+  };
+  const payload = {
+    calendarId,
+    account: {
+      businessName: account.businessName,
+      venueName: account.venueName,
+      venueShortName: account.venueShortName,
+      timezone: account.timezone,
+      contactEmail: account.contactEmail,
+    },
+    services: (Array.isArray(services) ? services : [])
+      .map((service, index) => normaliseCalendarSyncService(service, defaultServices[index]))
+      .sort((first, second) => first.id.localeCompare(second.id)),
+    locations: (Array.isArray(locations) ? locations : [])
+      .map((location) => normaliseCalendarSyncLocation(location))
+      .sort((first, second) => first.id.localeCompare(second.id)),
+    items: items
+      .map(normaliseCalendarSyncItem)
+      .sort((first, second) => first.id.localeCompare(second.id)),
+  };
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+async function acquireGoogleCalendarSyncLock() {
+  const settings = await readSettings();
+  if (isActiveTimestamp(settings.googleCalendarSyncInFlightUntil || "")) {
+    return {
+      ok: false,
+      reason: "in_flight" as const,
+      inFlightUntil: settings.googleCalendarSyncInFlightUntil || "",
+    };
+  }
+
+  const token = randomUUID();
+  const expires = new Date(Date.now() + googleCalendarSyncInFlightTtlMs).toISOString();
+  await setSettings({
+    googleCalendarSyncInFlightToken: token,
+    googleCalendarSyncInFlightUntil: expires,
+  });
+  const verified = await readSettings();
+  if (verified.googleCalendarSyncInFlightToken !== token || !isActiveTimestamp(verified.googleCalendarSyncInFlightUntil || "")) {
+    return {
+      ok: false,
+      reason: "in_flight" as const,
+      inFlightUntil: verified.googleCalendarSyncInFlightUntil || expires,
+    };
+  }
+  return { ok: true, token, inFlightUntil: expires };
+}
+
+async function releaseGoogleCalendarSyncLock(token: string) {
+  const settings = await readSettings();
+  if (!token || settings.googleCalendarSyncInFlightToken !== token) return;
+  await setSettings({
+    googleCalendarSyncInFlightUntil: "",
+    googleCalendarSyncInFlightToken: "",
+  });
 }
 
 function cleanString(value: unknown, fallback = "", max = 1200) {
@@ -188,6 +370,8 @@ export async function getGoogleCalendarSyncStatus(req?: Request) {
     lastSyncStatus: settings.googleCalendarLastSyncStatus || "",
     lastSyncError: settings.googleCalendarLastSyncError || "",
     connectedAt: settings.googleCalendarConnectedAt || "",
+    cooldownUntil: settings.googleCalendarCooldownUntil || "",
+    inFlightUntil: settings.googleCalendarSyncInFlightUntil || "",
     redirectUri: req ? configuredRedirectUri(req) : config.redirectUri,
     scope: googleScopes.join(" "),
   };
@@ -310,6 +494,9 @@ export async function finishGoogleCalendarOAuth(req: Request) {
     googleCalendarOAuthStartedAt: "",
     googleCalendarLastSyncStatus: "connected",
     googleCalendarLastSyncError: "",
+    googleCalendarCooldownUntil: "",
+    googleCalendarSyncInFlightUntil: "",
+    googleCalendarSyncInFlightToken: "",
   });
   return getGoogleCalendarSyncStatus(req);
 }
@@ -322,6 +509,10 @@ export async function disconnectGoogleCalendar(req?: Request) {
     googleCalendarEventMapJson: "{}",
     googleCalendarLastSyncStatus: "disconnected",
     googleCalendarLastSyncError: "",
+    googleCalendarCooldownUntil: "",
+    googleCalendarSyncInFlightUntil: "",
+    googleCalendarSyncInFlightToken: "",
+    googleCalendarLastSyncPayloadHash: "",
   });
   return getGoogleCalendarSyncStatus(req);
 }
@@ -478,9 +669,11 @@ async function googleCalendarRequest(accessToken: string, path: string, options:
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) {
+    const retryAfter = parseRetryAfterHeaderValue(response.headers.get("Retry-After"));
     throw Object.assign(new Error(data.error?.message || data.error || `Google Calendar request failed ${response.status}`), {
       status: response.status,
       googleError: data,
+      googleRetryAfter: retryAfter,
     });
   }
   return data;
@@ -537,15 +730,60 @@ export async function syncGoogleCalendarNow() {
   const status = await getGoogleCalendarSyncStatus();
   if (!status.configured) return { ...status, ok: false, skipped: true, reason: "google_oauth_not_configured" };
   if (!settings.googleCalendarRefreshToken) return { ...status, ok: false, skipped: true, reason: "google_calendar_not_connected" };
+  if (isActiveTimestamp(settings.googleCalendarCooldownUntil || "")) {
+    return {
+      ...status,
+      ok: true,
+      skipped: true,
+      reason: "cooldown",
+      cooldownUntil: settings.googleCalendarCooldownUntil,
+    };
+  }
+
+  const lock = await acquireGoogleCalendarSyncLock();
+  if (!lock.ok) {
+    return {
+      ...status,
+      ok: true,
+      skipped: true,
+      reason: lock.reason,
+      inFlightUntil: lock.inFlightUntil,
+    };
+  }
+  const lockToken = lock.token;
 
   const calendarId = cleanCalendarId(settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"));
   const previousMap = parseJson<Record<string, string>>(settings.googleCalendarEventMapJson, {});
   const nextMap: Record<string, string> = {};
-  const accessToken = await accessTokenFromRefreshToken(settings.googleCalendarRefreshToken);
+  const payloadHash = stableGoogleCalendarSyncPayloadHash(settings, items, services, locations, calendarId);
+  const previousPayloadHash = settings.googleCalendarLastSyncPayloadHash || "";
+  const payloadSameAsLast = Boolean(previousPayloadHash && previousPayloadHash === payloadHash);
   let upserted = 0;
   let deleted = 0;
 
   try {
+    const accessToken = await accessTokenFromRefreshToken(settings.googleCalendarRefreshToken);
+    if (payloadSameAsLast) {
+      const syncedAt = nowIso();
+      await setSettings({
+        googleCalendarId: calendarId,
+        googleCalendarLastSyncAt: syncedAt,
+        googleCalendarLastSyncStatus: "unchanged",
+        googleCalendarLastSyncError: "",
+        googleCalendarLastSyncPayloadHash: payloadHash,
+        googleCalendarCooldownUntil: "",
+      });
+      return {
+        ...(await getGoogleCalendarSyncStatus()),
+        ok: true,
+        skipped: true,
+        reason: "unchanged",
+        upserted: 0,
+        deleted: 0,
+        syncedAt,
+      };
+    }
+
     for (const item of items) {
       const eventId = previousMap[item.id] || googleEventId(item.id);
       const event = googleEventForItem(item, settings, services, locations, eventId);
@@ -566,6 +804,8 @@ export async function syncGoogleCalendarNow() {
       googleCalendarLastSyncAt: syncedAt,
       googleCalendarLastSyncStatus: "synced",
       googleCalendarLastSyncError: "",
+      googleCalendarLastSyncPayloadHash: payloadHash,
+      googleCalendarCooldownUntil: "",
     });
     return {
       ...(await getGoogleCalendarSyncStatus()),
@@ -577,12 +817,33 @@ export async function syncGoogleCalendarNow() {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Google Calendar sync failed.";
+
+    const googleError = error as Error & { status?: number; googleRetryAfter?: string };
+    if (googleError?.status === 429) {
+      const retryAfter = googleError.googleRetryAfter || parseRetryAfterHeaderValue(null, Date.now());
+      await setSettings({
+        googleCalendarLastSyncAt: nowIso(),
+        googleCalendarLastSyncStatus: "rate_limited",
+        googleCalendarLastSyncError: "Rate limit reached. Direct sync will retry after cooldown.",
+        googleCalendarCooldownUntil: retryAfter,
+      });
+      return {
+        ...(await getGoogleCalendarSyncStatus()),
+        ok: true,
+        skipped: true,
+        reason: "rate_limited",
+        cooldownUntil: retryAfter,
+      };
+    }
+
     await setSettings({
       googleCalendarLastSyncAt: nowIso(),
       googleCalendarLastSyncStatus: "failed",
       googleCalendarLastSyncError: message,
     });
     throw error;
+  } finally {
+    await releaseGoogleCalendarSyncLock(lockToken);
   }
 }
 
