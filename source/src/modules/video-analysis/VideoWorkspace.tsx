@@ -17,6 +17,7 @@ import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
 import { Toolbar } from "./components/Toolbar";
 import { VideoCanvas } from "./components/VideoCanvas";
+import { IconPlay, IconPause, IconUpload } from "./components/VideoIcons";
 import {
   ComparisonSide,
   ComparisonWorkspaceState,
@@ -1170,11 +1171,6 @@ export function VideoWorkspace({
     onCancel: cancelFocusSelectionOrTool,
   });
 
-  const playbackButtonText = (side: ComparisonSide) => {
-    const playback = side === "left" ? leftPlayback : rightPlayback;
-    return playback.isPlaying ? "Pause" : "Play";
-  };
-
   const renderVideoCard = (
     side: ComparisonSide,
     metadataReady: boolean,
@@ -1224,13 +1220,17 @@ export function VideoWorkspace({
             <div className="comparison-video-actions">
               <button
                 type="button"
-                className="upload-button"
+                className="video-tool-btn"
+                aria-label={`Upload ${sideTitle.toLowerCase()} clip`}
                 onClick={(event) => {
                   event.stopPropagation();
                   openUpload(side);
                 }}
               >
-                Upload {sideTitle.toLowerCase()} clip
+                <IconUpload />
+                <span className="video-tool-tip" aria-hidden="true">
+                  Upload {sideTitle.toLowerCase()} clip
+                </span>
               </button>
             </div>
           </div>
@@ -1260,13 +1260,17 @@ export function VideoWorkspace({
           <div className="comparison-video-actions">
             <button
               type="button"
-              className="upload-button"
+              className="video-tool-btn"
+              aria-label={playback.isPlaying ? "Pause" : "Play"}
               onClick={(event) => {
                 event.stopPropagation();
                 playPauseSide(side);
               }}
             >
-              {playbackButtonText(side)}
+              {playback.isPlaying ? <IconPause /> : <IconPlay />}
+              <span className="video-tool-tip" aria-hidden="true">
+                {playback.isPlaying ? "Pause" : "Play"}
+              </span>
             </button>
             <button
               type="button"

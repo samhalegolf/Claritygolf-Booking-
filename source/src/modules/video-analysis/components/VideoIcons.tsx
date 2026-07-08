@@ -107,6 +107,26 @@ export const IconFocusArea = ({ className }: IconProps) => (
   </Svg>
 );
 
+export const IconPlay = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M9 6.5v11l8-5.5-8-5.5z" fill="currentColor" />
+  </Svg>
+);
+
+export const IconPause = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M9 6.5v11M15 6.5v11" />
+  </Svg>
+);
+
+export const IconUpload = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M12 15V5" />
+    <path d="M8 9l4-4 4 4" />
+    <path d="M5 15v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3" />
+  </Svg>
+);
+
 export const IconFocusTrackBeta = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M5 9V6h3" />
