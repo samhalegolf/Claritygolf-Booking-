@@ -875,3 +875,47 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Back / Clear subtle toolbar buttons (ported) */
+.video-tool-btn.is-subtle {
+  opacity: 0.84;
+}
+
+.video-tool-btn.is-subtle:disabled {
+  opacity: 0.34;
+  box-shadow: none;
+}
+
+/* Drag-to-trash target over the video overlay (ported) */
+.video-trash-target {
+  position: absolute;
+  border: 1px solid rgba(255, 173, 112, 0.22);
+  border-radius: 10px;
+  background: linear-gradient(
+    130deg,
+    rgba(54, 30, 20, 0.74),
+    rgba(58, 26, 10, 0.4)
+  );
+  color: rgba(255, 196, 140, 0.78);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.92);
+  transition: opacity 140ms ease, transform 140ms ease, border-color 140ms ease,
+    color 140ms ease, box-shadow 140ms ease;
+}
+
+.video-trash-target.is-active {
+  opacity: 0.96;
+  transform: scale(1);
+  color: rgba(255, 214, 170, 0.95);
+  border-color: rgba(255, 131, 76, 0.62);
+  box-shadow: 0 0 0 1px rgba(255, 131, 76, 0.28), 0 8px 16px rgba(34, 13, 1, 0.42);
+}
+
+.video-trash-target svg {
+  width: 16px;
+  height: 16px;
+}

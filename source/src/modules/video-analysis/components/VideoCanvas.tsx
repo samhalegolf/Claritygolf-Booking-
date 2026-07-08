@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { DrawingObject } from "../models/Drawing";
 import { Dimensions } from "../engines/DrawingEngine";
 import { DrawingPoint } from "../models/Drawing";
@@ -10,6 +10,8 @@ export interface VideoCanvasProps {
   objects: DrawingObject[];
   draftObject: DrawingObject | null;
   selectedObjectId: string | null;
+  draggedObjectId?: string | null;
+  onTrashDrop?: (objectId: string) => boolean;
   onPointerDown: (point: DrawingPoint) => void;
   onPointerMove: (point: DrawingPoint) => void;
   onPointerUp: (point: DrawingPoint) => void;
@@ -34,6 +36,9 @@ const toScreen = (point: DrawingPoint, dimensions: Dimensions) => ({
 const HANDLE_VISUAL_RADIUS = 5.4;
 const HANDLE_PICK_RADIUS = 11;
 const SELECT_OUTLINE = 3;
+const TRASH_ZONE_SIZE = 34;
+const TRASH_ZONE_MARGIN = 10;
+const TRASH_HIT_PADDING = 18;
 
 const HandlePoint = ({
   point,
@@ -70,6 +75,8 @@ export function VideoCanvas({
   objects,
   draftObject,
   selectedObjectId,
+  draggedObjectId,
+  onTrashDrop,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -80,6 +87,21 @@ export function VideoCanvas({
   const overlayRef = useRef<HTMLDivElement>(null);
   const dimensionsRef = useRef(overlayDimensions);
   dimensionsRef.current = overlayDimensions;
+  const [isTrashHovered, setIsTrashHovered] = useState(false);
+  const isTrashDropEnabled = !!draggedObjectId;
+
+  const trashTarget = {
+    size: TRASH_ZONE_SIZE,
+    x: Math.max(TRASH_ZONE_MARGIN, overlayDimensions.width - TRASH_ZONE_SIZE - TRASH_ZONE_MARGIN),
+    y: Math.max(TRASH_ZONE_MARGIN, overlayDimensions.height - TRASH_ZONE_SIZE - TRASH_ZONE_MARGIN),
+  };
+
+  const isPointOverTrash = (point: { x: number; y: number }) => {
+    const centerX = trashTarget.x + trashTarget.size / 2;
+    const centerY = trashTarget.y + trashTarget.size / 2;
+    const hitRadius = TRASH_ZONE_SIZE / 2 + TRASH_HIT_PADDING;
+    return Math.hypot(point.x - centerX, point.y - centerY) <= hitRadius;
+  };
 
   const measure = useCallback(() => {
     const element = overlayRef.current;
@@ -122,15 +144,43 @@ export function VideoCanvas({
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    onPointerMove({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+    const point = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+    onPointerMove(point);
+    if (isTrashDropEnabled) {
+      const isOverTrash = isPointOverTrash(point);
+      setIsTrashHovered(isOverTrash);
+    } else if (isTrashHovered) {
+      setIsTrashHovered(false);
+    }
     event.preventDefault();
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    onPointerUp({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+    const point = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+    if (isTrashDropEnabled && draggedObjectId && onTrashDrop && isPointOverTrash(point)) {
+      const wasDeleted = onTrashDrop(draggedObjectId);
+      if (wasDeleted) {
+        setIsTrashHovered(false);
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        event.preventDefault();
+        return;
+      }
+    }
+    onPointerUp(point);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (isTrashHovered) {
+      setIsTrashHovered(false);
     }
     event.preventDefault();
   };
@@ -336,6 +386,43 @@ export function VideoCanvas({
             );
           })}
         </svg>
+        {isTrashDropEnabled ? (
+          <div
+            className={`video-trash-target ${isTrashHovered ? "is-active" : ""}`}
+            style={{
+              width: `${trashTarget.size}px`,
+              height: `${trashTarget.size}px`,
+              left: `${trashTarget.x}px`,
+              top: `${trashTarget.y}px`,
+            }}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path
+                d="M4 6.5h12M7 6.5V5.5c0-.7.5-1.2 1.1-1.2h1.8c.6 0 1.1.5 1.1 1.2v1M8 6.5V17m4-10.5V17M11 6.5V17"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M6.4 6.5 6.8 17m6.4-10.5 0.4 10.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                opacity="0.6"
+              />
+              <path
+                d="M6.5 5.5h7M8.4 2.8h3.2"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </div>
+        ) : null}
       </div>
     </div>
   );

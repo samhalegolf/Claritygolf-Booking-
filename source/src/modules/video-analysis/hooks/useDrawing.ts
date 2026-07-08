@@ -37,6 +37,11 @@ export interface UseDrawingResult extends UseDrawingState {
   pointerUp: (cursor: DrawingPoint) => void;
   cancel: () => void;
   deleteSelected: () => void;
+  deleteByIds: (objectIds: string[]) => void;
+  clearAll: () => void;
+  isDrawingActionActive: boolean;
+  isObjectDragging: boolean;
+  draggingObjectId: string | null;
   selectObject: (objectId: string | null) => void;
   undo: () => void;
   redo: () => void;
@@ -96,6 +101,15 @@ export function useDrawing({
   const setSyncedObjects = (next: DrawingObject[]) => {
     syncedRef.current = JSON.stringify(next);
   };
+
+  const isDrawingActionActive = !!(
+    (editMode === "create" || editMode === "edit") &&
+    draftObject
+  );
+  const draggingObjectId =
+    editMode === "edit" && interaction?.hasMoved && interaction.objectId
+      ? interaction.objectId
+      : null;
 
   const commit = useCallback(
     (next: DrawingObject[]) => {
@@ -261,12 +275,29 @@ export function useDrawing({
     setSelectedTool("select");
   }, []);
 
+  const deleteByIds = useCallback(
+    (objectIds: string[]) => {
+      if (!objectIds.length) return;
+      const objectIdSet = new Set(objectIds);
+      const nextObjects = objects.filter((entry) => !objectIdSet.has(entry.id));
+      if (nextObjects.length === objects.length) return;
+      if (selectedObjectId && objectIdSet.has(selectedObjectId)) {
+        setSelectedObjectId(null);
+      }
+      commit(nextObjects);
+    },
+    [commit, objects, selectedObjectId]
+  );
+
   const deleteSelected = useCallback(() => {
     if (!selectedObjectId) return;
-    const nextObjects = objects.filter((entry) => entry.id !== selectedObjectId);
-    setSelectedObjectId(null);
-    commit(nextObjects);
-  }, [commit, objects, selectedObjectId]);
+    deleteByIds([selectedObjectId]);
+  }, [deleteByIds, selectedObjectId]);
+
+  const clearAll = useCallback(() => {
+    if (!objects.length) return;
+    deleteByIds(objects.map((entry) => entry.id));
+  }, [deleteByIds, objects]);
 
   const nudgeSelected = useCallback(
     (direction: -1 | 1, axis: "x" | "y", shift: boolean, heldFrames = 1) => {
@@ -317,6 +348,7 @@ export function useDrawing({
   }, [onChange]);
 
   const allObjects = [...objects];
+  const isObjectDragging = !!draggingObjectId;
   if (draftObject && editMode === "create" && !selectedObjectId) {
     allObjects.push(draftObject);
   }
@@ -344,6 +376,11 @@ export function useDrawing({
     pointerMove,
     pointerUp,
     cancel,
+    deleteByIds,
+    clearAll,
+    isDrawingActionActive,
+    isObjectDragging,
+    draggingObjectId,
     deleteSelected,
     selectObject,
     undo,

@@ -883,6 +883,75 @@ export function VideoWorkspace({
     setFocusSelectionDraft(null);
   }, []);
 
+  const isBackAvailableThroughHistory =
+    typeof window !== "undefined" && window.history.length > 1;
+
+  // Back priority: cancel active draw/edit -> cancel focus selection -> close
+  // focus palette -> close focus window -> compare back to single -> browser
+  // history fallback.
+  const handleBackAction = useCallback(() => {
+    if (activeDrawing.isDrawingActionActive) {
+      activeDrawing.cancel();
+      return;
+    }
+    if (focusSelectionMode) {
+      clearFocusSelection();
+      return;
+    }
+    if (focusPaletteOpen) {
+      setFocusPaletteOpen(false);
+      return;
+    }
+    if (showFocusWindow) {
+      setShowFocusWindow(false);
+      return;
+    }
+    if (comparisonMode === "compare") {
+      updateMode("single");
+      return;
+    }
+    if (isBackAvailableThroughHistory) {
+      window.history.back();
+    }
+  }, [
+    activeDrawing,
+    comparisonMode,
+    focusPaletteOpen,
+    showFocusWindow,
+    focusSelectionMode,
+    isBackAvailableThroughHistory,
+    clearFocusSelection,
+    updateMode,
+  ]);
+
+  const canGoBack =
+    activeDrawing.isDrawingActionActive ||
+    Boolean(focusSelectionMode) ||
+    focusPaletteOpen ||
+    showFocusWindow ||
+    comparisonMode === "compare" ||
+    isBackAvailableThroughHistory;
+  const clearDrawingLabel = activeDrawing.selectedObjectId
+    ? "Clear selected"
+    : "Clear drawings on this side";
+  const clearDrawingTooltip = clearDrawingLabel;
+  const canClearDrawings = activeDrawing.objects.length > 0;
+
+  const clearActiveDrawing = useCallback(() => {
+    if (activeDrawing.selectedObjectId) {
+      activeDrawing.deleteSelected();
+      return;
+    }
+    if (!activeDrawing.objects.length) {
+      return;
+    }
+    const message = `Clear ${activeDrawing.objects.length} drawings on this side? This can be undone.`;
+    if (!window.confirm(message)) {
+      return;
+    }
+    activeDrawing.clearAll();
+  }, [activeDrawing]);
+
   const resetFocusWindowHover = useCallback(
     (side: ComparisonSide, isHovering: boolean) => {
       if (isHovering) {
@@ -1112,14 +1181,6 @@ export function VideoWorkspace({
     setActiveSideInCompare(focusWindowSide);
   }, [clearFocusSelection, focusWindowSide, setActiveSideInCompare]);
 
-  const cancelFocusSelectionOrTool = useCallback(() => {
-    if (focusSelectionMode === "area") {
-      clearFocusSelection();
-    }
-    leftDrawing.setTool("select");
-    rightDrawing.setTool("select");
-  }, [focusSelectionMode, clearFocusSelection, leftDrawing, rightDrawing]);
-
   useEffect(() => {
     if (!modeIsCompare) {
       clearFocusSelection();
@@ -1168,7 +1229,7 @@ export function VideoWorkspace({
       activeDrawing.nudgeSelected(direction, axis, shift, heldFrames);
     },
     drawingLayerHasFocus: isDrawingKeyboardFocus,
-    onCancel: cancelFocusSelectionOrTool,
+    onCancel: handleBackAction,
   });
 
   const renderVideoCard = (
@@ -1302,6 +1363,15 @@ export function VideoWorkspace({
             objects={drawingState.objects}
             draftObject={drawingState.draftObject}
             selectedObjectId={drawingState.selectedObjectId}
+            draggedObjectId={drawingState.isObjectDragging ? drawingState.draggingObjectId : null}
+            onTrashDrop={(objectId) => {
+              if (!drawingState.draggingObjectId || drawingState.draggingObjectId !== objectId) {
+                return false;
+              }
+              drawingState.cancel();
+              drawingState.deleteByIds([objectId]);
+              return true;
+            }}
             onPointerDown={(point) => {
               handleCanvasPointerDown(side, point);
             }}
@@ -1376,6 +1446,12 @@ export function VideoWorkspace({
           linkedPlayback={linkedPlayback}
           onSyncPlayheads={syncPlayheads}
           syncPlayheadsEnabled={Boolean(playerVideoLeft && playerVideoRight)}
+          onBack={handleBackAction}
+          canGoBack={canGoBack}
+          onClearDrawings={clearActiveDrawing}
+          canClearDrawings={canClearDrawings}
+          clearDrawingLabel={clearDrawingLabel}
+          clearDrawingTooltip={clearDrawingTooltip}
         />
         <button
           type="button"

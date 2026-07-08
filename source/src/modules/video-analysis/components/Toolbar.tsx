@@ -2,6 +2,7 @@ import React from "react";
 import { DrawingTool } from "../models/Drawing";
 import { ToolButton } from "./ToolButton";
 import {
+  IconBack,
   IconFocus,
   IconLinked,
   IconModeCompare,
@@ -12,6 +13,7 @@ import {
   IconToolLine,
   IconToolPen,
   IconToolSelect,
+  IconTrash,
 } from "./VideoIcons";
 
 const iconForTool = (tool: DrawingTool): React.ReactNode => {
@@ -40,6 +42,12 @@ interface ToolbarProps {
   linkedPlayback: boolean;
   onSyncPlayheads: () => void;
   syncPlayheadsEnabled: boolean;
+  onBack: () => void;
+  canGoBack: boolean;
+  onClearDrawings: () => void;
+  canClearDrawings: boolean;
+  clearDrawingLabel: string;
+  clearDrawingTooltip: string;
 }
 
 export function Toolbar({
@@ -53,11 +61,33 @@ export function Toolbar({
   linkedPlayback,
   onSyncPlayheads,
   syncPlayheadsEnabled,
+  onBack,
+  canGoBack,
+  onClearDrawings,
+  canClearDrawings,
+  clearDrawingLabel,
+  clearDrawingTooltip,
 }: ToolbarProps) {
   const uniqueTools = ["select", "line", "circle", "pen", ...(showAngleTool ? ["angle"] : [])] as DrawingTool[];
 
   return (
     <div className="video-toolbar-group">
+      <ToolButton
+        icon={<IconBack />}
+        label="Back"
+        tooltip="Back"
+        className="is-subtle"
+        disabled={!canGoBack}
+        onClick={onBack}
+      />
+      <ToolButton
+        icon={<IconTrash />}
+        label={clearDrawingLabel}
+        tooltip={clearDrawingTooltip}
+        className="is-subtle"
+        disabled={!canClearDrawings}
+        onClick={onClearDrawings}
+      />
       <ToolButton
         icon={<IconModeSingle />}
         label="Single"

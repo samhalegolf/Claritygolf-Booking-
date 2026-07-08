@@ -127,6 +127,22 @@ export const IconUpload = ({ className }: IconProps) => (
   </Svg>
 );
 
+export const IconBack = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M10 6 4 12l6 6" />
+    <path d="M5 12h15" />
+  </Svg>
+);
+
+export const IconTrash = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M8 8h8" />
+    <path d="M10 8V6h4v2" />
+    <path d="M9 10l.6 8h4.8l.6-8" />
+    <path d="M11 12v4M13 12v4" />
+  </Svg>
+);
+
 export const IconFocusTrackBeta = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M5 9V6h3" />
