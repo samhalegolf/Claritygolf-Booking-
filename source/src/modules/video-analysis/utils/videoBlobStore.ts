@@ -22,6 +22,9 @@ export interface VideoBlobStore {
   putVideo(slotKey: string, video: PlayerVideo, blob: Blob): Promise<void>;
   getVideo(slotKey: string): Promise<StoredVideo | null>;
   removeVideo(slotKey: string): Promise<void>;
+  // Lightweight metadata for every stored video (no blob), used to derive which
+  // players have footage and to feed recent-activity views.
+  listVideoMeta(): Promise<PlayerVideo[]>;
 }
 
 export const buildVideoSlotKey = (
@@ -89,6 +92,14 @@ export const createIndexedDbVideoStore = (): VideoBlobStore | null => {
     },
     async removeVideo(slotKey) {
       await runRequest("readwrite", (store) => store.delete(slotKey));
+    },
+    async listVideoMeta() {
+      const records = await runRequest<StoredVideo[]>("readonly", (store) =>
+        store.getAll()
+      );
+      return (records || [])
+        .filter((record) => record && record.video)
+        .map((record) => record.video);
     },
   };
 };

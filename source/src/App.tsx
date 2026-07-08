@@ -39,11 +39,24 @@ import {
   Trash2,
   Upload,
   User,
+  Users,
   Video,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VideoAnalysisPage } from "./modules/video-analysis";
+import {
+  createIndexedDbVideoStore,
+  type VideoBlobStore,
+} from "./modules/video-analysis/utils/videoBlobStore";
+import type { PlayerVideo } from "./modules/video-analysis/models/Video";
+import {
+  loadPlayerProfilesState,
+  addManualPlayer,
+  stampNotesUpdate,
+  type PlayerProfilesLocalState,
+} from "./modules/player-profiles/playerProfilesStore";
+import "./modules/player-profiles/playerProfiles.css";
 import type {
   ChangeEvent,
   CSSProperties,
@@ -500,7 +513,7 @@ type Toast = {
   undo?: () => void;
 };
 
-type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video";
+type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video" | "players";
 type BillingSection = "none" | "dashboard" | "new-invoice" | "expenses" | "reports" | "settings";
 type SettingsTab =
   | "none"
@@ -1592,9 +1605,28 @@ function sectionTitle(view: View) {
       return "Settings";
     case "video":
       return "Video Analysis";
+    case "players":
+      return "Player Profiles";
     default:
       return "Calendar";
   }
+}
+
+function formatActivityTime(iso: string): string {
+  const time = Date.parse(iso);
+  if (!Number.isFinite(time)) return "";
+  const diffMs = Date.now() - time;
+  const diffMin = Math.round(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.round(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return new Date(time).toLocaleDateString("en-NZ", {
+    day: "numeric",
+    month: "short",
+  });
 }
 
 function getInitialView(): View {
@@ -3802,6 +3834,46 @@ function App() {
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
   const [videoContext, setVideoContext] = useState<{ playerId: string; playerName: string } | null>(null);
+  const [playerProfilesLocal, setPlayerProfilesLocal] = useState<PlayerProfilesLocalState>(() => ({
+    manualIds: [],
+    notesStamps: {},
+    createdStamps: {},
+  }));
+  const [storedVideoMeta, setStoredVideoMeta] = useState<PlayerVideo[]>([]);
+  const [showPlayerAddDialog, setShowPlayerAddDialog] = useState(false);
+  const [playerAddSearch, setPlayerAddSearch] = useState("");
+  const [playerAddNew, setPlayerAddNew] = useState({ name: "", email: "", phone: "" });
+  const [playerAddSaving, setPlayerAddSaving] = useState(false);
+  const videoStoreRef = useRef<VideoBlobStore | null>(null);
+  if (videoStoreRef.current === null) {
+    videoStoreRef.current = createIndexedDbVideoStore();
+  }
+
+  useEffect(() => {
+    setPlayerProfilesLocal(loadPlayerProfilesState());
+  }, []);
+
+  const refreshStoredVideoMeta = useCallback(() => {
+    const store = videoStoreRef.current;
+    if (!store) return;
+    void store
+      .listVideoMeta()
+      .then((meta) => setStoredVideoMeta(meta))
+      .catch(() => {
+        // Ignore; an empty list simply hides video-derived profiles/activity.
+      });
+  }, []);
+
+  useEffect(() => {
+    refreshStoredVideoMeta();
+  }, [refreshStoredVideoMeta]);
+
+  // Refresh video-derived data whenever the Player Profiles view opens, so
+  // uploads made during this session show up without a reload.
+  useEffect(() => {
+    if (activeView === "players") refreshStoredVideoMeta();
+  }, [activeView, refreshStoredVideoMeta]);
+
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
   const [billingSection, setBillingSection] = useState<BillingSection>("dashboard");
   const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
@@ -6340,6 +6412,97 @@ function App() {
     return clients.filter((client) => clientMatchesSearchTerm(client, clientSearchTerm));
   }, [clientSearchTerm, clients]);
 
+  // ----- Player Profiles derivations -----
+  const videoPlayerIds = useMemo(() => {
+    const ids = new Set<string>();
+    storedVideoMeta.forEach((video) => {
+      if (video.playerId) ids.add(video.playerId);
+    });
+    return ids;
+  }, [storedVideoMeta]);
+
+  // A client becomes a player profile when they have notes, a stored video, or
+  // were manually added.
+  const playerProfiles = useMemo(() => {
+    const manual = new Set(playerProfilesLocal.manualIds);
+    return clients.filter(
+      (client) =>
+        safeText(client.notes).trim().length > 0 ||
+        videoPlayerIds.has(client.id) ||
+        manual.has(client.id),
+    );
+  }, [clients, playerProfilesLocal.manualIds, videoPlayerIds]);
+
+  const recentPlayerActivity = useMemo(() => {
+    type ActivityEntry = {
+      key: string;
+      time: number;
+      iso: string;
+      kind: "video" | "notes" | "booking" | "profile";
+      title: string;
+      subtitle: string;
+    };
+    const entries: ActivityEntry[] = [];
+    const nameById = new Map(clients.map((client) => [client.id, client.name]));
+
+    storedVideoMeta.forEach((video) => {
+      const time = Date.parse(video.createdAt || "");
+      if (!Number.isFinite(time)) return;
+      const who = nameById.get(video.playerId) || video.playerId;
+      entries.push({
+        key: `video-${video.id}`,
+        time,
+        iso: video.createdAt,
+        kind: "video",
+        title: "Video added",
+        subtitle: video.title ? `${who} · ${video.title}` : who,
+      });
+    });
+
+    Object.entries(playerProfilesLocal.notesStamps).forEach(([id, iso]) => {
+      const time = Date.parse(iso);
+      if (!Number.isFinite(time)) return;
+      entries.push({
+        key: `notes-${id}`,
+        time,
+        iso,
+        kind: "notes",
+        title: "Notes updated",
+        subtitle: nameById.get(id) || id,
+      });
+    });
+
+    Object.entries(playerProfilesLocal.createdStamps).forEach(([id, iso]) => {
+      const time = Date.parse(iso);
+      if (!Number.isFinite(time)) return;
+      entries.push({
+        key: `profile-${id}`,
+        time,
+        iso,
+        kind: "profile",
+        title: "Player profile added",
+        subtitle: nameById.get(id) || id,
+      });
+    });
+
+    accountItems
+      .filter((item) => item.kind === "appointment" && item.updatedAt)
+      .forEach((item) => {
+        const time = Date.parse(item.updatedAt || "");
+        if (!Number.isFinite(time)) return;
+        entries.push({
+          key: `booking-${item.id}`,
+          time,
+          iso: item.updatedAt || "",
+          kind: "booking",
+          title: "Booking activity",
+          subtitle: item.client || item.title || "Appointment",
+        });
+      });
+
+    return entries.sort((a, b) => b.time - a.time).slice(0, 12);
+  }, [accountItems, clients, storedVideoMeta, playerProfilesLocal]);
+
   const quickClientInput = {
     name: quickClientSearch,
     email: quickCreate?.email ?? "",
@@ -8247,6 +8410,60 @@ function App() {
     setActiveView("video");
     setQuickCreate(null);
     closeCalendarDetails();
+  }
+
+  function openPlayerAddDialog() {
+    setPlayerAddSearch("");
+    setPlayerAddNew({ name: "", email: "", phone: "" });
+    setShowPlayerAddDialog(true);
+  }
+
+  function promoteExistingPlayer(client: { id: string; name: string }) {
+    setPlayerProfilesLocal((current) => addManualPlayer(current, client.id));
+    setShowPlayerAddDialog(false);
+    setToast({ message: `${client.name} added to player profiles.` });
+  }
+
+  async function createNewPlayer() {
+    const name = playerAddNew.name.trim();
+    const email = playerAddNew.email.trim();
+    if (!name && !email) {
+      setToast({ message: "A player needs a name or email." });
+      return;
+    }
+    setPlayerAddSaving(true);
+    try {
+      const response = await fetch("/api/people", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          person: {
+            name,
+            email,
+            phone: playerAddNew.phone.trim(),
+            notes: "",
+            caddyProfileUrl: "",
+          },
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not add player."));
+      const result = (await response.json()) as PeopleUpdateResult;
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
+      const newId = result.person?.id;
+      if (newId) {
+        setPlayerProfilesLocal((current) => addManualPlayer(current, newId));
+      }
+      setShowPlayerAddDialog(false);
+      setToast({ message: name ? `${name} added to player profiles.` : "Player added." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not add player." });
+    } finally {
+      setPlayerAddSaving(false);
+    }
   }
 
   function openInvoiceCoachSettings() {
@@ -11831,6 +12048,12 @@ function App() {
       const result = (await response.json()) as PeopleUpdateResult;
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       if (result.person?.id) setSelectedClientId(result.person.id);
+      // Stamp a device-local timestamp so notes changes surface in the Player
+      // Profiles activity feed (person records carry no notes-updated time).
+      if (result.person?.id && clientEditor.notes.trim().length > 0) {
+        const savedId = result.person.id;
+        setPlayerProfilesLocal((current) => stampNotesUpdate(current, savedId));
+      }
       setIsAddingClient(false);
       setClientEditMode(false);
       setClientSaveState("saved");
@@ -14542,9 +14765,9 @@ function App() {
             <User size={18} />
             Clients
           </button>
-          <button className={activeView === "video" ? "active" : ""} onClick={() => switchView("video")}>
-            <Video size={18} />
-            Video
+          <button className={activeView === "players" ? "active" : ""} onClick={() => switchView("players")}>
+            <Users size={18} />
+            Player Profiles
           </button>
           {billingWorkspaceEnabled && (
             <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
@@ -15583,6 +15806,192 @@ function App() {
               )}
             </div>
           </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "players" && (
+          <section className="module-page player-profiles-page">
+            <div className="player-profiles-toolbar">
+              <div className="player-profiles-heading">
+                <h2>Player Profiles</h2>
+                <p>Clients with notes or video, plus anyone you add.</p>
+              </div>
+              <div className="player-profiles-actions">
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={openPlayerAddDialog}
+                  title="Add player"
+                  aria-label="Add player"
+                >
+                  <Plus size={18} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => switchView("video")}
+                  title="Open video analysis"
+                  aria-label="Open video analysis"
+                >
+                  <Video size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="player-profiles-layout">
+              <div className="player-profiles-list">
+                {playerProfiles.length === 0 ? (
+                  <div className="player-profiles-empty">
+                    <h2>No player profiles yet</h2>
+                    <p>Add notes or a video to a client, or use + to add one.</p>
+                  </div>
+                ) : (
+                  playerProfiles.map((player) => (
+                    <article
+                      key={player.id}
+                      className="player-profile-card"
+                      onClick={() => openClientProfile(player)}
+                    >
+                      <div className="player-profile-avatar">
+                        <User size={18} />
+                      </div>
+                      <div className="player-profile-body">
+                        <h3>{player.name}</h3>
+                        <span>{player.email || player.phone || "No contact yet"}</span>
+                        <div className="player-profile-tags">
+                          {videoPlayerIds.has(player.id) && (
+                            <span className="tag">
+                              <Video size={12} /> Video
+                            </span>
+                          )}
+                          {safeText(player.notes).trim().length > 0 && (
+                            <span className="tag">Notes</span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        title="Open video analysis"
+                        aria-label={`Open video analysis for ${player.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openVideoAnalysisForClient({ id: player.id, name: player.name });
+                        }}
+                      >
+                        <Video size={16} />
+                      </button>
+                    </article>
+                  ))
+                )}
+              </div>
+
+              <aside className="player-activity">
+                <h3>Recent activity</h3>
+                {recentPlayerActivity.length === 0 ? (
+                  <p className="player-activity-empty">No recent activity yet.</p>
+                ) : (
+                  <ul>
+                    {recentPlayerActivity.map((entry) => (
+                      <li key={entry.key} className={`activity-${entry.kind}`}>
+                        <span className="activity-dot" />
+                        <div className="activity-body">
+                          <span className="activity-title">{entry.title}</span>
+                          <span className="activity-sub">{entry.subtitle}</span>
+                        </div>
+                        <span className="activity-time">{formatActivityTime(entry.iso)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </aside>
+            </div>
+          </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && showPlayerAddDialog && (
+          <div
+            className="player-add-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add player profile"
+            onClick={() => setShowPlayerAddDialog(false)}
+          >
+            <div className="player-add-dialog" onClick={(event) => event.stopPropagation()}>
+              <div className="player-add-header">
+                <h3>Add player profile</h3>
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => setShowPlayerAddDialog(false)}
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="player-add-section">
+                <label>Add an existing client</label>
+                <input
+                  value={playerAddSearch}
+                  onChange={(event) => setPlayerAddSearch(event.target.value)}
+                  placeholder="Search clients"
+                />
+                <div className="player-add-results">
+                  {playerAddSearch.trim().length > 0 &&
+                    clients
+                      .filter((client) => clientMatchesSearchTerm(client, playerAddSearch.trim()))
+                      .slice(0, 6)
+                      .map((client) => (
+                        <button
+                          type="button"
+                          key={client.id}
+                          className="player-add-result"
+                          onClick={() =>
+                            promoteExistingPlayer({ id: client.id, name: client.name })
+                          }
+                        >
+                          <span>{client.name}</span>
+                          <span className="muted">{client.email || client.phone}</span>
+                        </button>
+                      ))}
+                </div>
+              </div>
+
+              <div className="player-add-divider">or add someone new</div>
+
+              <div className="player-add-section">
+                <input
+                  value={playerAddNew.name}
+                  onChange={(event) =>
+                    setPlayerAddNew((current) => ({ ...current, name: event.target.value }))
+                  }
+                  placeholder="Name"
+                />
+                <input
+                  value={playerAddNew.email}
+                  onChange={(event) =>
+                    setPlayerAddNew((current) => ({ ...current, email: event.target.value }))
+                  }
+                  placeholder="Email"
+                />
+                <input
+                  value={playerAddNew.phone}
+                  onChange={(event) =>
+                    setPlayerAddNew((current) => ({ ...current, phone: event.target.value }))
+                  }
+                  placeholder="Phone"
+                />
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={playerAddSaving}
+                  onClick={createNewPlayer}
+                >
+                  {playerAddSaving ? "Adding…" : "Add new player"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "video" && (
