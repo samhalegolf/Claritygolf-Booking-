@@ -3201,6 +3201,100 @@ function isoDateDiffDays(laterIso: string, earlierIso: string) {
   return Math.round((toUtcMillis(laterIso) - toUtcMillis(earlierIso)) / 86400000);
 }
 
+// --- Bank CSV import (expenses) ---------------------------------------------
+// Self-contained parser, deliberately similar to csv-import-enhancer.ts's
+// client-import parser (quote-aware, handles escaped "" quotes, mixed line
+// endings, BOM) - that script isn't a module and can't be imported into this
+// component, so the same logic is reimplemented here rather than shared.
+
+type ExpenseCsvField = "" | "date" | "description" | "debit" | "credit" | "reference";
+
+function guessExpenseCsvDelimiter(text: string) {
+  const sample = text.split(/\r?\n/).slice(0, 8).join("\n");
+  return (
+    [",", "\t", ";"]
+      .map((delimiter) => ({ delimiter, count: [...sample].filter((char) => char === delimiter).length }))
+      .sort((a, b) => b.count - a.count)[0]?.delimiter || ","
+  );
+}
+
+function parseExpenseCsv(text: string): string[][] {
+  const delimiter = guessExpenseCsvDelimiter(text);
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  const input = text.replace(/^﻿/, "");
+
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+    const next = input[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      cell += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === delimiter && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(cell.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
+}
+
+// Bank column names vary a lot; this only needs to get close, since the
+// mapping UI always lets the user correct it before anything imports.
+function inferExpenseCsvField(header: string): ExpenseCsvField {
+  const key = header.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!key) return "";
+  if (key.includes("date")) return "date";
+  if (key.includes("debit")) return "debit";
+  if (key.includes("credit")) return "credit";
+  if (key.includes("reference") || key === "uniqueid" || key === "id") return "reference";
+  if (key.includes("payee") || key.includes("description") || key.includes("memo") || key.includes("particulars") || key.includes("narrative") || key.includes("details")) {
+    return "description";
+  }
+  if (key === "amount") return "debit";
+  return "";
+}
+
+// NZ bank exports are typically dd/mm/yyyy. ISO strings pass through
+// untouched; anything unrecognised returns "" so the row is flagged invalid
+// rather than silently imported with a wrong date.
+function parseExpenseCsvDate(value: string): string {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const dmy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (dmy) {
+    const [, day, month, year] = dmy;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? "" : dateInputValue(parsed);
+}
+
+// Strips currency symbols/thousands separators; treats parenthesised values
+// as negative (some exports show debits that way) but always returns a
+// positive magnitude, since the caller already knows this is the debit
+// (money-out) column - the sign convention lives in which column was picked,
+// not in the value itself.
+function parseExpenseCsvAmount(value: string): number {
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  const numeric = Number(trimmed.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(numeric) ? Math.abs(numeric) : 0;
+}
+
 function formatMoney(amount: number, currency = "NZD") {
   return new Intl.NumberFormat("en-NZ", {
     style: "currency",
@@ -3782,6 +3876,20 @@ function App() {
     note: string;
   }>({ id: "", description: "", vendor: "", amount: 0, expenseDate: dateInputValue(), categoryId: "", note: "" });
   const [expenseSaveState, setExpenseSaveState] = useState<"idle" | "saving">("idle");
+  const [expenseImportFileName, setExpenseImportFileName] = useState("");
+  const [expenseImportHasHeader, setExpenseImportHasHeader] = useState(true);
+  const [expenseImportHeaders, setExpenseImportHeaders] = useState<string[]>([]);
+  const [expenseImportRows, setExpenseImportRows] = useState<string[][]>([]);
+  const [expenseImportMapping, setExpenseImportMapping] = useState<Record<number, ExpenseCsvField>>({});
+  const [expenseImportExcluded, setExpenseImportExcluded] = useState<Record<number, boolean>>({});
+  const [expenseImportCategoryId, setExpenseImportCategoryId] = useState("");
+  const [expenseImportState, setExpenseImportState] = useState<"idle" | "importing">("idle");
+  const [expenseImportResult, setExpenseImportResult] = useState<{
+    imported: number;
+    duplicate: number;
+    skipped: number;
+    failed: number;
+  } | null>(null);
   const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, string>>({});
   // Ready to Pull date range. Empty string on either side means "no bound" -
   // i.e. defaults to showing everything, same as before this filter existed.
@@ -10170,6 +10278,33 @@ function App() {
   const activeExpenses = expenses.filter((expense) => !expense.voided);
   const expenseTotalForRange = activeExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
+  const expenseImportMappingByField = useMemo(() => {
+    const map: Partial<Record<ExpenseCsvField, number>> = {};
+    Object.entries(expenseImportMapping).forEach(([colIndex, field]) => {
+      if (field) map[field] = Number(colIndex);
+    });
+    return map;
+  }, [expenseImportMapping]);
+
+  const expenseImportCandidates = useMemo(() => {
+    const cell = (row: string[], field: ExpenseCsvField) => {
+      const colIndex = expenseImportMappingByField[field];
+      return colIndex === undefined ? "" : (row[colIndex] || "").trim();
+    };
+    return expenseImportRows.map((row, index) => {
+      const date = parseExpenseCsvDate(cell(row, "date"));
+      const description = cell(row, "description");
+      const amount = parseExpenseCsvAmount(cell(row, "debit"));
+      const reference = cell(row, "reference");
+      return { index, date, description, amount, reference, valid: Boolean(date) && Boolean(description) && amount > 0 };
+    });
+  }, [expenseImportRows, expenseImportMappingByField]);
+
+  const expenseImportSelectedCandidates = expenseImportCandidates.filter(
+    (candidate) => candidate.valid && !expenseImportExcluded[candidate.index],
+  );
+  const expenseImportSelectedTotal = expenseImportSelectedCandidates.reduce((sum, candidate) => sum + candidate.amount, 0);
+
   function addCompletedBookingLine(item: CalendarItem) {
     if (invoicedBookingIds[item.id]) {
       setToast({ message: "This booking has already been invoiced." });
@@ -10405,6 +10540,80 @@ function App() {
 
   function resetExpenseDraft() {
     setExpenseDraft({ id: "", description: "", vendor: "", amount: 0, expenseDate: dateInputValue(), categoryId: "", note: "" });
+  }
+
+  async function handleExpenseCsvFile(file: File) {
+    const text = await file.text();
+    const parsedRows = parseExpenseCsv(text);
+    if (!parsedRows.length) {
+      setToast({ message: "That file doesn't look like a CSV." });
+      return;
+    }
+    const headers = expenseImportHasHeader ? parsedRows[0] : parsedRows[0].map((_, index) => `Column ${index + 1}`);
+    const bodyRows = expenseImportHasHeader ? parsedRows.slice(1) : parsedRows;
+    const mapping: Record<number, ExpenseCsvField> = {};
+    headers.forEach((header, index) => {
+      mapping[index] = expenseImportHasHeader ? inferExpenseCsvField(header) : "";
+    });
+    setExpenseImportFileName(file.name);
+    setExpenseImportHeaders(headers);
+    setExpenseImportRows(bodyRows);
+    setExpenseImportMapping(mapping);
+    setExpenseImportExcluded({});
+    setExpenseImportResult(null);
+  }
+
+  function resetExpenseCsvImport() {
+    setExpenseImportFileName("");
+    setExpenseImportHeaders([]);
+    setExpenseImportRows([]);
+    setExpenseImportMapping({});
+    setExpenseImportExcluded({});
+    setExpenseImportResult(null);
+  }
+
+  async function submitExpenseCsvImport() {
+    const rows = expenseImportSelectedCandidates.map((candidate) => ({
+      description: candidate.description,
+      amount: candidate.amount,
+      expenseDate: candidate.date,
+      categoryId: expenseImportCategoryId || undefined,
+      reference: candidate.reference || undefined,
+    }));
+    if (!rows.length) {
+      setToast({ message: "No valid rows to import - check your column mapping." });
+      return;
+    }
+    setExpenseImportState("importing");
+    try {
+      const response = await fetch("/api/billing/expenses/import", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ expenses: rows }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not import expenses."));
+      const data = (await response.json()) as { imported: number; duplicate: number; skipped: number; failed: number };
+      setExpenseImportResult(data);
+      setToast({
+        message: `${data.imported} imported, ${data.duplicate} already imported${data.failed ? `, ${data.failed} failed` : ""}.`,
+      });
+      await fetchExpenses();
+      if (data.imported > 0) {
+        setExpenseImportHeaders([]);
+        setExpenseImportRows([]);
+        setExpenseImportFileName("");
+      }
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not import expenses." });
+    } finally {
+      setExpenseImportState("idle");
+    }
   }
 
   async function saveExpenseDraft() {
@@ -16183,6 +16392,144 @@ function App() {
 
             {billingSection === "expenses" && (
               <div className="billing-dashboard">
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Bank export</span>
+                      <h2>Import from bank CSV</h2>
+                    </div>
+                    <Upload size={24} />
+                  </div>
+                  <p className="field-help">
+                    Export transactions from your bank and upload the CSV here. Nothing imports until you confirm
+                    the column mapping below - re-uploading the same file, or an export with overlapping dates,
+                    automatically skips transactions already imported.
+                  </p>
+                  <div className="csv-import-uploader">
+                    <label className="outline-button">
+                      <Upload size={16} />
+                      Choose CSV file
+                      <input
+                        type="file"
+                        accept=".csv,text/csv,text/plain"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = "";
+                          if (file) void handleExpenseCsvFile(file);
+                        }}
+                      />
+                    </label>
+                    <span>{expenseImportFileName || "No file chosen"}</span>
+                    <label className="csv-import-header-toggle">
+                      <input
+                        type="checkbox"
+                        checked={expenseImportHasHeader}
+                        onChange={(event) => {
+                          setExpenseImportHasHeader(event.target.checked);
+                          if (expenseImportFileName) resetExpenseCsvImport();
+                        }}
+                      />
+                      First row is a header
+                    </label>
+                  </div>
+
+                  {expenseImportHeaders.length > 0 && (
+                    <>
+                      <div className="csv-import-mapping-grid">
+                        {expenseImportHeaders.map((header, index) => (
+                          <label key={index} className="settings-field">
+                            <span>{header || `Column ${index + 1}`}</span>
+                            <select
+                              value={expenseImportMapping[index] || ""}
+                              onChange={(event) =>
+                                setExpenseImportMapping((current) => ({ ...current, [index]: event.target.value as ExpenseCsvField }))
+                              }
+                            >
+                              <option value="">Ignore</option>
+                              <option value="date">Date</option>
+                              <option value="description">Description / Payee</option>
+                              <option value="debit">Amount out (debit)</option>
+                              <option value="credit">Amount in (credit)</option>
+                              <option value="reference">Reference / Unique ID</option>
+                            </select>
+                            <em>{expenseImportRows.slice(0, 2).map((row) => row[index]).filter(Boolean).join(" / ") || "No sample"}</em>
+                          </label>
+                        ))}
+                      </div>
+
+                      <div className="service-form-row">
+                        <label className="settings-field">
+                          <span>Apply category to all imported rows</span>
+                          <select value={expenseImportCategoryId} onChange={(event) => setExpenseImportCategoryId(event.target.value)}>
+                            <option value="">Uncategorised</option>
+                            {expenseCategories
+                              .filter((category) => category.active)
+                              .map((category) => (
+                                <option key={category.id} value={category.id}>
+                                  {category.name}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      <p className="field-help">
+                        {expenseImportSelectedCandidates.length} of {expenseImportCandidates.length} rows will import
+                        ({formatMoney(expenseImportSelectedTotal, invoiceSettings.currency)}). Rows without a valid date,
+                        description, or amount-out are skipped automatically; use the checkboxes below to exclude any others.
+                      </p>
+
+                      <div className="csv-import-preview">
+                        {expenseImportCandidates.slice(0, 20).map((candidate) => (
+                          <label
+                            key={candidate.index}
+                            className={`csv-import-preview-row${candidate.valid ? "" : " invalid"}`}
+                          >
+                            <input
+                              type="checkbox"
+                              disabled={!candidate.valid}
+                              checked={candidate.valid && !expenseImportExcluded[candidate.index]}
+                              onChange={(event) =>
+                                setExpenseImportExcluded((current) => ({ ...current, [candidate.index]: !event.target.checked }))
+                              }
+                            />
+                            <span>{candidate.date || "Invalid date"}</span>
+                            <span>{candidate.description || "Missing description"}</span>
+                            <span>{candidate.valid ? formatMoney(candidate.amount, invoiceSettings.currency) : "-"}</span>
+                          </label>
+                        ))}
+                        {expenseImportCandidates.length > 20 && (
+                          <p className="field-help">...and {expenseImportCandidates.length - 20} more rows.</p>
+                        )}
+                      </div>
+
+                      <div className="invoice-actions">
+                        <button
+                          className="primary-button"
+                          disabled={expenseImportState === "importing" || !expenseImportSelectedCandidates.length}
+                          onClick={submitExpenseCsvImport}
+                          type="button"
+                        >
+                          {expenseImportState === "importing"
+                            ? "Importing..."
+                            : `Import ${expenseImportSelectedCandidates.length} transaction${expenseImportSelectedCandidates.length === 1 ? "" : "s"}`}
+                        </button>
+                        <button className="outline-button" onClick={resetExpenseCsvImport} type="button">
+                          Cancel
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {expenseImportResult && (
+                    <p className="field-help">
+                      Last import: {expenseImportResult.imported} added, {expenseImportResult.duplicate} already imported
+                      {expenseImportResult.skipped ? `, ${expenseImportResult.skipped} skipped` : ""}
+                      {expenseImportResult.failed ? `, ${expenseImportResult.failed} failed` : ""}.
+                    </p>
+                  )}
+                </article>
+
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>

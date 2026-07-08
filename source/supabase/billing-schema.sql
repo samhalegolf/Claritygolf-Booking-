@@ -155,9 +155,19 @@ create table if not exists public.billing_expenses (
   expense_date date not null default current_date,
   note text,
   voided boolean not null default false,
+  -- Set only by bank-CSV import: either the bank's own transaction
+  -- reference (when the export has one) or a hash of date+description+
+  -- amount. Lets re-importing the same file, or an export with an
+  -- overlapping date range, skip rows it's already seen instead of
+  -- double-counting them. Manually-logged expenses leave this null.
+  external_ref text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create unique index if not exists idx_billing_expenses_account_external_ref
+  on public.billing_expenses (account_id, external_ref)
+  where external_ref is not null and btrim(external_ref) <> '';
 
 create index if not exists idx_billing_expenses_account_date
   on public.billing_expenses (account_id, expense_date desc);

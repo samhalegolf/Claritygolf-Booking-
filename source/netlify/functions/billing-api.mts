@@ -381,6 +381,7 @@ function expenseRowToApi(row: Record<string, unknown>) {
     categoryName: row.category_name_snapshot || "",
     note: row.note || "",
     voided: row.voided === true,
+    imported: Boolean(row.external_ref),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -434,6 +435,67 @@ async function updateExpense(accountId: string, id: string, body: Record<string,
   });
   if (!rows.length) throw Object.assign(new Error("Expense not found."), { status: 404 });
   return { expense: expenseRowToApi(rows[0]) };
+}
+
+// Bulk import from a bank CSV. Each row is inserted individually (not one
+// batch call) specifically so one bad or duplicate row can't sink the whole
+// file - every row gets its own outcome, and the caller sees exactly which
+// ones landed, which were duplicates, and which failed and why.
+//
+// Dedup key: the bank's own transaction reference when the import supplies
+// one, otherwise a hash of account+date+description+amount. Re-uploading the
+// same file, or a new export whose date range overlaps a previous one, will
+// therefore skip rows already imported instead of double-counting spend.
+function expenseExternalRef(accountId: string, reference: unknown, expenseDate: string, description: string, amount: number) {
+  const cleanReference = cleanString(reference, "", 200);
+  if (cleanReference) return `bank:${cleanReference}`;
+  const digest = createHash("sha256").update(`${accountId}|${expenseDate}|${description}|${amount.toFixed(2)}`).digest("hex");
+  return `hash:${digest}`;
+}
+
+async function importExpenses(accountId: string, body: Record<string, unknown>) {
+  const rawRows = Array.isArray(body?.expenses) ? (body.expenses as Record<string, unknown>[]) : [];
+  const result = {
+    imported: 0,
+    duplicate: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [] as Array<{ index: number; message: string }>,
+  };
+
+  for (let index = 0; index < rawRows.length; index += 1) {
+    const raw = rawRows[index] || {};
+    const clean = cleanExpensePayload(raw);
+    if (!clean.description || clean.amount <= 0) {
+      result.skipped += 1;
+      continue;
+    }
+    try {
+      const categorySnapshot = await resolveExpenseCategorySnapshot(accountId, raw?.categoryId);
+      const row = {
+        id: randomUUID(),
+        account_id: accountId,
+        ...categorySnapshot,
+        ...clean,
+        voided: false,
+        external_ref: expenseExternalRef(accountId, raw?.reference, clean.expense_date, clean.description, clean.amount),
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      };
+      await supabase("billing_expenses", { method: "POST", body: [row], prefer: "return=minimal" });
+      result.imported += 1;
+    } catch (error) {
+      const status = (error as { supabaseStatus?: number })?.supabaseStatus;
+      if (status === 409) {
+        result.duplicate += 1;
+      } else {
+        result.failed += 1;
+        result.errors.push({ index, message: error instanceof Error ? error.message : "Unknown error" });
+      }
+    }
+  }
+
+  return result;
 }
 
 // --- Invoices ----------------------------------------------------------------
@@ -862,6 +924,7 @@ export default async function handler(req: Request) {
 
     if (action === "expenses" && req.method === "GET") return json(await listExpenses(accountId, url));
     if (action === "expenses" && req.method === "POST") return json(await createExpense(accountId, await parseBody(req)), 201);
+    if (action === "expenses/import" && req.method === "POST") return json(await importExpenses(accountId, await parseBody(req)));
     if (action.startsWith("expenses/") && (req.method === "PUT" || req.method === "PATCH")) {
       return json(await updateExpense(accountId, action.slice("expenses/".length), await parseBody(req)));
     }
