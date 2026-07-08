@@ -19,17 +19,20 @@ export function ToolButton({
   tooltip,
   disabled,
 }: ToolButtonProps) {
+  const hoverText = tooltip || label;
   return (
     <button
       className={`video-tool-btn ${active ? "active" : ""} ${className}`.trim()}
       onClick={onClick}
-      title={tooltip || label}
       aria-label={label}
       type="button"
       disabled={disabled}
       style={disabled ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
     >
       {icon}
+      <span className="video-tool-tip" role="tooltip" aria-hidden="true">
+        {hoverText}
+      </span>
     </button>
   );
 }

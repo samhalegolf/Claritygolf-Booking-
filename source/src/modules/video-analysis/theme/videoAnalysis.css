@@ -52,6 +52,7 @@
 }
 
 .video-tool-btn {
+  position: relative;
   width: 34px;
   height: 34px;
   border-radius: 9px;
@@ -73,6 +74,32 @@
   width: 17px;
   height: 17px;
   opacity: 0.96;
+}
+
+/* Hover text label */
+.video-tool-tip {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(6, 16, 10, 0.94);
+  border: 1px solid rgba(119, 255, 224, 0.28);
+  color: #f2fff8;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease, transform 140ms ease;
+  z-index: 40;
+}
+
+.video-tool-btn:hover .video-tool-tip,
+.video-tool-btn:focus-visible .video-tool-tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .video-tool-btn:hover {

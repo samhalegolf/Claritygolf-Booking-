@@ -1,5 +1,6 @@
 import React from "react";
 import { ToolButton } from "./ToolButton";
+import { IconFocusArea, IconFocusTrackBeta } from "./VideoIcons";
 
 interface FocusPaletteProps {
   onSelectArea: () => void;
@@ -15,7 +16,7 @@ export function FocusPalette({
   return (
     <div className="focus-palette">
       <ToolButton
-        icon={<span aria-hidden="true" style={{ fontSize: 14 }}>◯</span>}
+        icon={<IconFocusArea />}
         label="Area Focus"
         tooltip="Area Focus"
         onClick={() => {
@@ -26,7 +27,7 @@ export function FocusPalette({
       <ToolButton
         icon={(
           <span className="focus-beta-icon" aria-hidden="true">
-            <span style={{ fontSize: 14 }}>⎈</span>
+            <IconFocusTrackBeta />
             <span className="focus-beta-mark" aria-hidden="true">
               β
             </span>
