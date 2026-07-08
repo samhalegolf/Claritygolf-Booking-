@@ -273,6 +273,169 @@ async function updateDiscount(accountId: string, id: string, body: Record<string
   return { discount: discountRowToApi(rows[0]) };
 }
 
+// --- Expense categories -------------------------------------------------------
+// Presets only, same shape/pattern as discounts above (name + active). Not
+// used anywhere else in billing - deactivating one just hides it from the
+// picker, it never touches historical billing_expenses rows.
+
+function cleanExpenseCategoryPayload(raw: Record<string, unknown>) {
+  return {
+    name: cleanString(raw?.name, "", 140),
+    active: raw?.active !== false,
+  };
+}
+
+function expenseCategoryRowToApi(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    name: row.name,
+    active: row.active !== false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function listExpenseCategories(accountId: string) {
+  const rows = await supabase("billing_expense_categories", {
+    query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=active.desc,name.asc`,
+  });
+  return { categories: rows.map(expenseCategoryRowToApi) };
+}
+
+async function createExpenseCategory(accountId: string, body: Record<string, unknown>) {
+  const clean = cleanExpenseCategoryPayload(body);
+  if (!clean.name) throw Object.assign(new Error("Category name is required."), { status: 400 });
+  const row = { id: randomUUID(), account_id: accountId, ...clean, created_at: nowIso(), updated_at: nowIso() };
+  try {
+    await supabase("billing_expense_categories", { method: "POST", body: [row], prefer: "return=minimal" });
+  } catch (error) {
+    const status = (error as { supabaseStatus?: number })?.supabaseStatus;
+    if (status === 409) {
+      throw Object.assign(new Error(`A category named "${clean.name}" already exists.`), { status: 409, code: "CATEGORY_NAME_CONFLICT" });
+    }
+    throw error;
+  }
+  return { category: expenseCategoryRowToApi(row) };
+}
+
+async function updateExpenseCategory(accountId: string, id: string, body: Record<string, unknown>) {
+  const clean = cleanExpenseCategoryPayload(body);
+  if (!clean.name) throw Object.assign(new Error("Category name is required."), { status: 400 });
+  const patch = { ...clean, updated_at: nowIso() };
+  let rows;
+  try {
+    rows = await supabase("billing_expense_categories", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+      body: patch,
+      prefer: "return=representation",
+    });
+  } catch (error) {
+    const status = (error as { supabaseStatus?: number })?.supabaseStatus;
+    if (status === 409) {
+      throw Object.assign(new Error(`A category named "${clean.name}" already exists.`), { status: 409, code: "CATEGORY_NAME_CONFLICT" });
+    }
+    throw error;
+  }
+  if (!rows.length) throw Object.assign(new Error("Category not found."), { status: 404 });
+  return { category: expenseCategoryRowToApi(rows[0]) };
+}
+
+// --- Expenses ------------------------------------------------------------------
+// Simple outgoing-spend tracking: what the coach paid for, when, and roughly
+// why. Deliberately not linked to invoices/bookings (this isn't cost-of-goods
+// against a specific sale) and never hard-deleted - "voided" hides a mistaken
+// entry from totals while keeping the record for the audit trail.
+
+async function resolveExpenseCategorySnapshot(accountId: string, categoryId: unknown) {
+  const id = cleanString(categoryId, "", 200);
+  if (!id) return { category_id: null, category_name_snapshot: null };
+  const rows = await supabase("billing_expense_categories", {
+    query: `select=id,name&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+  });
+  if (!rows.length) throw Object.assign(new Error("Expense category not found."), { status: 400 });
+  return { category_id: rows[0].id, category_name_snapshot: rows[0].name };
+}
+
+function cleanExpensePayload(raw: Record<string, unknown>) {
+  const expenseDate = cleanString(raw?.expenseDate, "", 10);
+  return {
+    description: cleanString(raw?.description, "", 200),
+    vendor: cleanString(raw?.vendor, "", 140) || null,
+    amount: round2(cleanNumber(raw?.amount, 0, { min: 0 })),
+    currency: cleanString(raw?.currency, "NZD", 8).toUpperCase(),
+    expense_date: /^\d{4}-\d{2}-\d{2}$/.test(expenseDate) ? expenseDate : nowIso().slice(0, 10),
+    note: cleanString(raw?.note, "", 600) || null,
+  };
+}
+
+function expenseRowToApi(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    description: row.description,
+    vendor: row.vendor || "",
+    amount: Number(row.amount) || 0,
+    currency: row.currency,
+    expenseDate: row.expense_date,
+    categoryId: row.category_id || "",
+    categoryName: row.category_name_snapshot || "",
+    note: row.note || "",
+    voided: row.voided === true,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function listExpenses(accountId: string, url: URL) {
+  const from = cleanString(url.searchParams.get("from"), "", 10);
+  const to = cleanString(url.searchParams.get("to"), "", 10);
+  const filters = [`account_id=eq.${encodeFilter(accountId)}`];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(from)) filters.push(`expense_date=gte.${encodeFilter(from)}`);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(to)) filters.push(`expense_date=lte.${encodeFilter(to)}`);
+  const rows = await supabase("billing_expenses", {
+    query: `select=*&${filters.join("&")}&order=expense_date.desc,created_at.desc&limit=200`,
+  });
+  return { expenses: rows.map(expenseRowToApi) };
+}
+
+async function createExpense(accountId: string, body: Record<string, unknown>) {
+  const clean = cleanExpensePayload(body);
+  if (!clean.description) throw Object.assign(new Error("Expense description is required."), { status: 400 });
+  const categorySnapshot = await resolveExpenseCategorySnapshot(accountId, body?.categoryId);
+  const row = {
+    id: randomUUID(),
+    account_id: accountId,
+    ...categorySnapshot,
+    ...clean,
+    voided: false,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  await supabase("billing_expenses", { method: "POST", body: [row], prefer: "return=minimal" });
+  return { expense: expenseRowToApi(row) };
+}
+
+async function updateExpense(accountId: string, id: string, body: Record<string, unknown>) {
+  const clean = cleanExpensePayload(body);
+  if (!clean.description) throw Object.assign(new Error("Expense description is required."), { status: 400 });
+  const categorySnapshot =
+    body?.categoryId === undefined ? {} : await resolveExpenseCategorySnapshot(accountId, body.categoryId);
+  const patch: Record<string, unknown> = {
+    ...clean,
+    ...categorySnapshot,
+    updated_at: nowIso(),
+  };
+  if (typeof body?.voided === "boolean") patch.voided = body.voided;
+  const rows = await supabase("billing_expenses", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: patch,
+    prefer: "return=representation",
+  });
+  if (!rows.length) throw Object.assign(new Error("Expense not found."), { status: 404 });
+  return { expense: expenseRowToApi(rows[0]) };
+}
+
 // --- Invoices ----------------------------------------------------------------
 
 type InvoiceItemInput = {
@@ -687,6 +850,20 @@ export default async function handler(req: Request) {
     if (action === "discounts" && req.method === "POST") return json(await createDiscount(accountId, await parseBody(req)));
     if (action.startsWith("discounts/") && (req.method === "PUT" || req.method === "PATCH")) {
       return json(await updateDiscount(accountId, action.slice("discounts/".length), await parseBody(req)));
+    }
+
+    if (action === "expense-categories" && req.method === "GET") return json(await listExpenseCategories(accountId));
+    if (action === "expense-categories" && req.method === "POST") {
+      return json(await createExpenseCategory(accountId, await parseBody(req)));
+    }
+    if (action.startsWith("expense-categories/") && (req.method === "PUT" || req.method === "PATCH")) {
+      return json(await updateExpenseCategory(accountId, action.slice("expense-categories/".length), await parseBody(req)));
+    }
+
+    if (action === "expenses" && req.method === "GET") return json(await listExpenses(accountId, url));
+    if (action === "expenses" && req.method === "POST") return json(await createExpense(accountId, await parseBody(req)), 201);
+    if (action.startsWith("expenses/") && (req.method === "PUT" || req.method === "PATCH")) {
+      return json(await updateExpense(accountId, action.slice("expenses/".length), await parseBody(req)));
     }
 
     if (action === "invoices" && req.method === "GET") return json(await listInvoices(accountId, url));

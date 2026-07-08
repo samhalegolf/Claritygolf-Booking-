@@ -6771,6 +6771,18 @@ button {
   font-weight: 600;
 }
 
+.voided-row td {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.expense-vendor {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
 @media (max-width: 720px) {
   .revenue-chart {
     height: 90px;

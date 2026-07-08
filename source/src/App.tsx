@@ -28,6 +28,7 @@ import {
   Phone,
   Plus,
   Pencil,
+  Receipt,
   RefreshCw,
   ScissorsLineDashed,
   Search,
@@ -498,7 +499,7 @@ type Toast = {
 };
 
 type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings";
-type BillingSection = "none" | "dashboard" | "new-invoice" | "reports" | "settings";
+type BillingSection = "none" | "dashboard" | "new-invoice" | "expenses" | "reports" | "settings";
 type SettingsTab =
   | "none"
   | "services"
@@ -1066,6 +1067,29 @@ type BillingDiscount = {
   value: number;
   couponCode: string;
   active: boolean;
+};
+
+// Shape returned by /api/billing/expense-categories. Presets only, same
+// pattern as discounts above.
+type BillingExpenseCategory = {
+  id: string;
+  name: string;
+  active: boolean;
+};
+
+// Shape returned by /api/billing/expenses. Not linked to invoices/bookings -
+// this is simple outgoing-spend tracking, not cost-of-goods-sold.
+type BillingExpense = {
+  id: string;
+  description: string;
+  vendor: string;
+  amount: number;
+  currency: string;
+  expenseDate: string;
+  categoryId: string;
+  categoryName: string;
+  note: string;
+  voided: boolean;
 };
 
 type SlotCandidate = {
@@ -3741,6 +3765,23 @@ function App() {
   });
   const [discountSaveState, setDiscountSaveState] = useState<"idle" | "saving">("idle");
   const [selectedDiscountPresetId, setSelectedDiscountPresetId] = useState("");
+  const [expenseCategories, setExpenseCategories] = useState<BillingExpenseCategory[]>([]);
+  const [expenseCategoryEditor, setExpenseCategoryEditor] = useState<{ id: string; name: string }>({ id: "", name: "" });
+  const [expenseCategorySaveState, setExpenseCategorySaveState] = useState<"idle" | "saving">("idle");
+  const [expenses, setExpenses] = useState<BillingExpense[]>([]);
+  const [expenseLoadState, setExpenseLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [expenseRangeFrom, setExpenseRangeFrom] = useState("");
+  const [expenseRangeTo, setExpenseRangeTo] = useState("");
+  const [expenseDraft, setExpenseDraft] = useState<{
+    id: string;
+    description: string;
+    vendor: string;
+    amount: number;
+    expenseDate: string;
+    categoryId: string;
+    note: string;
+  }>({ id: "", description: "", vendor: "", amount: 0, expenseDate: dateInputValue(), categoryId: "", note: "" });
+  const [expenseSaveState, setExpenseSaveState] = useState<"idle" | "saving">("idle");
   const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, string>>({});
   // Ready to Pull date range. Empty string on either side means "no bound" -
   // i.e. defaults to showing everything, same as before this filter existed.
@@ -9982,6 +10023,39 @@ function App() {
     setDiscountPresets(Array.isArray(data.discounts) ? data.discounts : []);
   }
 
+  async function fetchExpenseCategories() {
+    const response = await fetch("/api/billing/expense-categories", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load expense categories."));
+    const data = (await response.json()) as { categories?: BillingExpenseCategory[] };
+    setExpenseCategories(Array.isArray(data.categories) ? data.categories : []);
+  }
+
+  async function fetchExpenses(from = expenseRangeFrom, to = expenseRangeTo) {
+    setExpenseLoadState("loading");
+    try {
+      const params = new URLSearchParams();
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      const query = params.toString();
+      const response = await fetch(`/api/billing/expenses${query ? `?${query}` : ""}`, { credentials: "same-origin", cache: "no-store" });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load expenses."));
+      const data = (await response.json()) as { expenses?: BillingExpense[] };
+      setExpenses(Array.isArray(data.expenses) ? data.expenses : []);
+      setExpenseLoadState("loaded");
+    } catch (error) {
+      setExpenseLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load expenses." });
+    }
+  }
+
   async function fetchRecentInvoices() {
     const response = await fetch("/api/billing/invoices?limit=50", { credentials: "same-origin", cache: "no-store" });
     if (response.status === 401) {
@@ -10010,7 +10084,7 @@ function App() {
   async function loadBillingWorkspace() {
     setBillingDataLoadState("loading");
     try {
-      await Promise.all([fetchBillingProducts(), fetchRecentInvoices(), fetchBillingDiscounts()]);
+      await Promise.all([fetchBillingProducts(), fetchRecentInvoices(), fetchBillingDiscounts(), fetchExpenseCategories(), fetchExpenses()]);
       setBillingDataLoadState("loaded");
     } catch (error) {
       setBillingDataLoadState("error");
@@ -10056,6 +10130,13 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEmbedMode, authStatus, billingWorkspaceEnabled, revenuePeriod]);
 
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (expenseLoadState === "idle") return; // initial load already covered by loadBillingWorkspace()
+    void fetchExpenses(expenseRangeFrom, expenseRangeTo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, expenseRangeFrom, expenseRangeTo]);
+
   const revenueMaxBucketTotal = Math.max(1, ...(revenueReport?.buckets.map((bucket) => bucket.total) ?? [0]));
   const revenueYoyDeltaPct =
     revenueReport && revenueReport.previousYearTotal !== null && revenueReport.previousYearTotal > 0
@@ -10082,6 +10163,12 @@ function App() {
   const overdueOldestDays = overdueInvoiceRecords.length
     ? Math.max(...overdueInvoiceRecords.map((invoiceRecord) => isoDateDiffDays(todayDateValue, invoiceRecord.dueDate as string)))
     : 0;
+
+  // expenses is already server-filtered to expenseRangeFrom/expenseRangeTo;
+  // voided entries stay visible in the list (for the audit trail) but never
+  // count toward the total.
+  const activeExpenses = expenses.filter((expense) => !expense.voided);
+  const expenseTotalForRange = activeExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
   function addCompletedBookingLine(item: CalendarItem) {
     if (invoicedBookingIds[item.id]) {
@@ -10251,6 +10338,157 @@ function App() {
       discountLabel: preset.name,
       discountAmount: amount,
     }));
+  }
+
+  async function addExpenseCategory() {
+    const name = expenseCategoryEditor.name.trim();
+    if (!name) {
+      setToast({ message: "Name the category before saving it." });
+      return;
+    }
+    const isUpdate = Boolean(expenseCategoryEditor.id);
+    setExpenseCategorySaveState("saving");
+    try {
+      const response = await fetch(
+        isUpdate ? `/api/billing/expense-categories/${encodeURIComponent(expenseCategoryEditor.id)}` : "/api/billing/expense-categories",
+        {
+          method: isUpdate ? "PUT" : "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ name, active: true }),
+        },
+      );
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { category?: BillingExpenseCategory; error?: string; message?: string } | null;
+      if (!response.ok) {
+        if (data?.error === "CATEGORY_NAME_CONFLICT") throw new Error(data.message || "That category name is already in use.");
+        throw new Error(data?.message || (await readApiFailure(response, "Could not save category.")));
+      }
+      const saved = data?.category;
+      if (!saved) throw new Error("Save response did not return the category.");
+      setExpenseCategories((current) =>
+        current.some((candidate) => candidate.id === saved.id)
+          ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
+          : [...current, saved],
+      );
+      setExpenseCategoryEditor({ id: "", name: "" });
+      setToast({ message: `${saved.name} ${isUpdate ? "updated" : "added"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save category." });
+    } finally {
+      setExpenseCategorySaveState("idle");
+    }
+  }
+
+  async function toggleExpenseCategoryActive(category: BillingExpenseCategory) {
+    try {
+      const response = await fetch(`/api/billing/expense-categories/${encodeURIComponent(category.id)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ name: category.name, active: !category.active }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update category."));
+      const data = (await response.json()) as { category?: BillingExpenseCategory };
+      const saved = data.category;
+      if (!saved) return;
+      setExpenseCategories((current) => current.map((candidate) => (candidate.id === saved.id ? saved : candidate)));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update category." });
+    }
+  }
+
+  function resetExpenseDraft() {
+    setExpenseDraft({ id: "", description: "", vendor: "", amount: 0, expenseDate: dateInputValue(), categoryId: "", note: "" });
+  }
+
+  async function saveExpenseDraft() {
+    const description = expenseDraft.description.trim();
+    if (!description) {
+      setToast({ message: "Describe the expense before saving it." });
+      return;
+    }
+    const isUpdate = Boolean(expenseDraft.id);
+    setExpenseSaveState("saving");
+    try {
+      const response = await fetch(isUpdate ? `/api/billing/expenses/${encodeURIComponent(expenseDraft.id)}` : "/api/billing/expenses", {
+        method: isUpdate ? "PUT" : "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          description,
+          vendor: expenseDraft.vendor.trim(),
+          amount: Math.max(0, Number(expenseDraft.amount) || 0),
+          expenseDate: expenseDraft.expenseDate,
+          categoryId: expenseDraft.categoryId || null,
+          note: expenseDraft.note.trim(),
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { expense?: BillingExpense; message?: string } | null;
+      if (!response.ok) throw new Error(data?.message || (await readApiFailure(response, "Could not save expense.")));
+      const saved = data?.expense;
+      if (!saved) throw new Error("Save response did not return the expense.");
+      setExpenses((current) =>
+        current.some((candidate) => candidate.id === saved.id)
+          ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
+          : [saved, ...current],
+      );
+      resetExpenseDraft();
+      setToast({ message: `Expense ${isUpdate ? "updated" : "logged"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save expense." });
+    } finally {
+      setExpenseSaveState("idle");
+    }
+  }
+
+  function editExpense(expense: BillingExpense) {
+    setExpenseDraft({
+      id: expense.id,
+      description: expense.description,
+      vendor: expense.vendor,
+      amount: expense.amount,
+      expenseDate: expense.expenseDate,
+      categoryId: expense.categoryId,
+      note: expense.note,
+    });
+  }
+
+  async function toggleExpenseVoided(expense: BillingExpense) {
+    try {
+      const response = await fetch(`/api/billing/expenses/${encodeURIComponent(expense.id)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          description: expense.description,
+          vendor: expense.vendor,
+          amount: expense.amount,
+          expenseDate: expense.expenseDate,
+          categoryId: expense.categoryId || null,
+          note: expense.note,
+          voided: !expense.voided,
+        }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update expense."));
+      const data = (await response.json()) as { expense?: BillingExpense };
+      const saved = data.expense;
+      if (!saved) return;
+      setExpenses((current) => current.map((candidate) => (candidate.id === saved.id ? saved : candidate)));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update expense." });
+    }
   }
 
   function resetInvoiceDraft() {
@@ -15144,6 +15382,16 @@ function App() {
                 New Invoice
               </button>
               <button
+                className={billingSection === "expenses" ? "active" : ""}
+                onClick={() => setBillingSection("expenses")}
+                role="tab"
+                aria-selected={billingSection === "expenses"}
+                type="button"
+              >
+                <Receipt size={16} />
+                Expenses
+              </button>
+              <button
                 className={billingSection === "reports" ? "active" : ""}
                 onClick={() => setBillingSection("reports")}
                 role="tab"
@@ -15933,6 +16181,172 @@ function App() {
               </div>
             )}
 
+            {billingSection === "expenses" && (
+              <div className="billing-dashboard">
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Expenses</span>
+                      <h2>{formatMoney(expenseTotalForRange, invoiceSettings.currency)}</h2>
+                    </div>
+                    <Receipt size={24} />
+                  </div>
+                  <div className="ready-to-pull-range">
+                    <label className="settings-field">
+                      <span>From</span>
+                      <input type="date" value={expenseRangeFrom} onChange={(event) => setExpenseRangeFrom(event.target.value)} />
+                    </label>
+                    <label className="settings-field">
+                      <span>To</span>
+                      <input type="date" value={expenseRangeTo} onChange={(event) => setExpenseRangeTo(event.target.value)} />
+                    </label>
+                    {(expenseRangeFrom || expenseRangeTo) && (
+                      <button
+                        className="outline-button small-action"
+                        onClick={() => {
+                          setExpenseRangeFrom("");
+                          setExpenseRangeTo("");
+                        }}
+                        type="button"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <p className="field-help">
+                    {activeExpenses.length} expense{activeExpenses.length === 1 ? "" : "s"}
+                    {expenseRangeFrom || expenseRangeTo ? " in this range" : " (last 200)"}.
+                  </p>
+                </article>
+
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>{expenseDraft.id ? "Edit" : "Log"}</span>
+                      <h2>{expenseDraft.id ? "Edit expense" : "Log an expense"}</h2>
+                    </div>
+                  </div>
+                  <div className="billing-catalog-editor">
+                    <label className="settings-field">
+                      <span>Description</span>
+                      <input
+                        value={expenseDraft.description}
+                        onChange={(event) => setExpenseDraft((current) => ({ ...current, description: event.target.value }))}
+                        placeholder="What did you pay for?"
+                      />
+                    </label>
+                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Amount</span>
+                        <input
+                          value={expenseDraft.amount}
+                          inputMode="decimal"
+                          onChange={(event) => setExpenseDraft((current) => ({ ...current, amount: parseMoneyInput(event.target.value) }))}
+                          type="text"
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Date</span>
+                        <input
+                          type="date"
+                          value={expenseDraft.expenseDate}
+                          onChange={(event) => setExpenseDraft((current) => ({ ...current, expenseDate: event.target.value }))}
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Category</span>
+                        <select
+                          value={expenseDraft.categoryId}
+                          onChange={(event) => setExpenseDraft((current) => ({ ...current, categoryId: event.target.value }))}
+                        >
+                          <option value="">Uncategorised</option>
+                          {expenseCategories
+                            .filter((category) => category.active || category.id === expenseDraft.categoryId)
+                            .map((category) => (
+                              <option key={category.id} value={category.id}>
+                                {category.name}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label className="settings-field">
+                      <span>Vendor</span>
+                      <input
+                        value={expenseDraft.vendor}
+                        onChange={(event) => setExpenseDraft((current) => ({ ...current, vendor: event.target.value }))}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Note</span>
+                      <textarea
+                        value={expenseDraft.note}
+                        onChange={(event) => setExpenseDraft((current) => ({ ...current, note: event.target.value }))}
+                        rows={2}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <button className="outline-button" disabled={expenseSaveState === "saving"} onClick={saveExpenseDraft} type="button">
+                      <Plus size={16} />
+                      {expenseDraft.id ? (expenseSaveState === "saving" ? "Saving..." : "Save Changes") : expenseSaveState === "saving" ? "Saving..." : "Log Expense"}
+                    </button>
+                    {Boolean(expenseDraft.id) && (
+                      <button className="outline-button" onClick={resetExpenseDraft} type="button">
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                </article>
+
+                <article className="data-card recent-invoices-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>History</span>
+                      <h2>Recent expenses</h2>
+                    </div>
+                  </div>
+                  {expenseLoadState === "loading" && !expenses.length ? (
+                    <p>Loading expenses...</p>
+                  ) : expenses.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Description</th>
+                          <th>Category</th>
+                          <th>Amount</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {expenses.map((expense) => (
+                          <tr key={expense.id} className={expense.voided ? "voided-row" : ""}>
+                            <td>{expense.expenseDate}</td>
+                            <td>
+                              <button className="text-link-button" onClick={() => editExpense(expense)} type="button">
+                                {expense.description}
+                              </button>
+                              {expense.vendor && <em className="expense-vendor">{expense.vendor}</em>}
+                            </td>
+                            <td>{expense.categoryName || "Uncategorised"}</td>
+                            <td>{formatMoney(expense.amount, invoiceSettings.currency)}</td>
+                            <td>
+                              <button className="text-link-button" onClick={() => toggleExpenseVoided(expense)} type="button">
+                                {expense.voided ? "Restore" : "Void"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p>No expenses logged{expenseRangeFrom || expenseRangeTo ? " in this date range" : " yet"}.</p>
+                  )}
+                </article>
+              </div>
+            )}
+
             {billingSection === "reports" && (
               <div className="billing-reports">
                 <article className="data-card">
@@ -16179,6 +16593,69 @@ function App() {
                       ))
                     ) : (
                       <p>No discount presets yet.</p>
+                    )}
+                  </div>
+                </article>
+
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Presets</span>
+                      <h2>Expense Categories</h2>
+                    </div>
+                    <Receipt size={24} />
+                  </div>
+                  <p className="field-help">
+                    Optional categories for logging expenses (Range fees, Coaching supplies, Travel, Software,
+                    etc). Every expense can also be left Uncategorised.
+                  </p>
+                  <div className="billing-catalog-editor">
+                    <label className="settings-field">
+                      <span>Name</span>
+                      <input
+                        value={expenseCategoryEditor.name}
+                        onChange={(event) => setExpenseCategoryEditor((current) => ({ ...current, name: event.target.value }))}
+                        placeholder="e.g. Range fees"
+                      />
+                    </label>
+                    <button
+                      className="outline-button"
+                      disabled={expenseCategorySaveState === "saving"}
+                      onClick={addExpenseCategory}
+                      type="button"
+                    >
+                      <Plus size={16} />
+                      {expenseCategoryEditor.id
+                        ? expenseCategorySaveState === "saving"
+                          ? "Saving..."
+                          : "Save Changes"
+                        : expenseCategorySaveState === "saving"
+                          ? "Saving..."
+                          : "Add Category"}
+                    </button>
+                    {Boolean(expenseCategoryEditor.id) && (
+                      <button className="outline-button" onClick={() => setExpenseCategoryEditor({ id: "", name: "" })} type="button">
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                  <div className="billing-catalog-list">
+                    {expenseCategories.length ? (
+                      expenseCategories.map((category) => (
+                        <div key={category.id} className={`billing-catalog-list-item${category.active === false ? " inactive" : ""}`}>
+                          <button onClick={() => setExpenseCategoryEditor(category)} type="button">
+                            <span>
+                              <strong>{category.name}</strong>
+                              {category.active === false && <em>Inactive</em>}
+                            </span>
+                          </button>
+                          <button className="text-link-button" onClick={() => toggleExpenseCategoryActive(category)} type="button">
+                            {category.active === false ? "Reactivate" : "Deactivate"}
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p>No expense categories yet.</p>
                     )}
                   </div>
                 </article>
