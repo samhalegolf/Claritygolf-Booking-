@@ -119,8 +119,66 @@ create unique index if not exists idx_billing_discounts_account_coupon
   on public.billing_discounts (account_id, lower(coupon_code))
   where coupon_code is not null and btrim(coupon_code) <> '';
 
+-- Expense categories (Coaching supplies, Range fees, Travel, Software,
+-- etc). Presets only, same pattern as billing_discounts - picked from a
+-- dropdown when logging an expense, not required to log one ("Uncategorised"
+-- is always a valid choice in the UI).
+create table if not exists public.billing_expense_categories (
+  id text primary key,
+  account_id text not null,
+  name text not null,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_billing_expense_categories_account
+  on public.billing_expense_categories (account_id, active);
+
+create unique index if not exists idx_billing_expense_categories_account_name
+  on public.billing_expense_categories (account_id, lower(name));
+
+-- Expense records. Not linked to invoices/bookings - this is simple outgoing
+-- spend tracking (what the coach paid for), not cost-of-goods-sold against a
+-- specific invoice line. category_id is nullable and not a foreign key
+-- on delete cascade on purpose: deactivating or renaming a category must
+-- never delete historical expense records.
+create table if not exists public.billing_expenses (
+  id text primary key,
+  account_id text not null,
+  category_id text,
+  category_name_snapshot text,
+  description text not null,
+  vendor text,
+  amount numeric not null default 0,
+  currency text not null default 'NZD',
+  expense_date date not null default current_date,
+  note text,
+  voided boolean not null default false,
+  -- Set only by bank-CSV import: either the bank's own transaction
+  -- reference (when the export has one) or a hash of date+description+
+  -- amount. Lets re-importing the same file, or an export with an
+  -- overlapping date range, skip rows it's already seen instead of
+  -- double-counting them. Manually-logged expenses leave this null.
+  external_ref text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists idx_billing_expenses_account_external_ref
+  on public.billing_expenses (account_id, external_ref)
+  where external_ref is not null and btrim(external_ref) <> '';
+
+create index if not exists idx_billing_expenses_account_date
+  on public.billing_expenses (account_id, expense_date desc);
+
+create index if not exists idx_billing_expenses_category
+  on public.billing_expenses (category_id);
+
 alter table public.billing_products_services enable row level security;
 alter table public.billing_invoices enable row level security;
 alter table public.billing_discounts enable row level security;
 alter table public.billing_invoice_items enable row level security;
 alter table public.billing_booking_invoice_links enable row level security;
+alter table public.billing_expense_categories enable row level security;
+alter table public.billing_expenses enable row level security;

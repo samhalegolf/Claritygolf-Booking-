@@ -6771,6 +6771,85 @@ button {
   font-weight: 600;
 }
 
+.voided-row td {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.expense-vendor {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.csv-import-uploader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.csv-import-uploader input[type="file"] {
+  display: none;
+}
+
+.csv-import-uploader > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.csv-import-header-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.csv-import-header-toggle input {
+  margin: 0;
+}
+
+.billing-page .csv-import-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.csv-import-preview {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.csv-import-preview-row {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 0.9fr) minmax(0, 2fr) minmax(70px, 0.7fr);
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.csv-import-preview-row.invalid {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.csv-import-preview-row input[type="checkbox"] {
+  margin: 0;
+}
+
 @media (max-width: 720px) {
   .revenue-chart {
     height: 90px;
