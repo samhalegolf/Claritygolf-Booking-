@@ -39,9 +39,11 @@ import {
   Trash2,
   Upload,
   User,
+  Video,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { VideoAnalysisPage } from "./modules/video-analysis";
 import type {
   ChangeEvent,
   CSSProperties,
@@ -498,7 +500,7 @@ type Toast = {
   undo?: () => void;
 };
 
-type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings";
+type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video";
 type BillingSection = "none" | "dashboard" | "new-invoice" | "expenses" | "reports" | "settings";
 type SettingsTab =
   | "none"
@@ -1588,6 +1590,8 @@ function sectionTitle(view: View) {
       return "Billing";
     case "settings":
       return "Settings";
+    case "video":
+      return "Video Analysis";
     default:
       return "Calendar";
   }
@@ -3797,6 +3801,7 @@ function App() {
   const [selectedId, setSelectedId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
+  const [videoContext, setVideoContext] = useState<{ playerId: string; playerName: string } | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
   const [billingSection, setBillingSection] = useState<BillingSection>("dashboard");
   const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
@@ -8232,7 +8237,16 @@ function App() {
     setQuickCreate(null);
     if (view === "settings") setSettingsTab("services");
     if (view === "billing") setBillingSection("dashboard");
+    // Opening Video from the nav is the general workspace (no player context).
+    if (view === "video") setVideoContext(null);
     if (view !== "calendar") closeCalendarDetails();
+  }
+
+  function openVideoAnalysisForClient(client: { id: string; name: string }) {
+    setVideoContext({ playerId: client.id, playerName: client.name });
+    setActiveView("video");
+    setQuickCreate(null);
+    closeCalendarDetails();
   }
 
   function openInvoiceCoachSettings() {
@@ -14528,6 +14542,10 @@ function App() {
             <User size={18} />
             Clients
           </button>
+          <button className={activeView === "video" ? "active" : ""} onClick={() => switchView("video")}>
+            <Video size={18} />
+            Video
+          </button>
           {billingWorkspaceEnabled && (
             <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
               <FileText size={18} />
@@ -15564,6 +15582,15 @@ function App() {
                 </div>
               )}
             </div>
+          </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "video" && (
+          <section className="module-page video-analysis-page-host">
+            <VideoAnalysisPage
+              playerId={videoContext?.playerId}
+              playerName={videoContext?.playerName}
+            />
           </section>
         )}
 
@@ -19131,6 +19158,21 @@ function App() {
                   </div>
                 </div>
                 {selectedClient?.notes && <p>{selectedClient.notes}</p>}
+                {selectedClient && (
+                  <button
+                    type="button"
+                    className="outline-button client-video-button"
+                    onClick={() =>
+                      openVideoAnalysisForClient({
+                        id: selectedClient.id,
+                        name: selectedClient.name,
+                      })
+                    }
+                  >
+                    <Video size={16} />
+                    Open Video Analysis
+                  </button>
+                )}
               </>
             )}
 

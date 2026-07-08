@@ -1,0 +1,1612 @@
+import React, {
+  ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { clamp, createId, FRAME_RATE_DEFAULT } from "./utils/frameMath";
+import { videoAnalysisThemeCss } from "./theme/videoAnalysisTheme";
+import { FocusPalette } from "./components/FocusPalette";
+import { FocusWindow } from "./components/FocusWindow";
+import { FocusAreaRect } from "./models/Focus";
+import { FocusSnapshot } from "./models/Analysis";
+import { Inspector } from "./components/Inspector";
+import { StatusBar } from "./components/StatusBar";
+import { Timeline } from "./components/Timeline";
+import { Toolbar } from "./components/Toolbar";
+import { VideoCanvas } from "./components/VideoCanvas";
+import {
+  ComparisonSide,
+  ComparisonWorkspaceState,
+  VideoAnalysisPersistenceLayer,
+  WorkspacePersistenceContext,
+  createVideoAnalysisPersistence,
+  loadComparisonWorkspaceState,
+  saveComparisonWorkspaceState,
+  WorkspaceMode,
+} from "./utils/localPersistence";
+import {
+  buildVideoSlotKey,
+  requestPersistentStorage,
+} from "./utils/videoBlobStore";
+import { useAnalysisStore } from "./hooks/useAnalysisStore";
+import { useDrawing } from "./hooks/useDrawing";
+import { useMarkerThumbnails } from "./hooks/useMarkerThumbnails";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { usePlayback } from "./hooks/usePlayback";
+import { useTimeline } from "./hooks/useTimeline";
+import { TimelineEngine } from "./engines/TimelineEngine";
+import { PlayerVideo } from "./models/Video";
+import { DrawingTool } from "./models/Drawing";
+import { TimelineMarker } from "./models/Timeline";
+
+const LEFT_ANALYSIS_SLOT = "comparison-left-slot";
+const RIGHT_ANALYSIS_SLOT = "comparison-right-slot";
+
+function getSideTitle(side: ComparisonSide) {
+  return side === "left" ? "Left" : "Right";
+}
+
+function getSideLabel(side: ComparisonSide) {
+  return side === "left" ? "L" : "R";
+}
+
+const MIN_ACTIVE_SELECTION_SIZE = 0.01;
+const SNAPSHOT_STORAGE_WARNING_LIMIT = 12;
+const SNAPSHOT_PREVIEW_WIDTH = 88;
+const SNAPSHOT_PREVIEW_HEIGHT = 50;
+const DEFAULT_PLAYER_ID = "player-demo-1";
+
+interface VideoWorkspaceProps {
+  playerId?: string;
+  playerName?: string;
+  lessonId?: string;
+  lessonTitle?: string;
+  persistence?: Partial<VideoAnalysisPersistenceLayer>;
+}
+
+const normalizePoint = (point: { x: number; y: number }, overlay: { width: number; height: number }) => ({
+  x: clamp(point.x / Math.max(1, overlay.width), 0, 1),
+  y: clamp(point.y / Math.max(1, overlay.height), 0, 1),
+});
+
+const toFixedTime = (value: number) => {
+  const safeValue = Math.max(0, Number.isFinite(value) ? value : 0);
+  const secondsTotal = Math.floor(safeValue);
+  const minutes = Math.floor(secondsTotal / 60);
+  const seconds = secondsTotal % 60;
+  const millis = Math.max(0, Math.round((safeValue - secondsTotal) * 100));
+  return `${minutes}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(2, "0")}`;
+};
+
+const getDataUrlBytes = (dataUrl: string) => {
+  const commaIndex = dataUrl.indexOf(",");
+  if (commaIndex === -1) return 0;
+  const base64 = dataUrl.slice(commaIndex + 1);
+  return Math.max(0, Math.floor((base64.length * 3) / 4));
+};
+
+const isDataUrl = (value: string) => typeof value === "string" && value.startsWith("data:image/");
+
+const toDownloadFileName = (snapshot: FocusSnapshot) => {
+  const safeTitle = snapshot.title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 36);
+  return `${safeTitle || "focus-snapshot"}-${snapshot.id}.png`;
+};
+
+const getSafeSourceDimensions = (
+  sourceVideo: PlayerVideo,
+  sourceVideoElement: HTMLVideoElement,
+  playbackDimensions: { width: number; height: number }
+) => {
+  const fallbackWidth = Math.max(1, Math.round(playbackDimensions.width || 1));
+  const fallbackHeight = Math.max(1, Math.round(playbackDimensions.height || 1));
+  return {
+    width: Math.max(1, Math.round(sourceVideoElement.videoWidth || sourceVideo.width || fallbackWidth)),
+    height: Math.max(1, Math.round(sourceVideoElement.videoHeight || sourceVideo.height || fallbackHeight)),
+  };
+};
+
+const buildSourceCropRect = (
+  focusAreaRect: FocusAreaRect,
+  sourceWidth: number,
+  sourceHeight: number
+) => {
+  const safeSourceWidth = Math.max(1, Math.round(sourceWidth));
+  const safeSourceHeight = Math.max(1, Math.round(sourceHeight));
+
+  const sourceCropX = Math.floor(clamp(focusAreaRect.x, 0, 1) * safeSourceWidth);
+  const sourceCropY = Math.floor(clamp(focusAreaRect.y, 0, 1) * safeSourceHeight);
+  const sourceCropWidth = Math.max(
+    1,
+    Math.floor(clamp(focusAreaRect.width, 0, 1) * safeSourceWidth)
+  );
+  const sourceCropHeight = Math.max(
+    1,
+    Math.floor(clamp(focusAreaRect.height, 0, 1) * safeSourceHeight)
+  );
+
+  return {
+    sourceWidth: safeSourceWidth,
+    sourceHeight: safeSourceHeight,
+    sourceCropRect: {
+      x: clamp(sourceCropX, 0, safeSourceWidth - 1),
+      y: clamp(sourceCropY, 0, safeSourceHeight - 1),
+      width: clamp(
+        sourceCropWidth,
+        1,
+        safeSourceWidth - clamp(sourceCropX, 0, safeSourceWidth - 1)
+      ),
+      height: clamp(
+        sourceCropHeight,
+        1,
+        safeSourceHeight - clamp(sourceCropY, 0, safeSourceHeight - 1)
+      ),
+    },
+  };
+};
+
+const createSourceImageMeta = (
+  sourceWidth: number,
+  sourceHeight: number,
+  sourceCropRect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  },
+  capturedFromSource: boolean
+) => {
+  const isSourceCropValid = sourceCropRect.width > 0 && sourceCropRect.height > 0;
+  return {
+    sourceWidth,
+    sourceHeight,
+    sourceCropRect,
+    imageWidth: isSourceCropValid ? sourceCropRect.width : undefined,
+    imageHeight: isSourceCropValid ? sourceCropRect.height : undefined,
+    capturedFromSource,
+  };
+};
+
+const buildRectFromDrag = (
+  start: { x: number; y: number },
+  current: { x: number; y: number }
+): FocusAreaRect => {
+  const x = Math.min(start.x, current.x);
+  const y = Math.min(start.y, current.y);
+  return {
+    x,
+    y,
+    width: Math.max(0, Math.max(start.x, current.x) - x),
+    height: Math.max(0, Math.max(start.y, current.y) - y),
+  };
+};
+
+export function VideoWorkspace({
+  playerId,
+  playerName,
+  lessonId,
+  lessonTitle,
+  persistence,
+}: VideoWorkspaceProps) {
+  const leftVideoRef = useRef<HTMLVideoElement>(null);
+  const rightVideoRef = useRef<HTMLVideoElement>(null);
+  const leftUploadInputRef = useRef<HTMLInputElement>(null);
+  const rightUploadInputRef = useRef<HTMLInputElement>(null);
+  const resolvedPlayerId = playerId || DEFAULT_PLAYER_ID;
+  const resolvedPlayerName = playerName || resolvedPlayerId;
+  const persistenceLayer = useMemo(() => createVideoAnalysisPersistence(persistence), [persistence]);
+  const workspaceContext = useMemo<WorkspacePersistenceContext>(
+    () => ({
+      playerId: resolvedPlayerId,
+      lessonId,
+    }),
+    [lessonId, resolvedPlayerId]
+  );
+
+  const leftPlayback = usePlayback({ videoRef: leftVideoRef });
+  const rightPlayback = usePlayback({ videoRef: rightVideoRef });
+
+  const [playerVideoLeft, setPlayerVideoLeft] = useState<PlayerVideo | null>(null);
+  const [playerVideoRight, setPlayerVideoRight] = useState<PlayerVideo | null>(null);
+  const [leftMountedSource, setLeftMountedSource] = useState<string | null>(null);
+  const [rightMountedSource, setRightMountedSource] = useState<string | null>(null);
+  const [leftOverlayDimensions, setLeftOverlayDimensions] = useState({
+    width: 1,
+    height: 1,
+  });
+  const [rightOverlayDimensions, setRightOverlayDimensions] = useState({
+    width: 1,
+    height: 1,
+  });
+  const [leftHoverMarker, setLeftHoverMarker] = useState<TimelineMarker | null>(null);
+  const [rightHoverMarker, setRightHoverMarker] = useState<TimelineMarker | null>(null);
+  const [focusPaletteOpen, setFocusPaletteOpen] = useState(false);
+  const [showFocusWindow, setShowFocusWindow] = useState(false);
+  const [focusWindowMode, setFocusWindowMode] = useState<"area" | "track">("area");
+  const [focusWindowSide, setFocusWindowSide] = useState<ComparisonSide>("left");
+  const [focusWindowHoverSide, setFocusWindowHoverSide] = useState<ComparisonSide | null>(null);
+  const [focusSelectionMode, setFocusSelectionMode] = useState<"area" | "track" | null>(null);
+  const [focusSelectionSide, setFocusSelectionSide] = useState<ComparisonSide>("left");
+  const [focusSelectionStart, setFocusSelectionStart] = useState<{ x: number; y: number } | null>(null);
+  const [focusSelectionDraft, setFocusSelectionDraft] = useState<FocusAreaRect | null>(null);
+  const [focusAreaRect, setFocusAreaRect] = useState<FocusAreaRect | null>(null);
+  const [focusArtifactExpandedId, setFocusArtifactExpandedId] = useState<string | null>(null);
+  const [leftMetadataReady, setLeftMetadataReady] = useState(false);
+  const [rightMetadataReady, setRightMetadataReady] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [comparisonMode, setComparisonMode] = useState<WorkspaceMode>("single");
+  const [linkedPlayback, setLinkedPlayback] = useState(false);
+  const [activeSide, setActiveSide] = useState<ComparisonSide>("left");
+  const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
+
+  const timelineEngine = useMemo(() => new TimelineEngine(), []);
+  const modeIsCompare = comparisonMode === "compare";
+
+  const leftStore = useAnalysisStore({
+    playerId: resolvedPlayerId,
+    lessonId,
+    videoId: LEFT_ANALYSIS_SLOT,
+    persistenceAdapter: persistenceLayer.analysisAdapter,
+  });
+
+  const rightStore = useAnalysisStore({
+    playerId: resolvedPlayerId,
+    lessonId,
+    videoId: RIGHT_ANALYSIS_SLOT,
+    persistenceAdapter: persistenceLayer.analysisAdapter,
+  });
+
+  // Restore on-device videos once per player/lesson context. Reconstructs a
+  // File from the stored blob and runs it through the normal load path so the
+  // mounted <video> and metadata match a fresh upload.
+  const videoHydrationRef = useRef<string | null>(null);
+  useEffect(() => {
+    const videoStore = persistenceLayer.videoStore;
+    if (!videoStore) return;
+
+    const hydrationKey = `${resolvedPlayerId}::${lessonId ?? "default"}`;
+    if (videoHydrationRef.current === hydrationKey) return;
+    videoHydrationRef.current = hydrationKey;
+
+    let cancelled = false;
+
+    const hydrateSide = async (side: ComparisonSide) => {
+      const stored = await videoStore.getVideo(
+        buildVideoSlotKey(resolvedPlayerId, side, lessonId)
+      );
+      if (cancelled || !stored) return;
+
+      const isLeft = side === "left";
+      const playback = isLeft ? leftPlayback : rightPlayback;
+      const setPlayerVideo = isLeft ? setPlayerVideoLeft : setPlayerVideoRight;
+      const setMountedSource = isLeft
+        ? setLeftMountedSource
+        : setRightMountedSource;
+      const setMetadataReady = isLeft
+        ? setLeftMetadataReady
+        : setRightMetadataReady;
+
+      const restoredFile = new File(
+        [stored.blob],
+        stored.video.title || `video-${side}`,
+        { type: stored.blob.type || "video/mp4" }
+      );
+      const loaded = await playback.loadVideoFile(restoredFile);
+      if (cancelled) return;
+
+      setPlayerVideo({ ...stored.video, sourceUrl: loaded.sourceUrl });
+      setMountedSource(loaded.sourceUrl);
+      setMetadataReady(false);
+    };
+
+    void hydrateSide("left").catch(() => {
+      // Ignore; a hydration failure leaves the side empty and uploadable.
+    });
+    void hydrateSide("right").catch(() => {
+      // Ignore; a hydration failure leaves the side empty and uploadable.
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [persistenceLayer, resolvedPlayerId, lessonId, leftPlayback, rightPlayback]);
+
+  const leftCurrentDuration = playerVideoLeft?.duration || leftPlayback.duration;
+  const rightCurrentDuration = playerVideoRight?.duration || rightPlayback.duration;
+
+  const leftFallbackMarkers = useMemo(() => {
+    if (leftStore.analysis.markers.length) {
+      return leftStore.analysis.markers;
+    }
+    return timelineEngine.getDefaultMarkers(Math.max(1, leftCurrentDuration || 0));
+  }, [leftCurrentDuration, leftStore.analysis.markers, timelineEngine]);
+
+  const rightFallbackMarkers = useMemo(() => {
+    if (rightStore.analysis.markers.length) {
+      return rightStore.analysis.markers;
+    }
+    return timelineEngine.getDefaultMarkers(Math.max(1, rightCurrentDuration || 0));
+  }, [rightCurrentDuration, rightStore.analysis.markers, timelineEngine]);
+
+  const leftTimelineState = useTimeline();
+  const rightTimelineState = useTimeline();
+
+  // Markers are owned by the analysis store; fall back to generated defaults for
+  // display only when the store has none yet.
+  const leftMarkers = leftStore.analysis.markers.length
+    ? leftStore.analysis.markers
+    : leftFallbackMarkers;
+  const rightMarkers = rightStore.analysis.markers.length
+    ? rightStore.analysis.markers
+    : rightFallbackMarkers;
+
+  const leftDrawing = useDrawing({
+    initialObjects: leftStore.analysis.drawings,
+    videoDimensions: leftOverlayDimensions,
+    onChange: leftStore.setDrawings,
+  });
+
+  const rightDrawing = useDrawing({
+    initialObjects: rightStore.analysis.drawings,
+    videoDimensions: rightOverlayDimensions,
+    onChange: rightStore.setDrawings,
+  });
+
+  const effectiveActiveSide: ComparisonSide = modeIsCompare ? activeSide : "left";
+  const activePlayback =
+    effectiveActiveSide === "left" ? leftPlayback : rightPlayback;
+  const activeDrawing = effectiveActiveSide === "left" ? leftDrawing : rightDrawing;
+  const activeTimelineState =
+    effectiveActiveSide === "left" ? leftTimelineState : rightTimelineState;
+  const activeTimelineHoverMarker =
+    effectiveActiveSide === "left" ? leftHoverMarker : rightHoverMarker;
+  const activeStoreDrawingVideo =
+    effectiveActiveSide === "left" ? playerVideoLeft : playerVideoRight;
+  const activeDuration =
+    effectiveActiveSide === "left" ? leftCurrentDuration || 0 : rightCurrentDuration || 0;
+  const activeFrame = Math.round(
+    activePlayback.currentTime *
+      (activeStoreDrawingVideo?.fps || activePlayback.frameRate || FRAME_RATE_DEFAULT)
+  );
+  const allFocusSnapshots = useMemo(() => {
+    const leftSnapshots =
+      leftStore.analysis.focusSnapshots.map((snapshot) => ({ ...snapshot, side: "left" as const }));
+    const rightSnapshots =
+      rightStore.analysis.focusSnapshots.map((snapshot) => ({ ...snapshot, side: "right" as const }));
+
+    return [...leftSnapshots, ...rightSnapshots].sort((left, right) =>
+      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    );
+  }, [leftStore.analysis.focusSnapshots, rightStore.analysis.focusSnapshots]);
+
+  const focusSnapshotStats = useMemo(() => {
+    const total = allFocusSnapshots.length;
+    const totalBytes = allFocusSnapshots.reduce((sum, snapshot) => {
+      return sum + getDataUrlBytes(snapshot.imageDataUrl);
+    }, 0);
+    return {
+      total,
+      totalBytes,
+      estimatedMB: totalBytes / (1024 * 1024),
+      shouldWarn: total >= SNAPSHOT_STORAGE_WARNING_LIMIT,
+    };
+  }, [allFocusSnapshots]);
+
+  useEffect(() => {
+    const loaded = loadComparisonWorkspaceState(
+      persistenceLayer.workspaceAdapter,
+      workspaceContext
+    );
+    if (loaded) {
+      setComparisonMode(loaded.mode);
+      setActiveSide(loaded.mode === "single" ? "left" : loaded.activeSide);
+      setLinkedPlayback(loaded.linkedPlayback);
+      setShowFocusWindow(loaded.focusWindowOpen);
+      setFocusWindowMode(loaded.focusWindowMode);
+      setFocusWindowSide(loaded.mode === "single" ? "left" : loaded.focusWindowSide);
+      setFocusAreaRect(loaded.focusAreaRect);
+    }
+    // Mark hydration complete so the save effect can begin persisting without
+    // first overwriting restored state with mount-time defaults.
+    setWorkspaceHydrated(true);
+  }, [persistenceLayer.workspaceAdapter, workspaceContext]);
+
+  const saveWorkspaceState = useCallback(() => {
+    const payload: ComparisonWorkspaceState = {
+      version: 1,
+      mode: comparisonMode,
+      activeSide,
+      linkedPlayback,
+      focusWindowOpen: showFocusWindow,
+      focusWindowMode,
+      focusWindowSide,
+      focusAreaRect,
+    };
+    saveComparisonWorkspaceState(
+      payload,
+      persistenceLayer.workspaceAdapter,
+      workspaceContext
+    );
+  }, [
+    activeSide,
+    comparisonMode,
+    linkedPlayback,
+    showFocusWindow,
+    focusWindowMode,
+    focusWindowSide,
+    focusAreaRect,
+    persistenceLayer.workspaceAdapter,
+    workspaceContext,
+  ]);
+
+  useEffect(() => {
+    if (!workspaceHydrated) return;
+    saveWorkspaceState();
+  }, [saveWorkspaceState, workspaceHydrated]);
+
+  const updateMode = (next: WorkspaceMode) => {
+    setComparisonMode(next);
+    if (next === "single") {
+      setActiveSide("left");
+    }
+  };
+
+  const setActiveSideInCompare = useCallback(
+    (side: ComparisonSide) => {
+      if (!modeIsCompare) {
+        return;
+      }
+      setActiveSide(side);
+    },
+    [modeIsCompare]
+  );
+
+  const isDrawingKeyboardFocus = activeDrawing.selectedObjectId !== null;
+
+  const syncMarkersWithAnalysis = useCallback(
+    (side: ComparisonSide, next: TimelineMarker[]) => {
+      if (side === "left") {
+        leftStore.setMarkers(next);
+        return;
+      }
+      rightStore.setMarkers(next);
+    },
+    [leftStore, rightStore]
+  );
+
+  const playPauseSide = useCallback(
+    (side: ComparisonSide) => {
+      if (side === "left") {
+        if (!playerVideoLeft) return;
+        leftPlayback.togglePlayPause();
+        return;
+      }
+      if (!playerVideoRight) return;
+      rightPlayback.togglePlayPause();
+    },
+    [leftPlayback, playerVideoLeft, playerVideoRight, rightPlayback]
+  );
+
+  const toggleSidePlayback = useCallback(() => {
+    const activeVideo = effectiveActiveSide === "left" ? playerVideoLeft : playerVideoRight;
+
+    if (!modeIsCompare) {
+      playPauseSide(activeVideo ? effectiveActiveSide : "left");
+      return;
+    }
+
+    if (linkedPlayback) {
+      // Drive every loaded side to the same target state using explicit
+      // play/pause (never per-side toggles, which can desync the lanes).
+      const anyPlaying =
+        (Boolean(playerVideoLeft) && leftPlayback.isPlaying) ||
+        (Boolean(playerVideoRight) && rightPlayback.isPlaying);
+      const shouldPlay = !anyPlaying;
+      if (playerVideoLeft) {
+        if (shouldPlay) leftPlayback.play();
+        else leftPlayback.pause();
+      }
+      if (playerVideoRight) {
+        if (shouldPlay) rightPlayback.play();
+        else rightPlayback.pause();
+      }
+      return;
+    }
+
+    if (!activeVideo) {
+      if (playerVideoLeft) {
+        playPauseSide("left");
+        return;
+      }
+      if (playerVideoRight) {
+        playPauseSide("right");
+        return;
+      }
+      return;
+    }
+
+    playPauseSide(effectiveActiveSide);
+  }, [
+    effectiveActiveSide,
+    linkedPlayback,
+    modeIsCompare,
+    playerVideoLeft,
+    playerVideoRight,
+    playPauseSide,
+    leftPlayback,
+    rightPlayback,
+  ]);
+
+  const stepActiveSide = useCallback(
+    (direction: -1 | 1, options: { shift?: boolean; heldFrames?: number } = {}) => {
+      const targetPlayback = effectiveActiveSide === "left" ? leftPlayback : rightPlayback;
+      targetPlayback.stepFrame(direction, {
+        shift: !!options.shift,
+        heldFrames: options.heldFrames,
+      });
+    },
+    [effectiveActiveSide, leftPlayback, rightPlayback]
+  );
+
+  const syncPlayheads = useCallback(() => {
+    if (!modeIsCompare || !playerVideoLeft || !playerVideoRight) {
+      return;
+    }
+
+    const sourceSide = effectiveActiveSide;
+    const sourcePlayback = sourceSide === "left" ? leftPlayback : rightPlayback;
+    const targetPlayback = sourceSide === "left" ? rightPlayback : leftPlayback;
+    const sourceFrame = Math.round(
+      sourcePlayback.currentTime * (sourcePlayback.frameRate || FRAME_RATE_DEFAULT)
+    );
+    const targetFps = targetPlayback.frameRate || FRAME_RATE_DEFAULT;
+    targetPlayback.seekTo(sourceFrame / targetFps);
+  }, [effectiveActiveSide, leftPlayback, modeIsCompare, playerVideoLeft, playerVideoRight, rightPlayback]);
+
+  const updateActiveDrawingTool = (tool: DrawingTool) => {
+    leftDrawing.setTool(tool);
+    rightDrawing.setTool(tool);
+  };
+
+  const onSourceLoad = useCallback(
+    (side: ComparisonSide) => {
+      const isLeft = side === "left";
+      const videoRef = isLeft ? leftVideoRef.current : rightVideoRef.current;
+      const analysisStore = isLeft ? leftStore : rightStore;
+      const setMetadataReady = isLeft ? setLeftMetadataReady : setRightMetadataReady;
+      const setMountedSource = isLeft ? setLeftMountedSource : setRightMountedSource;
+      const setPlaybackSource = isLeft ? leftPlayback.sourceUrl : rightPlayback.sourceUrl;
+      const playerVideo = isLeft ? playerVideoLeft : playerVideoRight;
+
+      if (!videoRef || !playerVideo) {
+        return;
+      }
+
+      const safeDuration = videoRef.duration || playerVideo.duration || 1;
+      setMountedSource(setPlaybackSource);
+      setMetadataReady(true);
+
+      if (!analysisStore.analysis.markers.length) {
+        const defaults = timelineEngine.getDefaultMarkers(safeDuration);
+        analysisStore.setMarkers(defaults);
+      }
+    },
+    [
+      leftPlayback,
+      rightPlayback,
+      leftStore,
+      rightStore,
+      playerVideoLeft,
+      playerVideoRight,
+      timelineEngine,
+    ]
+  );
+
+  const handleUpload = useCallback(
+    async (side: ComparisonSide, event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0] ?? null;
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+
+      const isLeft = side === "left";
+      const playback = isLeft ? leftPlayback : rightPlayback;
+      const analysisStore = isLeft ? leftStore : rightStore;
+      const setPlayerVideo = isLeft ? setPlayerVideoLeft : setPlayerVideoRight;
+      const setMountedSource = isLeft ? setLeftMountedSource : setRightMountedSource;
+      const setMetadataReady = isLeft ? setLeftMetadataReady : setRightMetadataReady;
+
+      const loaded = await playback.loadVideoFile(file);
+      const nextVideo: PlayerVideo = {
+        id: createId(`video-${side}`),
+        playerId: resolvedPlayerId,
+        lessonId,
+        sourceUrl: loaded.sourceUrl,
+        title: file.name,
+        createdAt: new Date().toISOString(),
+        duration: loaded.duration,
+        fps: loaded.fps,
+        width: loaded.width,
+        height: loaded.height,
+      };
+      const safeDuration = loaded.duration || 1;
+      const defaults = timelineEngine.getDefaultMarkers(safeDuration);
+
+      setPlayerVideo(nextVideo);
+      setMountedSource(nextVideo.sourceUrl);
+      setMetadataReady(false);
+      analysisStore.updateAnalysis({
+        videoId: nextVideo.id,
+        videoMeta: {
+          title: nextVideo.title,
+          duration: nextVideo.duration,
+          fps: nextVideo.fps,
+          width: nextVideo.width,
+          height: nextVideo.height,
+        },
+        markers: defaults,
+        drawings: [],
+      });
+      setActiveSideInCompare(side);
+
+      // Persist the raw video bytes on-device so the upload survives a reload.
+      // Fire-and-forget: a storage failure must never break the live upload.
+      const videoStore = persistenceLayer.videoStore;
+      if (videoStore) {
+        void requestPersistentStorage();
+        void videoStore
+          .putVideo(
+            buildVideoSlotKey(resolvedPlayerId, side, lessonId),
+            nextVideo,
+            file
+          )
+          .catch(() => {
+            // Ignore; the in-memory session still works without persistence.
+          });
+      }
+    },
+    [
+      leftPlayback,
+      rightPlayback,
+      leftStore,
+      rightStore,
+      timelineEngine,
+      lessonId,
+      resolvedPlayerId,
+      setActiveSideInCompare,
+      persistenceLayer,
+    ]
+  );
+
+  const handleCanvasPointerDown = useCallback(
+    (side: ComparisonSide, point: { x: number; y: number }) => {
+      const hasVideo = side === "left" ? !!playerVideoLeft : !!playerVideoRight;
+      if (!hasVideo) {
+        return;
+      }
+      if (focusSelectionMode === "area") {
+        const isLeft = side === "left";
+        const start = normalizePoint(point, isLeft ? leftOverlayDimensions : rightOverlayDimensions);
+        setActiveSideInCompare(side);
+        setFocusSelectionSide(side);
+        setFocusSelectionStart(start);
+        setFocusSelectionDraft({
+          x: start.x,
+          y: start.y,
+          width: 0,
+          height: 0,
+        });
+        return;
+      }
+      setActiveSideInCompare(side);
+      if (side === "left") {
+        leftDrawing.pointerDown(point);
+        return;
+      }
+      rightDrawing.pointerDown(point);
+    },
+    [
+      focusSelectionMode,
+      leftDrawing,
+      leftOverlayDimensions,
+      playerVideoLeft,
+      rightDrawing,
+      rightOverlayDimensions,
+      setActiveSideInCompare,
+      playerVideoRight,
+    ]
+  );
+
+  const handleCanvasPointerMove = useCallback(
+    (side: ComparisonSide, point: { x: number; y: number }) => {
+      if (!focusSelectionMode || !focusSelectionStart || focusSelectionSide !== side) {
+        if (side === "left") {
+          leftDrawing.pointerMove(point);
+          return;
+        }
+        rightDrawing.pointerMove(point);
+        return;
+      }
+
+      const isLeft = side === "left";
+      const current = normalizePoint(point, isLeft ? leftOverlayDimensions : rightOverlayDimensions);
+      setFocusSelectionDraft(buildRectFromDrag(focusSelectionStart, current));
+      return;
+    },
+    [
+      focusSelectionMode,
+      focusSelectionSide,
+      focusSelectionStart,
+      leftDrawing,
+      leftOverlayDimensions,
+      rightDrawing,
+      rightOverlayDimensions,
+    ]
+  );
+
+  const handleCanvasPointerUp = useCallback(
+    (side: ComparisonSide, point: { x: number; y: number }) => {
+      if (focusSelectionMode === "area" && focusSelectionSide === side && focusSelectionDraft) {
+        const canCreate = focusSelectionDraft.width > MIN_ACTIVE_SELECTION_SIZE && focusSelectionDraft.height > MIN_ACTIVE_SELECTION_SIZE;
+        if (canCreate) {
+          setFocusAreaRect(focusSelectionDraft);
+          setFocusWindowMode("area");
+          setFocusWindowSide(side);
+          setShowFocusWindow(true);
+          setFocusPaletteOpen(false);
+        }
+        setFocusSelectionMode(null);
+        setFocusSelectionDraft(null);
+        setFocusSelectionStart(null);
+        return;
+      }
+      if (side === "left") {
+        leftDrawing.pointerUp(point);
+        return;
+      }
+      rightDrawing.pointerUp(point);
+    },
+    [
+      focusSelectionDraft,
+      focusSelectionMode,
+      focusSelectionSide,
+      leftDrawing,
+      rightDrawing,
+      setFocusWindowMode,
+      setFocusWindowSide,
+    ]
+  );
+
+  const setMarkerHoverForSide = (side: ComparisonSide, marker: TimelineMarker | null) => {
+    if (side === "left") {
+      setLeftHoverMarker(marker);
+      return;
+    }
+    setRightHoverMarker(marker);
+  };
+
+  const onTimelineSeek = (side: ComparisonSide, time: number) => {
+    if (side === "left") {
+      leftPlayback.seekTo(time);
+      return;
+    }
+    rightPlayback.seekTo(time);
+  };
+
+  const onMarkerJump = (side: ComparisonSide, marker: TimelineMarker) => {
+    if (side === "left") {
+      leftPlayback.seekTo(marker.time);
+      return;
+    }
+    rightPlayback.seekTo(marker.time);
+  };
+
+  const onMarkerMove = (side: ComparisonSide, marker: TimelineMarker, time: number) => {
+    const current = side === "left" ? leftMarkers : rightMarkers;
+    const next = current.map((entry) =>
+      entry.id === marker.id ? { ...entry, time: Math.max(0, time) } : entry
+    );
+    syncMarkersWithAnalysis(side, next);
+  };
+
+  const openUpload = (side: ComparisonSide) => {
+    clearFocusSelection();
+    if (side === "left") {
+      leftUploadInputRef.current?.click();
+      return;
+    }
+    rightUploadInputRef.current?.click();
+  };
+
+  const clearCurrentSide = useCallback(
+    (side: ComparisonSide) => {
+      const isLeft = side === "left";
+      const playback = isLeft ? leftPlayback : rightPlayback;
+      const setPlayerVideo = isLeft ? setPlayerVideoLeft : setPlayerVideoRight;
+      const setMountedSource = isLeft ? setLeftMountedSource : setRightMountedSource;
+      const setMetadataReady = isLeft ? setLeftMetadataReady : setRightMetadataReady;
+      const analysisStore = isLeft ? leftStore : rightStore;
+
+      if (isLeft ? !playerVideoLeft : !playerVideoRight) {
+        return;
+      }
+
+      playback.clearSource();
+      if (showFocusWindow && focusWindowSide === side) {
+        setShowFocusWindow(false);
+        setFocusAreaRect(null);
+      }
+      analysisStore.updateAnalysis({
+        videoMeta: undefined,
+        markers: [],
+        drawings: [],
+      });
+      setPlayerVideo(null);
+      setMountedSource(null);
+      setMetadataReady(false);
+
+      // Drop the on-device copy for this slot so it is not re-hydrated later.
+      persistenceLayer.videoStore
+        ?.removeVideo(buildVideoSlotKey(resolvedPlayerId, side, lessonId))
+        .catch(() => {
+          // Ignore; removal is best-effort.
+        });
+    },
+    [
+      leftPlayback,
+      rightPlayback,
+      leftStore,
+      rightStore,
+      playerVideoLeft,
+      playerVideoRight,
+      focusWindowSide,
+      showFocusWindow,
+      persistenceLayer,
+      resolvedPlayerId,
+      lessonId,
+    ]
+  );
+
+  const clearFocusSelection = useCallback(() => {
+    setFocusSelectionMode(null);
+    setFocusSelectionSide("left");
+    setFocusSelectionStart(null);
+    setFocusSelectionDraft(null);
+  }, []);
+
+  const resetFocusWindowHover = useCallback(
+    (side: ComparisonSide, isHovering: boolean) => {
+      if (isHovering) {
+        setFocusWindowHoverSide(side);
+        return;
+      }
+      setFocusWindowHoverSide((current) => (current === side ? null : current));
+    },
+    []
+  );
+
+  const removeFocusSnapshot = useCallback(
+    (side: ComparisonSide, snapshotId: string) => {
+      setFocusArtifactExpandedId((current) => (current === snapshotId ? null : current));
+      if (side === "left") {
+        const nextSnapshots = (leftStore.analysis.focusSnapshots || []).filter(
+          (snapshot) => snapshot.id !== snapshotId
+        );
+        leftStore.updateAnalysis({ focusSnapshots: nextSnapshots });
+        return;
+      }
+      const nextSnapshots = (rightStore.analysis.focusSnapshots || []).filter(
+        (snapshot) => snapshot.id !== snapshotId
+      );
+      rightStore.updateAnalysis({ focusSnapshots: nextSnapshots });
+    },
+    [leftStore, rightStore]
+  );
+
+  const renameFocusSnapshot = useCallback(
+    (side: ComparisonSide, snapshotId: string) => {
+      const activeStore = side === "left" ? leftStore : rightStore;
+      const target = (activeStore.analysis.focusSnapshots || []).find(
+        (snapshot) => snapshot.id === snapshotId
+      );
+      if (!target) {
+        return;
+      }
+      const nextTitle = window.prompt("Rename snapshot", target.title);
+      if (!nextTitle || !nextTitle.trim()) {
+        return;
+      }
+      const nextSnapshots = (activeStore.analysis.focusSnapshots || []).map((snapshot) =>
+        snapshot.id === snapshotId ? { ...snapshot, title: nextTitle.trim() } : snapshot
+      );
+      activeStore.updateAnalysis({ focusSnapshots: nextSnapshots });
+    },
+    [leftStore, rightStore]
+  );
+
+  const clearAllFocusSnapshots = useCallback(() => {
+    if (!focusSnapshotStats.total) {
+      return;
+    }
+    const message = `Clear all ${focusSnapshotStats.total} Focus snapshots? This cannot be undone.`;
+    if (!window.confirm(message)) {
+      return;
+    }
+    leftStore.updateAnalysis({ focusSnapshots: [] });
+    rightStore.updateAnalysis({ focusSnapshots: [] });
+    setFocusArtifactExpandedId(null);
+  }, [focusSnapshotStats.total, leftStore, rightStore]);
+
+  const downloadFocusSnapshot = useCallback((snapshot: FocusSnapshot) => {
+    const link = document.createElement("a");
+    link.href = snapshot.imageDataUrl;
+    link.download = toDownloadFileName(snapshot);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, []);
+
+  const handleFocusWindowScreenshot = useCallback(
+    async (previewImageDataUrl: string): Promise<{ ok: boolean; error?: string }> => {
+      if (!focusWindowSide || !focusWindowMode || focusWindowMode !== "area" || !focusAreaRect) {
+        return { ok: false, error: "No valid focus crop selected." };
+      }
+      const isLeft = focusWindowSide === "left";
+      const activeStore = isLeft ? leftStore : rightStore;
+      const activePlayback = isLeft ? leftPlayback : rightPlayback;
+      const sourceVideo = isLeft ? playerVideoLeft : playerVideoRight;
+      const sourceVideoElement = isLeft ? leftVideoRef.current : rightVideoRef.current;
+
+      if (!sourceVideo || !sourceVideoElement) {
+        return { ok: false, error: "Source video is not available." };
+      }
+
+      let imageDataUrl = "";
+      let sourceImageMeta: FocusSnapshot["sourceImageMeta"] | undefined;
+      const { width: sourceWidth, height: sourceHeight } = getSafeSourceDimensions(
+        sourceVideo,
+        sourceVideoElement,
+        activePlayback.dimensions
+      );
+      const sourceCrop = buildSourceCropRect(focusAreaRect, sourceWidth, sourceHeight);
+
+      try {
+        if (
+          sourceVideoElement.readyState < 2 ||
+          !sourceVideoElement.videoWidth ||
+          !sourceVideoElement.videoHeight
+        ) {
+          await new Promise<void>((resolve) => {
+            if (sourceVideoElement.readyState >= 2) {
+              resolve();
+              return;
+            }
+            const timeoutId = window.setTimeout(() => {
+              sourceVideoElement.removeEventListener("canplay", onCanPlay);
+              sourceVideoElement.removeEventListener("error", onError);
+              resolve();
+            }, 500);
+            const onCanPlay = () => {
+              sourceVideoElement.removeEventListener("canplay", onCanPlay);
+              sourceVideoElement.removeEventListener("error", onError);
+              clearTimeout(timeoutId);
+              resolve();
+            };
+            const onError = () => {
+              sourceVideoElement.removeEventListener("canplay", onCanPlay);
+              sourceVideoElement.removeEventListener("error", onError);
+              clearTimeout(timeoutId);
+              resolve();
+            };
+            sourceVideoElement.addEventListener("canplay", onCanPlay, { once: true });
+            sourceVideoElement.addEventListener("error", onError, { once: true });
+          });
+        }
+
+        const sourceCanvas = document.createElement("canvas");
+        sourceCanvas.width = sourceCrop.sourceCropRect.width;
+        sourceCanvas.height = sourceCrop.sourceCropRect.height;
+        const context = sourceCanvas.getContext("2d");
+        if (!context) {
+          throw new Error("Could not create a source canvas.");
+        }
+        context.drawImage(
+          sourceVideoElement,
+          sourceCrop.sourceCropRect.x,
+          sourceCrop.sourceCropRect.y,
+          sourceCrop.sourceCropRect.width,
+          sourceCrop.sourceCropRect.height,
+          0,
+          0,
+          sourceCrop.sourceCropRect.width,
+          sourceCrop.sourceCropRect.height
+        );
+        imageDataUrl = sourceCanvas.toDataURL("image/png");
+        sourceImageMeta = createSourceImageMeta(
+          sourceCrop.sourceWidth,
+          sourceCrop.sourceHeight,
+          sourceCrop.sourceCropRect,
+          true
+        );
+      } catch {
+        // Fall through to preview capture.
+      }
+
+      if (!isDataUrl(imageDataUrl) && isDataUrl(previewImageDataUrl)) {
+        imageDataUrl = previewImageDataUrl;
+        sourceImageMeta = createSourceImageMeta(
+          sourceCrop.sourceWidth,
+          sourceCrop.sourceHeight,
+          sourceCrop.sourceCropRect,
+          false
+        );
+      }
+
+      if (!isDataUrl(imageDataUrl)) {
+        return { ok: false, error: "Crop image data is not available." };
+      }
+
+      const safeTime = Number.isFinite(activePlayback.currentTime)
+        ? activePlayback.currentTime
+        : 0;
+      const safeFps = sourceVideo.fps || activePlayback.frameRate || FRAME_RATE_DEFAULT;
+      const safeFrame = Math.max(0, Math.round(safeTime * safeFps));
+
+      const snapshot: FocusSnapshot = {
+        id: createId(`focus-${focusWindowSide}`),
+        playerId: resolvedPlayerId,
+        analysisId: activeStore.analysis.id,
+        title: "Focus snapshot",
+        side: focusWindowSide,
+        sourceVideoId: sourceVideo.id,
+        sourceVideoTitle: sourceVideo.title,
+        sourceVideoMeta: {
+          fps: sourceVideo.fps,
+          duration: sourceVideo.duration,
+          width: sourceVideo.width,
+          height: sourceVideo.height,
+        },
+        sourceImageMeta,
+        currentTime: safeTime,
+        currentFrame: safeFrame,
+        cropRect: { ...focusAreaRect },
+        imageDataUrl,
+        createdAt: new Date().toISOString(),
+      };
+
+      activeStore.updateAnalysis({
+        focusSnapshots: [...(activeStore.analysis.focusSnapshots || []), snapshot],
+      });
+
+      return { ok: true };
+    },
+    [
+      focusAreaRect,
+      focusWindowMode,
+      focusWindowSide,
+      leftPlayback,
+      leftStore,
+      playerVideoLeft,
+      playerVideoRight,
+      rightPlayback,
+      rightStore,
+      resolvedPlayerId,
+    ]
+  );
+
+  const reselectAreaFocus = useCallback(() => {
+    clearFocusSelection();
+    setFocusSelectionSide(focusWindowSide);
+    setFocusSelectionMode("area");
+    setShowFocusWindow(false);
+    setFocusPaletteOpen(false);
+    setActiveSideInCompare(focusWindowSide);
+  }, [clearFocusSelection, focusWindowSide, setActiveSideInCompare]);
+
+  const cancelFocusSelectionOrTool = useCallback(() => {
+    if (focusSelectionMode === "area") {
+      clearFocusSelection();
+    }
+    leftDrawing.setTool("select");
+    rightDrawing.setTool("select");
+  }, [focusSelectionMode, clearFocusSelection, leftDrawing, rightDrawing]);
+
+  useEffect(() => {
+    if (!modeIsCompare) {
+      clearFocusSelection();
+    }
+  }, [clearFocusSelection, modeIsCompare]);
+
+  useMarkerThumbnails({
+    sourceUrl: leftMountedSource,
+    duration: leftCurrentDuration || 0,
+    markers: leftMarkers,
+    enabled: leftMetadataReady && Boolean(playerVideoLeft),
+    onMarkersUpdated: (next) => syncMarkersWithAnalysis("left", next),
+  });
+
+  useMarkerThumbnails({
+    sourceUrl: rightMountedSource,
+    duration: rightCurrentDuration || 0,
+    markers: rightMarkers,
+    enabled: rightMetadataReady && Boolean(playerVideoRight),
+    onMarkersUpdated: (next) => syncMarkersWithAnalysis("right", next),
+  });
+
+  const currentDrawingObject = useMemo(
+    () =>
+      activeDrawing.objects.find((entry) => entry.id === activeDrawing.selectedObjectId) || null,
+    [activeDrawing.objects, activeDrawing.selectedObjectId]
+  );
+
+  useKeyboardShortcuts({
+    enabled: true,
+    onPlayPause: toggleSidePlayback,
+    onPrevFrame: (heldFrames, shift) =>
+      stepActiveSide(-1, {
+        shift,
+        heldFrames,
+      }),
+    onNextFrame: (heldFrames, shift) =>
+      stepActiveSide(1, {
+        shift,
+        heldFrames,
+      }),
+    onUndo: activeDrawing.undo,
+    onRedo: activeDrawing.redo,
+    onDelete: activeDrawing.deleteSelected,
+    onNudgeSelected: (direction, axis, shift, heldFrames) => {
+      activeDrawing.nudgeSelected(direction, axis, shift, heldFrames);
+    },
+    drawingLayerHasFocus: isDrawingKeyboardFocus,
+    onCancel: cancelFocusSelectionOrTool,
+  });
+
+  const playbackButtonText = (side: ComparisonSide) => {
+    const playback = side === "left" ? leftPlayback : rightPlayback;
+    return playback.isPlaying ? "Pause" : "Play";
+  };
+
+  const renderVideoCard = (
+    side: ComparisonSide,
+    metadataReady: boolean,
+    overlayDimensions: { width: number; height: number },
+    setOverlayDimensions: (dimensions: { width: number; height: number }) => void
+  ) => {
+    const isLeft = side === "left";
+    const playerVideo = isLeft ? playerVideoLeft : playerVideoRight;
+    const playback = isLeft ? leftPlayback : rightPlayback;
+    const drawingState = isLeft ? leftDrawing : rightDrawing;
+    const timelineState = isLeft ? leftTimelineState : rightTimelineState;
+    const analysis = isLeft ? leftStore.analysis : rightStore.analysis;
+    const markerMode = isLeft ? leftMarkers : rightMarkers;
+    const hoverMarker = isLeft ? leftHoverMarker : rightHoverMarker;
+    const mountedSource = isLeft ? leftMountedSource : rightMountedSource;
+    const sideTitle = getSideTitle(side);
+    const isActive = modeIsCompare ? activeSide === side : side === "left";
+    const isFocusSourceHovered = focusWindowHoverSide === side && showFocusWindow;
+    const focusSelectionDraftRect = focusSelectionDraft;
+    const hasSelectionDraft =
+      focusSelectionMode === "area" &&
+      focusSelectionSide === side &&
+      focusSelectionDraftRect !== null &&
+      focusSelectionDraftRect.width > 0 &&
+      focusSelectionDraftRect.height > 0;
+    const draftStyle =
+      hasSelectionDraft && focusSelectionDraftRect
+        ? {
+            left: `${focusSelectionDraftRect.x * 100}%`,
+            top: `${focusSelectionDraftRect.y * 100}%`,
+            width: `${focusSelectionDraftRect.width * 100}%`,
+            height: `${focusSelectionDraftRect.height * 100}%`,
+          }
+        : null;
+
+    if (!playerVideo) {
+      return (
+        <div
+          className={`comparison-video-panel ${isActive ? "is-active" : ""}`}
+          onMouseDown={() => setActiveSideInCompare(side)}
+        >
+          <div className="comparison-video-header">
+            <div className="comparison-side-chip">
+              <span>{sideTitle}</span>
+              <span className="comparison-mode-label">empty</span>
+            </div>
+            <div className="comparison-video-actions">
+              <button
+                type="button"
+                className="upload-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openUpload(side);
+                }}
+              >
+                Upload {sideTitle.toLowerCase()} clip
+              </button>
+            </div>
+          </div>
+          <div className="video-upload-card">
+            {analysis.videoMeta?.title ? <div>{analysis.videoMeta.title}</div> : null}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        className={`comparison-video-panel ${isActive ? "is-active" : ""} ${
+          isFocusSourceHovered ? "is-focus-source" : ""
+        }`}
+        onMouseDown={() => setActiveSideInCompare(side)}
+      >
+        <div className="comparison-video-header">
+          <div className="comparison-side-chip">
+            <span>
+              {sideTitle} • {getSideLabel(side)}
+            </span>
+            <span className="comparison-mode-label">
+              {metadataReady ? "ready" : "loading"}
+            </span>
+          </div>
+          <div className="comparison-video-actions">
+            <button
+              type="button"
+              className="upload-button"
+              onClick={(event) => {
+                event.stopPropagation();
+                playPauseSide(side);
+              }}
+            >
+              {playbackButtonText(side)}
+            </button>
+            <button
+              type="button"
+              className="upload-button"
+              onClick={(event) => {
+                event.stopPropagation();
+                openUpload(side);
+              }}
+            >
+              Replace {sideTitle.toLowerCase()} clip
+            </button>
+            <button
+              type="button"
+              className="upload-button video-action-button video-action-button--clear"
+              onClick={(event) => {
+                event.stopPropagation();
+                clearCurrentSide(side);
+              }}
+            >
+              Clear {sideTitle.toLowerCase()} clip
+            </button>
+          </div>
+        </div>
+        <div className="video-canvas-shell">
+          <VideoCanvas
+            sourceUrl={mountedSource}
+            videoRef={isLeft ? leftVideoRef : rightVideoRef}
+            onLoadMetadata={() => onSourceLoad(side)}
+            objects={drawingState.objects}
+            draftObject={drawingState.draftObject}
+            selectedObjectId={drawingState.selectedObjectId}
+            onPointerDown={(point) => {
+              handleCanvasPointerDown(side, point);
+            }}
+            onPointerMove={(point) => {
+              handleCanvasPointerMove(side, point);
+            }}
+            onPointerUp={(point) => {
+              handleCanvasPointerUp(side, point);
+            }}
+            overlayDimensions={overlayDimensions}
+            onDimensionsChange={setOverlayDimensions}
+            onTogglePlay={() => {
+              setActiveSideInCompare(side);
+              playPauseSide(side);
+            }}
+          />
+          {hasSelectionDraft ? <div className="focus-selection-overlay" style={draftStyle || undefined} /> : null}
+        </div>
+        <Timeline
+          duration={Math.max(1, playback.duration || (isLeft ? leftCurrentDuration : rightCurrentDuration) || 0)}
+          currentTime={playback.currentTime}
+          zoom={timelineState.zoom}
+          markers={markerMode}
+          hoverMarker={hoverMarker}
+          compact={modeIsCompare}
+          sideLabel={`${getSideLabel(side)} ${sideTitle}`}
+          onSeek={(time) => {
+            setActiveSideInCompare(side);
+            onTimelineSeek(side, time);
+          }}
+          onSetHoverMarker={(marker) => {
+            setActiveSideInCompare(side);
+            setMarkerHoverForSide(side, marker);
+          }}
+          onJumpToMarker={(marker) => {
+            setActiveSideInCompare(side);
+            onMarkerJump(side, marker);
+          }}
+          onMoveMarker={(marker, time) => {
+            setActiveSideInCompare(side);
+            onMarkerMove(side, marker, time);
+          }}
+          onScrubStateChange={(scrubbed) => {
+            setActiveSideInCompare(side);
+            timelineState.setScrubbing(scrubbed);
+          }}
+          onZoomChange={timelineState.setZoom}
+        />
+      </div>
+    );
+  };
+
+  return (
+    <div className="video-analysis-shell">
+      <style>{videoAnalysisThemeCss}</style>
+      <h1>{playerName ? `${playerName} Video Analysis` : "Clarity Golf Video Analysis"}</h1>
+      <p className="subtitle">
+        {resolvedPlayerName
+          ? `${resolvedPlayerName} • ${lessonTitle || "Unlinked"} lesson context`
+          : "Premium, protected, and reusable workspace foundation."}
+      </p>
+
+      <div className="video-analysis-toolbar">
+        <Toolbar
+          selected={leftDrawing.selectedTool}
+          onToolChange={updateActiveDrawingTool}
+          showAngleTool
+          onFocusOpen={() => setFocusPaletteOpen((previous) => !previous)}
+          mode={comparisonMode}
+          onModeChange={updateMode}
+          onLinkedPlaybackToggle={() => setLinkedPlayback((previous) => !previous)}
+          linkedPlayback={linkedPlayback}
+          onSyncPlayheads={syncPlayheads}
+          syncPlayheadsEnabled={Boolean(playerVideoLeft && playerVideoRight)}
+        />
+        <button
+          type="button"
+          className="upload-button"
+          onClick={() => setShowDiagnostics((previous) => !previous)}
+        >
+          {showDiagnostics ? "Hide diagnostics" : "Show diagnostics"}
+        </button>
+        <input
+          ref={leftUploadInputRef}
+          type="file"
+          accept="video/*"
+          style={{ display: "none" }}
+          onChange={(event) => handleUpload("left", event)}
+        />
+        <input
+          ref={rightUploadInputRef}
+          type="file"
+          accept="video/*"
+          style={{ display: "none" }}
+          onChange={(event) => handleUpload("right", event)}
+        />
+      </div>
+
+      {leftStore.persistenceError || rightStore.persistenceError ? (
+        <div className="focus-artifacts-warning" role="alert">
+          {leftStore.persistenceError || rightStore.persistenceError} Download and
+          clear older Focus snapshots to free space.
+        </div>
+      ) : null}
+
+      <div className={`comparison-layout ${modeIsCompare ? "is-compare" : "is-single"}`}>
+        {modeIsCompare ? (
+          <>
+            {renderVideoCard(
+              "left",
+              leftMetadataReady,
+              leftOverlayDimensions,
+              setLeftOverlayDimensions
+            )}
+            {renderVideoCard(
+              "right",
+              rightMetadataReady,
+              rightOverlayDimensions,
+              setRightOverlayDimensions
+            )}
+          </>
+        ) : (
+          renderVideoCard("left", leftMetadataReady, leftOverlayDimensions, setLeftOverlayDimensions)
+        )}
+      </div>
+
+      {showFocusWindow && (
+        <FocusWindow
+          enabled
+          mode={focusWindowMode}
+          area={focusAreaRect}
+          sideLabel={focusWindowSide}
+          onReselect={reselectAreaFocus}
+          onClose={() => {
+            setShowFocusWindow(false);
+          }}
+          onScreenshot={handleFocusWindowScreenshot}
+          sourceVideo={focusWindowSide === "left" ? leftVideoRef.current : rightVideoRef.current}
+          sourceDimensions={
+            focusWindowSide === "left" ? leftPlayback.dimensions : rightPlayback.dimensions
+          }
+          onHoverChange={(isHovering) => resetFocusWindowHover(focusWindowSide, isHovering)}
+        />
+      )}
+
+      {focusPaletteOpen ? (
+        <FocusPalette
+          onSelectArea={() => {
+            clearFocusSelection();
+            setFocusSelectionMode("area");
+            setFocusSelectionSide(modeIsCompare ? activeSide : "left");
+            setShowFocusWindow(false);
+            setFocusPaletteOpen(false);
+          }}
+          onSelectTrack={() => {
+            setFocusWindowMode("track");
+            setShowFocusWindow(true);
+            setFocusWindowSide(activeSide);
+            setFocusPaletteOpen(false);
+          }}
+          onClose={() => setFocusPaletteOpen(false)}
+        />
+      ) : null}
+
+      <div className="focus-artifacts">
+        <div className="focus-artifacts-title">
+          <span className="focus-artifacts-title-text">
+            Focus snapshots
+            <span>{focusSnapshotStats.total}</span>
+          </span>
+          {focusSnapshotStats.total ? (
+            <button
+              type="button"
+              className="focus-artifacts-clear"
+              onClick={clearAllFocusSnapshots}
+            >
+              Clear all snapshots
+            </button>
+          ) : null}
+        </div>
+        {focusSnapshotStats.shouldWarn ? (
+          <div className="focus-artifacts-warning">
+            You have {focusSnapshotStats.total} snapshots (~
+            {focusSnapshotStats.estimatedMB.toFixed(1)} MB of local snapshot data). Consider downloading and
+            clearing older shots.
+          </div>
+        ) : null}
+        <div className="focus-artifacts-strip">
+          {allFocusSnapshots.length ? (
+            allFocusSnapshots.map((snapshot) => (
+              <article
+                className={`focus-artifact ${
+                  focusArtifactExpandedId === snapshot.id ? "is-expanded" : ""
+                }`}
+                key={snapshot.id}
+              >
+                <button
+                  type="button"
+                  className={`focus-artifact-preview-button ${
+                    focusArtifactExpandedId === snapshot.id ? "is-expanded" : ""
+                  }`}
+                  aria-expanded={focusArtifactExpandedId === snapshot.id}
+                  onMouseEnter={() => setFocusArtifactExpandedId(snapshot.id)}
+                  onMouseLeave={() =>
+                    setFocusArtifactExpandedId((currentId) =>
+                      currentId === snapshot.id ? null : currentId
+                    )
+                  }
+                  onFocus={() => setFocusArtifactExpandedId(snapshot.id)}
+                  onBlur={() =>
+                    setFocusArtifactExpandedId((currentId) =>
+                      currentId === snapshot.id ? null : currentId
+                    )
+                  }
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setFocusArtifactExpandedId((currentId) =>
+                      currentId === snapshot.id ? null : snapshot.id
+                    );
+                  }}
+                  style={{
+                    width: SNAPSHOT_PREVIEW_WIDTH,
+                    height: SNAPSHOT_PREVIEW_HEIGHT,
+                  }}
+                  aria-label={`Toggle preview for ${snapshot.title}`}
+                >
+                  <img
+                    src={snapshot.imageDataUrl}
+                    className="focus-artifact-thumb"
+                    alt={`Focus snapshot ${snapshot.side.toUpperCase()}`}
+                  />
+                </button>
+                <div className="focus-artifact-body">
+                  <div className="focus-artifact-title">{snapshot.title}</div>
+                  <div className="focus-artifact-meta">
+                    {toFixedTime(snapshot.currentTime)} • f {snapshot.currentFrame} •{" "}
+                    {getSideLabel(snapshot.side)}
+                  </div>
+                </div>
+                <div className="focus-artifact-actions">
+                  <a
+                    className="focus-artifact-action"
+                    href={snapshot.imageDataUrl}
+                    download={toDownloadFileName(snapshot)}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      downloadFocusSnapshot(snapshot);
+                    }}
+                  >
+                    Download
+                  </a>
+                  <button
+                    type="button"
+                    className="focus-artifact-action"
+                    onClick={() => renameFocusSnapshot(snapshot.side, snapshot.id)}
+                    aria-label={`Rename focus snapshot ${snapshot.title}`}
+                    title="Rename snapshot"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    type="button"
+                    className="focus-artifact-action focus-artifact-action--danger"
+                    onClick={() => removeFocusSnapshot(snapshot.side, snapshot.id)}
+                    aria-label={`Delete focus snapshot ${snapshot.title}`}
+                    title="Delete snapshot"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="focus-artifacts-empty">No snapshots saved yet.</div>
+          )}
+        </div>
+      </div>
+
+      {showDiagnostics ? (
+        <StatusBar
+          playback={{
+            time: activePlayback.currentTime,
+            frame: activeFrame,
+            fps: activeStoreDrawingVideo?.fps || activePlayback.frameRate || FRAME_RATE_DEFAULT,
+            duration: activeDuration || 0,
+            isPlaying: activePlayback.isPlaying,
+          }}
+          timeline={{
+            scrub: activeTimelineState.isScrubbing,
+            hover: activeTimelineHoverMarker ? activeTimelineHoverMarker.label : null,
+            zoom: activeTimelineState.zoom,
+          }}
+          drawing={{
+            selectedTool: activeDrawing.selectedTool,
+            selectedObjectId: activeDrawing.selectedObjectId,
+            objectCount: activeDrawing.objects.length,
+            undoSize: activeDrawing.canUndo ? 1 : 0,
+            redoSize: activeDrawing.canRedo ? 1 : 0,
+          }}
+        />
+      ) : null}
+
+      <Inspector
+        selectedTool={activeDrawing.selectedTool}
+        selectedObject={currentDrawingObject}
+        canUndo={activeDrawing.canUndo}
+        canRedo={activeDrawing.canRedo}
+        currentObjects={activeDrawing.objects.length}
+      />
+    </div>
+  );
+}
