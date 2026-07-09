@@ -1,5 +1,6 @@
 import React, {
   ChangeEvent,
+  DragEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -304,6 +305,9 @@ export function VideoWorkspace({
   const [saveBackend, setSaveBackend] = useState<SaveBackend>("local-device");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveMessage, setSaveMessage] = useState("Nothing to save yet.");
+  const [showSaveSettings, setShowSaveSettings] = useState(false);
+  const [dragTargetSide, setDragTargetSide] = useState<ComparisonSide | null>(null);
+  const [intakeError, setIntakeError] = useState("");
   const [liveRecording, setLiveRecording] = useState<LiveRecordingSession | null>(null);
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
@@ -311,6 +315,7 @@ export function VideoWorkspace({
 
   const timelineEngine = useMemo(() => new TimelineEngine(), []);
   const modeIsCompare = comparisonMode === "compare";
+  const workspaceHasVideo = Boolean(playerVideoLeft || playerVideoRight);
 
   const leftStore = useAnalysisStore({
     playerId: resolvedPlayerId,
@@ -793,10 +798,53 @@ export function VideoWorkspace({
         return;
       }
       await loadClipFileForSide(side, file);
+      setIntakeError("");
       setSaveStatus("idle");
       setSaveMessage("Clip ready to save.");
     },
     [loadClipFileForSide]
+  );
+
+  const handleDropUpload = useCallback(
+    async (side: ComparisonSide, event: DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setDragTargetSide(null);
+
+      const file =
+        Array.from(event.dataTransfer.files).find((entry) =>
+          entry.type.startsWith("video/")
+        ) ?? null;
+
+      if (!file) {
+        setIntakeError("Drop a video file to upload.");
+        return;
+      }
+
+      try {
+        await loadClipFileForSide(side, file);
+        setIntakeError("");
+        setSaveStatus("idle");
+        setSaveMessage("Clip ready to save.");
+      } catch (error) {
+        setIntakeError("Upload failed. Try a different video file.");
+        setSaveStatus("error");
+        setSaveMessage("Upload failed. Try a different video file.");
+        // eslint-disable-next-line no-console
+        console.error("Dropped video upload failed", error);
+      }
+    },
+    [loadClipFileForSide]
+  );
+
+  const handleDropZoneDrag = useCallback(
+    (side: ComparisonSide, event: DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "copy";
+      setDragTargetSide(side);
+    },
+    []
   );
 
   const openLiveRecording = useCallback(
@@ -1671,6 +1719,44 @@ export function VideoWorkspace({
           }
         : null;
 
+    const renderUploadDropZone = (primary = false) => (
+      <button
+        type="button"
+        className={`video-upload-card ${primary ? "is-primary" : ""} ${
+          dragTargetSide === side ? "is-dragging" : ""
+        }`}
+        onClick={(event) => {
+          event.stopPropagation();
+          openUpload(side);
+        }}
+        onDragEnter={(event) => handleDropZoneDrag(side, event)}
+        onDragOver={(event) => handleDropZoneDrag(side, event)}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setDragTargetSide((current) => (current === side ? null : current));
+        }}
+        onDrop={(event) => void handleDropUpload(side, event)}
+        aria-label={`Upload ${sideTitle.toLowerCase()} clip`}
+      >
+        <span className="video-upload-icon" aria-hidden="true">
+          <IconUpload />
+        </span>
+        <span className="video-upload-title">
+          {primary ? "Upload a video" : `Upload ${sideTitle.toLowerCase()} clip`}
+        </span>
+        <span className="video-upload-copy">Drag and drop or click to choose a file</span>
+        {analysis.videoMeta?.title ? (
+          <span className="video-upload-file">{analysis.videoMeta.title}</span>
+        ) : null}
+        {intakeError ? (
+          <span className="video-upload-error" role="alert">
+            {intakeError}
+          </span>
+        ) : null}
+      </button>
+    );
+
     if (!playerVideo) {
       return (
         <div
@@ -1713,9 +1799,7 @@ export function VideoWorkspace({
               </button>
             </div>
           </div>
-          <div className="video-upload-card">
-            {analysis.videoMeta?.title ? <div>{analysis.videoMeta.title}</div> : null}
-          </div>
+          {renderUploadDropZone(!workspaceHasVideo && side === "left")}
         </div>
       );
     }
@@ -1866,82 +1950,94 @@ export function VideoWorkspace({
           : "Premium, protected, and reusable workspace foundation."}
       </p>
 
-      <div className="video-analysis-toolbar">
-        <Toolbar
-          selected={leftDrawing.selectedTool}
-          onToolChange={updateActiveDrawingTool}
-          showAngleTool
-          onFocusOpen={() => setFocusPaletteOpen((previous) => !previous)}
-          mode={comparisonMode}
-          onModeChange={updateMode}
-          onLinkedPlaybackToggle={() => setLinkedPlayback((previous) => !previous)}
-          linkedPlayback={linkedPlayback}
-          onSyncPlayheads={syncPlayheads}
-          syncPlayheadsEnabled={Boolean(playerVideoLeft && playerVideoRight)}
-          onBack={handleBackAction}
-          canGoBack={canGoBack}
-          onClearDrawings={clearActiveDrawing}
-          canClearDrawings={canClearDrawings}
-          clearDrawingLabel={clearDrawingLabel}
-          clearDrawingTooltip={clearDrawingTooltip}
-        />
-        <div className="analysis-save-controls" aria-label="Video analysis save controls">
-          <div className="analysis-save-destinations" role="group" aria-label="Save destination">
+      <input
+        ref={leftUploadInputRef}
+        type="file"
+        accept="video/*"
+        style={{ display: "none" }}
+        onChange={(event) => handleUpload("left", event)}
+      />
+      <input
+        ref={rightUploadInputRef}
+        type="file"
+        accept="video/*"
+        style={{ display: "none" }}
+        onChange={(event) => handleUpload("right", event)}
+      />
+
+      {workspaceHasVideo ? (
+        <div className="video-analysis-toolbar">
+          <Toolbar
+            selected={leftDrawing.selectedTool}
+            onToolChange={updateActiveDrawingTool}
+            showAngleTool
+            onFocusOpen={() => setFocusPaletteOpen((previous) => !previous)}
+            mode={comparisonMode}
+            onModeChange={updateMode}
+            onLinkedPlaybackToggle={() => setLinkedPlayback((previous) => !previous)}
+            linkedPlayback={linkedPlayback}
+            onSyncPlayheads={syncPlayheads}
+            syncPlayheadsEnabled={Boolean(playerVideoLeft && playerVideoRight)}
+            onBack={handleBackAction}
+            canGoBack={canGoBack}
+            onClearDrawings={clearActiveDrawing}
+            canClearDrawings={canClearDrawings}
+            clearDrawingLabel={clearDrawingLabel}
+            clearDrawingTooltip={clearDrawingTooltip}
+          />
+          <div className="analysis-save-controls" aria-label="Video analysis save controls">
             <button
               type="button"
-              className={`analysis-save-destination ${
-                saveBackend === "local-device" ? "is-active" : ""
-              }`}
-              onClick={() => setSaveBackend("local-device")}
-              aria-pressed={saveBackend === "local-device"}
+              className="upload-button video-save-button"
+              onClick={handleManualSave}
+              disabled={saveStatus === "saving" || !canManualSave}
             >
-              Local Device
+              {saveStatus === "saving" ? "Saving..." : "Save"}
             </button>
+            <span className={`analysis-save-status is-${saveStatus}`} role="status">
+              {saveMessage}
+            </span>
             <button
               type="button"
-              className={`analysis-save-destination ${
-                saveBackend === "cloud-service" ? "is-active" : ""
-              }`}
-              onClick={() => setSaveBackend("cloud-service")}
-              aria-pressed={saveBackend === "cloud-service"}
+              className="upload-button video-save-settings-button"
+              onClick={() => setShowSaveSettings((previous) => !previous)}
+              aria-expanded={showSaveSettings}
             >
-              Cloud
+              Settings
             </button>
+            {showSaveSettings ? (
+              <div className="analysis-save-settings" role="group" aria-label="Save location">
+                <span>Save location</span>
+                <label className="analysis-save-setting">
+                  <input
+                    type="radio"
+                    name="video-analysis-save-backend"
+                    checked={saveBackend === "local-device"}
+                    onChange={() => setSaveBackend("local-device")}
+                  />
+                  Local Device
+                </label>
+                <label className="analysis-save-setting">
+                  <input
+                    type="radio"
+                    name="video-analysis-save-backend"
+                    checked={saveBackend === "cloud-service"}
+                    onChange={() => setSaveBackend("cloud-service")}
+                  />
+                  Cloud
+                </label>
+              </div>
+            ) : null}
           </div>
           <button
             type="button"
-            className="upload-button video-save-button"
-            onClick={handleManualSave}
-            disabled={saveStatus === "saving" || !canManualSave}
+            className="upload-button"
+            onClick={() => setShowDiagnostics((previous) => !previous)}
           >
-            {saveStatus === "saving" ? "Saving..." : "Save"}
+            {showDiagnostics ? "Hide diagnostics" : "Show diagnostics"}
           </button>
-          <span className={`analysis-save-status is-${saveStatus}`} role="status">
-            {saveMessage}
-          </span>
         </div>
-        <button
-          type="button"
-          className="upload-button"
-          onClick={() => setShowDiagnostics((previous) => !previous)}
-        >
-          {showDiagnostics ? "Hide diagnostics" : "Show diagnostics"}
-        </button>
-        <input
-          ref={leftUploadInputRef}
-          type="file"
-          accept="video/*"
-          style={{ display: "none" }}
-          onChange={(event) => handleUpload("left", event)}
-        />
-        <input
-          ref={rightUploadInputRef}
-          type="file"
-          accept="video/*"
-          style={{ display: "none" }}
-          onChange={(event) => handleUpload("right", event)}
-        />
-      </div>
+      ) : null}
 
       {liveRecording ? (
         <section className="live-recording-panel" aria-label="Live recording">
@@ -2021,35 +2117,68 @@ export function VideoWorkspace({
         </section>
       ) : null}
 
-      {leftStore.persistenceError || rightStore.persistenceError ? (
+      {!workspaceHasVideo && !liveRecording ? (
+        <section className="video-intake-panel" aria-label="Add video">
+          {renderVideoCard(
+            "left",
+            leftMetadataReady,
+            leftOverlayDimensions,
+            setLeftOverlayDimensions
+          )}
+          <div className="video-intake-actions">
+            <button
+              type="button"
+              className="video-tool-btn"
+              aria-label="Record clip"
+              onClick={() => void openLiveRecording("left")}
+            >
+              <IconRecord />
+              <span className="video-tool-tip" aria-hidden="true">
+                Record clip
+              </span>
+            </button>
+            <button
+              type="button"
+              className="upload-button"
+              onClick={() => void openLiveRecording("left")}
+            >
+              Record from camera
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {workspaceHasVideo && (leftStore.persistenceError || rightStore.persistenceError) ? (
         <div className="focus-artifacts-warning" role="alert">
           {leftStore.persistenceError || rightStore.persistenceError} Download and
           clear older Focus snapshots to free space.
         </div>
       ) : null}
 
-      <div className={`comparison-layout ${modeIsCompare ? "is-compare" : "is-single"}`}>
-        {modeIsCompare ? (
-          <>
-            {renderVideoCard(
-              "left",
-              leftMetadataReady,
-              leftOverlayDimensions,
-              setLeftOverlayDimensions
-            )}
-            {renderVideoCard(
-              "right",
-              rightMetadataReady,
-              rightOverlayDimensions,
-              setRightOverlayDimensions
-            )}
-          </>
-        ) : (
-          renderVideoCard("left", leftMetadataReady, leftOverlayDimensions, setLeftOverlayDimensions)
-        )}
-      </div>
+      {workspaceHasVideo ? (
+        <div className={`comparison-layout ${modeIsCompare ? "is-compare" : "is-single"}`}>
+          {modeIsCompare ? (
+            <>
+              {renderVideoCard(
+                "left",
+                leftMetadataReady,
+                leftOverlayDimensions,
+                setLeftOverlayDimensions
+              )}
+              {renderVideoCard(
+                "right",
+                rightMetadataReady,
+                rightOverlayDimensions,
+                setRightOverlayDimensions
+              )}
+            </>
+          ) : (
+            renderVideoCard("left", leftMetadataReady, leftOverlayDimensions, setLeftOverlayDimensions)
+          )}
+        </div>
+      ) : null}
 
-      {showFocusWindow && (
+      {workspaceHasVideo && showFocusWindow && (
         <FocusWindow
           enabled
           mode={focusWindowMode}
@@ -2068,7 +2197,7 @@ export function VideoWorkspace({
         />
       )}
 
-      {focusPaletteOpen ? (
+      {workspaceHasVideo && focusPaletteOpen ? (
         <FocusPalette
           onSelectArea={() => {
             clearFocusSelection();
@@ -2087,30 +2216,31 @@ export function VideoWorkspace({
         />
       ) : null}
 
-      <div className="focus-artifacts">
-        <div className="focus-artifacts-title">
-          <span className="focus-artifacts-title-text">
-            Focus snapshots
-            <span>{focusSnapshotStats.total}</span>
-          </span>
-          {focusSnapshotStats.total ? (
-            <button
-              type="button"
-              className="focus-artifacts-clear"
-              onClick={clearAllFocusSnapshots}
-            >
-              Clear all snapshots
-            </button>
-          ) : null}
-        </div>
-        {focusSnapshotStats.shouldWarn ? (
-          <div className="focus-artifacts-warning">
-            You have {focusSnapshotStats.total} snapshots (~
-            {focusSnapshotStats.estimatedMB.toFixed(1)} MB of local snapshot data). Consider downloading and
-            clearing older shots.
+      {workspaceHasVideo ? (
+        <div className="focus-artifacts">
+          <div className="focus-artifacts-title">
+            <span className="focus-artifacts-title-text">
+              Focus snapshots
+              <span>{focusSnapshotStats.total}</span>
+            </span>
+            {focusSnapshotStats.total ? (
+              <button
+                type="button"
+                className="focus-artifacts-clear"
+                onClick={clearAllFocusSnapshots}
+              >
+                Clear all snapshots
+              </button>
+            ) : null}
           </div>
-        ) : null}
-        <div className="focus-artifacts-strip">
+          {focusSnapshotStats.shouldWarn ? (
+            <div className="focus-artifacts-warning">
+              You have {focusSnapshotStats.total} snapshots (~
+              {focusSnapshotStats.estimatedMB.toFixed(1)} MB of local snapshot data). Consider downloading and
+              clearing older shots.
+            </div>
+          ) : null}
+          <div className="focus-artifacts-strip">
           {allFocusSnapshots.length ? (
             allFocusSnapshots.map((snapshot) => (
               <article
@@ -2200,8 +2330,9 @@ export function VideoWorkspace({
           )}
         </div>
       </div>
+      ) : null}
 
-      {showDiagnostics ? (
+      {workspaceHasVideo && showDiagnostics ? (
         <StatusBar
           playback={{
             time: activePlayback.currentTime,
@@ -2225,6 +2356,7 @@ export function VideoWorkspace({
         />
       ) : null}
 
+      {workspaceHasVideo ? (
       <Inspector
         selectedTool={activeDrawing.selectedTool}
         selectedObject={currentDrawingObject}
@@ -2232,6 +2364,7 @@ export function VideoWorkspace({
         canRedo={activeDrawing.canRedo}
         currentObjects={activeDrawing.objects.length}
       />
+      ) : null}
     </div>
   );
 }
