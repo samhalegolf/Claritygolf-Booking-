@@ -16088,7 +16088,10 @@ function App() {
                             aria-label={`Show videos for ${player.name}`}
                             onClick={(event) => {
                               event.stopPropagation();
-                              selectPlayerProfileTool(player, "videos");
+                              selectPlayerProfileTool(
+                                { id: preferredVideoPlayerId(player, videoPlayerIds), name: player.name },
+                                "videos",
+                              );
                             }}
                           >
                             <Video size={16} />
