@@ -163,18 +163,6 @@
   font-size: 13px;
 }
 
-.player-tool-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.player-tool-toggle {
-  width: 42px;
-  height: 42px;
-}
-
 .player-tool-tabs {
   display: inline-flex;
   gap: 6px;
@@ -415,15 +403,4 @@
   font-size: 12px;
   margin: 16px 0;
   position: relative;
-}
-
-@media (max-width: 900px) {
-  .player-tool-header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .player-tool-actions {
-    justify-content: flex-start;
-  }
 }

@@ -6,8 +6,6 @@ import {
   BarChart3,
   CalendarDays,
   Check,
-  ChevronDown,
-  ChevronUp,
   Code2,
   Copy,
   Clock,
@@ -16060,7 +16058,13 @@ function App() {
                       >
                         <article
                           className={`player-profile-card${isSelectedPlayer ? " active" : ""}`}
-                          onClick={() => selectPlayerProfileTool(player)}
+                          onClick={() => {
+                            if (isSelectedPlayer) {
+                              setPlayerToolExpanded((expanded) => !expanded);
+                            } else {
+                              selectPlayerProfileTool(player);
+                            }
+                          }}
                         >
                           <div className="player-profile-avatar">
                             <User size={18} />
@@ -16105,22 +16109,6 @@ function App() {
                                 <span>Player</span>
                                 <h3>{notesWorkspaceClient.name}</h3>
                                 <p>{notesWorkspaceClient.email || notesWorkspaceClient.phone || "No contact yet"}</p>
-                              </div>
-                              <div className="player-tool-actions">
-                                <button type="button" className="outline-button" onClick={() => openClientProfile(notesWorkspaceClient)}>
-                                  <User size={15} />
-                                  Profile
-                                </button>
-                                <button
-                                  type="button"
-                                  className="icon-button player-tool-toggle"
-                                  onClick={() => setPlayerToolExpanded((expanded) => !expanded)}
-                                  aria-expanded={playerToolExpanded}
-                                  aria-label={playerToolExpanded ? "Collapse player tools" : "Expand player tools"}
-                                  title={playerToolExpanded ? "Collapse player tools" : "Expand player tools"}
-                                >
-                                  {playerToolExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                                </button>
                               </div>
                             </div>
 
