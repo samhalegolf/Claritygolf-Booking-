@@ -564,7 +564,6 @@ function personFromAppointment(item) {
       name: item.client || item.title,
       email: item.email,
       phone: item.phone,
-      note: item.note,
       source: "appointment",
     },
     "appointment",

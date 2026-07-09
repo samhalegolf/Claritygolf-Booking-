@@ -87,7 +87,6 @@ function personFromAppointment(item: any) {
       name: item.client || item.title,
       email: item.email,
       phone: item.phone,
-      note: item.note,
       source: "appointment_migration",
     },
     "appointment_migration",

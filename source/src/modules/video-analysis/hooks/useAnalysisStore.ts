@@ -22,6 +22,7 @@ export interface UseAnalysisStoreResult {
   setMarkers: (markers: TimelineMarker[]) => void;
   setDrawings: (drawings: DrawingObject[]) => void;
   persistenceError: string | null;
+  saveNow: () => Promise<boolean>;
 }
 
 const createBlankAnalysis = (
@@ -309,52 +310,90 @@ export function useAnalysisStore({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savePendingRef = useRef(false);
 
-  const flushSave = useCallback(() => {
+  const persistAnalysis = useCallback(
+    async (nextAnalysis: VideoAnalysis): Promise<boolean> => {
+      try {
+        await engine.save(nextAnalysis, safeVideoId);
+        setPersistenceError(null);
+        return true;
+      } catch (error) {
+        if (error instanceof PersistenceQuotaError) {
+          setPersistenceError(error.message);
+        } else {
+          setPersistenceError("Could not save analysis changes.");
+          // Unexpected persistence failures should not crash the workspace.
+          // eslint-disable-next-line no-console
+          console.error("Failed to persist analysis", error);
+        }
+        return false;
+      }
+    },
+    [engine, safeVideoId]
+  );
+
+  const flushSave = useCallback(async (): Promise<boolean> => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    if (!savePendingRef.current) return;
+    if (!savePendingRef.current) return true;
+    const nextAnalysis = analysisRef.current;
     savePendingRef.current = false;
-    try {
-      engine.save(analysisRef.current);
-      setPersistenceError(null);
-    } catch (error) {
-      if (error instanceof PersistenceQuotaError) {
-        setPersistenceError(error.message);
-      } else {
-        // Unexpected persistence failures should not crash the workspace.
-        // eslint-disable-next-line no-console
-        console.error("Failed to persist analysis", error);
-      }
+    return persistAnalysis(nextAnalysis);
+  }, [persistAnalysis]);
+
+  const saveNow = useCallback(async (): Promise<boolean> => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
     }
-  }, [engine]);
+    savePendingRef.current = false;
+    return persistAnalysis(analysisRef.current);
+  }, [persistAnalysis]);
 
   const scheduleSave = useCallback(() => {
     savePendingRef.current = true;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
+    saveTimerRef.current = setTimeout(() => {
+      void flushSave();
+    }, SAVE_DEBOUNCE_MS);
   }, [flushSave]);
 
   // Load persisted state. This uses setAnalysis directly and deliberately does
   // NOT schedule a save, so hydration never re-writes (or clobbers) storage.
   useEffect(() => {
-    flushSave(); // persist any pending edits for the previous key first
-    const loaded = engine.load(playerId, safeVideoId, lessonId);
-    setAnalysis(sanitizeAnalysis(playerId, safeVideoId, lessonId, loaded));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [engine, lessonId, playerId, safeVideoId]);
+    let cancelled = false;
+    void (async () => {
+      await flushSave(); // persist any pending edits for the previous key first
+      const loaded = await engine.load(playerId, safeVideoId, lessonId);
+      if (cancelled) return;
+      const nextAnalysis = sanitizeAnalysis(playerId, safeVideoId, lessonId, loaded);
+      analysisRef.current = nextAnalysis;
+      setAnalysis(nextAnalysis);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [engine, flushSave, lessonId, playerId, safeVideoId]);
 
   // Flush any pending write when the hook unmounts.
-  useEffect(() => flushSave, [flushSave]);
+  useEffect(() => {
+    return () => {
+      void flushSave();
+    };
+  }, [flushSave]);
 
   const updateAnalysis = useCallback(
     (patch: Partial<VideoAnalysis>) => {
-      setAnalysis((prev) => ({
-        ...prev,
-        ...patch,
-        updatedAt: new Date().toISOString(),
-      }));
+      setAnalysis((prev) => {
+        const nextAnalysis = {
+          ...prev,
+          ...patch,
+          updatedAt: new Date().toISOString(),
+        };
+        analysisRef.current = nextAnalysis;
+        return nextAnalysis;
+      });
       scheduleSave();
     },
     [scheduleSave]
@@ -376,5 +415,6 @@ export function useAnalysisStore({
     setMarkers,
     setDrawings,
     persistenceError,
+    saveNow,
   };
 }

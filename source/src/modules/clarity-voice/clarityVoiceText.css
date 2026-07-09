@@ -1,0 +1,119 @@
+.clarityVoicePanel {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 760px;
+  font-family: inherit;
+}
+
+.clarityVoiceInputRow {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.clarityVoiceMicButton {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  color: #111827;
+  cursor: pointer;
+}
+
+.clarityVoiceMicButton:hover:not(:disabled) {
+  border-color: rgba(15, 23, 42, 0.28);
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.clarityVoiceMicButton.is-listening {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+}
+
+.clarityVoiceMicButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.clarityVoiceTextOutput {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.clarityVoiceTextOutput textarea {
+  width: 100%;
+  min-height: 138px;
+  resize: vertical;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 10px;
+  padding: 12px;
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #111827;
+  background: #fff;
+}
+
+.clarityVoiceTextOutput textarea:focus {
+  outline: 2px solid rgba(25, 118, 210, 0.18);
+  border-color: rgba(25, 118, 210, 0.45);
+}
+
+.clarityVoiceInterim {
+  margin: -2px 0 0 56px;
+  color: #6b7280;
+  font-size: 13px;
+  font-style: italic;
+  white-space: pre-wrap;
+}
+
+.clarityVoiceSaveRow {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.clarityVoiceSaveButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 999px;
+  padding: 9px 13px;
+  font: inherit;
+  font-weight: 700;
+  background: #111827;
+  color: #fff;
+  cursor: pointer;
+}
+
+.clarityVoiceSaveButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@media (max-width: 640px) {
+  .clarityVoiceInputRow {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .clarityVoiceMicButton {
+    width: 40px;
+    height: 40px;
+  }
+
+  .clarityVoiceInterim {
+    margin-left: 50px;
+  }
+}

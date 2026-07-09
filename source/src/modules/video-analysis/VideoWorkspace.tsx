@@ -1,5 +1,6 @@
 import React, {
   ChangeEvent,
+  DragEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -11,21 +12,25 @@ import { videoAnalysisThemeCss } from "./theme/videoAnalysisTheme";
 import { FocusPalette } from "./components/FocusPalette";
 import { FocusWindow } from "./components/FocusWindow";
 import { FocusAreaRect } from "./models/Focus";
-import { FocusSnapshot } from "./models/Analysis";
+import { FocusSnapshot, VideoAnalysis } from "./models/Analysis";
 import { Inspector } from "./components/Inspector";
 import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
 import { Toolbar } from "./components/Toolbar";
 import { VideoCanvas } from "./components/VideoCanvas";
-import { IconPlay, IconPause, IconUpload } from "./components/VideoIcons";
+import { IconPlay, IconPause, IconRecord, IconUpload } from "./components/VideoIcons";
 import {
   ComparisonSide,
   ComparisonWorkspaceState,
+  SaveBackend,
+  VideoAnalysisSaveArtifact,
   VideoAnalysisPersistenceLayer,
   WorkspacePersistenceContext,
   createVideoAnalysisPersistence,
   loadComparisonWorkspaceState,
   saveComparisonWorkspaceState,
+  saveVideoAnalysisArtifactToCloud,
+  saveVideoAnalysisArtifactToDevice,
   WorkspaceMode,
 } from "./utils/localPersistence";
 import {
@@ -59,6 +64,15 @@ const SNAPSHOT_STORAGE_WARNING_LIMIT = 12;
 const SNAPSHOT_PREVIEW_WIDTH = 88;
 const SNAPSHOT_PREVIEW_HEIGHT = 50;
 const DEFAULT_PLAYER_ID = "player-demo-1";
+type SaveStatus = "idle" | "saving" | "saved" | "error";
+type RecordingStatus = "ready" | "recording" | "processing" | "error";
+
+interface LiveRecordingSession {
+  side: ComparisonSide;
+  status: RecordingStatus;
+  error: string | null;
+  startedAt: number | null;
+}
 
 interface VideoWorkspaceProps {
   playerId?: string;
@@ -189,6 +203,41 @@ const buildRectFromDrag = (
   };
 };
 
+const getPreferredRecordingMimeType = () => {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return "";
+  }
+  return (
+    [
+      "video/mp4;codecs=h264",
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/webm",
+    ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) || ""
+  );
+};
+
+const getRecordingFileName = (side: ComparisonSide, mimeType: string) => {
+  const extension = mimeType.includes("mp4") ? "mp4" : "webm";
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")
+    .replace("T", "-")
+    .replace("Z", "");
+  return `live-recording-${side}-${timestamp}.${extension}`;
+};
+
+const hasSaveableAnalysisContent = (analysis: VideoAnalysis) => {
+  return Boolean(
+    analysis.videoMeta ||
+      analysis.drawings.length ||
+      analysis.focusSnapshots.length ||
+      analysis.notes.length ||
+      analysis.focusViews.length ||
+      analysis.narrationRefs.length
+  );
+};
+
 export function VideoWorkspace({
   playerId,
   playerName,
@@ -198,8 +247,11 @@ export function VideoWorkspace({
 }: VideoWorkspaceProps) {
   const leftVideoRef = useRef<HTMLVideoElement>(null);
   const rightVideoRef = useRef<HTMLVideoElement>(null);
+  const livePreviewRef = useRef<HTMLVideoElement>(null);
   const leftUploadInputRef = useRef<HTMLInputElement>(null);
   const rightUploadInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
   const resolvedPlayerId = playerId || DEFAULT_PLAYER_ID;
   const resolvedPlayerName = playerName || resolvedPlayerId;
   const persistenceLayer = useMemo(() => createVideoAnalysisPersistence(persistence), [persistence]);
@@ -213,6 +265,10 @@ export function VideoWorkspace({
 
   const leftPlayback = usePlayback({ videoRef: leftVideoRef });
   const rightPlayback = usePlayback({ videoRef: rightVideoRef });
+
+  const stopLiveStream = useCallback((stream: MediaStream | null) => {
+    stream?.getTracks().forEach((track) => track.stop());
+  }, []);
 
   const [playerVideoLeft, setPlayerVideoLeft] = useState<PlayerVideo | null>(null);
   const [playerVideoRight, setPlayerVideoRight] = useState<PlayerVideo | null>(null);
@@ -246,9 +302,20 @@ export function VideoWorkspace({
   const [linkedPlayback, setLinkedPlayback] = useState(false);
   const [activeSide, setActiveSide] = useState<ComparisonSide>("left");
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
+  const [saveBackend, setSaveBackend] = useState<SaveBackend>("local-device");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveMessage, setSaveMessage] = useState("Nothing to save yet.");
+  const [showSaveSettings, setShowSaveSettings] = useState(false);
+  const [dragTargetSide, setDragTargetSide] = useState<ComparisonSide | null>(null);
+  const [intakeError, setIntakeError] = useState("");
+  const [liveRecording, setLiveRecording] = useState<LiveRecordingSession | null>(null);
+  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState("");
 
   const timelineEngine = useMemo(() => new TimelineEngine(), []);
   const modeIsCompare = comparisonMode === "compare";
+  const workspaceHasVideo = Boolean(playerVideoLeft || playerVideoRight);
 
   const leftStore = useAnalysisStore({
     playerId: resolvedPlayerId,
@@ -263,6 +330,19 @@ export function VideoWorkspace({
     videoId: RIGHT_ANALYSIS_SLOT,
     persistenceAdapter: persistenceLayer.analysisAdapter,
   });
+
+  useEffect(() => {
+    if (livePreviewRef.current) {
+      livePreviewRef.current.srcObject = liveStream;
+    }
+  }, [liveStream]);
+
+  useEffect(() => {
+    return () => {
+      mediaRecorderRef.current?.stream.getTracks().forEach((track) => track.stop());
+      stopLiveStream(liveStream);
+    };
+  }, [liveStream, stopLiveStream]);
 
   // Restore on-device videos once per player/lesson context. Reconstructs a
   // File from the stored blob and runs it through the normal load path so the
@@ -399,28 +479,52 @@ export function VideoWorkspace({
       shouldWarn: total >= SNAPSHOT_STORAGE_WARNING_LIMIT,
     };
   }, [allFocusSnapshots]);
+  const canManualSave = useMemo(
+    () =>
+      Boolean(
+        playerVideoLeft ||
+          playerVideoRight ||
+          hasSaveableAnalysisContent(leftStore.analysis) ||
+          hasSaveableAnalysisContent(rightStore.analysis)
+      ),
+    [leftStore.analysis, playerVideoLeft, playerVideoRight, rightStore.analysis]
+  );
 
   useEffect(() => {
-    const loaded = loadComparisonWorkspaceState(
-      persistenceLayer.workspaceAdapter,
-      workspaceContext
-    );
-    if (loaded) {
-      setComparisonMode(loaded.mode);
-      setActiveSide(loaded.mode === "single" ? "left" : loaded.activeSide);
-      setLinkedPlayback(loaded.linkedPlayback);
-      setShowFocusWindow(loaded.focusWindowOpen);
-      setFocusWindowMode(loaded.focusWindowMode);
-      setFocusWindowSide(loaded.mode === "single" ? "left" : loaded.focusWindowSide);
-      setFocusAreaRect(loaded.focusAreaRect);
+    if (!canManualSave && saveStatus === "saved") {
+      setSaveStatus("idle");
+      setSaveMessage("Nothing to save yet.");
     }
-    // Mark hydration complete so the save effect can begin persisting without
-    // first overwriting restored state with mount-time defaults.
-    setWorkspaceHydrated(true);
+  }, [canManualSave, saveStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const loaded = await loadComparisonWorkspaceState(
+        persistenceLayer.workspaceAdapter,
+        workspaceContext
+      );
+      if (cancelled) return;
+      if (loaded) {
+        setComparisonMode(loaded.mode);
+        setActiveSide(loaded.mode === "single" ? "left" : loaded.activeSide);
+        setLinkedPlayback(loaded.linkedPlayback);
+        setShowFocusWindow(loaded.focusWindowOpen);
+        setFocusWindowMode(loaded.focusWindowMode);
+        setFocusWindowSide(loaded.mode === "single" ? "left" : loaded.focusWindowSide);
+        setFocusAreaRect(loaded.focusAreaRect);
+      }
+      // Mark hydration complete so the save effect can begin persisting without
+      // first overwriting restored state with mount-time defaults.
+      setWorkspaceHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [persistenceLayer.workspaceAdapter, workspaceContext]);
 
-  const saveWorkspaceState = useCallback(() => {
-    const payload: ComparisonWorkspaceState = {
+  const buildWorkspaceState = useCallback((): ComparisonWorkspaceState => {
+    return {
       version: 1,
       mode: comparisonMode,
       activeSide,
@@ -430,26 +534,31 @@ export function VideoWorkspace({
       focusWindowSide,
       focusAreaRect,
     };
-    saveComparisonWorkspaceState(
-      payload,
+  }, [
+    activeSide,
+    comparisonMode,
+    focusAreaRect,
+    focusWindowMode,
+    focusWindowSide,
+    linkedPlayback,
+    showFocusWindow,
+  ]);
+
+  const saveWorkspaceState = useCallback(() => {
+    return saveComparisonWorkspaceState(
+      buildWorkspaceState(),
       persistenceLayer.workspaceAdapter,
       workspaceContext
     );
   }, [
-    activeSide,
-    comparisonMode,
-    linkedPlayback,
-    showFocusWindow,
-    focusWindowMode,
-    focusWindowSide,
-    focusAreaRect,
+    buildWorkspaceState,
     persistenceLayer.workspaceAdapter,
     workspaceContext,
   ]);
 
   useEffect(() => {
     if (!workspaceHydrated) return;
-    saveWorkspaceState();
+    void saveWorkspaceState();
   }, [saveWorkspaceState, workspaceHydrated]);
 
   const updateMode = (next: WorkspaceMode) => {
@@ -610,14 +719,8 @@ export function VideoWorkspace({
     ]
   );
 
-  const handleUpload = useCallback(
-    async (side: ComparisonSide, event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0] ?? null;
-      event.target.value = "";
-      if (!file) {
-        return;
-      }
-
+  const loadClipFileForSide = useCallback(
+    async (side: ComparisonSide, file: File) => {
       const isLeft = side === "left";
       const playback = isLeft ? leftPlayback : rightPlayback;
       const analysisStore = isLeft ? leftStore : rightStore;
@@ -685,6 +788,284 @@ export function VideoWorkspace({
       setActiveSideInCompare,
       persistenceLayer,
     ]
+  );
+
+  const handleUpload = useCallback(
+    async (side: ComparisonSide, event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0] ?? null;
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+      await loadClipFileForSide(side, file);
+      setIntakeError("");
+      setSaveStatus("idle");
+      setSaveMessage("Clip ready to save.");
+    },
+    [loadClipFileForSide]
+  );
+
+  const handleDropUpload = useCallback(
+    async (side: ComparisonSide, event: DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setDragTargetSide(null);
+
+      const file =
+        Array.from(event.dataTransfer.files).find((entry) =>
+          entry.type.startsWith("video/")
+        ) ?? null;
+
+      if (!file) {
+        setIntakeError("Drop a video file to upload.");
+        return;
+      }
+
+      try {
+        await loadClipFileForSide(side, file);
+        setIntakeError("");
+        setSaveStatus("idle");
+        setSaveMessage("Clip ready to save.");
+      } catch (error) {
+        setIntakeError("Upload failed. Try a different video file.");
+        setSaveStatus("error");
+        setSaveMessage("Upload failed. Try a different video file.");
+        // eslint-disable-next-line no-console
+        console.error("Dropped video upload failed", error);
+      }
+    },
+    [loadClipFileForSide]
+  );
+
+  const handleDropZoneDrag = useCallback(
+    (side: ComparisonSide, event: DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "copy";
+      setDragTargetSide(side);
+    },
+    []
+  );
+
+  const openLiveRecording = useCallback(
+    async (side: ComparisonSide, cameraId = selectedCameraId) => {
+      if (
+        liveRecording?.status === "recording" ||
+        liveRecording?.status === "processing"
+      ) {
+        return;
+      }
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setLiveRecording({
+          side,
+          status: "error",
+          error: "Live recording is not available in this browser.",
+          startedAt: null,
+        });
+        return;
+      }
+
+      try {
+        stopLiveStream(liveStream);
+        const videoConstraints: MediaTrackConstraints = {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 60 },
+        };
+        if (cameraId) {
+          videoConstraints.deviceId = { exact: cameraId };
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: false,
+        });
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cameras = devices.filter((device) => device.kind === "videoinput");
+        const activeDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId || cameraId;
+
+        setCameraDevices(cameras);
+        setSelectedCameraId(activeDeviceId || cameraId || "");
+        setLiveStream(stream);
+        setLiveRecording({
+          side,
+          status: "ready",
+          error: null,
+          startedAt: null,
+        });
+        setActiveSideInCompare(side);
+      } catch (error) {
+        setLiveStream(null);
+        setLiveRecording({
+          side,
+          status: "error",
+          error: error instanceof Error ? error.message : "Could not open camera.",
+          startedAt: null,
+        });
+      }
+    },
+    [
+      liveRecording?.status,
+      liveStream,
+      selectedCameraId,
+      setActiveSideInCompare,
+      stopLiveStream,
+    ]
+  );
+
+  const closeLiveRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === "recording") {
+      return;
+    }
+    stopLiveStream(liveStream);
+    mediaRecorderRef.current = null;
+    recordingChunksRef.current = [];
+    setLiveStream(null);
+    setLiveRecording(null);
+  }, [liveStream, stopLiveStream]);
+
+  const startLiveRecording = useCallback(() => {
+    if (!liveRecording || !liveStream) {
+      return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      setLiveRecording((current) =>
+        current
+          ? {
+              ...current,
+              status: "error",
+              error: "Recording is not available in this browser.",
+            }
+          : current
+      );
+      return;
+    }
+
+    try {
+      const mimeType = getPreferredRecordingMimeType();
+      const recorder = new MediaRecorder(
+        liveStream,
+        mimeType ? { mimeType } : undefined
+      );
+      const recordingSide = liveRecording.side;
+      recordingChunksRef.current = [];
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onerror = () => {
+        setLiveRecording((current) =>
+          current
+            ? {
+                ...current,
+                status: "error",
+                error: "Recording failed.",
+                startedAt: null,
+              }
+            : current
+        );
+      };
+      recorder.onstop = () => {
+        void (async () => {
+          const blobType =
+            mimeType || recordingChunksRef.current.find((chunk) => chunk.type)?.type || "video/webm";
+          const blob = new Blob(recordingChunksRef.current, { type: blobType });
+          recordingChunksRef.current = [];
+          mediaRecorderRef.current = null;
+
+          if (!blob.size) {
+            setLiveRecording((current) =>
+              current
+                ? {
+                    ...current,
+                    status: "error",
+                    error: "Recording did not capture any video.",
+                    startedAt: null,
+                  }
+                : current
+            );
+            return;
+          }
+
+          const file = new File(
+            [blob],
+            getRecordingFileName(recordingSide, blob.type || blobType),
+            { type: blob.type || blobType }
+          );
+          await loadClipFileForSide(recordingSide, file);
+          setSaveStatus("idle");
+          setSaveMessage("Recording ready to save.");
+          setLiveRecording((current) =>
+            current && current.side === recordingSide
+              ? {
+                  ...current,
+                  status: "ready",
+                  error: null,
+                  startedAt: null,
+                }
+              : current
+          );
+        })();
+      };
+
+      recorder.start(250);
+      setLiveRecording((current) =>
+        current
+          ? {
+              ...current,
+              status: "recording",
+              error: null,
+              startedAt: Date.now(),
+            }
+          : current
+      );
+    } catch (error) {
+      setLiveRecording((current) =>
+        current
+          ? {
+              ...current,
+              status: "error",
+              error: error instanceof Error ? error.message : "Could not start recording.",
+              startedAt: null,
+            }
+          : current
+      );
+    }
+  }, [liveRecording, liveStream, loadClipFileForSide]);
+
+  const stopLiveRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== "recording") {
+      return;
+    }
+    setLiveRecording((current) =>
+      current
+        ? {
+            ...current,
+            status: "processing",
+          }
+        : current
+    );
+    recorder.stop();
+  }, []);
+
+  const handleCameraChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const nextCameraId = event.target.value;
+      setSelectedCameraId(nextCameraId);
+      if (
+        liveRecording &&
+        liveRecording.status !== "recording" &&
+        liveRecording.status !== "processing"
+      ) {
+        void openLiveRecording(liveRecording.side, nextCameraId);
+      }
+    },
+    [liveRecording, openLiveRecording]
   );
 
   const handleCanvasPointerDown = useCallback(
@@ -1232,6 +1613,77 @@ export function VideoWorkspace({
     onCancel: handleBackAction,
   });
 
+  const createSaveArtifact = useCallback(
+    (backend: SaveBackend): VideoAnalysisSaveArtifact => ({
+      version: 1,
+      savedAt: new Date().toISOString(),
+      backend,
+      playerId: resolvedPlayerId,
+      lessonId,
+      workspace: buildWorkspaceState(),
+      analyses: {
+        left: leftStore.analysis as VideoAnalysis,
+        right: rightStore.analysis as VideoAnalysis,
+      },
+    }),
+    [
+      buildWorkspaceState,
+      leftStore.analysis,
+      lessonId,
+      resolvedPlayerId,
+      rightStore.analysis,
+    ]
+  );
+
+  const handleManualSave = useCallback(async () => {
+    if (!canManualSave) {
+      setSaveStatus("error");
+      setSaveMessage("Add or record a clip before saving.");
+      return;
+    }
+
+    setSaveStatus("saving");
+    setSaveMessage(saveBackend === "local-device" ? "Saving to this device..." : "Saving to cloud...");
+
+    try {
+      const [leftSaved, rightSaved] = await Promise.all([
+        leftStore.saveNow(),
+        rightStore.saveNow(),
+      ]);
+      await saveWorkspaceState();
+
+      if (!leftSaved || !rightSaved) {
+        throw new Error("One side could not be saved.");
+      }
+
+      const artifact = createSaveArtifact(saveBackend);
+      if (saveBackend === "local-device") {
+        await saveVideoAnalysisArtifactToDevice(artifact);
+        setSaveMessage("Saved to this device.");
+      } else {
+        await saveVideoAnalysisArtifactToCloud(artifact);
+        setSaveMessage("Saved to cloud service.");
+      }
+      setSaveStatus("saved");
+    } catch (error) {
+      setSaveStatus("error");
+      setSaveMessage(
+        saveBackend === "cloud-service"
+          ? "Cloud save failed. Check the configured save endpoint."
+          : "Device save failed. Browser storage may be unavailable."
+      );
+      // eslint-disable-next-line no-console
+      console.error("Manual video analysis save failed", error);
+    }
+  }, [
+    canManualSave,
+    createSaveArtifact,
+    leftStore,
+    rightStore,
+    saveBackend,
+    saveWorkspaceState,
+  ]);
+
   const renderVideoCard = (
     side: ComparisonSide,
     metadataReady: boolean,
@@ -1267,7 +1719,50 @@ export function VideoWorkspace({
           }
         : null;
 
+    const renderUploadDropZone = (primary = false) => (
+      <button
+        type="button"
+        className={`video-upload-card ${primary ? "is-primary" : ""} ${
+          dragTargetSide === side ? "is-dragging" : ""
+        }`}
+        onClick={(event) => {
+          event.stopPropagation();
+          openUpload(side);
+        }}
+        onDragEnter={(event) => handleDropZoneDrag(side, event)}
+        onDragOver={(event) => handleDropZoneDrag(side, event)}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setDragTargetSide((current) => (current === side ? null : current));
+        }}
+        onDrop={(event) => void handleDropUpload(side, event)}
+        aria-label={`Upload ${sideTitle.toLowerCase()} clip`}
+      >
+        <span className="video-upload-icon" aria-hidden="true">
+          <IconUpload />
+        </span>
+        <span className="video-upload-title">
+          {primary ? "Upload a video" : `Upload ${sideTitle.toLowerCase()} clip`}
+        </span>
+        <span className="video-upload-copy">Drag and drop or click to choose a file</span>
+        {intakeError ? (
+          <span className="video-upload-error" role="alert">
+            {intakeError}
+          </span>
+        ) : null}
+      </button>
+    );
+
     if (!playerVideo) {
+      if (!workspaceHasVideo && side === "left") {
+        return (
+          <div className="comparison-video-panel is-intake-only">
+            {renderUploadDropZone(true)}
+          </div>
+        );
+      }
+
       return (
         <div
           className={`comparison-video-panel ${isActive ? "is-active" : ""}`}
@@ -1279,6 +1774,20 @@ export function VideoWorkspace({
               <span className="comparison-mode-label">empty</span>
             </div>
             <div className="comparison-video-actions">
+              <button
+                type="button"
+                className="video-tool-btn"
+                aria-label={`Record ${sideTitle.toLowerCase()} clip`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void openLiveRecording(side);
+                }}
+              >
+                <IconRecord />
+                <span className="video-tool-tip" aria-hidden="true">
+                  Record {sideTitle.toLowerCase()} clip
+                </span>
+              </button>
               <button
                 type="button"
                 className="video-tool-btn"
@@ -1295,9 +1804,7 @@ export function VideoWorkspace({
               </button>
             </div>
           </div>
-          <div className="video-upload-card">
-            {analysis.videoMeta?.title ? <div>{analysis.videoMeta.title}</div> : null}
-          </div>
+          {renderUploadDropZone(!workspaceHasVideo && side === "left")}
         </div>
       );
     }
@@ -1319,6 +1826,20 @@ export function VideoWorkspace({
             </span>
           </div>
           <div className="comparison-video-actions">
+            <button
+              type="button"
+              className="video-tool-btn"
+              aria-label={`Record ${sideTitle.toLowerCase()} clip`}
+              onClick={(event) => {
+                event.stopPropagation();
+                void openLiveRecording(side);
+              }}
+            >
+              <IconRecord />
+              <span className="video-tool-tip" aria-hidden="true">
+                Record {sideTitle.toLowerCase()} clip
+              </span>
+            </button>
             <button
               type="button"
               className="video-tool-btn"
@@ -1434,77 +1955,235 @@ export function VideoWorkspace({
           : "Premium, protected, and reusable workspace foundation."}
       </p>
 
-      <div className="video-analysis-toolbar">
-        <Toolbar
-          selected={leftDrawing.selectedTool}
-          onToolChange={updateActiveDrawingTool}
-          showAngleTool
-          onFocusOpen={() => setFocusPaletteOpen((previous) => !previous)}
-          mode={comparisonMode}
-          onModeChange={updateMode}
-          onLinkedPlaybackToggle={() => setLinkedPlayback((previous) => !previous)}
-          linkedPlayback={linkedPlayback}
-          onSyncPlayheads={syncPlayheads}
-          syncPlayheadsEnabled={Boolean(playerVideoLeft && playerVideoRight)}
-          onBack={handleBackAction}
-          canGoBack={canGoBack}
-          onClearDrawings={clearActiveDrawing}
-          canClearDrawings={canClearDrawings}
-          clearDrawingLabel={clearDrawingLabel}
-          clearDrawingTooltip={clearDrawingTooltip}
-        />
-        <button
-          type="button"
-          className="upload-button"
-          onClick={() => setShowDiagnostics((previous) => !previous)}
-        >
-          {showDiagnostics ? "Hide diagnostics" : "Show diagnostics"}
-        </button>
-        <input
-          ref={leftUploadInputRef}
-          type="file"
-          accept="video/*"
-          style={{ display: "none" }}
-          onChange={(event) => handleUpload("left", event)}
-        />
-        <input
-          ref={rightUploadInputRef}
-          type="file"
-          accept="video/*"
-          style={{ display: "none" }}
-          onChange={(event) => handleUpload("right", event)}
-        />
-      </div>
+      <input
+        ref={leftUploadInputRef}
+        type="file"
+        accept="video/*"
+        style={{ display: "none" }}
+        onChange={(event) => handleUpload("left", event)}
+      />
+      <input
+        ref={rightUploadInputRef}
+        type="file"
+        accept="video/*"
+        style={{ display: "none" }}
+        onChange={(event) => handleUpload("right", event)}
+      />
 
-      {leftStore.persistenceError || rightStore.persistenceError ? (
+      {workspaceHasVideo ? (
+        <div className="video-analysis-toolbar">
+          <Toolbar
+            selected={leftDrawing.selectedTool}
+            onToolChange={updateActiveDrawingTool}
+            showAngleTool
+            onFocusOpen={() => setFocusPaletteOpen((previous) => !previous)}
+            mode={comparisonMode}
+            onModeChange={updateMode}
+            onLinkedPlaybackToggle={() => setLinkedPlayback((previous) => !previous)}
+            linkedPlayback={linkedPlayback}
+            onSyncPlayheads={syncPlayheads}
+            syncPlayheadsEnabled={Boolean(playerVideoLeft && playerVideoRight)}
+            onBack={handleBackAction}
+            canGoBack={canGoBack}
+            onClearDrawings={clearActiveDrawing}
+            canClearDrawings={canClearDrawings}
+            clearDrawingLabel={clearDrawingLabel}
+            clearDrawingTooltip={clearDrawingTooltip}
+          />
+          <div className="analysis-save-controls" aria-label="Video analysis save controls">
+            <button
+              type="button"
+              className="upload-button video-save-button"
+              onClick={handleManualSave}
+              disabled={saveStatus === "saving" || !canManualSave}
+            >
+              {saveStatus === "saving" ? "Saving..." : "Save"}
+            </button>
+            <span className={`analysis-save-status is-${saveStatus}`} role="status">
+              {saveMessage}
+            </span>
+            <button
+              type="button"
+              className="upload-button video-save-settings-button"
+              onClick={() => setShowSaveSettings((previous) => !previous)}
+              aria-expanded={showSaveSettings}
+            >
+              Settings
+            </button>
+            {showSaveSettings ? (
+              <div className="analysis-save-settings" role="group" aria-label="Save location">
+                <span>Save location</span>
+                <label className="analysis-save-setting">
+                  <input
+                    type="radio"
+                    name="video-analysis-save-backend"
+                    checked={saveBackend === "local-device"}
+                    onChange={() => setSaveBackend("local-device")}
+                  />
+                  Local Device
+                </label>
+                <label className="analysis-save-setting">
+                  <input
+                    type="radio"
+                    name="video-analysis-save-backend"
+                    checked={saveBackend === "cloud-service"}
+                    onChange={() => setSaveBackend("cloud-service")}
+                  />
+                  Cloud
+                </label>
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="upload-button"
+            onClick={() => setShowDiagnostics((previous) => !previous)}
+          >
+            {showDiagnostics ? "Hide diagnostics" : "Show diagnostics"}
+          </button>
+        </div>
+      ) : null}
+
+      {liveRecording ? (
+        <section className="live-recording-panel" aria-label="Live recording">
+          <div className="live-recording-header">
+            <div>
+              <h2>Live recording</h2>
+              <span>{getSideTitle(liveRecording.side)} clip</span>
+            </div>
+            <button
+              type="button"
+              className="video-tool-btn is-subtle"
+              onClick={closeLiveRecording}
+              disabled={
+                liveRecording.status === "recording" ||
+                liveRecording.status === "processing"
+              }
+              aria-label="Close live recording"
+            >
+              X
+            </button>
+          </div>
+
+          <div className="live-recording-body">
+            <div className="live-recording-preview">
+              <video ref={livePreviewRef} autoPlay muted playsInline />
+            </div>
+            <div className="live-recording-controls">
+              <label>
+                <span>Camera</span>
+                <select
+                  value={selectedCameraId}
+                  onChange={handleCameraChange}
+                  disabled={
+                    liveRecording.status === "recording" ||
+                    liveRecording.status === "processing"
+                  }
+                >
+                  <option value="">Default camera</option>
+                  {cameraDevices.map((device, index) => (
+                    <option key={device.deviceId || index} value={device.deviceId}>
+                      {device.label || `Camera ${index + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {liveRecording.status === "recording" ? (
+                <button
+                  type="button"
+                  className="upload-button video-record-stop"
+                  onClick={stopLiveRecording}
+                >
+                  Stop recording
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="upload-button"
+                  onClick={startLiveRecording}
+                  disabled={
+                    liveRecording.status === "processing" ||
+                    liveRecording.status === "error" ||
+                    !liveStream
+                  }
+                >
+                  {liveRecording.status === "processing" ? "Processing..." : "Start recording"}
+                </button>
+              )}
+              <span className={`live-recording-status is-${liveRecording.status}`}>
+                {liveRecording.status === "recording"
+                  ? "Recording"
+                  : liveRecording.status === "processing"
+                    ? "Processing"
+                    : liveRecording.error || "Camera ready"}
+              </span>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {!workspaceHasVideo && !liveRecording ? (
+        <section className="video-intake-panel" aria-label="Add video">
+          {renderVideoCard(
+            "left",
+            leftMetadataReady,
+            leftOverlayDimensions,
+            setLeftOverlayDimensions
+          )}
+          <div className="video-intake-actions">
+            <button
+              type="button"
+              className="video-tool-btn"
+              aria-label="Record clip"
+              onClick={() => void openLiveRecording("left")}
+            >
+              <IconRecord />
+              <span className="video-tool-tip" aria-hidden="true">
+                Record clip
+              </span>
+            </button>
+            <button
+              type="button"
+              className="upload-button"
+              onClick={() => void openLiveRecording("left")}
+            >
+              Record from camera
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {workspaceHasVideo && (leftStore.persistenceError || rightStore.persistenceError) ? (
         <div className="focus-artifacts-warning" role="alert">
           {leftStore.persistenceError || rightStore.persistenceError} Download and
           clear older Focus snapshots to free space.
         </div>
       ) : null}
 
-      <div className={`comparison-layout ${modeIsCompare ? "is-compare" : "is-single"}`}>
-        {modeIsCompare ? (
-          <>
-            {renderVideoCard(
-              "left",
-              leftMetadataReady,
-              leftOverlayDimensions,
-              setLeftOverlayDimensions
-            )}
-            {renderVideoCard(
-              "right",
-              rightMetadataReady,
-              rightOverlayDimensions,
-              setRightOverlayDimensions
-            )}
-          </>
-        ) : (
-          renderVideoCard("left", leftMetadataReady, leftOverlayDimensions, setLeftOverlayDimensions)
-        )}
-      </div>
+      {workspaceHasVideo ? (
+        <div className={`comparison-layout ${modeIsCompare ? "is-compare" : "is-single"}`}>
+          {modeIsCompare ? (
+            <>
+              {renderVideoCard(
+                "left",
+                leftMetadataReady,
+                leftOverlayDimensions,
+                setLeftOverlayDimensions
+              )}
+              {renderVideoCard(
+                "right",
+                rightMetadataReady,
+                rightOverlayDimensions,
+                setRightOverlayDimensions
+              )}
+            </>
+          ) : (
+            renderVideoCard("left", leftMetadataReady, leftOverlayDimensions, setLeftOverlayDimensions)
+          )}
+        </div>
+      ) : null}
 
-      {showFocusWindow && (
+      {workspaceHasVideo && showFocusWindow && (
         <FocusWindow
           enabled
           mode={focusWindowMode}
@@ -1523,7 +2202,7 @@ export function VideoWorkspace({
         />
       )}
 
-      {focusPaletteOpen ? (
+      {workspaceHasVideo && focusPaletteOpen ? (
         <FocusPalette
           onSelectArea={() => {
             clearFocusSelection();
@@ -1542,30 +2221,31 @@ export function VideoWorkspace({
         />
       ) : null}
 
-      <div className="focus-artifacts">
-        <div className="focus-artifacts-title">
-          <span className="focus-artifacts-title-text">
-            Focus snapshots
-            <span>{focusSnapshotStats.total}</span>
-          </span>
-          {focusSnapshotStats.total ? (
-            <button
-              type="button"
-              className="focus-artifacts-clear"
-              onClick={clearAllFocusSnapshots}
-            >
-              Clear all snapshots
-            </button>
-          ) : null}
-        </div>
-        {focusSnapshotStats.shouldWarn ? (
-          <div className="focus-artifacts-warning">
-            You have {focusSnapshotStats.total} snapshots (~
-            {focusSnapshotStats.estimatedMB.toFixed(1)} MB of local snapshot data). Consider downloading and
-            clearing older shots.
+      {workspaceHasVideo ? (
+        <div className="focus-artifacts">
+          <div className="focus-artifacts-title">
+            <span className="focus-artifacts-title-text">
+              Focus snapshots
+              <span>{focusSnapshotStats.total}</span>
+            </span>
+            {focusSnapshotStats.total ? (
+              <button
+                type="button"
+                className="focus-artifacts-clear"
+                onClick={clearAllFocusSnapshots}
+              >
+                Clear all snapshots
+              </button>
+            ) : null}
           </div>
-        ) : null}
-        <div className="focus-artifacts-strip">
+          {focusSnapshotStats.shouldWarn ? (
+            <div className="focus-artifacts-warning">
+              You have {focusSnapshotStats.total} snapshots (~
+              {focusSnapshotStats.estimatedMB.toFixed(1)} MB of local snapshot data). Consider downloading and
+              clearing older shots.
+            </div>
+          ) : null}
+          <div className="focus-artifacts-strip">
           {allFocusSnapshots.length ? (
             allFocusSnapshots.map((snapshot) => (
               <article
@@ -1655,8 +2335,9 @@ export function VideoWorkspace({
           )}
         </div>
       </div>
+      ) : null}
 
-      {showDiagnostics ? (
+      {workspaceHasVideo && showDiagnostics ? (
         <StatusBar
           playback={{
             time: activePlayback.currentTime,
@@ -1680,6 +2361,7 @@ export function VideoWorkspace({
         />
       ) : null}
 
+      {workspaceHasVideo ? (
       <Inspector
         selectedTool={activeDrawing.selectedTool}
         selectedObject={currentDrawingObject}
@@ -1687,6 +2369,7 @@ export function VideoWorkspace({
         canRedo={activeDrawing.canRedo}
         currentObjects={activeDrawing.objects.length}
       />
+      ) : null}
     </div>
   );
 }

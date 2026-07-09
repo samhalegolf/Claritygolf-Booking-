@@ -127,6 +127,14 @@ export const IconUpload = ({ className }: IconProps) => (
   </Svg>
 );
 
+export const IconRecord = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <rect x="4.5" y="7" width="11.5" height="10" rx="2" />
+    <path d="M16 10.2 20 8v8l-4-2.2" />
+    <circle cx="10.25" cy="12" r="2.4" fill="currentColor" stroke="none" />
+  </Svg>
+);
+
 export const IconBack = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M10 6 4 12l6 6" />

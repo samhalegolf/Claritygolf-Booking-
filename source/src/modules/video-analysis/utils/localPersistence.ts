@@ -7,11 +7,19 @@ import {
 
 const ANALYSIS_PREFIX = "clarity.video.analysis";
 const WORKSPACE_PREFIX = "clarity.video.workspace";
+const ARTIFACT_PREFIX = "clarity.video.artifact";
+const DEVICE_DB_NAME = "clarity-video-analysis-device";
+const DEVICE_STORE_NAME = "keyValue";
+const CLOUD_SAVE_ENDPOINT =
+  (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
+    ?.VITE_VIDEO_ANALYSIS_CLOUD_SAVE_URL || "/api/video-analysis/save";
+
+type MaybePromise<T> = T | Promise<T>;
 
 export interface PersistenceAdapter {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  removeItem(key: string): void;
+  getItem(key: string): MaybePromise<string | null>;
+  setItem(key: string, value: string): MaybePromise<void>;
+  removeItem(key: string): MaybePromise<void>;
 }
 
 export interface WorkspacePersistenceContext {
@@ -27,33 +35,33 @@ export interface VideoAnalysisPersistenceLayer {
   videoStore: VideoBlobStore | null;
 }
 
-const withFallbackAdapter = (adapter: PersistenceAdapter | undefined): PersistenceAdapter => {
-  if (!adapter) {
-    return browserStorageAdapter;
-  }
-
+const withFallbackAdapter = (
+  adapter: PersistenceAdapter,
+  fallback: PersistenceAdapter = browserStorageAdapter
+): PersistenceAdapter => {
   return {
-    getItem: (key) => {
+    getItem: async (key) => {
       try {
-        return adapter.getItem(key);
+        const primaryValue = await adapter.getItem(key);
+        if (primaryValue !== null) return primaryValue;
       } catch {
-        return browserStorageAdapter.getItem(key);
+        // Fall back below.
       }
+      return fallback.getItem(key);
     },
-    setItem: (key, value) => {
+    setItem: async (key, value) => {
       try {
-        adapter.setItem(key, value);
+        await adapter.setItem(key, value);
         return;
       } catch {
-        browserStorageAdapter.setItem(key, value);
+        await fallback.setItem(key, value);
       }
     },
-    removeItem: (key) => {
+    removeItem: async (key) => {
       try {
-        adapter.removeItem(key);
-        return;
-      } catch {
-        browserStorageAdapter.removeItem(key);
+        await adapter.removeItem(key);
+      } finally {
+        await fallback.removeItem(key);
       }
     },
   };
@@ -62,8 +70,12 @@ const withFallbackAdapter = (adapter: PersistenceAdapter | undefined): Persisten
 export const createVideoAnalysisPersistence = (
   adapters: Partial<VideoAnalysisPersistenceLayer> = {}
 ): VideoAnalysisPersistenceLayer => ({
-  analysisAdapter: withFallbackAdapter(adapters.analysisAdapter),
-  workspaceAdapter: withFallbackAdapter(adapters.workspaceAdapter),
+  analysisAdapter: adapters.analysisAdapter
+    ? withFallbackAdapter(adapters.analysisAdapter)
+    : withFallbackAdapter(indexedDbStorageAdapter),
+  workspaceAdapter: adapters.workspaceAdapter
+    ? withFallbackAdapter(adapters.workspaceAdapter)
+    : withFallbackAdapter(indexedDbStorageAdapter),
   videoStore:
     adapters.videoStore !== undefined
       ? adapters.videoStore
@@ -82,6 +94,21 @@ export interface ComparisonWorkspaceState {
   focusWindowMode: FocusMode;
   focusWindowSide: ComparisonSide;
   focusAreaRect: FocusAreaRect | null;
+}
+
+export type SaveBackend = "local-device" | "cloud-service";
+
+export interface VideoAnalysisSaveArtifact {
+  version: 1;
+  savedAt: string;
+  backend: SaveBackend;
+  playerId: string;
+  lessonId?: string;
+  workspace: ComparisonWorkspaceState;
+  analyses: {
+    left: VideoAnalysis;
+    right: VideoAnalysis;
+  };
 }
 
 export class PersistenceQuotaError extends Error {
@@ -138,29 +165,86 @@ export const browserStorageAdapter: PersistenceAdapter = {
   },
 };
 
+let indexedDbOpenPromise: Promise<IDBDatabase> | null = null;
+
+const resolveIndexedDb = () => {
+  if (typeof window === "undefined" || !window.indexedDB) {
+    throw new Error("IndexedDB is not available in this browser.");
+  }
+  return window.indexedDB;
+};
+
+const openIndexedDb = () => {
+  if (indexedDbOpenPromise) return indexedDbOpenPromise;
+  indexedDbOpenPromise = new Promise<IDBDatabase>((resolve, reject) => {
+    const request = resolveIndexedDb().open(DEVICE_DB_NAME, 1);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DEVICE_STORE_NAME)) {
+        db.createObjectStore(DEVICE_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("Could not open IndexedDB."));
+    request.onblocked = () => reject(new Error("IndexedDB is blocked by another tab."));
+  });
+  return indexedDbOpenPromise;
+};
+
+const requestResult = <T>(request: IDBRequest<T>): Promise<T> =>
+  new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("IndexedDB request failed."));
+  });
+
+const runIndexedDbStore = async <T>(
+  mode: IDBTransactionMode,
+  callback: (store: IDBObjectStore) => IDBRequest<T>
+): Promise<T> => {
+  const db = await openIndexedDb();
+  const transaction = db.transaction(DEVICE_STORE_NAME, mode);
+  const store = transaction.objectStore(DEVICE_STORE_NAME);
+  return requestResult(callback(store));
+};
+
+export const indexedDbStorageAdapter: PersistenceAdapter = {
+  getItem: async (key) => {
+    const value = await runIndexedDbStore("readonly", (store) => store.get(key));
+    return typeof value === "string" ? value : null;
+  },
+  setItem: async (key, value) => {
+    await runIndexedDbStore("readwrite", (store) => store.put(value, key));
+  },
+  removeItem: async (key) => {
+    await runIndexedDbStore("readwrite", (store) => store.delete(key));
+  },
+};
+
 export const buildAnalysisKey = (playerId: string, videoId: string, lessonId?: string) =>
   `${ANALYSIS_PREFIX}.${playerId}.${lessonId ?? "default"}.${videoId}`;
 
 export const saveAnalysis = (
   analysis: VideoAnalysis,
-  adapter: PersistenceAdapter = browserStorageAdapter
+  adapter: PersistenceAdapter = indexedDbStorageAdapter,
+  storageVideoId = analysis.videoId
 ) => {
   const key = buildAnalysisKey(
     analysis.playerId,
-    analysis.videoId,
+    storageVideoId,
     analysis.lessonId
   );
-  adapter.setItem(key, JSON.stringify(analysis));
+  return adapter.setItem(key, JSON.stringify(analysis));
 };
 
-export const loadAnalysis = (
+export const loadAnalysis = async (
   playerId: string,
   videoId: string,
   lessonId?: string,
-  adapter: PersistenceAdapter = browserStorageAdapter
-): VideoAnalysis | null => {
+  adapter: PersistenceAdapter = indexedDbStorageAdapter
+): Promise<VideoAnalysis | null> => {
   const key = buildAnalysisKey(playerId, videoId, lessonId);
-  const raw = adapter.getItem(key);
+  const raw = await adapter.getItem(key);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as VideoAnalysis;
@@ -173,9 +257,9 @@ export const clearAnalysis = (
   playerId: string,
   videoId: string,
   lessonId?: string,
-  adapter: PersistenceAdapter = browserStorageAdapter
+  adapter: PersistenceAdapter = indexedDbStorageAdapter
 ) => {
-  adapter.removeItem(buildAnalysisKey(playerId, videoId, lessonId));
+  return adapter.removeItem(buildAnalysisKey(playerId, videoId, lessonId));
 };
 
 const sanitizeFocusAreaRect = (raw: unknown): FocusAreaRect | null => {
@@ -236,7 +320,7 @@ const getWorkspaceKey = (context?: WorkspacePersistenceContext) => {
 
 export const saveComparisonWorkspaceState = (
   state: ComparisonWorkspaceState,
-  adapter: PersistenceAdapter = browserStorageAdapter,
+  adapter: PersistenceAdapter = indexedDbStorageAdapter,
   context?: WorkspacePersistenceContext
 ) => {
   const safeState: ComparisonWorkspaceState = {
@@ -251,14 +335,14 @@ export const saveComparisonWorkspaceState = (
       ? state.focusAreaRect
       : null,
   };
-  adapter.setItem(getWorkspaceKey(context), JSON.stringify(safeState));
+  return adapter.setItem(getWorkspaceKey(context), JSON.stringify(safeState));
 };
 
-export const loadComparisonWorkspaceState = (
-  adapter: PersistenceAdapter = browserStorageAdapter,
+export const loadComparisonWorkspaceState = async (
+  adapter: PersistenceAdapter = indexedDbStorageAdapter,
   context?: WorkspacePersistenceContext
-): ComparisonWorkspaceState | null => {
-  const raw = adapter.getItem(getWorkspaceKey(context));
+): Promise<ComparisonWorkspaceState | null> => {
+  const raw = await adapter.getItem(getWorkspaceKey(context));
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -269,8 +353,39 @@ export const loadComparisonWorkspaceState = (
 };
 
 export const clearComparisonWorkspaceState = (
-  adapter: PersistenceAdapter = browserStorageAdapter,
+  adapter: PersistenceAdapter = indexedDbStorageAdapter,
   context?: WorkspacePersistenceContext
 ) => {
-  adapter.removeItem(getWorkspaceKey(context));
+  return adapter.removeItem(getWorkspaceKey(context));
+};
+
+const getArtifactKey = (context: WorkspacePersistenceContext) =>
+  `${ARTIFACT_PREFIX}.${context.playerId ?? "global"}.${context.lessonId ?? "default"}`;
+
+export const saveVideoAnalysisArtifactToDevice = (
+  artifact: VideoAnalysisSaveArtifact,
+  adapter: PersistenceAdapter = indexedDbStorageAdapter
+) => {
+  return adapter.setItem(
+    getArtifactKey({ playerId: artifact.playerId, lessonId: artifact.lessonId }),
+    JSON.stringify(artifact)
+  );
+};
+
+export const saveVideoAnalysisArtifactToCloud = async (
+  artifact: VideoAnalysisSaveArtifact,
+  endpoint = CLOUD_SAVE_ENDPOINT
+) => {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify(artifact),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Cloud save failed with ${response.status}.`);
+  }
 };
