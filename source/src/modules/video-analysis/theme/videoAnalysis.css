@@ -37,13 +37,75 @@
   gap: 10px;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   margin-bottom: 14px;
+}
+
+.analysis-save-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 48px;
+  padding: 6px;
+  border: 1px solid rgba(148, 169, 222, 0.22);
+  border-radius: 14px;
+  background: rgba(13, 18, 32, 0.76);
+  backdrop-filter: blur(7px);
+}
+
+.analysis-save-destinations {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(76px, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 11px;
+  background: rgba(6, 10, 20, 0.74);
+  border: 1px solid rgba(148, 169, 222, 0.18);
+}
+
+.analysis-save-destination {
+  min-height: 30px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 9px;
+  color: rgba(218, 229, 252, 0.78);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.analysis-save-destination.is-active {
+  color: #f7fbff;
+  background: linear-gradient(155deg, rgba(38, 75, 59, 0.92), rgba(20, 49, 42, 0.86));
+  box-shadow: inset 0 0 0 1px rgba(87, 229, 156, 0.28);
+}
+
+.video-save-button {
+  min-height: 38px;
+}
+
+.analysis-save-status {
+  max-width: 190px;
+  color: var(--va-muted, #a3adc2);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.analysis-save-status.is-saved {
+  color: rgba(142, 244, 186, 0.94);
+}
+
+.analysis-save-status.is-error {
+  color: rgba(255, 174, 194, 0.96);
 }
 
 .video-toolbar-group {
   display: inline-flex;
   gap: 7px;
   align-items: center;
+  flex-wrap: wrap;
+  max-width: 100%;
   background: rgba(13, 18, 32, 0.76);
   border: 1px solid var(--va-border, rgba(148, 169, 222, 0.22));
   padding: 7px;
@@ -233,6 +295,11 @@
   background: linear-gradient(155deg, #1a2340, #131a2e);
   color: var(--va-text, #e9f0ff);
   cursor: pointer;
+}
+
+.upload-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .video-frame {

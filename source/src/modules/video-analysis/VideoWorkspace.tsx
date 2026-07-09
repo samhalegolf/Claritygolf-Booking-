@@ -11,7 +11,7 @@ import { videoAnalysisThemeCss } from "./theme/videoAnalysisTheme";
 import { FocusPalette } from "./components/FocusPalette";
 import { FocusWindow } from "./components/FocusWindow";
 import { FocusAreaRect } from "./models/Focus";
-import { FocusSnapshot } from "./models/Analysis";
+import { FocusSnapshot, VideoAnalysis } from "./models/Analysis";
 import { Inspector } from "./components/Inspector";
 import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
@@ -21,11 +21,15 @@ import { IconPlay, IconPause, IconUpload } from "./components/VideoIcons";
 import {
   ComparisonSide,
   ComparisonWorkspaceState,
+  SaveBackend,
+  VideoAnalysisSaveArtifact,
   VideoAnalysisPersistenceLayer,
   WorkspacePersistenceContext,
   createVideoAnalysisPersistence,
   loadComparisonWorkspaceState,
   saveComparisonWorkspaceState,
+  saveVideoAnalysisArtifactToCloud,
+  saveVideoAnalysisArtifactToDevice,
   WorkspaceMode,
 } from "./utils/localPersistence";
 import {
@@ -59,6 +63,7 @@ const SNAPSHOT_STORAGE_WARNING_LIMIT = 12;
 const SNAPSHOT_PREVIEW_WIDTH = 88;
 const SNAPSHOT_PREVIEW_HEIGHT = 50;
 const DEFAULT_PLAYER_ID = "player-demo-1";
+type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 interface VideoWorkspaceProps {
   playerId?: string;
@@ -246,6 +251,9 @@ export function VideoWorkspace({
   const [linkedPlayback, setLinkedPlayback] = useState(false);
   const [activeSide, setActiveSide] = useState<ComparisonSide>("left");
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
+  const [saveBackend, setSaveBackend] = useState<SaveBackend>("local-device");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveMessage, setSaveMessage] = useState("Not saved manually yet.");
 
   const timelineEngine = useMemo(() => new TimelineEngine(), []);
   const modeIsCompare = comparisonMode === "compare";
@@ -401,26 +409,33 @@ export function VideoWorkspace({
   }, [allFocusSnapshots]);
 
   useEffect(() => {
-    const loaded = loadComparisonWorkspaceState(
-      persistenceLayer.workspaceAdapter,
-      workspaceContext
-    );
-    if (loaded) {
-      setComparisonMode(loaded.mode);
-      setActiveSide(loaded.mode === "single" ? "left" : loaded.activeSide);
-      setLinkedPlayback(loaded.linkedPlayback);
-      setShowFocusWindow(loaded.focusWindowOpen);
-      setFocusWindowMode(loaded.focusWindowMode);
-      setFocusWindowSide(loaded.mode === "single" ? "left" : loaded.focusWindowSide);
-      setFocusAreaRect(loaded.focusAreaRect);
-    }
-    // Mark hydration complete so the save effect can begin persisting without
-    // first overwriting restored state with mount-time defaults.
-    setWorkspaceHydrated(true);
+    let cancelled = false;
+    void (async () => {
+      const loaded = await loadComparisonWorkspaceState(
+        persistenceLayer.workspaceAdapter,
+        workspaceContext
+      );
+      if (cancelled) return;
+      if (loaded) {
+        setComparisonMode(loaded.mode);
+        setActiveSide(loaded.mode === "single" ? "left" : loaded.activeSide);
+        setLinkedPlayback(loaded.linkedPlayback);
+        setShowFocusWindow(loaded.focusWindowOpen);
+        setFocusWindowMode(loaded.focusWindowMode);
+        setFocusWindowSide(loaded.mode === "single" ? "left" : loaded.focusWindowSide);
+        setFocusAreaRect(loaded.focusAreaRect);
+      }
+      // Mark hydration complete so the save effect can begin persisting without
+      // first overwriting restored state with mount-time defaults.
+      setWorkspaceHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [persistenceLayer.workspaceAdapter, workspaceContext]);
 
-  const saveWorkspaceState = useCallback(() => {
-    const payload: ComparisonWorkspaceState = {
+  const buildWorkspaceState = useCallback((): ComparisonWorkspaceState => {
+    return {
       version: 1,
       mode: comparisonMode,
       activeSide,
@@ -430,26 +445,31 @@ export function VideoWorkspace({
       focusWindowSide,
       focusAreaRect,
     };
-    saveComparisonWorkspaceState(
-      payload,
+  }, [
+    activeSide,
+    comparisonMode,
+    focusAreaRect,
+    focusWindowMode,
+    focusWindowSide,
+    linkedPlayback,
+    showFocusWindow,
+  ]);
+
+  const saveWorkspaceState = useCallback(() => {
+    return saveComparisonWorkspaceState(
+      buildWorkspaceState(),
       persistenceLayer.workspaceAdapter,
       workspaceContext
     );
   }, [
-    activeSide,
-    comparisonMode,
-    linkedPlayback,
-    showFocusWindow,
-    focusWindowMode,
-    focusWindowSide,
-    focusAreaRect,
+    buildWorkspaceState,
     persistenceLayer.workspaceAdapter,
     workspaceContext,
   ]);
 
   useEffect(() => {
     if (!workspaceHydrated) return;
-    saveWorkspaceState();
+    void saveWorkspaceState();
   }, [saveWorkspaceState, workspaceHydrated]);
 
   const updateMode = (next: WorkspaceMode) => {
@@ -1232,6 +1252,70 @@ export function VideoWorkspace({
     onCancel: handleBackAction,
   });
 
+  const createSaveArtifact = useCallback(
+    (backend: SaveBackend): VideoAnalysisSaveArtifact => ({
+      version: 1,
+      savedAt: new Date().toISOString(),
+      backend,
+      playerId: resolvedPlayerId,
+      lessonId,
+      workspace: buildWorkspaceState(),
+      analyses: {
+        left: leftStore.analysis as VideoAnalysis,
+        right: rightStore.analysis as VideoAnalysis,
+      },
+    }),
+    [
+      buildWorkspaceState,
+      leftStore.analysis,
+      lessonId,
+      resolvedPlayerId,
+      rightStore.analysis,
+    ]
+  );
+
+  const handleManualSave = useCallback(async () => {
+    setSaveStatus("saving");
+    setSaveMessage(saveBackend === "local-device" ? "Saving to this device..." : "Saving to cloud...");
+
+    try {
+      const [leftSaved, rightSaved] = await Promise.all([
+        leftStore.saveNow(),
+        rightStore.saveNow(),
+      ]);
+      await saveWorkspaceState();
+
+      if (!leftSaved || !rightSaved) {
+        throw new Error("One side could not be saved.");
+      }
+
+      const artifact = createSaveArtifact(saveBackend);
+      if (saveBackend === "local-device") {
+        await saveVideoAnalysisArtifactToDevice(artifact);
+        setSaveMessage("Saved to this device.");
+      } else {
+        await saveVideoAnalysisArtifactToCloud(artifact);
+        setSaveMessage("Saved to cloud service.");
+      }
+      setSaveStatus("saved");
+    } catch (error) {
+      setSaveStatus("error");
+      setSaveMessage(
+        saveBackend === "cloud-service"
+          ? "Cloud save failed. Check the configured save endpoint."
+          : "Device save failed. Browser storage may be unavailable."
+      );
+      // eslint-disable-next-line no-console
+      console.error("Manual video analysis save failed", error);
+    }
+  }, [
+    createSaveArtifact,
+    leftStore,
+    rightStore,
+    saveBackend,
+    saveWorkspaceState,
+  ]);
+
   const renderVideoCard = (
     side: ComparisonSide,
     metadataReady: boolean,
@@ -1453,6 +1537,41 @@ export function VideoWorkspace({
           clearDrawingLabel={clearDrawingLabel}
           clearDrawingTooltip={clearDrawingTooltip}
         />
+        <div className="analysis-save-controls" aria-label="Video analysis save controls">
+          <div className="analysis-save-destinations" role="group" aria-label="Save destination">
+            <button
+              type="button"
+              className={`analysis-save-destination ${
+                saveBackend === "local-device" ? "is-active" : ""
+              }`}
+              onClick={() => setSaveBackend("local-device")}
+              aria-pressed={saveBackend === "local-device"}
+            >
+              Local Device
+            </button>
+            <button
+              type="button"
+              className={`analysis-save-destination ${
+                saveBackend === "cloud-service" ? "is-active" : ""
+              }`}
+              onClick={() => setSaveBackend("cloud-service")}
+              aria-pressed={saveBackend === "cloud-service"}
+            >
+              Cloud
+            </button>
+          </div>
+          <button
+            type="button"
+            className="upload-button video-save-button"
+            onClick={handleManualSave}
+            disabled={saveStatus === "saving"}
+          >
+            {saveStatus === "saving" ? "Saving..." : "Save"}
+          </button>
+          <span className={`analysis-save-status is-${saveStatus}`} role="status">
+            {saveMessage}
+          </span>
+        </div>
         <button
           type="button"
           className="upload-button"
