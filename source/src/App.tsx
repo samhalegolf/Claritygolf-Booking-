@@ -8575,9 +8575,7 @@ function App() {
   function openNotesForClient(client: Pick<Person, "id" | "name">) {
     setNotesContext({ playerId: client.id, playerName: client.name });
     setActiveView("notes");
-    setSelectedClientId("");
-    setIsAddingClient(false);
-    setClientEditMode(false);
+    closeClientModal();
     setQuickCreate(null);
     closeCalendarDetails();
   }
