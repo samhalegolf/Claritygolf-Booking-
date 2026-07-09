@@ -3301,6 +3301,29 @@ function notificationTimeLabel(createdAt = "") {
   return Number.isNaN(time.getTime()) ? "" : time.toLocaleString();
 }
 
+function profileRecordDateLabel(createdAt = "") {
+  if (!createdAt) return "";
+  const time = new Date(createdAt);
+  if (Number.isNaN(time.getTime())) return "";
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(time)
+    .replace(",", "")
+    .replace(/\s(am|pm)$/i, (match) => match.toUpperCase());
+}
+
+function profileRecordTitle(playerName = "", createdAt = "") {
+  const name = safeText(playerName).trim() || "Player";
+  const date = profileRecordDateLabel(createdAt);
+  return date ? `${name} - ${date}` : name;
+}
+
 function googleSyncTimeLabel(createdAt = "") {
   if (!createdAt) return "Not synced yet";
   const time = new Date(createdAt);
@@ -6682,8 +6705,8 @@ function App() {
       return {
         id: `note-${note.id}`,
         kind: "note",
-        title: note.title || "Lesson note",
-        subtitle: `${note.source === "voice" ? "Voice note" : "Typed note"} · ${notificationTimeLabel(timestamp)}${
+        title: profileRecordTitle(notesWorkspaceClient?.name, timestamp),
+        subtitle: `${note.title || "Lesson note"} · ${note.source === "voice" ? "Voice note" : "Typed note"}${
           linkedVideo ? " · Linked lesson video" : ""
         }`,
         body: note.body,
@@ -6695,8 +6718,8 @@ function App() {
     const videoRecords: PlayerToolRecord[] = playerToolVideos.map((video) => ({
       id: `video-${video.id}`,
       kind: "video",
-      title: video.title || "Saved video",
-      subtitle: `${notificationTimeLabel(video.createdAt)}${linkedLessonVideoIds.has(video.id) ? " · Linked lesson note" : ""}`,
+      title: profileRecordTitle(notesWorkspaceClient?.name, video.createdAt),
+      subtitle: `${video.title || "Video file"}${linkedLessonVideoIds.has(video.id) ? " · Linked lesson note" : ""}`,
       timestamp: video.createdAt,
       lessonId: video.lessonId,
       sourceId: video.id,
@@ -6704,7 +6727,7 @@ function App() {
     return [...noteRecords, ...videoRecords]
       .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
       .slice(0, 6);
-  }, [linkedLessonVideoIds, notesWorkspaceLessonNotes, playerToolVideos]);
+  }, [linkedLessonVideoIds, notesWorkspaceClient?.name, notesWorkspaceLessonNotes, playerToolVideos]);
   const selectedAppointmentNotifications = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return [];
     return notificationsByAppointment.get(selected.id) ?? [];
@@ -16195,10 +16218,12 @@ function App() {
                                     notesWorkspaceLessonNotes.map((note) => (
                                       <article className="lesson-note-card" key={note.id}>
                                         <div>
-                                          <strong>{note.title}</strong>
+                                          <strong>{profileRecordTitle(notesWorkspaceClient.name, note.updatedAt || note.createdAt)}</strong>
                                           <span>
-                                            {note.source === "voice" ? "Voice note" : "Typed note"} ·{" "}
-                                            {notificationTimeLabel(note.updatedAt || note.createdAt)}
+                                            {note.title || "Lesson note"} · {note.source === "voice" ? "Voice note" : "Typed note"}
+                                            {note.lessonId && playerToolVideos.some((video) => video.lessonId === note.lessonId)
+                                              ? " · Linked lesson video"
+                                              : ""}
                                           </span>
                                         </div>
                                         <p>{note.body}</p>
@@ -16240,9 +16265,9 @@ function App() {
                                     playerToolVideos.map((video) => (
                                       <article className="player-video-card" key={video.id}>
                                         <div>
-                                          <strong>{video.title || "Saved video"}</strong>
+                                          <strong>{profileRecordTitle(notesWorkspaceClient.name, video.createdAt)}</strong>
                                           <span>
-                                            {notificationTimeLabel(video.createdAt)}
+                                            {video.title || "Video file"}
                                             {linkedLessonVideoIds.has(video.id) ? " · Linked lesson note" : ""}
                                           </span>
                                         </div>
