@@ -559,7 +559,7 @@ type Toast = {
   undo?: () => void;
 };
 
-type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video" | "players";
+type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video" | "players" | "notes";
 type BillingSection = "none" | "dashboard" | "new-invoice" | "expenses" | "reports" | "settings";
 type SettingsTab =
   | "none"
@@ -1653,6 +1653,8 @@ function sectionTitle(view: View) {
       return "Video Analysis";
     case "players":
       return "Player Profiles";
+    case "notes":
+      return "Notes";
     default:
       return "Calendar";
   }
@@ -1680,6 +1682,9 @@ function getInitialView(): View {
   const requestedView = new URLSearchParams(window.location.search).get("view");
   if (requestedView === "settings") return "settings";
   if (requestedView === "billing") return "billing";
+  if (requestedView === "notes") return "notes";
+  if (requestedView === "players") return "players";
+  if (requestedView === "video") return "video";
   return isPublicBookingMode() ? "booking" : "calendar";
 }
 
@@ -3928,6 +3933,7 @@ function App() {
   const [clientEditor, setClientEditor] = useState<ClientEditor>(emptyClientEditor);
   const [clientSaveState, setClientSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [clientProfileTab, setClientProfileTab] = useState<ClientProfileTab>("bookings");
+  const [notesContext, setNotesContext] = useState<{ playerId: string; playerName: string } | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
@@ -6721,6 +6727,21 @@ function App() {
     const selectedProfileIds = profileIdsForClient(selectedClient);
     return lessonNotes.filter((note) => selectedProfileIds.has(note.playerId));
   }, [lessonNotes, selectedClient]);
+  const notesWorkspaceClient = useMemo(() => {
+    if (!notesContext) return null;
+    return (
+      clients.find((client) => profileIdsForClient(client).has(notesContext.playerId)) ??
+      clients.find((client) => client.id === notesContext.playerId) ??
+      null
+    );
+  }, [clients, notesContext]);
+  const notesWorkspaceLessonNotes = useMemo(() => {
+    if (!notesWorkspaceClient) return [];
+    const noteProfileIds = profileIdsForClient(notesWorkspaceClient);
+    return lessonNotes
+      .filter((note) => noteProfileIds.has(note.playerId))
+      .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
+  }, [lessonNotes, notesWorkspaceClient]);
   const selectedAppointmentNotifications = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return [];
     return notificationsByAppointment.get(selected.id) ?? [];
@@ -8547,6 +8568,13 @@ function App() {
   function openVideoAnalysisForClient(client: { id: string; name: string }) {
     setVideoContext({ playerId: client.id, playerName: client.name });
     setActiveView("video");
+    setQuickCreate(null);
+    closeCalendarDetails();
+  }
+
+  function openNotesForClient(client: Pick<Person, "id" | "name">) {
+    setNotesContext({ playerId: client.id, playerName: client.name });
+    setActiveView("notes");
     setQuickCreate(null);
     closeCalendarDetails();
   }
@@ -12204,9 +12232,13 @@ function App() {
     }
   }
 
-  async function saveLessonNoteForClient(text: string, source: LessonNoteSource = "typed") {
+  async function saveLessonNoteForClient(
+    client: Pick<Person, "id" | "name"> | null | undefined,
+    text: string,
+    source: LessonNoteSource = "typed",
+  ) {
     const cleanBody = text.trim();
-    if (!selectedClient || !cleanBody) return;
+    if (!client || !cleanBody) return;
     setLessonNoteSaveState("saving");
     try {
       const response = await fetch("/api/notes", {
@@ -12215,8 +12247,8 @@ function App() {
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
           note: {
-            playerId: selectedClient.id,
-            playerName: selectedClient.name,
+            playerId: client.id,
+            playerName: client.name,
             title: source === "voice" ? "Voice lesson note" : "Lesson note",
             body: cleanBody,
             source,
@@ -14968,6 +15000,10 @@ function App() {
             <Users size={18} />
             Player Profiles
           </button>
+          <button className={activeView === "notes" ? "active" : ""} onClick={() => switchView("notes")}>
+            <FileText size={18} />
+            Notes
+          </button>
           {billingWorkspaceEnabled && (
             <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
               <FileText size={18} />
@@ -16108,6 +16144,91 @@ function App() {
                   </ul>
                 )}
               </aside>
+            </div>
+          </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "notes" && (
+          <section className="module-page notes-workspace-page">
+            <div className="notes-workspace-header">
+              <div>
+                <h2>Lesson Notes</h2>
+                <p>{notesWorkspaceClient ? notesWorkspaceClient.name : "Select a player"}</p>
+              </div>
+              {notesWorkspaceClient && (
+                <button
+                  type="button"
+                  className="outline-button"
+                  onClick={() => openClientProfile(notesWorkspaceClient)}
+                >
+                  <User size={16} />
+                  Player profile
+                </button>
+              )}
+            </div>
+
+            <div className="notes-workspace-layout">
+              <aside className="notes-player-list" aria-label="Players with notes">
+                {playerProfiles.length ? (
+                  playerProfiles.map((player) => (
+                    <button
+                      type="button"
+                      key={player.id}
+                      className={notesWorkspaceClient?.id === player.id ? "active" : ""}
+                      onClick={() => setNotesContext({ playerId: player.id, playerName: player.name })}
+                    >
+                      <span>{player.name}</span>
+                      <em>{player.email || player.phone || "No contact"}</em>
+                    </button>
+                  ))
+                ) : (
+                  <p>No player profiles yet.</p>
+                )}
+              </aside>
+
+              <div className="notes-workspace-main">
+                {notesWorkspaceClient ? (
+                  <>
+                    <ClarityVoiceTextPanel
+                      fieldLabel="Lesson note"
+                      placeholder="Type or dictate the coach lesson note."
+                      onCommit={(text) => void saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
+                    />
+                    <div className="lesson-notes-list">
+                      {notesWorkspaceLessonNotes.length ? (
+                        notesWorkspaceLessonNotes.map((note) => (
+                          <article className="lesson-note-card" key={note.id}>
+                            <div>
+                              <strong>{note.title}</strong>
+                              <span>
+                                {note.source === "voice" ? "Voice note" : "Typed note"} ·{" "}
+                                {notificationTimeLabel(note.updatedAt || note.createdAt)}
+                              </span>
+                            </div>
+                            <p>{note.body}</p>
+                            <button
+                              type="button"
+                              className="outline-button"
+                              onClick={() => void deleteLessonNote(note.id)}
+                              disabled={lessonNoteSaveState === "saving"}
+                            >
+                              <Trash2 size={14} />
+                              Delete
+                            </button>
+                          </article>
+                        ))
+                      ) : (
+                        <p className="notes-empty">No lesson notes yet.</p>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="notes-empty-panel">
+                    <FileText size={22} />
+                    <h3>Select a player</h3>
+                  </div>
+                )}
+              </div>
             </div>
           </section>
         )}
@@ -19853,11 +19974,22 @@ function App() {
                     )
                   ) : clientProfileTab === "notes" ? (
                     <div className="lesson-notes-panel">
-                      <ClarityVoiceTextPanel
-                        fieldLabel="Lesson notes"
-                        placeholder="Type or dictate the coach lesson note. These notes create and organise player profiles."
-                        onCommit={(text) => void saveLessonNoteForClient(text, "voice")}
-                      />
+                      {selectedClient && (
+                        <div className="lesson-notes-window">
+                          <div>
+                            <strong>Lesson Notes</strong>
+                            <span>{selectedClient.name}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="primary-button"
+                            onClick={() => openNotesForClient(selectedClient)}
+                          >
+                            <FileText size={16} />
+                            Open notes
+                          </button>
+                        </div>
+                      )}
                       <div className="lesson-notes-list">
                         {selectedClientLessonNotes.length ? (
                           selectedClientLessonNotes.map((note) => (

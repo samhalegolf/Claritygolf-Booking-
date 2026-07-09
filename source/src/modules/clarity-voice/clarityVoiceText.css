@@ -1,227 +1,119 @@
 .clarityVoicePanel {
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 18px;
-  padding: 18px;
+  display: grid;
+  gap: 12px;
+  width: 100%;
   max-width: 760px;
-  background: #fff;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
   font-family: inherit;
 }
 
-.clarityVoiceHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
-}
-
-.clarityVoiceKicker {
-  margin: 0 0 4px;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.65;
-}
-
-.clarityVoiceHeader h2 {
-  margin: 0;
-  font-size: 22px;
-}
-
-.clarityVoiceStatus {
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 12px;
-  background: rgba(15, 23, 42, 0.08);
-  text-transform: capitalize;
-}
-
-.clarityVoiceStatus--listening,
-.clarityVoiceStatus--starting,
-.clarityVoiceStatus--checking {
-  background: rgba(22, 163, 74, 0.14);
-}
-
-.clarityVoiceStatus--thinking,
-.clarityVoiceStatus--paused {
-  background: rgba(234, 179, 8, 0.2);
-}
-
-.clarityVoiceStatus--error,
-.clarityVoiceStatus--unsupported {
-  background: rgba(220, 38, 38, 0.14);
-}
-
-.clarityVoiceSmartStrip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.clarityVoiceSmartStrip span {
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.06);
-  padding: 7px 10px;
-  font-size: 13px;
-}
-
-.clarityVoiceLabel {
+.clarityVoiceInputRow {
   display: grid;
-  gap: 6px;
-  margin: 12px 0;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.clarityVoiceMicButton {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  color: #111827;
+  cursor: pointer;
+}
+
+.clarityVoiceMicButton:hover:not(:disabled) {
+  border-color: rgba(15, 23, 42, 0.28);
+  background: rgba(15, 23, 42, 0.04);
+}
+
+.clarityVoiceMicButton.is-listening {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+}
+
+.clarityVoiceMicButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.clarityVoiceTextOutput {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: #111827;
   font-size: 13px;
   font-weight: 650;
 }
 
-.clarityVoiceLabel select,
-.clarityVoiceLabel textarea {
-  border: 1px solid rgba(15, 23, 42, 0.16);
-  border-radius: 12px;
-  padding: 10px 12px;
-  font: inherit;
-}
-
-.clarityVoiceLabel textarea {
+.clarityVoiceTextOutput textarea {
+  width: 100%;
+  min-height: 138px;
   resize: vertical;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 10px;
+  padding: 12px;
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #111827;
+  background: #fff;
 }
 
-.clarityVoiceControls {
+.clarityVoiceTextOutput textarea:focus {
+  outline: 2px solid rgba(25, 118, 210, 0.18);
+  border-color: rgba(25, 118, 210, 0.45);
+}
+
+.clarityVoiceInterim {
+  margin: -2px 0 0 56px;
+  color: #6b7280;
+  font-size: 13px;
+  font-style: italic;
+  white-space: pre-wrap;
+}
+
+.clarityVoiceSaveRow {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0;
-}
-
-.clarityVoiceControls--right {
   justify-content: flex-end;
 }
 
-.clarityVoiceControls button,
-.clarityVoiceLinkButton {
+.clarityVoiceSaveButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   border: 0;
   border-radius: 999px;
-  padding: 10px 13px;
+  padding: 9px 13px;
   font: inherit;
   font-weight: 700;
+  background: #111827;
+  color: #fff;
   cursor: pointer;
-  background: rgba(15, 23, 42, 0.09);
 }
 
-.clarityVoiceControls button:disabled {
+.clarityVoiceSaveButton:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.45;
 }
 
-.clarityVoiceWarning,
-.clarityVoiceError {
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 13px;
-}
+@media (max-width: 640px) {
+  .clarityVoiceInputRow {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 10px;
+  }
 
-.clarityVoiceWarning {
-  background: rgba(234, 179, 8, 0.14);
-}
+  .clarityVoiceMicButton {
+    width: 40px;
+    height: 40px;
+  }
 
-.clarityVoiceError {
-  background: rgba(220, 38, 38, 0.12);
-}
-
-.clarityVoiceTranscriptBox {
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  border-radius: 14px;
-  padding: 12px;
-  margin-top: 12px;
-  background: rgba(15, 23, 42, 0.03);
-}
-
-.clarityVoiceTranscriptBox--smart {
-  background: rgba(22, 163, 74, 0.06);
-}
-
-.clarityVoiceBoxHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.clarityVoiceBoxTitle {
-  margin: 0 0 8px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  opacity: 0.6;
-}
-
-.clarityVoiceFinal,
-.clarityVoiceInterim {
-  white-space: pre-wrap;
-  margin: 0;
-}
-
-.clarityVoiceInterim {
-  margin-top: 8px;
-  opacity: 0.55;
-  font-style: italic;
-}
-
-.clarityVoiceLinkButton {
-  background: transparent;
-  padding: 4px 0;
-  font-size: 12px;
-  text-decoration: underline;
-}
-
-.clarityVoiceDiagnostics {
-  overflow: auto;
-  max-height: 280px;
-  border-radius: 12px;
-  padding: 12px;
-  background: rgba(15, 23, 42, 0.06);
-  font-size: 12px;
-}
-
-.clarityVoiceTranscriptBox--vocabulary {
-  border-style: dashed;
-}
-
-.clarityVoiceHelpText {
-  margin: 0.25rem 0 0.75rem;
-  font-size: 0.9rem;
-  line-height: 1.35;
-  opacity: 0.78;
-}
-
-.clarityVoiceVocabularyAdd {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.clarityVoiceVocabularyAdd input {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid rgba(17, 24, 39, 0.18);
-  border-radius: 0.7rem;
-  padding: 0.75rem 0.85rem;
-  font: inherit;
-}
-
-.clarityVoiceVocabularyPills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-top: 0.75rem;
-}
-
-.clarityVoiceVocabularyPill {
-  border: 1px solid rgba(17, 24, 39, 0.14);
-  background: rgba(17, 24, 39, 0.04);
-  border-radius: 999px;
-  padding: 0.35rem 0.55rem;
-  font-size: 0.82rem;
-  cursor: pointer;
+  .clarityVoiceInterim {
+    margin-left: 50px;
+  }
 }

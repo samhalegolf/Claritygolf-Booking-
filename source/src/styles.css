@@ -1374,13 +1374,111 @@ button {
 
 .lesson-notes-panel .clarityVoicePanel {
   max-width: none;
-  border-radius: 10px;
-  box-shadow: none;
+}
+
+.lesson-notes-window {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
   background: var(--panel);
 }
 
-.lesson-notes-panel .clarityVoiceHeader h2 {
-  font-size: 18px;
+.lesson-notes-window div,
+.lesson-notes-window strong,
+.lesson-notes-window span {
+  display: grid;
+  gap: 4px;
+}
+
+.lesson-notes-window span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.notes-workspace-page {
+  display: grid;
+  gap: 16px;
+}
+
+.notes-workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.notes-workspace-header h2 {
+  margin: 0;
+}
+
+.notes-workspace-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.notes-workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(210px, 280px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.notes-player-list {
+  display: grid;
+  gap: 8px;
+}
+
+.notes-player-list button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--heading);
+  padding: 11px 12px;
+  cursor: pointer;
+}
+
+.notes-player-list button.active {
+  border-color: rgba(25, 118, 210, 0.45);
+  background: rgba(25, 118, 210, 0.08);
+}
+
+.notes-player-list em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.notes-player-list p,
+.notes-empty {
+  color: var(--muted);
+}
+
+.notes-workspace-main {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.notes-empty-panel {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 220px;
+  color: var(--muted);
+}
+
+.notes-empty-panel h3 {
+  margin: 0;
+  color: var(--heading);
 }
 
 .lesson-notes-list {
@@ -1403,6 +1501,18 @@ button {
 
 .lesson-note-card strong {
   color: var(--heading);
+}
+
+@media (max-width: 820px) {
+  .notes-workspace-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .lesson-notes-window,
+  .notes-workspace-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .lesson-note-card span {
