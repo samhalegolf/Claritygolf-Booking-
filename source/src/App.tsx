@@ -1945,7 +1945,7 @@ function findClientMatch<T extends MatchableClient>(clients: T[], input: ClientM
   return clients.find((client) => clientMatchesInput(client, input)) ?? null;
 }
 
-function clientMatchesSearchTerm(client: Pick<Person, "name" | "email" | "phone" | "notes">, term: string) {
+function clientMatchesSearchTerm(client: Pick<Person, "name" | "email" | "phone" | "notes" | "source">, term: string) {
   const rawTerm = safeText(term).trim().toLowerCase();
   if (!rawTerm) return true;
   return clientSearchText(client).includes(rawTerm) || clientMatchesInput(client, { name: term, email: term, phone: term });
@@ -1983,8 +1983,21 @@ function caddyProfileUrl(
   return url.toString();
 }
 
-function clientSearchText(client: Pick<Person, "name" | "email" | "phone" | "notes">) {
-  return [client.name, client.email, client.phone, client.notes].map((value) => safeText(value)).join(" ").toLowerCase();
+function isBookingGeneratedProfileNote(client: Pick<Person, "notes" | "source">) {
+  const note = safeText(client.notes).trim().toLowerCase().replace(/\.+$/, "");
+  const source = safeText(client.source).toLowerCase();
+  return note === "booked from public booking page" && source.includes("appointment");
+}
+
+function profileNotesText(client: Pick<Person, "notes" | "source">) {
+  return isBookingGeneratedProfileNote(client) ? "" : safeText(client.notes);
+}
+
+function clientSearchText(client: Pick<Person, "name" | "email" | "phone" | "notes" | "source">) {
+  return [client.name, client.email, client.phone, profileNotesText(client)]
+    .map((value) => safeText(value))
+    .join(" ")
+    .toLowerCase();
 }
 
 function editorFromClient(client: ClientSummary): ClientEditor {
@@ -1993,7 +2006,7 @@ function editorFromClient(client: ClientSummary): ClientEditor {
     name: client.name,
     email: client.email,
     phone: client.phone,
-    notes: client.notes,
+    notes: profileNotesText(client),
     caddyProfileId: client.caddyProfileId,
     caddyProfileUrl: client.caddyProfileUrl,
   };
@@ -19713,10 +19726,10 @@ function App() {
                     </span>
                   </div>
                 </div>
-                {selectedClient?.notes && (
+                {selectedClient && profileNotesText(selectedClient) && (
                   <div className="client-profile-note-block">
                     <strong>Profile notes</strong>
-                    <p>{selectedClient.notes}</p>
+                    <p>{profileNotesText(selectedClient)}</p>
                   </div>
                 )}
                 {selectedClient && (
