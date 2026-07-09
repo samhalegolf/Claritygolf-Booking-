@@ -6,6 +6,8 @@ import {
   BarChart3,
   CalendarDays,
   Check,
+  ChevronDown,
+  ChevronUp,
   Code2,
   Copy,
   Clock,
@@ -3917,6 +3919,7 @@ function App() {
   const [clientProfileTab, setClientProfileTab] = useState<ClientProfileTab>("bookings");
   const [notesContext, setNotesContext] = useState<{ playerId: string; playerName: string } | null>(null);
   const [playerProfileTool, setPlayerProfileTool] = useState<PlayerProfileTool>("notes");
+  const [playerToolExpanded, setPlayerToolExpanded] = useState(true);
   const [selectedId, setSelectedId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
@@ -8488,6 +8491,7 @@ function App() {
   function selectPlayerProfileTool(client: Pick<Person, "id" | "name">, tool: PlayerProfileTool = "notes") {
     setNotesContext({ playerId: client.id, playerName: client.name });
     setPlayerProfileTool(tool);
+    setPlayerToolExpanded(true);
   }
 
   function openNotesForClient(client: Pick<Person, "id" | "name">) {
@@ -16040,7 +16044,7 @@ function App() {
                 )}
               </div>
 
-              <aside className="player-profile-tool-panel">
+              <aside className={`player-profile-tool-panel${playerToolExpanded ? "" : " collapsed"}`}>
                 {notesWorkspaceClient ? (
                   <>
                     <div className="player-tool-header">
@@ -16049,36 +16053,50 @@ function App() {
                         <h3>{notesWorkspaceClient.name}</h3>
                         <p>{notesWorkspaceClient.email || notesWorkspaceClient.phone || "No contact yet"}</p>
                       </div>
-                      <button type="button" className="outline-button" onClick={() => openClientProfile(notesWorkspaceClient)}>
-                        <User size={15} />
-                        Profile
-                      </button>
+                      <div className="player-tool-actions">
+                        <button type="button" className="outline-button" onClick={() => openClientProfile(notesWorkspaceClient)}>
+                          <User size={15} />
+                          Profile
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button player-tool-toggle"
+                          onClick={() => setPlayerToolExpanded((expanded) => !expanded)}
+                          aria-expanded={playerToolExpanded}
+                          aria-label={playerToolExpanded ? "Collapse player tools" : "Expand player tools"}
+                          title={playerToolExpanded ? "Collapse player tools" : "Expand player tools"}
+                        >
+                          {playerToolExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="player-tool-tabs" role="tablist" aria-label="Player profile tools">
-                      <button
-                        type="button"
-                        className={playerProfileTool === "notes" ? "active" : ""}
-                        onClick={() => setPlayerProfileTool("notes")}
-                        role="tab"
-                        aria-selected={playerProfileTool === "notes"}
-                      >
-                        <FileText size={15} />
-                        Notes
-                      </button>
-                      <button
-                        type="button"
-                        className={playerProfileTool === "videos" ? "active" : ""}
-                        onClick={() => setPlayerProfileTool("videos")}
-                        role="tab"
-                        aria-selected={playerProfileTool === "videos"}
-                      >
-                        <Video size={15} />
-                        Videos
-                      </button>
-                    </div>
+                    {playerToolExpanded && (
+                      <div className="player-tool-tabs" role="tablist" aria-label="Player profile tools">
+                        <button
+                          type="button"
+                          className={playerProfileTool === "notes" ? "active" : ""}
+                          onClick={() => setPlayerProfileTool("notes")}
+                          role="tab"
+                          aria-selected={playerProfileTool === "notes"}
+                        >
+                          <FileText size={15} />
+                          Notes
+                        </button>
+                        <button
+                          type="button"
+                          className={playerProfileTool === "videos" ? "active" : ""}
+                          onClick={() => setPlayerProfileTool("videos")}
+                          role="tab"
+                          aria-selected={playerProfileTool === "videos"}
+                        >
+                          <Video size={15} />
+                          Videos
+                        </button>
+                      </div>
+                    )}
 
-                    {playerProfileTool === "notes" ? (
+                    {playerToolExpanded && playerProfileTool === "notes" ? (
                       <div className="player-tool-body">
                         <ClarityVoiceTextPanel
                           fieldLabel="Lesson note"
@@ -16113,7 +16131,7 @@ function App() {
                           )}
                         </div>
                       </div>
-                    ) : (
+                    ) : playerToolExpanded ? (
                       <div className="player-tool-body">
                         <button
                           type="button"
@@ -16141,7 +16159,7 @@ function App() {
                           )}
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </>
                 ) : (
                   <div className="player-tool-empty">
