@@ -17,7 +17,7 @@ import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
 import { Toolbar } from "./components/Toolbar";
 import { VideoCanvas } from "./components/VideoCanvas";
-import { IconPlay, IconPause, IconUpload } from "./components/VideoIcons";
+import { IconPlay, IconPause, IconRecord, IconUpload } from "./components/VideoIcons";
 import {
   ComparisonSide,
   ComparisonWorkspaceState,
@@ -64,6 +64,14 @@ const SNAPSHOT_PREVIEW_WIDTH = 88;
 const SNAPSHOT_PREVIEW_HEIGHT = 50;
 const DEFAULT_PLAYER_ID = "player-demo-1";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+type RecordingStatus = "ready" | "recording" | "processing" | "error";
+
+interface LiveRecordingSession {
+  side: ComparisonSide;
+  status: RecordingStatus;
+  error: string | null;
+  startedAt: number | null;
+}
 
 interface VideoWorkspaceProps {
   playerId?: string;
@@ -194,6 +202,41 @@ const buildRectFromDrag = (
   };
 };
 
+const getPreferredRecordingMimeType = () => {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return "";
+  }
+  return (
+    [
+      "video/mp4;codecs=h264",
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/webm",
+    ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) || ""
+  );
+};
+
+const getRecordingFileName = (side: ComparisonSide, mimeType: string) => {
+  const extension = mimeType.includes("mp4") ? "mp4" : "webm";
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")
+    .replace("T", "-")
+    .replace("Z", "");
+  return `live-recording-${side}-${timestamp}.${extension}`;
+};
+
+const hasSaveableAnalysisContent = (analysis: VideoAnalysis) => {
+  return Boolean(
+    analysis.videoMeta ||
+      analysis.drawings.length ||
+      analysis.focusSnapshots.length ||
+      analysis.notes.length ||
+      analysis.focusViews.length ||
+      analysis.narrationRefs.length
+  );
+};
+
 export function VideoWorkspace({
   playerId,
   playerName,
@@ -203,8 +246,11 @@ export function VideoWorkspace({
 }: VideoWorkspaceProps) {
   const leftVideoRef = useRef<HTMLVideoElement>(null);
   const rightVideoRef = useRef<HTMLVideoElement>(null);
+  const livePreviewRef = useRef<HTMLVideoElement>(null);
   const leftUploadInputRef = useRef<HTMLInputElement>(null);
   const rightUploadInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
   const resolvedPlayerId = playerId || DEFAULT_PLAYER_ID;
   const resolvedPlayerName = playerName || resolvedPlayerId;
   const persistenceLayer = useMemo(() => createVideoAnalysisPersistence(persistence), [persistence]);
@@ -218,6 +264,10 @@ export function VideoWorkspace({
 
   const leftPlayback = usePlayback({ videoRef: leftVideoRef });
   const rightPlayback = usePlayback({ videoRef: rightVideoRef });
+
+  const stopLiveStream = useCallback((stream: MediaStream | null) => {
+    stream?.getTracks().forEach((track) => track.stop());
+  }, []);
 
   const [playerVideoLeft, setPlayerVideoLeft] = useState<PlayerVideo | null>(null);
   const [playerVideoRight, setPlayerVideoRight] = useState<PlayerVideo | null>(null);
@@ -253,7 +303,11 @@ export function VideoWorkspace({
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
   const [saveBackend, setSaveBackend] = useState<SaveBackend>("local-device");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [saveMessage, setSaveMessage] = useState("Not saved manually yet.");
+  const [saveMessage, setSaveMessage] = useState("Nothing to save yet.");
+  const [liveRecording, setLiveRecording] = useState<LiveRecordingSession | null>(null);
+  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState("");
 
   const timelineEngine = useMemo(() => new TimelineEngine(), []);
   const modeIsCompare = comparisonMode === "compare";
@@ -271,6 +325,19 @@ export function VideoWorkspace({
     videoId: RIGHT_ANALYSIS_SLOT,
     persistenceAdapter: persistenceLayer.analysisAdapter,
   });
+
+  useEffect(() => {
+    if (livePreviewRef.current) {
+      livePreviewRef.current.srcObject = liveStream;
+    }
+  }, [liveStream]);
+
+  useEffect(() => {
+    return () => {
+      mediaRecorderRef.current?.stream.getTracks().forEach((track) => track.stop());
+      stopLiveStream(liveStream);
+    };
+  }, [liveStream, stopLiveStream]);
 
   // Restore on-device videos once per player/lesson context. Reconstructs a
   // File from the stored blob and runs it through the normal load path so the
@@ -407,6 +474,23 @@ export function VideoWorkspace({
       shouldWarn: total >= SNAPSHOT_STORAGE_WARNING_LIMIT,
     };
   }, [allFocusSnapshots]);
+  const canManualSave = useMemo(
+    () =>
+      Boolean(
+        playerVideoLeft ||
+          playerVideoRight ||
+          hasSaveableAnalysisContent(leftStore.analysis) ||
+          hasSaveableAnalysisContent(rightStore.analysis)
+      ),
+    [leftStore.analysis, playerVideoLeft, playerVideoRight, rightStore.analysis]
+  );
+
+  useEffect(() => {
+    if (!canManualSave && saveStatus === "saved") {
+      setSaveStatus("idle");
+      setSaveMessage("Nothing to save yet.");
+    }
+  }, [canManualSave, saveStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -630,14 +714,8 @@ export function VideoWorkspace({
     ]
   );
 
-  const handleUpload = useCallback(
-    async (side: ComparisonSide, event: ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0] ?? null;
-      event.target.value = "";
-      if (!file) {
-        return;
-      }
-
+  const loadClipFileForSide = useCallback(
+    async (side: ComparisonSide, file: File) => {
       const isLeft = side === "left";
       const playback = isLeft ? leftPlayback : rightPlayback;
       const analysisStore = isLeft ? leftStore : rightStore;
@@ -705,6 +783,241 @@ export function VideoWorkspace({
       setActiveSideInCompare,
       persistenceLayer,
     ]
+  );
+
+  const handleUpload = useCallback(
+    async (side: ComparisonSide, event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0] ?? null;
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+      await loadClipFileForSide(side, file);
+      setSaveStatus("idle");
+      setSaveMessage("Clip ready to save.");
+    },
+    [loadClipFileForSide]
+  );
+
+  const openLiveRecording = useCallback(
+    async (side: ComparisonSide, cameraId = selectedCameraId) => {
+      if (
+        liveRecording?.status === "recording" ||
+        liveRecording?.status === "processing"
+      ) {
+        return;
+      }
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setLiveRecording({
+          side,
+          status: "error",
+          error: "Live recording is not available in this browser.",
+          startedAt: null,
+        });
+        return;
+      }
+
+      try {
+        stopLiveStream(liveStream);
+        const videoConstraints: MediaTrackConstraints = {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 60 },
+        };
+        if (cameraId) {
+          videoConstraints.deviceId = { exact: cameraId };
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: false,
+        });
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cameras = devices.filter((device) => device.kind === "videoinput");
+        const activeDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId || cameraId;
+
+        setCameraDevices(cameras);
+        setSelectedCameraId(activeDeviceId || cameraId || "");
+        setLiveStream(stream);
+        setLiveRecording({
+          side,
+          status: "ready",
+          error: null,
+          startedAt: null,
+        });
+        setActiveSideInCompare(side);
+      } catch (error) {
+        setLiveStream(null);
+        setLiveRecording({
+          side,
+          status: "error",
+          error: error instanceof Error ? error.message : "Could not open camera.",
+          startedAt: null,
+        });
+      }
+    },
+    [
+      liveRecording?.status,
+      liveStream,
+      selectedCameraId,
+      setActiveSideInCompare,
+      stopLiveStream,
+    ]
+  );
+
+  const closeLiveRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state === "recording") {
+      return;
+    }
+    stopLiveStream(liveStream);
+    mediaRecorderRef.current = null;
+    recordingChunksRef.current = [];
+    setLiveStream(null);
+    setLiveRecording(null);
+  }, [liveStream, stopLiveStream]);
+
+  const startLiveRecording = useCallback(() => {
+    if (!liveRecording || !liveStream) {
+      return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      setLiveRecording((current) =>
+        current
+          ? {
+              ...current,
+              status: "error",
+              error: "Recording is not available in this browser.",
+            }
+          : current
+      );
+      return;
+    }
+
+    try {
+      const mimeType = getPreferredRecordingMimeType();
+      const recorder = new MediaRecorder(
+        liveStream,
+        mimeType ? { mimeType } : undefined
+      );
+      const recordingSide = liveRecording.side;
+      recordingChunksRef.current = [];
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          recordingChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onerror = () => {
+        setLiveRecording((current) =>
+          current
+            ? {
+                ...current,
+                status: "error",
+                error: "Recording failed.",
+                startedAt: null,
+              }
+            : current
+        );
+      };
+      recorder.onstop = () => {
+        void (async () => {
+          const blobType =
+            mimeType || recordingChunksRef.current.find((chunk) => chunk.type)?.type || "video/webm";
+          const blob = new Blob(recordingChunksRef.current, { type: blobType });
+          recordingChunksRef.current = [];
+          mediaRecorderRef.current = null;
+
+          if (!blob.size) {
+            setLiveRecording((current) =>
+              current
+                ? {
+                    ...current,
+                    status: "error",
+                    error: "Recording did not capture any video.",
+                    startedAt: null,
+                  }
+                : current
+            );
+            return;
+          }
+
+          const file = new File(
+            [blob],
+            getRecordingFileName(recordingSide, blob.type || blobType),
+            { type: blob.type || blobType }
+          );
+          await loadClipFileForSide(recordingSide, file);
+          setSaveStatus("idle");
+          setSaveMessage("Recording ready to save.");
+          setLiveRecording((current) =>
+            current && current.side === recordingSide
+              ? {
+                  ...current,
+                  status: "ready",
+                  error: null,
+                  startedAt: null,
+                }
+              : current
+          );
+        })();
+      };
+
+      recorder.start(250);
+      setLiveRecording((current) =>
+        current
+          ? {
+              ...current,
+              status: "recording",
+              error: null,
+              startedAt: Date.now(),
+            }
+          : current
+      );
+    } catch (error) {
+      setLiveRecording((current) =>
+        current
+          ? {
+              ...current,
+              status: "error",
+              error: error instanceof Error ? error.message : "Could not start recording.",
+              startedAt: null,
+            }
+          : current
+      );
+    }
+  }, [liveRecording, liveStream, loadClipFileForSide]);
+
+  const stopLiveRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== "recording") {
+      return;
+    }
+    setLiveRecording((current) =>
+      current
+        ? {
+            ...current,
+            status: "processing",
+          }
+        : current
+    );
+    recorder.stop();
+  }, []);
+
+  const handleCameraChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      const nextCameraId = event.target.value;
+      setSelectedCameraId(nextCameraId);
+      if (
+        liveRecording &&
+        liveRecording.status !== "recording" &&
+        liveRecording.status !== "processing"
+      ) {
+        void openLiveRecording(liveRecording.side, nextCameraId);
+      }
+    },
+    [liveRecording, openLiveRecording]
   );
 
   const handleCanvasPointerDown = useCallback(
@@ -1275,6 +1588,12 @@ export function VideoWorkspace({
   );
 
   const handleManualSave = useCallback(async () => {
+    if (!canManualSave) {
+      setSaveStatus("error");
+      setSaveMessage("Add or record a clip before saving.");
+      return;
+    }
+
     setSaveStatus("saving");
     setSaveMessage(saveBackend === "local-device" ? "Saving to this device..." : "Saving to cloud...");
 
@@ -1309,6 +1628,7 @@ export function VideoWorkspace({
       console.error("Manual video analysis save failed", error);
     }
   }, [
+    canManualSave,
     createSaveArtifact,
     leftStore,
     rightStore,
@@ -1366,6 +1686,20 @@ export function VideoWorkspace({
               <button
                 type="button"
                 className="video-tool-btn"
+                aria-label={`Record ${sideTitle.toLowerCase()} clip`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void openLiveRecording(side);
+                }}
+              >
+                <IconRecord />
+                <span className="video-tool-tip" aria-hidden="true">
+                  Record {sideTitle.toLowerCase()} clip
+                </span>
+              </button>
+              <button
+                type="button"
+                className="video-tool-btn"
                 aria-label={`Upload ${sideTitle.toLowerCase()} clip`}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -1403,6 +1737,20 @@ export function VideoWorkspace({
             </span>
           </div>
           <div className="comparison-video-actions">
+            <button
+              type="button"
+              className="video-tool-btn"
+              aria-label={`Record ${sideTitle.toLowerCase()} clip`}
+              onClick={(event) => {
+                event.stopPropagation();
+                void openLiveRecording(side);
+              }}
+            >
+              <IconRecord />
+              <span className="video-tool-tip" aria-hidden="true">
+                Record {sideTitle.toLowerCase()} clip
+              </span>
+            </button>
             <button
               type="button"
               className="video-tool-btn"
@@ -1564,7 +1912,7 @@ export function VideoWorkspace({
             type="button"
             className="upload-button video-save-button"
             onClick={handleManualSave}
-            disabled={saveStatus === "saving"}
+            disabled={saveStatus === "saving" || !canManualSave}
           >
             {saveStatus === "saving" ? "Saving..." : "Save"}
           </button>
@@ -1594,6 +1942,84 @@ export function VideoWorkspace({
           onChange={(event) => handleUpload("right", event)}
         />
       </div>
+
+      {liveRecording ? (
+        <section className="live-recording-panel" aria-label="Live recording">
+          <div className="live-recording-header">
+            <div>
+              <h2>Live recording</h2>
+              <span>{getSideTitle(liveRecording.side)} clip</span>
+            </div>
+            <button
+              type="button"
+              className="video-tool-btn is-subtle"
+              onClick={closeLiveRecording}
+              disabled={
+                liveRecording.status === "recording" ||
+                liveRecording.status === "processing"
+              }
+              aria-label="Close live recording"
+            >
+              X
+            </button>
+          </div>
+
+          <div className="live-recording-body">
+            <div className="live-recording-preview">
+              <video ref={livePreviewRef} autoPlay muted playsInline />
+            </div>
+            <div className="live-recording-controls">
+              <label>
+                <span>Camera</span>
+                <select
+                  value={selectedCameraId}
+                  onChange={handleCameraChange}
+                  disabled={
+                    liveRecording.status === "recording" ||
+                    liveRecording.status === "processing"
+                  }
+                >
+                  <option value="">Default camera</option>
+                  {cameraDevices.map((device, index) => (
+                    <option key={device.deviceId || index} value={device.deviceId}>
+                      {device.label || `Camera ${index + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {liveRecording.status === "recording" ? (
+                <button
+                  type="button"
+                  className="upload-button video-record-stop"
+                  onClick={stopLiveRecording}
+                >
+                  Stop recording
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="upload-button"
+                  onClick={startLiveRecording}
+                  disabled={
+                    liveRecording.status === "processing" ||
+                    liveRecording.status === "error" ||
+                    !liveStream
+                  }
+                >
+                  {liveRecording.status === "processing" ? "Processing..." : "Start recording"}
+                </button>
+              )}
+              <span className={`live-recording-status is-${liveRecording.status}`}>
+                {liveRecording.status === "recording"
+                  ? "Recording"
+                  : liveRecording.status === "processing"
+                    ? "Processing"
+                    : liveRecording.error || "Camera ready"}
+              </span>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {leftStore.persistenceError || rightStore.persistenceError ? (
         <div className="focus-artifacts-warning" role="alert">
