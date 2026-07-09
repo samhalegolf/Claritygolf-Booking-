@@ -1967,6 +1967,43 @@ function clientNotificationKeys(name = "", email = "", phone = "") {
   );
 }
 
+function browserBase64(value: string) {
+  try {
+    return window.btoa(value);
+  } catch {
+    return "";
+  }
+}
+
+function profileIdsForClient(client: Pick<Person, "id" | "email" | "phone">) {
+  const ids = new Set<string>();
+  const id = safeText(client.id).trim();
+  const email = safeText(client.email).trim().toLowerCase();
+  const phone = canonicalPhoneKey(client.phone);
+  if (id) ids.add(id);
+  if (email) {
+    ids.add(email);
+    const encodedEmail = browserBase64(email);
+    if (encodedEmail) ids.add(`email-${encodedEmail}`);
+  }
+  if (phone) ids.add(`phone-${phone}`);
+  return ids;
+}
+
+function hasAnyProfileId(ids: Set<string>, client: Pick<Person, "id" | "email" | "phone">) {
+  for (const id of profileIdsForClient(client)) {
+    if (ids.has(id)) return true;
+  }
+  return false;
+}
+
+function preferredVideoPlayerId(client: Pick<Person, "id" | "email" | "phone">, videoIds: Set<string>) {
+  for (const id of profileIdsForClient(client)) {
+    if (videoIds.has(id)) return id;
+  }
+  return safeText(client.id);
+}
+
 function caddyProfileUrl(
   person: Pick<Person, "name" | "email" | "caddyProfileUrl" | "caddyProfileId">,
   workspaceUrl = CADDY_APP_URL,
@@ -6521,8 +6558,8 @@ function App() {
     const manual = new Set(playerProfilesLocal.manualIds);
     return clients.filter(
       (client) =>
-        lessonNotePlayerIds.has(client.id) ||
-        videoPlayerIds.has(client.id) ||
+        hasAnyProfileId(lessonNotePlayerIds, client) ||
+        hasAnyProfileId(videoPlayerIds, client) ||
         manual.has(client.id),
     );
   }, [clients, lessonNotePlayerIds, playerProfilesLocal.manualIds, videoPlayerIds]);
@@ -6537,7 +6574,10 @@ function App() {
       subtitle: string;
     };
     const entries: ActivityEntry[] = [];
-    const nameById = new Map(clients.map((client) => [client.id, client.name]));
+    const nameById = new Map<string, string>();
+    clients.forEach((client) => {
+      profileIdsForClient(client).forEach((id) => nameById.set(id, client.name));
+    });
 
     storedVideoMeta.forEach((video) => {
       const time = Date.parse(video.createdAt || "");
@@ -6678,7 +6718,8 @@ function App() {
   }, [coachAccount, coachProfiles, isAdminUser, items, selectedClient, services, serviceScopeCoachId]);
   const selectedClientLessonNotes = useMemo(() => {
     if (!selectedClient) return [];
-    return lessonNotes.filter((note) => note.playerId === selectedClient.id);
+    const selectedProfileIds = profileIdsForClient(selectedClient);
+    return lessonNotes.filter((note) => selectedProfileIds.has(note.playerId));
   }, [lessonNotes, selectedClient]);
   const selectedAppointmentNotifications = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return [];
@@ -16016,12 +16057,12 @@ function App() {
                         <h3>{player.name}</h3>
                         <span>{player.email || player.phone || "No contact yet"}</span>
                         <div className="player-profile-tags">
-                          {videoPlayerIds.has(player.id) && (
+                          {hasAnyProfileId(videoPlayerIds, player) && (
                             <span className="tag">
                               <Video size={12} /> Video
                             </span>
                           )}
-                          {lessonNotePlayerIds.has(player.id) && (
+                          {hasAnyProfileId(lessonNotePlayerIds, player) && (
                             <span className="tag">
                               <FileText size={12} /> Lesson notes
                             </span>
@@ -16035,7 +16076,10 @@ function App() {
                         aria-label={`Open video analysis for ${player.name}`}
                         onClick={(event) => {
                           event.stopPropagation();
-                          openVideoAnalysisForClient({ id: player.id, name: player.name });
+                          openVideoAnalysisForClient({
+                            id: preferredVideoPlayerId(player, videoPlayerIds),
+                            name: player.name,
+                          });
                         }}
                       >
                         <Video size={16} />
@@ -19738,7 +19782,7 @@ function App() {
                     className="outline-button client-video-button"
                     onClick={() =>
                       openVideoAnalysisForClient({
-                        id: selectedClient.id,
+                        id: preferredVideoPlayerId(selectedClient, videoPlayerIds),
                         name: selectedClient.name,
                       })
                     }
