@@ -559,7 +559,7 @@ type Toast = {
   undo?: () => void;
 };
 
-type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video" | "players" | "notes";
+type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video" | "players";
 type BillingSection = "none" | "dashboard" | "new-invoice" | "expenses" | "reports" | "settings";
 type SettingsTab =
   | "none"
@@ -660,6 +660,7 @@ type RescheduleLookupCredentials = RescheduleForm & {
 type SavedBookingLogin = BookingForm;
 
 type ClientProfileTab = "bookings" | "notes" | "notifications";
+type PlayerProfileTool = "notes" | "videos";
 
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
@@ -1653,28 +1654,9 @@ function sectionTitle(view: View) {
       return "Video Analysis";
     case "players":
       return "Player Profiles";
-    case "notes":
-      return "Notes";
     default:
       return "Calendar";
   }
-}
-
-function formatActivityTime(iso: string): string {
-  const time = Date.parse(iso);
-  if (!Number.isFinite(time)) return "";
-  const diffMs = Date.now() - time;
-  const diffMin = Math.round(diffMs / 60000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.round(diffHr / 24);
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return new Date(time).toLocaleDateString("en-NZ", {
-    day: "numeric",
-    month: "short",
-  });
 }
 
 function getInitialView(): View {
@@ -1682,7 +1664,7 @@ function getInitialView(): View {
   const requestedView = new URLSearchParams(window.location.search).get("view");
   if (requestedView === "settings") return "settings";
   if (requestedView === "billing") return "billing";
-  if (requestedView === "notes") return "notes";
+  if (requestedView === "notes") return "players";
   if (requestedView === "players") return "players";
   if (requestedView === "video") return "video";
   return isPublicBookingMode() ? "booking" : "calendar";
@@ -3934,6 +3916,7 @@ function App() {
   const [clientSaveState, setClientSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [clientProfileTab, setClientProfileTab] = useState<ClientProfileTab>("bookings");
   const [notesContext, setNotesContext] = useState<{ playerId: string; playerName: string } | null>(null);
+  const [playerProfileTool, setPlayerProfileTool] = useState<PlayerProfileTool>("notes");
   const [selectedId, setSelectedId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
@@ -6570,79 +6553,6 @@ function App() {
     );
   }, [clients, lessonNotePlayerIds, playerProfilesLocal.manualIds, videoPlayerIds]);
 
-  const recentPlayerActivity = useMemo(() => {
-    type ActivityEntry = {
-      key: string;
-      time: number;
-      iso: string;
-      kind: "video" | "notes" | "booking" | "profile";
-      title: string;
-      subtitle: string;
-    };
-    const entries: ActivityEntry[] = [];
-    const nameById = new Map<string, string>();
-    clients.forEach((client) => {
-      profileIdsForClient(client).forEach((id) => nameById.set(id, client.name));
-    });
-
-    storedVideoMeta.forEach((video) => {
-      const time = Date.parse(video.createdAt || "");
-      if (!Number.isFinite(time)) return;
-      const who = nameById.get(video.playerId) || video.playerId;
-      entries.push({
-        key: `video-${video.id}`,
-        time,
-        iso: video.createdAt,
-        kind: "video",
-        title: "Video added",
-        subtitle: video.title ? `${who} · ${video.title}` : who,
-      });
-    });
-
-    lessonNotes.forEach((note) => {
-      const time = Date.parse(note.updatedAt || note.createdAt);
-      if (!Number.isFinite(time)) return;
-      entries.push({
-        key: `notes-${note.id}`,
-        time,
-        iso: note.updatedAt || note.createdAt,
-        kind: "notes",
-        title: note.source === "voice" ? "Voice note saved" : "Lesson note saved",
-        subtitle: note.playerName || nameById.get(note.playerId) || note.playerId,
-      });
-    });
-
-    Object.entries(playerProfilesLocal.createdStamps).forEach(([id, iso]) => {
-      const time = Date.parse(iso);
-      if (!Number.isFinite(time)) return;
-      entries.push({
-        key: `profile-${id}`,
-        time,
-        iso,
-        kind: "profile",
-        title: "Player profile added",
-        subtitle: nameById.get(id) || id,
-      });
-    });
-
-    accountItems
-      .filter((item) => item.kind === "appointment" && item.updatedAt)
-      .forEach((item) => {
-        const time = Date.parse(item.updatedAt || "");
-        if (!Number.isFinite(time)) return;
-        entries.push({
-          key: `booking-${item.id}`,
-          time,
-          iso: item.updatedAt || "",
-          kind: "booking",
-          title: "Booking activity",
-          subtitle: item.client || item.title || "Appointment",
-        });
-      });
-
-    return entries.sort((a, b) => b.time - a.time).slice(0, 12);
-  }, [accountItems, clients, lessonNotes, storedVideoMeta, playerProfilesLocal]);
-
   const quickClientInput = {
     name: quickClientSearch,
     email: quickCreate?.email ?? "",
@@ -6722,11 +6632,6 @@ function App() {
       .filter((item) => clientKey(item.client || item.title, item.email ?? "", item.phone ?? "") === key)
       .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
   }, [coachAccount, coachProfiles, isAdminUser, items, selectedClient, services, serviceScopeCoachId]);
-  const selectedClientLessonNotes = useMemo(() => {
-    if (!selectedClient) return [];
-    const selectedProfileIds = profileIdsForClient(selectedClient);
-    return lessonNotes.filter((note) => selectedProfileIds.has(note.playerId));
-  }, [lessonNotes, selectedClient]);
   const notesWorkspaceClient = useMemo(() => {
     if (!notesContext) return null;
     return (
@@ -6742,6 +6647,13 @@ function App() {
       .filter((note) => noteProfileIds.has(note.playerId))
       .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
   }, [lessonNotes, notesWorkspaceClient]);
+  const playerToolVideos = useMemo(() => {
+    if (!notesWorkspaceClient) return [];
+    const playerIds = profileIdsForClient(notesWorkspaceClient);
+    return storedVideoMeta
+      .filter((video) => playerIds.has(video.playerId))
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  }, [notesWorkspaceClient, storedVideoMeta]);
   const selectedAppointmentNotifications = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return [];
     return notificationsByAppointment.get(selected.id) ?? [];
@@ -8568,13 +8480,19 @@ function App() {
   function openVideoAnalysisForClient(client: { id: string; name: string }) {
     setVideoContext({ playerId: client.id, playerName: client.name });
     setActiveView("video");
+    closeClientModal();
     setQuickCreate(null);
     closeCalendarDetails();
   }
 
-  function openNotesForClient(client: Pick<Person, "id" | "name">) {
+  function selectPlayerProfileTool(client: Pick<Person, "id" | "name">, tool: PlayerProfileTool = "notes") {
     setNotesContext({ playerId: client.id, playerName: client.name });
-    setActiveView("notes");
+    setPlayerProfileTool(tool);
+  }
+
+  function openNotesForClient(client: Pick<Person, "id" | "name">) {
+    selectPlayerProfileTool(client, "notes");
+    setActiveView("players");
     closeClientModal();
     setQuickCreate(null);
     closeCalendarDetails();
@@ -15001,10 +14919,6 @@ function App() {
             <Users size={18} />
             Player Profiles
           </button>
-          <button className={activeView === "notes" ? "active" : ""} onClick={() => switchView("notes")}>
-            <FileText size={18} />
-            Notes
-          </button>
           {billingWorkspaceEnabled && (
             <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
               <FileText size={18} />
@@ -16084,8 +15998,8 @@ function App() {
                   playerProfiles.map((player) => (
                     <article
                       key={player.id}
-                      className="player-profile-card"
-                      onClick={() => openClientProfile(player)}
+                      className={`player-profile-card${notesWorkspaceClient?.id === player.id ? " active" : ""}`}
+                      onClick={() => selectPlayerProfileTool(player, "notes")}
                     >
                       <div className="player-profile-avatar">
                         <User size={18} />
@@ -16126,110 +16040,117 @@ function App() {
                 )}
               </div>
 
-              <aside className="player-activity">
-                <h3>Recent activity</h3>
-                {recentPlayerActivity.length === 0 ? (
-                  <p className="player-activity-empty">No recent activity yet.</p>
-                ) : (
-                  <ul>
-                    {recentPlayerActivity.map((entry) => (
-                      <li key={entry.key} className={`activity-${entry.kind}`}>
-                        <span className="activity-dot" />
-                        <div className="activity-body">
-                          <span className="activity-title">{entry.title}</span>
-                          <span className="activity-sub">{entry.subtitle}</span>
-                        </div>
-                        <span className="activity-time">{formatActivityTime(entry.iso)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </aside>
-            </div>
-          </section>
-        )}
-
-        {!isEmbedMode && adminWorkspaceReady && activeView === "notes" && (
-          <section className="module-page notes-workspace-page">
-            <div className="notes-workspace-header">
-              <div>
-                <h2>Lesson Notes</h2>
-                <p>{notesWorkspaceClient ? notesWorkspaceClient.name : "Select a player"}</p>
-              </div>
-              {notesWorkspaceClient && (
-                <button
-                  type="button"
-                  className="outline-button"
-                  onClick={() => openClientProfile(notesWorkspaceClient)}
-                >
-                  <User size={16} />
-                  Player profile
-                </button>
-              )}
-            </div>
-
-            <div className="notes-workspace-layout">
-              <aside className="notes-player-list" aria-label="Players with notes">
-                {playerProfiles.length ? (
-                  playerProfiles.map((player) => (
-                    <button
-                      type="button"
-                      key={player.id}
-                      className={notesWorkspaceClient?.id === player.id ? "active" : ""}
-                      onClick={() => setNotesContext({ playerId: player.id, playerName: player.name })}
-                    >
-                      <span>{player.name}</span>
-                      <em>{player.email || player.phone || "No contact"}</em>
-                    </button>
-                  ))
-                ) : (
-                  <p>No player profiles yet.</p>
-                )}
-              </aside>
-
-              <div className="notes-workspace-main">
+              <aside className="player-profile-tool-panel">
                 {notesWorkspaceClient ? (
                   <>
-                    <ClarityVoiceTextPanel
-                      fieldLabel="Lesson note"
-                      placeholder="Type or dictate the coach lesson note."
-                      onCommit={(text) => void saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
-                    />
-                    <div className="lesson-notes-list">
-                      {notesWorkspaceLessonNotes.length ? (
-                        notesWorkspaceLessonNotes.map((note) => (
-                          <article className="lesson-note-card" key={note.id}>
-                            <div>
-                              <strong>{note.title}</strong>
-                              <span>
-                                {note.source === "voice" ? "Voice note" : "Typed note"} ·{" "}
-                                {notificationTimeLabel(note.updatedAt || note.createdAt)}
-                              </span>
-                            </div>
-                            <p>{note.body}</p>
-                            <button
-                              type="button"
-                              className="outline-button"
-                              onClick={() => void deleteLessonNote(note.id)}
-                              disabled={lessonNoteSaveState === "saving"}
-                            >
-                              <Trash2 size={14} />
-                              Delete
-                            </button>
-                          </article>
-                        ))
-                      ) : (
-                        <p className="notes-empty">No lesson notes yet.</p>
-                      )}
+                    <div className="player-tool-header">
+                      <div>
+                        <span>Player</span>
+                        <h3>{notesWorkspaceClient.name}</h3>
+                        <p>{notesWorkspaceClient.email || notesWorkspaceClient.phone || "No contact yet"}</p>
+                      </div>
+                      <button type="button" className="outline-button" onClick={() => openClientProfile(notesWorkspaceClient)}>
+                        <User size={15} />
+                        Profile
+                      </button>
                     </div>
+
+                    <div className="player-tool-tabs" role="tablist" aria-label="Player profile tools">
+                      <button
+                        type="button"
+                        className={playerProfileTool === "notes" ? "active" : ""}
+                        onClick={() => setPlayerProfileTool("notes")}
+                        role="tab"
+                        aria-selected={playerProfileTool === "notes"}
+                      >
+                        <FileText size={15} />
+                        Notes
+                      </button>
+                      <button
+                        type="button"
+                        className={playerProfileTool === "videos" ? "active" : ""}
+                        onClick={() => setPlayerProfileTool("videos")}
+                        role="tab"
+                        aria-selected={playerProfileTool === "videos"}
+                      >
+                        <Video size={15} />
+                        Videos
+                      </button>
+                    </div>
+
+                    {playerProfileTool === "notes" ? (
+                      <div className="player-tool-body">
+                        <ClarityVoiceTextPanel
+                          fieldLabel="Lesson note"
+                          placeholder="Type or dictate the coach lesson note."
+                          onCommit={(text) => void saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
+                        />
+                        <div className="lesson-notes-list">
+                          {notesWorkspaceLessonNotes.length ? (
+                            notesWorkspaceLessonNotes.map((note) => (
+                              <article className="lesson-note-card" key={note.id}>
+                                <div>
+                                  <strong>{note.title}</strong>
+                                  <span>
+                                    {note.source === "voice" ? "Voice note" : "Typed note"} ·{" "}
+                                    {notificationTimeLabel(note.updatedAt || note.createdAt)}
+                                  </span>
+                                </div>
+                                <p>{note.body}</p>
+                                <button
+                                  type="button"
+                                  className="outline-button"
+                                  onClick={() => void deleteLessonNote(note.id)}
+                                  disabled={lessonNoteSaveState === "saving"}
+                                >
+                                  <Trash2 size={14} />
+                                  Delete
+                                </button>
+                              </article>
+                            ))
+                          ) : (
+                            <p className="notes-empty">No lesson notes yet.</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="player-tool-body">
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={() =>
+                            openVideoAnalysisForClient({
+                              id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
+                              name: notesWorkspaceClient.name,
+                            })
+                          }
+                        >
+                          <Video size={16} />
+                          Open video analysis
+                        </button>
+                        <div className="player-video-list">
+                          {playerToolVideos.length ? (
+                            playerToolVideos.map((video) => (
+                              <article className="player-video-card" key={video.id}>
+                                <strong>{video.title || "Saved video"}</strong>
+                                <span>{notificationTimeLabel(video.createdAt)}</span>
+                              </article>
+                            ))
+                          ) : (
+                            <p className="notes-empty">No videos yet.</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </>
                 ) : (
-                  <div className="notes-empty-panel">
-                    <FileText size={22} />
+                  <div className="player-tool-empty">
+                    <Users size={22} />
                     <h3>Select a player</h3>
+                    <p>View or add notes and videos from the player profile.</p>
                   </div>
                 )}
-              </div>
+              </aside>
             </div>
           </section>
         )}
@@ -19979,45 +19900,45 @@ function App() {
                         <div className="lesson-notes-window">
                           <div>
                             <strong>Lesson Notes</strong>
-                            <span>{selectedClient.name}</span>
+                            <span>Start something fresh, or open the player profile for older records.</span>
                           </div>
-                          <button
-                            type="button"
-                            className="primary-button"
-                            onClick={() => openNotesForClient(selectedClient)}
-                          >
-                            <FileText size={16} />
-                            Open notes
-                          </button>
+                          <div className="lesson-quick-actions">
+                            <button
+                              type="button"
+                              className="icon-button"
+                              onClick={() => openNotesForClient(selectedClient)}
+                              title="Add lesson note"
+                              aria-label="Add lesson note"
+                            >
+                              <Plus size={16} />
+                              <FileText size={15} />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-button"
+                              onClick={() =>
+                                openVideoAnalysisForClient({
+                                  id: preferredVideoPlayerId(selectedClient, videoPlayerIds),
+                                  name: selectedClient.name,
+                                })
+                              }
+                              title="Add video"
+                              aria-label="Add video"
+                            >
+                              <Plus size={16} />
+                              <Video size={15} />
+                            </button>
+                            <button
+                              type="button"
+                              className="outline-button"
+                              onClick={() => openNotesForClient(selectedClient)}
+                            >
+                              <User size={15} />
+                              Player profile
+                            </button>
+                          </div>
                         </div>
                       )}
-                      <div className="lesson-notes-list">
-                        {selectedClientLessonNotes.length ? (
-                          selectedClientLessonNotes.map((note) => (
-                            <article className="lesson-note-card" key={note.id}>
-                              <div>
-                                <strong>{note.title}</strong>
-                                <span>
-                                  {note.source === "voice" ? "Voice note" : "Typed note"} ·{" "}
-                                  {notificationTimeLabel(note.updatedAt || note.createdAt)}
-                                </span>
-                              </div>
-                              <p>{note.body}</p>
-                              <button
-                                type="button"
-                                className="outline-button"
-                                onClick={() => void deleteLessonNote(note.id)}
-                                disabled={lessonNoteSaveState === "saving"}
-                              >
-                                <Trash2 size={14} />
-                                Delete
-                              </button>
-                            </article>
-                          ))
-                        ) : (
-                          <p>No lesson notes yet.</p>
-                        )}
-                      </div>
                     </div>
                   ) : selectedClientNotifications.length ? (
                     selectedClientNotifications.map((notification) => (

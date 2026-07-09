@@ -24,7 +24,7 @@
 
 .player-profiles-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(240px, 380px) minmax(0, 1fr);
   gap: 18px;
   align-items: start;
 }
@@ -56,6 +56,11 @@
 .player-profile-card:hover {
   border-color: var(--border-strong);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+}
+
+.player-profile-card.active {
+  border-color: rgba(25, 118, 210, 0.45);
+  background: rgba(25, 118, 210, 0.06);
 }
 
 .player-profile-avatar {
@@ -105,93 +110,120 @@
   font-size: 11px;
 }
 
-.player-activity {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px;
-}
-
-.player-activity h3 {
-  margin: 0 0 12px;
-  font-size: 14px;
-  color: var(--heading);
-}
-
-.player-activity-empty {
-  color: var(--muted);
-  font-size: 13px;
-  margin: 0;
-}
-
-.player-activity ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.player-activity li {
-  display: grid;
-  grid-template-columns: 10px 1fr auto;
-  gap: 10px;
-  align-items: start;
-}
-
-.player-activity .activity-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-top: 5px;
-  background: var(--muted);
-}
-
-.player-activity .activity-video .activity-dot {
-  background: #2f6fb5;
-}
-.player-activity .activity-notes .activity-dot {
-  background: #b58a2f;
-}
-.player-activity .activity-booking .activity-dot {
-  background: #2f9a63;
-}
-.player-activity .activity-profile .activity-dot {
-  background: var(--primary);
-}
-
-.player-activity .activity-body {
-  min-width: 0;
-}
-
-.player-activity .activity-title {
-  display: block;
-  font-size: 13px;
-  color: var(--text);
-}
-
-.player-activity .activity-sub {
-  display: block;
-  font-size: 12px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.player-activity .activity-time {
-  font-size: 11px;
-  color: var(--quiet);
-  white-space: nowrap;
-}
-
 .player-profiles-empty {
   padding: 32px;
   text-align: center;
   color: var(--muted);
   border: 1px dashed var(--border);
   border-radius: 12px;
+}
+
+.player-profile-tool-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.player-tool-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.player-tool-header span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.player-tool-header h3 {
+  margin: 2px 0 0;
+  color: var(--heading);
+}
+
+.player-tool-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.player-tool-tabs {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  justify-self: start;
+}
+
+.player-tool-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.player-tool-tabs button.active {
+  background: var(--panel);
+  color: var(--heading);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+.player-tool-body {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.player-tool-empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 240px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.player-tool-empty h3 {
+  margin: 0;
+  color: var(--heading);
+}
+
+.player-tool-empty p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.player-video-list {
+  display: grid;
+  gap: 10px;
+}
+
+.player-video-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.player-video-card span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* Manual add dialog */
