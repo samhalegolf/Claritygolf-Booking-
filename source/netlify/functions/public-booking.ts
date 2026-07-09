@@ -768,7 +768,7 @@ async function createPublicBooking(payload: any) {
     name: client,
     email,
     phone: phone || null,
-    notes: appointment.note,
+    notes: null,
     source: "appointment",
     created_at: nowIso(),
     updated_at: nowIso(),

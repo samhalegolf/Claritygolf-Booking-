@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VideoAnalysisPage } from "./modules/video-analysis";
+import { ClarityVoiceTextPanel } from "./modules/clarity-voice";
 import {
   createIndexedDbVideoStore,
   type VideoBlobStore,
@@ -419,6 +420,30 @@ function cleanNotificationRecords(notifications: unknown[]): NotificationRecord[
   return notifications.map((notification) => cleanNotificationRecord((notification ?? {}) as Partial<NotificationRecord>));
 }
 
+function cleanLessonNote(note: Partial<LessonNote> & { id?: unknown } = {}): LessonNote {
+  const createdAt = safeText(note.createdAt) || new Date().toISOString();
+  return {
+    id: safeText(note.id),
+    accountId: safeText(note.accountId) || defaultWorkspaceAccountFromCoachAccount().id,
+    playerId: safeText(note.playerId),
+    playerName: safeText(note.playerName),
+    lessonId: safeText(note.lessonId),
+    calendarItemId: safeText(note.calendarItemId),
+    title: safeText(note.title) || "Lesson note",
+    body: safeText(note.body),
+    source: note.source === "voice" ? "voice" : "typed",
+    createdAt,
+    updatedAt: safeText(note.updatedAt) || createdAt,
+  };
+}
+
+function cleanLessonNotes(notes: unknown[]): LessonNote[] {
+  return notes
+    .map((note) => cleanLessonNote((note ?? {}) as Partial<LessonNote>))
+    .filter((note) => note.playerId && note.body)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
 type PeopleImportResult = {
   ok?: boolean;
   imported?: number;
@@ -445,6 +470,27 @@ type PeopleImportDiagnostic = {
 type PeopleUpdateResult = {
   person: Person;
   people: Person[];
+};
+
+type LessonNoteSource = "typed" | "voice";
+
+type LessonNote = {
+  id: string;
+  accountId: string;
+  playerId: string;
+  playerName: string;
+  lessonId: string;
+  calendarItemId: string;
+  title: string;
+  body: string;
+  source: LessonNoteSource;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type NotesResult = {
+  note?: LessonNote;
+  notes?: LessonNote[];
 };
 
 type ClientEditor = Pick<Person, "id" | "name" | "email" | "phone" | "notes" | "caddyProfileId" | "caddyProfileUrl">;
@@ -613,7 +659,7 @@ type RescheduleLookupCredentials = RescheduleForm & {
 
 type SavedBookingLogin = BookingForm;
 
-type ClientProfileTab = "bookings" | "notifications";
+type ClientProfileTab = "bookings" | "notes" | "notifications";
 
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
@@ -3818,6 +3864,8 @@ function App() {
   const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
   const [people, setPeople] = useState<Person[]>([]);
+  const [lessonNotes, setLessonNotes] = useState<LessonNote[]>([]);
+  const [lessonNoteSaveState, setLessonNoteSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [peopleImportText, setPeopleImportText] = useState("");
   const [peopleImportState, setPeopleImportState] = useState<"idle" | "importing" | "imported">("idle");
@@ -3868,10 +3916,13 @@ function App() {
     refreshStoredVideoMeta();
   }, [refreshStoredVideoMeta]);
 
-  // Refresh video-derived data whenever the Player Profiles view opens, so
-  // uploads made during this session show up without a reload.
+  // Refresh player-profile derived data whenever the view opens, so uploads
+  // and lesson notes made during this session show up without a reload.
   useEffect(() => {
-    if (activeView === "players") refreshStoredVideoMeta();
+    if (activeView === "players") {
+      refreshStoredVideoMeta();
+      void refreshLessonNotes();
+    }
   }, [activeView, refreshStoredVideoMeta]);
 
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
@@ -5102,6 +5153,27 @@ function App() {
     }
   }
 
+  async function refreshLessonNotes(runId?: number) {
+    if (isEmbedMode || authStatus !== "authenticated") return;
+    try {
+      const response = await fetch("/api/notes", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (runId !== undefined && !shouldApplyAdminWorkspaceDetail(runId)) return;
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => ({}))) as NotesResult;
+      if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
+    } catch {
+      // Lesson notes are secondary to the calendar frame.
+    }
+  }
+
   async function processPendingAdminNotifications() {
     if (isEmbedMode || authStatus !== "authenticated") return;
     try {
@@ -5981,6 +6053,7 @@ function App() {
       },
     });
     window.setTimeout(() => void refreshPeopleList(runId), 0);
+    window.setTimeout(() => void refreshLessonNotes(runId), 0);
     window.setTimeout(() => void refreshNotificationHistory(), 0);
     window.setTimeout(() => void refreshGoogleCalendarStatus(), 0);
 
@@ -6376,7 +6449,7 @@ function App() {
             name,
             email: item.email ?? "",
             phone: item.phone ?? "",
-            notes: item.note ?? "",
+            notes: "",
             source: "appointment",
             caddyProfileId: "",
             caddyProfileUrl: "",
@@ -6390,7 +6463,7 @@ function App() {
           name: existing.name || name,
           email: existing.email || item.email || "",
           phone: existing.phone || item.phone || "",
-          notes: existing.notes || item.note || "",
+          notes: existing.notes || "",
           count: existing.count + 1,
           next,
           last: item,
@@ -6421,17 +6494,25 @@ function App() {
     return ids;
   }, [storedVideoMeta]);
 
-  // A client becomes a player profile when they have notes, a stored video, or
-  // were manually added.
+  const lessonNotePlayerIds = useMemo(() => {
+    const ids = new Set<string>();
+    lessonNotes.forEach((note) => {
+      if (note.playerId) ids.add(note.playerId);
+    });
+    return ids;
+  }, [lessonNotes]);
+
+  // A client becomes a player profile when they have a lesson note, a stored
+  // video, or were manually added. Booking notes do not promote profiles.
   const playerProfiles = useMemo(() => {
     const manual = new Set(playerProfilesLocal.manualIds);
     return clients.filter(
       (client) =>
-        safeText(client.notes).trim().length > 0 ||
+        lessonNotePlayerIds.has(client.id) ||
         videoPlayerIds.has(client.id) ||
         manual.has(client.id),
     );
-  }, [clients, playerProfilesLocal.manualIds, videoPlayerIds]);
+  }, [clients, lessonNotePlayerIds, playerProfilesLocal.manualIds, videoPlayerIds]);
 
   const recentPlayerActivity = useMemo(() => {
     type ActivityEntry = {
@@ -6459,16 +6540,16 @@ function App() {
       });
     });
 
-    Object.entries(playerProfilesLocal.notesStamps).forEach(([id, iso]) => {
-      const time = Date.parse(iso);
+    lessonNotes.forEach((note) => {
+      const time = Date.parse(note.updatedAt || note.createdAt);
       if (!Number.isFinite(time)) return;
       entries.push({
-        key: `notes-${id}`,
+        key: `notes-${note.id}`,
         time,
-        iso,
+        iso: note.updatedAt || note.createdAt,
         kind: "notes",
-        title: "Notes updated",
-        subtitle: nameById.get(id) || id,
+        title: note.source === "voice" ? "Voice note saved" : "Lesson note saved",
+        subtitle: note.playerName || nameById.get(note.playerId) || note.playerId,
       });
     });
 
@@ -6501,7 +6582,7 @@ function App() {
       });
 
     return entries.sort((a, b) => b.time - a.time).slice(0, 12);
-  }, [accountItems, clients, storedVideoMeta, playerProfilesLocal]);
+  }, [accountItems, clients, lessonNotes, storedVideoMeta, playerProfilesLocal]);
 
   const quickClientInput = {
     name: quickClientSearch,
@@ -6582,6 +6663,10 @@ function App() {
       .filter((item) => clientKey(item.client || item.title, item.email ?? "", item.phone ?? "") === key)
       .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
   }, [coachAccount, coachProfiles, isAdminUser, items, selectedClient, services, serviceScopeCoachId]);
+  const selectedClientLessonNotes = useMemo(() => {
+    if (!selectedClient) return [];
+    return lessonNotes.filter((note) => note.playerId === selectedClient.id);
+  }, [lessonNotes, selectedClient]);
   const selectedAppointmentNotifications = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return [];
     return notificationsByAppointment.get(selected.id) ?? [];
@@ -12065,6 +12150,66 @@ function App() {
     }
   }
 
+  async function saveLessonNoteForClient(text: string, source: LessonNoteSource = "typed") {
+    const cleanBody = text.trim();
+    if (!selectedClient || !cleanBody) return;
+    setLessonNoteSaveState("saving");
+    try {
+      const response = await fetch("/api/notes", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          note: {
+            playerId: selectedClient.id,
+            playerName: selectedClient.name,
+            title: source === "voice" ? "Voice lesson note" : "Lesson note",
+            body: cleanBody,
+            source,
+          },
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Lesson note save failed"));
+      const data = (await response.json()) as NotesResult;
+      if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
+      setLessonNoteSaveState("saved");
+      setToast({ message: "Lesson note saved." });
+      window.setTimeout(() => setLessonNoteSaveState("idle"), 1400);
+    } catch (error) {
+      setLessonNoteSaveState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not save lesson note." });
+    }
+  }
+
+  async function deleteLessonNote(noteId: string) {
+    if (!noteId) return;
+    setLessonNoteSaveState("saving");
+    try {
+      const response = await fetch(`/api/notes?id=${encodeURIComponent(noteId)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Lesson note delete failed"));
+      const data = (await response.json()) as NotesResult;
+      if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
+      setLessonNoteSaveState("saved");
+      setToast({ message: "Lesson note deleted." });
+      window.setTimeout(() => setLessonNoteSaveState("idle"), 1400);
+    } catch (error) {
+      setLessonNoteSaveState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not delete lesson note." });
+    }
+  }
+
   async function confirmPublicBooking() {
     if (bookingSubmitState === "saving") return;
     if (!bookingTargetService || bookingStart === null) {
@@ -15813,7 +15958,7 @@ function App() {
             <div className="player-profiles-toolbar">
               <div className="player-profiles-heading">
                 <h2>Player Profiles</h2>
-                <p>Clients with notes or video, plus anyone you add.</p>
+                <p>Clients with lesson notes or video, plus anyone you add.</p>
               </div>
               <div className="player-profiles-actions">
                 <button
@@ -15842,7 +15987,7 @@ function App() {
                 {playerProfiles.length === 0 ? (
                   <div className="player-profiles-empty">
                     <h2>No player profiles yet</h2>
-                    <p>Add notes or a video to a client, or use + to add one.</p>
+                    <p>Add a lesson note or video to a client, or use + to add one.</p>
                   </div>
                 ) : (
                   playerProfiles.map((player) => (
@@ -15863,8 +16008,10 @@ function App() {
                               <Video size={12} /> Video
                             </span>
                           )}
-                          {safeText(player.notes).trim().length > 0 && (
-                            <span className="tag">Notes</span>
+                          {lessonNotePlayerIds.has(player.id) && (
+                            <span className="tag">
+                              <FileText size={12} /> Lesson notes
+                            </span>
                           )}
                         </div>
                       </div>
@@ -19540,7 +19687,7 @@ function App() {
                   />
                 </label>
                 <label className="settings-field">
-                  <span>Notes</span>
+                  <span>Profile notes</span>
                   <textarea
                     value={clientEditor.notes}
                     onChange={(event) => setClientEditor((current) => ({ ...current, notes: event.target.value }))}
@@ -19566,7 +19713,12 @@ function App() {
                     </span>
                   </div>
                 </div>
-                {selectedClient?.notes && <p>{selectedClient.notes}</p>}
+                {selectedClient?.notes && (
+                  <div className="client-profile-note-block">
+                    <strong>Profile notes</strong>
+                    <p>{selectedClient.notes}</p>
+                  </div>
+                )}
                 {selectedClient && (
                   <button
                     type="button"
@@ -19599,6 +19751,16 @@ function App() {
                     Booking history
                   </button>
                   <button
+                    className={clientProfileTab === "notes" ? "active" : ""}
+                    onClick={() => setClientProfileTab("notes")}
+                    role="tab"
+                    type="button"
+                    aria-selected={clientProfileTab === "notes"}
+                  >
+                    <FileText size={16} />
+                    Lesson notes
+                  </button>
+                  <button
                     className={clientProfileTab === "notifications" ? "active" : ""}
                     onClick={() => setClientProfileTab("notifications")}
                     role="tab"
@@ -19621,6 +19783,9 @@ function App() {
                             <div>
                               <strong>{service?.name ?? appointment.title}</strong>
                               <span>{appointment.kind === "appointment" ? "Booked lesson" : "Blocked time"}</span>
+                              {appointment.note ? (
+                                <span className="booking-note-line">Booking notes: {appointment.note}</span>
+                              ) : null}
                             </div>
                             <em>{`${appointmentDays[appointment.day].label}, ${formatRange(appointment.start, appointment.duration)}`}</em>
                           </div>
@@ -19629,6 +19794,41 @@ function App() {
                     ) : (
                       <p>No appointments yet.</p>
                     )
+                  ) : clientProfileTab === "notes" ? (
+                    <div className="lesson-notes-panel">
+                      <ClarityVoiceTextPanel
+                        fieldLabel="Lesson notes"
+                        placeholder="Type or dictate the coach lesson note. These notes create and organise player profiles."
+                        onCommit={(text) => void saveLessonNoteForClient(text, "voice")}
+                      />
+                      <div className="lesson-notes-list">
+                        {selectedClientLessonNotes.length ? (
+                          selectedClientLessonNotes.map((note) => (
+                            <article className="lesson-note-card" key={note.id}>
+                              <div>
+                                <strong>{note.title}</strong>
+                                <span>
+                                  {note.source === "voice" ? "Voice note" : "Typed note"} ·{" "}
+                                  {notificationTimeLabel(note.updatedAt || note.createdAt)}
+                                </span>
+                              </div>
+                              <p>{note.body}</p>
+                              <button
+                                type="button"
+                                className="outline-button"
+                                onClick={() => void deleteLessonNote(note.id)}
+                                disabled={lessonNoteSaveState === "saving"}
+                              >
+                                <Trash2 size={14} />
+                                Delete
+                              </button>
+                            </article>
+                          ))
+                        ) : (
+                          <p>No lesson notes yet.</p>
+                        )}
+                      </div>
+                    </div>
                   ) : selectedClientNotifications.length ? (
                     selectedClientNotifications.map((notification) => (
                       <div className="profile-history-row notification-history-row" key={notification.id}>

@@ -1218,6 +1218,26 @@ button {
   margin: 18px 0;
 }
 
+.client-profile-note-block {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+}
+
+.client-profile-note-block strong {
+  color: var(--heading);
+  font-size: 13px;
+}
+
+.client-profile-note-block p {
+  margin: 0;
+  padding: 0;
+  color: var(--body);
+}
+
 .client-history {
   margin-top: 16px;
   padding-top: 14px;
@@ -1340,6 +1360,67 @@ button {
   color: var(--muted);
   font-size: 13px;
   font-style: normal;
+}
+
+.booking-note-line {
+  margin-top: 5px;
+}
+
+.lesson-notes-panel {
+  display: grid;
+  gap: 14px;
+  padding: 12px;
+}
+
+.lesson-notes-panel .clarityVoicePanel {
+  max-width: none;
+  border-radius: 10px;
+  box-shadow: none;
+  background: var(--panel);
+}
+
+.lesson-notes-panel .clarityVoiceHeader h2 {
+  font-size: 18px;
+}
+
+.lesson-notes-list {
+  display: grid;
+  gap: 10px;
+}
+
+.lesson-note-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.lesson-note-card strong,
+.lesson-note-card span {
+  display: block;
+}
+
+.lesson-note-card strong {
+  color: var(--heading);
+}
+
+.lesson-note-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.lesson-note-card p {
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  color: var(--body);
+}
+
+.lesson-note-card .outline-button {
+  justify-self: start;
+  min-height: 34px;
+  padding: 7px 10px;
 }
 
 .notification-history-row em {

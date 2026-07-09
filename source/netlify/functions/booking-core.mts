@@ -2558,7 +2558,6 @@ function personFromAppointment(item) {
       name: item.client || item.title,
       email: item.email,
       phone: item.phone,
-      note: item.note,
       source: "appointment",
     },
     "appointment",
@@ -2739,6 +2738,89 @@ async function readPeople(fallbackAccountId = defaultWorkspaceAccountFromCoachAc
     ORDER BY LOWER(name), LOWER(email), id
   `;
   return rows.map((row) => rowToPerson(row, fallbackAccountId));
+}
+
+const LESSON_NOTES_SETTING_PREFIX = "lessonNotes.v1";
+
+function lessonNotesSettingKey(accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  return `${LESSON_NOTES_SETTING_PREFIX}.${cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id)}`;
+}
+
+function rowToLessonNote(note, fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const createdAt = cleanString(note?.createdAt || note?.created_at, "", 80) || nowIso();
+  const updatedAt = cleanString(note?.updatedAt || note?.updated_at, "", 80) || createdAt;
+  return {
+    id: cleanString(note?.id, "", 120) || randomUUID(),
+    accountId: cleanSlug(note?.accountId || note?.account_id, fallbackAccountId),
+    playerId: cleanString(note?.playerId || note?.player_id, "", 160),
+    playerName: cleanString(note?.playerName || note?.player_name, "", 180),
+    lessonId: cleanString(note?.lessonId || note?.lesson_id, "", 160),
+    calendarItemId: cleanString(note?.calendarItemId || note?.calendar_item_id, "", 160),
+    title: cleanString(note?.title, "Lesson note", 180),
+    body: cleanString(note?.body || note?.text || note?.note, "", 8000),
+    source: cleanString(note?.source, "typed", 40) === "voice" ? "voice" : "typed",
+    createdAt,
+    updatedAt,
+  };
+}
+
+async function readLessonNotes(accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const raw = await getSetting(lessonNotesSettingKey(cleanAccountId));
+  const parsed = safeJsonParse(raw, []);
+  return Array.isArray(parsed)
+    ? parsed
+        .map((note) => rowToLessonNote(note, cleanAccountId))
+        .filter((note) => note.playerId && note.body)
+        .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    : [];
+}
+
+async function writeLessonNotes(notes, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const scopedNotes = Array.isArray(notes)
+    ? notes
+        .map((note) => rowToLessonNote(note, cleanAccountId))
+        .filter((note) => note.playerId && note.body)
+    : [];
+  await setSetting(lessonNotesSettingKey(cleanAccountId), JSON.stringify(scopedNotes));
+  return scopedNotes.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
+
+async function upsertLessonNote(rawNote, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const now = nowIso();
+  const current = await readLessonNotes(cleanAccountId);
+  const note = rowToLessonNote(
+    {
+      ...rawNote,
+      accountId: cleanAccountId,
+      id: rawNote?.id || randomUUID(),
+      createdAt: rawNote?.createdAt || now,
+      updatedAt: now,
+    },
+    cleanAccountId,
+  );
+  if (!note.playerId) {
+    throw Object.assign(new Error("A lesson note needs a player id."), { status: 400 });
+  }
+  if (!note.body.trim()) {
+    throw Object.assign(new Error("A lesson note cannot be empty."), { status: 400 });
+  }
+  const next = [note, ...current.filter((entry) => entry.id !== note.id)];
+  const notes = await writeLessonNotes(next, cleanAccountId);
+  return { note, notes };
+}
+
+async function deleteLessonNote(noteId, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const cleanId = cleanString(noteId, "", 120);
+  if (!cleanId) {
+    throw Object.assign(new Error("A lesson note id is required."), { status: 400 });
+  }
+  const current = await readLessonNotes(cleanAccountId);
+  const notes = await writeLessonNotes(current.filter((note) => note.id !== cleanId), cleanAccountId);
+  return { notes };
 }
 
 async function importPeople(rawPeople, source = "import", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
@@ -7383,6 +7465,37 @@ export async function handleBookingApiRoute(
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       return json({ people: filterPeopleForContext(await readPeople(requestContext.accountId), requestContext, state) });
+    }
+
+    if (req.method === "GET" && pathname === "/api/notes") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const playerId = cleanString(url.searchParams.get("playerId"), "", 160);
+      const calendarItemId = cleanString(url.searchParams.get("calendarItemId"), "", 160);
+      const notes = (await readLessonNotes(requestContext.accountId)).filter(
+        (note) =>
+          (!playerId || note.playerId === playerId) &&
+          (!calendarItemId || note.calendarItemId === calendarItemId),
+      );
+      return json({ notes });
+    }
+
+    if ((req.method === "POST" || req.method === "PUT") && pathname === "/api/notes") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const result = await upsertLessonNote(body.note || body, requestContext.accountId);
+      return json(result, req.method === "POST" ? 201 : 200);
+    }
+
+    if (req.method === "DELETE" && pathname === "/api/notes") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const noteId = cleanString(url.searchParams.get("id"), "", 120);
+      return json(await deleteLessonNote(noteId, requestContext.accountId));
     }
 
 	    if (req.method === "POST" && (pathname === "/api/people/import" || pathname === "/api/people/import-lite")) {
