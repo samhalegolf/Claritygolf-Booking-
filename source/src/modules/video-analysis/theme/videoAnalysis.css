@@ -360,8 +360,7 @@
   font-weight: 700;
 }
 
-.video-upload-copy,
-.video-upload-file {
+.video-upload-copy {
   color: var(--va-muted, #a3adc2);
   font-size: 0.84rem;
 }

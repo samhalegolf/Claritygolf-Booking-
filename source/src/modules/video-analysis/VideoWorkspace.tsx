@@ -1746,9 +1746,6 @@ export function VideoWorkspace({
           {primary ? "Upload a video" : `Upload ${sideTitle.toLowerCase()} clip`}
         </span>
         <span className="video-upload-copy">Drag and drop or click to choose a file</span>
-        {analysis.videoMeta?.title ? (
-          <span className="video-upload-file">{analysis.videoMeta.title}</span>
-        ) : null}
         {intakeError ? (
           <span className="video-upload-error" role="alert">
             {intakeError}
@@ -1758,6 +1755,14 @@ export function VideoWorkspace({
     );
 
     if (!playerVideo) {
+      if (!workspaceHasVideo && side === "left") {
+        return (
+          <div className="comparison-video-panel is-intake-only">
+            {renderUploadDropZone(true)}
+          </div>
+        );
+      }
+
       return (
         <div
           className={`comparison-video-panel ${isActive ? "is-active" : ""}`}
