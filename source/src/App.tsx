@@ -16084,14 +16084,11 @@ function App() {
                           <button
                             type="button"
                             className="icon-button"
-                            title="Open video analysis"
-                            aria-label={`Open video analysis for ${player.name}`}
+                            title="Show videos"
+                            aria-label={`Show videos for ${player.name}`}
                             onClick={(event) => {
                               event.stopPropagation();
-                              openVideoAnalysisForClient({
-                                id: preferredVideoPlayerId(player, videoPlayerIds),
-                                name: player.name,
-                              });
+                              selectPlayerProfileTool(player, "videos");
                             }}
                           >
                             <Video size={16} />
