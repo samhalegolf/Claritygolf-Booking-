@@ -3374,6 +3374,54 @@ function formatVideoDurationLabel(seconds?: number) {
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
+function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
+  switch (code) {
+    case "DRIVE_API_DISABLED":
+      return "Google Drive API is not enabled for this connection.";
+    case "DRIVE_UPLOAD_PROXY_FAILED":
+      return "Clarity could not complete the upload.";
+    case "DRIVE_UPLOAD_TOO_LARGE":
+      return "This video is too large for the current transfer method.";
+    case "DRIVE_SCOPE_MISSING":
+      return "Google Drive permission is required.";
+    case "GOOGLE_RECONNECT_REQUIRED":
+      return "Reconnect Google Drive to continue.";
+    case "DRIVE_UPLOAD_SESSION_EXPIRED":
+      return "Start a new upload session before retrying.";
+    case "DRIVE_UPLOAD_VERIFY_FAILED":
+      return "Clarity could not verify the uploaded video.";
+    case "DRIVE_UPLOAD_INTERRUPTED":
+      return "Video upload was interrupted.";
+    default:
+      return fallback && !/[{}<>]|https?:\/\//i.test(fallback) && fallback.length < 140
+        ? fallback
+        : "Clarity could not complete the upload.";
+  }
+}
+
+function savedVideoCloudStatusLabel(video: SavedVideoItem, isUploading: boolean, driveConnected: boolean, driveState: GoogleDriveTransferState) {
+  if (video.cloud?.status === "ready") return "Ready on primary computer";
+  if (isUploading) return `Sending ${Math.max(0, Math.min(100, Math.round(video.cloud?.progress || 0)))}%`;
+  if (video.cloud?.status === "failed") return "Failed - Retry";
+  if (driveState === "permission_upgrade_required") return "Permission required";
+  return driveConnected ? "Local" : "Connect Drive";
+}
+
+function googleDriveTransferHeading(status: GoogleDriveTransferStatus) {
+  if (status.state === "permission_upgrade_required") return "Permission required";
+  if (status.state === "reconnect_required") return "Reconnect required";
+  if (status.state === "blocked" || status.state === "error") return "Setup issue";
+  return status.connected ? "Connected" : status.configured ? "Not connected" : "Needs OAuth credentials";
+}
+
+function googleDriveTransferStatusLabel(status: GoogleDriveTransferStatus) {
+  if (status.connected && status.driveScopeGranted) return "Ready to send saved videos";
+  if (status.state === "permission_upgrade_required") return "Grant Drive permission";
+  if (status.state === "reconnect_required") return "Reconnect Google Drive";
+  if (status.state === "blocked" || status.state === "error") return status.blocker || status.message || "Setup issue";
+  return "Connect Google Drive";
+}
+
 function sourceSideFromSlotKey(slotKey: string): ComparisonSide {
   return slotKey.endsWith(".right") ? "right" : "left";
 }
@@ -8796,7 +8844,8 @@ function App() {
       setToast({ message: "Ready on primary computer" });
     } catch (error) {
       refreshSavedVideoLibrary();
-      setToast({ message: error instanceof Error ? error.message : "Saved video could not be sent to the primary computer." });
+      const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code || "") : "";
+      setToast({ message: savedVideoCloudErrorLabel(code, error instanceof Error ? error.message : undefined) });
     } finally {
       setUploadingSavedVideoIds((current) => {
         const next = new Set(current);
@@ -16649,18 +16698,16 @@ function App() {
                                       {playerToolVideos.map((video) => {
                                         const isUploading =
                                           uploadingSavedVideoIds.has(video.savedVideoId) || video.cloud?.status === "uploading";
-                                        const cloudLabel =
-                                          video.cloud?.status === "ready"
-                                            ? "Ready on primary computer"
-                                            : isUploading
-                                              ? `Uploading ${Math.max(0, Math.min(100, Math.round(video.cloud?.progress || 0)))}%`
-                                              : video.cloud?.status === "failed"
-                                                ? "Failed - Retry"
-                                                : googleDriveTransfer.state === "permission_upgrade_required"
-                                                  ? "Permission upgrade required"
-                                                  : googleDriveTransfer.connected
-                                                    ? "Not sent"
-                                                    : "Drive connection required";
+                                        const cloudLabel = savedVideoCloudStatusLabel(
+                                          video,
+                                          isUploading,
+                                          googleDriveTransfer.connected,
+                                          googleDriveTransfer.state,
+                                        );
+                                        const cloudErrorLabel =
+                                          video.cloud?.status === "failed"
+                                            ? savedVideoCloudErrorLabel(video.cloud.lastUploadErrorCode, video.cloud.errorMessage)
+                                            : "";
                                         const canSend =
                                           video.local.status === "available" &&
                                           googleDriveTransfer.connected &&
@@ -16691,8 +16738,8 @@ function App() {
                                                 {cloudLabel}
                                                 {linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}
                                               </span>
-                                              {video.cloud?.errorMessage ? (
-                                                <span className="player-video-card-error">{video.cloud.errorMessage}</span>
+                                              {cloudErrorLabel ? (
+                                                <span className="player-video-card-error">{cloudErrorLabel}</span>
                                               ) : null}
                                             </div>
                                             <div className="player-video-card-actions">
@@ -16745,9 +16792,9 @@ function App() {
                                             <Archive size={16} />
                                           </div>
                                           <div className="player-video-card-body">
-                                            <strong>{record.video.title || "Recovery video"}</strong>
+                                            <strong>Recovery copy - {record.video.title || "Video"}</strong>
                                             <span>
-                                              Slot recovery only · {formatVideoDurationLabel(record.video.duration)} · Move to Saved Videos to keep it in the durable library
+                                              Safe to remove after saving · {formatVideoDurationLabel(record.video.duration)} · Move to Saved Videos to keep it in the durable library
                                             </span>
                                           </div>
                                           <div className="player-video-card-actions">
@@ -19588,17 +19635,7 @@ function App() {
                     <Upload size={18} />
                     <div>
                       <span>Google Drive Transfer</span>
-                      <strong>
-                        {googleDriveTransfer.state === "blocked"
-                          ? "Security prerequisite required"
-                          : googleDriveTransfer.state === "permission_upgrade_required"
-                            ? "Google connected - Drive permission required"
-                            : googleDriveTransfer.connected
-                              ? "Connected"
-                              : googleDriveTransfer.configured
-                                ? "Not connected"
-                                : "Needs OAuth credentials"}
-                      </strong>
+                      <strong>{googleDriveTransferHeading(googleDriveTransfer)}</strong>
                     </div>
                   </summary>
                   <div
@@ -19612,25 +19649,23 @@ function App() {
                   >
                     <span>Private transfer folder</span>
                     <strong>
-                      {googleDriveTransfer.connected
-                        ? "Connected"
-                        : googleDriveTransfer.state === "blocked"
-                          ? "Blocked"
-                          : googleDriveTransfer.state === "permission_upgrade_required"
-                            ? "Permission upgrade required"
-                            : "Not connected"}
+                      {googleDriveTransfer.connected && googleDriveTransfer.inboxFolderId
+                        ? "Ready"
+                        : googleDriveTransfer.state === "blocked" || googleDriveTransfer.state === "error"
+                          ? "Setup issue"
+                          : "Not ready"}
                     </strong>
                     <em>
-                      Clarity uses a private transfer folder in your Google Drive to move lesson videos between your devices. It does not receive access to unrelated Drive files.
+                      Clarity uses a private folder in your Google Drive to transfer saved lesson videos between your devices. It does not access unrelated Drive files.
                     </em>
                   </div>
                   <div className="sync-meta">
-                    <span>Drive scope</span>
-                    <code>{googleDriveTransfer.scope || "https://www.googleapis.com/auth/drive.file"}</code>
+                    <span>Drive permission</span>
+                    <strong>{googleDriveTransfer.driveScopeGranted ? "Granted" : "Permission required"}</strong>
                   </div>
                   <div className="sync-meta">
-                    <span>Status</span>
-                    <strong>{googleDriveTransfer.message}</strong>
+                    <span>Transfer status</span>
+                    <strong>{googleDriveTransferStatusLabel(googleDriveTransfer)}</strong>
                   </div>
                   <div className="sync-actions">
                     <button
@@ -19657,10 +19692,11 @@ function App() {
                     </button>
                     <button
                       className="outline-button"
-                      disabled={!googleDriveTransfer.rootFolderId}
+                      disabled={!googleDriveTransfer.inboxFolderId && !googleDriveTransfer.rootFolderId}
                       onClick={() => {
-                        if (googleDriveTransfer.rootFolderId) {
-                          window.open(`https://drive.google.com/drive/folders/${googleDriveTransfer.rootFolderId}`, "_blank", "noopener,noreferrer");
+                        const folderId = googleDriveTransfer.inboxFolderId || googleDriveTransfer.rootFolderId;
+                        if (folderId) {
+                          window.open(`https://drive.google.com/drive/folders/${folderId}`, "_blank", "noopener,noreferrer");
                         }
                       }}
                       type="button"

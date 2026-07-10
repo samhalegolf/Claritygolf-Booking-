@@ -74,6 +74,52 @@ const installBrowserGlobals = () => {
   });
 };
 
+const installMockXhr = (
+  handler: (request: { method: string; url: string; headers: Record<string, string>; body: Blob }) => {
+    status: number;
+    body?: unknown;
+    contentType?: string;
+  }
+) => {
+  const requests: Array<{ method: string; url: string; headers: Record<string, string>; body: Blob }> = [];
+  class MockXhr {
+    method = "";
+    url = "";
+    status = 0;
+    responseText = "";
+    headers: Record<string, string> = {};
+    responseContentType = "application/json";
+    upload: { onprogress?: (event: { lengthComputable: boolean; loaded: number; total: number }) => void } = {};
+    onload?: () => void;
+    onerror?: () => void;
+
+    open(method: string, url: string) {
+      this.method = method;
+      this.url = url;
+    }
+
+    setRequestHeader(key: string, value: string) {
+      this.headers[key.toLowerCase()] = value;
+    }
+
+    getResponseHeader(key: string) {
+      return key.toLowerCase() === "content-type" ? this.responseContentType : "";
+    }
+
+    send(body: Blob) {
+      requests.push({ method: this.method, url: this.url, headers: this.headers, body });
+      this.upload.onprogress?.({ lengthComputable: true, loaded: body.size, total: body.size });
+      const response = handler({ method: this.method, url: this.url, headers: this.headers, body });
+      this.status = response.status;
+      this.responseContentType = response.contentType || "application/json";
+      this.responseText = typeof response.body === "string" ? response.body : JSON.stringify(response.body || {});
+      this.onload?.();
+    }
+  }
+  Object.defineProperty(globalThis, "XMLHttpRequest", { value: MockXhr, configurable: true });
+  return requests;
+};
+
 const savedVideoWithLargeImages = async () => {
   const store = createMemorySavedVideoLibraryStore();
   const item = await store.saveItem({
@@ -404,6 +450,128 @@ describe("saved video library", () => {
       assert.equal(payload.analysisId, item.analysisId);
       assert.equal(payload.video.sizeBytes, sourceBlob().size);
       assert.equal("analysisSnapshot" in payload, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("uploads saved video bytes to same-origin Clarity endpoint and never to googleapis", async () => {
+    installBrowserGlobals();
+    const { store, item } = await savedVideoWithLargeImages();
+    const xhrRequests = installMockXhr(({ url }) => {
+      assert.equal(url, `/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/upload`);
+      assert.equal(url.includes("googleapis.com"), false);
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          status: "uploaded",
+          videoFileId: "drive-video-1",
+          assetFolderId: "drive-folder-1",
+        },
+      };
+    });
+    const originalFetch = globalThis.fetch;
+    const fetchUrls: string[] = [];
+    globalThis.fetch = async (input, init) => {
+      fetchUrls.push(String(input));
+      if (String(input).includes("/api/video-transfer/upload-session")) {
+        return Response.json({
+          ok: true,
+          status: "uploading",
+          assetFolderId: "drive-folder-1",
+          maxUploadSizeBytes: 5_000_000,
+        });
+      }
+      if (String(input).includes(`/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/finalize`)) {
+        assert.equal(init?.method, "POST");
+        const payload = JSON.parse(String(init?.body || "{}"));
+        assert.equal(payload.video.driveFileId, "drive-video-1");
+        return Response.json({
+          ok: true,
+          status: "ready",
+          assetFolderId: "drive-folder-1",
+          videoFileId: "drive-video-1",
+          manifestFileId: "manifest-1",
+          analysisFileId: "analysis-1",
+          uploadedAt: "2026-07-10T01:00:00.000Z",
+        });
+      }
+      return Response.json({ ok: false }, { status: 500 });
+    };
+    try {
+      const ready = await saveSavedVideoToCloud(item.savedVideoId, store);
+
+      assert.equal(xhrRequests.length, 1);
+      assert.equal(xhrRequests[0]?.method, "PUT");
+      assert.equal(fetchUrls.some((url) => url.includes("googleapis.com")), false);
+      assert.equal(ready.cloud?.status, "ready");
+      assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not finalize after a failed proxy upload and keeps the local saved blob", async () => {
+    installBrowserGlobals();
+    const { store, item } = await savedVideoWithLargeImages();
+    installMockXhr(() => ({
+      status: 502,
+      body: { ok: false, error: "DRIVE_UPLOAD_PROXY_FAILED", message: "Clarity could not complete the upload." },
+    }));
+    const originalFetch = globalThis.fetch;
+    const fetchUrls: string[] = [];
+    globalThis.fetch = async (input) => {
+      fetchUrls.push(String(input));
+      if (String(input).includes("/api/video-transfer/upload-session")) {
+        return Response.json({
+          ok: true,
+          status: "uploading",
+          assetFolderId: "drive-folder-1",
+          maxUploadSizeBytes: 5_000_000,
+        });
+      }
+      return Response.json({ ok: false, error: "unexpected_finalize" }, { status: 500 });
+    };
+    try {
+      await assert.rejects(
+        () => saveSavedVideoToCloud(item.savedVideoId, store),
+        (error) =>
+          error instanceof SavedVideoCloudError &&
+          error.code === "DRIVE_UPLOAD_PROXY_FAILED" &&
+          error.message === "Clarity could not complete the upload."
+      );
+      assert.equal(fetchUrls.some((url) => url.includes("/finalize")), false);
+      assert.equal((await store.getItem(item.savedVideoId))?.cloud?.status, "failed");
+      assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("maps oversized proxy upload failures to DRIVE_UPLOAD_TOO_LARGE", async () => {
+    installBrowserGlobals();
+    const { store, item } = await savedVideoWithLargeImages();
+    installMockXhr(() => ({
+      status: 413,
+      body: { ok: false, error: "DRIVE_UPLOAD_TOO_LARGE", message: "This video is too large for the current transfer method." },
+    }));
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      Response.json({
+        ok: true,
+        status: "uploading",
+        assetFolderId: "drive-folder-1",
+        maxUploadSizeBytes: 5_000_000,
+      });
+    try {
+      await assert.rejects(
+        () => saveSavedVideoToCloud(item.savedVideoId, store),
+        (error) =>
+          error instanceof SavedVideoCloudError &&
+          error.code === "DRIVE_UPLOAD_TOO_LARGE" &&
+          error.message.includes("too large")
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
