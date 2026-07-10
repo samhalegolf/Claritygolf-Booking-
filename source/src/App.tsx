@@ -824,6 +824,34 @@ type GoogleCalendarSyncStatus = {
   skipped?: boolean;
 };
 type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting" | "migrating";
+type GoogleDriveTransferState =
+  | "not_connected"
+  | "connected"
+  | "permission_upgrade_required"
+  | "reconnect_required"
+  | "blocked"
+  | "error";
+type GoogleDriveTransferStatus = {
+  ok?: boolean;
+  configured: boolean;
+  connected: boolean;
+  state: GoogleDriveTransferState;
+  calendarConnected: boolean;
+  driveScopeGranted: boolean;
+  accountEmail: string;
+  redirectUri: string;
+  scope: string;
+  requestedScopes: string;
+  rootFolderId: string;
+  inboxFolderId: string;
+  importedFolderId: string;
+  failedFolderId: string;
+  tokenEncryptionConfigured: boolean;
+  providerStorageConfigured: boolean;
+  blocker: string;
+  message: string;
+};
+type GoogleDriveActionState = "idle" | "connecting" | "testing" | "disconnecting";
 type AuthStatus = "checking" | "authenticated" | "guest";
 type AuthMode = "login" | "forgot" | "reset";
 type ThemeMode = "light" | "dark";
@@ -3329,6 +3357,14 @@ function profileRecordTitle(playerName = "", createdAt = "") {
   return date ? `${name} - ${date}` : name;
 }
 
+async function readJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T & { message?: string; error?: string }> {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(fallbackMessage);
+  }
+  return (await response.json()) as T & { message?: string; error?: string };
+}
+
 function googleSyncTimeLabel(createdAt = "") {
   if (!createdAt) return "Not synced yet";
   const time = new Date(createdAt);
@@ -3866,6 +3902,26 @@ const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
   scope: "",
 };
 
+const defaultGoogleDriveTransferStatus: GoogleDriveTransferStatus = {
+  configured: false,
+  connected: false,
+  state: "not_connected",
+  calendarConnected: false,
+  driveScopeGranted: false,
+  accountEmail: "",
+  redirectUri: "",
+  scope: "https://www.googleapis.com/auth/drive.file",
+  requestedScopes: "",
+  rootFolderId: "",
+  inboxFolderId: "",
+  importedFolderId: "",
+  failedFolderId: "",
+  tokenEncryptionConfigured: false,
+  providerStorageConfigured: false,
+  blocker: "",
+  message: "Google Drive Transfer status has not loaded.",
+};
+
 const emptyClientEditor: ClientEditor = {
   id: "",
   name: "",
@@ -4172,6 +4228,8 @@ function App() {
   const [calendarLocationFilterId, setCalendarLocationFilterId] = useState("");
   const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarSyncStatus>(defaultGoogleCalendarStatus);
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
+  const [googleDriveTransfer, setGoogleDriveTransfer] = useState<GoogleDriveTransferStatus>(defaultGoogleDriveTransferStatus);
+  const [googleDriveAction, setGoogleDriveAction] = useState<GoogleDriveActionState>("idle");
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
   const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
@@ -4192,6 +4250,12 @@ function App() {
       setSettingsTab("services");
     }
   }, [isAdminUser, settingsTab]);
+
+  useEffect(() => {
+    if (activeView === "settings" && settingsTab === "integrations") {
+      void refreshGoogleDriveTransferStatus();
+    }
+  }, [activeView, settingsTab]);
   const attemptedSavedRescheduleRef = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
@@ -5524,6 +5588,15 @@ function App() {
       ...(status ?? {}),
       calendarId: typeof status?.calendarId === "string" && status.calendarId.trim() ? status.calendarId : "primary",
       autoSync: status?.autoSync !== false,
+    });
+  }
+
+  function applyGoogleDriveTransferStatus(status?: Partial<GoogleDriveTransferStatus>) {
+    setGoogleDriveTransfer({
+      ...defaultGoogleDriveTransferStatus,
+      ...(status ?? {}),
+      state: status?.state || defaultGoogleDriveTransferStatus.state,
+      message: status?.message || status?.blocker || defaultGoogleDriveTransferStatus.message,
     });
   }
 
@@ -11841,6 +11914,20 @@ function App() {
     }
   }
 
+  async function refreshGoogleDriveTransferStatus() {
+    try {
+      const response = await fetch("/api/google-drive/status", { headers: { Accept: "application/json" } });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok && response.status !== 409 && response.status !== 412) return;
+      applyGoogleDriveTransferStatus(await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive status did not return JSON."));
+    } catch {
+      // Google Drive transfer is optional; keep the rest of Settings usable.
+    }
+  }
+
   async function connectGoogleCalendar() {
     if (!canUseFeature(activeAccount, "googleCalendarSync")) {
       setToast({ message: featureUnavailableMessage("googleCalendarSync") });
@@ -11982,6 +12069,74 @@ function App() {
       setToast({ message: error instanceof Error ? error.message : "Could not disconnect Google Calendar." });
     } finally {
       setGoogleCalendarAction("idle");
+    }
+  }
+
+  async function connectGoogleDriveTransfer() {
+    setGoogleDriveAction("connecting");
+    try {
+      const response = await fetch("/api/google-drive/connect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = await readJsonResponse<Partial<GoogleDriveTransferStatus> & { authUrl?: string }>(
+        response,
+        "Google Drive connection did not return JSON.",
+      );
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      applyGoogleDriveTransferStatus(data);
+      if (!response.ok || !data.authUrl) throw new Error(data.message || "Google Drive Transfer is not ready to connect.");
+      window.location.assign(data.authUrl);
+    } catch (error) {
+      setGoogleDriveAction("idle");
+      setToast({ message: error instanceof Error ? error.message : "Could not start Google Drive connection." });
+    }
+  }
+
+  async function testGoogleDriveTransfer() {
+    setGoogleDriveAction("testing");
+    try {
+      const response = await fetch("/api/google-drive/test", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive test did not return JSON.");
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      applyGoogleDriveTransferStatus(data);
+      if (!response.ok || data.ok === false) throw new Error(data.message || "Google Drive Transfer is not connected.");
+      setToast({ message: data.message || "Google Drive Transfer tested." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Google Drive Transfer test failed." });
+    } finally {
+      setGoogleDriveAction("idle");
+    }
+  }
+
+  async function disconnectGoogleDriveTransfer() {
+    setGoogleDriveAction("disconnecting");
+    try {
+      const response = await fetch("/api/google-drive/disconnect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive disconnect did not return JSON.");
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      applyGoogleDriveTransferStatus(data);
+      if (!response.ok || data.ok === false) throw new Error(data.message || "Google Drive did not disconnect.");
+      setToast({ message: "Google Drive Transfer disconnected." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not disconnect Google Drive Transfer." });
+    } finally {
+      setGoogleDriveAction("idle");
     }
   }
 
@@ -19137,6 +19292,103 @@ function App() {
                         </button>
                       </>
                     )}
+                  </div>
+                </details>
+
+                <details className="settings-subsection" open>
+                  <summary className="settings-subsection-title">
+                    <Upload size={18} />
+                    <div>
+                      <span>Google Drive Transfer</span>
+                      <strong>
+                        {googleDriveTransfer.state === "blocked"
+                          ? "Security prerequisite required"
+                          : googleDriveTransfer.state === "permission_upgrade_required"
+                            ? "Google connected - Drive permission required"
+                            : googleDriveTransfer.connected
+                              ? "Connected"
+                              : googleDriveTransfer.configured
+                                ? "Not connected"
+                                : "Needs OAuth credentials"}
+                      </strong>
+                    </div>
+                  </summary>
+                  <div
+                    className={`sync-status ${
+                      googleDriveTransfer.connected
+                        ? "connected"
+                        : googleDriveTransfer.state === "blocked" || googleDriveTransfer.state === "error"
+                          ? "offline"
+                          : "checking"
+                    }`}
+                  >
+                    <span>Private transfer folder</span>
+                    <strong>
+                      {googleDriveTransfer.connected
+                        ? "Connected"
+                        : googleDriveTransfer.state === "blocked"
+                          ? "Blocked"
+                          : googleDriveTransfer.state === "permission_upgrade_required"
+                            ? "Permission upgrade required"
+                            : "Not connected"}
+                    </strong>
+                    <em>
+                      Clarity uses a private transfer folder in your Google Drive to move lesson videos between your devices. It does not receive access to unrelated Drive files.
+                    </em>
+                  </div>
+                  <div className="sync-meta">
+                    <span>Drive scope</span>
+                    <code>{googleDriveTransfer.scope || "https://www.googleapis.com/auth/drive.file"}</code>
+                  </div>
+                  <div className="sync-meta">
+                    <span>Status</span>
+                    <strong>{googleDriveTransfer.message}</strong>
+                  </div>
+                  <div className="sync-actions">
+                    <button
+                      className="primary-button"
+                      disabled={googleDriveAction !== "idle" || googleDriveTransfer.state === "blocked" || !googleDriveTransfer.configured}
+                      onClick={connectGoogleDriveTransfer}
+                      type="button"
+                    >
+                      <ExternalLink size={16} />
+                      {googleDriveAction === "connecting"
+                        ? "Opening Google"
+                        : googleDriveTransfer.state === "permission_upgrade_required" || googleDriveTransfer.state === "reconnect_required"
+                          ? "Reconnect"
+                          : "Connect Google Drive"}
+                    </button>
+                    <button
+                      className="outline-button"
+                      disabled={googleDriveAction !== "idle"}
+                      onClick={testGoogleDriveTransfer}
+                      type="button"
+                    >
+                      <RefreshCw size={16} />
+                      {googleDriveAction === "testing" ? "Testing" : "Test connection"}
+                    </button>
+                    <button
+                      className="outline-button"
+                      disabled={!googleDriveTransfer.rootFolderId}
+                      onClick={() => {
+                        if (googleDriveTransfer.rootFolderId) {
+                          window.open(`https://drive.google.com/drive/folders/${googleDriveTransfer.rootFolderId}`, "_blank", "noopener,noreferrer");
+                        }
+                      }}
+                      type="button"
+                    >
+                      <ExternalLink size={16} />
+                      Open transfer inbox
+                    </button>
+                    <button
+                      className="danger-button"
+                      disabled={googleDriveAction !== "idle" || !googleDriveTransfer.connected}
+                      onClick={disconnectGoogleDriveTransfer}
+                      type="button"
+                    >
+                      <X size={16} />
+                      {googleDriveAction === "disconnecting" ? "Disconnecting" : "Disconnect Drive"}
+                    </button>
                   </div>
                 </details>
 
