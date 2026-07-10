@@ -87,6 +87,45 @@ export interface SavedVideoBlobRecord {
   updatedAt: string;
 }
 
+export type CreateVideoUploadSessionRequest = {
+  savedVideoId: string;
+  playerId: string;
+  lessonId?: string;
+  analysisId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  video: {
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    checksumSha256: string;
+  };
+  sourceDevice?: {
+    deviceId: string;
+    deviceName?: string;
+    platform?: string;
+  };
+};
+
+export type FinalizeVideoUploadRequest = CreateVideoUploadSessionRequest & {
+  video: CreateVideoUploadSessionRequest["video"] & {
+    driveFileId: string;
+  };
+  analysisJson: CompactSavedVideoAnalysisJson;
+};
+
+export type CompactSavedVideoAnalysisJson = {
+  savedVideoId: string;
+  analysis: Omit<VideoAnalysis, "markers" | "focusSnapshots" | "focusViews" | "narrationRefs"> & {
+    markers: Array<Omit<VideoAnalysis["markers"][number], "thumbnail">>;
+    focusSnapshots: Array<Omit<VideoAnalysis["focusSnapshots"][number], "imageDataUrl">>;
+    focusViews: unknown[];
+    narrationRefs: unknown[];
+  };
+  workspace: ComparisonWorkspaceState;
+};
+
 export interface SaveSavedVideoInput {
   savedVideoId?: string;
   playerId: string;
@@ -287,10 +326,22 @@ const defaultCloudState: SavedVideoCloudState = { status: "not-uploaded" };
 export const getSavedVideoCloudStatus = (item?: SavedVideoItem | null): SavedVideoCloudState =>
   item?.cloud || defaultCloudState;
 
-const safeJson = async <T>(response: Response, fallbackMessage: string): Promise<T> => {
+const safeJson = async <T>(
+  response: Response,
+  fallbackMessage: string,
+  errorCode: SavedVideoCloudErrorCode
+): Promise<T> => {
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.toLowerCase().includes("application/json")) {
-    throw new SavedVideoCloudError("DRIVE_FINALIZE_FAILED", fallbackMessage, response.status);
+    const responseText = await response.text().catch(() => "");
+    const safePreview = firstSafeResponseText(responseText);
+    const typeLabel = contentType.split(";")[0].trim() || "unknown content type";
+    const detail = safePreview ? `: ${safePreview}` : "";
+    throw new SavedVideoCloudError(
+      errorCode,
+      `${fallbackMessage} (HTTP ${response.status}, ${typeLabel})${detail}`,
+      response.status
+    );
   }
   return response.json() as Promise<T>;
 };
@@ -305,6 +356,58 @@ const dataUrlToBase64Size = (dataUrl?: string) => {
   if (!base64) return 0;
   return Math.max(0, Math.floor((base64.length * 3) / 4) - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0));
 };
+
+const firstSafeResponseText = (text: string) =>
+  text
+    .replace(/(cookie|authorization|token|secret|api[_-]?key)\s*[:=]\s*["']?[^"'\s<]+/gi, "$1=[redacted]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
+
+const stripDataUrls = (value: unknown): unknown => {
+  if (typeof value === "string") return value.startsWith("data:") ? undefined : value;
+  if (Array.isArray(value)) return value.map(stripDataUrls).filter((entry) => entry !== undefined);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, entry]) => [key, stripDataUrls(entry)] as const)
+      .filter(([, entry]) => entry !== undefined)
+  );
+};
+
+export const buildVideoUploadSessionRequest = (
+  item: SavedVideoItem,
+  blob: Blob,
+  checksumSha256: string,
+  sourceDevice?: CreateVideoUploadSessionRequest["sourceDevice"]
+): CreateVideoUploadSessionRequest => ({
+  savedVideoId: item.savedVideoId,
+  playerId: item.playerId,
+  lessonId: item.lessonId,
+  analysisId: item.analysisId,
+  title: item.title,
+  createdAt: item.createdAt,
+  updatedAt: item.updatedAt,
+  video: {
+    fileName: item.source.originalFileName || `${item.savedVideoId}.mp4`,
+    mimeType: blob.type || item.source.mimeType || "application/octet-stream",
+    sizeBytes: blob.size,
+    checksumSha256,
+  },
+  sourceDevice,
+});
+
+export const compactSavedVideoAnalysisJson = (item: SavedVideoItem): CompactSavedVideoAnalysisJson => ({
+  savedVideoId: item.savedVideoId,
+  analysis: {
+    ...item.analysisSnapshot,
+    markers: item.analysisSnapshot.markers.map(({ thumbnail: _thumbnail, ...marker }) => marker),
+    focusSnapshots: item.analysisSnapshot.focusSnapshots.map(({ imageDataUrl: _imageDataUrl, ...snapshot }) => snapshot),
+    focusViews: stripDataUrls(item.analysisSnapshot.focusViews) as unknown[],
+    narrationRefs: stripDataUrls(item.analysisSnapshot.narrationRefs) as unknown[],
+  },
+  workspace: stripDataUrls(item.workspaceSnapshot) as ComparisonWorkspaceState,
+});
 
 const patchCloudState = async (
   store: SavedVideoLibraryStore,
@@ -361,31 +464,22 @@ export const saveSavedVideoToCloud = async (
   });
 
   try {
+    const sourceDevice = {
+      deviceId: options.deviceId || window.localStorage.getItem("clarityDeviceId") || "browser",
+      deviceName: options.deviceName || window.navigator.userAgent.slice(0, 120),
+      platform: options.platform || window.navigator.platform,
+    };
+    const uploadSessionRequest = buildVideoUploadSessionRequest(working, blob, checksumSha256, sourceDevice);
     const sessionResponse = await fetch("/api/video-transfer/upload-session", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({
-        savedVideo: {
-          ...working,
-          source: { ...working.source, checksumSha256 },
-          analysisSnapshot: working.analysisSnapshot,
-          workspaceSnapshot: working.workspaceSnapshot,
-          thumbnailDataUrl: working.thumbnailDataUrl,
-        },
-        video: {
-          fileName: working.source.originalFileName || `${working.savedVideoId}.mp4`,
-          mimeType: blob.type || working.source.mimeType || "application/octet-stream",
-          sizeBytes: blob.size,
-          checksumSha256,
-        },
-        sourceDevice: {
-          deviceId: options.deviceId || window.localStorage.getItem("clarityDeviceId") || "browser",
-          deviceName: options.deviceName || window.navigator.userAgent.slice(0, 120),
-          platform: options.platform || window.navigator.platform,
-        },
-      }),
+      body: JSON.stringify(uploadSessionRequest),
     });
-    const sessionData = await safeJson<any>(sessionResponse, "Upload session did not return JSON.");
+    const sessionData = await safeJson<any>(
+      sessionResponse,
+      "Upload session failed before reaching Clarity server",
+      "DRIVE_UPLOAD_SESSION_FAILED"
+    );
     if (!sessionResponse.ok) throw apiFailure(sessionData, "DRIVE_UPLOAD_SESSION_FAILED");
     if (sessionData.status === "ready") {
       const ready = await patchCloudState(store, working, {
@@ -435,13 +529,13 @@ export const saveSavedVideoToCloud = async (
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
-        savedVideo: {
-          ...working,
-          source: { ...working.source, checksumSha256 },
-          analysisSnapshot: working.analysisSnapshot,
-          workspaceSnapshot: working.workspaceSnapshot,
-          thumbnailDataUrl: working.thumbnailDataUrl,
-        },
+        savedVideoId: working.savedVideoId,
+        playerId: working.playerId,
+        lessonId: working.lessonId,
+        analysisId: working.analysisId,
+        title: working.title,
+        createdAt: working.createdAt,
+        updatedAt: working.updatedAt,
         video: {
           fileName: working.source.originalFileName || `${working.savedVideoId}.mp4`,
           mimeType: blob.type || working.source.mimeType || "application/octet-stream",
@@ -449,10 +543,11 @@ export const saveSavedVideoToCloud = async (
           checksumSha256,
           driveFileId: sessionData.videoFileId,
         },
+        analysisJson: compactSavedVideoAnalysisJson(working),
         snapshotBytes: dataUrlToBase64Size(working.thumbnailDataUrl),
       }),
     });
-    const finalized = await safeJson<any>(finalizeResponse, "Finalize did not return JSON.");
+    const finalized = await safeJson<any>(finalizeResponse, "Finalize did not return JSON.", "DRIVE_FINALIZE_FAILED");
     if (!finalizeResponse.ok || finalized.status !== "ready") throw apiFailure(finalized, "DRIVE_FINALIZE_FAILED");
 
     const ready = await patchCloudState(store, working, {
