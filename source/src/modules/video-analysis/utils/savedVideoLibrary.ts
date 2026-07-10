@@ -4,12 +4,62 @@ import type { ComparisonSide, ComparisonWorkspaceState } from "./localPersistenc
 import type { StoredVideo } from "./videoBlobStore";
 
 const DB_NAME = "clarity-video-analysis";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const SAVED_ITEMS_STORE = "savedVideoItems";
 const SAVED_BLOBS_STORE = "savedVideoBlobs";
 const TRANSIENT_VIDEOS_STORE = "videos";
+const MANAGED_LIBRARY_STORE = "managedLocalLibrary";
+const MANAGED_LIBRARY_HANDLE_KEY = "rootDirectory";
+const MANAGED_LIBRARY_MANIFEST = "manifest.json";
+const MANAGED_LIBRARY_VIDEO_FILE = "video.mp4";
+
+type FileSystemPermissionMode = "read" | "readwrite";
+type FileSystemPermissionState = "granted" | "denied" | "prompt";
+
+interface FileSystemPermissionDescriptor {
+  mode?: FileSystemPermissionMode;
+}
+
+interface FileSystemWritableFileStream extends WritableStream {
+  write(data: Blob | BufferSource | string): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface FileSystemFileHandle {
+  kind: "file";
+  name: string;
+  getFile(): Promise<File>;
+  createWritable(): Promise<FileSystemWritableFileStream>;
+}
+
+interface FileSystemDirectoryHandle {
+  kind: "directory";
+  name: string;
+  getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<FileSystemDirectoryHandle>;
+  getFileHandle(name: string, options?: { create?: boolean }): Promise<FileSystemFileHandle>;
+  removeEntry?(name: string, options?: { recursive?: boolean }): Promise<void>;
+  queryPermission?(descriptor?: FileSystemPermissionDescriptor): Promise<FileSystemPermissionState>;
+  requestPermission?(descriptor?: FileSystemPermissionDescriptor): Promise<FileSystemPermissionState>;
+}
+
+interface WindowWithFileSystemAccess extends Window {
+  showDirectoryPicker?: (options?: {
+    id?: string;
+    mode?: FileSystemPermissionMode;
+    startIn?: "desktop" | "documents" | "downloads" | "music" | "pictures" | "videos";
+  }) => Promise<FileSystemDirectoryHandle>;
+}
 
 export type SavedVideoLocalStatus = "available" | "missing" | "recovery-only" | "error";
+export type ManagedLocalLibraryHealth =
+  | "healthy"
+  | "missing"
+  | "moved"
+  | "read-only"
+  | "permission-lost"
+  | "repair-required"
+  | "not-configured"
+  | "unsupported";
 export type SavedVideoCloudStatus = "not-uploaded" | "uploading" | "ready" | "imported" | "failed";
 export type SavedVideoCloudProvider = "google-drive";
 
@@ -47,6 +97,14 @@ export interface SavedVideoCloudState {
   errorMessage?: string;
 }
 
+export interface SavedVideoManagedLocalState {
+  status: ManagedLocalLibraryHealth;
+  libraryId?: string;
+  migratedAt?: string;
+  verifiedAt?: string;
+  lastError?: string;
+}
+
 export interface SavedVideoItem {
   version: 1;
   savedVideoId: string;
@@ -71,6 +129,7 @@ export interface SavedVideoItem {
   local: {
     status: SavedVideoLocalStatus;
     blobRecordId?: string;
+    managed?: SavedVideoManagedLocalState;
   };
   cloud?: SavedVideoCloudState;
   analysisSnapshot: VideoAnalysis;
@@ -209,6 +268,49 @@ export const calculateBlobSha256 = async (blob: Blob): Promise<string | undefine
   }
 };
 
+const nowIso = () => new Date().toISOString();
+
+const createStableId = (prefix: string) => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const sanitizeSegment = (value: string, fallback: string) => {
+  const safe = value
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  return safe || fallback;
+};
+
+const isFileSystemAccessSupported = () =>
+  typeof window !== "undefined" &&
+  typeof (window as WindowWithFileSystemAccess).showDirectoryPicker === "function";
+
+const jsonBlob = (value: unknown) =>
+  new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+
+const dataUrlToBlob = (dataUrl?: string): Blob | null => {
+  if (!dataUrl) return null;
+  const match = dataUrl.match(/^data:([^;,]+)?(;base64)?,(.*)$/);
+  if (!match) return null;
+  try {
+    const mimeType = match[1] || "application/octet-stream";
+    const payload = match[3] || "";
+    const binary = match[2] ? atob(payload) : decodeURIComponent(payload);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mimeType });
+  } catch {
+    return null;
+  }
+};
+
 const sortSavedItems = (items: SavedVideoItem[]) =>
   [...items].sort((left, right) =>
     String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))
@@ -223,6 +325,9 @@ const ensureStores = (db: IDBDatabase) => {
   }
   if (!db.objectStoreNames.contains(SAVED_BLOBS_STORE)) {
     db.createObjectStore(SAVED_BLOBS_STORE, { keyPath: "savedVideoId" });
+  }
+  if (!db.objectStoreNames.contains(MANAGED_LIBRARY_STORE)) {
+    db.createObjectStore(MANAGED_LIBRARY_STORE);
   }
 };
 
@@ -645,6 +750,392 @@ export const cancelSavedVideoCloudUpload = async (
   });
 };
 
+export interface ManagedLocalVideoLibraryStatus {
+  supported: boolean;
+  configured: boolean;
+  health: ManagedLocalLibraryHealth;
+  message: string;
+}
+
+const runManagedHandleRequest = async <T>(
+  mode: IDBTransactionMode,
+  operate: (store: IDBObjectStore) => IDBRequest
+): Promise<T> => runStoreRequest<T>(MANAGED_LIBRARY_STORE, mode, operate);
+
+const getStoredManagedRootHandle = async (): Promise<FileSystemDirectoryHandle | null> => {
+  try {
+    const handle = await runManagedHandleRequest<FileSystemDirectoryHandle | undefined>(
+      "readonly",
+      (store) => store.get(MANAGED_LIBRARY_HANDLE_KEY)
+    );
+    return handle || null;
+  } catch {
+    return null;
+  }
+};
+
+const storeManagedRootHandle = (handle: FileSystemDirectoryHandle) =>
+  runManagedHandleRequest<void>("readwrite", (store) => store.put(handle, MANAGED_LIBRARY_HANDLE_KEY));
+
+const getManagedPermission = async (
+  handle: FileSystemDirectoryHandle | null,
+  request = false
+): Promise<FileSystemPermissionState> => {
+  if (!handle) return "denied";
+  try {
+    const descriptor = { mode: "readwrite" as const };
+    if (request && typeof handle.requestPermission === "function") {
+      return await handle.requestPermission(descriptor);
+    }
+    if (typeof handle.queryPermission === "function") {
+      return await handle.queryPermission(descriptor);
+    }
+    return "granted";
+  } catch {
+    return "denied";
+  }
+};
+
+const writeFile = async (directory: FileSystemDirectoryHandle, fileName: string, value: Blob | string) => {
+  const fileHandle = await directory.getFileHandle(fileName, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(value);
+  await writable.close();
+};
+
+const readJsonFile = async <T>(directory: FileSystemDirectoryHandle, fileName: string): Promise<T | null> => {
+  try {
+    const fileHandle = await directory.getFileHandle(fileName);
+    const file = await fileHandle.getFile();
+    return JSON.parse(await file.text()) as T;
+  } catch {
+    return null;
+  }
+};
+
+const ensureManagedSystemFolders = async (root: FileSystemDirectoryHandle) => {
+  const system = await root.getDirectoryHandle("System", { create: true });
+  await Promise.all([
+    system.getDirectoryHandle("imports", { create: true }),
+    system.getDirectoryHandle("logs", { create: true }),
+    system.getDirectoryHandle("cache", { create: true }),
+  ]);
+};
+
+const ensureManagedRootManifest = async (root: FileSystemDirectoryHandle) => {
+  const existing = await readJsonFile<{ version?: number; libraryId?: string; app?: string; createdAt?: string }>(
+    root,
+    MANAGED_LIBRARY_MANIFEST
+  );
+  const now = nowIso();
+  const manifest = {
+    version: 1,
+    app: "clarity-booking",
+    libraryId:
+      existing?.version === 1 && existing.app === "clarity-booking" && existing.libraryId
+        ? existing.libraryId
+        : createStableId("clarity-video-library"),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+  await writeFile(root, MANAGED_LIBRARY_MANIFEST, jsonBlob(manifest));
+  return manifest;
+};
+
+const getManagedSavedVideoDirectory = async (
+  root: FileSystemDirectoryHandle,
+  playerId: string,
+  savedVideoId: string,
+  create: boolean
+) => {
+  const players = await root.getDirectoryHandle("Players", { create });
+  const player = await players.getDirectoryHandle(sanitizeSegment(playerId, "player"), { create });
+  const videos = await player.getDirectoryHandle("Videos", { create });
+  return videos.getDirectoryHandle(sanitizeSegment(savedVideoId, "saved-video"), { create });
+};
+
+const managedHealthFromError = (error: unknown): ManagedLocalLibraryHealth => {
+  const name = typeof error === "object" && error && "name" in error ? String((error as { name?: unknown }).name) : "";
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (name === "NotFoundError") return "missing";
+  if (name === "NotAllowedError" || message.includes("permission")) return "permission-lost";
+  if (message.includes("read-only") || message.includes("read only")) return "read-only";
+  return "repair-required";
+};
+
+const managedStatusMessage = (health: ManagedLocalLibraryHealth) => {
+  switch (health) {
+    case "healthy":
+      return "Healthy";
+    case "missing":
+      return "Missing file";
+    case "moved":
+      return "Moved";
+    case "read-only":
+      return "Read only";
+    case "permission-lost":
+      return "Permission lost";
+    case "repair-required":
+      return "Repair required";
+    case "unsupported":
+      return "File System Access is unavailable. Working from local cache.";
+    case "not-configured":
+    default:
+      return "Choose Clarity Video Library";
+  }
+};
+
+export const getManagedLocalVideoLibraryStatus = async (): Promise<ManagedLocalVideoLibraryStatus> => {
+  if (!isFileSystemAccessSupported()) {
+    return {
+      supported: false,
+      configured: false,
+      health: "unsupported",
+      message: managedStatusMessage("unsupported"),
+    };
+  }
+  const root = await getStoredManagedRootHandle();
+  if (!root) {
+    return {
+      supported: true,
+      configured: false,
+      health: "not-configured",
+      message: managedStatusMessage("not-configured"),
+    };
+  }
+  const permission = await getManagedPermission(root);
+  if (permission !== "granted") {
+    return {
+      supported: true,
+      configured: true,
+      health: "permission-lost",
+      message: managedStatusMessage("permission-lost"),
+    };
+  }
+  try {
+    await ensureManagedSystemFolders(root);
+    await ensureManagedRootManifest(root);
+    const cache = await root
+      .getDirectoryHandle("System", { create: true })
+      .then((system) => system.getDirectoryHandle("cache", { create: true }));
+    await writeFile(cache, ".clarity-write-test", "ok");
+    await cache.removeEntry?.(".clarity-write-test");
+    return {
+      supported: true,
+      configured: true,
+      health: "healthy",
+      message: managedStatusMessage("healthy"),
+    };
+  } catch (error) {
+    const health = managedHealthFromError(error);
+    return {
+      supported: true,
+      configured: true,
+      health,
+      message: managedStatusMessage(health),
+    };
+  }
+};
+
+export const chooseManagedLocalVideoLibrary = async (): Promise<ManagedLocalVideoLibraryStatus> => {
+  const picker = (window as WindowWithFileSystemAccess).showDirectoryPicker;
+  if (!picker) return getManagedLocalVideoLibraryStatus();
+  const root = await picker({
+    id: "clarity-video-library",
+    mode: "readwrite",
+    startIn: "documents",
+  });
+  await storeManagedRootHandle(root);
+  await getManagedPermission(root, true);
+  await ensureManagedSystemFolders(root);
+  await ensureManagedRootManifest(root);
+  return getManagedLocalVideoLibraryStatus();
+};
+
+export const reconnectManagedLocalVideoLibrary = async () => {
+  const root = await getStoredManagedRootHandle();
+  if (!root) return chooseManagedLocalVideoLibrary();
+  await getManagedPermission(root, true);
+  return getManagedLocalVideoLibraryStatus();
+};
+
+export const moveManagedLocalVideoLibrary = async (store: SavedVideoLibraryStore) => {
+  const status = await chooseManagedLocalVideoLibrary();
+  if (status.health === "healthy") {
+    await migrateSavedVideosToManagedLocalLibrary(store);
+  }
+  return getManagedLocalVideoLibraryStatus();
+};
+
+const markManagedFailure = (item: SavedVideoItem, error: unknown): SavedVideoItem => {
+  const status = managedHealthFromError(error);
+  return {
+    ...item,
+    local: {
+      ...item.local,
+      status: item.local.status === "available" ? "recovery-only" : item.local.status,
+      managed: {
+        ...item.local.managed,
+        status,
+        lastError: error instanceof Error ? error.message : managedStatusMessage(status),
+      },
+    },
+  };
+};
+
+const writeManagedSavedVideo = async (
+  item: SavedVideoItem,
+  blobRecord: SavedVideoBlobRecord
+): Promise<SavedVideoItem> => {
+  const root = await getStoredManagedRootHandle();
+  if (!root) return item;
+  const permission = await getManagedPermission(root, true);
+  if (permission !== "granted") throw new Error("Permission lost");
+  const libraryManifest = await ensureManagedRootManifest(root);
+  await ensureManagedSystemFolders(root);
+  const directory = await getManagedSavedVideoDirectory(root, item.playerId, item.savedVideoId, true);
+  const snapshots = await directory.getDirectoryHandle("snapshots", { create: true });
+  await writeFile(directory, MANAGED_LIBRARY_VIDEO_FILE, blobRecord.blob);
+  await writeFile(directory, "analysis.json", jsonBlob(compactSavedVideoAnalysisJson(item)));
+  await writeFile(
+    directory,
+    "metadata.json",
+    jsonBlob({
+      version: 1,
+      savedVideoId: item.savedVideoId,
+      playerId: item.playerId,
+      lessonId: item.lessonId,
+      title: item.title,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      capturedAt: item.capturedAt,
+      source: item.source,
+      local: { status: "managed-library" },
+      cloud: item.cloud,
+    })
+  );
+  await writeFile(
+    directory,
+    MANAGED_LIBRARY_MANIFEST,
+    jsonBlob({
+      version: 1,
+      app: "clarity-booking",
+      libraryId: libraryManifest.libraryId,
+      savedVideoId: item.savedVideoId,
+      playerId: item.playerId,
+      videoFile: MANAGED_LIBRARY_VIDEO_FILE,
+      analysisFile: "analysis.json",
+      metadataFile: "metadata.json",
+      snapshotsDirectory: "snapshots",
+      checksumSha256: blobRecord.checksumSha256,
+      sizeBytes: blobRecord.sizeBytes,
+      updatedAt: nowIso(),
+    })
+  );
+  const thumb = dataUrlToBlob(item.thumbnailDataUrl);
+  if (thumb) await writeFile(snapshots, "thumbnail.jpg", thumb);
+  const verified = await directory.getFileHandle(MANAGED_LIBRARY_VIDEO_FILE).then((handle) => handle.getFile());
+  if (verified.size !== blobRecord.sizeBytes) {
+    throw new SavedVideoLibraryError("SAVED_VIDEO_VERIFY_FAILED", "Managed library video did not match metadata.");
+  }
+  return {
+    ...item,
+    local: {
+      ...item.local,
+      status: "available",
+      managed: {
+        status: "healthy",
+        libraryId: libraryManifest.libraryId,
+        migratedAt: item.local.managed?.migratedAt || nowIso(),
+        verifiedAt: nowIso(),
+      },
+    },
+  };
+};
+
+const readManagedSavedVideoBlob = async (item: SavedVideoItem): Promise<Blob | null> => {
+  if (!item.local.managed || item.local.managed.status === "not-configured") return null;
+  const root = await getStoredManagedRootHandle();
+  if (!root || (await getManagedPermission(root)) !== "granted") return null;
+  const directory = await getManagedSavedVideoDirectory(root, item.playerId, item.savedVideoId, false);
+  const file = await directory.getFileHandle(MANAGED_LIBRARY_VIDEO_FILE).then((handle) => handle.getFile());
+  return file.size > 0 ? file : null;
+};
+
+const verifyManagedSavedVideo = async (item: SavedVideoItem): Promise<SavedVideoItem> => {
+  try {
+    const blob = await readManagedSavedVideoBlob(item);
+    if (!blob) throw new SavedVideoLibraryError("SAVED_VIDEO_BLOB_MISSING", "Managed library file is missing.");
+    if (blobSize(blob) !== item.source.sizeBytes) {
+      throw new SavedVideoLibraryError("SAVED_VIDEO_VERIFY_FAILED", "Managed library file size does not match metadata.");
+    }
+    return {
+      ...item,
+      local: {
+        ...item.local,
+        status: "available",
+        managed: {
+          ...item.local.managed,
+          status: "healthy",
+          verifiedAt: nowIso(),
+        },
+      },
+    };
+  } catch (error) {
+    return markManagedFailure(item, error);
+  }
+};
+
+export const migrateSavedVideosToManagedLocalLibrary = async (
+  store: SavedVideoLibraryStore
+): Promise<{ migrated: number; failed: number }> => {
+  const status = await getManagedLocalVideoLibraryStatus();
+  if (status.health !== "healthy") return { migrated: 0, failed: 0 };
+  const items = await store.listItems();
+  let migrated = 0;
+  let failed = 0;
+  for (const item of items) {
+    const blob = await store.getBlob(item.savedVideoId);
+    if (!blob) {
+      failed += 1;
+      continue;
+    }
+    const blobRecord: SavedVideoBlobRecord = {
+      savedVideoId: item.savedVideoId,
+      blob,
+      sizeBytes: blobSize(blob),
+      mimeType: blob.type || item.source.mimeType || "video/mp4",
+      checksumSha256: item.source.checksumSha256 || (await calculateBlobSha256(blob)),
+      updatedAt: nowIso(),
+    };
+    try {
+      await store.putItem(await writeManagedSavedVideo(item, blobRecord));
+      migrated += 1;
+    } catch (error) {
+      await store.putItem(markManagedFailure(item, error));
+      failed += 1;
+    }
+  }
+  return { migrated, failed };
+};
+
+export const verifyManagedLocalVideoLibrary = async (store: SavedVideoLibraryStore) => {
+  const status = await getManagedLocalVideoLibraryStatus();
+  if (status.health !== "healthy") return { status, verified: 0, repaired: 0 };
+  const items = await store.listItems();
+  let verified = 0;
+  let repaired = 0;
+  for (const item of items) {
+    const next = await verifyManagedSavedVideo(item);
+    if (next.local.managed?.status === "healthy") verified += 1;
+    else repaired += 1;
+    await store.putItem(next);
+  }
+  return { status: await getManagedLocalVideoLibraryStatus(), verified, repaired };
+};
+
+export const rescanManagedLocalVideoLibrary = verifyManagedLocalVideoLibrary;
+
 export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | null => {
   if (typeof indexedDB === "undefined" || indexedDB === null) return null;
 
@@ -671,13 +1162,19 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
       try {
         const existing = input.savedVideoId ? await getItem(input.savedVideoId) : null;
         const { item, blobRecord } = await buildItem(input, existing);
+        let durableItem = item;
+        try {
+          durableItem = await writeManagedSavedVideo(item, blobRecord);
+        } catch (error) {
+          durableItem = markManagedFailure(item, error);
+        }
         await runStoreRequest(SAVED_BLOBS_STORE, "readwrite", (objectStore) =>
           objectStore.put(blobRecord)
         );
         await runStoreRequest(SAVED_ITEMS_STORE, "readwrite", (objectStore) =>
-          objectStore.put(item)
+          objectStore.put(durableItem)
         );
-        return store.verifyItem(item.savedVideoId);
+        return store.verifyItem(durableItem.savedVideoId);
       } catch (error) {
         if (error instanceof SavedVideoLibraryError) throw error;
         throw new SavedVideoLibraryError(
@@ -706,6 +1203,16 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
     getItem,
 
     async getBlob(savedVideoId) {
+      const item = await getItem(savedVideoId);
+      if (item?.local.managed?.status === "healthy") {
+        try {
+          const managedBlob = await readManagedSavedVideoBlob(item);
+          if (managedBlob) return managedBlob;
+          await store.putItem(markManagedFailure(item, new Error("Managed library file is missing.")));
+        } catch (error) {
+          await store.putItem(markManagedFailure(item, error));
+        }
+      }
       const record = await getBlobRecord(savedVideoId);
       return record?.blob || null;
     },
@@ -732,6 +1239,21 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
 
     async deleteItem(savedVideoId) {
       try {
+        const item = await getItem(savedVideoId);
+        const root = await getStoredManagedRootHandle();
+        if (item && root && (await getManagedPermission(root)) === "granted") {
+          await getManagedSavedVideoDirectory(root, item.playerId, item.savedVideoId, false)
+            .then(async (_directory) => {
+              const videos = await root
+                .getDirectoryHandle("Players")
+                .then((players) => players.getDirectoryHandle(sanitizeSegment(item.playerId, "player")))
+                .then((player) => player.getDirectoryHandle("Videos"));
+              await videos.removeEntry?.(sanitizeSegment(item.savedVideoId, "saved-video"), { recursive: true });
+            })
+            .catch(() => {
+              // IndexedDB metadata/cache cleanup must still proceed.
+            });
+        }
         await runStoreRequest(SAVED_BLOBS_STORE, "readwrite", (objectStore) =>
           objectStore.delete(savedVideoId)
         );
@@ -755,20 +1277,32 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
           "Saved video metadata was not found after saving."
         );
       }
+      let currentItem = item;
+      if (item.local.managed) {
+        currentItem = await verifyManagedSavedVideo(item);
+        if (currentItem !== item) {
+          await runStoreRequest(SAVED_ITEMS_STORE, "readwrite", (objectStore) =>
+            objectStore.put(currentItem)
+          );
+        }
+      }
       const blobRecord = await getBlobRecord(savedVideoId);
-      if (!blobRecord?.blob) {
+      if (!blobRecord?.blob && currentItem.local.managed?.status !== "healthy") {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_BLOB_MISSING",
           "Saved video blob was not found after saving."
         );
       }
-      if (blobRecord.sizeBytes !== item.source.sizeBytes || blobSize(blobRecord.blob) !== item.source.sizeBytes) {
+      if (
+        blobRecord?.blob &&
+        (blobRecord.sizeBytes !== currentItem.source.sizeBytes || blobSize(blobRecord.blob) !== currentItem.source.sizeBytes)
+      ) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_VERIFY_FAILED",
           "Saved video blob size did not match metadata."
         );
       }
-      return item;
+      return currentItem;
     },
   };
 

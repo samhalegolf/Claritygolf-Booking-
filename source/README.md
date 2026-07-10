@@ -39,25 +39,48 @@ Production needs:
 
 ## Video Analysis saved-video ownership
 
-Video Analysis keeps two separate browser-local persistence layers:
+Video Analysis now separates primary local storage from browser recovery:
 
+- The managed Clarity Video Library folder is the primary durable store when the
+  browser supports the File System Access API and the coach has chosen a folder.
+- IndexedDB remains the cache, recovery, and offline protection layer.
 - Transient workspace slots are recovery data keyed by `playerId + lessonId + side`.
   They protect the active upload/recording, drawings, markers, and workspace state
   while the coach is editing. These records are not the Player Profile library.
 - Durable saved videos are user-facing library records keyed by `savedVideoId`.
-  Metadata lives in `savedVideoItems` and the source blob lives in
-  `savedVideoBlobs`. The saved blob is keyed by `savedVideoId`, not by left/right
+  Metadata lives in `savedVideoItems`; `savedVideoBlobs` keeps the cache/recovery
+  source blob. The saved blob is keyed by `savedVideoId`, not by left/right
   workspace side.
 
 Manual Save flushes the active analysis stores, copies each active side's
-transient source blob into `savedVideoBlobs`, writes a versioned
-`SavedVideoItem`, verifies metadata plus blob size, and only then reports
-`Saved to Player Profile`.
+transient source blob into `Players/<playerId>/Videos/<savedVideoId>/video.mp4`
+inside the managed folder, writes `analysis.json`, `manifest.json`,
+`metadata.json`, and `snapshots/`, verifies the file size, writes the
+`SavedVideoItem`, and then updates the IndexedDB cache. If the Finder write
+fails, the IndexedDB copy is kept and the item is marked for reconnect/repair
+rather than losing the coach's work.
+
+The managed folder shape is:
+
+```txt
+Clarity Video Library/
+  Players/<playerId>/Videos/<savedVideoId>/
+    video.mp4
+    analysis.json
+    manifest.json
+    metadata.json
+    snapshots/
+  System/
+    imports/
+    logs/
+    cache/
+```
 
 Player Profile video cards are sourced from `savedVideoItems`. Opening a card
-passes the exact `savedVideoId` to Video Analysis, restores its saved source blob,
-analysis snapshot, and workspace snapshot, then rebuilds a transient slot copy for
-recovery while editing.
+passes the exact `savedVideoId` to Video Analysis, tries the Finder library file
+first, falls back to the IndexedDB cache if the file is missing or permission is
+lost, restores its analysis snapshot and workspace snapshot, then rebuilds a
+transient slot copy for recovery while editing.
 
 Clear clip and Delete saved item are intentionally different:
 
@@ -69,8 +92,10 @@ Clear clip and Delete saved item are intentionally different:
 
 Existing slot-only browser videos are not silently converted or deleted. They
 remain visible as recovery records with a `Move to Saved Videos` action, which
-copies the old transient blob into the durable saved library and keeps the
-original recovery record until validation succeeds.
+copies the old transient blob into the durable saved library, migrates verified
+items into the Finder library when configured, and keeps the original recovery
+record until validation succeeds. Existing durable saved videos can also be
+migrated from cache to Finder through Settings.
 
 Google Drive transfer is a temporary transport bridge, not the permanent video
 library. `Send to primary computer` uploads from the durable

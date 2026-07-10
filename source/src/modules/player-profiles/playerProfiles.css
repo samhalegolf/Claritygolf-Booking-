@@ -244,6 +244,11 @@
   background: var(--panel-soft);
 }
 
+.player-video-card.is-library-status {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--panel-soft) 84%, #eef6ff 16%);
+}
+
 .player-video-card-body {
   display: grid;
   gap: 4px;

@@ -13,6 +13,7 @@ import {
   Eye,
   ExternalLink,
   FileText,
+  FolderOpen,
   GripVertical,
   ImagePlus,
   KeyRound,
@@ -56,7 +57,15 @@ import type { VideoAnalysis } from "./modules/video-analysis/models/Analysis";
 import type { ComparisonSide, ComparisonWorkspaceState } from "./modules/video-analysis/utils/localPersistence";
 import {
   createIndexedDbSavedVideoLibrary,
+  chooseManagedLocalVideoLibrary,
+  getManagedLocalVideoLibraryStatus,
+  migrateSavedVideosToManagedLocalLibrary,
+  moveManagedLocalVideoLibrary,
+  reconnectManagedLocalVideoLibrary,
+  rescanManagedLocalVideoLibrary,
   saveSavedVideoToCloud,
+  verifyManagedLocalVideoLibrary,
+  type ManagedLocalVideoLibraryStatus,
   type SavedVideoItem,
   type SavedVideoLibraryStore,
 } from "./modules/video-analysis/utils/savedVideoLibrary";
@@ -3426,6 +3435,24 @@ function sourceSideFromSlotKey(slotKey: string): ComparisonSide {
   return slotKey.endsWith(".right") ? "right" : "left";
 }
 
+const defaultManagedLocalLibraryStatus: ManagedLocalVideoLibraryStatus = {
+  supported: false,
+  configured: false,
+  health: "unsupported",
+  message: "File System Access is unavailable. Working from local cache.",
+};
+
+function savedVideoManagedLocalLabel(video: SavedVideoItem) {
+  const status = video.local.managed?.status;
+  if (status === "healthy") return "Finder library";
+  if (status === "missing") return "Missing file";
+  if (status === "permission-lost") return "Permission lost";
+  if (status === "read-only") return "Read only";
+  if (status === "repair-required") return "Repair required";
+  if (status === "moved") return "Moved";
+  return video.local.status === "available" ? "Local cache" : "Local file unavailable";
+}
+
 function createDefaultVideoWorkspaceState(side: ComparisonSide): ComparisonWorkspaceState {
   return {
     version: 1,
@@ -4132,6 +4159,8 @@ function App() {
   const [savedVideoItems, setSavedVideoItems] = useState<SavedVideoItem[]>([]);
   const [legacyVideoRecords, setLegacyVideoRecords] = useState<StoredVideoRecord[]>([]);
   const [uploadingSavedVideoIds, setUploadingSavedVideoIds] = useState<Set<string>>(() => new Set());
+  const [managedLocalLibraryStatus, setManagedLocalLibraryStatus] =
+    useState<ManagedLocalVideoLibraryStatus>(defaultManagedLocalLibraryStatus);
   const [showPlayerAddDialog, setShowPlayerAddDialog] = useState(false);
   const [playerAddSearch, setPlayerAddSearch] = useState("");
   const [playerAddNew, setPlayerAddNew] = useState({ name: "", email: "", phone: "" });
@@ -4152,6 +4181,9 @@ function App() {
   const refreshSavedVideoLibrary = useCallback(() => {
     const savedStore = savedVideoLibraryRef.current;
     const transientStore = videoStoreRef.current;
+    void getManagedLocalVideoLibraryStatus()
+      .then((status) => setManagedLocalLibraryStatus(status))
+      .catch(() => setManagedLocalLibraryStatus(defaultManagedLocalLibraryStatus));
     void savedStore
       ?.listItems()
       .then((items) => setSavedVideoItems(items))
@@ -8873,6 +8905,92 @@ function App() {
       setToast({ message: "Moved recovery video to Saved Videos. Original recovery copy was kept." });
     } catch {
       setToast({ message: "Recovery video could not be moved to Saved Videos." });
+    }
+  }
+
+  async function runManagedLibraryAction(
+    action: "choose" | "reconnect" | "move" | "verify" | "rescan" | "migrate"
+  ) {
+    const store = savedVideoLibraryRef.current;
+    try {
+      if (action === "choose") {
+        await chooseManagedLocalVideoLibrary();
+        if (store) {
+          const result = await migrateSavedVideosToManagedLocalLibrary(store);
+          setToast({ message: result.migrated ? `Migrated ${result.migrated} saved videos.` : "Clarity Video Library connected." });
+        } else {
+          setToast({ message: "Clarity Video Library connected." });
+        }
+      } else if (action === "reconnect") {
+        await reconnectManagedLocalVideoLibrary();
+        setToast({ message: "Clarity Video Library reconnected." });
+      } else if (action === "move") {
+        if (!store) throw new Error("Saved video library is unavailable in this browser.");
+        await moveManagedLocalVideoLibrary(store);
+        setToast({ message: "Clarity Video Library moved." });
+      } else if (action === "verify" || action === "rescan") {
+        if (!store) throw new Error("Saved video library is unavailable in this browser.");
+        const result = action === "verify"
+          ? await verifyManagedLocalVideoLibrary(store)
+          : await rescanManagedLocalVideoLibrary(store);
+        setToast({ message: `${action === "verify" ? "Verified" : "Rescanned"} ${result.verified} saved videos.` });
+      } else if (action === "migrate") {
+        if (!store) throw new Error("Saved video library is unavailable in this browser.");
+        const result = await migrateSavedVideosToManagedLocalLibrary(store);
+        setToast({ message: result.failed ? `Migrated ${result.migrated}; ${result.failed} need attention.` : `Migrated ${result.migrated} saved videos.` });
+      }
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Clarity Video Library action failed." });
+    } finally {
+      refreshSavedVideoLibrary();
+    }
+  }
+
+  async function verifySavedVideoInLibrary(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    try {
+      await store.verifyItem(item.savedVideoId);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Saved video verified." });
+    } catch (error) {
+      refreshSavedVideoLibrary();
+      setToast({ message: error instanceof Error ? error.message : "Saved video needs repair." });
+    }
+  }
+
+  async function showSavedVideoInFinder(item: SavedVideoItem) {
+    if (item.local.managed?.status === "healthy") {
+      setToast({ message: "Saved video is in the Clarity Video Library." });
+      return;
+    }
+    if (!managedLocalLibraryStatus.configured) {
+      await runManagedLibraryAction("choose");
+      return;
+    }
+    await runManagedLibraryAction("reconnect");
+  }
+
+  async function revealSavedVideoFile(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    try {
+      const blob = await store.getBlob(item.savedVideoId);
+      if (!blob) {
+        setToast({ message: "Saved video file is missing. Reconnect the library or use the cache recovery copy." });
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Saved video file could not be opened." });
     }
   }
 
@@ -16693,6 +16811,48 @@ function App() {
                                   </button>
                                 </div>
                                 <div className="player-video-list">
+                                  {!managedLocalLibraryStatus.configured ? (
+                                    <article className="player-video-card is-library-status">
+                                      <div className="player-video-thumb is-empty">
+                                        <FolderOpen size={16} />
+                                      </div>
+                                      <div className="player-video-card-body">
+                                        <strong>Choose Clarity Video Library</strong>
+                                        <span>Saved videos stay in local cache until a library folder is connected.</span>
+                                      </div>
+                                      <div className="player-video-card-actions">
+                                        <button
+                                          type="button"
+                                          className="primary-button"
+                                          disabled={!managedLocalLibraryStatus.supported}
+                                          onClick={() => void runManagedLibraryAction("choose")}
+                                        >
+                                          <FolderOpen size={14} />
+                                          Choose
+                                        </button>
+                                      </div>
+                                    </article>
+                                  ) : managedLocalLibraryStatus.health !== "healthy" ? (
+                                    <article className="player-video-card is-library-status">
+                                      <div className="player-video-thumb is-empty">
+                                        <AlertTriangle size={16} />
+                                      </div>
+                                      <div className="player-video-card-body">
+                                        <strong>{managedLocalLibraryStatus.message}</strong>
+                                        <span>Working from local cache. Reconnect the library when available.</span>
+                                      </div>
+                                      <div className="player-video-card-actions">
+                                        <button
+                                          type="button"
+                                          className="outline-button"
+                                          onClick={() => void runManagedLibraryAction("reconnect")}
+                                        >
+                                          <RefreshCw size={14} />
+                                          Reconnect Library
+                                        </button>
+                                      </div>
+                                    </article>
+                                  ) : null}
                                   {playerToolVideos.length || playerToolLegacyVideoRecords.length ? (
                                     <>
                                       {playerToolVideos.map((video) => {
@@ -16733,7 +16893,7 @@ function App() {
                                                 {" · "}
                                                 {formatVideoDurationLabel(video.source.duration)}
                                                 {" · "}
-                                                {video.local.status === "available" ? "Local" : "Local file unavailable"}
+                                                {savedVideoManagedLocalLabel(video)}
                                                 {" · "}
                                                 {cloudLabel}
                                                 {linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}
@@ -16765,6 +16925,30 @@ function App() {
                                               >
                                                 <Send size={14} />
                                                 {video.cloud?.status === "failed" ? "Retry" : "Send"}
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="outline-button"
+                                                onClick={() => void showSavedVideoInFinder(video)}
+                                              >
+                                                <FolderOpen size={14} />
+                                                Show in Finder
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="outline-button"
+                                                onClick={() => void revealSavedVideoFile(video)}
+                                              >
+                                                <ExternalLink size={14} />
+                                                Reveal file
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="outline-button"
+                                                onClick={() => void verifySavedVideoInLibrary(video)}
+                                              >
+                                                <Check size={14} />
+                                                Verify
                                               </button>
                                               <button
                                                 type="button"
@@ -19630,9 +19814,78 @@ function App() {
                   </div>
                 </details>
 
-                <details className="settings-subsection" open>
-                  <summary className="settings-subsection-title">
-                    <Upload size={18} />
+	                <details className="settings-subsection" open>
+	                  <summary className="settings-subsection-title">
+	                    <FolderOpen size={18} />
+	                    <div>
+	                      <span>Clarity Video Library</span>
+	                      <strong>{managedLocalLibraryStatus.message}</strong>
+	                    </div>
+	                  </summary>
+	                  <p className="field-help">
+	                    Clarity manages durable lesson videos in one local library folder. Browser storage stays available as cache and recovery.
+	                  </p>
+	                  <div className="sync-meta">
+	                    <span>Library status</span>
+	                    <strong>{managedLocalLibraryStatus.message}</strong>
+	                  </div>
+	                  {managedLocalLibraryStatus.health !== "healthy" ? (
+	                    <div className="auth-warning">
+	                      Working from local cache. Reconnect library when available.
+	                    </div>
+	                  ) : null}
+	                  <div className="sync-actions">
+	                    <button
+	                      className="primary-button"
+	                      disabled={!managedLocalLibraryStatus.supported}
+	                      onClick={() => void runManagedLibraryAction(managedLocalLibraryStatus.configured ? "reconnect" : "choose")}
+	                      type="button"
+	                    >
+	                      <FolderOpen size={16} />
+	                      {managedLocalLibraryStatus.configured ? "Reconnect Library" : "Choose Library"}
+	                    </button>
+	                    <button
+	                      className="outline-button"
+	                      disabled={!managedLocalLibraryStatus.supported}
+	                      onClick={() => void runManagedLibraryAction("move")}
+	                      type="button"
+	                    >
+	                      <ArrowRight size={16} />
+	                      Move Library
+	                    </button>
+	                    <button
+	                      className="outline-button"
+	                      disabled={!managedLocalLibraryStatus.configured}
+	                      onClick={() => void runManagedLibraryAction("verify")}
+	                      type="button"
+	                    >
+	                      <Check size={16} />
+	                      Verify Library
+	                    </button>
+	                    <button
+	                      className="outline-button"
+	                      disabled={!managedLocalLibraryStatus.configured}
+	                      onClick={() => void runManagedLibraryAction("rescan")}
+	                      type="button"
+	                    >
+	                      <RefreshCw size={16} />
+	                      Rescan Library
+	                    </button>
+	                    <button
+	                      className="outline-button"
+	                      disabled={!managedLocalLibraryStatus.configured}
+	                      onClick={() => void runManagedLibraryAction("migrate")}
+	                      type="button"
+	                    >
+	                      <Archive size={16} />
+	                      Migrate cache
+	                    </button>
+	                  </div>
+	                </details>
+
+	                <details className="settings-subsection" open>
+	                  <summary className="settings-subsection-title">
+	                    <Upload size={18} />
                     <div>
                       <span>Google Drive Transfer</span>
                       <strong>{googleDriveTransferHeading(googleDriveTransfer)}</strong>
