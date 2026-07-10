@@ -25,6 +25,7 @@ import {
   Moon,
   Package,
   Palette,
+  Pause,
   Percent,
   Phone,
   Plus,
@@ -61,6 +62,8 @@ import {
   getManagedLocalVideoLibraryStatus,
   migrateSavedVideosToManagedLocalLibrary,
   moveManagedLocalVideoLibrary,
+  cancelSavedVideoCloudUpload,
+  pauseSavedVideoCloudUpload,
   reconnectManagedLocalVideoLibrary,
   rescanManagedLocalVideoLibrary,
   saveSavedVideoToCloud,
@@ -3390,7 +3393,7 @@ function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
     case "DRIVE_UPLOAD_PROXY_FAILED":
       return "Clarity could not complete the upload.";
     case "DRIVE_UPLOAD_TOO_LARGE":
-      return "This video is too large for the current transfer method.";
+      return "This transfer chunk was too large.";
     case "DRIVE_SCOPE_MISSING":
       return "Google Drive permission is required.";
     case "GOOGLE_RECONNECT_REQUIRED":
@@ -3401,6 +3404,10 @@ function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
       return "Clarity could not verify the uploaded video.";
     case "DRIVE_UPLOAD_INTERRUPTED":
       return "Video upload was interrupted.";
+    case "SAVED_VIDEO_SOURCE_MISSING":
+      return "Source unavailable.";
+    case "TRANSFER_PAUSED":
+      return "Transfer paused.";
     default:
       return fallback && !/[{}<>]|https?:\/\//i.test(fallback) && fallback.length < 140
         ? fallback
@@ -3410,6 +3417,10 @@ function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
 
 function savedVideoCloudStatusLabel(video: SavedVideoItem, isUploading: boolean, driveConnected: boolean, driveState: GoogleDriveTransferState) {
   if (video.cloud?.status === "ready") return "Ready on primary computer";
+  if (video.cloud?.status === "paused") return "Paused";
+  if (video.cloud?.status === "verifying") return "Verifying";
+  if (video.cloud?.status === "preparing") return "Preparing";
+  if (video.cloud?.status === "cancelled") return "Cancelled";
   if (isUploading) return `Sending ${Math.max(0, Math.min(100, Math.round(video.cloud?.progress || 0)))}%`;
   if (video.cloud?.status === "failed") return "Failed - Retry";
   if (driveState === "permission_upgrade_required") return "Permission required";
@@ -3424,7 +3435,8 @@ function googleDriveTransferHeading(status: GoogleDriveTransferStatus) {
 }
 
 function googleDriveTransferStatusLabel(status: GoogleDriveTransferStatus) {
-  if (status.connected && status.driveScopeGranted) return "Ready to send saved videos";
+  if (status.connected && status.driveScopeGranted && status.inboxFolderId) return "Large video transfer ready";
+  if (status.connected && status.driveScopeGranted) return "Folder ready";
   if (status.state === "permission_upgrade_required") return "Grant Drive permission";
   if (status.state === "reconnect_required") return "Reconnect Google Drive";
   if (status.state === "blocked" || status.state === "error") return status.blocker || status.message || "Setup issue";
@@ -8878,6 +8890,50 @@ function App() {
       refreshSavedVideoLibrary();
       const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code || "") : "";
       setToast({ message: savedVideoCloudErrorLabel(code, error instanceof Error ? error.message : undefined) });
+    } finally {
+      setUploadingSavedVideoIds((current) => {
+        const next = new Set(current);
+        next.delete(item.savedVideoId);
+        return next;
+      });
+    }
+  }
+
+  async function pauseSavedVideoTransfer(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    try {
+      await pauseSavedVideoCloudUpload(item.savedVideoId, store);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Transfer paused." });
+    } catch (error) {
+      const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code || "") : "";
+      setToast({ message: savedVideoCloudErrorLabel(code, error instanceof Error ? error.message : undefined) });
+    } finally {
+      setUploadingSavedVideoIds((current) => {
+        const next = new Set(current);
+        next.delete(item.savedVideoId);
+        return next;
+      });
+    }
+  }
+
+  async function cancelSavedVideoTransfer(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    if (!window.confirm("Cancel this transfer? The local saved video will stay in your library.")) return;
+    try {
+      await cancelSavedVideoCloudUpload(item.savedVideoId, store);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Transfer cancelled. Local video kept." });
+    } catch {
+      setToast({ message: "Transfer could not be cancelled." });
     } finally {
       setUploadingSavedVideoIds((current) => {
         const next = new Set(current);
@@ -16857,7 +16913,10 @@ function App() {
                                     <>
                                       {playerToolVideos.map((video) => {
                                         const isUploading =
-                                          uploadingSavedVideoIds.has(video.savedVideoId) || video.cloud?.status === "uploading";
+                                          uploadingSavedVideoIds.has(video.savedVideoId) ||
+                                          video.cloud?.status === "preparing" ||
+                                          video.cloud?.status === "uploading" ||
+                                          video.cloud?.status === "verifying";
                                         const cloudLabel = savedVideoCloudStatusLabel(
                                           video,
                                           isUploading,
@@ -16873,6 +16932,12 @@ function App() {
                                           googleDriveTransfer.connected &&
                                           video.cloud?.status !== "ready" &&
                                           !isUploading;
+                                        const canPause = video.cloud?.status === "uploading" || isUploading;
+                                        const canCancel =
+                                          video.cloud?.status === "preparing" ||
+                                          video.cloud?.status === "uploading" ||
+                                          video.cloud?.status === "paused" ||
+                                          video.cloud?.status === "failed";
                                         return (
                                           <article className="player-video-card" key={video.savedVideoId}>
                                             {video.thumbnailDataUrl ? (
@@ -16924,7 +16989,25 @@ function App() {
                                                 onClick={() => void sendSavedVideoToPrimaryComputer(video)}
                                               >
                                                 <Send size={14} />
-                                                {video.cloud?.status === "failed" ? "Retry" : "Send"}
+                                                {video.cloud?.status === "failed" || video.cloud?.status === "paused" || video.cloud?.status === "cancelled" ? "Retry" : "Send"}
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="outline-button"
+                                                disabled={!canPause}
+                                                onClick={() => void pauseSavedVideoTransfer(video)}
+                                              >
+                                                <Pause size={14} />
+                                                Pause
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="outline-button"
+                                                disabled={!canCancel}
+                                                onClick={() => void cancelSavedVideoTransfer(video)}
+                                              >
+                                                <X size={14} />
+                                                Cancel
                                               </button>
                                               <button
                                                 type="button"

@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  defaultChunkSizeBytes,
   default as videoTransferHandler,
-  maxProxyUploadBytes,
-  validateProxyUploadRequest,
+  publicTransferSession,
+  validateChunkRequest,
   validateFinalizePayload,
   validateUploadSessionPayload,
 } from "../video-transfer.mts";
@@ -86,8 +87,8 @@ test("finalize accepts compact analysis JSON and strips accidental data URLs", (
   assert.equal((analysisJson.analysis as any).focusSnapshots[0].cropRect.width, 1);
 });
 
-test("proxy endpoint requires admin before upload handling", async () => {
-  const response = await videoTransferHandler(new Request("https://example.test/api/video-transfer/saved-video-1/upload", {
+test("chunk endpoint requires admin before upload handling", async () => {
+  const response = await videoTransferHandler(new Request("https://example.test/api/video-transfer/saved-video-1/chunk", {
     method: "PUT",
     body: new Blob(["video-bytes"], { type: "video/mp4" }),
   }));
@@ -97,67 +98,85 @@ test("proxy endpoint requires admin before upload handling", async () => {
   assert.equal(body.error, "unauthorized");
 });
 
-test("proxy upload validation rejects missing expired and oversized sessions", () => {
-  assert.throws(
-    () => validateProxyUploadRequest(null, { accountId: "account-1", savedVideoId: "saved-video-1" }),
-    /new upload session/i,
-  );
-  assert.throws(
-    () => validateProxyUploadRequest({
-      accountId: "account-1",
-      savedVideoId: "saved-video-1",
-      expectedSizeBytes: 10,
-      expiresAt: "2026-07-10T00:00:00.000Z",
-      status: "uploading",
-    }, { accountId: "account-1", savedVideoId: "saved-video-1", now: new Date("2026-07-10T00:01:00.000Z") }),
-    /new upload session/i,
-  );
-  assert.throws(
-    () => validateProxyUploadRequest({
-      accountId: "account-1",
-      savedVideoId: "saved-video-1",
-      expectedSizeBytes: maxProxyUploadBytes + 1,
-      expiresAt: "2026-07-10T01:00:00.000Z",
-      status: "uploading",
-    }, { accountId: "account-1", savedVideoId: "saved-video-1", now: new Date("2026-07-10T00:00:00.000Z") }),
-    /too large/i,
-  );
+test("public transfer session never exposes the Google resumable URL", () => {
+  const publicSession = publicTransferSession({
+    version: 1,
+    transferId: "transfer-1",
+    savedVideoId: "saved-video-1",
+    accountId: "account-1",
+    playerId: "player-1",
+    analysisId: "analysis-1",
+    status: "uploading",
+    expectedSizeBytes: 10,
+    checksumSha256: "a".repeat(64),
+    acceptedOffsetBytes: 4,
+    chunkSizeBytes: defaultChunkSizeBytes,
+    driveAssetFolderId: "folder-1",
+    resumableSessionUrl: "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&secret=1",
+    resumableSessionCreatedAt: "2026-07-10T00:00:00.000Z",
+    createdAt: "2026-07-10T00:00:00.000Z",
+    updatedAt: "2026-07-10T00:00:00.000Z",
+  });
+
+  const serialized = JSON.stringify(publicSession);
+  assert.equal(serialized.includes("googleapis.com"), false);
+  assert.equal(serialized.includes("resumableSessionUrl"), false);
+  assert.equal(publicSession.acceptedOffsetBytes, 4);
 });
 
-test("proxy upload validation enforces account saved-video ownership and size", () => {
+test("chunk validation rejects out-of-order overlapping and oversized chunks", () => {
   const session = {
     accountId: "account-1",
     savedVideoId: "saved-video-1",
-    expectedSizeBytes: 10,
-    expiresAt: "2026-07-10T01:00:00.000Z",
     status: "uploading" as const,
+    acceptedOffsetBytes: 4,
+    expectedSizeBytes: 20,
+    chunkSizeBytes: 8,
   };
 
   assert.throws(
-    () => validateProxyUploadRequest(session, {
-      accountId: "account-2",
+    () => validateChunkRequest(session, {
+      accountId: "account-1",
       savedVideoId: "saved-video-1",
-      contentLength: 10,
-      now: new Date("2026-07-10T00:00:00.000Z"),
+      startByte: 0,
+      endByte: 3,
+      totalSize: 20,
+      chunkLength: 4,
     }),
-    /ownership metadata/i,
+    /accepted transfer offset/i,
   );
   assert.throws(
-    () => validateProxyUploadRequest(session, {
+    () => validateChunkRequest(session, {
       accountId: "account-1",
       savedVideoId: "saved-video-1",
-      contentLength: 11,
-      now: new Date("2026-07-10T00:00:00.000Z"),
+      startByte: 4,
+      endByte: 14,
+      totalSize: 20,
+      chunkLength: 11,
     }),
-    /size did not match/i,
+    /chunk size/i,
   );
-  assert.equal(
-    validateProxyUploadRequest(session, {
+  assert.throws(
+    () => validateChunkRequest(session, {
       accountId: "account-1",
       savedVideoId: "saved-video-1",
-      contentLength: 10,
-      now: new Date("2026-07-10T00:00:00.000Z"),
-    }).savedVideoId,
-    "saved-video-1",
+      startByte: 4,
+      endByte: 9,
+      totalSize: 21,
+      chunkLength: 6,
+    }),
+    /total size/i,
+  );
+
+  assert.equal(
+    validateChunkRequest(session, {
+      accountId: "account-1",
+      savedVideoId: "saved-video-1",
+      startByte: 4,
+      endByte: 11,
+      totalSize: 20,
+      chunkLength: 8,
+    }),
+    true,
   );
 });

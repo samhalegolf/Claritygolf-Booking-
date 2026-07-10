@@ -474,14 +474,21 @@ describe("saved video library", () => {
     const originalFetch = globalThis.fetch;
     let uploadSessionBody = "";
     globalThis.fetch = async (input, init) => {
-      if (String(input).includes("/api/video-transfer/upload-session")) {
+      if (String(input).includes(`/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/session`)) {
         uploadSessionBody = String(init?.body || "");
         return Response.json({
           ok: true,
           status: "ready",
-          assetFolderId: "drive-folder-1",
-          manifestFileId: "manifest-1",
-          uploadedAt: "2026-07-10T01:00:00.000Z",
+          session: {
+            transferId: "transfer-1",
+            savedVideoId: item.savedVideoId,
+            status: "ready",
+            expectedSizeBytes: sourceBlob().size,
+            acceptedOffsetBytes: sourceBlob().size,
+            chunkSizeBytes: 8 * 1024 * 1024,
+            driveAssetFolderId: "drive-folder-1",
+            driveManifestFileId: "manifest-1",
+          },
         });
       }
       return Response.json({ ok: false }, { status: 500 });
@@ -500,32 +507,44 @@ describe("saved video library", () => {
     }
   });
 
-  it("uploads saved video bytes to same-origin Clarity endpoint and never to googleapis", async () => {
+  it("uploads saved video chunks to same-origin Clarity endpoint and never to googleapis", async () => {
     installBrowserGlobals();
     const { store, item } = await savedVideoWithLargeImages();
-    const xhrRequests = installMockXhr(({ url }) => {
-      assert.equal(url, `/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/upload`);
-      assert.equal(url.includes("googleapis.com"), false);
-      return {
-        status: 200,
-        body: {
-          ok: true,
-          status: "uploaded",
-          videoFileId: "drive-video-1",
-          assetFolderId: "drive-folder-1",
-        },
-      };
-    });
     const originalFetch = globalThis.fetch;
-    const fetchUrls: string[] = [];
+    const requests: Array<{ url: string; method?: string; body?: BodyInit | null }> = [];
     globalThis.fetch = async (input, init) => {
-      fetchUrls.push(String(input));
-      if (String(input).includes("/api/video-transfer/upload-session")) {
+      requests.push({ url: String(input), method: init?.method, body: init?.body });
+      if (String(input).includes(`/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/session`)) {
         return Response.json({
           ok: true,
           status: "uploading",
-          assetFolderId: "drive-folder-1",
-          maxUploadSizeBytes: 5_000_000,
+          session: {
+            transferId: "transfer-1",
+            savedVideoId: item.savedVideoId,
+            status: "uploading",
+            expectedSizeBytes: sourceBlob().size,
+            acceptedOffsetBytes: 0,
+            chunkSizeBytes: 4,
+            driveAssetFolderId: "drive-folder-1",
+          },
+        });
+      }
+      if (String(input).includes(`/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/chunk`)) {
+        const body = init?.body as Blob;
+        const start = Number((init?.headers as Record<string, string>)["X-Clarity-Start-Byte"]);
+        return Response.json({
+          ok: true,
+          status: start + body.size >= sourceBlob().size ? "verifying" : "uploading",
+          session: {
+            transferId: "transfer-1",
+            savedVideoId: item.savedVideoId,
+            status: start + body.size >= sourceBlob().size ? "verifying" : "uploading",
+            expectedSizeBytes: sourceBlob().size,
+            acceptedOffsetBytes: start + body.size,
+            chunkSizeBytes: 4,
+            driveAssetFolderId: "drive-folder-1",
+            driveVideoFileId: start + body.size >= sourceBlob().size ? "drive-video-1" : undefined,
+          },
         });
       }
       if (String(input).includes(`/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/finalize`)) {
@@ -547,9 +566,11 @@ describe("saved video library", () => {
     try {
       const ready = await saveSavedVideoToCloud(item.savedVideoId, store);
 
-      assert.equal(xhrRequests.length, 1);
-      assert.equal(xhrRequests[0]?.method, "PUT");
-      assert.equal(fetchUrls.some((url) => url.includes("googleapis.com")), false);
+      const chunkRequests = requests.filter((request) => request.url.includes("/chunk"));
+      assert.ok(chunkRequests.length > 1);
+      assert.equal(chunkRequests.every((request) => request.method === "PUT"), true);
+      assert.equal(chunkRequests.every((request) => (request.body as Blob).size <= 4), true);
+      assert.equal(requests.some((request) => request.url.includes("googleapis.com")), false);
       assert.equal(ready.cloud?.status, "ready");
       assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
     } finally {
@@ -560,21 +581,30 @@ describe("saved video library", () => {
   it("does not finalize after a failed proxy upload and keeps the local saved blob", async () => {
     installBrowserGlobals();
     const { store, item } = await savedVideoWithLargeImages();
-    installMockXhr(() => ({
-      status: 502,
-      body: { ok: false, error: "DRIVE_UPLOAD_PROXY_FAILED", message: "Clarity could not complete the upload." },
-    }));
     const originalFetch = globalThis.fetch;
     const fetchUrls: string[] = [];
     globalThis.fetch = async (input) => {
       fetchUrls.push(String(input));
-      if (String(input).includes("/api/video-transfer/upload-session")) {
+      if (String(input).includes(`/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/session`)) {
         return Response.json({
           ok: true,
           status: "uploading",
-          assetFolderId: "drive-folder-1",
-          maxUploadSizeBytes: 5_000_000,
+          session: {
+            transferId: "transfer-1",
+            savedVideoId: item.savedVideoId,
+            status: "uploading",
+            expectedSizeBytes: sourceBlob().size,
+            acceptedOffsetBytes: 0,
+            chunkSizeBytes: 4,
+            driveAssetFolderId: "drive-folder-1",
+          },
         });
+      }
+      if (String(input).includes(`/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/chunk`)) {
+        return Response.json(
+          { ok: false, error: "DRIVE_UPLOAD_PROXY_FAILED", message: "Clarity could not complete the upload." },
+          { status: 502 },
+        );
       }
       return Response.json({ ok: false, error: "unexpected_finalize" }, { status: 500 });
     };
@@ -594,21 +624,31 @@ describe("saved video library", () => {
     }
   });
 
-  it("maps oversized proxy upload failures to DRIVE_UPLOAD_TOO_LARGE", async () => {
+  it("maps oversized chunk upload failures to DRIVE_UPLOAD_TOO_LARGE", async () => {
     installBrowserGlobals();
     const { store, item } = await savedVideoWithLargeImages();
-    installMockXhr(() => ({
-      status: 413,
-      body: { ok: false, error: "DRIVE_UPLOAD_TOO_LARGE", message: "This video is too large for the current transfer method." },
-    }));
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
-      Response.json({
-        ok: true,
-        status: "uploading",
-        assetFolderId: "drive-folder-1",
-        maxUploadSizeBytes: 5_000_000,
-      });
+    globalThis.fetch = async (input) => {
+      if (String(input).includes(`/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/session`)) {
+        return Response.json({
+          ok: true,
+          status: "uploading",
+          session: {
+            transferId: "transfer-1",
+            savedVideoId: item.savedVideoId,
+            status: "uploading",
+            expectedSizeBytes: sourceBlob().size,
+            acceptedOffsetBytes: 0,
+            chunkSizeBytes: 4,
+            driveAssetFolderId: "drive-folder-1",
+          },
+        });
+      }
+      return Response.json(
+        { ok: false, error: "DRIVE_UPLOAD_TOO_LARGE", message: "This transfer chunk was too large." },
+        { status: 413 },
+      );
+    };
     try {
       await assert.rejects(
         () => saveSavedVideoToCloud(item.savedVideoId, store),
