@@ -166,6 +166,9 @@ export type SavedVideoCloudErrorCode =
   | "GOOGLE_RECONNECT_REQUIRED"
   | "DRIVE_FOLDER_PROVISION_FAILED"
   | "DRIVE_UPLOAD_SESSION_FAILED"
+  | "DRIVE_UPLOAD_PROXY_FAILED"
+  | "DRIVE_UPLOAD_TOO_LARGE"
+  | "DRIVE_UPLOAD_SESSION_EXPIRED"
   | "DRIVE_UPLOAD_INTERRUPTED"
   | "DRIVE_UPLOAD_VERIFY_FAILED"
   | "DRIVE_FINALIZE_FAILED"
@@ -351,6 +354,42 @@ const apiFailure = (data: any, fallback: SavedVideoCloudErrorCode): SavedVideoCl
   return new SavedVideoCloudError(code, data?.message || "Google Drive upload failed.");
 };
 
+const uploadBlobToClarity = (
+  url: string,
+  blob: Blob,
+  mimeType: string,
+  onProgress?: (progress: number) => void
+): Promise<any> =>
+  new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", mimeType);
+    xhr.setRequestHeader("Accept", "application/json");
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      onProgress?.(Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100))));
+    };
+    xhr.onerror = () => reject(new SavedVideoCloudError("DRIVE_UPLOAD_INTERRUPTED", "Video upload was interrupted."));
+    xhr.onload = () => {
+      const contentType = xhr.getResponseHeader("content-type") || "";
+      let data: any = {};
+      if (contentType.toLowerCase().includes("application/json")) {
+        try {
+          data = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+        } catch {
+          reject(new SavedVideoCloudError("DRIVE_UPLOAD_PROXY_FAILED", "Clarity upload response could not be read.", xhr.status));
+          return;
+        }
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && data.status === "uploaded") {
+        resolve(data);
+        return;
+      }
+      reject(apiFailure(data, xhr.status === 413 ? "DRIVE_UPLOAD_TOO_LARGE" : "DRIVE_UPLOAD_PROXY_FAILED"));
+    };
+    xhr.send(blob);
+  });
+
 const dataUrlToBase64Size = (dataUrl?: string) => {
   const base64 = typeof dataUrl === "string" ? dataUrl.split(",")[1] || "" : "";
   if (!base64) return 0;
@@ -494,8 +533,6 @@ export const saveSavedVideoToCloud = async (
       options.onProgress?.(100);
       return ready;
     }
-    if (!sessionData.uploadUrl) throw apiFailure(sessionData, "DRIVE_UPLOAD_SESSION_FAILED");
-
     working = await patchCloudState(store, working, {
       ...working.cloud,
       status: "uploading",
@@ -505,24 +542,26 @@ export const saveSavedVideoToCloud = async (
       progress: 1,
     });
 
-    await new Promise<void>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("PUT", sessionData.uploadUrl);
-      xhr.setRequestHeader("Content-Type", blob.type || working.source.mimeType || "application/octet-stream");
-      xhr.upload.onprogress = (event) => {
-        if (!event.lengthComputable) return;
-        const progress = Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100)));
+    const uploaded = await uploadBlobToClarity(
+      `/api/video-transfer/${encodeURIComponent(savedVideoId)}/upload`,
+      blob,
+      blob.type || working.source.mimeType || "application/octet-stream",
+      (progress) => {
         options.onProgress?.(progress);
         void patchCloudState(store, working, { ...working.cloud, status: "uploading", progress }).then((next) => {
           working = next;
         });
-      };
-      xhr.onerror = () => reject(new SavedVideoCloudError("DRIVE_UPLOAD_INTERRUPTED", "Video upload was interrupted."));
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) resolve();
-        else reject(new SavedVideoCloudError("DRIVE_UPLOAD_INTERRUPTED", "Google Drive did not accept the upload.", xhr.status));
-      };
-      xhr.send(blob);
+      }
+    );
+    if (!uploaded.videoFileId) {
+      throw apiFailure(uploaded, "DRIVE_UPLOAD_VERIFY_FAILED");
+    }
+    working = await patchCloudState(store, working, {
+      ...working.cloud,
+      status: "uploading",
+      provider: "google-drive",
+      driveVideoFileId: uploaded.videoFileId,
+      progress: 99,
     });
 
     const finalizeResponse = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/finalize`, {
@@ -541,7 +580,7 @@ export const saveSavedVideoToCloud = async (
           mimeType: blob.type || working.source.mimeType || "application/octet-stream",
           sizeBytes: blob.size,
           checksumSha256,
-          driveFileId: sessionData.videoFileId,
+          driveFileId: uploaded.videoFileId,
         },
         analysisJson: compactSavedVideoAnalysisJson(working),
         snapshotBytes: dataUrlToBase64Size(working.thumbnailDataUrl),

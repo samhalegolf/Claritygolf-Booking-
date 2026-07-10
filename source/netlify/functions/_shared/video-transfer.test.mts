@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  default as videoTransferHandler,
+  maxProxyUploadBytes,
+  validateProxyUploadRequest,
   validateFinalizePayload,
   validateUploadSessionPayload,
 } from "../video-transfer.mts";
@@ -83,3 +86,78 @@ test("finalize accepts compact analysis JSON and strips accidental data URLs", (
   assert.equal((analysisJson.analysis as any).focusSnapshots[0].cropRect.width, 1);
 });
 
+test("proxy endpoint requires admin before upload handling", async () => {
+  const response = await videoTransferHandler(new Request("https://example.test/api/video-transfer/saved-video-1/upload", {
+    method: "PUT",
+    body: new Blob(["video-bytes"], { type: "video/mp4" }),
+  }));
+  const body = await response.json() as any;
+
+  assert.equal(response.status, 401);
+  assert.equal(body.error, "unauthorized");
+});
+
+test("proxy upload validation rejects missing expired and oversized sessions", () => {
+  assert.throws(
+    () => validateProxyUploadRequest(null, { accountId: "account-1", savedVideoId: "saved-video-1" }),
+    /new upload session/i,
+  );
+  assert.throws(
+    () => validateProxyUploadRequest({
+      accountId: "account-1",
+      savedVideoId: "saved-video-1",
+      expectedSizeBytes: 10,
+      expiresAt: "2026-07-10T00:00:00.000Z",
+      status: "uploading",
+    }, { accountId: "account-1", savedVideoId: "saved-video-1", now: new Date("2026-07-10T00:01:00.000Z") }),
+    /new upload session/i,
+  );
+  assert.throws(
+    () => validateProxyUploadRequest({
+      accountId: "account-1",
+      savedVideoId: "saved-video-1",
+      expectedSizeBytes: maxProxyUploadBytes + 1,
+      expiresAt: "2026-07-10T01:00:00.000Z",
+      status: "uploading",
+    }, { accountId: "account-1", savedVideoId: "saved-video-1", now: new Date("2026-07-10T00:00:00.000Z") }),
+    /too large/i,
+  );
+});
+
+test("proxy upload validation enforces account saved-video ownership and size", () => {
+  const session = {
+    accountId: "account-1",
+    savedVideoId: "saved-video-1",
+    expectedSizeBytes: 10,
+    expiresAt: "2026-07-10T01:00:00.000Z",
+    status: "uploading" as const,
+  };
+
+  assert.throws(
+    () => validateProxyUploadRequest(session, {
+      accountId: "account-2",
+      savedVideoId: "saved-video-1",
+      contentLength: 10,
+      now: new Date("2026-07-10T00:00:00.000Z"),
+    }),
+    /ownership metadata/i,
+  );
+  assert.throws(
+    () => validateProxyUploadRequest(session, {
+      accountId: "account-1",
+      savedVideoId: "saved-video-1",
+      contentLength: 11,
+      now: new Date("2026-07-10T00:00:00.000Z"),
+    }),
+    /size did not match/i,
+  );
+  assert.equal(
+    validateProxyUploadRequest(session, {
+      accountId: "account-1",
+      savedVideoId: "saved-video-1",
+      contentLength: 10,
+      now: new Date("2026-07-10T00:00:00.000Z"),
+    }).savedVideoId,
+    "saved-video-1",
+  );
+});

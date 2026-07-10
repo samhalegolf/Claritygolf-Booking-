@@ -19,9 +19,17 @@ type TransferErrorCode =
   | "GOOGLE_RECONNECT_REQUIRED"
   | "DRIVE_FOLDER_PROVISION_FAILED"
   | "DRIVE_UPLOAD_SESSION_FAILED"
+  | "DRIVE_UPLOAD_PROXY_FAILED"
+  | "DRIVE_UPLOAD_TOO_LARGE"
+  | "DRIVE_UPLOAD_SESSION_EXPIRED"
+  | "DRIVE_UPLOAD_INTERRUPTED"
   | "DRIVE_UPLOAD_VERIFY_FAILED"
   | "DRIVE_FINALIZE_FAILED"
   | "SAVED_VIDEO_BLOB_MISSING";
+
+export const maxProxyUploadBytes = 5_000_000;
+const transferSessionSettingsKey = "googleDriveVideoTransferSessionsJson";
+const transferSessionTtlMs = 1000 * 60 * 45;
 
 type SafeSavedVideo = {
   savedVideoId: string;
@@ -60,6 +68,20 @@ type DriveFile = {
   webViewLink?: string;
 };
 
+type TransferSessionState = {
+  savedVideoId: string;
+  accountId: string;
+  playerId: string;
+  assetFolderId: string;
+  videoFileId?: string;
+  uploadUrl: string;
+  expectedSizeBytes: number;
+  checksumSha256: string;
+  createdAt: string;
+  expiresAt: string;
+  status: "uploading" | "uploaded" | "failed";
+};
+
 class TransferError extends Error {
   constructor(
     public readonly code: TransferErrorCode,
@@ -87,6 +109,14 @@ function json(value: unknown, status = 200) {
 
 function cleanString(value: unknown, fallback = "", max = 1200) {
   return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
+}
+
+function parseJson<T>(value: string | undefined, fallback: T): T {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function parseCookies(req: Request) {
@@ -171,6 +201,55 @@ function appProperties(accountId: string, savedVideo: SafeSavedVideo, clarityTyp
     clarityAccountId: accountId,
     clarityVersion,
   };
+}
+
+function transferSessionKey(accountId: string, savedVideoId: string) {
+  return `${accountId}:${savedVideoId}`;
+}
+
+function activeTransferSessions(settings: Record<string, string>, now = new Date()) {
+  const sessions = parseJson<Record<string, TransferSessionState>>(settings[transferSessionSettingsKey], {});
+  return Object.fromEntries(
+    Object.entries(sessions).filter(([, session]) => {
+      const expiresAt = Date.parse(session.expiresAt || "");
+      return Number.isFinite(expiresAt) && expiresAt > now.getTime();
+    })
+  );
+}
+
+async function saveTransferSession(settings: Record<string, string>, session: TransferSessionState) {
+  const sessions = activeTransferSessions(settings);
+  sessions[transferSessionKey(session.accountId, session.savedVideoId)] = session;
+  await setSettings({ [transferSessionSettingsKey]: JSON.stringify(sessions) });
+}
+
+function readTransferSession(settings: Record<string, string>, accountId: string, savedVideoId: string) {
+  return activeTransferSessions(settings)[transferSessionKey(accountId, savedVideoId)] || null;
+}
+
+export function validateProxyUploadRequest(
+  session: Pick<TransferSessionState, "accountId" | "savedVideoId" | "expectedSizeBytes" | "expiresAt" | "status"> | null,
+  args: { accountId: string; savedVideoId: string; contentLength?: number | null; now?: Date }
+) {
+  if (!session) {
+    throw new TransferError("DRIVE_UPLOAD_SESSION_EXPIRED", "Start a new upload session before retrying.", 409);
+  }
+  if (session.accountId !== args.accountId || session.savedVideoId !== args.savedVideoId) {
+    throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Saved video ownership metadata did not match the upload session.", 403);
+  }
+  if (session.status !== "uploading") {
+    throw new TransferError("DRIVE_UPLOAD_SESSION_EXPIRED", "Start a new upload session before retrying.", 409);
+  }
+  if (Date.parse(session.expiresAt || "") <= (args.now || new Date()).getTime()) {
+    throw new TransferError("DRIVE_UPLOAD_SESSION_EXPIRED", "Start a new upload session before retrying.", 409);
+  }
+  if (session.expectedSizeBytes > maxProxyUploadBytes || (args.contentLength || 0) > maxProxyUploadBytes) {
+    throw new TransferError("DRIVE_UPLOAD_TOO_LARGE", "This video is too large for the current transfer method.", 413);
+  }
+  if (args.contentLength != null && args.contentLength > 0 && args.contentLength !== session.expectedSizeBytes) {
+    throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Upload size did not match the saved source.", 409);
+  }
+  return session;
 }
 
 function validateSavedVideo(candidate: any, savedVideoIdFromPath?: string): SafeSavedVideo {
@@ -499,6 +578,9 @@ function transferManifest(args: {
 async function handleUploadSession(req: Request, accountId: string, accessToken: string, settings: Record<string, string>) {
   const body = await readJson(req) as any;
   const { savedVideo, video } = validateUploadSessionPayload(body);
+  if (video.sizeBytes > maxProxyUploadBytes) {
+    throw new TransferError("DRIVE_UPLOAD_TOO_LARGE", "This video is too large for the current transfer method.", 413);
+  }
   const folders = await ensureTransferFolders(accessToken, accountId, settings);
   const assetFolder = await ensureAssetFolder(accessToken, accountId, savedVideo, folders.inbox.id);
   const existingReady = await findDriveFile(accessToken, appProperties(accountId, savedVideo, "manifest"), assetFolder.id);
@@ -512,6 +594,26 @@ async function handleUploadSession(req: Request, accountId: string, accessToken:
     });
   }
   const session = await startResumableUpload(accessToken, accountId, savedVideo, assetFolder.id, video);
+  const createdAt = new Date();
+  await saveTransferSession(settings, {
+    savedVideoId: savedVideo.savedVideoId,
+    accountId,
+    playerId: savedVideo.playerId,
+    assetFolderId: assetFolder.id,
+    videoFileId: session.videoFileId,
+    uploadUrl: session.uploadUrl,
+    expectedSizeBytes: video.sizeBytes,
+    checksumSha256: video.checksumSha256,
+    createdAt: createdAt.toISOString(),
+    expiresAt: new Date(createdAt.getTime() + transferSessionTtlMs).toISOString(),
+    status: "uploading",
+  });
+  console.info("video_transfer:upload_session_created", {
+    savedVideoId: savedVideo.savedVideoId,
+    accountId,
+    assetFolderId: assetFolder.id,
+    expectedSizeBytes: video.sizeBytes,
+  });
   await uploadJsonFile(
     accessToken,
     assetFolder.id,
@@ -522,15 +624,84 @@ async function handleUploadSession(req: Request, accountId: string, accessToken:
   return json({
     ok: true,
     status: "uploading",
-    uploadUrl: session.uploadUrl,
     videoFileId: session.videoFileId,
     assetFolderId: assetFolder.id,
+    maxUploadSizeBytes: maxProxyUploadBytes,
+  });
+}
+
+async function handleUpload(req: Request, accountId: string, settings: Record<string, string>, savedVideoId: string) {
+  const contentLengthHeader = req.headers.get("content-length");
+  const contentLength = contentLengthHeader ? Number(contentLengthHeader) : null;
+  const session = validateProxyUploadRequest(readTransferSession(settings, accountId, savedVideoId), {
+    accountId,
+    savedVideoId,
+    contentLength: Number.isFinite(contentLength) ? contentLength : null,
+  }) as TransferSessionState;
+
+  console.info("video_transfer:proxy_upload_started", {
+    savedVideoId,
+    accountId,
+    expectedSizeBytes: session.expectedSizeBytes,
+  });
+  const bytes = Buffer.from(await req.arrayBuffer());
+  validateProxyUploadRequest(session, { accountId, savedVideoId, contentLength: bytes.byteLength });
+  const checksumSha256 = createHash("sha256").update(bytes).digest("hex");
+  if (checksumSha256 !== session.checksumSha256) {
+    throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Upload checksum did not match the saved source.", 409);
+  }
+
+  const googleResponse = await fetch(session.uploadUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": req.headers.get("content-type") || "application/octet-stream",
+      "Content-Length": String(bytes.byteLength),
+    },
+    body: bytes,
+  });
+  const text = await googleResponse.text();
+  const contentType = googleResponse.headers.get("content-type") || "";
+  console.info("video_transfer:proxy_upload_completed", {
+    savedVideoId,
+    accountId,
+    googleStatus: googleResponse.status,
+    expectedSizeBytes: session.expectedSizeBytes,
+    actualSizeBytes: bytes.byteLength,
+  });
+  if (!googleResponse.ok) {
+    throw new TransferError("DRIVE_UPLOAD_PROXY_FAILED", "Clarity could not complete the upload.", googleResponse.status || 502);
+  }
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Google Drive returned an unexpected upload response.", 502);
+  }
+  const data = text ? JSON.parse(text) : {};
+  const driveFile = data as DriveFile;
+  if (!driveFile.id || Number(driveFile.size || 0) !== session.expectedSizeBytes) {
+    throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Google Drive upload verification failed.", 409);
+  }
+  if (driveFile.appProperties?.claritySavedVideoId !== savedVideoId || driveFile.appProperties?.clarityAccountId !== accountId) {
+    throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Google Drive upload ownership metadata did not match.", 409);
+  }
+  await saveTransferSession(settings, { ...session, videoFileId: driveFile.id, status: "uploaded" });
+  return json({
+    ok: true,
+    status: "uploaded",
+    videoFileId: driveFile.id,
+    assetFolderId: session.assetFolderId,
+    expectedSizeBytes: session.expectedSizeBytes,
+    actualSizeBytes: Number(driveFile.size || 0),
   });
 }
 
 async function handleFinalize(req: Request, accountId: string, accessToken: string, savedVideoId: string) {
   const body = await readJson(req) as any;
   const { savedVideo, video, analysisJson } = validateFinalizePayload(body, savedVideoId);
+  console.info("video_transfer:finalize_started", {
+    savedVideoId,
+    accountId,
+    expectedSizeBytes: video.sizeBytes,
+    videoFileId: video.driveFileId,
+  });
   if (!video.driveFileId) {
     throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Uploaded Drive video file id is required.", 400);
   }
@@ -569,6 +740,13 @@ async function handleFinalize(req: Request, accountId: string, accessToken: stri
     { ...manifestPayload, manifestFileId: undefined }
   );
   const uploadedAt = new Date().toISOString();
+  console.info("video_transfer:finalize_completed", {
+    savedVideoId,
+    accountId,
+    assetFolderId,
+    videoFileId: file.id,
+    manifestFileId: manifest.id,
+  });
   return json({
     ok: true,
     status: "ready",
@@ -624,6 +802,9 @@ export default async function handler(req: Request) {
 
     if (req.method === "POST" && parts[0] === "upload-session") {
       return handleUploadSession(req, accountId, accessToken, settings);
+    }
+    if (req.method === "PUT" && parts[1] === "upload") {
+      return handleUpload(req, accountId, settings, parts[0]);
     }
     if (req.method === "POST" && parts[1] === "finalize") {
       return handleFinalize(req, accountId, accessToken, parts[0]);

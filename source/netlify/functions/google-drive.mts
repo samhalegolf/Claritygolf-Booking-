@@ -194,7 +194,7 @@ async function driveStatusFromSettings(req: Request, settings: Record<string, st
       (state === "permission_upgrade_required"
         ? "Google connected - Drive permission required."
         : state === "connected"
-          ? "Google Drive permission is connected. Video transfer remains disabled until folder provisioning and upload validation are implemented."
+          ? "Google Drive Transfer is ready to send saved videos."
           : state === "reconnect_required"
             ? "Google needs to be reconnected before Drive transfer can be prepared."
           : configured
@@ -325,7 +325,7 @@ export default async function handler(req: Request) {
   try {
     if (req.method === "GET" && action === "callback") {
       const status = await finishGoogleDriveOAuth(req);
-      return html(callbackPage(true, `Connected${status.accountEmail ? ` as ${status.accountEmail}` : ""}. Video transfer remains disabled until Drive folders and upload validation are ready.`));
+      return html(callbackPage(true, `Connected${status.accountEmail ? ` as ${status.accountEmail}` : ""}. Google Drive Transfer is ready to send saved videos.`));
     }
 
     if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
@@ -338,10 +338,9 @@ export default async function handler(req: Request) {
       await getGoogleAccessToken(status.accountId, [driveFileScope]);
       return json({
         ...status,
-        ok: false,
-        error: "drive_transfer_not_implemented",
-        message: "Drive permission can refresh an access token, but video transfer remains disabled until folder provisioning, resumable-upload initiation, ownership checks, and response validation are implemented.",
-      }, 412);
+        ok: true,
+        message: "Google Drive Transfer is ready to send saved videos.",
+      });
     }
     if ((req.method === "GET" || req.method === "POST") && action === "connect") {
       if (!status.configured) return json({ ...status, ok: false, error: "google_oauth_not_configured" }, 400);
