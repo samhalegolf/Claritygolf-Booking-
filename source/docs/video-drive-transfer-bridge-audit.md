@@ -22,18 +22,25 @@ There is no separate Drive refresh-token table, no plaintext Drive token setting
 - Stores only short-lived OAuth state in settings; token material goes through the shared provider service.
 - Saves the Drive grant with `saveGoogleAuthorization({ enableCalendar: true, enableDrive: true })`, preserving the existing encrypted refresh token if Google omits one.
 - Uses `getGoogleAccessToken` for the Drive test path to prove provider refresh works without exposing token material.
-- Keeps video upload/import disabled: `/test` returns a blocked implementation response after refresh succeeds, and `/disconnect` is blocked until ownership and lifecycle semantics are defined.
 - Adds a Settings > Integrations Google Drive Transfer panel showing Not connected, Permission upgrade required, Reconnect required, Error, and Blocked states.
 
-## Required Follow-Up Before Full Transfer
+## Upload Transfer Added
 
-1. Add Drive folder provisioning and persist the owned root/inbox/imported/failed folder IDs.
-2. Add resumable upload initiation, chunk/finalize handling, retry policy, and cancellation.
-3. Validate Drive account ownership and folder ownership before accepting any upload/import state.
-4. Validate Google API responses before writing transfer metadata.
-5. Add transfer asset indexing and primary-device/import ownership rules.
-6. Add import into the managed local video library after the managed-library PR lands.
-7. Add the owner Google Cloud OAuth callback for `/api/google-drive/callback` and make sure the app verification consent screen includes Drive file access.
+- Adds `/api/video-transfer/upload-session`, `/api/video-transfer/:savedVideoId/finalize`, `/status`, `/retry`, and `DELETE /api/video-transfer/:savedVideoId`.
+- Starts Google Drive resumable uploads server-side, then lets the browser PUT the durable saved video blob directly to Google.
+- Provisions `Clarity Golf/Video Transfer/Inbox/<savedVideoId>/` plus `Imported` and `Failed` folders under the connected Google account.
+- Uses Drive `appProperties` for Clarity-created folders/files: `clarityType`, `claritySavedVideoId`, `clarityPlayerId`, `clarityAccountId`, and `clarityVersion`.
+- Writes editable `analysis.json` and a versioned `manifest.json`; drawings are not flattened into the video.
+- Marks `SavedVideoItem.cloud.status` ready only after finalize verifies Drive file size and ownership properties.
+- Keeps the local saved item and blob intact after upload.
+
+## Required Follow-Up Before Full Import
+
+1. Add primary-device download/import into the managed local video library.
+2. Verify download checksum against the manifest before writing the local import.
+3. Write import receipts and define the Drive cleanup/retention policy.
+4. Add resumable continuation across browser reloads if upload URLs can be stored safely.
+5. Add the owner Google Cloud OAuth callback for `/api/google-drive/callback` and make sure the app verification consent screen includes Drive file access.
 
 ## Calendar Regression Checklist
 

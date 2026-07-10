@@ -6,6 +6,7 @@ import type { ComparisonWorkspaceState } from "./localPersistence";
 import {
   SavedVideoLibraryError,
   createMemorySavedVideoLibraryStore,
+  getSavedVideoCloudStatus,
   saveSavedVideoToCloud,
 } from "./savedVideoLibrary";
 
@@ -224,12 +225,44 @@ describe("saved video library", () => {
     assert.equal((await store.getBlob(item.savedVideoId))?.size, transientRecord.blob.size);
   });
 
-  it("keeps cloud transfer disabled until the Drive adapter is implemented", async () => {
+  it("requires durable metadata before starting a Drive upload", async () => {
+    const store = createMemorySavedVideoLibraryStore();
+
     await assert.rejects(
-      () => saveSavedVideoToCloud(),
+      () => saveSavedVideoToCloud("missing-video", store),
       (error) =>
         error instanceof SavedVideoLibraryError &&
-        error.code === "SAVED_VIDEO_WRITE_FAILED"
+        error.code === "SAVED_VIDEO_METADATA_MISSING"
     );
+  });
+
+  it("tracks ready cloud transfer metadata without deleting the local blob", async () => {
+    const store = createMemorySavedVideoLibraryStore();
+    const item = await store.saveItem({
+      playerId: "player-1",
+      sourceSide: "left",
+      sourceVideo: video,
+      sourceBlob: sourceBlob(),
+      analysisSnapshot,
+      workspaceSnapshot,
+    });
+
+    await store.putItem({
+      ...item,
+      cloud: {
+        status: "ready",
+        provider: "google-drive",
+        driveAssetId: "drive-folder-1",
+        driveFolderId: "drive-folder-1",
+        driveVideoFileId: "drive-video-1",
+        driveManifestFileId: "drive-manifest-1",
+        driveAnalysisFileId: "drive-analysis-1",
+        uploadedAt: "2026-07-10T01:00:00.000Z",
+      },
+    });
+
+    const ready = await store.getItem(item.savedVideoId);
+    assert.equal(getSavedVideoCloudStatus(ready).status, "ready");
+    assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
   });
 });
