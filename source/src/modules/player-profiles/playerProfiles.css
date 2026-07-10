@@ -230,24 +230,50 @@
 }
 
 .player-video-card {
-  display: flex;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--border);
   background: var(--panel);
 }
 
-.player-video-card > div {
+.player-video-card.is-legacy {
+  border-style: dashed;
+  background: var(--panel-soft);
+}
+
+.player-video-card-body {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
+.player-video-thumb {
+  width: 64px;
+  height: 42px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+}
+
+.player-video-thumb.is-empty {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
 .player-video-card span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.player-video-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .player-record-list {
@@ -312,6 +338,22 @@
 
 .player-record-action {
   align-self: center;
+}
+
+@media (max-width: 720px) {
+  .player-video-card {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .player-video-thumb {
+    width: 54px;
+    height: 38px;
+  }
+
+  .player-video-card-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
 }
 
 /* Manual add dialog */

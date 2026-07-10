@@ -10,12 +10,18 @@ import { PlayerVideo } from "../models/Video";
 // contract without changing the workspace internals.
 
 const DB_NAME = "clarity-video-analysis";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = "videos";
+const SAVED_ITEMS_STORE_NAME = "savedVideoItems";
+const SAVED_BLOBS_STORE_NAME = "savedVideoBlobs";
 
 export interface StoredVideo {
   video: PlayerVideo;
   blob: Blob;
+}
+
+export interface StoredVideoRecord extends StoredVideo {
+  slotKey: string;
 }
 
 export interface VideoBlobStore {
@@ -25,6 +31,10 @@ export interface VideoBlobStore {
   // Lightweight metadata for every stored video (no blob), used to derive which
   // players have footage and to feed recent-activity views.
   listVideoMeta(): Promise<PlayerVideo[]>;
+  // Recovery records include the transient slot key so legacy slot-only videos
+  // can be deliberately migrated into the saved-video library without deleting
+  // the recovery copy first.
+  listVideoRecords(): Promise<StoredVideoRecord[]>;
 }
 
 export const buildVideoSlotKey = (
@@ -41,8 +51,12 @@ const openDb = (): Promise<IDBDatabase> =>
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
+      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+      if (!db.objectStoreNames.contains(SAVED_ITEMS_STORE_NAME)) {
+        db.createObjectStore(SAVED_ITEMS_STORE_NAME, { keyPath: "savedVideoId" });
+      }
+      if (!db.objectStoreNames.contains(SAVED_BLOBS_STORE_NAME)) {
+        db.createObjectStore(SAVED_BLOBS_STORE_NAME, { keyPath: "savedVideoId" });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -100,6 +114,36 @@ export const createIndexedDbVideoStore = (): VideoBlobStore | null => {
       return (records || [])
         .filter((record) => record && record.video)
         .map((record) => record.video);
+    },
+    async listVideoRecords() {
+      return openDb().then(
+        (db) =>
+          new Promise<StoredVideoRecord[]>((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, "readonly");
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.openCursor();
+            const records: StoredVideoRecord[] = [];
+
+            request.onsuccess = () => {
+              const cursor = request.result;
+              if (!cursor) return;
+              const value = cursor.value as StoredVideo | undefined;
+              if (value?.video && value.blob instanceof Blob) {
+                records.push({
+                  ...value,
+                  slotKey: String(cursor.key),
+                });
+              }
+              cursor.continue();
+            };
+            request.onerror = () => reject(request.error);
+            tx.onerror = () => reject(tx.error);
+            tx.oncomplete = () => {
+              db.close();
+              resolve(records);
+            };
+          })
+      );
     },
   };
 };

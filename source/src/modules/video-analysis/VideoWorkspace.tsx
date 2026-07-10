@@ -23,20 +23,23 @@ import {
   ComparisonSide,
   ComparisonWorkspaceState,
   SaveBackend,
-  VideoAnalysisSaveArtifact,
   VideoAnalysisPersistenceLayer,
   WorkspacePersistenceContext,
   createVideoAnalysisPersistence,
   loadComparisonWorkspaceState,
   saveComparisonWorkspaceState,
-  saveVideoAnalysisArtifactToCloud,
-  saveVideoAnalysisArtifactToDevice,
   WorkspaceMode,
 } from "./utils/localPersistence";
 import {
   buildVideoSlotKey,
   requestPersistentStorage,
 } from "./utils/videoBlobStore";
+import {
+  createIndexedDbSavedVideoLibrary,
+  SavedVideoLibraryError,
+  type SavedVideoItem,
+  type SavedVideoLibraryStore,
+} from "./utils/savedVideoLibrary";
 import { useAnalysisStore } from "./hooks/useAnalysisStore";
 import { useDrawing } from "./hooks/useDrawing";
 import { useMarkerThumbnails } from "./hooks/useMarkerThumbnails";
@@ -79,7 +82,10 @@ interface VideoWorkspaceProps {
   playerName?: string;
   lessonId?: string;
   lessonTitle?: string;
+  savedVideoId?: string;
   persistence?: Partial<VideoAnalysisPersistenceLayer>;
+  savedVideoLibrary?: SavedVideoLibraryStore | null;
+  onSavedVideoLibraryChange?: () => void;
 }
 
 const normalizePoint = (point: { x: number; y: number }, overlay: { width: number; height: number }) => ({
@@ -243,7 +249,10 @@ export function VideoWorkspace({
   playerName,
   lessonId,
   lessonTitle,
+  savedVideoId,
   persistence,
+  savedVideoLibrary,
+  onSavedVideoLibraryChange,
 }: VideoWorkspaceProps) {
   const leftVideoRef = useRef<HTMLVideoElement>(null);
   const rightVideoRef = useRef<HTMLVideoElement>(null);
@@ -255,6 +264,8 @@ export function VideoWorkspace({
   const resolvedPlayerId = playerId || DEFAULT_PLAYER_ID;
   const resolvedPlayerName = playerName || resolvedPlayerId;
   const persistenceLayer = useMemo(() => createVideoAnalysisPersistence(persistence), [persistence]);
+  const defaultSavedVideoLibrary = useMemo(() => createIndexedDbSavedVideoLibrary(), []);
+  const savedVideoStore = savedVideoLibrary === undefined ? defaultSavedVideoLibrary : savedVideoLibrary;
   const workspaceContext = useMemo<WorkspacePersistenceContext>(
     () => ({
       playerId: resolvedPlayerId,
@@ -302,6 +313,7 @@ export function VideoWorkspace({
   const [linkedPlayback, setLinkedPlayback] = useState(false);
   const [activeSide, setActiveSide] = useState<ComparisonSide>("left");
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
+  const [currentSavedVideoIds, setCurrentSavedVideoIds] = useState<Partial<Record<ComparisonSide, string>>>({});
   const [saveBackend, setSaveBackend] = useState<SaveBackend>("local-device");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveMessage, setSaveMessage] = useState("Nothing to save yet.");
@@ -513,6 +525,7 @@ export function VideoWorkspace({
         setFocusWindowMode(loaded.focusWindowMode);
         setFocusWindowSide(loaded.mode === "single" ? "left" : loaded.focusWindowSide);
         setFocusAreaRect(loaded.focusAreaRect);
+        setCurrentSavedVideoIds(loaded.savedVideoIds || {});
       }
       // Mark hydration complete so the save effect can begin persisting without
       // first overwriting restored state with mount-time defaults.
@@ -528,6 +541,7 @@ export function VideoWorkspace({
       version: 1,
       mode: comparisonMode,
       activeSide,
+      savedVideoIds: currentSavedVideoIds,
       linkedPlayback,
       focusWindowOpen: showFocusWindow,
       focusWindowMode,
@@ -537,6 +551,7 @@ export function VideoWorkspace({
   }, [
     activeSide,
     comparisonMode,
+    currentSavedVideoIds,
     focusAreaRect,
     focusWindowMode,
     focusWindowSide,
@@ -759,6 +774,7 @@ export function VideoWorkspace({
         markers: defaults,
         drawings: [],
       });
+      setCurrentSavedVideoIds((current) => ({ ...current, [side]: undefined }));
       setActiveSideInCompare(side);
 
       // Persist the raw video bytes on-device so the upload survives a reload.
@@ -846,6 +862,122 @@ export function VideoWorkspace({
     },
     []
   );
+
+  const restoreSavedVideo = useCallback(
+    async (targetSavedVideoId: string) => {
+      if (!savedVideoStore) {
+        throw new SavedVideoLibraryError(
+          "SAVED_VIDEO_LOAD_FAILED",
+          "Saved video library is unavailable in this browser."
+        );
+      }
+
+      const item = await savedVideoStore.getItem(targetSavedVideoId);
+      if (!item) {
+        throw new SavedVideoLibraryError(
+          "SAVED_VIDEO_METADATA_MISSING",
+          "Saved video metadata could not be found."
+        );
+      }
+
+      const blob = await savedVideoStore.getBlob(targetSavedVideoId);
+      if (!blob) {
+        setSaveStatus("error");
+        setSaveMessage("Local file unavailable. Saved card was kept for recovery.");
+        return;
+      }
+
+      const side = item.sourceSide || "left";
+      const isLeft = side === "left";
+      const playback = isLeft ? leftPlayback : rightPlayback;
+      const analysisStore = isLeft ? leftStore : rightStore;
+      const setPlayerVideo = isLeft ? setPlayerVideoLeft : setPlayerVideoRight;
+      const setMountedSource = isLeft ? setLeftMountedSource : setRightMountedSource;
+      const setMetadataReady = isLeft ? setLeftMetadataReady : setRightMetadataReady;
+      const file = new File(
+        [blob],
+        item.source.originalFileName || item.title || "saved-video",
+        { type: item.source.mimeType || blob.type || "video/mp4" }
+      );
+      const loaded = await playback.loadVideoFile(file);
+      const restoredVideo: PlayerVideo = {
+        id: item.savedVideoId,
+        playerId: item.playerId,
+        lessonId: item.lessonId,
+        sourceUrl: loaded.sourceUrl,
+        title: item.title || item.source.originalFileName,
+        createdAt: item.capturedAt || item.createdAt,
+        duration: item.source.duration || loaded.duration,
+        fps: item.analysisSnapshot.videoMeta?.fps || loaded.fps,
+        width: item.source.width || loaded.width,
+        height: item.source.height || loaded.height,
+      };
+
+      setPlayerVideo(restoredVideo);
+      setMountedSource(restoredVideo.sourceUrl);
+      setMetadataReady(false);
+      analysisStore.replaceAnalysis({
+        ...item.analysisSnapshot,
+        playerId: item.playerId,
+        lessonId: item.lessonId,
+        videoId: item.savedVideoId,
+        videoMeta: {
+          ...item.analysisSnapshot.videoMeta,
+          title: item.title,
+          duration: restoredVideo.duration,
+          fps: restoredVideo.fps,
+          width: restoredVideo.width,
+          height: restoredVideo.height,
+        },
+      });
+      setComparisonMode(item.workspaceSnapshot.mode);
+      setActiveSide(item.workspaceSnapshot.mode === "single" ? "left" : item.workspaceSnapshot.activeSide);
+      setLinkedPlayback(item.workspaceSnapshot.linkedPlayback);
+      setShowFocusWindow(item.workspaceSnapshot.focusWindowOpen);
+      setFocusWindowMode(item.workspaceSnapshot.focusWindowMode);
+      setFocusWindowSide(item.workspaceSnapshot.mode === "single" ? "left" : item.workspaceSnapshot.focusWindowSide);
+      setFocusAreaRect(item.workspaceSnapshot.focusAreaRect);
+      setCurrentSavedVideoIds({
+        ...item.workspaceSnapshot.savedVideoIds,
+        [side]: item.savedVideoId,
+      });
+      setActiveSideInCompare(side);
+
+      persistenceLayer.videoStore
+        ?.putVideo(buildVideoSlotKey(item.playerId, side, item.lessonId), restoredVideo, blob)
+        .catch(() => {
+          // Saved library stays intact even if the recovery copy cannot be rebuilt.
+        });
+
+      setSaveStatus("idle");
+      setSaveMessage("Saved video loaded.");
+    },
+    [
+      leftPlayback,
+      leftStore,
+      persistenceLayer.videoStore,
+      rightPlayback,
+      rightStore,
+      savedVideoStore,
+      setActiveSideInCompare,
+    ]
+  );
+
+  const openedSavedVideoRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!savedVideoId || openedSavedVideoRef.current === savedVideoId) return;
+    openedSavedVideoRef.current = savedVideoId;
+    void restoreSavedVideo(savedVideoId).catch((error) => {
+      setSaveStatus("error");
+      setSaveMessage(
+        error instanceof SavedVideoLibraryError
+          ? error.message
+          : "Saved video could not be loaded."
+      );
+      // eslint-disable-next-line no-console
+      console.error("Saved video load failed", error);
+    });
+  }, [restoreSavedVideo, savedVideoId]);
 
   const openLiveRecording = useCallback(
     async (side: ComparisonSide, cameraId = selectedCameraId) => {
@@ -1234,6 +1366,7 @@ export function VideoWorkspace({
       setPlayerVideo(null);
       setMountedSource(null);
       setMetadataReady(false);
+      setCurrentSavedVideoIds((current) => ({ ...current, [side]: undefined }));
 
       // Drop the on-device copy for this slot so it is not re-hydrated later.
       persistenceLayer.videoStore
@@ -1613,26 +1746,33 @@ export function VideoWorkspace({
     onCancel: handleBackAction,
   });
 
-  const createSaveArtifact = useCallback(
-    (backend: SaveBackend): VideoAnalysisSaveArtifact => ({
-      version: 1,
-      savedAt: new Date().toISOString(),
-      backend,
-      playerId: resolvedPlayerId,
-      lessonId,
-      workspace: buildWorkspaceState(),
-      analyses: {
-        left: leftStore.analysis as VideoAnalysis,
-        right: rightStore.analysis as VideoAnalysis,
-      },
-    }),
-    [
-      buildWorkspaceState,
-      leftStore.analysis,
-      lessonId,
-      resolvedPlayerId,
-      rightStore.analysis,
-    ]
+  const saveableSides = useMemo(() => {
+    const sides: ComparisonSide[] = [];
+    if (playerVideoLeft) sides.push("left");
+    if (playerVideoRight) sides.push("right");
+    return sides;
+  }, [playerVideoLeft, playerVideoRight]);
+
+  const captureSideThumbnail = useCallback(
+    (side: ComparisonSide) => {
+      const video = side === "left" ? leftVideoRef.current : rightVideoRef.current;
+      if (!video || !video.videoWidth || !video.videoHeight) return undefined;
+
+      try {
+        const canvas = document.createElement("canvas");
+        const maxWidth = 320;
+        const ratio = Math.min(1, maxWidth / Math.max(1, video.videoWidth));
+        canvas.width = Math.max(1, Math.round(video.videoWidth * ratio));
+        canvas.height = Math.max(1, Math.round(video.videoHeight * ratio));
+        const context = canvas.getContext("2d");
+        if (!context) return undefined;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL("image/jpeg", 0.72);
+      } catch {
+        return undefined;
+      }
+    },
+    []
   );
 
   const handleManualSave = useCallback(async () => {
@@ -1642,46 +1782,119 @@ export function VideoWorkspace({
       return;
     }
 
+    if (!saveableSides.length) {
+      setSaveStatus("error");
+      setSaveMessage("Save needs an uploaded or recorded video.");
+      return;
+    }
+
+    if (saveBackend === "cloud-service") {
+      setSaveStatus("error");
+      setSaveMessage("Cloud transfer is coming next. Save locally first.");
+      return;
+    }
+
+    if (!savedVideoStore || !persistenceLayer.videoStore) {
+      setSaveStatus("error");
+      setSaveMessage("Device video storage is unavailable in this browser.");
+      return;
+    }
+
     setSaveStatus("saving");
-    setSaveMessage(saveBackend === "local-device" ? "Saving to this device..." : "Saving to cloud...");
+    setSaveMessage("Saving to Player Profile...");
 
     try {
       const [leftSaved, rightSaved] = await Promise.all([
         leftStore.saveNow(),
         rightStore.saveNow(),
       ]);
-      await saveWorkspaceState();
 
       if (!leftSaved || !rightSaved) {
         throw new Error("One side could not be saved.");
       }
 
-      const artifact = createSaveArtifact(saveBackend);
-      if (saveBackend === "local-device") {
-        await saveVideoAnalysisArtifactToDevice(artifact);
-        setSaveMessage("Saved to this device.");
-      } else {
-        await saveVideoAnalysisArtifactToCloud(artifact);
-        setSaveMessage("Saved to cloud service.");
+      let nextSavedVideoIds = { ...currentSavedVideoIds };
+      const savedItems: SavedVideoItem[] = [];
+
+      for (const side of saveableSides) {
+        const playerVideo = side === "left" ? playerVideoLeft : playerVideoRight;
+        const analysisStore = side === "left" ? leftStore : rightStore;
+        if (!playerVideo) continue;
+
+        const transient = await persistenceLayer.videoStore.getVideo(
+          buildVideoSlotKey(resolvedPlayerId, side, lessonId)
+        );
+        if (!transient?.blob) {
+          throw new SavedVideoLibraryError(
+            "TRANSIENT_VIDEO_NOT_FOUND",
+            `${getSideTitle(side)} video source is missing from recovery storage.`
+          );
+        }
+
+        const item = await savedVideoStore.saveItem({
+          savedVideoId: nextSavedVideoIds[side],
+          playerId: resolvedPlayerId,
+          lessonId,
+          title: playerVideo.title,
+          sourceSide: side,
+          sourceVideo: playerVideo,
+          sourceBlob: transient.blob,
+          analysisSnapshot: analysisStore.analysis as VideoAnalysis,
+          workspaceSnapshot: buildWorkspaceState(),
+          thumbnailDataUrl: captureSideThumbnail(side),
+        });
+        savedItems.push(item);
+        nextSavedVideoIds = { ...nextSavedVideoIds, [side]: item.savedVideoId };
       }
+
+      if (!savedItems.length) {
+        throw new SavedVideoLibraryError(
+          "SAVED_VIDEO_WRITE_FAILED",
+          "No active video was available to save."
+        );
+      }
+
+      setCurrentSavedVideoIds(nextSavedVideoIds);
+      await saveComparisonWorkspaceState(
+        { ...buildWorkspaceState(), savedVideoIds: nextSavedVideoIds },
+        persistenceLayer.workspaceAdapter,
+        workspaceContext
+      );
+      onSavedVideoLibraryChange?.();
+      setSaveMessage(
+        savedItems.length === 1
+          ? "Saved to Player Profile."
+          : `Saved ${savedItems.length} videos to Player Profile.`
+      );
       setSaveStatus("saved");
     } catch (error) {
       setSaveStatus("error");
-      setSaveMessage(
-        saveBackend === "cloud-service"
-          ? "Cloud save failed. Check the configured save endpoint."
-          : "Device save failed. Browser storage may be unavailable."
-      );
+      const message =
+        error instanceof SavedVideoLibraryError
+          ? error.message
+          : "Device save failed. Workspace was kept intact.";
+      setSaveMessage(message);
       // eslint-disable-next-line no-console
       console.error("Manual video analysis save failed", error);
     }
   }, [
+    buildWorkspaceState,
     canManualSave,
-    createSaveArtifact,
+    captureSideThumbnail,
+    currentSavedVideoIds,
     leftStore,
+    lessonId,
+    onSavedVideoLibraryChange,
+    persistenceLayer.videoStore,
+    persistenceLayer.workspaceAdapter,
+    playerVideoLeft,
+    playerVideoRight,
+    resolvedPlayerId,
     rightStore,
     saveBackend,
-    saveWorkspaceState,
+    saveableSides,
+    savedVideoStore,
+    workspaceContext,
   ]);
 
   const renderVideoCard = (
@@ -2028,8 +2241,9 @@ export function VideoWorkspace({
                     name="video-analysis-save-backend"
                     checked={saveBackend === "cloud-service"}
                     onChange={() => setSaveBackend("cloud-service")}
+                    disabled
                   />
-                  Cloud
+                  Cloud transfer coming next
                 </label>
               </div>
             ) : null}
