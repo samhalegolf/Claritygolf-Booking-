@@ -48,9 +48,17 @@ import { VideoAnalysisPage } from "./modules/video-analysis";
 import { ClarityVoiceTextPanel } from "./modules/clarity-voice";
 import {
   createIndexedDbVideoStore,
+  type StoredVideoRecord,
   type VideoBlobStore,
 } from "./modules/video-analysis/utils/videoBlobStore";
 import type { PlayerVideo } from "./modules/video-analysis/models/Video";
+import type { VideoAnalysis } from "./modules/video-analysis/models/Analysis";
+import type { ComparisonSide, ComparisonWorkspaceState } from "./modules/video-analysis/utils/localPersistence";
+import {
+  createIndexedDbSavedVideoLibrary,
+  type SavedVideoItem,
+  type SavedVideoLibraryStore,
+} from "./modules/video-analysis/utils/savedVideoLibrary";
 import {
   loadPlayerProfilesState,
   addManualPlayer,
@@ -3357,6 +3365,57 @@ function profileRecordTitle(playerName = "", createdAt = "") {
   return date ? `${name} - ${date}` : name;
 }
 
+function formatVideoDurationLabel(seconds?: number) {
+  if (!Number.isFinite(seconds ?? NaN) || !seconds) return "Duration unknown";
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = totalSeconds % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function sourceSideFromSlotKey(slotKey: string): ComparisonSide {
+  return slotKey.endsWith(".right") ? "right" : "left";
+}
+
+function createDefaultVideoWorkspaceState(side: ComparisonSide): ComparisonWorkspaceState {
+  return {
+    version: 1,
+    mode: "single",
+    activeSide: side,
+    savedVideoIds: {},
+    linkedPlayback: false,
+    focusWindowOpen: false,
+    focusWindowMode: "area",
+    focusWindowSide: side,
+    focusAreaRect: null,
+  };
+}
+
+function createMigrationAnalysis(video: PlayerVideo): VideoAnalysis {
+  const now = new Date().toISOString();
+  return {
+    id: `analysis-${video.id || now}`,
+    playerId: video.playerId,
+    lessonId: video.lessonId,
+    videoId: video.id,
+    videoMeta: {
+      title: video.title,
+      duration: video.duration,
+      fps: video.fps,
+      width: video.width,
+      height: video.height,
+    },
+    drawings: [],
+    markers: [],
+    notes: [],
+    focusViews: [],
+    focusSnapshots: [],
+    narrationRefs: [],
+    createdAt: video.createdAt || now,
+    updatedAt: now,
+  };
+}
+
 async function readJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T & { message?: string; error?: string }> {
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
@@ -4015,13 +4074,14 @@ function App() {
   const [selectedId, setSelectedId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
-  const [videoContext, setVideoContext] = useState<{ playerId: string; playerName: string } | null>(null);
+  const [videoContext, setVideoContext] = useState<{ playerId: string; playerName: string; savedVideoId?: string } | null>(null);
   const [playerProfilesLocal, setPlayerProfilesLocal] = useState<PlayerProfilesLocalState>(() => ({
     manualIds: [],
     notesStamps: {},
     createdStamps: {},
   }));
-  const [storedVideoMeta, setStoredVideoMeta] = useState<PlayerVideo[]>([]);
+  const [savedVideoItems, setSavedVideoItems] = useState<SavedVideoItem[]>([]);
+  const [legacyVideoRecords, setLegacyVideoRecords] = useState<StoredVideoRecord[]>([]);
   const [showPlayerAddDialog, setShowPlayerAddDialog] = useState(false);
   const [playerAddSearch, setPlayerAddSearch] = useState("");
   const [playerAddNew, setPlayerAddNew] = useState({ name: "", email: "", phone: "" });
@@ -4030,34 +4090,44 @@ function App() {
   if (videoStoreRef.current === null) {
     videoStoreRef.current = createIndexedDbVideoStore();
   }
+  const savedVideoLibraryRef = useRef<SavedVideoLibraryStore | null>(null);
+  if (savedVideoLibraryRef.current === null) {
+    savedVideoLibraryRef.current = createIndexedDbSavedVideoLibrary();
+  }
 
   useEffect(() => {
     setPlayerProfilesLocal(loadPlayerProfilesState());
   }, []);
 
-  const refreshStoredVideoMeta = useCallback(() => {
-    const store = videoStoreRef.current;
-    if (!store) return;
-    void store
-      .listVideoMeta()
-      .then((meta) => setStoredVideoMeta(meta))
+  const refreshSavedVideoLibrary = useCallback(() => {
+    const savedStore = savedVideoLibraryRef.current;
+    const transientStore = videoStoreRef.current;
+    void savedStore
+      ?.listItems()
+      .then((items) => setSavedVideoItems(items))
       .catch(() => {
-        // Ignore; an empty list simply hides video-derived profiles/activity.
+        // Ignore; an empty list simply hides saved-library profile activity.
+      });
+    void transientStore
+      ?.listVideoRecords()
+      .then((records) => setLegacyVideoRecords(records))
+      .catch(() => {
+        // Ignore; legacy recovery records are best-effort migration helpers.
       });
   }, []);
 
   useEffect(() => {
-    refreshStoredVideoMeta();
-  }, [refreshStoredVideoMeta]);
+    refreshSavedVideoLibrary();
+  }, [refreshSavedVideoLibrary]);
 
   // Refresh player-profile derived data whenever the view opens, so uploads
   // and lesson notes made during this session show up without a reload.
   useEffect(() => {
     if (activeView === "players") {
-      refreshStoredVideoMeta();
+      refreshSavedVideoLibrary();
       void refreshLessonNotes();
     }
-  }, [activeView, refreshStoredVideoMeta]);
+  }, [activeView, refreshSavedVideoLibrary]);
 
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
   const [billingSection, setBillingSection] = useState<BillingSection>("dashboard");
@@ -6637,13 +6707,22 @@ function App() {
   }, [clientSearchTerm, clients]);
 
   // ----- Player Profiles derivations -----
+  const savedVideoIds = useMemo(() => {
+    const ids = new Set<string>();
+    savedVideoItems.forEach((video) => ids.add(video.savedVideoId));
+    return ids;
+  }, [savedVideoItems]);
+
   const videoPlayerIds = useMemo(() => {
     const ids = new Set<string>();
-    storedVideoMeta.forEach((video) => {
+    savedVideoItems.forEach((video) => {
       if (video.playerId) ids.add(video.playerId);
     });
+    legacyVideoRecords.forEach((record) => {
+      if (record.video.playerId && !savedVideoIds.has(record.video.id)) ids.add(record.video.playerId);
+    });
     return ids;
-  }, [storedVideoMeta]);
+  }, [legacyVideoRecords, savedVideoIds, savedVideoItems]);
 
   const lessonNotePlayerIds = useMemo(() => {
     const ids = new Set<string>();
@@ -6762,16 +6841,24 @@ function App() {
   const playerToolVideos = useMemo(() => {
     if (!notesWorkspaceClient) return [];
     const playerIds = profileIdsForClient(notesWorkspaceClient);
-    return storedVideoMeta
+    return savedVideoItems
       .filter((video) => playerIds.has(video.playerId))
-      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-  }, [notesWorkspaceClient, storedVideoMeta]);
+      .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
+  }, [notesWorkspaceClient, savedVideoItems]);
+  const playerToolLegacyVideoRecords = useMemo(() => {
+    if (!notesWorkspaceClient) return [];
+    const playerIds = profileIdsForClient(notesWorkspaceClient);
+    return legacyVideoRecords
+      .filter((record) => playerIds.has(record.video.playerId))
+      .filter((record) => !savedVideoIds.has(record.video.id))
+      .sort((a, b) => String(b.video.createdAt).localeCompare(String(a.video.createdAt)));
+  }, [legacyVideoRecords, notesWorkspaceClient, savedVideoIds]);
   const linkedLessonVideoIds = useMemo(() => {
     const ids = new Set<string>();
     const noteLessonIds = new Set(notesWorkspaceLessonNotes.map((note) => note.lessonId).filter(Boolean));
     if (!noteLessonIds.size) return ids;
     playerToolVideos.forEach((video) => {
-      if (video.lessonId && noteLessonIds.has(video.lessonId)) ids.add(video.id);
+      if (video.lessonId && noteLessonIds.has(video.lessonId)) ids.add(video.savedVideoId);
     });
     return ids;
   }, [notesWorkspaceLessonNotes, playerToolVideos]);
@@ -6794,13 +6881,13 @@ function App() {
       };
     });
     const videoRecords: PlayerToolRecord[] = playerToolVideos.map((video) => ({
-      id: `video-${video.id}`,
+      id: `video-${video.savedVideoId}`,
       kind: "video",
-      title: profileRecordTitle(notesWorkspaceClient?.name, video.createdAt),
-      subtitle: `${video.title || "Video file"}${linkedLessonVideoIds.has(video.id) ? " · Linked lesson note" : ""}`,
-      timestamp: video.createdAt,
+      title: profileRecordTitle(notesWorkspaceClient?.name, video.updatedAt || video.createdAt),
+      subtitle: `${video.title || "Video file"}${linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}`,
+      timestamp: video.updatedAt || video.createdAt,
       lessonId: video.lessonId,
-      sourceId: video.id,
+      sourceId: video.savedVideoId,
     }));
     return [...noteRecords, ...videoRecords]
       .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
@@ -8629,12 +8716,77 @@ function App() {
     if (view !== "calendar") closeCalendarDetails();
   }
 
-  function openVideoAnalysisForClient(client: { id: string; name: string }) {
-    setVideoContext({ playerId: client.id, playerName: client.name });
+  function openVideoAnalysisForClient(client: { id: string; name: string; savedVideoId?: string }) {
+    setVideoContext({ playerId: client.id, playerName: client.name, savedVideoId: client.savedVideoId });
     setActiveView("video");
     closeClientModal();
     setQuickCreate(null);
     closeCalendarDetails();
+  }
+
+  async function renameSavedVideo(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const title = window.prompt("Rename saved video", item.title);
+    if (title === null) return;
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      setToast({ message: "Saved video name cannot be blank." });
+      return;
+    }
+    try {
+      await store.putItem({ ...item, title: nextTitle });
+      refreshSavedVideoLibrary();
+      setToast({ message: "Saved video renamed." });
+    } catch {
+      setToast({ message: "Saved video could not be renamed." });
+    }
+  }
+
+  async function deleteSavedVideo(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const currentlyOpen = videoContext?.savedVideoId === item.savedVideoId;
+    const confirmed = window.confirm(
+      currentlyOpen
+        ? "This saved video is currently open in Video Analysis. Delete the saved library item? The active workspace copy will not be cleared."
+        : "Delete this saved video from the Player Profile library?"
+    );
+    if (!confirmed) return;
+    try {
+      await store.deleteItem(item.savedVideoId);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Saved video deleted." });
+    } catch {
+      setToast({ message: "Saved video could not be deleted." });
+    }
+  }
+
+  async function migrateLegacyVideo(record: StoredVideoRecord) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const side = sourceSideFromSlotKey(record.slotKey);
+    try {
+      await store.migrateTransientVideo({
+        storedVideo: record,
+        sourceSide: side,
+        analysisSnapshot: createMigrationAnalysis(record.video),
+        workspaceSnapshot: createDefaultVideoWorkspaceState(side),
+      });
+      refreshSavedVideoLibrary();
+      setToast({ message: "Moved recovery video to Saved Videos. Original recovery copy was kept." });
+    } catch {
+      setToast({ message: "Recovery video could not be moved to Saved Videos." });
+    }
   }
 
   function selectPlayerProfileTool(client: Pick<Person, "id" | "name">, tool: PlayerProfileTool = "recent") {
@@ -16384,6 +16536,7 @@ function App() {
                                               openVideoAnalysisForClient({
                                                 id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
                                                 name: notesWorkspaceClient.name,
+                                                savedVideoId: record.sourceId,
                                               })
                                             }
                                           >
@@ -16453,31 +16606,92 @@ function App() {
                                   </button>
                                 </div>
                                 <div className="player-video-list">
-                                  {playerToolVideos.length ? (
-                                    playerToolVideos.map((video) => (
-                                      <article className="player-video-card" key={video.id}>
-                                        <div>
-                                          <strong>{profileRecordTitle(notesWorkspaceClient.name, video.createdAt)}</strong>
-                                          <span>
-                                            {video.title || "Video file"}
-                                            {linkedLessonVideoIds.has(video.id) ? " · Linked lesson note" : ""}
-                                          </span>
-                                        </div>
-                                        <button
-                                          type="button"
-                                          className="outline-button"
-                                          onClick={() =>
-                                            openVideoAnalysisForClient({
-                                              id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
-                                              name: notesWorkspaceClient.name,
-                                            })
-                                          }
-                                        >
-                                          <Video size={14} />
-                                          Open
-                                        </button>
-                                      </article>
-                                    ))
+                                  {playerToolVideos.length || playerToolLegacyVideoRecords.length ? (
+                                    <>
+                                      {playerToolVideos.map((video) => (
+                                        <article className="player-video-card" key={video.savedVideoId}>
+                                          {video.thumbnailDataUrl ? (
+                                            <img
+                                              className="player-video-thumb"
+                                              src={video.thumbnailDataUrl}
+                                              alt=""
+                                            />
+                                          ) : (
+                                            <div className="player-video-thumb is-empty">
+                                              <Video size={16} />
+                                            </div>
+                                          )}
+                                          <div className="player-video-card-body">
+                                            <strong>{video.title || profileRecordTitle(notesWorkspaceClient.name, video.updatedAt || video.createdAt)}</strong>
+                                            <span>
+                                              {profileRecordTitle(notesWorkspaceClient.name, video.updatedAt || video.createdAt)}
+                                              {" · "}
+                                              {formatVideoDurationLabel(video.source.duration)}
+                                              {" · "}
+                                              {video.local.status === "available" ? "Local" : "Local file unavailable"}
+                                              {" · "}
+                                              {video.cloud?.status === "ready" ? "Cloud ready" : "Cloud not uploaded"}
+                                              {linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}
+                                            </span>
+                                          </div>
+                                          <div className="player-video-card-actions">
+                                            <button
+                                              type="button"
+                                              className="outline-button"
+                                              onClick={() =>
+                                                openVideoAnalysisForClient({
+                                                  id: video.playerId,
+                                                  name: notesWorkspaceClient.name,
+                                                  savedVideoId: video.savedVideoId,
+                                                })
+                                              }
+                                            >
+                                              <Video size={14} />
+                                              Open
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="outline-button"
+                                              onClick={() => void renameSavedVideo(video)}
+                                            >
+                                              <Pencil size={14} />
+                                              Rename
+                                            </button>
+                                            <button
+                                              type="button"
+                                              className="danger-button"
+                                              onClick={() => void deleteSavedVideo(video)}
+                                            >
+                                              <Trash2 size={14} />
+                                              Delete
+                                            </button>
+                                          </div>
+                                        </article>
+                                      ))}
+                                      {playerToolLegacyVideoRecords.map((record) => (
+                                        <article className="player-video-card is-legacy" key={record.slotKey}>
+                                          <div className="player-video-thumb is-empty">
+                                            <Archive size={16} />
+                                          </div>
+                                          <div className="player-video-card-body">
+                                            <strong>{record.video.title || "Recovery video"}</strong>
+                                            <span>
+                                              Slot recovery only · {formatVideoDurationLabel(record.video.duration)} · Move to Saved Videos to keep it in the durable library
+                                            </span>
+                                          </div>
+                                          <div className="player-video-card-actions">
+                                            <button
+                                              type="button"
+                                              className="outline-button"
+                                              onClick={() => void migrateLegacyVideo(record)}
+                                            >
+                                              <Archive size={14} />
+                                              Move to Saved Videos
+                                            </button>
+                                          </div>
+                                        </article>
+                                      ))}
+                                    </>
                                   ) : (
                                     <p className="notes-empty">No videos yet.</p>
                                   )}
@@ -16586,6 +16800,9 @@ function App() {
             <VideoAnalysisPage
               playerId={videoContext?.playerId}
               playerName={videoContext?.playerName}
+              savedVideoId={videoContext?.savedVideoId}
+              savedVideoLibrary={savedVideoLibraryRef.current}
+              onSavedVideoLibraryChange={refreshSavedVideoLibrary}
             />
           </section>
         )}

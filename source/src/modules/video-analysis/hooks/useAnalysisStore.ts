@@ -19,6 +19,7 @@ export interface UseAnalysisStoreArgs {
 export interface UseAnalysisStoreResult {
   analysis: VideoAnalysis;
   updateAnalysis: (patch: Partial<VideoAnalysis>) => void;
+  replaceAnalysis: (nextAnalysis: VideoAnalysis) => void;
   setMarkers: (markers: TimelineMarker[]) => void;
   setDrawings: (drawings: DrawingObject[]) => void;
   persistenceError: string | null;
@@ -399,6 +400,16 @@ export function useAnalysisStore({
     [scheduleSave]
   );
 
+  const replaceAnalysis = useCallback(
+    (nextAnalysis: VideoAnalysis) => {
+      const safeAnalysis = sanitizeAnalysis(playerId, safeVideoId, lessonId, nextAnalysis);
+      analysisRef.current = safeAnalysis;
+      setAnalysis(safeAnalysis);
+      scheduleSave();
+    },
+    [lessonId, playerId, safeVideoId, scheduleSave]
+  );
+
   const setMarkers = useCallback(
     (markers: TimelineMarker[]) => updateAnalysis({ markers }),
     [updateAnalysis]
@@ -412,6 +423,7 @@ export function useAnalysisStore({
   return {
     analysis,
     updateAnalysis,
+    replaceAnalysis,
     setMarkers,
     setDrawings,
     persistenceError,

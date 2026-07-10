@@ -10,9 +10,6 @@ const WORKSPACE_PREFIX = "clarity.video.workspace";
 const ARTIFACT_PREFIX = "clarity.video.artifact";
 const DEVICE_DB_NAME = "clarity-video-analysis-device";
 const DEVICE_STORE_NAME = "keyValue";
-const CLOUD_SAVE_ENDPOINT =
-  (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env
-    ?.VITE_VIDEO_ANALYSIS_CLOUD_SAVE_URL || "/api/video-analysis/save";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -89,6 +86,7 @@ export interface ComparisonWorkspaceState {
   version: 1;
   mode: WorkspaceMode;
   activeSide: ComparisonSide;
+  savedVideoIds?: Partial<Record<ComparisonSide, string>>;
   linkedPlayback: boolean;
   focusWindowOpen: boolean;
   focusWindowMode: FocusMode;
@@ -297,11 +295,26 @@ const sanitizeWorkspaceState = (raw: unknown): ComparisonWorkspaceState | null =
     candidate.focusWindowMode === "track" ? "track" : "area";
   const focusWindowSide = candidate.focusWindowSide === "right" ? "right" : "left";
   const focusAreaRect = sanitizeFocusAreaRect(candidate.focusAreaRect);
+  const savedVideoIdsCandidate = candidate.savedVideoIds;
+  const savedVideoIds =
+    savedVideoIdsCandidate && typeof savedVideoIdsCandidate === "object"
+      ? {
+          left:
+            typeof (savedVideoIdsCandidate as Record<string, unknown>).left === "string"
+              ? ((savedVideoIdsCandidate as Record<string, string>).left)
+              : undefined,
+          right:
+            typeof (savedVideoIdsCandidate as Record<string, unknown>).right === "string"
+              ? ((savedVideoIdsCandidate as Record<string, string>).right)
+              : undefined,
+        }
+      : undefined;
 
   return {
     version: 1,
     mode,
     activeSide,
+    savedVideoIds,
     linkedPlayback,
     focusWindowOpen,
     focusWindowMode,
@@ -327,6 +340,10 @@ export const saveComparisonWorkspaceState = (
     version: 1,
     mode: state.mode,
     activeSide: state.activeSide === "right" ? "right" : "left",
+    savedVideoIds: {
+      left: state.savedVideoIds?.left,
+      right: state.savedVideoIds?.right,
+    },
     linkedPlayback: state.linkedPlayback === true,
     focusWindowOpen: state.focusWindowOpen === true,
     focusWindowMode: state.focusWindowMode === "track" ? "track" : "area",
@@ -372,20 +389,6 @@ export const saveVideoAnalysisArtifactToDevice = (
   );
 };
 
-export const saveVideoAnalysisArtifactToCloud = async (
-  artifact: VideoAnalysisSaveArtifact,
-  endpoint = CLOUD_SAVE_ENDPOINT
-) => {
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    credentials: "include",
-    body: JSON.stringify(artifact),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Cloud save failed with ${response.status}.`);
-  }
+export const saveVideoAnalysisArtifactToCloud = async () => {
+  throw new Error("Cloud video transfer is disabled until the saved-video Drive adapter is implemented.");
 };
