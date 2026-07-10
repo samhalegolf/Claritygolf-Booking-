@@ -1801,7 +1801,7 @@ export function VideoWorkspace({
     }
 
     setSaveStatus("saving");
-    setSaveMessage("Saving to Player Profile...");
+    setSaveMessage("Saving to Clarity Video Library...");
 
     try {
       const [leftSaved, rightSaved] = await Promise.all([
@@ -1861,10 +1861,15 @@ export function VideoWorkspace({
         workspaceContext
       );
       onSavedVideoLibraryChange?.();
+      const managedCount = savedItems.filter((item) => item.local.managed?.status === "healthy").length;
       setSaveMessage(
-        savedItems.length === 1
-          ? "Saved to Player Profile."
-          : `Saved ${savedItems.length} videos to Player Profile.`
+        managedCount === savedItems.length
+          ? savedItems.length === 1
+            ? "Saved to Clarity Video Library."
+            : `Saved ${savedItems.length} videos to Clarity Video Library.`
+          : savedItems.length === 1
+            ? "Working from local cache. Reconnect library when available."
+            : `Saved ${savedItems.length} videos to local cache. Reconnect library when available.`
       );
       setSaveStatus("saved");
     } catch (error) {

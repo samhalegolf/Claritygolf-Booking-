@@ -9,6 +9,7 @@ import {
   buildVideoUploadSessionRequest,
   compactSavedVideoAnalysisJson,
   createMemorySavedVideoLibraryStore,
+  getManagedLocalVideoLibraryStatus,
   getSavedVideoCloudStatus,
   saveSavedVideoToCloud,
 } from "./savedVideoLibrary";
@@ -204,6 +205,50 @@ describe("saved video library", () => {
     transientSlots.delete("player-1.default.left");
 
     assert.equal(transientSlots.has("player-1.default.left"), false);
+    assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
+  });
+
+  it("reports local-cache recovery mode when File System Access is unavailable", async () => {
+    Object.defineProperty(globalThis, "window", {
+      value: {},
+      configurable: true,
+    });
+
+    const status = await getManagedLocalVideoLibraryStatus();
+
+    assert.equal(status.supported, false);
+    assert.equal(status.configured, false);
+    assert.equal(status.health, "unsupported");
+    assert.match(status.message, /local cache/i);
+  });
+
+  it("keeps managed-library metadata on the saved item while retaining the cache blob", async () => {
+    const store = createMemorySavedVideoLibraryStore();
+    const item = await store.saveItem({
+      playerId: "player-1",
+      sourceSide: "left",
+      sourceVideo: video,
+      sourceBlob: sourceBlob(),
+      analysisSnapshot,
+      workspaceSnapshot,
+    });
+
+    await store.putItem({
+      ...item,
+      local: {
+        ...item.local,
+        managed: {
+          status: "healthy",
+          libraryId: "clarity-video-library-test",
+          migratedAt: "2026-07-10T00:00:00.000Z",
+          verifiedAt: "2026-07-10T00:01:00.000Z",
+        },
+      },
+    });
+
+    const ready = await store.verifyItem(item.savedVideoId);
+
+    assert.equal(ready.local.managed?.status, "healthy");
     assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
   });
 
