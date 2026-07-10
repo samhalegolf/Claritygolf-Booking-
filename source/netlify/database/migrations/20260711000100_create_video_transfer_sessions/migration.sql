@@ -48,11 +48,11 @@ create index if not exists video_transfer_sessions_saved_video_idx
 alter table public.video_transfer_sessions enable row level security;
 
 drop policy if exists "Service role manages video transfer sessions" on public.video_transfer_sessions;
-create policy "Service role manages video transfer sessions"
-  on public.video_transfer_sessions
-  for all
-  using (auth.role() = 'service_role')
-  with check (auth.role() = 'service_role');
+
+-- Netlify preview Postgres does not expose Supabase's auth schema, so this
+-- migration intentionally creates no Supabase-auth-helper client policy.
+-- RLS remains enabled; normal RLS-bound clients have no table policy, and all
+-- access is owned by service-role server paths.
 
 comment on table public.video_transfer_sessions is
   'Server-owned Google Drive resumable upload session state. resumable_session_url is secret and must only be accessed with the service role.';
