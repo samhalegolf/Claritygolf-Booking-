@@ -128,6 +128,37 @@ create table if not exists public.notification_webhook_events (
   received_at timestamptz not null default now()
 );
 
+create table if not exists public.google_provider_connections (
+  id text primary key,
+  account_id text not null,
+  provider text not null default 'google',
+  provider_user_id text,
+  provider_email text,
+  encrypted_refresh_token_json text not null,
+  encrypted_refresh_token_version integer not null default 1,
+  granted_scopes_json text not null default '[]',
+  calendar_enabled boolean not null default false,
+  drive_enabled boolean not null default false,
+  connection_status text not null default 'connected',
+  connected_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  last_token_refresh_at timestamptz,
+  last_successful_use_at timestamptz,
+  revoked_at timestamptz,
+  last_error_code text,
+  last_error_at timestamptz,
+  constraint google_provider_connections_provider_check check (provider = 'google'),
+  constraint google_provider_connections_status_check check (
+    connection_status in ('connected', 'reconnect_required', 'disconnected', 'revoked', 'error')
+  )
+);
+
+create unique index if not exists idx_google_provider_connections_account_provider
+  on public.google_provider_connections (account_id, provider);
+
+create index if not exists idx_google_provider_connections_status
+  on public.google_provider_connections (connection_status);
+
 alter table public.settings enable row level security;
 alter table public.calendar_items enable row level security;
 alter table public.people enable row level security;
@@ -136,3 +167,4 @@ alter table public.admin_sessions enable row level security;
 alter table public.admin_password_resets enable row level security;
 alter table public.notification_history enable row level security;
 alter table public.notification_webhook_events enable row level security;
+alter table public.google_provider_connections enable row level security;

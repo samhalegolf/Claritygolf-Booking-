@@ -1,12 +1,19 @@
 import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
+import {
+  disconnectGoogleService,
+  getGoogleAccessToken,
+  googleCalendarScopes as googleScopes,
+  hasGoogleScopes,
+  loadGoogleProviderConnection,
+  migrateLegacyGoogleCalendarToken,
+  publicGoogleProviderStatus,
+  resolveGoogleAccountId,
+  saveGoogleAuthorization,
+} from "./_shared/google-provider.mts";
 
 const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
-const googleScopes = [
-  "https://www.googleapis.com/auth/calendar.events",
-  "https://www.googleapis.com/auth/userinfo.email",
-];
 
 const defaultServices = [
   { id: "lesson-30", name: "30min Lesson", duration: 30, price: 100, lessonNote: "Bay hire included", location: "Bay hire included" },
@@ -177,19 +184,34 @@ export async function getGoogleCalendarSyncStatus(req?: Request) {
   const settings = await readSettings();
   const config = googleConfig(req);
   const configured = Boolean(config.clientId && config.clientSecret && (config.redirectUri || req));
-  const connected = Boolean(settings.googleCalendarRefreshToken);
+  const accountId = resolveGoogleAccountId(settings);
+  const connection = await loadGoogleProviderConnection(accountId);
+  const providerStatus = publicGoogleProviderStatus(connection, googleScopes);
+  const legacyMigrationRequired = Boolean(settings.googleCalendarRefreshToken);
+  const connected = Boolean(
+    connection?.calendarEnabled &&
+      connection.connectionStatus === "connected" &&
+      hasGoogleScopes(connection, googleScopes)
+  );
   return {
     configured,
     connected,
+    accountId,
     calendarId: settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"),
     autoSync: settings.googleCalendarAutoSync !== "false",
-    accountEmail: settings.googleCalendarAccountEmail || "",
+    accountEmail: providerStatus.accountEmail || settings.googleCalendarAccountEmail || "",
     lastSyncAt: settings.googleCalendarLastSyncAt || "",
-    lastSyncStatus: settings.googleCalendarLastSyncStatus || "",
-    lastSyncError: settings.googleCalendarLastSyncError || "",
-    connectedAt: settings.googleCalendarConnectedAt || "",
+    lastSyncStatus: legacyMigrationRequired ? "migration_required" : settings.googleCalendarLastSyncStatus || "",
+    lastSyncError: legacyMigrationRequired
+      ? "Legacy Google Calendar token must be migrated to encrypted provider storage."
+      : providerStatus.lastErrorCode || settings.googleCalendarLastSyncError || "",
+    connectedAt: providerStatus.connectedAt || settings.googleCalendarConnectedAt || "",
     redirectUri: req ? configuredRedirectUri(req) : config.redirectUri,
     scope: googleScopes.join(" "),
+    grantedScopes: providerStatus.grantedScopes,
+    missingScopes: providerStatus.missingScopes,
+    connectionStatus: providerStatus.connectionStatus,
+    legacyMigrationRequired,
   };
 }
 
@@ -211,8 +233,11 @@ export async function createGoogleCalendarAuthUrl(req: Request) {
     throw Object.assign(new Error("Google Calendar OAuth is not configured."), { status: 400 });
   }
   const state = randomUUID().replaceAll("-", "");
+  const settings = await readSettings();
+  const accountId = resolveGoogleAccountId(settings);
   await setSettings({
     googleCalendarOAuthState: state,
+    googleCalendarOAuthAccountId: accountId,
     googleCalendarOAuthStartedAt: nowIso(),
   });
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -247,17 +272,6 @@ async function tokenRequest(params: Record<string, string>) {
   return data;
 }
 
-async function accessTokenFromRefreshToken(refreshToken: string) {
-  const config = googleConfig();
-  const data = await tokenRequest({
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    refresh_token: refreshToken,
-    grant_type: "refresh_token",
-  });
-  return data.access_token as string;
-}
-
 async function userEmail(accessToken: string) {
   try {
     const response = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
@@ -287,6 +301,11 @@ export async function finishGoogleCalendarOAuth(req: Request) {
   if (!expectedState || state !== expectedState) {
     throw Object.assign(new Error("Google Calendar connection could not be verified."), { status: 400 });
   }
+  const startedAt = Date.parse(settings.googleCalendarOAuthStartedAt || "");
+  if (!Number.isFinite(startedAt) || Date.now() - startedAt > 15 * 60 * 1000) {
+    throw Object.assign(new Error("Google Calendar connection expired. Start again."), { status: 400 });
+  }
+  const accountId = settings.googleCalendarOAuthAccountId || resolveGoogleAccountId(settings);
 
   const config = googleConfig(req);
   const token = await tokenRequest({
@@ -296,17 +315,23 @@ export async function finishGoogleCalendarOAuth(req: Request) {
     code,
     grant_type: "authorization_code",
   });
-  const refreshToken = cleanString(token.refresh_token, settings.googleCalendarRefreshToken || "", 4000);
-  if (!refreshToken) {
-    throw Object.assign(new Error("Google did not return an offline refresh token. Try connecting again."), { status: 400 });
-  }
   const email = token.access_token ? await userEmail(token.access_token) : "";
+  await saveGoogleAuthorization({
+    accountId,
+    refreshToken: cleanString(token.refresh_token, "", 4000) || undefined,
+    grantedScopes: cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean).length
+      ? cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean)
+      : googleScopes,
+    providerEmail: email || settings.googleCalendarAccountEmail || "",
+    enableCalendar: true,
+  });
   await setSettings({
-    googleCalendarRefreshToken: refreshToken,
+    googleCalendarRefreshToken: "",
     googleCalendarAccountEmail: email,
     googleCalendarConnectedAt: nowIso(),
     googleCalendarAutoSync: "true",
     googleCalendarOAuthState: "",
+    googleCalendarOAuthAccountId: "",
     googleCalendarOAuthStartedAt: "",
     googleCalendarLastSyncStatus: "connected",
     googleCalendarLastSyncError: "",
@@ -315,6 +340,8 @@ export async function finishGoogleCalendarOAuth(req: Request) {
 }
 
 export async function disconnectGoogleCalendar(req?: Request) {
+  const settings = await readSettings();
+  await disconnectGoogleService(resolveGoogleAccountId(settings), "calendar");
   await setSettings({
     googleCalendarRefreshToken: "",
     googleCalendarAccountEmail: "",
@@ -324,6 +351,14 @@ export async function disconnectGoogleCalendar(req?: Request) {
     googleCalendarLastSyncError: "",
   });
   return getGoogleCalendarSyncStatus(req);
+}
+
+export async function migrateLegacyGoogleCalendarConnection(req?: Request) {
+  const result = await migrateLegacyGoogleCalendarToken();
+  return {
+    ...result,
+    status: await getGoogleCalendarSyncStatus(req),
+  };
 }
 
 function rowToItem(row: any) {
@@ -536,12 +571,13 @@ export async function syncGoogleCalendarNow() {
   const { settings, items, services, locations } = await calendarSyncPayload();
   const status = await getGoogleCalendarSyncStatus();
   if (!status.configured) return { ...status, ok: false, skipped: true, reason: "google_oauth_not_configured" };
-  if (!settings.googleCalendarRefreshToken) return { ...status, ok: false, skipped: true, reason: "google_calendar_not_connected" };
+  if (status.legacyMigrationRequired) return { ...status, ok: false, skipped: true, reason: "google_calendar_token_migration_required" };
+  if (!status.connected) return { ...status, ok: false, skipped: true, reason: "google_calendar_not_connected" };
 
   const calendarId = cleanCalendarId(settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"));
   const previousMap = parseJson<Record<string, string>>(settings.googleCalendarEventMapJson, {});
   const nextMap: Record<string, string> = {};
-  const accessToken = await accessTokenFromRefreshToken(settings.googleCalendarRefreshToken);
+  const accessToken = await getGoogleAccessToken(resolveGoogleAccountId(settings), googleScopes);
   let upserted = 0;
   let deleted = 0;
 

@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "typecheck:functions": "tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 --lib ES2022,DOM --skipLibCheck --allowImportingTsExtensions netlify/functions/_shared/google-provider.mts netlify/functions/google-calendar-sync.mts netlify/functions/google-calendar.mts",
+    "test": "tsx --test netlify/functions/**/*.test.mts",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1"
   },
@@ -18,8 +21,10 @@
     "vite": "^7.2.7"
   },
   "devDependencies": {
+    "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "tsx": "^4.23.0",
     "typescript": "^5.9.3"
   }
 }
