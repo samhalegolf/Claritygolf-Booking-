@@ -47,9 +47,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { VideoAnalysisPage } from "./modules/video-analysis";
 import { ClarityVoiceTextPanel } from "./modules/clarity-voice";
 import {
-  createIndexedDbVideoStore,
   type VideoBlobStore,
 } from "./modules/video-analysis/utils/videoBlobStore";
+import {
+  createManagedLocalVideoStore,
+  listLocalVideoLibraryProjects,
+  type LocalLibraryAvailability,
+} from "./modules/video-analysis/utils/localVideoLibrary";
 import type { PlayerVideo } from "./modules/video-analysis/models/Video";
 import {
   loadPlayerProfilesState,
@@ -670,6 +674,12 @@ type PlayerToolRecord = {
   timestamp: string;
   lessonId?: string;
   sourceId: string;
+};
+type StoredVideoMeta = PlayerVideo & {
+  localAvailability?: LocalLibraryAvailability;
+  localLibraryTitle?: string;
+  localLibraryUpdatedAt?: string;
+  thumbnailDataUrl?: string;
 };
 
 type CalendarFeedStatus = "checking" | "connected" | "offline";
@@ -3324,6 +3334,13 @@ function profileRecordTitle(playerName = "", createdAt = "") {
   return date ? `${name} - ${date}` : name;
 }
 
+function videoAvailabilityLabel(video: StoredVideoMeta) {
+  if (video.localAvailability === "available") return "Local library";
+  if (video.localAvailability === "needs-reconnect") return "Reconnect library";
+  if (video.localAvailability === "missing") return "Locate library";
+  return "Browser-bound";
+}
+
 function googleSyncTimeLabel(createdAt = "") {
   if (!createdAt) return "Not synced yet";
   const time = new Date(createdAt);
@@ -3960,14 +3977,14 @@ function App() {
     notesStamps: {},
     createdStamps: {},
   }));
-  const [storedVideoMeta, setStoredVideoMeta] = useState<PlayerVideo[]>([]);
+  const [storedVideoMeta, setStoredVideoMeta] = useState<StoredVideoMeta[]>([]);
   const [showPlayerAddDialog, setShowPlayerAddDialog] = useState(false);
   const [playerAddSearch, setPlayerAddSearch] = useState("");
   const [playerAddNew, setPlayerAddNew] = useState({ name: "", email: "", phone: "" });
   const [playerAddSaving, setPlayerAddSaving] = useState(false);
   const videoStoreRef = useRef<VideoBlobStore | null>(null);
   if (videoStoreRef.current === null) {
-    videoStoreRef.current = createIndexedDbVideoStore();
+    videoStoreRef.current = createManagedLocalVideoStore();
   }
 
   useEffect(() => {
@@ -3977,9 +3994,25 @@ function App() {
   const refreshStoredVideoMeta = useCallback(() => {
     const store = videoStoreRef.current;
     if (!store) return;
-    void store
-      .listVideoMeta()
-      .then((meta) => setStoredVideoMeta(meta))
+    void Promise.all([store.listVideoMeta(), listLocalVideoLibraryProjects()])
+      .then(([meta, libraryProjects]) => {
+        const byId = new Map<string, StoredVideoMeta>();
+        meta.forEach((video) => byId.set(video.id, video));
+        libraryProjects.forEach((project) => {
+          (["left", "right"] as const).forEach((side) => {
+            const video = project.videos[side];
+            if (!video) return;
+            byId.set(video.id, {
+              ...video,
+              localAvailability: project.availability,
+              localLibraryTitle: project.title,
+              localLibraryUpdatedAt: project.updatedAt,
+              thumbnailDataUrl: project.thumbnailDataUrl,
+            });
+          });
+        });
+        setStoredVideoMeta(Array.from(byId.values()));
+      })
       .catch(() => {
         // Ignore; an empty list simply hides video-derived profiles/activity.
       });
@@ -6719,7 +6752,9 @@ function App() {
       id: `video-${video.id}`,
       kind: "video",
       title: profileRecordTitle(notesWorkspaceClient?.name, video.createdAt),
-      subtitle: `${video.title || "Video file"}${linkedLessonVideoIds.has(video.id) ? " · Linked lesson note" : ""}`,
+      subtitle: `${video.localLibraryTitle || video.title || "Video analysis"} - ${videoAvailabilityLabel(video)}${
+        linkedLessonVideoIds.has(video.id) ? " - Linked lesson note" : ""
+      }`,
       timestamp: video.createdAt,
       lessonId: video.lessonId,
       sourceId: video.id,
@@ -16264,11 +16299,21 @@ function App() {
                                   {playerToolVideos.length ? (
                                     playerToolVideos.map((video) => (
                                       <article className="player-video-card" key={video.id}>
+                                        {video.thumbnailDataUrl ? (
+                                          <img
+                                            src={video.thumbnailDataUrl}
+                                            alt=""
+                                            className="player-video-thumb"
+                                          />
+                                        ) : null}
                                         <div>
                                           <strong>{profileRecordTitle(notesWorkspaceClient.name, video.createdAt)}</strong>
                                           <span>
-                                            {video.title || "Video file"}
-                                            {linkedLessonVideoIds.has(video.id) ? " · Linked lesson note" : ""}
+                                            {video.localLibraryTitle || video.title || "Video analysis"}
+                                            {linkedLessonVideoIds.has(video.id) ? " - Linked lesson note" : ""}
+                                          </span>
+                                          <span className={`player-video-status is-${video.localAvailability || "fallback"}`}>
+                                            {videoAvailabilityLabel(video)}
                                           </span>
                                         </div>
                                         <button

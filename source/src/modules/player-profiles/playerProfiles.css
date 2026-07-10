@@ -239,15 +239,43 @@
   background: var(--panel);
 }
 
+.player-video-thumb {
+  width: 72px;
+  height: 42px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+}
+
 .player-video-card > div {
   display: grid;
   gap: 4px;
   min-width: 0;
+  flex: 1;
 }
 
 .player-video-card span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.player-video-status {
+  width: fit-content;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.player-video-status.is-available {
+  border-color: rgba(33, 136, 74, 0.24);
+  color: #0b5f32;
+}
+
+.player-video-status.is-needs-reconnect,
+.player-video-status.is-missing {
+  border-color: rgba(179, 100, 28, 0.26);
+  color: #8a4b13;
 }
 
 .player-record-list {

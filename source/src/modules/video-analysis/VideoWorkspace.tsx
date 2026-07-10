@@ -37,6 +37,14 @@ import {
   buildVideoSlotKey,
   requestPersistentStorage,
 } from "./utils/videoBlobStore";
+import {
+  createManagedLocalVideoStore,
+  chooseLocalVideoLibrary,
+  getLocalVideoLibraryStatus,
+  reconnectLocalVideoLibrary,
+  saveManagedLocalProject,
+  type LocalVideoLibraryStatus,
+} from "./utils/localVideoLibrary";
 import { useAnalysisStore } from "./hooks/useAnalysisStore";
 import { useDrawing } from "./hooks/useDrawing";
 import { useMarkerThumbnails } from "./hooks/useMarkerThumbnails";
@@ -238,6 +246,14 @@ const hasSaveableAnalysisContent = (analysis: VideoAnalysis) => {
   );
 };
 
+const DEFAULT_LOCAL_LIBRARY_STATUS: LocalVideoLibraryStatus = {
+  supported: false,
+  configured: false,
+  permission: "unknown",
+  mode: "browser-bound",
+  message: "Checking local video library...",
+};
+
 export function VideoWorkspace({
   playerId,
   playerName,
@@ -254,7 +270,20 @@ export function VideoWorkspace({
   const recordingChunksRef = useRef<Blob[]>([]);
   const resolvedPlayerId = playerId || DEFAULT_PLAYER_ID;
   const resolvedPlayerName = playerName || resolvedPlayerId;
-  const persistenceLayer = useMemo(() => createVideoAnalysisPersistence(persistence), [persistence]);
+  const managedPersistence = useMemo<Partial<VideoAnalysisPersistenceLayer>>(
+    () => ({
+      ...persistence,
+      videoStore:
+        persistence?.videoStore !== undefined
+          ? persistence.videoStore
+          : createManagedLocalVideoStore(),
+    }),
+    [persistence]
+  );
+  const persistenceLayer = useMemo(
+    () => createVideoAnalysisPersistence(managedPersistence),
+    [managedPersistence]
+  );
   const workspaceContext = useMemo<WorkspacePersistenceContext>(
     () => ({
       playerId: resolvedPlayerId,
@@ -306,6 +335,9 @@ export function VideoWorkspace({
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveMessage, setSaveMessage] = useState("Nothing to save yet.");
   const [showSaveSettings, setShowSaveSettings] = useState(false);
+  const [localLibraryStatus, setLocalLibraryStatus] =
+    useState<LocalVideoLibraryStatus>(DEFAULT_LOCAL_LIBRARY_STATUS);
+  const [localLibraryBusy, setLocalLibraryBusy] = useState(false);
   const [dragTargetSide, setDragTargetSide] = useState<ComparisonSide | null>(null);
   const [intakeError, setIntakeError] = useState("");
   const [liveRecording, setLiveRecording] = useState<LiveRecordingSession | null>(null);
@@ -496,6 +528,49 @@ export function VideoWorkspace({
       setSaveMessage("Nothing to save yet.");
     }
   }, [canManualSave, saveStatus]);
+
+  const refreshLocalLibraryStatus = useCallback(async () => {
+    setLocalLibraryStatus(await getLocalVideoLibraryStatus());
+  }, []);
+
+  useEffect(() => {
+    void refreshLocalLibraryStatus();
+  }, [refreshLocalLibraryStatus]);
+
+  const handleChooseLocalLibrary = useCallback(async () => {
+    setLocalLibraryBusy(true);
+    try {
+      const nextStatus = await chooseLocalVideoLibrary();
+      setLocalLibraryStatus(nextStatus);
+      setSaveBackend("local-device");
+      setSaveStatus("saved");
+      setSaveMessage("Local video library connected.");
+    } catch (error) {
+      setSaveStatus("error");
+      setSaveMessage(
+        error instanceof DOMException && error.name === "AbortError"
+          ? "Library setup cancelled."
+          : "Could not connect the local video library."
+      );
+    } finally {
+      setLocalLibraryBusy(false);
+    }
+  }, []);
+
+  const handleReconnectLocalLibrary = useCallback(async () => {
+    setLocalLibraryBusy(true);
+    try {
+      const nextStatus = await reconnectLocalVideoLibrary();
+      setLocalLibraryStatus(nextStatus);
+      setSaveStatus(nextStatus.permission === "granted" ? "saved" : "error");
+      setSaveMessage(nextStatus.message);
+    } catch {
+      setSaveStatus("error");
+      setSaveMessage("Could not reconnect the local video library.");
+    } finally {
+      setLocalLibraryBusy(false);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1643,7 +1718,13 @@ export function VideoWorkspace({
     }
 
     setSaveStatus("saving");
-    setSaveMessage(saveBackend === "local-device" ? "Saving to this device..." : "Saving to cloud...");
+    setSaveMessage(
+      saveBackend === "local-device"
+        ? localLibraryStatus.supported && localLibraryStatus.configured
+          ? "Saving to local video library..."
+          : "Saving to this browser..."
+        : "Saving to cloud..."
+    );
 
     try {
       const [leftSaved, rightSaved] = await Promise.all([
@@ -1659,7 +1740,23 @@ export function VideoWorkspace({
       const artifact = createSaveArtifact(saveBackend);
       if (saveBackend === "local-device") {
         await saveVideoAnalysisArtifactToDevice(artifact);
-        setSaveMessage("Saved to this device.");
+        const localProject = await saveManagedLocalProject({
+          artifact,
+          playerName: resolvedPlayerName,
+          lessonTitle,
+          videos: {
+            left: playerVideoLeft,
+            right: playerVideoRight,
+          },
+        });
+        await refreshLocalLibraryStatus();
+        setSaveMessage(
+          localProject
+            ? "Saved to local video library."
+            : localLibraryStatus.supported
+              ? "Saved in browser recovery storage. Reconnect a local video library for managed files."
+              : "Saved in browser-bound storage."
+        );
       } else {
         await saveVideoAnalysisArtifactToCloud(artifact);
         setSaveMessage("Saved to cloud service.");
@@ -1679,9 +1776,16 @@ export function VideoWorkspace({
     canManualSave,
     createSaveArtifact,
     leftStore,
+    lessonTitle,
+    localLibraryStatus.supported,
+    localLibraryStatus.configured,
+    playerVideoLeft,
+    playerVideoRight,
+    refreshLocalLibraryStatus,
     rightStore,
     saveBackend,
     saveWorkspaceState,
+    resolvedPlayerName,
   ]);
 
   const renderVideoCard = (
@@ -1954,6 +2058,46 @@ export function VideoWorkspace({
           ? `${resolvedPlayerName} • ${lessonTitle || "Unlinked"} lesson context`
           : "Premium, protected, and reusable workspace foundation."}
       </p>
+
+      <section className={`local-library-panel is-${localLibraryStatus.mode}`} aria-label="Local video library">
+        <div>
+          <span>Local video library</span>
+          <strong>
+            {localLibraryStatus.supported
+              ? localLibraryStatus.configured
+                ? localLibraryStatus.permission === "granted"
+                  ? "Connected"
+                  : "Reconnect needed"
+                : "Not configured"
+              : "Browser-bound fallback"}
+          </strong>
+          <p>
+            {localLibraryStatus.supported
+              ? localLibraryStatus.configured
+                ? localLibraryStatus.message
+                : "Choose or create Documents/Clarity Video Library to let Clarity manage player analysis files."
+              : "This browser does not support managed folders, so clips and recovery data stay inside browser storage."}
+          </p>
+        </div>
+        {localLibraryStatus.supported ? (
+          <button
+            type="button"
+            className="upload-button"
+            onClick={
+              localLibraryStatus.configured
+                ? handleReconnectLocalLibrary
+                : handleChooseLocalLibrary
+            }
+            disabled={localLibraryBusy}
+          >
+            {localLibraryBusy
+              ? "Connecting..."
+              : localLibraryStatus.configured
+                ? "Reconnect library"
+                : "Choose Clarity Video Library"}
+          </button>
+        ) : null}
+      </section>
 
       <input
         ref={leftUploadInputRef}
