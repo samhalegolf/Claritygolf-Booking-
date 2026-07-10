@@ -56,6 +56,7 @@ import type { VideoAnalysis } from "./modules/video-analysis/models/Analysis";
 import type { ComparisonSide, ComparisonWorkspaceState } from "./modules/video-analysis/utils/localPersistence";
 import {
   createIndexedDbSavedVideoLibrary,
+  saveSavedVideoToCloud,
   type SavedVideoItem,
   type SavedVideoLibraryStore,
 } from "./modules/video-analysis/utils/savedVideoLibrary";
@@ -4082,6 +4083,7 @@ function App() {
   }));
   const [savedVideoItems, setSavedVideoItems] = useState<SavedVideoItem[]>([]);
   const [legacyVideoRecords, setLegacyVideoRecords] = useState<StoredVideoRecord[]>([]);
+  const [uploadingSavedVideoIds, setUploadingSavedVideoIds] = useState<Set<string>>(() => new Set());
   const [showPlayerAddDialog, setShowPlayerAddDialog] = useState(false);
   const [playerAddSearch, setPlayerAddSearch] = useState("");
   const [playerAddNew, setPlayerAddNew] = useState({ name: "", email: "", phone: "" });
@@ -8765,6 +8767,42 @@ function App() {
       setToast({ message: "Saved video deleted." });
     } catch {
       setToast({ message: "Saved video could not be deleted." });
+    }
+  }
+
+  async function sendSavedVideoToPrimaryComputer(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    if (!googleDriveTransfer.connected) {
+      setToast({
+        message:
+          googleDriveTransfer.state === "permission_upgrade_required"
+            ? "Grant Google Drive permission before sending videos."
+            : "Connect Google Drive before sending videos.",
+      });
+      setActiveView("settings");
+      setSettingsTab("integrations");
+      return;
+    }
+    setUploadingSavedVideoIds((current) => new Set(current).add(item.savedVideoId));
+    try {
+      await saveSavedVideoToCloud(item.savedVideoId, store, {
+        onProgress: () => refreshSavedVideoLibrary(),
+      });
+      refreshSavedVideoLibrary();
+      setToast({ message: "Ready on primary computer" });
+    } catch (error) {
+      refreshSavedVideoLibrary();
+      setToast({ message: error instanceof Error ? error.message : "Saved video could not be sent to the primary computer." });
+    } finally {
+      setUploadingSavedVideoIds((current) => {
+        const next = new Set(current);
+        next.delete(item.savedVideoId);
+        return next;
+      });
     }
   }
 
@@ -16608,66 +16646,99 @@ function App() {
                                 <div className="player-video-list">
                                   {playerToolVideos.length || playerToolLegacyVideoRecords.length ? (
                                     <>
-                                      {playerToolVideos.map((video) => (
-                                        <article className="player-video-card" key={video.savedVideoId}>
-                                          {video.thumbnailDataUrl ? (
-                                            <img
-                                              className="player-video-thumb"
-                                              src={video.thumbnailDataUrl}
-                                              alt=""
-                                            />
-                                          ) : (
-                                            <div className="player-video-thumb is-empty">
-                                              <Video size={16} />
+                                      {playerToolVideos.map((video) => {
+                                        const isUploading =
+                                          uploadingSavedVideoIds.has(video.savedVideoId) || video.cloud?.status === "uploading";
+                                        const cloudLabel =
+                                          video.cloud?.status === "ready"
+                                            ? "Ready on primary computer"
+                                            : isUploading
+                                              ? `Uploading ${Math.max(0, Math.min(100, Math.round(video.cloud?.progress || 0)))}%`
+                                              : video.cloud?.status === "failed"
+                                                ? "Failed - Retry"
+                                                : googleDriveTransfer.state === "permission_upgrade_required"
+                                                  ? "Permission upgrade required"
+                                                  : googleDriveTransfer.connected
+                                                    ? "Not sent"
+                                                    : "Drive connection required";
+                                        const canSend =
+                                          video.local.status === "available" &&
+                                          googleDriveTransfer.connected &&
+                                          video.cloud?.status !== "ready" &&
+                                          !isUploading;
+                                        return (
+                                          <article className="player-video-card" key={video.savedVideoId}>
+                                            {video.thumbnailDataUrl ? (
+                                              <img
+                                                className="player-video-thumb"
+                                                src={video.thumbnailDataUrl}
+                                                alt=""
+                                              />
+                                            ) : (
+                                              <div className="player-video-thumb is-empty">
+                                                <Video size={16} />
+                                              </div>
+                                            )}
+                                            <div className="player-video-card-body">
+                                              <strong>{video.title || profileRecordTitle(notesWorkspaceClient.name, video.updatedAt || video.createdAt)}</strong>
+                                              <span>
+                                                {profileRecordTitle(notesWorkspaceClient.name, video.updatedAt || video.createdAt)}
+                                                {" · "}
+                                                {formatVideoDurationLabel(video.source.duration)}
+                                                {" · "}
+                                                {video.local.status === "available" ? "Local" : "Local file unavailable"}
+                                                {" · "}
+                                                {cloudLabel}
+                                                {linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}
+                                              </span>
+                                              {video.cloud?.errorMessage ? (
+                                                <span className="player-video-card-error">{video.cloud.errorMessage}</span>
+                                              ) : null}
                                             </div>
-                                          )}
-                                          <div className="player-video-card-body">
-                                            <strong>{video.title || profileRecordTitle(notesWorkspaceClient.name, video.updatedAt || video.createdAt)}</strong>
-                                            <span>
-                                              {profileRecordTitle(notesWorkspaceClient.name, video.updatedAt || video.createdAt)}
-                                              {" · "}
-                                              {formatVideoDurationLabel(video.source.duration)}
-                                              {" · "}
-                                              {video.local.status === "available" ? "Local" : "Local file unavailable"}
-                                              {" · "}
-                                              {video.cloud?.status === "ready" ? "Cloud ready" : "Cloud not uploaded"}
-                                              {linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}
-                                            </span>
-                                          </div>
-                                          <div className="player-video-card-actions">
-                                            <button
-                                              type="button"
-                                              className="outline-button"
-                                              onClick={() =>
-                                                openVideoAnalysisForClient({
-                                                  id: video.playerId,
-                                                  name: notesWorkspaceClient.name,
-                                                  savedVideoId: video.savedVideoId,
-                                                })
-                                              }
-                                            >
-                                              <Video size={14} />
-                                              Open
-                                            </button>
-                                            <button
-                                              type="button"
-                                              className="outline-button"
-                                              onClick={() => void renameSavedVideo(video)}
-                                            >
-                                              <Pencil size={14} />
-                                              Rename
-                                            </button>
-                                            <button
-                                              type="button"
-                                              className="danger-button"
-                                              onClick={() => void deleteSavedVideo(video)}
-                                            >
-                                              <Trash2 size={14} />
-                                              Delete
-                                            </button>
-                                          </div>
-                                        </article>
-                                      ))}
+                                            <div className="player-video-card-actions">
+                                              <button
+                                                type="button"
+                                                className="outline-button"
+                                                onClick={() =>
+                                                  openVideoAnalysisForClient({
+                                                    id: video.playerId,
+                                                    name: notesWorkspaceClient.name,
+                                                    savedVideoId: video.savedVideoId,
+                                                  })
+                                                }
+                                              >
+                                                <Video size={14} />
+                                                Open
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="outline-button"
+                                                disabled={!canSend}
+                                                onClick={() => void sendSavedVideoToPrimaryComputer(video)}
+                                              >
+                                                <Send size={14} />
+                                                {video.cloud?.status === "failed" ? "Retry" : "Send"}
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="outline-button"
+                                                onClick={() => void renameSavedVideo(video)}
+                                              >
+                                                <Pencil size={14} />
+                                                Rename
+                                              </button>
+                                              <button
+                                                type="button"
+                                                className="danger-button"
+                                                onClick={() => void deleteSavedVideo(video)}
+                                              >
+                                                <Trash2 size={14} />
+                                                Delete
+                                              </button>
+                                            </div>
+                                          </article>
+                                        );
+                                      })}
                                       {playerToolLegacyVideoRecords.map((record) => (
                                         <article className="player-video-card is-legacy" key={record.slotKey}>
                                           <div className="player-video-thumb is-empty">

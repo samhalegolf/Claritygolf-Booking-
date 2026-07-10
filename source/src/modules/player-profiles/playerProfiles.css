@@ -269,6 +269,10 @@
   font-size: 12px;
 }
 
+.player-video-card-error {
+  color: var(--danger, #b42318) !important;
+}
+
 .player-video-card-actions {
   display: flex;
   flex-wrap: wrap;

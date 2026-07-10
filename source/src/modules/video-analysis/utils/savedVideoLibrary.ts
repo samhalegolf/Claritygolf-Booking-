@@ -37,8 +37,13 @@ export interface SavedVideoCloudState {
   status: SavedVideoCloudStatus;
   provider?: SavedVideoCloudProvider;
   driveAssetId?: string;
+  driveFolderId?: string;
   driveVideoFileId?: string;
   driveManifestFileId?: string;
+  driveAnalysisFileId?: string;
+  progress?: number;
+  uploadedAt?: string;
+  lastUploadErrorCode?: string;
   errorMessage?: string;
 }
 
@@ -114,6 +119,28 @@ export interface SavedVideoLibraryStore {
   putItem(item: SavedVideoItem): Promise<void>;
   deleteItem(savedVideoId: string): Promise<void>;
   verifyItem(savedVideoId: string): Promise<SavedVideoItem>;
+}
+
+export type SavedVideoCloudErrorCode =
+  | "DRIVE_NOT_CONNECTED"
+  | "DRIVE_SCOPE_MISSING"
+  | "GOOGLE_RECONNECT_REQUIRED"
+  | "DRIVE_FOLDER_PROVISION_FAILED"
+  | "DRIVE_UPLOAD_SESSION_FAILED"
+  | "DRIVE_UPLOAD_INTERRUPTED"
+  | "DRIVE_UPLOAD_VERIFY_FAILED"
+  | "DRIVE_FINALIZE_FAILED"
+  | "SAVED_VIDEO_BLOB_MISSING";
+
+export class SavedVideoCloudError extends Error {
+  constructor(
+    public readonly code: SavedVideoCloudErrorCode,
+    message: string,
+    public readonly status?: number
+  ) {
+    super(message);
+    this.name = "SavedVideoCloudError";
+  }
 }
 
 const createSavedVideoId = () => {
@@ -260,11 +287,228 @@ const defaultCloudState: SavedVideoCloudState = { status: "not-uploaded" };
 export const getSavedVideoCloudStatus = (item?: SavedVideoItem | null): SavedVideoCloudState =>
   item?.cloud || defaultCloudState;
 
-export const saveSavedVideoToCloud = async (): Promise<never> => {
-  throw new SavedVideoLibraryError(
-    "SAVED_VIDEO_WRITE_FAILED",
-    "Cloud transfer is not implemented yet. Save locally first."
-  );
+const safeJson = async <T>(response: Response, fallbackMessage: string): Promise<T> => {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new SavedVideoCloudError("DRIVE_FINALIZE_FAILED", fallbackMessage, response.status);
+  }
+  return response.json() as Promise<T>;
+};
+
+const apiFailure = (data: any, fallback: SavedVideoCloudErrorCode): SavedVideoCloudError => {
+  const code = (typeof data?.error === "string" ? data.error : fallback) as SavedVideoCloudErrorCode;
+  return new SavedVideoCloudError(code, data?.message || "Google Drive upload failed.");
+};
+
+const dataUrlToBase64Size = (dataUrl?: string) => {
+  const base64 = typeof dataUrl === "string" ? dataUrl.split(",")[1] || "" : "";
+  if (!base64) return 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0));
+};
+
+const patchCloudState = async (
+  store: SavedVideoLibraryStore,
+  item: SavedVideoItem,
+  cloud: SavedVideoCloudState
+) => {
+  const next: SavedVideoItem = {
+    ...item,
+    source: {
+      ...item.source,
+      checksumSha256: item.source.checksumSha256 || undefined,
+    },
+    cloud,
+  };
+  await store.putItem(next);
+  return next;
+};
+
+export const saveSavedVideoToCloud = async (
+  savedVideoId: string,
+  store: SavedVideoLibraryStore,
+  options: {
+    onProgress?: (progress: number) => void;
+    deviceId?: string;
+    deviceName?: string;
+    platform?: string;
+  } = {}
+): Promise<SavedVideoItem> => {
+  const item = await store.getItem(savedVideoId);
+  if (!item) {
+    throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
+  }
+  const blob = await store.getBlob(savedVideoId);
+  if (!blob) {
+    throw new SavedVideoCloudError("SAVED_VIDEO_BLOB_MISSING", "Saved video blob was not found.");
+  }
+  if (item.cloud?.status === "ready") return item;
+
+  const checksumSha256 = item.source.checksumSha256 || (await calculateBlobSha256(blob));
+  if (!checksumSha256) {
+    throw new SavedVideoCloudError(
+      "DRIVE_UPLOAD_VERIFY_FAILED",
+      "Could not calculate a checksum for this saved video. Try again before sending it."
+    );
+  }
+
+  let working = await patchCloudState(store, item, {
+    ...item.cloud,
+    status: "uploading",
+    provider: "google-drive",
+    progress: 0,
+    lastUploadErrorCode: undefined,
+    errorMessage: undefined,
+  });
+
+  try {
+    const sessionResponse = await fetch("/api/video-transfer/upload-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        savedVideo: {
+          ...working,
+          source: { ...working.source, checksumSha256 },
+          analysisSnapshot: working.analysisSnapshot,
+          workspaceSnapshot: working.workspaceSnapshot,
+          thumbnailDataUrl: working.thumbnailDataUrl,
+        },
+        video: {
+          fileName: working.source.originalFileName || `${working.savedVideoId}.mp4`,
+          mimeType: blob.type || working.source.mimeType || "application/octet-stream",
+          sizeBytes: blob.size,
+          checksumSha256,
+        },
+        sourceDevice: {
+          deviceId: options.deviceId || window.localStorage.getItem("clarityDeviceId") || "browser",
+          deviceName: options.deviceName || window.navigator.userAgent.slice(0, 120),
+          platform: options.platform || window.navigator.platform,
+        },
+      }),
+    });
+    const sessionData = await safeJson<any>(sessionResponse, "Upload session did not return JSON.");
+    if (!sessionResponse.ok) throw apiFailure(sessionData, "DRIVE_UPLOAD_SESSION_FAILED");
+    if (sessionData.status === "ready") {
+      const ready = await patchCloudState(store, working, {
+        status: "ready",
+        provider: "google-drive",
+        driveAssetId: sessionData.assetFolderId,
+        driveFolderId: sessionData.assetFolderId,
+        driveManifestFileId: sessionData.manifestFileId,
+        progress: 100,
+        uploadedAt: sessionData.uploadedAt || new Date().toISOString(),
+      });
+      options.onProgress?.(100);
+      return ready;
+    }
+    if (!sessionData.uploadUrl) throw apiFailure(sessionData, "DRIVE_UPLOAD_SESSION_FAILED");
+
+    working = await patchCloudState(store, working, {
+      ...working.cloud,
+      status: "uploading",
+      provider: "google-drive",
+      driveAssetId: sessionData.assetFolderId,
+      driveFolderId: sessionData.assetFolderId,
+      progress: 1,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", sessionData.uploadUrl);
+      xhr.setRequestHeader("Content-Type", blob.type || working.source.mimeType || "application/octet-stream");
+      xhr.upload.onprogress = (event) => {
+        if (!event.lengthComputable) return;
+        const progress = Math.max(1, Math.min(99, Math.round((event.loaded / event.total) * 100)));
+        options.onProgress?.(progress);
+        void patchCloudState(store, working, { ...working.cloud, status: "uploading", progress }).then((next) => {
+          working = next;
+        });
+      };
+      xhr.onerror = () => reject(new SavedVideoCloudError("DRIVE_UPLOAD_INTERRUPTED", "Video upload was interrupted."));
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new SavedVideoCloudError("DRIVE_UPLOAD_INTERRUPTED", "Google Drive did not accept the upload.", xhr.status));
+      };
+      xhr.send(blob);
+    });
+
+    const finalizeResponse = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/finalize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        savedVideo: {
+          ...working,
+          source: { ...working.source, checksumSha256 },
+          analysisSnapshot: working.analysisSnapshot,
+          workspaceSnapshot: working.workspaceSnapshot,
+          thumbnailDataUrl: working.thumbnailDataUrl,
+        },
+        video: {
+          fileName: working.source.originalFileName || `${working.savedVideoId}.mp4`,
+          mimeType: blob.type || working.source.mimeType || "application/octet-stream",
+          sizeBytes: blob.size,
+          checksumSha256,
+          driveFileId: sessionData.videoFileId,
+        },
+        snapshotBytes: dataUrlToBase64Size(working.thumbnailDataUrl),
+      }),
+    });
+    const finalized = await safeJson<any>(finalizeResponse, "Finalize did not return JSON.");
+    if (!finalizeResponse.ok || finalized.status !== "ready") throw apiFailure(finalized, "DRIVE_FINALIZE_FAILED");
+
+    const ready = await patchCloudState(store, working, {
+      status: "ready",
+      provider: "google-drive",
+      driveAssetId: finalized.assetFolderId,
+      driveFolderId: finalized.assetFolderId,
+      driveVideoFileId: finalized.videoFileId,
+      driveManifestFileId: finalized.manifestFileId,
+      driveAnalysisFileId: finalized.analysisFileId,
+      uploadedAt: finalized.uploadedAt,
+      progress: 100,
+    });
+    options.onProgress?.(100);
+    return ready;
+  } catch (error) {
+    const cloudError =
+      error instanceof SavedVideoCloudError
+        ? error
+        : new SavedVideoCloudError("DRIVE_FINALIZE_FAILED", error instanceof Error ? error.message : "Google Drive upload failed.");
+    await patchCloudState(store, working, {
+      ...working.cloud,
+      status: "failed",
+      provider: "google-drive",
+      progress: undefined,
+      lastUploadErrorCode: cloudError.code,
+      errorMessage: cloudError.message,
+    });
+    throw cloudError;
+  }
+};
+
+export const retrySavedVideoCloudUpload = saveSavedVideoToCloud;
+
+export const cancelSavedVideoCloudUpload = async (
+  savedVideoId: string,
+  store: SavedVideoLibraryStore
+): Promise<SavedVideoItem> => {
+  const item = await store.getItem(savedVideoId);
+  if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
+  try {
+    await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    });
+  } catch {
+    // Local retry state matters more than a best-effort cleanup request.
+  }
+  return patchCloudState(store, item, {
+    ...item.cloud,
+    status: "failed",
+    provider: "google-drive",
+    progress: undefined,
+    lastUploadErrorCode: "DRIVE_UPLOAD_INTERRUPTED",
+    errorMessage: "Upload cancelled. Retry when ready.",
+  });
 };
 
 export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | null => {

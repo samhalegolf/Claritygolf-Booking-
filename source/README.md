@@ -72,7 +72,27 @@ remain visible as recovery records with a `Move to Saved Videos` action, which
 copies the old transient blob into the durable saved library and keeps the
 original recovery record until validation succeeds.
 
-Cloud transfer is disabled in this layer until the Google Drive upload adapter is
-implemented. The future Drive integration should upload from
-`savedVideoItems`/`savedVideoBlobs` using the `saveSavedVideoToCloud` and
-`getSavedVideoCloudStatus` seams, not from transient workspace slots.
+Google Drive transfer is a temporary transport bridge, not the permanent video
+library. `Send to primary computer` uploads from the durable
+`savedVideoItems`/`savedVideoBlobs` records using `savedVideoId` as the ownership
+key; it never uploads directly from transient left/right workspace slots and it
+does not delete the local source copy after upload.
+
+The upload lifecycle is:
+
+1. The client loads the durable saved item and blob, calculates SHA-256, and asks
+   `/api/video-transfer/upload-session` for a Drive resumable upload URL.
+2. The server authenticates the Clarity admin session, resolves the account,
+   refreshes Google through the shared encrypted provider connection, provisions
+   `Clarity Golf/Video Transfer/Inbox/<savedVideoId>/`, and starts the resumable
+   upload with `drive.file`.
+3. The browser uploads the video bytes directly to Google Drive and reports
+   progress locally.
+4. `/api/video-transfer/:savedVideoId/finalize` verifies the uploaded file size
+   and Clarity `appProperties`, writes `analysis.json` and `manifest.json`, and
+   only then marks the local item `Ready on primary computer`.
+
+Known limitations: resumable upload URLs are treated as temporary secrets and are
+not persisted across reloads, so an interrupted browser upload becomes retryable
+rather than resumable-continuable. Primary-device import, checksum download
+verification, import receipts, and Drive cleanup policy remain the next sprint.
