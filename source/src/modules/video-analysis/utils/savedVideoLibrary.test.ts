@@ -4,7 +4,10 @@ import type { VideoAnalysis } from "../models/Analysis";
 import type { PlayerVideo } from "../models/Video";
 import type { ComparisonWorkspaceState } from "./localPersistence";
 import {
+  SavedVideoCloudError,
   SavedVideoLibraryError,
+  buildVideoUploadSessionRequest,
+  compactSavedVideoAnalysisJson,
   createMemorySavedVideoLibraryStore,
   getSavedVideoCloudStatus,
   saveSavedVideoToCloud,
@@ -56,6 +59,70 @@ const analysisSnapshot: VideoAnalysis = {
 };
 
 const sourceBlob = () => new Blob(["video-bytes"], { type: "video/mp4" });
+
+const dataUrl = (label: string) => `data:image/png;base64,${Buffer.from(label).toString("base64")}`;
+
+const stringifySize = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
+
+const installBrowserGlobals = () => {
+  Object.defineProperty(globalThis, "window", {
+    value: {
+      localStorage: { getItem: () => "device-1" },
+      navigator: { userAgent: "node-test", platform: "test-platform" },
+    },
+    configurable: true,
+  });
+};
+
+const savedVideoWithLargeImages = async () => {
+  const store = createMemorySavedVideoLibraryStore();
+  const item = await store.saveItem({
+    playerId: "player-1",
+    lessonId: "lesson-1",
+    sourceSide: "left",
+    sourceVideo: video,
+    sourceBlob: sourceBlob(),
+    analysisSnapshot: {
+      ...analysisSnapshot,
+      drawings: [{
+        id: "draw-1",
+        type: "line",
+        color: "#fff",
+        strokeWidth: 2,
+        opacity: 1,
+        layer: 0,
+        createdAt: "2026-07-10T00:00:00.000Z",
+        updatedAt: "2026-07-10T00:00:00.000Z",
+        x1: 0,
+        y1: 0,
+        x2: 1,
+        y2: 1,
+      }],
+      markers: Array.from({ length: 120 }, (_, index) => ({
+        id: `marker-${index}`,
+        label: "Impact" as const,
+        time: index / 10,
+        color: "#f00",
+        thumbnail: dataUrl(`marker-${index}`.repeat(200)),
+      })),
+      focusSnapshots: [{
+        id: "focus-1",
+        playerId: "player-1",
+        analysisId: "analysis-1",
+        title: "Focus",
+        side: "left",
+        currentTime: 1.25,
+        currentFrame: 38,
+        cropRect: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 },
+        imageDataUrl: dataUrl("focus".repeat(200)),
+        createdAt: "2026-07-10T00:00:00.000Z",
+      }],
+    },
+    workspaceSnapshot,
+    thumbnailDataUrl: dataUrl("poster".repeat(200)),
+  });
+  return { store, item };
+};
 
 describe("saved video library", () => {
   it("creates a saved video item with blob keyed by savedVideoId", async () => {
@@ -234,6 +301,112 @@ describe("saved video library", () => {
         error instanceof SavedVideoLibraryError &&
         error.code === "SAVED_VIDEO_METADATA_MISSING"
     );
+  });
+
+  it("builds an upload-session payload without embedded data URLs", async () => {
+    const { item } = await savedVideoWithLargeImages();
+    const payload = buildVideoUploadSessionRequest(item, sourceBlob(), "a".repeat(64), {
+      deviceId: "device-1",
+      deviceName: "Test Browser",
+      platform: "test-platform",
+    });
+    const serialized = JSON.stringify(payload);
+
+    assert.equal(serialized.includes("data:image"), false);
+    assert.equal("analysisSnapshot" in payload, false);
+    assert.equal("workspaceSnapshot" in payload, false);
+    assert.equal("thumbnailDataUrl" in payload, false);
+    assert.equal(payload.savedVideoId, item.savedVideoId);
+    assert.equal(payload.playerId, "player-1");
+    assert.equal(payload.analysisId, "analysis-1");
+    assert.equal(payload.video.checksumSha256, "a".repeat(64));
+  });
+
+  it("keeps upload-session payload small even with many marker thumbnails", async () => {
+    const { item } = await savedVideoWithLargeImages();
+    const fullSavedVideoSize = stringifySize(item);
+    const payload = buildVideoUploadSessionRequest(item, sourceBlob(), "b".repeat(64));
+
+    assert.ok(fullSavedVideoSize > 250_000);
+    assert.ok(stringifySize(payload) < 1_500);
+  });
+
+  it("compacts analysis JSON while preserving editable drawings and marker timestamps", async () => {
+    const { item } = await savedVideoWithLargeImages();
+    const compact = compactSavedVideoAnalysisJson(item);
+    const serialized = JSON.stringify(compact);
+
+    assert.equal(serialized.includes("data:image"), false);
+    assert.equal(compact.analysis.drawings[0]?.id, "draw-1");
+    assert.equal(compact.analysis.markers[0]?.time, 0);
+    assert.equal("thumbnail" in compact.analysis.markers[0], false);
+    assert.equal(compact.analysis.focusSnapshots[0]?.currentTime, 1.25);
+    assert.deepEqual(compact.analysis.focusSnapshots[0]?.cropRect, { x: 0.1, y: 0.2, width: 0.3, height: 0.4 });
+    assert.equal("imageDataUrl" in compact.analysis.focusSnapshots[0], false);
+  });
+
+  it("reports non-JSON upload-session failures with status, type, and safe preview", async () => {
+    installBrowserGlobals();
+    const originalFetch = globalThis.fetch;
+    try {
+      for (const status of [413, 404, 500]) {
+        const { store, item } = await savedVideoWithLargeImages();
+        globalThis.fetch = async () =>
+          new Response(`<html>failed token=secret-value status ${status}</html>`, {
+            status,
+            headers: { "content-type": "text/html" },
+          });
+        await assert.rejects(
+          () => saveSavedVideoToCloud(item.savedVideoId, store),
+          (error) =>
+            error instanceof SavedVideoCloudError &&
+            error.code === "DRIVE_UPLOAD_SESSION_FAILED" &&
+            error.status === status &&
+            error.message.includes(`HTTP ${status}, text/html`) &&
+            error.message.includes("token=[redacted]") &&
+            !error.message.includes("secret-value")
+        );
+        const local = await store.getItem(item.savedVideoId);
+        assert.equal(local?.local.status, "available");
+        assert.equal(local?.thumbnailDataUrl, item.thumbnailDataUrl);
+        assert.equal(local?.analysisSnapshot.markers[0]?.thumbnail, item.analysisSnapshot.markers[0]?.thumbnail);
+        assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("sends only compact ownership metadata to upload-session", async () => {
+    installBrowserGlobals();
+    const { store, item } = await savedVideoWithLargeImages();
+    const originalFetch = globalThis.fetch;
+    let uploadSessionBody = "";
+    globalThis.fetch = async (input, init) => {
+      if (String(input).includes("/api/video-transfer/upload-session")) {
+        uploadSessionBody = String(init?.body || "");
+        return Response.json({
+          ok: true,
+          status: "ready",
+          assetFolderId: "drive-folder-1",
+          manifestFileId: "manifest-1",
+          uploadedAt: "2026-07-10T01:00:00.000Z",
+        });
+      }
+      return Response.json({ ok: false }, { status: 500 });
+    };
+    try {
+      await saveSavedVideoToCloud(item.savedVideoId, store);
+      const payload = JSON.parse(uploadSessionBody);
+      assert.equal(uploadSessionBody.includes("data:image"), false);
+      assert.equal(payload.savedVideoId, item.savedVideoId);
+      assert.equal(payload.playerId, item.playerId);
+      assert.equal(payload.analysisId, item.analysisId);
+      assert.equal(payload.video.sizeBytes, sourceBlob().size);
+      assert.equal("analysisSnapshot" in payload, false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("tracks ready cloud transfer metadata without deleting the local blob", async () => {

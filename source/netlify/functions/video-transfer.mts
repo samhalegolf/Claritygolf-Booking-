@@ -40,9 +40,6 @@ type SafeSavedVideo = {
     height?: number;
     checksumSha256?: string;
   };
-  analysisSnapshot?: unknown;
-  workspaceSnapshot?: unknown;
-  thumbnailDataUrl?: string;
 };
 
 type UploadVideoMetadata = {
@@ -195,9 +192,6 @@ function validateSavedVideo(candidate: any, savedVideoIdFromPath?: string): Safe
     createdAt: cleanString(candidate?.createdAt, new Date().toISOString(), 80),
     updatedAt: cleanString(candidate?.updatedAt, new Date().toISOString(), 80),
     source: candidate?.source || {},
-    analysisSnapshot: candidate?.analysisSnapshot,
-    workspaceSnapshot: candidate?.workspaceSnapshot,
-    thumbnailDataUrl: cleanString(candidate?.thumbnailDataUrl, "", 4_000_000),
   };
 }
 
@@ -217,6 +211,30 @@ function validateVideoMetadata(candidate: any): UploadVideoMetadata {
     checksumSha256: checksumSha256.toLowerCase(),
     driveFileId: cleanString(candidate?.driveFileId, "", 180) || undefined,
   };
+}
+
+function removeDataUrls(value: unknown): unknown {
+  if (typeof value === "string") return value.startsWith("data:") ? undefined : value;
+  if (Array.isArray(value)) return value.map(removeDataUrls).filter((entry) => entry !== undefined);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([key, entry]) => [key, removeDataUrls(entry)] as const)
+      .filter(([, entry]) => entry !== undefined),
+  );
+}
+
+export function validateUploadSessionPayload(body: any) {
+  const savedVideo = validateSavedVideo(body?.savedVideo || body);
+  const video = validateVideoMetadata(body?.video);
+  return { savedVideo, video };
+}
+
+export function validateFinalizePayload(body: any, savedVideoIdFromPath: string) {
+  const savedVideo = validateSavedVideo(body?.savedVideo || body, savedVideoIdFromPath);
+  const video = validateVideoMetadata(body?.video);
+  const analysisJson = removeDataUrls(body?.analysisJson || {}) as Record<string, unknown>;
+  return { savedVideo, video, analysisJson };
 }
 
 async function ensureDriveReady(accountId: string) {
@@ -480,8 +498,7 @@ function transferManifest(args: {
 
 async function handleUploadSession(req: Request, accountId: string, accessToken: string, settings: Record<string, string>) {
   const body = await readJson(req) as any;
-  const savedVideo = validateSavedVideo(body.savedVideo);
-  const video = validateVideoMetadata(body.video);
+  const { savedVideo, video } = validateUploadSessionPayload(body);
   const folders = await ensureTransferFolders(accessToken, accountId, settings);
   const assetFolder = await ensureAssetFolder(accessToken, accountId, savedVideo, folders.inbox.id);
   const existingReady = await findDriveFile(accessToken, appProperties(accountId, savedVideo, "manifest"), assetFolder.id);
@@ -513,8 +530,7 @@ async function handleUploadSession(req: Request, accountId: string, accessToken:
 
 async function handleFinalize(req: Request, accountId: string, accessToken: string, savedVideoId: string) {
   const body = await readJson(req) as any;
-  const savedVideo = validateSavedVideo(body.savedVideo, savedVideoId);
-  const video = validateVideoMetadata(body.video);
+  const { savedVideo, video, analysisJson } = validateFinalizePayload(body, savedVideoId);
   if (!video.driveFileId) {
     throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Uploaded Drive video file id is required.", 400);
   }
@@ -534,12 +550,7 @@ async function handleFinalize(req: Request, accountId: string, accessToken: stri
     assetFolderId,
     "analysis.json",
     appProperties(accountId, savedVideo, "analysis"),
-    {
-      savedVideoId: savedVideo.savedVideoId,
-      analysis: savedVideo.analysisSnapshot,
-      workspace: savedVideo.workspaceSnapshot,
-      thumbnailDataUrl: savedVideo.thumbnailDataUrl || undefined,
-    }
+    analysisJson
   );
   const manifestPayload = transferManifest({
     accountId,
