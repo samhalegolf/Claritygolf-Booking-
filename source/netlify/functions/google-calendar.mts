@@ -6,6 +6,7 @@ import {
   disconnectGoogleCalendar,
   finishGoogleCalendarOAuth,
   getGoogleCalendarSyncStatus,
+  migrateLegacyGoogleCalendarConnection,
   syncGoogleCalendarNow,
   updateGoogleCalendarSyncSettings,
 } from "./google-calendar-sync.mts";
@@ -125,6 +126,7 @@ export default async function handler(req: Request) {
 
     if (req.method === "GET" && action === "status") return json(await getGoogleCalendarSyncStatus(req));
     if ((req.method === "GET" || req.method === "POST") && action === "connect") return json(await createGoogleCalendarAuthUrl(req));
+    if (req.method === "POST" && action === "migrate-provider-token") return json(await migrateLegacyGoogleCalendarConnection(req));
     if (req.method === "POST" && action === "sync") return json(await syncGoogleCalendarNow());
     if (req.method === "POST" && action === "disconnect") return json(await disconnectGoogleCalendar(req));
     if ((req.method === "PUT" || req.method === "POST") && action === "settings") {

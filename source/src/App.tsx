@@ -806,6 +806,7 @@ type BookingConfirmationResendResponse = {
 type GoogleCalendarSyncStatus = {
   configured: boolean;
   connected: boolean;
+  accountId?: string;
   calendarId: string;
   autoSync: boolean;
   accountEmail: string;
@@ -815,10 +816,14 @@ type GoogleCalendarSyncStatus = {
   connectedAt: string;
   redirectUri: string;
   scope: string;
+  grantedScopes?: string[];
+  missingScopes?: string[];
+  connectionStatus?: string;
+  legacyMigrationRequired?: boolean;
   ok?: boolean;
   skipped?: boolean;
 };
-type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting";
+type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting" | "migrating";
 type AuthStatus = "checking" | "authenticated" | "guest";
 type AuthMode = "login" | "forgot" | "reset";
 type ThemeMode = "light" | "dark";
@@ -4207,7 +4212,7 @@ function App() {
   const lastEdgeNavRef = useRef(0);
   const lastCalendarTapRef = useRef(0);
   const suppressBlankGestureUntilRef = useRef(0);
-  const edgeCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const edgeCueTimerRef = useRef<number | null>(null);
   const gestureCleanupRef = useRef<null | (() => void)>(null);
   const brandSaveVersionRef = useRef(0);
   const serviceSaveVersionRef = useRef(0);
@@ -4967,7 +4972,7 @@ function App() {
 
     let cancelled = false;
     let attempts = 0;
-    let timer: ReturnType<typeof window.setTimeout> | null = null;
+    let timer: number | null = null;
     const triggerKey = `${bookingConfirmation.kind}:${bookingConfirmation.appointmentId}`;
 
     const mergeNotificationResults = (results: EmailSendResult[]) => {
@@ -7441,8 +7446,8 @@ function App() {
 
   function flashEdgeCue(direction: "prev" | "next") {
     setEdgeCue(direction);
-    if (edgeCueTimerRef.current) clearTimeout(edgeCueTimerRef.current);
-    edgeCueTimerRef.current = setTimeout(() => setEdgeCue(null), 550);
+    if (edgeCueTimerRef.current) window.clearTimeout(edgeCueTimerRef.current);
+    edgeCueTimerRef.current = window.setTimeout(() => setEdgeCue(null), 550);
   }
 
   function handleEdgeNavigation(clientX: number) {
@@ -11916,6 +11921,38 @@ function App() {
       setToast({ message: `Google Calendar synced${typeof data.upserted === "number" ? ` (${data.upserted} upserted, ${data.deleted ?? 0} deleted)` : ""}.` });
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Google Calendar sync failed." });
+      void refreshGoogleCalendarStatus();
+    } finally {
+      setGoogleCalendarAction("idle");
+    }
+  }
+
+  async function migrateGoogleCalendarProviderToken() {
+    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
+      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
+      return;
+    }
+    setGoogleCalendarAction("migrating");
+    try {
+      const response = await fetch("/api/google-calendar/migrate-provider-token", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        migrated?: boolean;
+        message?: string;
+        status?: Partial<GoogleCalendarSyncStatus>;
+      };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok || data.ok === false) throw new Error(data.message || "Google Calendar token migration failed.");
+      applyGoogleCalendarStatus(data.status);
+      setToast({ message: data.migrated ? "Google Calendar token migrated securely." : "Google Calendar token storage is already secure." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Google Calendar token migration failed." });
       void refreshGoogleCalendarStatus();
     } finally {
       setGoogleCalendarAction("idle");
@@ -19012,7 +19049,9 @@ function App() {
                       : googleCalendar.lastSyncError ||
                       (googleCalendar.connected
                         ? `${googleCalendar.accountEmail || "Google account"} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`
-                        : googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify.")}
+                        : googleCalendar.legacyMigrationRequired
+                          ? "Legacy plaintext token migration required."
+                          : googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify.")}
                   </em>
                 </div>
 
@@ -19047,7 +19086,17 @@ function App() {
                     <code>{googleCalendar.redirectUri || "Set GOOGLE_CALENDAR_REDIRECT_URI or use /api/google-calendar/callback"}</code>
                   </div>
                   <div className="sync-actions">
-                    {!googleCalendar.connected ? (
+                    {googleCalendar.legacyMigrationRequired ? (
+                      <button
+                        className="primary-button"
+                        disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                        onClick={migrateGoogleCalendarProviderToken}
+                        type="button"
+                      >
+                        <KeyRound size={16} />
+                        {googleCalendarAction === "migrating" ? "Migrating" : "Secure existing token"}
+                      </button>
+                    ) : !googleCalendar.connected ? (
                       <button
                         className="primary-button"
                         disabled={!googleCalendarSyncEnabled || !googleCalendar.configured || googleCalendarAction !== "idle"}
