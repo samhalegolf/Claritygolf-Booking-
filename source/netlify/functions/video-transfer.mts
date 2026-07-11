@@ -1,6 +1,11 @@
 import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  getClarityCloudGoogleConfig,
+  getSafeClarityCloudGoogleRuntimeDiagnostic,
+  isClarityCloudProviderTokenEncryptionConfigured,
+} from "./_shared/clarity-cloud-google-config.mts";
+import {
   getGoogleAccessToken,
   googleDriveFileScope,
   hasGoogleScopes,
@@ -274,25 +279,16 @@ function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
 }
 
-function googleOAuthConfigurationMissing() {
-  const clientId = env("GOOGLE_CLIENT_ID", "") || env("GOOGLE_CALENDAR_CLIENT_ID", "");
-  const clientSecret = env("GOOGLE_CLIENT_SECRET", "") || env("GOOGLE_CALENDAR_CLIENT_SECRET", "");
-  return [
-    clientId ? "" : "GOOGLE_CLIENT_ID or GOOGLE_CALENDAR_CLIENT_ID",
-    clientSecret ? "" : "GOOGLE_CLIENT_SECRET or GOOGLE_CALENDAR_CLIENT_SECRET",
-  ].filter(Boolean);
-}
-
-function assertClarityCloudServerConfigured() {
-  const missingConfiguration = googleOAuthConfigurationMissing();
-  if (missingConfiguration.length) {
+function assertClarityCloudServerConfigured(req: Request) {
+  const googleConfig = getClarityCloudGoogleConfig(req);
+  if (!googleConfig.configured) {
     throw new TransferError(
       "CLOUD_OAUTH_NOT_CONFIGURED",
       "Clarity Cloud is not configured for this environment.",
       503
     );
   }
-  if (!env("GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_V1", "")) {
+  if (!isClarityCloudProviderTokenEncryptionConfigured()) {
     throw new TransferError(
       "PROVIDER_STORAGE_UNAVAILABLE",
       "Secure provider storage is unavailable.",
@@ -2064,7 +2060,10 @@ export default async function handler(req: Request) {
 
   try {
     if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-    assertClarityCloudServerConfigured();
+    if (req.method === "GET" && parts[0] === "diagnostics") {
+      return json(getSafeClarityCloudGoogleRuntimeDiagnostic(req));
+    }
+    assertClarityCloudServerConfigured(req);
     const settings = await readSettings();
     const accountId = resolveGoogleAccountId(settings);
     // Only routes that talk to the Drive API need an access token. Chunk
@@ -2119,7 +2118,9 @@ export default async function handler(req: Request) {
       });
     }
     const code =
-      error?.code === "GOOGLE_RECONNECT_REQUIRED"
+      error?.code === "CLOUD_OAUTH_NOT_CONFIGURED"
+        ? "CLOUD_OAUTH_NOT_CONFIGURED"
+        : error?.code === "GOOGLE_RECONNECT_REQUIRED"
         ? "GOOGLE_RECONNECT_REQUIRED"
         : error?.code === "GOOGLE_CONNECTION_NOT_FOUND"
           ? "DRIVE_NOT_CONNECTED"
@@ -2132,7 +2133,9 @@ export default async function handler(req: Request) {
                 : "CLARITY_CLOUD_PROVIDER_FAILED";
     const status = error?.status || (code === "GOOGLE_RECONNECT_REQUIRED" || code === "DRIVE_NOT_CONNECTED" || code === "DRIVE_SCOPE_MISSING" ? 403 : code === "GOOGLE_TOKEN_REFRESH_FAILED" ? 502 : 503);
     const message =
-      code === "PROVIDER_STORAGE_UNAVAILABLE"
+      code === "CLOUD_OAUTH_NOT_CONFIGURED"
+        ? "Clarity Cloud is not configured for this environment."
+        : code === "PROVIDER_STORAGE_UNAVAILABLE"
         ? "Secure provider storage is unavailable."
         : code === "GOOGLE_TOKEN_REFRESH_FAILED"
           ? "Clarity Cloud could not refresh the Google connection."

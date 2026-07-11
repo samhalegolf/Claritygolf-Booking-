@@ -11,6 +11,7 @@ import {
   validateFinalizePayload,
   validateUploadSessionPayload,
 } from "../video-transfer.mts";
+import googleDriveHandler from "../google-drive.mts";
 
 const netlifyBufferedPayloadLimitBytes = 6 * 1024 * 1024;
 
@@ -35,6 +36,55 @@ const compactPayload = {
     checksumSha256: "a".repeat(64),
   },
 };
+
+const cloudRuntimeEnvKeys = [
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
+  "GOOGLE_CALENDAR_CLIENT_ID",
+  "GOOGLE_CALENDAR_CLIENT_SECRET",
+  "GOOGLE_DRIVE_REDIRECT_URI",
+  "GOOGLE_CALENDAR_REDIRECT_URI",
+  "GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_V1",
+] as const;
+
+function snapshotEnv() {
+  return Object.fromEntries(cloudRuntimeEnvKeys.map((key) => [key, process.env[key]]));
+}
+
+function restoreEnv(snapshot: Record<string, string | undefined>) {
+  Object.entries(snapshot).forEach(([key, value]) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  });
+}
+
+function useCloudRuntimeEnv(values: Record<string, string | undefined>) {
+  const snapshot = snapshotEnv();
+  cloudRuntimeEnvKeys.forEach((key) => delete process.env[key]);
+  process.env.SUPABASE_URL = "https://supabase.example";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+  Object.entries(values).forEach(([key, value]) => {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  });
+  return () => restoreEnv(snapshot);
+}
+
+function mockSupabaseFetch() {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.includes("/rest/v1/admin_sessions")) return Response.json([{ id: "session-1" }]);
+    if (url.includes("/rest/v1/settings")) return Response.json([]);
+    if (url.includes("/rest/v1/google_provider_connections")) return Response.json([]);
+    return Response.json([]);
+  };
+  return () => {
+    globalThis.fetch = originalFetch;
+  };
+}
 
 test("upload-session accepts compact ownership and video metadata", () => {
   const { savedVideo, video } = validateUploadSessionPayload(compactPayload);
@@ -143,6 +193,89 @@ test("transfer routes return typed setup JSON when OAuth configuration is missin
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     });
+  }
+});
+
+test("status and transfer routes share legacy Calendar OAuth resolution", async () => {
+  const restoreRuntimeEnv = useCloudRuntimeEnv({
+    GOOGLE_CALENDAR_CLIENT_ID: "legacy-client-id",
+    GOOGLE_CALENDAR_CLIENT_SECRET: "legacy-client-secret",
+    GOOGLE_DRIVE_REDIRECT_URI: "https://claritygolf.app/api/google-drive/callback",
+  });
+  const restoreFetch = mockSupabaseFetch();
+  try {
+    const statusResponse = await googleDriveHandler(new Request("https://claritygolf.app/api/google-drive/status", {
+      headers: { cookie: "clarity_session=session-token" },
+    }));
+    const statusBody = await statusResponse.json() as any;
+
+    assert.equal(statusResponse.status, 200);
+    assert.equal(statusBody.configured, true);
+    assert.equal(statusBody.safeErrorCode, "PROVIDER_STORAGE_UNAVAILABLE");
+    assert.notEqual(statusBody.safeErrorCode, "CLOUD_OAUTH_NOT_CONFIGURED");
+
+    const transferResponse = await videoTransferHandler(new Request("https://claritygolf.app/api/video-transfer/imports", {
+      headers: { cookie: "clarity_session=session-token" },
+    }));
+    const transferBody = await transferResponse.json() as any;
+
+    assert.equal(transferResponse.status, 503);
+    assert.equal(transferBody.error.code, "PROVIDER_STORAGE_UNAVAILABLE");
+    assert.notEqual(transferBody.error.code, "CLOUD_OAUTH_NOT_CONFIGURED");
+  } finally {
+    restoreFetch();
+    restoreRuntimeEnv();
+  }
+});
+
+test("safe transfer runtime diagnostics expose no values or lengths", async () => {
+  const restoreRuntimeEnv = useCloudRuntimeEnv({
+    GOOGLE_CLIENT_ID: "generic-client-id-value",
+    GOOGLE_CLIENT_SECRET: "generic-client-secret-value",
+    GOOGLE_CALENDAR_CLIENT_ID: "legacy-client-id-value",
+    GOOGLE_CALENDAR_CLIENT_SECRET: "legacy-client-secret-value",
+    GOOGLE_DRIVE_REDIRECT_URI: "https://claritygolf.app/api/google-drive/callback",
+    GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_V1: "encryption-key-value",
+  });
+  const restoreFetch = mockSupabaseFetch();
+  try {
+    const response = await videoTransferHandler(new Request("https://claritygolf.app/api/video-transfer/diagnostics", {
+      headers: { cookie: "clarity_session=session-token" },
+    }));
+    const body = await response.json() as any;
+    const serialized = JSON.stringify(body);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(Object.keys(body).sort(), [
+      "clientIdSource",
+      "clientSecretSource",
+      "configured",
+      "driveRedirectUriPresent",
+      "encryptionKeyPresent",
+      "googleClientIdPresent",
+      "googleClientSecretPresent",
+      "missingFields",
+      "redirectUriSource",
+    ].sort());
+    assert.equal(body.googleClientIdPresent, true);
+    assert.equal(body.googleClientSecretPresent, true);
+    assert.equal(body.driveRedirectUriPresent, true);
+    assert.equal(body.encryptionKeyPresent, true);
+    assert.equal(body.clientIdSource, "GOOGLE_CLIENT_ID");
+    assert.equal(body.clientSecretSource, "GOOGLE_CLIENT_SECRET");
+    assert.equal(body.redirectUriSource, "GOOGLE_DRIVE_REDIRECT_URI");
+    assert.equal(body.configured, true);
+    assert.deepEqual(body.missingFields, []);
+    assert.equal(serialized.includes("generic-client-id-value"), false);
+    assert.equal(serialized.includes("generic-client-secret-value"), false);
+    assert.equal(serialized.includes("legacy-client-id-value"), false);
+    assert.equal(serialized.includes("legacy-client-secret-value"), false);
+    assert.equal(serialized.includes("encryption-key-value"), false);
+    assert.equal("clientId" in body, false);
+    assert.equal("clientSecret" in body, false);
+  } finally {
+    restoreFetch();
+    restoreRuntimeEnv();
   }
 });
 
