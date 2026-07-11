@@ -261,13 +261,19 @@ export type SavedVideoCloudErrorCode =
   | "CLARITY_CLOUD_PROVIDER_FAILED";
 
 export class SavedVideoCloudError extends Error {
+  public readonly phase?: string;
+  public readonly retryable?: boolean;
+
   constructor(
     public readonly code: SavedVideoCloudErrorCode,
     message: string,
-    public readonly status?: number
+    public readonly status?: number,
+    options: { phase?: string; retryable?: boolean } = {}
   ) {
     super(message);
     this.name = "SavedVideoCloudError";
+    this.phase = options.phase;
+    this.retryable = options.retryable;
   }
 }
 
@@ -481,7 +487,17 @@ const apiFailure = (data: any, fallback: SavedVideoCloudErrorCode): SavedVideoCl
     data?.message ||
     "Google Drive upload failed.";
   const status = Number(data?.status || data?.error?.status) || undefined;
-  return new SavedVideoCloudError(code, message, status);
+  const phase =
+    (typeof data?.phase === "string" && data.phase) ||
+    (typeof data?.error?.phase === "string" && data.error.phase) ||
+    undefined;
+  const retryable =
+    typeof data?.retryable === "boolean"
+      ? data.retryable
+      : typeof data?.error?.retryable === "boolean"
+        ? data.error.retryable
+        : undefined;
+  return new SavedVideoCloudError(code, message, status, { phase, retryable });
 };
 
 type PublicTransferSession = {

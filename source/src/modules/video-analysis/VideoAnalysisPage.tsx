@@ -20,6 +20,7 @@ export interface VideoAnalysisPageProps {
   onNavigateBack?: (context: VideoWorkspaceNavigationContext) => void;
   onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;
   onSaveAndSend?: (result: VideoWorkspaceSaveResult) => Promise<void>;
+  onOpenCloudSettings?: () => void;
 }
 
 export function VideoAnalysisPage(props: VideoAnalysisPageProps) {

@@ -36,6 +36,7 @@ import {
 } from "./utils/videoBlobStore";
 import {
   createIndexedDbSavedVideoLibrary,
+  SavedVideoCloudError,
   SavedVideoLibraryError,
   type SavedVideoItem,
   type SavedVideoLibraryStore,
@@ -69,6 +70,23 @@ const SNAPSHOT_PREVIEW_HEIGHT = 50;
 const DEFAULT_PLAYER_ID = "player-demo-1";
 type SaveStatus = "idle" | "saving" | "sending" | "saved" | "error";
 type RecordingStatus = "ready" | "recording" | "processing" | "error";
+type CloudUploadFailureStage =
+  | "Configuration"
+  | "Connection"
+  | "Preparing storage"
+  | "Starting upload"
+  | "Uploading"
+  | "Verifying";
+
+interface CloudUploadFailureFeedback {
+  title: "Cloud upload could not start";
+  reason: string;
+  stage: CloudUploadFailureStage;
+  safeErrorCode: string;
+  retryable?: boolean;
+  httpStatus?: number;
+  actionRequired: boolean;
+}
 
 export interface VideoWorkspaceNavigationContext {
   playerId?: string;
@@ -103,7 +121,94 @@ interface VideoWorkspaceProps {
   onNavigateBack?: (context: VideoWorkspaceNavigationContext) => void;
   onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;
   onSaveAndSend?: (result: VideoWorkspaceSaveResult) => Promise<void>;
+  onOpenCloudSettings?: () => void;
 }
+
+const cloudSettingsActionCodes = new Set([
+  "CLOUD_OAUTH_NOT_CONFIGURED",
+  "PROVIDER_STORAGE_UNAVAILABLE",
+  "DRIVE_NOT_CONNECTED",
+  "DRIVE_SCOPE_MISSING",
+  "GOOGLE_RECONNECT_REQUIRED",
+  "GOOGLE_TOKEN_REFRESH_FAILED",
+]);
+
+const cloudFailureStageFromPhase = (phase?: string): CloudUploadFailureStage | null => {
+  if (phase === "preparing") return "Preparing storage";
+  if (phase === "session-created") return "Starting upload";
+  if (phase === "uploading") return "Uploading";
+  if (phase === "verifying") return "Verifying";
+  return null;
+};
+
+const cloudFailureStageFromCode = (code: string): CloudUploadFailureStage => {
+  if (code === "CLOUD_OAUTH_NOT_CONFIGURED" || code === "PROVIDER_STORAGE_UNAVAILABLE") {
+    return "Configuration";
+  }
+  if (
+    code === "DRIVE_NOT_CONNECTED" ||
+    code === "DRIVE_SCOPE_MISSING" ||
+    code === "GOOGLE_RECONNECT_REQUIRED" ||
+    code === "GOOGLE_TOKEN_REFRESH_FAILED" ||
+    code === "CLARITY_CLOUD_PROVIDER_FAILED"
+  ) {
+    return "Connection";
+  }
+  if (code === "DRIVE_FOLDER_PROVISION_FAILED" || code === "DRIVE_TRANSFER_FOLDER_FAILED") {
+    return "Preparing storage";
+  }
+  if (
+    code === "DRIVE_UPLOAD_SESSION_FAILED" ||
+    code === "DRIVE_TRANSFER_STATE_FAILED" ||
+    code === "SAVED_VIDEO_BLOB_MISSING" ||
+    code === "SAVED_VIDEO_SOURCE_MISSING"
+  ) {
+    return "Starting upload";
+  }
+  if (
+    code === "DRIVE_UPLOAD_PROXY_FAILED" ||
+    code === "DRIVE_UPLOAD_TOO_LARGE" ||
+    code === "DRIVE_UPLOAD_SESSION_EXPIRED" ||
+    code === "DRIVE_UPLOAD_INTERRUPTED" ||
+    code === "TRANSFER_PAUSED" ||
+    code === "TRANSFER_CANCELLED"
+  ) {
+    return "Uploading";
+  }
+  return "Verifying";
+};
+
+const stringProperty = (value: unknown, key: string) =>
+  typeof value === "object" && value && key in value
+    ? String((value as Record<string, unknown>)[key] || "")
+    : "";
+
+const cloudFailureCode = (error: unknown) =>
+  error instanceof SavedVideoCloudError
+    ? error.code
+    : stringProperty(error, "code") || "CLARITY_CLOUD_TRANSFER_FAILED";
+
+const buildCloudUploadFailureFeedback = (error: unknown): CloudUploadFailureFeedback => {
+  const safeErrorCode = cloudFailureCode(error);
+  const cloudError = error instanceof SavedVideoCloudError ? error : null;
+  const stage =
+    cloudFailureStageFromPhase(cloudError?.phase || stringProperty(error, "phase")) ||
+    cloudFailureStageFromCode(safeErrorCode);
+  const reason =
+    error instanceof Error && error.message.trim()
+      ? error.message.trim()
+      : "Your local video is safe. The cloud transfer service could not be reached.";
+
+  return {
+    title: "Cloud upload could not start",
+    reason,
+    stage,
+    safeErrorCode,
+    retryable: cloudError?.retryable,
+    httpStatus: cloudError?.status,
+    actionRequired: cloudSettingsActionCodes.has(safeErrorCode),
+  };
+};
 
 const normalizePoint = (point: { x: number; y: number }, overlay: { width: number; height: number }) => ({
   x: clamp(point.x / Math.max(1, overlay.width), 0, 1),
@@ -276,6 +381,7 @@ export function VideoWorkspace({
   onNavigateBack,
   onLocalSaveComplete,
   onSaveAndSend,
+  onOpenCloudSettings,
 }: VideoWorkspaceProps) {
   const leftVideoRef = useRef<HTMLVideoElement>(null);
   const rightVideoRef = useRef<HTMLVideoElement>(null);
@@ -308,6 +414,7 @@ export function VideoWorkspace({
   const [playerVideoRight, setPlayerVideoRight] = useState<PlayerVideo | null>(null);
   const [leftMountedSource, setLeftMountedSource] = useState<string | null>(null);
   const [rightMountedSource, setRightMountedSource] = useState<string | null>(null);
+  const [cloudUploadFailure, setCloudUploadFailure] = useState<CloudUploadFailureFeedback | null>(null);
   const [leftOverlayDimensions, setLeftOverlayDimensions] = useState({
     width: 1,
     height: 1,
@@ -1906,6 +2013,7 @@ export function VideoWorkspace({
     setSaveStatus("saving");
     setSaveMessage("Saving to Clarity Video Library...");
     setShowSaveAndSendOffer(false);
+    setCloudUploadFailure(null);
 
     try {
       const [leftSaved, rightSaved] = await Promise.all([
@@ -2035,11 +2143,13 @@ export function VideoWorkspace({
       setSaveStatus("error");
       setSaveMessage("Add or record a clip before saving.");
       setShowSaveAndSendOffer(false);
+      setCloudUploadFailure(null);
       return;
     }
     setSaveStatus("idle");
     setSaveMessage("Save locally before sending to Clarity Cloud.");
     setShowSaveAndSendOffer(true);
+    setCloudUploadFailure(null);
   }, [canManualSave]);
 
   const handleSaveAndSend = useCallback(async () => {
@@ -2049,20 +2159,29 @@ export function VideoWorkspace({
     if (!onSaveAndSend) {
       setSaveStatus("error");
       setSaveMessage("Transfer service unavailable.");
+      setCloudUploadFailure(buildCloudUploadFailureFeedback(
+        Object.assign(new Error("Transfer service unavailable."), {
+          code: "CLARITY_CLOUD_PROVIDER_FAILED",
+        })
+      ));
       return;
     }
 
     setSaveStatus("sending");
     setSaveMessage("Preparing Clarity Cloud transfer...");
+    setCloudUploadFailure(null);
     try {
       await onSaveAndSend(result);
+      setCloudUploadFailure(null);
       await completeSuccessfulSave(result, "Uploading 0% in Player Profile.");
     } catch (error) {
       setSaveStatus("error");
+      const cloudFailure = buildCloudUploadFailureFeedback(error);
       const safeMessage =
-        error instanceof Error && error.message
-          ? error.message
-          : "Cloud transfer failed. Your local video is still safe.";
+        cloudFailure.stage === "Uploading"
+          ? "Cloud upload paused. Your local video is safe."
+          : cloudFailure.title;
+      setCloudUploadFailure(cloudFailure);
       setSaveMessage(safeMessage);
       onSavedVideoLibraryChange?.();
       // eslint-disable-next-line no-console
@@ -2072,6 +2191,7 @@ export function VideoWorkspace({
           typeof error === "object" && error && "code" in error
             ? String((error as { code?: unknown }).code || "CLARITY_CLOUD_TRANSFER_FAILED")
             : "CLARITY_CLOUD_TRANSFER_FAILED",
+        failedStage: cloudFailure.stage,
       });
     }
   }, [
@@ -2366,6 +2486,60 @@ export function VideoWorkspace({
         style={{ display: "none" }}
         onChange={(event) => handleUpload("right", event)}
       />
+
+      {cloudUploadFailure ? (
+        <section className="cloud-upload-failure-row" role="alert" aria-live="assertive">
+          <div className="cloud-upload-failure-copy">
+            <span className="cloud-upload-failure-stage">{cloudUploadFailure.stage}</span>
+            <strong>{cloudUploadFailure.title}</strong>
+            <span>{cloudUploadFailure.reason}</span>
+          </div>
+          <div className="cloud-upload-failure-actions">
+            <button
+              type="button"
+              className="upload-button"
+              onClick={() => void handleSaveAndSend()}
+              disabled={saveStatus === "saving" || saveStatus === "sending"}
+            >
+              Retry
+            </button>
+            {cloudUploadFailure.actionRequired && onOpenCloudSettings ? (
+              <button
+                type="button"
+                className="upload-button"
+                onClick={onOpenCloudSettings}
+              >
+                Cloud settings
+              </button>
+            ) : null}
+            <details className="cloud-upload-failure-diagnostics">
+              <summary>Advanced diagnostic</summary>
+              <dl>
+                <div>
+                  <dt>Safe error code</dt>
+                  <dd>{cloudUploadFailure.safeErrorCode}</dd>
+                </div>
+                <div>
+                  <dt>Failed stage</dt>
+                  <dd>{cloudUploadFailure.stage}</dd>
+                </div>
+                {typeof cloudUploadFailure.retryable === "boolean" ? (
+                  <div>
+                    <dt>Retryable</dt>
+                    <dd>{cloudUploadFailure.retryable ? "true" : "false"}</dd>
+                  </div>
+                ) : null}
+                {cloudUploadFailure.httpStatus ? (
+                  <div>
+                    <dt>HTTP status</dt>
+                    <dd>{cloudUploadFailure.httpStatus}</dd>
+                  </div>
+                ) : null}
+              </dl>
+            </details>
+          </div>
+        </section>
+      ) : null}
 
       {workspaceHasVideo ? (
         <div className="video-analysis-toolbar">

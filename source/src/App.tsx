@@ -17435,6 +17435,10 @@ function App() {
               onNavigateBack={returnToPlayerProfileVideos}
               onLocalSaveComplete={handleVideoAnalysisLocalSaveComplete}
               onSaveAndSend={handleVideoAnalysisSaveAndSend}
+              onOpenCloudSettings={() => {
+                setActiveView("settings");
+                setSettingsTab("integrations");
+              }}
             />
           </section>
         )}

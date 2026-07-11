@@ -29,6 +29,98 @@
   font-size: 0.92rem;
 }
 
+.cloud-upload-failure-row {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid rgba(255, 174, 194, 0.34);
+  border-radius: 8px;
+  background: rgba(38, 18, 28, 0.84);
+  box-shadow: 0 12px 24px rgba(6, 10, 20, 0.18);
+}
+
+.cloud-upload-failure-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.cloud-upload-failure-copy strong {
+  color: #fff3f6;
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.cloud-upload-failure-copy span:last-child {
+  color: rgba(255, 225, 232, 0.9);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.cloud-upload-failure-stage {
+  width: fit-content;
+  padding: 2px 7px;
+  border: 1px solid rgba(255, 210, 222, 0.28);
+  border-radius: 999px;
+  color: #ffdbe4;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cloud-upload-failure-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: min(100%, 320px);
+}
+
+.cloud-upload-failure-actions .upload-button {
+  min-height: 36px;
+}
+
+.cloud-upload-failure-diagnostics {
+  min-width: min(100%, 220px);
+  color: rgba(255, 225, 232, 0.9);
+  font-size: 0.78rem;
+}
+
+.cloud-upload-failure-diagnostics summary {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: rgba(255, 225, 232, 0.88);
+}
+
+.cloud-upload-failure-diagnostics dl {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+}
+
+.cloud-upload-failure-diagnostics div {
+  display: grid;
+  grid-template-columns: minmax(92px, max-content) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.cloud-upload-failure-diagnostics dt {
+  color: rgba(255, 225, 232, 0.68);
+}
+
+.cloud-upload-failure-diagnostics dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #fff8fa;
+}
+
 .video-analysis-toolbar {
   position: sticky;
   top: 8px;
