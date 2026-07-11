@@ -254,6 +254,36 @@ describe("storage health model", () => {
     );
   });
 
+  it("shows an actionable Cloud connection reason on saved-video cards", () => {
+    assert.equal(
+      getSavedVideoCloudStatusLabel(savedVideo({ cloud: { status: "not-uploaded" } }), {
+        isUploading: false,
+        cloudConnected: false,
+        cloudState: "not_connected",
+      }),
+      "Cloud - Connect Clarity Cloud",
+    );
+  });
+
+  it("shows setup and service blockers instead of a silent Cloud action", () => {
+    assert.equal(
+      getSavedVideoCloudStatusLabel(savedVideo({ cloud: { status: "not-uploaded" } }), {
+        isUploading: false,
+        cloudConnected: true,
+        cloudState: "blocked",
+      }),
+      "Cloud - Setup incomplete",
+    );
+    assert.equal(
+      getSavedVideoCloudStatusLabel(savedVideo({ cloud: { status: "not-uploaded" } }), {
+        isUploading: false,
+        cloudConnected: true,
+        cloudState: "error",
+      }),
+      "Cloud - Service unavailable",
+    );
+  });
+
   it("keeps migration and reconnect actions available through local action labels", () => {
     const health = getLocalStorageHealth(localStatus({ health: "permission-lost" }));
 

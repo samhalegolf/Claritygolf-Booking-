@@ -22,9 +22,9 @@ import { IconPlay, IconPause, IconRecord, IconUpload } from "./components/VideoI
 import {
   ComparisonSide,
   ComparisonWorkspaceState,
-  SaveBackend,
   VideoAnalysisPersistenceLayer,
   WorkspacePersistenceContext,
+  clearComparisonWorkspaceState,
   createVideoAnalysisPersistence,
   loadComparisonWorkspaceState,
   saveComparisonWorkspaceState,
@@ -67,8 +67,22 @@ const SNAPSHOT_STORAGE_WARNING_LIMIT = 12;
 const SNAPSHOT_PREVIEW_WIDTH = 88;
 const SNAPSHOT_PREVIEW_HEIGHT = 50;
 const DEFAULT_PLAYER_ID = "player-demo-1";
-type SaveStatus = "idle" | "saving" | "saved" | "error";
+type SaveStatus = "idle" | "saving" | "sending" | "saved" | "error";
 type RecordingStatus = "ready" | "recording" | "processing" | "error";
+
+export interface VideoWorkspaceNavigationContext {
+  playerId?: string;
+  playerName?: string;
+  lessonId?: string;
+  savedVideoId?: string;
+  hasPlayerContext: boolean;
+  reason: "toolbar-back" | "local-save" | "save-and-send";
+}
+
+export interface VideoWorkspaceSaveResult extends VideoWorkspaceNavigationContext {
+  savedItems: SavedVideoItem[];
+  reason: "local-save" | "save-and-send";
+}
 
 interface LiveRecordingSession {
   side: ComparisonSide;
@@ -86,6 +100,9 @@ interface VideoWorkspaceProps {
   persistence?: Partial<VideoAnalysisPersistenceLayer>;
   savedVideoLibrary?: SavedVideoLibraryStore | null;
   onSavedVideoLibraryChange?: () => void;
+  onNavigateBack?: (context: VideoWorkspaceNavigationContext) => void;
+  onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;
+  onSaveAndSend?: (result: VideoWorkspaceSaveResult) => Promise<void>;
 }
 
 const normalizePoint = (point: { x: number; y: number }, overlay: { width: number; height: number }) => ({
@@ -244,6 +261,9 @@ const hasSaveableAnalysisContent = (analysis: VideoAnalysis) => {
   );
 };
 
+const briefSuccessDelay = () =>
+  new Promise((resolve) => window.setTimeout(resolve, 450));
+
 export function VideoWorkspace({
   playerId,
   playerName,
@@ -253,6 +273,9 @@ export function VideoWorkspace({
   persistence,
   savedVideoLibrary,
   onSavedVideoLibraryChange,
+  onNavigateBack,
+  onLocalSaveComplete,
+  onSaveAndSend,
 }: VideoWorkspaceProps) {
   const leftVideoRef = useRef<HTMLVideoElement>(null);
   const rightVideoRef = useRef<HTMLVideoElement>(null);
@@ -314,10 +337,9 @@ export function VideoWorkspace({
   const [activeSide, setActiveSide] = useState<ComparisonSide>("left");
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
   const [currentSavedVideoIds, setCurrentSavedVideoIds] = useState<Partial<Record<ComparisonSide, string>>>({});
-  const [saveBackend, setSaveBackend] = useState<SaveBackend>("local-device");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveMessage, setSaveMessage] = useState("Nothing to save yet.");
-  const [showSaveSettings, setShowSaveSettings] = useState(false);
+  const [showSaveAndSendOffer, setShowSaveAndSendOffer] = useState(false);
   const [dragTargetSide, setDragTargetSide] = useState<ComparisonSide | null>(null);
   const [intakeError, setIntakeError] = useState("");
   const [liveRecording, setLiveRecording] = useState<LiveRecordingSession | null>(null);
@@ -1397,12 +1419,29 @@ export function VideoWorkspace({
     setFocusSelectionDraft(null);
   }, []);
 
-  const isBackAvailableThroughHistory =
-    typeof window !== "undefined" && window.history.length > 1;
+  const buildNavigationContext = useCallback(
+    (reason: VideoWorkspaceNavigationContext["reason"]): VideoWorkspaceNavigationContext => ({
+      playerId: playerId || undefined,
+      playerName: playerName || (playerId ? resolvedPlayerName : undefined),
+      lessonId,
+      savedVideoId: savedVideoId || currentSavedVideoIds.left || currentSavedVideoIds.right,
+      hasPlayerContext: Boolean(playerId),
+      reason,
+    }),
+    [
+      currentSavedVideoIds.left,
+      currentSavedVideoIds.right,
+      lessonId,
+      playerId,
+      playerName,
+      resolvedPlayerName,
+      savedVideoId,
+    ]
+  );
 
   // Back priority: cancel active draw/edit -> cancel focus selection -> close
-  // focus palette -> close focus window -> compare back to single -> browser
-  // history fallback.
+  // focus palette -> close focus window -> compare back to single -> explicit
+  // app navigation callback.
   const handleBackAction = useCallback(() => {
     if (activeDrawing.isDrawingActionActive) {
       activeDrawing.cancel();
@@ -1424,17 +1463,25 @@ export function VideoWorkspace({
       updateMode("single");
       return;
     }
-    if (isBackAvailableThroughHistory) {
-      window.history.back();
+    if (onNavigateBack) {
+      onNavigateBack(buildNavigationContext("toolbar-back"));
+      return;
     }
+    // eslint-disable-next-line no-console
+    console.warn("video_analysis_navigation_fallback_missing", {
+      hasPlayerContext: Boolean(playerId),
+      reason: "toolbar-back",
+    });
   }, [
     activeDrawing,
+    buildNavigationContext,
     comparisonMode,
     focusPaletteOpen,
     showFocusWindow,
     focusSelectionMode,
-    isBackAvailableThroughHistory,
     clearFocusSelection,
+    onNavigateBack,
+    playerId,
     updateMode,
   ]);
 
@@ -1444,7 +1491,7 @@ export function VideoWorkspace({
     focusPaletteOpen ||
     showFocusWindow ||
     comparisonMode === "compare" ||
-    isBackAvailableThroughHistory;
+    Boolean(onNavigateBack);
   const clearDrawingLabel = activeDrawing.selectedObjectId
     ? "Clear selected"
     : "Clear drawings on this side";
@@ -1775,33 +1822,90 @@ export function VideoWorkspace({
     []
   );
 
-  const handleManualSave = useCallback(async () => {
+  const createBlankAnalysis = useCallback(
+    (videoId: string): VideoAnalysis => ({
+      id: createId("analysis"),
+      playerId: resolvedPlayerId,
+      lessonId,
+      videoId,
+      videoMeta: undefined,
+      drawings: [],
+      markers: [],
+      notes: [],
+      focusViews: [],
+      focusSnapshots: [],
+      narrationRefs: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }),
+    [lessonId, resolvedPlayerId]
+  );
+
+  const resetWorkspaceAfterDurableSave = useCallback(async () => {
+    leftPlayback.clearSource();
+    rightPlayback.clearSource();
+    setPlayerVideoLeft(null);
+    setPlayerVideoRight(null);
+    setLeftMountedSource(null);
+    setRightMountedSource(null);
+    setLeftMetadataReady(false);
+    setRightMetadataReady(false);
+    setComparisonMode("single");
+    setActiveSide("left");
+    setLinkedPlayback(false);
+    setShowFocusWindow(false);
+    setFocusWindowMode("area");
+    setFocusWindowSide("left");
+    setFocusAreaRect(null);
+    setCurrentSavedVideoIds({});
+    leftStore.replaceAnalysis(createBlankAnalysis(LEFT_ANALYSIS_SLOT));
+    rightStore.replaceAnalysis(createBlankAnalysis(RIGHT_ANALYSIS_SLOT));
+
+    await Promise.allSettled([
+      persistenceLayer.videoStore?.removeVideo(buildVideoSlotKey(resolvedPlayerId, "left", lessonId)),
+      persistenceLayer.videoStore?.removeVideo(buildVideoSlotKey(resolvedPlayerId, "right", lessonId)),
+      clearComparisonWorkspaceState(persistenceLayer.workspaceAdapter, workspaceContext),
+      leftStore.saveNow(),
+      rightStore.saveNow(),
+    ]);
+  }, [
+    createBlankAnalysis,
+    leftPlayback,
+    leftStore,
+    lessonId,
+    persistenceLayer.videoStore,
+    persistenceLayer.workspaceAdapter,
+    resolvedPlayerId,
+    rightPlayback,
+    rightStore,
+    workspaceContext,
+  ]);
+
+  const performDurableSave = useCallback(async (reason: VideoWorkspaceSaveResult["reason"]) => {
     if (!canManualSave) {
       setSaveStatus("error");
       setSaveMessage("Add or record a clip before saving.");
-      return;
+      setShowSaveAndSendOffer(false);
+      return null;
     }
 
     if (!saveableSides.length) {
       setSaveStatus("error");
       setSaveMessage("Save needs an uploaded or recorded video.");
-      return;
-    }
-
-    if (saveBackend === "cloud-service") {
-      setSaveStatus("error");
-      setSaveMessage("Cloud transfer is coming next. Save locally first.");
-      return;
+      setShowSaveAndSendOffer(false);
+      return null;
     }
 
     if (!savedVideoStore || !persistenceLayer.videoStore) {
       setSaveStatus("error");
       setSaveMessage("Device video storage is unavailable in this browser.");
-      return;
+      setShowSaveAndSendOffer(false);
+      return null;
     }
 
     setSaveStatus("saving");
     setSaveMessage("Saving to Clarity Video Library...");
+    setShowSaveAndSendOffer(false);
 
     try {
       const [leftSaved, rightSaved] = await Promise.all([
@@ -1872,6 +1976,12 @@ export function VideoWorkspace({
             : `Saved ${savedItems.length} videos to local cache. Reconnect library when available.`
       );
       setSaveStatus("saved");
+      return {
+        ...buildNavigationContext(reason),
+        savedVideoId: savedItems[0]?.savedVideoId || buildNavigationContext(reason).savedVideoId,
+        savedItems,
+        reason,
+      } satisfies VideoWorkspaceSaveResult;
     } catch (error) {
       setSaveStatus("error");
       const message =
@@ -1881,9 +1991,11 @@ export function VideoWorkspace({
       setSaveMessage(message);
       // eslint-disable-next-line no-console
       console.error("Manual video analysis save failed", error);
+      return null;
     }
   }, [
     buildWorkspaceState,
+    buildNavigationContext,
     canManualSave,
     captureSideThumbnail,
     currentSavedVideoIds,
@@ -1896,10 +2008,77 @@ export function VideoWorkspace({
     playerVideoRight,
     resolvedPlayerId,
     rightStore,
-    saveBackend,
     saveableSides,
     savedVideoStore,
     workspaceContext,
+  ]);
+
+  const completeSuccessfulSave = useCallback(
+    async (result: VideoWorkspaceSaveResult, message: string) => {
+      setSaveStatus("saved");
+      setSaveMessage(message);
+      await resetWorkspaceAfterDurableSave();
+      await briefSuccessDelay();
+      await onLocalSaveComplete?.(result);
+    },
+    [onLocalSaveComplete, resetWorkspaceAfterDurableSave]
+  );
+
+  const handleManualSave = useCallback(async () => {
+    const result = await performDurableSave("local-save");
+    if (!result) return;
+    await completeSuccessfulSave(result, "Saved to Local Storage.");
+  }, [completeSuccessfulSave, performDurableSave]);
+
+  const handleCloudSavePrompt = useCallback(() => {
+    if (!canManualSave) {
+      setSaveStatus("error");
+      setSaveMessage("Add or record a clip before saving.");
+      setShowSaveAndSendOffer(false);
+      return;
+    }
+    setSaveStatus("idle");
+    setSaveMessage("Save locally before sending to Clarity Cloud.");
+    setShowSaveAndSendOffer(true);
+  }, [canManualSave]);
+
+  const handleSaveAndSend = useCallback(async () => {
+    const result = await performDurableSave("save-and-send");
+    if (!result) return;
+
+    if (!onSaveAndSend) {
+      setSaveStatus("error");
+      setSaveMessage("Transfer service unavailable.");
+      return;
+    }
+
+    setSaveStatus("sending");
+    setSaveMessage("Preparing Clarity Cloud transfer...");
+    try {
+      await onSaveAndSend(result);
+      await completeSuccessfulSave(result, "Uploading 0% in Player Profile.");
+    } catch (error) {
+      setSaveStatus("error");
+      const safeMessage =
+        error instanceof Error && error.message
+          ? error.message
+          : "Cloud transfer failed. Your local video is still safe.";
+      setSaveMessage(safeMessage);
+      onSavedVideoLibraryChange?.();
+      // eslint-disable-next-line no-console
+      console.warn("video_analysis_cloud_transfer_start_failed", {
+        savedVideoIds: result.savedItems.map((item) => item.savedVideoId),
+        safeErrorCode:
+          typeof error === "object" && error && "code" in error
+            ? String((error as { code?: unknown }).code || "CLARITY_CLOUD_TRANSFER_FAILED")
+            : "CLARITY_CLOUD_TRANSFER_FAILED",
+      });
+    }
+  }, [
+    completeSuccessfulSave,
+    onSaveAndSend,
+    onSavedVideoLibraryChange,
+    performDurableSave,
   ]);
 
   const renderVideoCard = (
@@ -2213,45 +2392,31 @@ export function VideoWorkspace({
               type="button"
               className="upload-button video-save-button"
               onClick={handleManualSave}
-              disabled={saveStatus === "saving" || !canManualSave}
+              disabled={saveStatus === "saving" || saveStatus === "sending"}
             >
               {saveStatus === "saving" ? "Saving..." : "Save"}
             </button>
+            <button
+              type="button"
+              className="upload-button video-save-button"
+              onClick={handleCloudSavePrompt}
+              disabled={saveStatus === "saving" || saveStatus === "sending"}
+            >
+              Save to Clarity Cloud
+            </button>
+            {showSaveAndSendOffer ? (
+              <button
+                type="button"
+                className="upload-button video-save-button"
+                onClick={handleSaveAndSend}
+                disabled={saveStatus === "saving" || saveStatus === "sending"}
+              >
+                {saveStatus === "sending" ? "Preparing..." : "Save and send"}
+              </button>
+            ) : null}
             <span className={`analysis-save-status is-${saveStatus}`} role="status">
               {saveMessage}
             </span>
-            <button
-              type="button"
-              className="upload-button video-save-settings-button"
-              onClick={() => setShowSaveSettings((previous) => !previous)}
-              aria-expanded={showSaveSettings}
-            >
-              Settings
-            </button>
-            {showSaveSettings ? (
-              <div className="analysis-save-settings" role="group" aria-label="Save location">
-                <span>Save location</span>
-                <label className="analysis-save-setting">
-                  <input
-                    type="radio"
-                    name="video-analysis-save-backend"
-                    checked={saveBackend === "local-device"}
-                    onChange={() => setSaveBackend("local-device")}
-                  />
-                  Local Device
-                </label>
-                <label className="analysis-save-setting">
-                  <input
-                    type="radio"
-                    name="video-analysis-save-backend"
-                    checked={saveBackend === "cloud-service"}
-                    onChange={() => setSaveBackend("cloud-service")}
-                    disabled
-                  />
-                  Cloud transfer coming next
-                </label>
-              </div>
-            ) : null}
           </div>
           <button
             type="button"

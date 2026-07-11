@@ -432,5 +432,9 @@ export function getSavedVideoCloudStatusLabel(
   }
   if (video.cloud?.status === "failed") return "Cloud - Failed - Retry";
   if (options.cloudState === "permission_upgrade_required") return "Cloud - Permission required";
+  if (options.cloudState === "reconnect_required") return "Cloud - Reconnect required";
+  if (options.cloudState === "blocked") return "Cloud - Setup incomplete";
+  if (options.cloudState === "error") return "Cloud - Service unavailable";
+  if (!options.cloudConnected || options.cloudState === "not_connected") return "Cloud - Connect Clarity Cloud";
   return "Cloud - Not sent";
 }
