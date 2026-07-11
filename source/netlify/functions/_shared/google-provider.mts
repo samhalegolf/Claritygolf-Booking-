@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
+import { getClarityCloudGoogleConfig } from "./clarity-cloud-google-config.mts";
 
 export const googleCalendarScopes = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -279,10 +280,14 @@ async function upsertGoogleProviderConnection(row: GoogleProviderConnectionRow) 
 }
 
 function googleConfig() {
-  return {
-    clientId: env("GOOGLE_CLIENT_ID", "") || env("GOOGLE_CALENDAR_CLIENT_ID", ""),
-    clientSecret: env("GOOGLE_CLIENT_SECRET", "") || env("GOOGLE_CALENDAR_CLIENT_SECRET", ""),
-  };
+  const config = getClarityCloudGoogleConfig();
+  if (!config.configured) {
+    throw Object.assign(new Error("Clarity Cloud is not configured for this environment."), {
+      code: "CLOUD_OAUTH_NOT_CONFIGURED",
+      status: 503,
+    });
+  }
+  return { clientId: config.clientId, clientSecret: config.clientSecret };
 }
 
 async function tokenRequest(params: Record<string, string>) {
