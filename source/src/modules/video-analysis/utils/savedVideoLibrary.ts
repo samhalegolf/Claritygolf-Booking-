@@ -379,6 +379,15 @@ const buildItem = async (
   const savedVideoId = input.savedVideoId || existing?.savedVideoId || createSavedVideoId();
   const checksumSha256 = await calculateBlobSha256(input.sourceBlob);
   const sizeBytes = blobSize(input.sourceBlob);
+  // If the saved bytes changed, any previous cloud upload is stale and the
+  // item must be sendable again. Compare by checksum when available,
+  // falling back to size.
+  const sourceUnchanged = Boolean(
+    existing &&
+      (existing.source.checksumSha256 && checksumSha256
+        ? existing.source.checksumSha256 === checksumSha256
+        : existing.source.sizeBytes === sizeBytes)
+  );
   const mimeType = input.sourceBlob.type || "application/octet-stream";
   const title =
     input.title?.trim() ||
@@ -411,7 +420,7 @@ const buildItem = async (
       status: "available",
       blobRecordId: savedVideoId,
     },
-    cloud: existing?.cloud || { status: "not-uploaded" },
+    cloud: sourceUnchanged ? existing?.cloud || { status: "not-uploaded" } : { status: "not-uploaded" },
     analysisSnapshot: input.analysisSnapshot,
     workspaceSnapshot: {
       ...input.workspaceSnapshot,
@@ -531,6 +540,28 @@ const uploadChunkToClarity = async (
   const data = await safeJson<any>(response, "Chunk upload did not return JSON.", "DRIVE_UPLOAD_PROXY_FAILED");
   if (!response.ok || data.ok === false) throw apiFailure(data, response.status === 413 ? "DRIVE_UPLOAD_TOO_LARGE" : "DRIVE_UPLOAD_PROXY_FAILED");
   return sessionFromResponse(data);
+};
+
+// The server answers Google 429/5xx with DRIVE_UPLOAD_INTERRUPTED and keeps
+// the accepted offset unchanged, so the same chunk can be retried safely.
+const uploadChunkWithRetry = async (
+  savedVideoId: string,
+  session: PublicTransferSession,
+  chunk: Blob,
+  startByte: number,
+  totalSize: number,
+  mimeType: string
+): Promise<PublicTransferSession> => {
+  const maxAttempts = 3;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await uploadChunkToClarity(savedVideoId, session, chunk, startByte, totalSize, mimeType);
+    } catch (error) {
+      const retryable = error instanceof SavedVideoCloudError && error.code === "DRIVE_UPLOAD_INTERRUPTED";
+      if (!retryable || attempt >= maxAttempts) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+    }
+  }
 };
 
 const dataUrlToBase64Size = (dataUrl?: string) => {
@@ -685,7 +716,7 @@ export const saveSavedVideoToCloud = async (
       const startByte = session.acceptedOffsetBytes;
       const endByteExclusive = Math.min(session.expectedSizeBytes, startByte + session.chunkSizeBytes);
       const chunk = blob.slice(startByte, endByteExclusive, blob.type || working.source.mimeType || "application/octet-stream");
-      session = await uploadChunkToClarity(
+      session = await uploadChunkWithRetry(
         savedVideoId,
         session,
         chunk,
