@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Google Calendar and future Google Drive Transfer both need long-lived offline access. Refresh tokens must be encrypted, account-scoped, and held server-side only. Browser responses may show connection status, provider email, scopes, and reconnect state, but never refresh tokens, access tokens, encrypted payloads, or encryption-key metadata.
+Google Calendar and Clarity Cloud's current Google Drive provider both need long-lived offline access. Refresh tokens must be encrypted, account-scoped, and held server-side only. Browser responses may show connection status, provider email, scopes, and reconnect state, but never refresh tokens, access tokens, encrypted payloads, or encryption-key metadata.
 
 ## Storage Model
 

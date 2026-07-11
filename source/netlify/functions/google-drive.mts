@@ -159,7 +159,7 @@ async function driveStatusFromSettings(req: Request, settings: Record<string, st
   const encryptionConfigured = tokenEncryptionConfigured();
   const providerStorageConfigured = true;
   const blocker = !encryptionConfigured
-    ? "Server-side OAuth token encryption is required before Drive transfer can be connected."
+    ? "Secure provider storage is unavailable."
     : "";
 
   let state: DriveStatusState = "not_connected";
@@ -192,13 +192,13 @@ async function driveStatusFromSettings(req: Request, settings: Record<string, st
     message:
       blocker ||
       (state === "permission_upgrade_required"
-        ? "Google connected - Drive permission required."
+        ? "Clarity Cloud permission required."
         : state === "connected"
-          ? "Google Drive Transfer is ready to send saved videos."
+          ? "Clarity Cloud can send saved videos."
           : state === "reconnect_required"
             ? "Google needs to be reconnected before Drive transfer can be prepared."
           : configured
-            ? "Google Drive Transfer permission is ready to connect."
+            ? "Clarity Cloud is ready to connect."
             : "Google OAuth credentials are not configured."),
   };
 }
@@ -296,7 +296,7 @@ function callbackPage(ok: boolean, message: string) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Google Drive ${ok ? "Connected" : "Connection Failed"}</title>
+    <title>Clarity Cloud ${ok ? "Connected" : "Connection Failed"}</title>
     <style>
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: Inter, system-ui, sans-serif; background: #f5f5f3; color: #171717; }
       main { width: min(440px, calc(100vw - 32px)); padding: 24px; border: 1px solid #deded8; border-radius: 12px; background: #fff; }
@@ -307,7 +307,7 @@ function callbackPage(ok: boolean, message: string) {
   </head>
   <body>
     <main>
-      <h1>${ok ? "Google Drive permission connected" : "Google Drive not connected"}</h1>
+      <h1>${ok ? "Clarity Cloud connected" : "Clarity Cloud not connected"}</h1>
       <p>${escaped}</p>
       <a href="/?view=settings">Back to Clarity Booking</a>
     </main>
@@ -325,7 +325,7 @@ export default async function handler(req: Request) {
   try {
     if (req.method === "GET" && action === "callback") {
       const status = await finishGoogleDriveOAuth(req);
-      return html(callbackPage(true, `Connected${status.accountEmail ? ` as ${status.accountEmail}` : ""}. Google Drive Transfer is ready to send saved videos.`));
+      return html(callbackPage(true, `Connected${status.accountEmail ? ` as ${status.accountEmail}` : ""}. Clarity Cloud can send saved videos.`));
     }
 
     if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
@@ -339,7 +339,7 @@ export default async function handler(req: Request) {
       return json({
         ...status,
         ok: true,
-        message: "Google Drive Transfer is ready to send saved videos.",
+        message: "Clarity Cloud can send saved videos.",
       });
     }
     if ((req.method === "GET" || req.method === "POST") && action === "connect") {

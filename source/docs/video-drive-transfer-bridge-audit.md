@@ -22,7 +22,7 @@ There is no separate Drive refresh-token table, no plaintext Drive token setting
 - Stores only short-lived OAuth state in settings; token material goes through the shared provider service.
 - Saves the Drive grant with `saveGoogleAuthorization({ enableCalendar: true, enableDrive: true })`, preserving the existing encrypted refresh token if Google omits one.
 - Uses `getGoogleAccessToken` for the Drive test path to prove provider refresh works without exposing token material.
-- Adds a Settings > Integrations Google Drive Transfer panel showing Not connected, Permission upgrade required, Reconnect required, Error, and Blocked states.
+- Adds the Google Drive provider routes that now feed the Settings > Integrations Clarity Cloud card, including Not connected, Permission required, Reconnect required, Error, and Blocked states.
 
 ## Chunked Upload Transfer Added
 

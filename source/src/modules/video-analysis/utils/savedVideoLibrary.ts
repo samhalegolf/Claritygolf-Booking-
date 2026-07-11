@@ -1013,8 +1013,16 @@ export const getManagedLocalVideoLibraryStatus = async (): Promise<ManagedLocalV
     const cache = await root
       .getDirectoryHandle("System", { create: true })
       .then((system) => system.getDirectoryHandle("cache", { create: true }));
-    await writeFile(cache, ".clarity-write-test", "ok");
-    await cache.removeEntry?.(".clarity-write-test");
+    const testFileName = ".clarity-write-test";
+    try {
+      await writeFile(cache, testFileName, "ok");
+      const testFile = await cache.getFileHandle(testFileName).then((fileHandle) => fileHandle.getFile());
+      if ((await testFile.text()) !== "ok") {
+        throw new Error("Local library verification read-back failed.");
+      }
+    } finally {
+      await cache.removeEntry?.(testFileName).catch(() => undefined);
+    }
     return {
       supported: true,
       configured: true,

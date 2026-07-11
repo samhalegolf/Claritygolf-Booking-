@@ -351,13 +351,13 @@ export function validateFinalizePayload(body: any, savedVideoIdFromPath: string)
 async function ensureDriveReady(accountId: string) {
   const connection = await loadGoogleProviderConnection(accountId);
   if (!connection?.driveEnabled) {
-    throw new TransferError("DRIVE_NOT_CONNECTED", "Connect Google Drive before sending saved videos.", 409);
+    throw new TransferError("DRIVE_NOT_CONNECTED", "Connect Clarity Cloud before sending saved videos.", 409);
   }
   if (connection.connectionStatus === "reconnect_required") {
     throw new TransferError("GOOGLE_RECONNECT_REQUIRED", "Reconnect Google before sending saved videos.", 409);
   }
   if (!hasGoogleScopes(connection, [googleDriveFileScope])) {
-    throw new TransferError("DRIVE_SCOPE_MISSING", "Grant Google Drive permission before sending saved videos.", 409);
+    throw new TransferError("DRIVE_SCOPE_MISSING", "Grant Clarity Cloud permission before sending saved videos.", 409);
   }
   return getGoogleAccessToken(accountId, [googleDriveFileScope]);
 }
@@ -930,7 +930,7 @@ async function handleFinalize(req: Request, accountId: string, accessToken: stri
   return json({
     ok: true,
     status: "ready",
-    message: "Ready on primary computer",
+    message: "Ready in Clarity Cloud",
     assetFolderId,
     videoFileId: file.id,
     analysisFileId: analysis.id,

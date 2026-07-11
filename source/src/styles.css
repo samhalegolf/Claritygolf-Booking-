@@ -2269,6 +2269,126 @@ button {
   justify-content: flex-start;
 }
 
+.video-storage-section {
+  gap: 14px;
+}
+
+.video-storage-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.video-storage-heading span,
+.storage-card-header span,
+.storage-provider-line,
+.storage-diagnostics-group h4 {
+  color: #76736d;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.video-storage-heading h3 {
+  margin: 2px 0 0;
+  color: #171717;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.video-storage-grid,
+.storage-diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.storage-card,
+.storage-diagnostics-group {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #deded8;
+  background: #fff;
+}
+
+.storage-card {
+  align-content: start;
+}
+
+.storage-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.storage-card-header svg,
+.video-storage-heading svg {
+  color: #8a6f3f;
+  flex: 0 0 auto;
+}
+
+.storage-card-header strong {
+  display: block;
+  margin-top: 2px;
+  color: #171717;
+  font-size: 19px;
+  line-height: 1.15;
+}
+
+.storage-card p {
+  margin: 0;
+  color: #4b4741;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.storage-provider-line {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #ecebe5;
+  background: #f7f7f3;
+  color: #56534d;
+  overflow-wrap: anywhere;
+}
+
+.storage-card.is-ready .storage-card-header strong {
+  color: #275325;
+}
+
+.storage-card.is-beta .storage-card-header strong,
+.storage-card.is-needs-folder .storage-card-header strong,
+.storage-card.is-setup-incomplete .storage-card-header strong,
+.storage-card.is-not-connected .storage-card-header strong {
+  color: #8a5b12;
+}
+
+.storage-card.is-reconnect-required .storage-card-header strong,
+.storage-card.is-permission-required .storage-card-header strong,
+.storage-card.is-library-missing .storage-card-header strong,
+.storage-card.is-cache-only .storage-card-header strong,
+.storage-card.is-temporarily-unavailable .storage-card-header strong,
+.storage-card.is-error .storage-card-header strong {
+  color: #a52e15;
+}
+
+.storage-diagnostics {
+  display: grid;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #ecebe5;
+}
+
+.storage-diagnostics-group h4 {
+  margin: 0;
+  color: #34312d;
+}
+
 .sync-meta {
   display: flex;
   flex-wrap: wrap;
@@ -6970,6 +7090,11 @@ button {
 }
 
 @media (max-width: 720px) {
+  .video-storage-grid,
+  .storage-diagnostics-grid {
+    grid-template-columns: 1fr;
+  }
+
   .revenue-chart {
     height: 90px;
   }

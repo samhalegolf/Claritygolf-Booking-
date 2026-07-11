@@ -39,6 +39,10 @@ Production needs:
 
 ## Video Analysis saved-video ownership
 
+See `docs/video-storage-product-model.md` for the current product vocabulary:
+Local Storage is the durable computer-side library, and Clarity Cloud is the
+optional cross-device transfer system currently powered by Google Drive.
+
 Video Analysis now separates primary local storage from browser recovery:
 
 - The managed Clarity Video Library folder is the primary durable store when the
@@ -115,7 +119,7 @@ The upload lifecycle is:
    progress locally.
 4. `/api/video-transfer/:savedVideoId/finalize` verifies the uploaded file size
    and Clarity `appProperties`, writes `analysis.json` and `manifest.json`, and
-   only then marks the local item `Ready on primary computer`.
+   only then marks the local item `Ready in Clarity Cloud`.
 
 Known limitations: resumable upload URLs are treated as temporary secrets and are
 not persisted across reloads, so an interrupted browser upload becomes retryable
