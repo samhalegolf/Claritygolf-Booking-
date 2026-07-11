@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 import type { VideoAnalysis } from "../models/Analysis";
 import type { PlayerVideo } from "../models/Video";
@@ -11,6 +12,8 @@ import {
   createMemorySavedVideoLibraryStore,
   getManagedLocalVideoLibraryStatus,
   getSavedVideoCloudStatus,
+  importSavedVideoFromClarityCloud,
+  listClarityCloudImportTransfers,
   saveSavedVideoToCloud,
 } from "./savedVideoLibrary";
 
@@ -65,10 +68,17 @@ const dataUrl = (label: string) => `data:image/png;base64,${Buffer.from(label).t
 
 const stringifySize = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).length;
 
+const checksumForBlob = async (blob: Blob) =>
+  createHash("sha256").update(Buffer.from(await blob.arrayBuffer())).digest("hex");
+
 const installBrowserGlobals = () => {
+  const localStorageMap = new Map<string, string>([["clarityDeviceId", "device-1"]]);
   Object.defineProperty(globalThis, "window", {
     value: {
-      localStorage: { getItem: () => "device-1" },
+      localStorage: {
+        getItem: (key: string) => localStorageMap.get(key) || null,
+        setItem: (key: string, value: string) => localStorageMap.set(key, value),
+      },
       navigator: { userAgent: "node-test", platform: "test-platform" },
     },
     configurable: true,
@@ -573,6 +583,186 @@ describe("saved video library", () => {
       assert.equal(requests.some((request) => request.url.includes("googleapis.com")), false);
       assert.equal(ready.cloud?.status, "ready");
       assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("lists Clarity Cloud imports and imports only after local verification receipt", async () => {
+    installBrowserGlobals();
+    const store = createMemorySavedVideoLibraryStore();
+    const blob = sourceBlob();
+    const checksumSha256 = await checksumForBlob(blob);
+    const originalFetch = globalThis.fetch;
+    let receiptBody: any = null;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url === "/api/video-transfer/imports") {
+        return Response.json({
+          ok: true,
+          transfers: [{
+            transferId: "transfer-1",
+            savedVideoId: "saved-video-1",
+            status: "ready",
+            catalogueStatus: "ready_to_import",
+            expectedSizeBytes: blob.size,
+            acceptedOffsetBytes: blob.size,
+            chunkSizeBytes: 4,
+            savedVideo: {
+              savedVideoId: "saved-video-1",
+              playerId: "player-1",
+              lessonId: "lesson-1",
+              analysisId: "analysis-1",
+              title: "Imported swing",
+              createdAt: "2026-07-10T00:00:00.000Z",
+              updatedAt: "2026-07-10T00:00:00.000Z",
+            },
+            video: {
+              fileName: "swing.mp4",
+              mimeType: "video/mp4",
+              sizeBytes: blob.size,
+              checksumSha256,
+            },
+          }],
+        });
+      }
+      if (url.endsWith("/import")) {
+        return Response.json({
+          ok: true,
+          transfer: {
+            transferId: "transfer-1",
+            savedVideoId: "saved-video-1",
+            status: "ready",
+            catalogueStatus: "ready_to_import",
+            expectedSizeBytes: blob.size,
+            acceptedOffsetBytes: blob.size,
+            chunkSizeBytes: 4,
+          },
+          savedVideo: {
+            savedVideoId: "saved-video-1",
+            playerId: "player-1",
+            lessonId: "lesson-1",
+            analysisId: "analysis-1",
+            title: "Imported swing",
+            createdAt: "2026-07-10T00:00:00.000Z",
+            updatedAt: "2026-07-10T00:00:00.000Z",
+          },
+          video: {
+            fileName: "swing.mp4",
+            mimeType: "video/mp4",
+            sizeBytes: blob.size,
+            checksumSha256,
+            duration: 12,
+            width: 1280,
+            height: 720,
+          },
+          analysisJson: {
+            savedVideoId: "saved-video-1",
+            analysis: analysisSnapshot,
+            workspace: workspaceSnapshot,
+          },
+        });
+      }
+      if (url.endsWith("/download")) {
+        return new Response(blob, { status: 200, headers: { "content-type": "video/mp4" } });
+      }
+      if (url.endsWith("/import-receipt")) {
+        receiptBody = JSON.parse(String(init?.body || "{}"));
+        return Response.json({
+          ok: true,
+          status: "imported",
+          catalogueStatus: "complete",
+          importedAt: "2026-07-10T01:00:00.000Z",
+          importVerifiedAt: receiptBody.verifiedAt,
+          cleanupScheduledAt: "2026-07-10T01:00:00.000Z",
+          cleanupAfter: "2026-07-17T01:00:00.000Z",
+          session: {
+            transferId: "transfer-1",
+            savedVideoId: "saved-video-1",
+            status: "ready",
+            catalogueStatus: "complete",
+            expectedSizeBytes: blob.size,
+            acceptedOffsetBytes: blob.size,
+            chunkSizeBytes: 4,
+            importedAt: "2026-07-10T01:00:00.000Z",
+            importVerifiedAt: receiptBody.verifiedAt,
+            cleanupScheduledAt: "2026-07-10T01:00:00.000Z",
+            cleanupAfter: "2026-07-17T01:00:00.000Z",
+          },
+        });
+      }
+      return Response.json({ ok: false }, { status: 500 });
+    };
+    try {
+      const transfers = await listClarityCloudImportTransfers();
+      const imported = await importSavedVideoFromClarityCloud("saved-video-1", store);
+
+      assert.equal(transfers.length, 1);
+      assert.equal(receiptBody.sizeBytes, blob.size);
+      assert.equal(receiptBody.checksumSha256, checksumSha256);
+      assert.equal(imported.local.status, "available");
+      assert.equal(imported.cloud?.status, "imported");
+      assert.equal(imported.cloud?.catalogueStatus, "complete");
+      assert.equal((await store.getBlob("saved-video-1"))?.size, blob.size);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not mark a Clarity Cloud import as imported when local checksum verification fails", async () => {
+    installBrowserGlobals();
+    const store = createMemorySavedVideoLibraryStore();
+    const blob = sourceBlob();
+    const originalFetch = globalThis.fetch;
+    const fetchUrls: string[] = [];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      fetchUrls.push(url);
+      if (url.endsWith("/import")) {
+        return Response.json({
+          ok: true,
+          transfer: {
+            transferId: "transfer-1",
+            savedVideoId: "saved-video-1",
+            status: "ready",
+            catalogueStatus: "ready_to_import",
+            expectedSizeBytes: blob.size,
+            acceptedOffsetBytes: blob.size,
+            chunkSizeBytes: 4,
+          },
+          savedVideo: {
+            savedVideoId: "saved-video-1",
+            playerId: "player-1",
+            analysisId: "analysis-1",
+            title: "Imported swing",
+            createdAt: "2026-07-10T00:00:00.000Z",
+            updatedAt: "2026-07-10T00:00:00.000Z",
+          },
+          video: {
+            fileName: "swing.mp4",
+            mimeType: "video/mp4",
+            sizeBytes: blob.size,
+            checksumSha256: "b".repeat(64),
+          },
+          analysisJson: {
+            savedVideoId: "saved-video-1",
+            analysis: analysisSnapshot,
+            workspace: workspaceSnapshot,
+          },
+        });
+      }
+      if (url.endsWith("/download")) return new Response(blob, { status: 200 });
+      return Response.json({ ok: false }, { status: 500 });
+    };
+    try {
+      await assert.rejects(
+        () => importSavedVideoFromClarityCloud("saved-video-1", store),
+        (error) =>
+          error instanceof SavedVideoCloudError &&
+          error.code === "CLARITY_CLOUD_IMPORT_VERIFY_FAILED"
+      );
+      assert.equal(fetchUrls.some((url) => url.endsWith("/import-receipt")), false);
+      assert.equal(await store.getItem("saved-video-1"), null);
     } finally {
       globalThis.fetch = originalFetch;
     }

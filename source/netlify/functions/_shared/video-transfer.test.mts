@@ -114,6 +114,8 @@ test("public transfer session never exposes the Google resumable URL", () => {
     transferId: "transfer-1",
     savedVideoId: "saved-video-1",
     accountId: "account-1",
+    providerId: "google-drive",
+    catalogueStatus: "uploading",
     playerId: "player-1",
     analysisId: "analysis-1",
     status: "uploading",

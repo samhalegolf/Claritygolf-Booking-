@@ -63,15 +63,29 @@ import {
   migrateSavedVideosToManagedLocalLibrary,
   moveManagedLocalVideoLibrary,
   cancelSavedVideoCloudUpload,
+  importSavedVideoFromClarityCloud,
+  listClarityCloudImportTransfers,
   pauseSavedVideoCloudUpload,
   reconnectManagedLocalVideoLibrary,
   rescanManagedLocalVideoLibrary,
   saveSavedVideoToCloud,
   verifyManagedLocalVideoLibrary,
   type ManagedLocalVideoLibraryStatus,
+  type ClarityCloudImportTransfer,
   type SavedVideoItem,
   type SavedVideoLibraryStore,
 } from "./modules/video-analysis/utils/savedVideoLibrary";
+import {
+  getClarityCloudActionLabel,
+  getClarityCloudHealth,
+  getLocalStorageActionLabel,
+  getLocalStorageHealth,
+  getSavedVideoCloudStatusLabel,
+  getSavedVideoLocalStatusLabel,
+  type ClarityCloudAction,
+  type GoogleDriveTransferStatus,
+  type LocalStorageAction,
+} from "./storageHealth";
 import {
   loadPlayerProfilesState,
   addManualPlayer,
@@ -845,33 +859,6 @@ type GoogleCalendarSyncStatus = {
   skipped?: boolean;
 };
 type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting" | "migrating";
-type GoogleDriveTransferState =
-  | "not_connected"
-  | "connected"
-  | "permission_upgrade_required"
-  | "reconnect_required"
-  | "blocked"
-  | "error";
-type GoogleDriveTransferStatus = {
-  ok?: boolean;
-  configured: boolean;
-  connected: boolean;
-  state: GoogleDriveTransferState;
-  calendarConnected: boolean;
-  driveScopeGranted: boolean;
-  accountEmail: string;
-  redirectUri: string;
-  scope: string;
-  requestedScopes: string;
-  rootFolderId: string;
-  inboxFolderId: string;
-  importedFolderId: string;
-  failedFolderId: string;
-  tokenEncryptionConfigured: boolean;
-  providerStorageConfigured: boolean;
-  blocker: string;
-  message: string;
-};
 type GoogleDriveActionState = "idle" | "connecting" | "testing" | "disconnecting";
 type AuthStatus = "checking" | "authenticated" | "guest";
 type AuthMode = "login" | "forgot" | "reset";
@@ -3389,58 +3376,36 @@ function formatVideoDurationLabel(seconds?: number) {
 function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
   switch (code) {
     case "DRIVE_API_DISABLED":
-      return "Google Drive API is not enabled for this connection.";
+      return "Clarity Cloud is not enabled for this connection.";
     case "DRIVE_UPLOAD_PROXY_FAILED":
-      return "Clarity could not complete the upload.";
+      return "Clarity Cloud could not complete the upload.";
     case "DRIVE_UPLOAD_TOO_LARGE":
       return "This transfer chunk was too large.";
     case "DRIVE_SCOPE_MISSING":
-      return "Google Drive permission is required.";
+      return "Clarity Cloud permission is required.";
     case "GOOGLE_RECONNECT_REQUIRED":
-      return "Reconnect Google Drive to continue.";
+      return "Reconnect Clarity Cloud to continue.";
     case "DRIVE_UPLOAD_SESSION_EXPIRED":
       return "Start a new upload session before retrying.";
     case "DRIVE_UPLOAD_VERIFY_FAILED":
-      return "Clarity could not verify the uploaded video.";
+      return "Clarity Cloud could not verify the uploaded video.";
     case "DRIVE_UPLOAD_INTERRUPTED":
       return "Video upload was interrupted.";
     case "SAVED_VIDEO_SOURCE_MISSING":
       return "Source unavailable.";
+    case "CLARITY_CLOUD_IMPORT_NOT_READY":
+      return "This transfer is not ready to import.";
+    case "CLARITY_CLOUD_IMPORT_VERIFY_FAILED":
+      return "Imported video did not match the Clarity Cloud catalogue.";
+    case "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED":
+      return "Local import was verified, but the receipt could not be recorded.";
     case "TRANSFER_PAUSED":
       return "Transfer paused.";
     default:
       return fallback && !/[{}<>]|https?:\/\//i.test(fallback) && fallback.length < 140
         ? fallback
-        : "Clarity could not complete the upload.";
+        : "Clarity Cloud could not complete the upload.";
   }
-}
-
-function savedVideoCloudStatusLabel(video: SavedVideoItem, isUploading: boolean, driveConnected: boolean, driveState: GoogleDriveTransferState) {
-  if (video.cloud?.status === "ready") return "Ready on primary computer";
-  if (video.cloud?.status === "paused") return "Paused";
-  if (video.cloud?.status === "verifying") return "Verifying";
-  if (video.cloud?.status === "preparing") return "Preparing";
-  if (video.cloud?.status === "cancelled") return "Cancelled";
-  if (isUploading) return `Sending ${Math.max(0, Math.min(100, Math.round(video.cloud?.progress || 0)))}%`;
-  if (video.cloud?.status === "failed") return "Failed - Retry";
-  if (driveState === "permission_upgrade_required") return "Permission required";
-  return driveConnected ? "Local" : "Connect Drive";
-}
-
-function googleDriveTransferHeading(status: GoogleDriveTransferStatus) {
-  if (status.state === "permission_upgrade_required") return "Permission required";
-  if (status.state === "reconnect_required") return "Reconnect required";
-  if (status.state === "blocked" || status.state === "error") return "Setup issue";
-  return status.connected ? "Connected" : status.configured ? "Not connected" : "Needs OAuth credentials";
-}
-
-function googleDriveTransferStatusLabel(status: GoogleDriveTransferStatus) {
-  if (status.connected && status.driveScopeGranted && status.inboxFolderId) return "Large video transfer ready";
-  if (status.connected && status.driveScopeGranted) return "Folder ready";
-  if (status.state === "permission_upgrade_required") return "Grant Drive permission";
-  if (status.state === "reconnect_required") return "Reconnect Google Drive";
-  if (status.state === "blocked" || status.state === "error") return status.blocker || status.message || "Setup issue";
-  return "Connect Google Drive";
 }
 
 function sourceSideFromSlotKey(slotKey: string): ComparisonSide {
@@ -3453,17 +3418,6 @@ const defaultManagedLocalLibraryStatus: ManagedLocalVideoLibraryStatus = {
   health: "unsupported",
   message: "File System Access is unavailable. Working from local cache.",
 };
-
-function savedVideoManagedLocalLabel(video: SavedVideoItem) {
-  const status = video.local.managed?.status;
-  if (status === "healthy") return "Finder library";
-  if (status === "missing") return "Missing file";
-  if (status === "permission-lost") return "Permission lost";
-  if (status === "read-only") return "Read only";
-  if (status === "repair-required") return "Repair required";
-  if (status === "moved") return "Moved";
-  return video.local.status === "available" ? "Local cache" : "Local file unavailable";
-}
 
 function createDefaultVideoWorkspaceState(side: ComparisonSide): ComparisonWorkspaceState {
   return {
@@ -4066,7 +4020,10 @@ const defaultGoogleDriveTransferStatus: GoogleDriveTransferStatus = {
   tokenEncryptionConfigured: false,
   providerStorageConfigured: false,
   blocker: "",
-  message: "Google Drive Transfer status has not loaded.",
+  message: "Clarity Cloud status has not loaded.",
+  uploadRouteReady: true,
+  chunkedTransportReady: true,
+  incomingImportReady: false,
 };
 
 const emptyClientEditor: ClientEditor = {
@@ -4394,6 +4351,8 @@ function App() {
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
   const [googleDriveTransfer, setGoogleDriveTransfer] = useState<GoogleDriveTransferStatus>(defaultGoogleDriveTransferStatus);
   const [googleDriveAction, setGoogleDriveAction] = useState<GoogleDriveActionState>("idle");
+  const [clarityCloudImports, setClarityCloudImports] = useState<ClarityCloudImportTransfer[]>([]);
+  const [clarityCloudImportActionIds, setClarityCloudImportActionIds] = useState<Set<string>>(() => new Set());
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
   const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
@@ -4420,6 +4379,14 @@ function App() {
       void refreshGoogleDriveTransferStatus();
     }
   }, [activeView, settingsTab]);
+
+  useEffect(() => {
+    if (activeView === "settings" && settingsTab === "integrations" && googleDriveTransfer.connected && googleDriveTransfer.incomingImportReady) {
+      void refreshClarityCloudImports();
+      return;
+    }
+    if (!googleDriveTransfer.connected) setClarityCloudImports([]);
+  }, [activeView, settingsTab, googleDriveTransfer.connected, googleDriveTransfer.incomingImportReady]);
   const attemptedSavedRescheduleRef = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
@@ -4961,6 +4928,10 @@ function App() {
   const invoiceNumber = `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`;
   const billingWorkspaceEnabled = invoiceSettings.enabled && invoiceSettings.showBillingWorkspace && canUseFeature(activeAccount, "invoicing");
   const googleCalendarSyncEnabled = canUseFeature(activeAccount, "googleCalendarSync");
+  const localStorageHealth = getLocalStorageHealth(managedLocalLibraryStatus);
+  const clarityCloudHealth = getClarityCloudHealth(googleDriveTransfer);
+  const localStoragePrimaryAction = "action" in localStorageHealth ? localStorageHealth.action : undefined;
+  const clarityCloudPrimaryAction = "action" in clarityCloudHealth ? clarityCloudHealth.action : undefined;
   const hasMissingInvoiceCoachSettings =
     !invoiceSettings.bankAccount.trim() || !invoiceSettings.taxNumber.trim() || !invoiceSettings.businessAddress.trim();
   const activeAccountEntitlements = accountEntitlements(activeAccount);
@@ -8872,8 +8843,8 @@ function App() {
       setToast({
         message:
           googleDriveTransfer.state === "permission_upgrade_required"
-            ? "Grant Google Drive permission before sending videos."
-            : "Connect Google Drive before sending videos.",
+            ? "Grant Clarity Cloud permission before sending videos."
+            : "Connect Clarity Cloud before sending videos.",
       });
       setActiveView("settings");
       setSettingsTab("integrations");
@@ -8885,7 +8856,8 @@ function App() {
         onProgress: () => refreshSavedVideoLibrary(),
       });
       refreshSavedVideoLibrary();
-      setToast({ message: "Ready on primary computer" });
+      await refreshClarityCloudImports();
+      setToast({ message: "Ready to import in Clarity Cloud" });
     } catch (error) {
       refreshSavedVideoLibrary();
       const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code || "") : "";
@@ -8999,6 +8971,61 @@ function App() {
       setToast({ message: error instanceof Error ? error.message : "Clarity Video Library action failed." });
     } finally {
       refreshSavedVideoLibrary();
+    }
+  }
+
+  async function runLocalStorageHealthAction(action?: LocalStorageAction) {
+    if (!action) return;
+    if (action === "choose-folder") {
+      await runManagedLibraryAction("choose");
+      return;
+    }
+    await runManagedLibraryAction("reconnect");
+  }
+
+  async function runClarityCloudHealthAction(action?: ClarityCloudAction) {
+    if (!action) return;
+    if (action === "connect" || action === "grant-permission" || action === "reconnect") {
+      await connectGoogleDriveTransfer();
+      return;
+    }
+    if (action === "retry-setup") {
+      await testGoogleDriveTransfer();
+      return;
+    }
+    await refreshGoogleDriveTransferStatus();
+    setToast({ message: "Clarity Cloud status refreshed." });
+  }
+
+  async function importClarityCloudTransfer(transfer: ClarityCloudImportTransfer) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    if (managedLocalLibraryStatus.health !== "healthy") {
+      setToast({ message: "Connect Local Storage before importing from Clarity Cloud." });
+      return;
+    }
+    const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+    if (!savedVideoId) {
+      setToast({ message: "Clarity Cloud transfer metadata is incomplete." });
+      return;
+    }
+    setClarityCloudImportActionIds((current) => new Set(current).add(savedVideoId));
+    try {
+      const imported = await importSavedVideoFromClarityCloud(savedVideoId, store);
+      refreshSavedVideoLibrary();
+      await refreshClarityCloudImports();
+      setToast({ message: `${imported.title || "Video"} imported to Local Storage.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not import from Clarity Cloud." });
+    } finally {
+      setClarityCloudImportActionIds((current) => {
+        const next = new Set(current);
+        next.delete(savedVideoId);
+        return next;
+      });
     }
   }
 
@@ -12341,6 +12368,18 @@ function App() {
     }
   }
 
+  async function refreshClarityCloudImports() {
+    try {
+      if (!googleDriveTransfer.connected) {
+        setClarityCloudImports([]);
+        return;
+      }
+      setClarityCloudImports(await listClarityCloudImportTransfers());
+    } catch {
+      // The import inbox is optional; the status cards still show provider health.
+    }
+  }
+
   async function connectGoogleCalendar() {
     if (!canUseFeature(activeAccount, "googleCalendarSync")) {
       setToast({ message: featureUnavailableMessage("googleCalendarSync") });
@@ -12501,11 +12540,11 @@ function App() {
         throw new Error("Admin login required");
       }
       applyGoogleDriveTransferStatus(data);
-      if (!response.ok || !data.authUrl) throw new Error(data.message || "Google Drive Transfer is not ready to connect.");
+      if (!response.ok || !data.authUrl) throw new Error(data.message || "Clarity Cloud is not ready to connect.");
       window.location.assign(data.authUrl);
     } catch (error) {
       setGoogleDriveAction("idle");
-      setToast({ message: error instanceof Error ? error.message : "Could not start Google Drive connection." });
+      setToast({ message: error instanceof Error ? error.message : "Could not start Clarity Cloud connection." });
     }
   }
 
@@ -12522,10 +12561,10 @@ function App() {
         throw new Error("Admin login required");
       }
       applyGoogleDriveTransferStatus(data);
-      if (!response.ok || data.ok === false) throw new Error(data.message || "Google Drive Transfer is not connected.");
-      setToast({ message: data.message || "Google Drive Transfer tested." });
+      if (!response.ok || data.ok === false) throw new Error(data.message || "Clarity Cloud is not connected.");
+      setToast({ message: data.message || "Clarity Cloud tested." });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Google Drive Transfer test failed." });
+      setToast({ message: error instanceof Error ? error.message : "Clarity Cloud test failed." });
     } finally {
       setGoogleDriveAction("idle");
     }
@@ -12544,10 +12583,10 @@ function App() {
         throw new Error("Admin login required");
       }
       applyGoogleDriveTransferStatus(data);
-      if (!response.ok || data.ok === false) throw new Error(data.message || "Google Drive did not disconnect.");
-      setToast({ message: "Google Drive Transfer disconnected." });
+      if (!response.ok || data.ok === false) throw new Error(data.message || "Clarity Cloud did not disconnect.");
+      setToast({ message: "Clarity Cloud disconnected." });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not disconnect Google Drive Transfer." });
+      setToast({ message: error instanceof Error ? error.message : "Could not disconnect Clarity Cloud." });
     } finally {
       setGoogleDriveAction("idle");
     }
@@ -16873,7 +16912,7 @@ function App() {
                                         <FolderOpen size={16} />
                                       </div>
                                       <div className="player-video-card-body">
-                                        <strong>Choose Clarity Video Library</strong>
+                                        <strong>Local Storage needs folder access</strong>
                                         <span>Saved videos stay in local cache until a library folder is connected.</span>
                                       </div>
                                       <div className="player-video-card-actions">
@@ -16884,7 +16923,7 @@ function App() {
                                           onClick={() => void runManagedLibraryAction("choose")}
                                         >
                                           <FolderOpen size={14} />
-                                          Choose
+                                          Choose folder
                                         </button>
                                       </div>
                                     </article>
@@ -16904,7 +16943,7 @@ function App() {
                                           onClick={() => void runManagedLibraryAction("reconnect")}
                                         >
                                           <RefreshCw size={14} />
-                                          Reconnect Library
+                                          Reconnect folder
                                         </button>
                                       </div>
                                     </article>
@@ -16917,12 +16956,12 @@ function App() {
                                           video.cloud?.status === "preparing" ||
                                           video.cloud?.status === "uploading" ||
                                           video.cloud?.status === "verifying";
-                                        const cloudLabel = savedVideoCloudStatusLabel(
-                                          video,
+                                        const localLabel = getSavedVideoLocalStatusLabel(video);
+                                        const cloudLabel = getSavedVideoCloudStatusLabel(video, {
                                           isUploading,
-                                          googleDriveTransfer.connected,
-                                          googleDriveTransfer.state,
-                                        );
+                                          cloudConnected: googleDriveTransfer.connected,
+                                          cloudState: googleDriveTransfer.state,
+                                        });
                                         const cloudErrorLabel =
                                           video.cloud?.status === "failed"
                                             ? savedVideoCloudErrorLabel(video.cloud.lastUploadErrorCode, video.cloud.errorMessage)
@@ -16958,7 +16997,7 @@ function App() {
                                                 {" · "}
                                                 {formatVideoDurationLabel(video.source.duration)}
                                                 {" · "}
-                                                {savedVideoManagedLocalLabel(video)}
+                                                {localLabel}
                                                 {" · "}
                                                 {cloudLabel}
                                                 {linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}
@@ -16989,7 +17028,7 @@ function App() {
                                                 onClick={() => void sendSavedVideoToPrimaryComputer(video)}
                                               >
                                                 <Send size={14} />
-                                                {video.cloud?.status === "failed" || video.cloud?.status === "paused" || video.cloud?.status === "cancelled" ? "Retry" : "Send"}
+                                                {video.cloud?.status === "failed" || video.cloud?.status === "paused" || video.cloud?.status === "cancelled" ? "Retry Cloud send" : "Send to Clarity Cloud"}
                                               </button>
                                               <button
                                                 type="button"
@@ -19897,160 +19936,304 @@ function App() {
                   </div>
                 </details>
 
-	                <details className="settings-subsection" open>
-	                  <summary className="settings-subsection-title">
-	                    <FolderOpen size={18} />
-	                    <div>
-	                      <span>Clarity Video Library</span>
-	                      <strong>{managedLocalLibraryStatus.message}</strong>
-	                    </div>
-	                  </summary>
-	                  <p className="field-help">
-	                    Clarity manages durable lesson videos in one local library folder. Browser storage stays available as cache and recovery.
-	                  </p>
-	                  <div className="sync-meta">
-	                    <span>Library status</span>
-	                    <strong>{managedLocalLibraryStatus.message}</strong>
-	                  </div>
-	                  {managedLocalLibraryStatus.health !== "healthy" ? (
-	                    <div className="auth-warning">
-	                      Working from local cache. Reconnect library when available.
-	                    </div>
-	                  ) : null}
-	                  <div className="sync-actions">
-	                    <button
-	                      className="primary-button"
-	                      disabled={!managedLocalLibraryStatus.supported}
-	                      onClick={() => void runManagedLibraryAction(managedLocalLibraryStatus.configured ? "reconnect" : "choose")}
-	                      type="button"
-	                    >
-	                      <FolderOpen size={16} />
-	                      {managedLocalLibraryStatus.configured ? "Reconnect Library" : "Choose Library"}
-	                    </button>
-	                    <button
-	                      className="outline-button"
-	                      disabled={!managedLocalLibraryStatus.supported}
-	                      onClick={() => void runManagedLibraryAction("move")}
-	                      type="button"
-	                    >
-	                      <ArrowRight size={16} />
-	                      Move Library
-	                    </button>
-	                    <button
-	                      className="outline-button"
-	                      disabled={!managedLocalLibraryStatus.configured}
-	                      onClick={() => void runManagedLibraryAction("verify")}
-	                      type="button"
-	                    >
-	                      <Check size={16} />
-	                      Verify Library
-	                    </button>
-	                    <button
-	                      className="outline-button"
-	                      disabled={!managedLocalLibraryStatus.configured}
-	                      onClick={() => void runManagedLibraryAction("rescan")}
-	                      type="button"
-	                    >
-	                      <RefreshCw size={16} />
-	                      Rescan Library
-	                    </button>
-	                    <button
-	                      className="outline-button"
-	                      disabled={!managedLocalLibraryStatus.configured}
-	                      onClick={() => void runManagedLibraryAction("migrate")}
-	                      type="button"
-	                    >
-	                      <Archive size={16} />
-	                      Migrate cache
-	                    </button>
-	                  </div>
-	                </details>
-
-	                <details className="settings-subsection" open>
-	                  <summary className="settings-subsection-title">
-	                    <Upload size={18} />
+                <section className="settings-subsection video-storage-section" aria-labelledby="video-storage-heading">
+                  <div className="video-storage-heading">
                     <div>
-                      <span>Google Drive Transfer</span>
-                      <strong>{googleDriveTransferHeading(googleDriveTransfer)}</strong>
+                      <span>VIDEO STORAGE</span>
+                      <h3 id="video-storage-heading">Local Storage and Clarity Cloud</h3>
                     </div>
-                  </summary>
-                  <div
-                    className={`sync-status ${
-                      googleDriveTransfer.connected
-                        ? "connected"
-                        : googleDriveTransfer.state === "blocked" || googleDriveTransfer.state === "error"
-                          ? "offline"
-                          : "checking"
-                    }`}
-                  >
-                    <span>Private transfer folder</span>
-                    <strong>
-                      {googleDriveTransfer.connected && googleDriveTransfer.inboxFolderId
-                        ? "Ready"
-                        : googleDriveTransfer.state === "blocked" || googleDriveTransfer.state === "error"
-                          ? "Setup issue"
-                          : "Not ready"}
-                    </strong>
-                    <em>
-                      Clarity uses a private folder in your Google Drive to transfer saved lesson videos between your devices. It does not access unrelated Drive files.
-                    </em>
+                    <Video size={20} />
                   </div>
-                  <div className="sync-meta">
-                    <span>Drive permission</span>
-                    <strong>{googleDriveTransfer.driveScopeGranted ? "Granted" : "Permission required"}</strong>
+
+                  <div className="video-storage-grid">
+                    <article className={`storage-card is-${localStorageHealth.state}`}>
+                      <div className="storage-card-header">
+                        <FolderOpen size={18} />
+                        <div>
+                          <span>Local Storage</span>
+                          <strong>{localStorageHealth.statusLabel}</strong>
+                        </div>
+                      </div>
+                      <p>{localStorageHealth.message}</p>
+                      <span className="storage-provider-line">{localStorageHealth.detail}</span>
+                      {localStoragePrimaryAction ? (
+                        <button
+                          className="primary-button"
+                          disabled={!managedLocalLibraryStatus.supported}
+                          onClick={() => void runLocalStorageHealthAction(localStoragePrimaryAction)}
+                          type="button"
+                        >
+                          <FolderOpen size={16} />
+                          {getLocalStorageActionLabel(localStoragePrimaryAction)}
+                        </button>
+                      ) : null}
+                    </article>
+
+                    <article className={`storage-card is-${clarityCloudHealth.state}`}>
+                      <div className="storage-card-header">
+                        <Upload size={18} />
+                        <div>
+                          <span>Clarity Cloud</span>
+                          <strong>{clarityCloudHealth.statusLabel}</strong>
+                        </div>
+                      </div>
+                      <p>{clarityCloudHealth.message}</p>
+                      <span className="storage-provider-line">Powered by {clarityCloudHealth.providerLabel}</span>
+                      {clarityCloudPrimaryAction ? (
+                        <button
+                          className="primary-button"
+                          disabled={googleDriveAction !== "idle"}
+                          onClick={() => void runClarityCloudHealthAction(clarityCloudPrimaryAction)}
+                          type="button"
+                        >
+                          <ExternalLink size={16} />
+                          {googleDriveAction === "connecting"
+                            ? "Opening provider"
+                            : googleDriveAction === "testing"
+                              ? "Checking"
+                              : getClarityCloudActionLabel(clarityCloudPrimaryAction)}
+                        </button>
+                      ) : null}
+                    </article>
                   </div>
-                  <div className="sync-meta">
-                    <span>Transfer status</span>
-                    <strong>{googleDriveTransferStatusLabel(googleDriveTransfer)}</strong>
-                  </div>
-                  <div className="sync-actions">
-                    <button
-                      className="primary-button"
-                      disabled={googleDriveAction !== "idle" || googleDriveTransfer.state === "blocked" || !googleDriveTransfer.configured}
-                      onClick={connectGoogleDriveTransfer}
-                      type="button"
-                    >
-                      <ExternalLink size={16} />
-                      {googleDriveAction === "connecting"
-                        ? "Opening Google"
-                        : googleDriveTransfer.state === "permission_upgrade_required" || googleDriveTransfer.state === "reconnect_required"
-                          ? "Reconnect"
-                          : "Connect Google Drive"}
-                    </button>
-                    <button
-                      className="outline-button"
-                      disabled={googleDriveAction !== "idle"}
-                      onClick={testGoogleDriveTransfer}
-                      type="button"
-                    >
-                      <RefreshCw size={16} />
-                      {googleDriveAction === "testing" ? "Testing" : "Test connection"}
-                    </button>
-                    <button
-                      className="outline-button"
-                      disabled={!googleDriveTransfer.inboxFolderId && !googleDriveTransfer.rootFolderId}
-                      onClick={() => {
-                        const folderId = googleDriveTransfer.inboxFolderId || googleDriveTransfer.rootFolderId;
-                        if (folderId) {
-                          window.open(`https://drive.google.com/drive/folders/${folderId}`, "_blank", "noopener,noreferrer");
-                        }
-                      }}
-                      type="button"
-                    >
-                      <ExternalLink size={16} />
-                      Open transfer inbox
-                    </button>
-                    <button
-                      className="danger-button"
-                      disabled={googleDriveAction !== "idle" || !googleDriveTransfer.connected}
-                      onClick={disconnectGoogleDriveTransfer}
-                      type="button"
-                    >
-                      <X size={16} />
-                      {googleDriveAction === "disconnecting" ? "Disconnecting" : "Disconnect Drive"}
-                    </button>
-                  </div>
-                </details>
+
+                  <section className="storage-transfer-inbox" aria-label="Clarity Cloud imports">
+                    <div className="storage-transfer-inbox-header">
+                      <div>
+                        <span>CLARITY CLOUD INBOX</span>
+                        <h4>Ready to import</h4>
+                      </div>
+                      <button
+                        type="button"
+                        className="outline-button"
+                        disabled={!googleDriveTransfer.connected || !googleDriveTransfer.incomingImportReady}
+                        onClick={() => void refreshClarityCloudImports()}
+                      >
+                        <RefreshCw size={16} />
+                        Refresh
+                      </button>
+                    </div>
+                    {clarityCloudImports.length ? (
+                      <div className="storage-transfer-list">
+                        {clarityCloudImports.map((transfer) => {
+                          const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId || transfer.transferId;
+                          const statusLabel =
+                            transfer.catalogueStatus === "complete"
+                              ? "Transfer complete"
+                              : transfer.catalogueStatus === "imported" || transfer.catalogueStatus === "cleanup_scheduled"
+                                ? "Imported"
+                                : transfer.catalogueStatus === "repair_required"
+                                  ? "Needs repair"
+                                  : "Ready to import";
+                          const canImport =
+                            managedLocalLibraryStatus.health === "healthy" &&
+                            transfer.catalogueStatus === "ready_to_import" &&
+                            !clarityCloudImportActionIds.has(savedVideoId);
+                          return (
+                            <article className="storage-transfer-row" key={savedVideoId}>
+                              <div className="storage-transfer-icon">
+                                <Download size={16} />
+                              </div>
+                              <div className="storage-transfer-copy">
+                                <strong>{transfer.savedVideo?.title || "Saved video"}</strong>
+                                <span>
+                                  {statusLabel}
+                                  {transfer.savedVideo?.createdAt ? ` · ${profileRecordDateLabel(transfer.savedVideo.createdAt)}` : ""}
+                                  {transfer.video?.sizeBytes ? ` · ${Math.round(transfer.video.sizeBytes / 1024 / 1024)} MB` : ""}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                className="primary-button"
+                                disabled={!canImport}
+                                onClick={() => void importClarityCloudTransfer(transfer)}
+                              >
+                                <Download size={16} />
+                                {clarityCloudImportActionIds.has(savedVideoId) ? "Importing" : "Import to Local Storage"}
+                              </button>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="storage-transfer-empty">
+                        {googleDriveTransfer.connected
+                          ? "No videos are waiting to import."
+                          : "Connect Clarity Cloud to see transfers from other devices."}
+                      </p>
+                    )}
+                  </section>
+
+                  <details className="storage-diagnostics">
+                    <summary className="settings-subsection-title">
+                      <Code2 size={18} />
+                      <div>
+                        <span>Advanced storage diagnostics</span>
+                        <strong>Local Storage and Clarity Cloud</strong>
+                      </div>
+                    </summary>
+                    <div className="storage-diagnostics-grid">
+                      <div className="storage-diagnostics-group">
+                        <h4>Local Storage</h4>
+                        <div className="sync-meta">
+                          <span>Browser support</span>
+                          <strong>{managedLocalLibraryStatus.supported ? "Supported" : "Browser-only"}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Directory handle</span>
+                          <strong>{managedLocalLibraryStatus.configured ? "Available" : "Not selected"}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Verification</span>
+                          <strong>{managedLocalLibraryStatus.health === "healthy" ? "Write/read passed" : managedLocalLibraryStatus.message}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Cache state</span>
+                          <strong>IndexedDB recovery enabled</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Safe error code</span>
+                          <strong>{"safeErrorCode" in localStorageHealth && localStorageHealth.safeErrorCode ? localStorageHealth.safeErrorCode : "None"}</strong>
+                        </div>
+                        <div className="sync-actions">
+                          <button
+                            className="outline-button"
+                            disabled={!managedLocalLibraryStatus.supported}
+                            onClick={() => void runManagedLibraryAction("choose")}
+                            type="button"
+                          >
+                            <FolderOpen size={16} />
+                            Change folder
+                          </button>
+                          <button
+                            className="outline-button"
+                            disabled={!managedLocalLibraryStatus.supported}
+                            onClick={() => void runManagedLibraryAction("move")}
+                            type="button"
+                          >
+                            <ArrowRight size={16} />
+                            Move library
+                          </button>
+                          <button
+                            className="outline-button"
+                            disabled={!managedLocalLibraryStatus.configured}
+                            onClick={() => void runManagedLibraryAction("reconnect")}
+                            type="button"
+                          >
+                            <RefreshCw size={16} />
+                            Reconnect handle
+                          </button>
+                          <button
+                            className="outline-button"
+                            disabled={!managedLocalLibraryStatus.configured}
+                            onClick={() => void runManagedLibraryAction("verify")}
+                            type="button"
+                          >
+                            <Check size={16} />
+                            Verify library
+                          </button>
+                          <button
+                            className="outline-button"
+                            disabled={!managedLocalLibraryStatus.configured}
+                            onClick={() => void runManagedLibraryAction("rescan")}
+                            type="button"
+                          >
+                            <RefreshCw size={16} />
+                            Rescan library
+                          </button>
+                          <button
+                            className="outline-button"
+                            disabled={!managedLocalLibraryStatus.configured}
+                            onClick={() => void runManagedLibraryAction("migrate")}
+                            type="button"
+                          >
+                            <Archive size={16} />
+                            Migrate cache
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="storage-diagnostics-group">
+                        <h4>Clarity Cloud</h4>
+                        <div className="sync-meta">
+                          <span>Provider</span>
+                          <strong>{clarityCloudHealth.providerLabel}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>OAuth connection</span>
+                          <strong>{googleDriveTransfer.connected ? googleDriveTransfer.accountEmail || "Connected" : "Not connected"}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Permission</span>
+                          <strong>{googleDriveTransfer.driveScopeGranted ? "Granted" : "Required"}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Transfer folder</span>
+                          <strong>{googleDriveTransfer.inboxFolderId ? "Ready" : "Not ready"}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Upload service</span>
+                          <strong>{googleDriveTransfer.uploadRouteReady === false ? "Unavailable" : "Available"}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Chunked transport</span>
+                          <strong>{googleDriveTransfer.chunkedTransportReady === false ? "Unavailable" : "Available"}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Incoming import</span>
+                          <strong>{googleDriveTransfer.incomingImportReady ? "Ready" : "Next step"}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Safe error code</span>
+                          <strong>{"safeErrorCode" in clarityCloudHealth && clarityCloudHealth.safeErrorCode ? clarityCloudHealth.safeErrorCode : "None"}</strong>
+                        </div>
+                        <div className="sync-actions">
+                          <button
+                            className="outline-button"
+                            disabled={googleDriveAction !== "idle"}
+                            onClick={connectGoogleDriveTransfer}
+                            type="button"
+                          >
+                            <ExternalLink size={16} />
+                            {googleDriveTransfer.connected ? "Reconnect provider" : "Connect provider"}
+                          </button>
+                          <button
+                            className="outline-button"
+                            disabled={googleDriveAction !== "idle"}
+                            onClick={testGoogleDriveTransfer}
+                            type="button"
+                          >
+                            <RefreshCw size={16} />
+                            {googleDriveAction === "testing" ? "Testing" : "Test connection"}
+                          </button>
+                          <button
+                            className="outline-button"
+                            disabled={!googleDriveTransfer.inboxFolderId && !googleDriveTransfer.rootFolderId}
+                            onClick={() => {
+                              const folderId = googleDriveTransfer.inboxFolderId || googleDriveTransfer.rootFolderId;
+                              if (folderId) {
+                                window.open(`https://drive.google.com/drive/folders/${folderId}`, "_blank", "noopener,noreferrer");
+                              }
+                            }}
+                            type="button"
+                          >
+                            <ExternalLink size={16} />
+                            Open transfer inbox
+                          </button>
+                          <button
+                            className="danger-button"
+                            disabled={googleDriveAction !== "idle" || !googleDriveTransfer.connected}
+                            onClick={disconnectGoogleDriveTransfer}
+                            type="button"
+                          >
+                            <X size={16} />
+                            {googleDriveAction === "disconnecting" ? "Disconnecting" : "Disconnect provider"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                </section>
 
                 <div className={`sync-status ${calendarFeedStatus}`}>
                   <span>Feed endpoint</span>
