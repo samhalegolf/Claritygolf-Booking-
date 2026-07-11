@@ -86,6 +86,7 @@ export class SavedVideoLibraryError extends Error {
 export interface SavedVideoCloudState {
   status: SavedVideoCloudStatus;
   provider?: SavedVideoCloudProvider;
+  catalogueStatus?: "uploading" | "ready_to_import" | "importing" | "imported" | "cleanup_scheduled" | "complete" | "repair_required" | "failed" | "cancelled" | "expired";
   transferId?: string;
   driveAssetId?: string;
   driveFolderId?: string;
@@ -97,6 +98,13 @@ export interface SavedVideoCloudState {
   chunkSizeBytes?: number;
   progress?: number;
   uploadedAt?: string;
+  readyToImportAt?: string;
+  importedAt?: string;
+  importVerifiedAt?: string;
+  cleanupScheduledAt?: string;
+  cleanupAfter?: string;
+  destinationDeviceId?: string;
+  providerFolderLink?: string;
   lastUploadErrorCode?: string;
   errorMessage?: string;
 }
@@ -238,7 +246,11 @@ export type SavedVideoCloudErrorCode =
   | "SAVED_VIDEO_BLOB_MISSING"
   | "SAVED_VIDEO_SOURCE_MISSING"
   | "TRANSFER_PAUSED"
-  | "TRANSFER_CANCELLED";
+  | "TRANSFER_CANCELLED"
+  | "CLARITY_CLOUD_IMPORT_FAILED"
+  | "CLARITY_CLOUD_IMPORT_NOT_READY"
+  | "CLARITY_CLOUD_IMPORT_VERIFY_FAILED"
+  | "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED";
 
 export class SavedVideoCloudError extends Error {
   constructor(
@@ -479,6 +491,11 @@ type PublicTransferSession = {
   transferId: string;
   savedVideoId: string;
   status: SavedVideoCloudStatus;
+  provider?: SavedVideoCloudProvider;
+  providerId?: SavedVideoCloudProvider;
+  providerLabel?: string;
+  catalogueStatus?: SavedVideoCloudState["catalogueStatus"];
+  transferState?: SavedVideoCloudState["catalogueStatus"];
   expectedSizeBytes: number;
   acceptedOffsetBytes: number;
   chunkSizeBytes: number;
@@ -486,8 +503,42 @@ type PublicTransferSession = {
   driveVideoFileId?: string;
   driveManifestFileId?: string;
   driveAnalysisFileId?: string;
+  readyToImportAt?: string;
+  importedAt?: string;
+  importVerifiedAt?: string;
+  cleanupScheduledAt?: string;
+  cleanupAfter?: string;
+  destinationDeviceId?: string;
+  providerFolderLink?: string;
   lastErrorCode?: string;
   lastErrorMessage?: string;
+};
+
+export type ClarityCloudImportTransfer = PublicTransferSession & {
+  savedVideo?: {
+    savedVideoId: string;
+    playerId: string;
+    lessonId?: string;
+    analysisId: string;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  video?: {
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    checksumSha256: string;
+    duration?: number;
+    width?: number;
+    height?: number;
+  };
+};
+
+type ClarityCloudImportPackage = ClarityCloudImportTransfer & {
+  transfer: PublicTransferSession;
+  manifest?: Record<string, unknown>;
+  analysisJson?: CompactSavedVideoAnalysisJson;
 };
 
 const transferProgress = (acceptedOffsetBytes = 0, expectedSizeBytes = 0) =>
@@ -500,8 +551,11 @@ const applyTransferSessionToCloud = (
   session: PublicTransferSession
 ): SavedVideoCloudState => ({
   ...cloud,
-  status: session.status,
-  provider: "google-drive",
+  status: session.catalogueStatus === "complete" || session.catalogueStatus === "imported" || session.catalogueStatus === "cleanup_scheduled"
+    ? "imported"
+    : session.status,
+  catalogueStatus: session.catalogueStatus || session.transferState,
+  provider: session.provider || session.providerId || "google-drive",
   transferId: session.transferId,
   driveAssetId: session.driveAssetFolderId || cloud?.driveAssetId,
   driveFolderId: session.driveAssetFolderId || cloud?.driveFolderId,
@@ -512,6 +566,13 @@ const applyTransferSessionToCloud = (
   expectedSizeBytes: session.expectedSizeBytes,
   chunkSizeBytes: session.chunkSizeBytes,
   progress: session.status === "ready" ? 100 : transferProgress(session.acceptedOffsetBytes, session.expectedSizeBytes),
+  readyToImportAt: session.readyToImportAt || cloud?.readyToImportAt,
+  importedAt: session.importedAt || cloud?.importedAt,
+  importVerifiedAt: session.importVerifiedAt || cloud?.importVerifiedAt,
+  cleanupScheduledAt: session.cleanupScheduledAt || cloud?.cleanupScheduledAt,
+  cleanupAfter: session.cleanupAfter || cloud?.cleanupAfter,
+  destinationDeviceId: session.destinationDeviceId || cloud?.destinationDeviceId,
+  providerFolderLink: session.providerFolderLink || cloud?.providerFolderLink,
   lastUploadErrorCode: session.lastErrorCode,
   errorMessage: session.lastErrorMessage,
 });
@@ -586,6 +647,28 @@ const stripDataUrls = (value: unknown): unknown => {
       .map(([key, entry]) => [key, stripDataUrls(entry)] as const)
       .filter(([, entry]) => entry !== undefined)
   );
+};
+
+const getClarityDevice = () => {
+  const fallback = "browser";
+  if (typeof window === "undefined") {
+    return { deviceId: fallback, deviceName: "Server render", platform: "" };
+  }
+  let deviceId = "";
+  try {
+    deviceId = window.localStorage.getItem("clarityDeviceId") || "";
+    if (!deviceId) {
+      deviceId = createStableId("clarity-device");
+      window.localStorage.setItem("clarityDeviceId", deviceId);
+    }
+  } catch {
+    deviceId = fallback;
+  }
+  return {
+    deviceId: deviceId || fallback,
+    deviceName: window.navigator.userAgent.slice(0, 120),
+    platform: window.navigator.platform,
+  };
 };
 
 export const buildVideoUploadSessionRequest = (
@@ -677,10 +760,11 @@ export const saveSavedVideoToCloud = async (
   });
 
   try {
+    const currentDevice = getClarityDevice();
     const sourceDevice = {
-      deviceId: options.deviceId || window.localStorage.getItem("clarityDeviceId") || "browser",
-      deviceName: options.deviceName || window.navigator.userAgent.slice(0, 120),
-      platform: options.platform || window.navigator.platform,
+      deviceId: options.deviceId || currentDevice.deviceId,
+      deviceName: options.deviceName || currentDevice.deviceName,
+      platform: options.platform || currentDevice.platform,
     };
     const uploadSessionRequest = buildVideoUploadSessionRequest(working, blob, checksumSha256, sourceDevice);
     const sessionResponse = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/session`, {
@@ -698,11 +782,14 @@ export const saveSavedVideoToCloud = async (
     if (session.status === "ready") {
       const ready = await patchCloudState(store, working, {
         status: "ready",
+        catalogueStatus: session.catalogueStatus || "ready_to_import",
         provider: "google-drive",
         transferId: session.transferId,
         driveAssetId: session.driveAssetFolderId,
         driveFolderId: session.driveAssetFolderId,
         driveManifestFileId: session.driveManifestFileId,
+        readyToImportAt: session.readyToImportAt,
+        providerFolderLink: session.providerFolderLink,
         progress: 100,
         uploadedAt: new Date().toISOString(),
       });
@@ -768,6 +855,7 @@ export const saveSavedVideoToCloud = async (
 
     const ready = await patchCloudState(store, working, {
       status: "ready",
+      catalogueStatus: finalized.session?.catalogueStatus || "ready_to_import",
       provider: "google-drive",
       driveAssetId: finalized.assetFolderId,
       driveFolderId: finalized.assetFolderId,
@@ -778,6 +866,8 @@ export const saveSavedVideoToCloud = async (
       acceptedOffsetBytes: blob.size,
       expectedSizeBytes: blob.size,
       uploadedAt: finalized.uploadedAt,
+      readyToImportAt: finalized.readyToImportAt || finalized.uploadedAt,
+      providerFolderLink: finalized.session?.providerFolderLink,
       progress: 100,
     });
     options.onProgress?.(100);
@@ -842,6 +932,183 @@ export const cancelSavedVideoCloudUpload = async (
     progress: undefined,
     lastUploadErrorCode: "DRIVE_UPLOAD_INTERRUPTED",
     errorMessage: "Upload cancelled. Retry when ready.",
+  });
+};
+
+export const listClarityCloudImportTransfers = async (): Promise<ClarityCloudImportTransfer[]> => {
+  const response = await fetch("/api/video-transfer/imports", { headers: { Accept: "application/json" } });
+  const data = await safeJson<{ transfers?: ClarityCloudImportTransfer[] }>(
+    response,
+    "Clarity Cloud import list did not return JSON.",
+    "CLARITY_CLOUD_IMPORT_FAILED"
+  );
+  if (!response.ok) throw apiFailure(data, "CLARITY_CLOUD_IMPORT_FAILED");
+  return Array.isArray(data.transfers) ? data.transfers : [];
+};
+
+const defaultImportedWorkspace = (savedVideoId: string): ComparisonWorkspaceState => ({
+  version: 1,
+  mode: "single",
+  activeSide: "left",
+  savedVideoIds: { left: savedVideoId },
+  linkedPlayback: false,
+  focusWindowOpen: false,
+  focusWindowMode: "area",
+  focusWindowSide: "left",
+  focusAreaRect: null,
+});
+
+const normaliseImportedAnalysis = (
+  savedVideoId: string,
+  savedVideo: NonNullable<ClarityCloudImportPackage["savedVideo"]>,
+  analysisJson?: CompactSavedVideoAnalysisJson
+): VideoAnalysis => {
+  const analysis = (analysisJson?.analysis || {}) as any;
+  const now = nowIso();
+  return {
+    id: analysis.id || savedVideo.analysisId,
+    playerId: analysis.playerId || savedVideo.playerId,
+    lessonId: analysis.lessonId || savedVideo.lessonId,
+    videoId: analysis.videoId || savedVideoId,
+    videoMeta: analysis.videoMeta || { title: savedVideo.title },
+    drawings: Array.isArray(analysis.drawings) ? analysis.drawings : [],
+    markers: Array.isArray(analysis.markers) ? analysis.markers.map((marker: any) => ({ ...marker })) : [],
+    notes: Array.isArray(analysis.notes) ? analysis.notes : [],
+    focusViews: Array.isArray(analysis.focusViews) ? analysis.focusViews : [],
+    focusSnapshots: Array.isArray(analysis.focusSnapshots) ? analysis.focusSnapshots.map((snapshot: any) => ({ ...snapshot })) : [],
+    narrationRefs: Array.isArray(analysis.narrationRefs) ? analysis.narrationRefs : [],
+    createdAt: analysis.createdAt || savedVideo.createdAt || now,
+    updatedAt: analysis.updatedAt || savedVideo.updatedAt || now,
+  };
+};
+
+const sendImportReceipt = async (
+  savedVideoId: string,
+  item: SavedVideoItem,
+  checksumSha256: string,
+  options: { deviceId?: string; deviceName?: string; platform?: string } = {}
+) => {
+  const device = getClarityDevice();
+  const response = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/import-receipt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      localSavedVideoId: item.savedVideoId,
+      deviceId: options.deviceId || device.deviceId,
+      deviceName: options.deviceName || device.deviceName,
+      platform: options.platform || device.platform,
+      libraryStatus: item.local.managed?.status || item.local.status,
+      sizeBytes: item.source.sizeBytes,
+      checksumSha256,
+      verifiedAt: item.local.managed?.verifiedAt || nowIso(),
+    }),
+  });
+  const receipt = await safeJson<any>(
+    response,
+    "Clarity Cloud import receipt did not return JSON.",
+    "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED"
+  );
+  if (!response.ok || receipt.ok === false) throw apiFailure(receipt, "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED");
+  return receipt;
+};
+
+export const importSavedVideoFromClarityCloud = async (
+  savedVideoId: string,
+  store: SavedVideoLibraryStore,
+  options: { deviceId?: string; deviceName?: string; platform?: string } = {}
+): Promise<SavedVideoItem> => {
+  const packageResponse = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/import`, {
+    headers: { Accept: "application/json" },
+  });
+  const importPackage = await safeJson<ClarityCloudImportPackage>(
+    packageResponse,
+    "Clarity Cloud import package did not return JSON.",
+    "CLARITY_CLOUD_IMPORT_FAILED"
+  );
+  if (!packageResponse.ok || (importPackage as any).ok === false) {
+    throw apiFailure(importPackage, "CLARITY_CLOUD_IMPORT_FAILED");
+  }
+  if (!importPackage.savedVideo || !importPackage.video) {
+    throw new SavedVideoCloudError("CLARITY_CLOUD_IMPORT_FAILED", "Clarity Cloud import metadata was incomplete.");
+  }
+
+  const existing = await store.getItem(savedVideoId);
+  if (
+    existing?.source.checksumSha256 &&
+    existing.source.checksumSha256 === importPackage.video.checksumSha256 &&
+    existing.source.sizeBytes === importPackage.video.sizeBytes
+  ) {
+    const verifiedExisting = await store.verifyItem(existing.savedVideoId);
+    const receipt = await sendImportReceipt(savedVideoId, verifiedExisting, existing.source.checksumSha256, options);
+    return patchCloudState(store, verifiedExisting, {
+      ...applyTransferSessionToCloud(verifiedExisting.cloud, receipt.session || importPackage.transfer),
+      status: "imported",
+      catalogueStatus: receipt.catalogueStatus || "complete",
+      importedAt: receipt.importedAt,
+      importVerifiedAt: receipt.importVerifiedAt,
+      cleanupScheduledAt: receipt.cleanupScheduledAt,
+      cleanupAfter: receipt.cleanupAfter,
+      progress: 100,
+    });
+  }
+
+  const downloadResponse = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/download`, {
+    headers: { Accept: importPackage.video.mimeType || "application/octet-stream" },
+  });
+  if (!downloadResponse.ok) {
+    throw new SavedVideoCloudError(
+      "CLARITY_CLOUD_IMPORT_FAILED",
+      `Clarity Cloud video download failed with HTTP ${downloadResponse.status}.`,
+      downloadResponse.status
+    );
+  }
+  const blob = await downloadResponse.blob();
+  const checksumSha256 = await calculateBlobSha256(blob);
+  if (!checksumSha256 || checksumSha256 !== importPackage.video.checksumSha256 || blob.size !== importPackage.video.sizeBytes) {
+    throw new SavedVideoCloudError(
+      "CLARITY_CLOUD_IMPORT_VERIFY_FAILED",
+      "Downloaded video did not match the Clarity Cloud transfer catalogue."
+    );
+  }
+
+  const workspace = {
+    ...defaultImportedWorkspace(savedVideoId),
+    ...(importPackage.analysisJson?.workspace || {}),
+  } as ComparisonWorkspaceState;
+  const sourceSide = workspace.activeSide || "left";
+  const analysisSnapshot = normaliseImportedAnalysis(savedVideoId, importPackage.savedVideo, importPackage.analysisJson);
+  const item = await store.saveItem({
+    savedVideoId,
+    playerId: importPackage.savedVideo.playerId,
+    lessonId: importPackage.savedVideo.lessonId,
+    title: importPackage.savedVideo.title,
+    sourceSide,
+    sourceVideo: {
+      id: `cloud-import-${savedVideoId}`,
+      playerId: importPackage.savedVideo.playerId,
+      lessonId: importPackage.savedVideo.lessonId,
+      sourceUrl: "",
+      title: importPackage.video.fileName || importPackage.savedVideo.title,
+      createdAt: importPackage.savedVideo.createdAt,
+      duration: importPackage.video.duration,
+      width: importPackage.video.width,
+      height: importPackage.video.height,
+    },
+    sourceBlob: blob,
+    analysisSnapshot,
+    workspaceSnapshot: workspace,
+  });
+  const verified = await store.verifyItem(item.savedVideoId);
+  const receipt = await sendImportReceipt(savedVideoId, verified, checksumSha256, options);
+  return patchCloudState(store, verified, {
+    ...applyTransferSessionToCloud(verified.cloud, receipt.session || importPackage.transfer),
+    status: "imported",
+    catalogueStatus: receipt.catalogueStatus || "complete",
+    importedAt: receipt.importedAt,
+    importVerifiedAt: receipt.importVerifiedAt,
+    cleanupScheduledAt: receipt.cleanupScheduledAt,
+    cleanupAfter: receipt.cleanupAfter,
+    progress: 100,
   });
 };
 

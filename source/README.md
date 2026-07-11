@@ -101,8 +101,9 @@ items into the Finder library when configured, and keeps the original recovery
 record until validation succeeds. Existing durable saved videos can also be
 migrated from cache to Finder through Settings.
 
-Google Drive transfer is a temporary transport bridge, not the permanent video
-library. `Send to primary computer` uploads from the durable
+Clarity Cloud transfer is a temporary transport bridge, not the permanent video
+library. It is currently backed by Google Drive for provider file bytes.
+`Send to Clarity Cloud` uploads from the durable
 `savedVideoItems`/`savedVideoBlobs` records using `savedVideoId` as the ownership
 key; it never uploads directly from transient left/right workspace slots and it
 does not delete the local source copy after upload.
@@ -119,9 +120,15 @@ The upload lifecycle is:
    progress locally.
 4. `/api/video-transfer/:savedVideoId/finalize` verifies the uploaded file size
    and Clarity `appProperties`, writes `analysis.json` and `manifest.json`, and
-   only then marks the local item `Ready in Clarity Cloud`.
+   only then marks the transfer `Ready to import`.
+5. The primary computer lists `/api/video-transfer/imports`, downloads the
+   provider bytes through Clarity Cloud, writes the video into Local Storage,
+   verifies size and SHA-256 locally, and posts an import receipt.
+6. Clarity Cloud records the destination device, verified import time, cleanup
+   schedule, and transfer-complete state. A transfer is never marked imported
+   only because upload finished.
 
 Known limitations: resumable upload URLs are treated as temporary secrets and are
 not persisted across reloads, so an interrupted browser upload becomes retryable
-rather than resumable-continuable. Primary-device import, checksum download
-verification, import receipts, and Drive cleanup policy remain the next sprint.
+rather than resumable-continuable. Provider cleanup is scheduled after verified
+import; the actual provider-file deletion worker remains a follow-up.

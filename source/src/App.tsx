@@ -63,12 +63,15 @@ import {
   migrateSavedVideosToManagedLocalLibrary,
   moveManagedLocalVideoLibrary,
   cancelSavedVideoCloudUpload,
+  importSavedVideoFromClarityCloud,
+  listClarityCloudImportTransfers,
   pauseSavedVideoCloudUpload,
   reconnectManagedLocalVideoLibrary,
   rescanManagedLocalVideoLibrary,
   saveSavedVideoToCloud,
   verifyManagedLocalVideoLibrary,
   type ManagedLocalVideoLibraryStatus,
+  type ClarityCloudImportTransfer,
   type SavedVideoItem,
   type SavedVideoLibraryStore,
 } from "./modules/video-analysis/utils/savedVideoLibrary";
@@ -3390,6 +3393,12 @@ function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
       return "Video upload was interrupted.";
     case "SAVED_VIDEO_SOURCE_MISSING":
       return "Source unavailable.";
+    case "CLARITY_CLOUD_IMPORT_NOT_READY":
+      return "This transfer is not ready to import.";
+    case "CLARITY_CLOUD_IMPORT_VERIFY_FAILED":
+      return "Imported video did not match the Clarity Cloud catalogue.";
+    case "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED":
+      return "Local import was verified, but the receipt could not be recorded.";
     case "TRANSFER_PAUSED":
       return "Transfer paused.";
     default:
@@ -4342,6 +4351,8 @@ function App() {
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
   const [googleDriveTransfer, setGoogleDriveTransfer] = useState<GoogleDriveTransferStatus>(defaultGoogleDriveTransferStatus);
   const [googleDriveAction, setGoogleDriveAction] = useState<GoogleDriveActionState>("idle");
+  const [clarityCloudImports, setClarityCloudImports] = useState<ClarityCloudImportTransfer[]>([]);
+  const [clarityCloudImportActionIds, setClarityCloudImportActionIds] = useState<Set<string>>(() => new Set());
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
   const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
@@ -4368,6 +4379,14 @@ function App() {
       void refreshGoogleDriveTransferStatus();
     }
   }, [activeView, settingsTab]);
+
+  useEffect(() => {
+    if (activeView === "settings" && settingsTab === "integrations" && googleDriveTransfer.connected && googleDriveTransfer.incomingImportReady) {
+      void refreshClarityCloudImports();
+      return;
+    }
+    if (!googleDriveTransfer.connected) setClarityCloudImports([]);
+  }, [activeView, settingsTab, googleDriveTransfer.connected, googleDriveTransfer.incomingImportReady]);
   const attemptedSavedRescheduleRef = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
@@ -8837,7 +8856,8 @@ function App() {
         onProgress: () => refreshSavedVideoLibrary(),
       });
       refreshSavedVideoLibrary();
-      setToast({ message: "Ready in Clarity Cloud" });
+      await refreshClarityCloudImports();
+      setToast({ message: "Ready to import in Clarity Cloud" });
     } catch (error) {
       refreshSavedVideoLibrary();
       const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code || "") : "";
@@ -8975,6 +8995,38 @@ function App() {
     }
     await refreshGoogleDriveTransferStatus();
     setToast({ message: "Clarity Cloud status refreshed." });
+  }
+
+  async function importClarityCloudTransfer(transfer: ClarityCloudImportTransfer) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    if (managedLocalLibraryStatus.health !== "healthy") {
+      setToast({ message: "Connect Local Storage before importing from Clarity Cloud." });
+      return;
+    }
+    const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+    if (!savedVideoId) {
+      setToast({ message: "Clarity Cloud transfer metadata is incomplete." });
+      return;
+    }
+    setClarityCloudImportActionIds((current) => new Set(current).add(savedVideoId));
+    try {
+      const imported = await importSavedVideoFromClarityCloud(savedVideoId, store);
+      refreshSavedVideoLibrary();
+      await refreshClarityCloudImports();
+      setToast({ message: `${imported.title || "Video"} imported to Local Storage.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not import from Clarity Cloud." });
+    } finally {
+      setClarityCloudImportActionIds((current) => {
+        const next = new Set(current);
+        next.delete(savedVideoId);
+        return next;
+      });
+    }
   }
 
   async function verifySavedVideoInLibrary(item: SavedVideoItem) {
@@ -12313,6 +12365,18 @@ function App() {
       applyGoogleDriveTransferStatus(await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive status did not return JSON."));
     } catch {
       // Google Drive transfer is optional; keep the rest of Settings usable.
+    }
+  }
+
+  async function refreshClarityCloudImports() {
+    try {
+      if (!googleDriveTransfer.connected) {
+        setClarityCloudImports([]);
+        return;
+      }
+      setClarityCloudImports(await listClarityCloudImportTransfers());
+    } catch {
+      // The import inbox is optional; the status cards still show provider health.
     }
   }
 
@@ -19932,6 +19996,73 @@ function App() {
                       ) : null}
                     </article>
                   </div>
+
+                  <section className="storage-transfer-inbox" aria-label="Clarity Cloud imports">
+                    <div className="storage-transfer-inbox-header">
+                      <div>
+                        <span>CLARITY CLOUD INBOX</span>
+                        <h4>Ready to import</h4>
+                      </div>
+                      <button
+                        type="button"
+                        className="outline-button"
+                        disabled={!googleDriveTransfer.connected || !googleDriveTransfer.incomingImportReady}
+                        onClick={() => void refreshClarityCloudImports()}
+                      >
+                        <RefreshCw size={16} />
+                        Refresh
+                      </button>
+                    </div>
+                    {clarityCloudImports.length ? (
+                      <div className="storage-transfer-list">
+                        {clarityCloudImports.map((transfer) => {
+                          const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId || transfer.transferId;
+                          const statusLabel =
+                            transfer.catalogueStatus === "complete"
+                              ? "Transfer complete"
+                              : transfer.catalogueStatus === "imported" || transfer.catalogueStatus === "cleanup_scheduled"
+                                ? "Imported"
+                                : transfer.catalogueStatus === "repair_required"
+                                  ? "Needs repair"
+                                  : "Ready to import";
+                          const canImport =
+                            managedLocalLibraryStatus.health === "healthy" &&
+                            transfer.catalogueStatus === "ready_to_import" &&
+                            !clarityCloudImportActionIds.has(savedVideoId);
+                          return (
+                            <article className="storage-transfer-row" key={savedVideoId}>
+                              <div className="storage-transfer-icon">
+                                <Download size={16} />
+                              </div>
+                              <div className="storage-transfer-copy">
+                                <strong>{transfer.savedVideo?.title || "Saved video"}</strong>
+                                <span>
+                                  {statusLabel}
+                                  {transfer.savedVideo?.createdAt ? ` · ${profileRecordDateLabel(transfer.savedVideo.createdAt)}` : ""}
+                                  {transfer.video?.sizeBytes ? ` · ${Math.round(transfer.video.sizeBytes / 1024 / 1024)} MB` : ""}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                className="primary-button"
+                                disabled={!canImport}
+                                onClick={() => void importClarityCloudTransfer(transfer)}
+                              >
+                                <Download size={16} />
+                                {clarityCloudImportActionIds.has(savedVideoId) ? "Importing" : "Import to Local Storage"}
+                              </button>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="storage-transfer-empty">
+                        {googleDriveTransfer.connected
+                          ? "No videos are waiting to import."
+                          : "Connect Clarity Cloud to see transfers from other devices."}
+                      </p>
+                    )}
+                  </section>
 
                   <details className="storage-diagnostics">
                     <summary className="settings-subsection-title">

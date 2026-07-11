@@ -2377,6 +2377,89 @@ button {
   color: #a52e15;
 }
 
+.storage-transfer-inbox {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #deded8;
+  background: #fff;
+}
+
+.storage-transfer-inbox-header,
+.storage-transfer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.storage-transfer-inbox-header span {
+  color: #76736d;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.storage-transfer-inbox-header h4 {
+  margin: 2px 0 0;
+  color: #171717;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.storage-transfer-list {
+  display: grid;
+  gap: 8px;
+}
+
+.storage-transfer-row {
+  padding: 10px;
+  border: 1px solid #ecebe5;
+  background: #fbfbf9;
+}
+
+.storage-transfer-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid #ddd9ce;
+  background: #fff;
+  color: #8a6f3f;
+}
+
+.storage-transfer-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.storage-transfer-copy strong,
+.storage-transfer-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-transfer-copy strong {
+  color: #171717;
+  font-size: 14px;
+}
+
+.storage-transfer-copy span,
+.storage-transfer-empty {
+  color: #6f6c66;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.storage-transfer-empty {
+  margin: 0;
+}
+
 .storage-diagnostics {
   display: grid;
   gap: 12px;
@@ -7093,6 +7176,22 @@ button {
   .video-storage-grid,
   .storage-diagnostics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .storage-transfer-inbox-header,
+  .storage-transfer-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .storage-transfer-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .storage-transfer-row .primary-button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .revenue-chart {

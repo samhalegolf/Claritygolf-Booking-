@@ -29,10 +29,11 @@ Clarity Cloud is optional. A Cloud failure must never turn a successful local sa
 - Local - Cache only
 - Cloud - Not sent
 - Cloud - Sending 42%
-- Cloud - Ready in Clarity Cloud
+- Cloud - Ready to import
+- Cloud - Imported locally
 - Cloud - Failed - Retry
 
-Clarity Cloud may only show **Ready** when provider connection, required permission, token refresh, transfer folder provisioning, transfer session storage, upload transport, and inbound import into Local Storage are operational. Until inbound import is complete, a connected send path should remain **Beta** rather than Ready.
+Clarity Cloud may only show **Ready** when provider connection, required permission, token refresh, transfer folder provisioning, transfer session storage, upload transport, and inbound import into Local Storage are operational.
 
 Provider diagnostics belong in Advanced storage diagnostics:
 
@@ -53,7 +54,7 @@ Manual Save means save locally. It writes to Local Storage first and reports loc
 
 Send to Clarity Cloud is a separate transfer action. Cloud send can fail, pause, or require reconnect while the local saved video remains successful and visible in Player Profiles.
 
-Incoming Cloud items are not fully received until they are imported into Local Storage, verified against the transfer manifest, and recorded in the saved-video library.
+Incoming Cloud items are not fully received until they are imported into Local Storage, verified against the transfer manifest, recorded in the saved-video library, and acknowledged with an import receipt. Upload completion means Ready to import; it never means Imported.
 
 ## Provider Seam
 

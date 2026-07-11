@@ -420,7 +420,7 @@ export function getSavedVideoCloudStatusLabel(
     cloudState: GoogleDriveTransferState;
   }
 ) {
-  if (video.cloud?.status === "ready") return "Cloud - Ready in Clarity Cloud";
+  if (video.cloud?.status === "ready") return "Cloud - Ready to import";
   if (video.cloud?.status === "imported") return "Cloud - Imported locally";
   if (video.cloud?.status === "paused") return "Cloud - Paused";
   if (video.cloud?.status === "verifying") return "Cloud - Verifying";

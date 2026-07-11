@@ -188,6 +188,9 @@ async function driveStatusFromSettings(req: Request, settings: Record<string, st
     failedFolderId: settings.googleDriveFailedFolderId || "",
     tokenEncryptionConfigured: encryptionConfigured,
     providerStorageConfigured,
+    uploadRouteReady: true,
+    chunkedTransportReady: true,
+    incomingImportReady: true,
     blocker,
     message:
       blocker ||
@@ -196,7 +199,7 @@ async function driveStatusFromSettings(req: Request, settings: Record<string, st
         : state === "connected"
           ? "Clarity Cloud can send saved videos."
           : state === "reconnect_required"
-            ? "Google needs to be reconnected before Drive transfer can be prepared."
+            ? "Reconnect the Clarity Cloud provider before transfers can be prepared."
           : configured
             ? "Clarity Cloud is ready to connect."
             : "Google OAuth credentials are not configured."),
@@ -353,8 +356,8 @@ export default async function handler(req: Request) {
       return json({
         ...status,
         ok: false,
-        error: "drive_transfer_not_implemented",
-        message: "Drive disconnect is blocked until Drive folder ownership and transfer lifecycle rules are implemented.",
+        error: "clarity_cloud_disconnect_blocked",
+        message: "Clarity Cloud disconnect is blocked until transfer cleanup rules are implemented.",
       }, 412);
     }
 
