@@ -1,4 +1,9 @@
 import { PlayerVideo } from "../models/Video";
+import {
+  VIDEO_ANALYSIS_DB_STORES,
+  isIndexedDbFactoryAvailable,
+  openVideoAnalysisDatabase,
+} from "./videoAnalysisDatabase";
 
 // On-device video persistence.
 //
@@ -9,11 +14,7 @@ import { PlayerVideo } from "../models/Video";
 // future cloud-backed implementation (e.g. Google Drive) can satisfy the same
 // contract without changing the workspace internals.
 
-const DB_NAME = "clarity-video-analysis";
-const DB_VERSION = 2;
-const STORE_NAME = "videos";
-const SAVED_ITEMS_STORE_NAME = "savedVideoItems";
-const SAVED_BLOBS_STORE_NAME = "savedVideoBlobs";
+const STORE_NAME = VIDEO_ANALYSIS_DB_STORES.transientVideos;
 
 export interface StoredVideo {
   video: PlayerVideo;
@@ -43,25 +44,8 @@ export const buildVideoSlotKey = (
   lessonId?: string
 ) => `${playerId}.${lessonId ?? "default"}.${side}`;
 
-const isIndexedDbAvailable = () =>
-  typeof indexedDB !== "undefined" && indexedDB !== null;
-
 const openDb = (): Promise<IDBDatabase> =>
-  new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
-      if (!db.objectStoreNames.contains(SAVED_ITEMS_STORE_NAME)) {
-        db.createObjectStore(SAVED_ITEMS_STORE_NAME, { keyPath: "savedVideoId" });
-      }
-      if (!db.objectStoreNames.contains(SAVED_BLOBS_STORE_NAME)) {
-        db.createObjectStore(SAVED_BLOBS_STORE_NAME, { keyPath: "savedVideoId" });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+  openVideoAnalysisDatabase("transient-video-store.open");
 
 const runRequest = <T>(
   mode: IDBTransactionMode,
@@ -86,7 +70,7 @@ const runRequest = <T>(
  * null store degrades gracefully: videos simply won't persist across reloads.
  */
 export const createIndexedDbVideoStore = (): VideoBlobStore | null => {
-  if (!isIndexedDbAvailable()) return null;
+  if (!isIndexedDbFactoryAvailable()) return null;
 
   return {
     async putVideo(slotKey, video, blob) {

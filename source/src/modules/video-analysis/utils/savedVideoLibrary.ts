@@ -2,13 +2,15 @@ import type { VideoAnalysis } from "../models/Analysis";
 import type { PlayerVideo } from "../models/Video";
 import type { ComparisonSide, ComparisonWorkspaceState } from "./localPersistence";
 import type { StoredVideo } from "./videoBlobStore";
+import {
+  VIDEO_ANALYSIS_DB_STORES,
+  isIndexedDbFactoryAvailable,
+  openVideoAnalysisDatabase,
+} from "./videoAnalysisDatabase";
 
-const DB_NAME = "clarity-video-analysis";
-const DB_VERSION = 3;
-const SAVED_ITEMS_STORE = "savedVideoItems";
-const SAVED_BLOBS_STORE = "savedVideoBlobs";
-const TRANSIENT_VIDEOS_STORE = "videos";
-const MANAGED_LIBRARY_STORE = "managedLocalLibrary";
+const SAVED_ITEMS_STORE = VIDEO_ANALYSIS_DB_STORES.savedVideoItems;
+const SAVED_BLOBS_STORE = VIDEO_ANALYSIS_DB_STORES.savedVideoBlobs;
+const MANAGED_LIBRARY_STORE = VIDEO_ANALYSIS_DB_STORES.managedLocalLibrary;
 const MANAGED_LIBRARY_HANDLE_KEY = "rootDirectory";
 const MANAGED_LIBRARY_MANIFEST = "manifest.json";
 const MANAGED_LIBRARY_VIDEO_FILE = "video.mp4";
@@ -335,36 +337,12 @@ const sortSavedItems = (items: SavedVideoItem[]) =>
     String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))
   );
 
-const ensureStores = (db: IDBDatabase) => {
-  if (!db.objectStoreNames.contains(TRANSIENT_VIDEOS_STORE)) {
-    db.createObjectStore(TRANSIENT_VIDEOS_STORE);
-  }
-  if (!db.objectStoreNames.contains(SAVED_ITEMS_STORE)) {
-    db.createObjectStore(SAVED_ITEMS_STORE, { keyPath: "savedVideoId" });
-  }
-  if (!db.objectStoreNames.contains(SAVED_BLOBS_STORE)) {
-    db.createObjectStore(SAVED_BLOBS_STORE, { keyPath: "savedVideoId" });
-  }
-  if (!db.objectStoreNames.contains(MANAGED_LIBRARY_STORE)) {
-    db.createObjectStore(MANAGED_LIBRARY_STORE);
-  }
-};
-
-const openDb = (): Promise<IDBDatabase> =>
-  new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => ensureStores(request.result);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("Could not open saved video library."));
-    request.onblocked = () => reject(new Error("Saved video library is blocked by another tab."));
-  });
-
 const runStoreRequest = async <T>(
   storeName: string,
   mode: IDBTransactionMode,
   operate: (store: IDBObjectStore) => IDBRequest
 ): Promise<T> => {
-  const db = await openDb();
+  const db = await openVideoAnalysisDatabase(`saved-video-library.${storeName}.${mode}`);
   return new Promise<T>((resolve, reject) => {
     const transaction = db.transaction(storeName, mode);
     const store = transaction.objectStore(storeName);
@@ -1507,7 +1485,7 @@ export const verifyManagedLocalVideoLibrary = async (store: SavedVideoLibrarySto
 export const rescanManagedLocalVideoLibrary = verifyManagedLocalVideoLibrary;
 
 export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | null => {
-  if (typeof indexedDB === "undefined" || indexedDB === null) return null;
+  if (!isIndexedDbFactoryAvailable()) return null;
 
   const getItem = async (savedVideoId: string) => {
     const item = await runStoreRequest<SavedVideoItem | undefined>(
