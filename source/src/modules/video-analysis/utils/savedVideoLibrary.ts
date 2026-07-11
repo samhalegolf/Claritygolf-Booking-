@@ -234,6 +234,8 @@ export interface SavedVideoLibraryStore {
 }
 
 export type SavedVideoCloudErrorCode =
+  | "CLOUD_OAUTH_NOT_CONFIGURED"
+  | "PROVIDER_STORAGE_UNAVAILABLE"
   | "DRIVE_NOT_CONNECTED"
   | "DRIVE_SCOPE_MISSING"
   | "GOOGLE_RECONNECT_REQUIRED"
@@ -252,7 +254,8 @@ export type SavedVideoCloudErrorCode =
   | "CLARITY_CLOUD_IMPORT_FAILED"
   | "CLARITY_CLOUD_IMPORT_NOT_READY"
   | "CLARITY_CLOUD_IMPORT_VERIFY_FAILED"
-  | "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED";
+  | "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED"
+  | "CLARITY_CLOUD_PROVIDER_FAILED";
 
 export class SavedVideoCloudError extends Error {
   constructor(
@@ -461,8 +464,21 @@ const safeJson = async <T>(
 };
 
 const apiFailure = (data: any, fallback: SavedVideoCloudErrorCode): SavedVideoCloudError => {
-  const code = (typeof data?.error === "string" ? data.error : fallback) as SavedVideoCloudErrorCode;
-  return new SavedVideoCloudError(code, data?.message || "Google Drive upload failed.", data?.status);
+  const code = (
+    typeof data?.error === "string"
+      ? data.error
+      : typeof data?.error?.code === "string"
+        ? data.error.code
+        : typeof data?.code === "string"
+          ? data.code
+          : fallback
+  ) as SavedVideoCloudErrorCode;
+  const message =
+    (typeof data?.error === "object" && typeof data.error.message === "string" ? data.error.message : "") ||
+    data?.message ||
+    "Google Drive upload failed.";
+  const status = Number(data?.status || data?.error?.status) || undefined;
+  return new SavedVideoCloudError(code, message, status);
 };
 
 type PublicTransferSession = {
@@ -554,6 +570,13 @@ const applyTransferSessionToCloud = (
   lastUploadErrorCode: session.lastErrorCode,
   errorMessage: session.lastErrorMessage,
 });
+
+const isCloudSetupError = (code: SavedVideoCloudErrorCode) =>
+  code === "CLOUD_OAUTH_NOT_CONFIGURED" ||
+  code === "PROVIDER_STORAGE_UNAVAILABLE" ||
+  code === "DRIVE_NOT_CONNECTED" ||
+  code === "DRIVE_SCOPE_MISSING" ||
+  code === "GOOGLE_RECONNECT_REQUIRED";
 
 const uploadChunkToClarity = async (
   savedVideoId: string,
@@ -855,11 +878,18 @@ export const saveSavedVideoToCloud = async (
       error instanceof SavedVideoCloudError
         ? error
         : new SavedVideoCloudError("DRIVE_FINALIZE_FAILED", error instanceof Error ? error.message : "Google Drive upload failed.");
+    const setupBlocked = isCloudSetupError(cloudError.code);
     await patchCloudState(store, working, {
-      ...working.cloud,
+      ...(setupBlocked ? {} : working.cloud),
       status: "failed",
       provider: "google-drive",
       progress: undefined,
+      transferId: setupBlocked ? undefined : working.cloud?.transferId,
+      driveAssetId: setupBlocked ? undefined : working.cloud?.driveAssetId,
+      driveFolderId: setupBlocked ? undefined : working.cloud?.driveFolderId,
+      driveVideoFileId: setupBlocked ? undefined : working.cloud?.driveVideoFileId,
+      driveManifestFileId: setupBlocked ? undefined : working.cloud?.driveManifestFileId,
+      driveAnalysisFileId: setupBlocked ? undefined : working.cloud?.driveAnalysisFileId,
       lastUploadErrorCode: cloudError.code,
       errorMessage: cloudError.message,
     });

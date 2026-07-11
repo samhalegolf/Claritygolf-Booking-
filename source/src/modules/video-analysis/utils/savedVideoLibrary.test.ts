@@ -478,6 +478,51 @@ describe("saved video library", () => {
     }
   });
 
+  it("keeps local saved video intact and clears transfer fields when cloud setup is incomplete", async () => {
+    installBrowserGlobals();
+    const { store, item } = await savedVideoWithLargeImages();
+    await store.putItem({
+      ...item,
+      cloud: {
+        status: "uploading",
+        provider: "google-drive",
+        transferId: "stale-transfer",
+        driveAssetId: "stale-folder",
+        progress: 42,
+      },
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      Response.json(
+        {
+          ok: false,
+          error: {
+            code: "CLOUD_OAUTH_NOT_CONFIGURED",
+            message: "Clarity Cloud is not configured for this environment.",
+          },
+        },
+        { status: 503 },
+      );
+    try {
+      await assert.rejects(
+        () => saveSavedVideoToCloud(item.savedVideoId, store),
+        (error) =>
+          error instanceof SavedVideoCloudError &&
+          error.code === "CLOUD_OAUTH_NOT_CONFIGURED" &&
+          error.message === "Clarity Cloud is not configured for this environment."
+      );
+      const local = await store.getItem(item.savedVideoId);
+      assert.equal(local?.local.status, "available");
+      assert.equal(local?.cloud?.status, "failed");
+      assert.equal(local?.cloud?.lastUploadErrorCode, "CLOUD_OAUTH_NOT_CONFIGURED");
+      assert.equal(local?.cloud?.transferId, undefined);
+      assert.equal(local?.cloud?.driveAssetId, undefined);
+      assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("sends only compact ownership metadata to upload-session", async () => {
     installBrowserGlobals();
     const { store, item } = await savedVideoWithLargeImages();

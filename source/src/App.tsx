@@ -3380,6 +3380,10 @@ function formatVideoDurationLabel(seconds?: number) {
 
 function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
   switch (code) {
+    case "CLOUD_OAUTH_NOT_CONFIGURED":
+      return "Clarity Cloud is not configured for this environment.";
+    case "PROVIDER_STORAGE_UNAVAILABLE":
+      return "Clarity Cloud setup is incomplete.";
     case "DRIVE_API_DISABLED":
       return "Clarity Cloud is not enabled for this connection.";
     case "DRIVE_UPLOAD_PROXY_FAILED":
@@ -3404,6 +3408,8 @@ function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
       return "Imported video did not match the Clarity Cloud catalogue.";
     case "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED":
       return "Local import was verified, but the receipt could not be recorded.";
+    case "CLARITY_CLOUD_PROVIDER_FAILED":
+      return "Your local video is safe. The cloud transfer service could not be reached.";
     case "TRANSFER_PAUSED":
       return "Transfer paused.";
     default:
@@ -3425,9 +3431,13 @@ function clarityCloudTransferBlockReason(health: ClarityCloudHealth) {
   if (health.state === "not-connected") return "Connect Clarity Cloud";
   if (health.state === "reconnect-required") return "Reconnect Clarity Cloud";
   if (health.state === "permission-required") return "Permission required";
-  if (health.state === "setup-incomplete") return "Setup incomplete";
+  if (health.state === "setup-incomplete") {
+    return "safeErrorCode" in health && health.safeErrorCode === "CLOUD_OAUTH_NOT_CONFIGURED"
+      ? "Clarity Cloud is not configured for this environment."
+      : "Setup incomplete";
+  }
   if (health.state === "temporarily-unavailable" || health.state === "error") {
-    return "Transfer service unavailable";
+    return "Your local video is safe. The cloud transfer service could not be reached.";
   }
   if (health.state === "beta") return "Primary computer not configured";
   return "";
@@ -3446,6 +3456,10 @@ function clarityCloudSafeErrorCode(health: ClarityCloudHealth) {
 
 function shouldOpenClarityCloudSettings(health: ClarityCloudHealth) {
   return "action" in health && health.action !== "retry";
+}
+
+function isClarityCloudOperational(health: ClarityCloudHealth) {
+  return health.state === "ready";
 }
 
 function sourceSideFromSlotKey(slotKey: string): ComparisonSide {
@@ -4380,6 +4394,7 @@ function App() {
   const [diagnosticEvents, setDiagnosticEvents] = useState<DiagnosticEvent[]>([]);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [diagnosticsTab, setDiagnosticsTab] = useState<DiagnosticTab>("overview");
+  const [storageDiagnosticsOpen, setStorageDiagnosticsOpen] = useState(false);
   const [pendingLessonCompleteId, setPendingLessonCompleteId] = useState("");
   const [lessonCompleteErrors, setLessonCompleteErrors] = useState<LessonCompleteErrorMap>({});
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
@@ -9107,6 +9122,11 @@ function App() {
     if (!action) return;
     if (action === "connect" || action === "grant-permission" || action === "reconnect") {
       await connectGoogleDriveTransfer();
+      return;
+    }
+    if (action === "open-setup-details") {
+      setStorageDiagnosticsOpen(true);
+      setToast({ message: "Setup details opened." });
       return;
     }
     if (action === "retry-setup") {
@@ -17071,16 +17091,20 @@ function App() {
                                   {playerToolVideos.length || playerToolLegacyVideoRecords.length ? (
                                     <>
                                       {playerToolVideos.map((video) => {
+                                        const cloudOperational = isClarityCloudOperational(clarityCloudHealth);
+                                        const cloudHasServerSession = Boolean(video.cloud?.transferId);
                                         const isUploading =
-                                          uploadingSavedVideoIds.has(video.savedVideoId) ||
-                                          video.cloud?.status === "preparing" ||
-                                          video.cloud?.status === "uploading" ||
-                                          video.cloud?.status === "verifying";
+                                          cloudOperational &&
+                                          (uploadingSavedVideoIds.has(video.savedVideoId) ||
+                                            video.cloud?.status === "preparing" ||
+                                            video.cloud?.status === "uploading" ||
+                                            video.cloud?.status === "verifying");
                                         const localLabel = getSavedVideoLocalStatusLabel(video);
                                         const cloudLabel = getSavedVideoCloudStatusLabel(video, {
                                           isUploading,
                                           cloudConnected: googleDriveTransfer.connected,
                                           cloudState: googleDriveTransfer.state,
+                                          cloudHealth: clarityCloudHealth,
                                         });
                                         const cloudErrorLabel =
                                           video.cloud?.status === "failed"
@@ -17088,15 +17112,17 @@ function App() {
                                             : "";
                                         const canSend =
                                           video.local.status === "available" &&
+                                          cloudOperational &&
                                           video.cloud?.status !== "ready" &&
                                           video.cloud?.status !== "imported" &&
                                           !isUploading;
-                                        const canPause = video.cloud?.status === "uploading" || isUploading;
+                                        const canPause = cloudOperational && cloudHasServerSession && (video.cloud?.status === "uploading" || isUploading);
                                         const canCancel =
-                                          video.cloud?.status === "preparing" ||
-                                          video.cloud?.status === "uploading" ||
-                                          video.cloud?.status === "paused" ||
-                                          video.cloud?.status === "failed";
+                                          cloudOperational &&
+                                          cloudHasServerSession &&
+                                          (video.cloud?.status === "preparing" ||
+                                            video.cloud?.status === "uploading" ||
+                                            video.cloud?.status === "paused");
                                         return (
                                           <article className="player-video-card" key={video.savedVideoId}>
                                             {video.thumbnailDataUrl ? (
@@ -17141,33 +17167,37 @@ function App() {
                                                 <Video size={14} />
                                                 Open
                                               </button>
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                disabled={!canSend}
-                                                onClick={() => void sendSavedVideoToPrimaryComputer(video)}
-                                              >
-                                                <Send size={14} />
-                                                {video.cloud?.status === "failed" || video.cloud?.status === "paused" || video.cloud?.status === "cancelled" ? "Retry Cloud send" : "Send to Clarity Cloud"}
-                                              </button>
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                disabled={!canPause}
-                                                onClick={() => void pauseSavedVideoTransfer(video)}
-                                              >
-                                                <Pause size={14} />
-                                                Pause
-                                              </button>
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                disabled={!canCancel}
-                                                onClick={() => void cancelSavedVideoTransfer(video)}
-                                              >
-                                                <X size={14} />
-                                                Cancel
-                                              </button>
+                                              {cloudOperational ? (
+                                                <>
+                                                  <button
+                                                    type="button"
+                                                    className="outline-button"
+                                                    disabled={!canSend}
+                                                    onClick={() => void sendSavedVideoToPrimaryComputer(video)}
+                                                  >
+                                                    <Send size={14} />
+                                                    {video.cloud?.status === "failed" || video.cloud?.status === "paused" || video.cloud?.status === "cancelled" ? "Retry Cloud send" : "Send to Clarity Cloud"}
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className="outline-button"
+                                                    disabled={!canPause}
+                                                    onClick={() => void pauseSavedVideoTransfer(video)}
+                                                  >
+                                                    <Pause size={14} />
+                                                    Pause
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className="outline-button"
+                                                    disabled={!canCancel}
+                                                    onClick={() => void cancelSavedVideoTransfer(video)}
+                                                  >
+                                                    <X size={14} />
+                                                    Cancel
+                                                  </button>
+                                                </>
+                                              ) : null}
                                               <button
                                                 type="button"
                                                 className="outline-button"
@@ -20187,7 +20217,11 @@ function App() {
                     )}
                   </section>
 
-                  <details className="storage-diagnostics">
+                  <details
+                    className="storage-diagnostics"
+                    open={storageDiagnosticsOpen}
+                    onToggle={(event) => setStorageDiagnosticsOpen(event.currentTarget.open)}
+                  >
                     <summary className="settings-subsection-title">
                       <Code2 size={18} />
                       <div>
@@ -20309,6 +20343,10 @@ function App() {
                         <div className="sync-meta">
                           <span>Safe error code</span>
                           <strong>{"safeErrorCode" in clarityCloudHealth && clarityCloudHealth.safeErrorCode ? clarityCloudHealth.safeErrorCode : "None"}</strong>
+                        </div>
+                        <div className="sync-meta">
+                          <span>Missing configuration</span>
+                          <strong>{googleDriveTransfer.missingConfiguration?.length ? googleDriveTransfer.missingConfiguration.join(", ") : "None"}</strong>
                         </div>
                         <div className="sync-actions">
                           <button
