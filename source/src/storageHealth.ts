@@ -33,6 +33,8 @@ export type GoogleDriveTransferStatus = {
   uploadRouteReady?: boolean;
   chunkedTransportReady?: boolean;
   incomingImportReady?: boolean;
+  safeErrorCode?: string;
+  missingConfiguration?: string[];
 };
 
 export type LocalStorageAction =
@@ -94,6 +96,7 @@ export type ClarityCloudAction =
   | "connect"
   | "grant-permission"
   | "reconnect"
+  | "open-setup-details"
   | "retry-setup"
   | "retry";
 
@@ -137,7 +140,7 @@ export type ClarityCloudHealth =
       message: string;
       provider: ClarityCloudProviderId;
       providerLabel: string;
-      action: "retry-setup";
+      action: "open-setup-details" | "retry-setup";
       safeErrorCode?: string;
     }
   | {
@@ -264,13 +267,13 @@ export function getLocalStorageActionLabel(action?: LocalStorageAction) {
 }
 
 export function getClarityCloudHealth(status: GoogleDriveTransferStatus): ClarityCloudHealth {
-  if (!status.configured) {
+  if (!status.configured || status.safeErrorCode === "CLOUD_OAUTH_NOT_CONFIGURED") {
     return {
       ...cloudBase,
       state: "setup-incomplete",
       statusLabel: "Setup incomplete",
-      message: "Clarity Cloud setup is not complete for this workspace.",
-      action: "retry-setup",
+      message: "Clarity Cloud is not configured for this environment.",
+      action: "open-setup-details",
       safeErrorCode: "CLOUD_OAUTH_NOT_CONFIGURED",
     };
   }
@@ -311,8 +314,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
       state: "setup-incomplete",
       statusLabel: "Setup incomplete",
       message: "Secure provider storage is unavailable.",
-      action: "retry-setup",
-      safeErrorCode: "PROVIDER_STORAGE_UNAVAILABLE",
+      action: "open-setup-details",
+      safeErrorCode: safeCode(status.safeErrorCode || status.blocker, "PROVIDER_STORAGE_UNAVAILABLE"),
     };
   }
 
@@ -332,8 +335,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
       state: "setup-incomplete",
       statusLabel: "Setup incomplete",
       message: "Cloud storage is connected, but transfer setup is not complete.",
-      action: "retry-setup",
-      safeErrorCode: safeCode(status.blocker || status.message, "CLARITY_CLOUD_SETUP_INCOMPLETE"),
+      action: "open-setup-details",
+      safeErrorCode: safeCode(status.safeErrorCode || status.blocker || status.message, "CLARITY_CLOUD_SETUP_INCOMPLETE"),
     };
   }
 
@@ -364,18 +367,20 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
       ...cloudBase,
       state: "temporarily-unavailable",
       statusLabel: "Temporarily unavailable",
-      message: "Clarity Cloud could not be reached. Your local videos are still safe.",
+      message: "Your local video is safe. The cloud transfer service could not be reached.",
       action: "retry",
-      safeErrorCode: "CHUNK_UPLOAD_UNAVAILABLE",
+      safeErrorCode: safeCode(status.safeErrorCode, "CHUNK_UPLOAD_UNAVAILABLE"),
     };
   }
 
   if (status.incomingImportReady !== true) {
     return {
       ...cloudBase,
-      state: "beta",
-      statusLabel: "Beta",
-      message: "Cloud sending is connected, but inbound import into Local Storage is still being completed.",
+      state: "temporarily-unavailable",
+      statusLabel: "Temporarily unavailable",
+      message: "Your local video is safe. The cloud transfer service could not be reached.",
+      action: "retry",
+      safeErrorCode: safeCode(status.safeErrorCode, "CLARITY_CLOUD_IMPORT_LIST_UNAVAILABLE"),
     };
   }
 
@@ -397,6 +402,7 @@ export function getClarityCloudActionLabel(action?: ClarityCloudAction) {
   if (action === "connect") return "Connect Clarity Cloud";
   if (action === "grant-permission") return "Grant permission";
   if (action === "reconnect") return "Reconnect Clarity Cloud";
+  if (action === "open-setup-details") return "Open setup details";
   if (action === "retry-setup") return "Retry setup";
   if (action === "retry") return "Retry";
   return "";
@@ -418,10 +424,16 @@ export function getSavedVideoCloudStatusLabel(
     isUploading: boolean;
     cloudConnected: boolean;
     cloudState: GoogleDriveTransferState;
+    cloudHealth?: ClarityCloudHealth;
   }
 ) {
   if (video.cloud?.status === "ready") return "Cloud - Ready to import";
   if (video.cloud?.status === "imported") return "Cloud - Imported locally";
+  if (options.cloudHealth?.state === "setup-incomplete") return "Cloud - Setup incomplete";
+  if (options.cloudHealth?.state === "temporarily-unavailable") return "Cloud - Temporarily unavailable";
+  if (options.cloudHealth?.state === "not-connected") return "Cloud - Not connected";
+  if (options.cloudHealth?.state === "permission-required") return "Cloud - Permission required";
+  if (options.cloudHealth?.state === "reconnect-required") return "Cloud - Reconnect required";
   if (video.cloud?.status === "paused") return "Cloud - Paused";
   if (video.cloud?.status === "verifying") return "Cloud - Verifying";
   if (video.cloud?.status === "preparing") return "Cloud - Preparing";
@@ -432,5 +444,9 @@ export function getSavedVideoCloudStatusLabel(
   }
   if (video.cloud?.status === "failed") return "Cloud - Failed - Retry";
   if (options.cloudState === "permission_upgrade_required") return "Cloud - Permission required";
+  if (options.cloudState === "reconnect_required") return "Cloud - Reconnect required";
+  if (options.cloudState === "blocked") return "Cloud - Setup incomplete";
+  if (options.cloudState === "error") return "Cloud - Service unavailable";
+  if (!options.cloudConnected || options.cloudState === "not_connected") return "Cloud - Connect Clarity Cloud";
   return "Cloud - Not sent";
 }

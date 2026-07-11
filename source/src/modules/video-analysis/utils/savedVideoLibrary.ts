@@ -2,13 +2,15 @@ import type { VideoAnalysis } from "../models/Analysis";
 import type { PlayerVideo } from "../models/Video";
 import type { ComparisonSide, ComparisonWorkspaceState } from "./localPersistence";
 import type { StoredVideo } from "./videoBlobStore";
+import {
+  VIDEO_ANALYSIS_DB_STORES,
+  isIndexedDbFactoryAvailable,
+  openVideoAnalysisDatabase,
+} from "./videoAnalysisDatabase";
 
-const DB_NAME = "clarity-video-analysis";
-const DB_VERSION = 3;
-const SAVED_ITEMS_STORE = "savedVideoItems";
-const SAVED_BLOBS_STORE = "savedVideoBlobs";
-const TRANSIENT_VIDEOS_STORE = "videos";
-const MANAGED_LIBRARY_STORE = "managedLocalLibrary";
+const SAVED_ITEMS_STORE = VIDEO_ANALYSIS_DB_STORES.savedVideoItems;
+const SAVED_BLOBS_STORE = VIDEO_ANALYSIS_DB_STORES.savedVideoBlobs;
+const MANAGED_LIBRARY_STORE = VIDEO_ANALYSIS_DB_STORES.managedLocalLibrary;
 const MANAGED_LIBRARY_HANDLE_KEY = "rootDirectory";
 const MANAGED_LIBRARY_MANIFEST = "manifest.json";
 const MANAGED_LIBRARY_VIDEO_FILE = "video.mp4";
@@ -232,6 +234,8 @@ export interface SavedVideoLibraryStore {
 }
 
 export type SavedVideoCloudErrorCode =
+  | "CLOUD_OAUTH_NOT_CONFIGURED"
+  | "PROVIDER_STORAGE_UNAVAILABLE"
   | "DRIVE_NOT_CONNECTED"
   | "DRIVE_SCOPE_MISSING"
   | "GOOGLE_RECONNECT_REQUIRED"
@@ -250,7 +254,8 @@ export type SavedVideoCloudErrorCode =
   | "CLARITY_CLOUD_IMPORT_FAILED"
   | "CLARITY_CLOUD_IMPORT_NOT_READY"
   | "CLARITY_CLOUD_IMPORT_VERIFY_FAILED"
-  | "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED";
+  | "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED"
+  | "CLARITY_CLOUD_PROVIDER_FAILED";
 
 export class SavedVideoCloudError extends Error {
   constructor(
@@ -335,36 +340,12 @@ const sortSavedItems = (items: SavedVideoItem[]) =>
     String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))
   );
 
-const ensureStores = (db: IDBDatabase) => {
-  if (!db.objectStoreNames.contains(TRANSIENT_VIDEOS_STORE)) {
-    db.createObjectStore(TRANSIENT_VIDEOS_STORE);
-  }
-  if (!db.objectStoreNames.contains(SAVED_ITEMS_STORE)) {
-    db.createObjectStore(SAVED_ITEMS_STORE, { keyPath: "savedVideoId" });
-  }
-  if (!db.objectStoreNames.contains(SAVED_BLOBS_STORE)) {
-    db.createObjectStore(SAVED_BLOBS_STORE, { keyPath: "savedVideoId" });
-  }
-  if (!db.objectStoreNames.contains(MANAGED_LIBRARY_STORE)) {
-    db.createObjectStore(MANAGED_LIBRARY_STORE);
-  }
-};
-
-const openDb = (): Promise<IDBDatabase> =>
-  new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => ensureStores(request.result);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("Could not open saved video library."));
-    request.onblocked = () => reject(new Error("Saved video library is blocked by another tab."));
-  });
-
 const runStoreRequest = async <T>(
   storeName: string,
   mode: IDBTransactionMode,
   operate: (store: IDBObjectStore) => IDBRequest
 ): Promise<T> => {
-  const db = await openDb();
+  const db = await openVideoAnalysisDatabase(`saved-video-library.${storeName}.${mode}`);
   return new Promise<T>((resolve, reject) => {
     const transaction = db.transaction(storeName, mode);
     const store = transaction.objectStore(storeName);
@@ -483,8 +464,21 @@ const safeJson = async <T>(
 };
 
 const apiFailure = (data: any, fallback: SavedVideoCloudErrorCode): SavedVideoCloudError => {
-  const code = (typeof data?.error === "string" ? data.error : fallback) as SavedVideoCloudErrorCode;
-  return new SavedVideoCloudError(code, data?.message || "Google Drive upload failed.", data?.status);
+  const code = (
+    typeof data?.error === "string"
+      ? data.error
+      : typeof data?.error?.code === "string"
+        ? data.error.code
+        : typeof data?.code === "string"
+          ? data.code
+          : fallback
+  ) as SavedVideoCloudErrorCode;
+  const message =
+    (typeof data?.error === "object" && typeof data.error.message === "string" ? data.error.message : "") ||
+    data?.message ||
+    "Google Drive upload failed.";
+  const status = Number(data?.status || data?.error?.status) || undefined;
+  return new SavedVideoCloudError(code, message, status);
 };
 
 type PublicTransferSession = {
@@ -576,6 +570,13 @@ const applyTransferSessionToCloud = (
   lastUploadErrorCode: session.lastErrorCode,
   errorMessage: session.lastErrorMessage,
 });
+
+const isCloudSetupError = (code: SavedVideoCloudErrorCode) =>
+  code === "CLOUD_OAUTH_NOT_CONFIGURED" ||
+  code === "PROVIDER_STORAGE_UNAVAILABLE" ||
+  code === "DRIVE_NOT_CONNECTED" ||
+  code === "DRIVE_SCOPE_MISSING" ||
+  code === "GOOGLE_RECONNECT_REQUIRED";
 
 const uploadChunkToClarity = async (
   savedVideoId: string,
@@ -877,11 +878,18 @@ export const saveSavedVideoToCloud = async (
       error instanceof SavedVideoCloudError
         ? error
         : new SavedVideoCloudError("DRIVE_FINALIZE_FAILED", error instanceof Error ? error.message : "Google Drive upload failed.");
+    const setupBlocked = isCloudSetupError(cloudError.code);
     await patchCloudState(store, working, {
-      ...working.cloud,
+      ...(setupBlocked ? {} : working.cloud),
       status: "failed",
       provider: "google-drive",
       progress: undefined,
+      transferId: setupBlocked ? undefined : working.cloud?.transferId,
+      driveAssetId: setupBlocked ? undefined : working.cloud?.driveAssetId,
+      driveFolderId: setupBlocked ? undefined : working.cloud?.driveFolderId,
+      driveVideoFileId: setupBlocked ? undefined : working.cloud?.driveVideoFileId,
+      driveManifestFileId: setupBlocked ? undefined : working.cloud?.driveManifestFileId,
+      driveAnalysisFileId: setupBlocked ? undefined : working.cloud?.driveAnalysisFileId,
       lastUploadErrorCode: cloudError.code,
       errorMessage: cloudError.message,
     });
@@ -1507,7 +1515,7 @@ export const verifyManagedLocalVideoLibrary = async (store: SavedVideoLibrarySto
 export const rescanManagedLocalVideoLibrary = verifyManagedLocalVideoLibrary;
 
 export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | null => {
-  if (typeof indexedDB === "undefined" || indexedDB === null) return null;
+  if (!isIndexedDbFactoryAvailable()) return null;
 
   const getItem = async (savedVideoId: string) => {
     const item = await runStoreRequest<SavedVideoItem | undefined>(

@@ -108,6 +108,44 @@ test("chunk endpoint requires admin before upload handling", async () => {
   assert.equal(body.error, "unauthorized");
 });
 
+test("transfer routes return typed setup JSON when OAuth configuration is missing", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = {
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+    GOOGLE_CALENDAR_CLIENT_ID: process.env.GOOGLE_CALENDAR_CLIENT_ID,
+    GOOGLE_CALENDAR_CLIENT_SECRET: process.env.GOOGLE_CALENDAR_CLIENT_SECRET,
+    GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_V1: process.env.GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_V1,
+  };
+  process.env.SUPABASE_URL = "https://supabase.example";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role";
+  delete process.env.GOOGLE_CLIENT_ID;
+  delete process.env.GOOGLE_CLIENT_SECRET;
+  delete process.env.GOOGLE_CALENDAR_CLIENT_ID;
+  delete process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+  process.env.GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_V1 = "a".repeat(43);
+  globalThis.fetch = async () => Response.json([{ id: "session-1" }]);
+  try {
+    const response = await videoTransferHandler(new Request("https://example.test/api/video-transfer/imports", {
+      headers: { cookie: "clarity_session=session-token" },
+    }));
+    const body = await response.json() as any;
+
+    assert.equal(response.status, 503);
+    assert.equal(body.ok, false);
+    assert.equal(body.error.code, "CLOUD_OAUTH_NOT_CONFIGURED");
+    assert.equal(body.error.message, "Clarity Cloud is not configured for this environment.");
+  } finally {
+    globalThis.fetch = originalFetch;
+    Object.entries(originalEnv).forEach(([key, value]) => {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    });
+  }
+});
+
 test("public transfer session never exposes the Google resumable URL", () => {
   const publicSession = publicTransferSession({
     version: 1,

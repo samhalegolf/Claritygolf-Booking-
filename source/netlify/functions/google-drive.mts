@@ -106,10 +106,19 @@ function configuredRedirectUri(req: Request) {
 }
 
 function googleConfig(req: Request) {
+  const clientId = env("GOOGLE_CLIENT_ID", "") || env("GOOGLE_CALENDAR_CLIENT_ID", "");
+  const clientSecret = env("GOOGLE_CLIENT_SECRET", "") || env("GOOGLE_CALENDAR_CLIENT_SECRET", "");
+  const redirectUri = configuredRedirectUri(req);
+  const missingConfiguration = [
+    clientId ? "" : "GOOGLE_CLIENT_ID or GOOGLE_CALENDAR_CLIENT_ID",
+    clientSecret ? "" : "GOOGLE_CLIENT_SECRET or GOOGLE_CALENDAR_CLIENT_SECRET",
+    redirectUri ? "" : "GOOGLE_DRIVE_REDIRECT_URI or GOOGLE_CALENDAR_REDIRECT_URI",
+  ].filter(Boolean);
   return {
-    clientId: env("GOOGLE_CLIENT_ID", "") || env("GOOGLE_CALENDAR_CLIENT_ID", ""),
-    clientSecret: env("GOOGLE_CLIENT_SECRET", "") || env("GOOGLE_CALENDAR_CLIENT_SECRET", ""),
-    redirectUri: configuredRedirectUri(req),
+    clientId,
+    clientSecret,
+    redirectUri,
+    missingConfiguration,
   };
 }
 
@@ -150,7 +159,7 @@ async function userProfile(accessToken: string) {
 
 async function driveStatusFromSettings(req: Request, settings: Record<string, string>) {
   const config = googleConfig(req);
-  const configured = Boolean(config.clientId && config.clientSecret && config.redirectUri);
+  const configured = config.missingConfiguration.length === 0;
   const accountId = resolveGoogleAccountId(settings);
   const connection = await loadGoogleProviderConnection(accountId);
   const providerStatus = publicGoogleProviderStatus(connection, requiredDriveScopes);
@@ -158,22 +167,36 @@ async function driveStatusFromSettings(req: Request, settings: Record<string, st
   const driveScopeGranted = Boolean(connection && hasGoogleScopes(connection, [driveFileScope]));
   const encryptionConfigured = tokenEncryptionConfigured();
   const providerStorageConfigured = true;
-  const blocker = !encryptionConfigured
+  const oauthBlocker = configured ? "" : "Clarity Cloud is not configured for this environment.";
+  const blocker = oauthBlocker ||
+    (!encryptionConfigured
     ? "Secure provider storage is unavailable."
-    : "";
+    : "");
+  const safeErrorCode = oauthBlocker
+    ? "CLOUD_OAUTH_NOT_CONFIGURED"
+    : !encryptionConfigured
+      ? "GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_MISSING"
+      : "";
+  const foldersReady = Boolean(
+    settings.googleDriveInboxFolderId &&
+      settings.googleDriveImportedFolderId &&
+      settings.googleDriveFailedFolderId
+  );
 
   let state: DriveStatusState = "not_connected";
-  if (!configured) state = "error";
+  if (!configured) state = "blocked";
   else if (blocker) state = "blocked";
   else if (calendarConnected && !driveScopeGranted) state = "permission_upgrade_required";
   else if (driveScopeGranted && connection?.driveEnabled && connection.connectionStatus === "connected") state = "connected";
   else if (connection?.connectionStatus === "reconnect_required") state = "reconnect_required";
   else if (connection?.connectionStatus === "error") state = "error";
+  const connected = state === "connected";
+  const routeReady = configured && encryptionConfigured && connected && foldersReady;
 
   return {
     ok: true,
     configured,
-    connected: state === "connected",
+    connected,
     state,
     accountId,
     calendarConnected,
@@ -188,9 +211,11 @@ async function driveStatusFromSettings(req: Request, settings: Record<string, st
     failedFolderId: settings.googleDriveFailedFolderId || "",
     tokenEncryptionConfigured: encryptionConfigured,
     providerStorageConfigured,
-    uploadRouteReady: true,
-    chunkedTransportReady: true,
-    incomingImportReady: true,
+    uploadRouteReady: routeReady,
+    chunkedTransportReady: routeReady,
+    incomingImportReady: routeReady,
+    safeErrorCode,
+    missingConfiguration: config.missingConfiguration,
     blocker,
     message:
       blocker ||
@@ -202,7 +227,7 @@ async function driveStatusFromSettings(req: Request, settings: Record<string, st
             ? "Reconnect the Clarity Cloud provider before transfers can be prepared."
           : configured
             ? "Clarity Cloud is ready to connect."
-            : "Google OAuth credentials are not configured."),
+            : "Clarity Cloud is not configured for this environment."),
   };
 }
 
@@ -337,7 +362,16 @@ export default async function handler(req: Request) {
 
     if (req.method === "GET" && action === "status") return json(status);
     if (req.method === "POST" && action === "test") {
-      if (status.state !== "connected") return json({ ...status, ok: false, error: status.state }, 409);
+      if (status.state !== "connected") {
+        return json({
+          ...status,
+          ok: false,
+          error: {
+            code: status.safeErrorCode || status.state,
+            message: status.message,
+          },
+        }, status.safeErrorCode ? 503 : 409);
+      }
       await getGoogleAccessToken(status.accountId, [driveFileScope]);
       return json({
         ...status,
@@ -346,9 +380,25 @@ export default async function handler(req: Request) {
       });
     }
     if ((req.method === "GET" || req.method === "POST") && action === "connect") {
-      if (!status.configured) return json({ ...status, ok: false, error: "google_oauth_not_configured" }, 400);
+      if (!status.configured) {
+        return json({
+          ...status,
+          ok: false,
+          error: {
+            code: "CLOUD_OAUTH_NOT_CONFIGURED",
+            message: "Clarity Cloud is not configured for this environment.",
+          },
+        }, 503);
+      }
       if (status.blocker) {
-        return json({ ...status, ok: false, error: "drive_prerequisite_required" }, 412);
+        return json({
+          ...status,
+          ok: false,
+          error: {
+            code: status.safeErrorCode || "CLARITY_CLOUD_SETUP_INCOMPLETE",
+            message: status.message,
+          },
+        }, 412);
       }
       return json({ ...status, ...(await createGoogleDriveAuthUrl(req, settings)) });
     }

@@ -4,11 +4,13 @@ import {
   VideoBlobStore,
   createIndexedDbVideoStore,
 } from "./videoBlobStore";
+import { openIndexedDbDatabase } from "./videoAnalysisDatabase";
 
 const ANALYSIS_PREFIX = "clarity.video.analysis";
 const WORKSPACE_PREFIX = "clarity.video.workspace";
 const ARTIFACT_PREFIX = "clarity.video.artifact";
 const DEVICE_DB_NAME = "clarity-video-analysis-device";
+const DEVICE_DB_VERSION = 1;
 const DEVICE_STORE_NAME = "keyValue";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -165,27 +167,17 @@ export const browserStorageAdapter: PersistenceAdapter = {
 
 let indexedDbOpenPromise: Promise<IDBDatabase> | null = null;
 
-const resolveIndexedDb = () => {
-  if (typeof window === "undefined" || !window.indexedDB) {
-    throw new Error("IndexedDB is not available in this browser.");
-  }
-  return window.indexedDB;
-};
-
 const openIndexedDb = () => {
   if (indexedDbOpenPromise) return indexedDbOpenPromise;
-  indexedDbOpenPromise = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = resolveIndexedDb().open(DEVICE_DB_NAME, 1);
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
+  indexedDbOpenPromise = openIndexedDbDatabase({
+    databaseName: DEVICE_DB_NAME,
+    version: DEVICE_DB_VERSION,
+    operation: "analysis-persistence.key-value.open",
+    onUpgradeNeeded: (db) => {
       if (!db.objectStoreNames.contains(DEVICE_STORE_NAME)) {
         db.createObjectStore(DEVICE_STORE_NAME);
       }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("Could not open IndexedDB."));
-    request.onblocked = () => reject(new Error("IndexedDB is blocked by another tab."));
+    },
   });
   return indexedDbOpenPromise;
 };

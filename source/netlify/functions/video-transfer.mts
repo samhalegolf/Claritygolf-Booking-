@@ -46,6 +46,8 @@ type ClarityCloudCatalogueStatus =
   | "expired";
 
 type TransferErrorCode =
+  | "CLOUD_OAUTH_NOT_CONFIGURED"
+  | "PROVIDER_STORAGE_UNAVAILABLE"
   | "DRIVE_NOT_CONNECTED"
   | "DRIVE_SCOPE_MISSING"
   | "GOOGLE_RECONNECT_REQUIRED"
@@ -247,6 +249,33 @@ function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
 }
 
+function googleOAuthConfigurationMissing() {
+  const clientId = env("GOOGLE_CLIENT_ID", "") || env("GOOGLE_CALENDAR_CLIENT_ID", "");
+  const clientSecret = env("GOOGLE_CLIENT_SECRET", "") || env("GOOGLE_CALENDAR_CLIENT_SECRET", "");
+  return [
+    clientId ? "" : "GOOGLE_CLIENT_ID or GOOGLE_CALENDAR_CLIENT_ID",
+    clientSecret ? "" : "GOOGLE_CLIENT_SECRET or GOOGLE_CALENDAR_CLIENT_SECRET",
+  ].filter(Boolean);
+}
+
+function assertClarityCloudServerConfigured() {
+  const missingConfiguration = googleOAuthConfigurationMissing();
+  if (missingConfiguration.length) {
+    throw new TransferError(
+      "CLOUD_OAUTH_NOT_CONFIGURED",
+      "Clarity Cloud is not configured for this environment.",
+      503
+    );
+  }
+  if (!env("GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_V1", "")) {
+    throw new TransferError(
+      "PROVIDER_STORAGE_UNAVAILABLE",
+      "Secure provider storage is unavailable.",
+      503
+    );
+  }
+}
+
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
@@ -255,6 +284,18 @@ function json(value: unknown, status = 200) {
       "Cache-Control": "no-store",
     },
   });
+}
+
+function errorJson(code: TransferErrorCode | string, message: string, status = 400) {
+  return json({
+    ok: false,
+    error: {
+      code,
+      message,
+    },
+    code,
+    message,
+  }, status);
 }
 
 function cleanString(value: unknown, fallback = "", max = 1200) {
@@ -1538,6 +1579,7 @@ export default async function handler(req: Request) {
 
   try {
     if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+    assertClarityCloudServerConfigured();
     const settings = await readSettings();
     const accountId = resolveGoogleAccountId(settings);
     // Only routes that talk to the Drive API need an access token. Chunk
@@ -1586,11 +1628,28 @@ export default async function handler(req: Request) {
   } catch (error: any) {
     console.error("video_transfer:failed", parts.join("/") || "root", error?.code || "", error?.message || error);
     if (error instanceof TransferError) {
-      return json({ ok: false, error: error.code, message: error.message }, error.status);
+      return errorJson(error.code, error.message, error.status);
     }
-    const code = error?.code === "GOOGLE_RECONNECT_REQUIRED" ? "GOOGLE_RECONNECT_REQUIRED" : "DRIVE_FINALIZE_FAILED";
-    const status = error?.status || (code === "GOOGLE_RECONNECT_REQUIRED" ? 409 : 500);
-    return json({ ok: false, error: code, message: error instanceof Error ? error.message : "Video transfer failed." }, status);
+    const code =
+      error?.code === "GOOGLE_RECONNECT_REQUIRED"
+        ? "GOOGLE_RECONNECT_REQUIRED"
+        : error?.code === "GOOGLE_CONNECTION_NOT_FOUND"
+          ? "DRIVE_NOT_CONNECTED"
+          : error?.code === "GOOGLE_SCOPE_MISSING"
+            ? "DRIVE_SCOPE_MISSING"
+            : error?.code === "GOOGLE_TOKEN_ENCRYPTION_KEY_MISSING" || error?.code === "GOOGLE_TOKEN_ENCRYPTION_KEY_INVALID"
+              ? "PROVIDER_STORAGE_UNAVAILABLE"
+              : "CLARITY_CLOUD_PROVIDER_FAILED";
+    const status = error?.status || (code === "GOOGLE_RECONNECT_REQUIRED" || code === "DRIVE_NOT_CONNECTED" || code === "DRIVE_SCOPE_MISSING" ? 409 : 503);
+    const message =
+      code === "PROVIDER_STORAGE_UNAVAILABLE"
+        ? "Secure provider storage is unavailable."
+        : code === "CLARITY_CLOUD_PROVIDER_FAILED"
+          ? "Your local video is safe. The cloud transfer service could not be reached."
+          : error instanceof Error
+            ? error.message
+            : "Video transfer failed.";
+    return errorJson(code, message, status);
   }
 }
 

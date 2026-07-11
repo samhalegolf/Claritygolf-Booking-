@@ -155,6 +155,21 @@ describe("storage health model", () => {
     assert.equal(getClarityCloudActionLabel("action" in health ? health.action : undefined), "Connect Clarity Cloud");
   });
 
+  it("maps missing OAuth configuration to setup incomplete with setup details", () => {
+    const health = getClarityCloudHealth(cloudStatus({
+      configured: false,
+      state: "blocked",
+      safeErrorCode: "CLOUD_OAUTH_NOT_CONFIGURED",
+      missingConfiguration: ["GOOGLE_CLIENT_ID or GOOGLE_CALENDAR_CLIENT_ID"],
+    }));
+
+    assert.equal(health.state, "setup-incomplete");
+    assert.equal(health.statusLabel, "Setup incomplete");
+    assert.equal(health.message, "Clarity Cloud is not configured for this environment.");
+    assert.equal("safeErrorCode" in health ? health.safeErrorCode : "", "CLOUD_OAUTH_NOT_CONFIGURED");
+    assert.equal(getClarityCloudActionLabel("action" in health ? health.action : undefined), "Open setup details");
+  });
+
   it("maps missing Drive permission to Clarity Cloud permission required", () => {
     const health = getClarityCloudHealth(cloudStatus({
       connected: true,
@@ -179,6 +194,18 @@ describe("storage health model", () => {
 
     assert.equal(health.state, "ready");
     assert.equal(health.statusLabel, "Ready");
+  });
+
+  it("does not show Cloud Ready when transfer routes are unavailable", () => {
+    const health = getClarityCloudHealth(readyCloudStatus({
+      uploadRouteReady: false,
+      incomingImportReady: false,
+      safeErrorCode: "CLARITY_CLOUD_IMPORT_LIST_UNAVAILABLE",
+    }));
+
+    assert.equal(health.state, "temporarily-unavailable");
+    assert.equal(health.statusLabel, "Temporarily unavailable");
+    assert.equal(health.message, "Your local video is safe. The cloud transfer service could not be reached.");
   });
 
   it("keeps connect and disconnect out of the same primary Cloud action", () => {
@@ -251,6 +278,42 @@ describe("storage health model", () => {
         cloudState: "connected",
       }),
       "Cloud - Not sent",
+    );
+  });
+
+  it("shows an actionable Cloud connection reason on saved-video cards", () => {
+    assert.equal(
+      getSavedVideoCloudStatusLabel(savedVideo({ cloud: { status: "not-uploaded" } }), {
+        isUploading: false,
+        cloudConnected: false,
+        cloudState: "not_connected",
+      }),
+      "Cloud - Connect Clarity Cloud",
+    );
+  });
+
+  it("shows setup and service blockers instead of a silent Cloud action", () => {
+    const setupHealth = getClarityCloudHealth(cloudStatus({
+      configured: false,
+      state: "blocked",
+      safeErrorCode: "CLOUD_OAUTH_NOT_CONFIGURED",
+    }));
+    assert.equal(
+      getSavedVideoCloudStatusLabel(savedVideo({ cloud: { status: "not-uploaded" } }), {
+        isUploading: false,
+        cloudConnected: true,
+        cloudState: "blocked",
+        cloudHealth: setupHealth,
+      }),
+      "Cloud - Setup incomplete",
+    );
+    assert.equal(
+      getSavedVideoCloudStatusLabel(savedVideo({ cloud: { status: "not-uploaded" } }), {
+        isUploading: false,
+        cloudConnected: true,
+        cloudState: "error",
+      }),
+      "Cloud - Service unavailable",
     );
   });
 
