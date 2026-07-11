@@ -436,11 +436,15 @@ export function getSavedVideoCloudStatusLabel(
   if (options.cloudHealth?.state === "reconnect-required") return "Cloud - Reconnect required";
   if (video.cloud?.status === "paused") return "Cloud - Paused";
   if (video.cloud?.status === "verifying") return "Cloud - Verifying";
+  if (video.cloud?.status === "session-created") return "Cloud - Starting upload";
   if (video.cloud?.status === "preparing") return "Cloud - Preparing";
   if (video.cloud?.status === "cancelled") return "Cloud - Cancelled";
   if (options.isUploading) {
     const progress = Math.max(0, Math.min(100, Math.round(video.cloud?.progress || 0)));
     return `Cloud - Sending ${progress}%`;
+  }
+  if (video.cloud?.status === "failed" && video.cloud.lastUploadErrorCode === "DRIVE_UPLOAD_SESSION_FAILED") {
+    return "Cloud - Could not start upload";
   }
   if (video.cloud?.status === "failed") return "Cloud - Failed - Retry";
   if (options.cloudState === "permission_upgrade_required") return "Cloud - Permission required";

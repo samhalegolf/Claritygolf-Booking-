@@ -23,6 +23,7 @@ const transferSessionTable = "video_transfer_sessions";
 
 type TransferStatus =
   | "preparing"
+  | "session-created"
   | "uploading"
   | "paused"
   | "verifying"
@@ -51,8 +52,11 @@ type TransferErrorCode =
   | "DRIVE_NOT_CONNECTED"
   | "DRIVE_SCOPE_MISSING"
   | "GOOGLE_RECONNECT_REQUIRED"
+  | "GOOGLE_TOKEN_REFRESH_FAILED"
   | "DRIVE_FOLDER_PROVISION_FAILED"
+  | "DRIVE_TRANSFER_FOLDER_FAILED"
   | "DRIVE_UPLOAD_SESSION_FAILED"
+  | "DRIVE_TRANSFER_STATE_FAILED"
   | "DRIVE_UPLOAD_PROXY_FAILED"
   | "DRIVE_UPLOAD_TOO_LARGE"
   | "DRIVE_UPLOAD_SESSION_EXPIRED"
@@ -67,6 +71,22 @@ type TransferErrorCode =
   | "CLARITY_CLOUD_IMPORT_VERIFY_FAILED"
   | "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED"
   | "CLARITY_CLOUD_PROVIDER_FAILED";
+
+type TransferPhase = "preparing" | "session-created" | "uploading" | "verifying" | "ready";
+
+type ProviderDiagnostics = {
+  step?: string;
+  endpointClass?: string;
+  googleStatus?: number;
+  googleReason?: string;
+  accessTokenRefreshed?: boolean;
+  rootFolderReady?: boolean;
+  transferFolderReady?: boolean;
+  inboxFolderReady?: boolean;
+  assetFolderReady?: boolean;
+  resumableSessionReturned?: boolean;
+  afterResumableSession?: boolean;
+};
 
 type SafeSavedVideo = {
   savedVideoId: string;
@@ -238,7 +258,12 @@ class TransferError extends Error {
   constructor(
     public readonly code: TransferErrorCode,
     message: string,
-    public readonly status = 400
+    public readonly status = 400,
+    public readonly options: {
+      phase?: TransferPhase;
+      retryable?: boolean;
+      diagnostics?: ProviderDiagnostics;
+    } = {}
   ) {
     super(message);
     this.name = "TransferError";
@@ -286,20 +311,111 @@ function json(value: unknown, status = 200) {
   });
 }
 
-function errorJson(code: TransferErrorCode | string, message: string, status = 400) {
+function errorJson(
+  code: TransferErrorCode | string,
+  message: string,
+  status = 400,
+  options: { phase?: TransferPhase; retryable?: boolean; session?: unknown } = {}
+) {
   return json({
     ok: false,
+    ...(options.phase ? { status: "failed", phase: options.phase } : {}),
+    ...(typeof options.retryable === "boolean" ? { retryable: options.retryable } : {}),
     error: {
       code,
       message,
     },
     code,
     message,
+    ...(options.session ? { session: options.session } : {}),
   }, status);
 }
 
 function cleanString(value: unknown, fallback = "", max = 1200) {
   return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
+}
+
+function redactForLogs(value: unknown, max = 300) {
+  return cleanString(value, "", max)
+    .replace(/https:\/\/www\.googleapis\.com\/upload\/drive\/v3\/files\?[^"'\s)]+/gi, "[redacted-google-upload-url]")
+    .replace(/(authorization|cookie|token|refresh_token|access_token|client_secret|secret|api[_-]?key)\s*[:=]\s*["']?[^"',\s)]+/gi, "$1=[redacted]");
+}
+
+function safeGoogleReason(data: any, fallback = "") {
+  return cleanString(
+    data?.error?.errors?.[0]?.reason ||
+      data?.error?.status ||
+      data?.error?.reason ||
+      data?.error ||
+      fallback,
+    fallback,
+    160
+  );
+}
+
+async function readGoogleError(response: Response) {
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text().catch(() => "");
+  let data: any = {};
+  if (contentType.toLowerCase().includes("application/json")) {
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = {};
+    }
+  }
+  const reason = safeGoogleReason(data, contentType ? "google_error" : "empty_google_response");
+  const message = redactForLogs(data?.error?.message || data?.error_description || text || response.statusText || "Google Drive request failed.");
+  return { contentType, data, reason, message };
+}
+
+function statusForGoogleProviderFailure(responseStatus: number, reason: string, fallbackStatus = 502) {
+  if (responseStatus === 401) return 403;
+  if (responseStatus === 403 && /auth|permission|scope|insufficientPermissions/i.test(reason)) return 403;
+  return fallbackStatus;
+}
+
+function codeForGoogleProviderFailure(
+  fallbackCode: TransferErrorCode,
+  responseStatus: number,
+  reason: string
+): TransferErrorCode {
+  if (responseStatus === 401 || /authError|invalidCredentials/i.test(reason)) return "GOOGLE_RECONNECT_REQUIRED";
+  if (responseStatus === 403 && /insufficientPermissions|forbidden|scope/i.test(reason)) return "DRIVE_SCOPE_MISSING";
+  return fallbackCode;
+}
+
+function providerErrorOptions(
+  diagnostics: ProviderDiagnostics,
+  phase: TransferPhase = "preparing"
+) {
+  return {
+    phase,
+    retryable: true,
+    diagnostics,
+  };
+}
+
+function logProviderFailure(route: string, error: any, trace: ProviderDiagnostics = {}) {
+  const diagnostics: ProviderDiagnostics = {
+    ...trace,
+    ...(error instanceof TransferError ? error.options.diagnostics || {} : {}),
+  };
+  console.error("video_transfer:failed", route || "root", {
+    code: error?.code || "CLARITY_CLOUD_PROVIDER_FAILED",
+    message: redactForLogs(error?.message || error),
+    step: diagnostics.step || "unknown",
+    endpointClass: diagnostics.endpointClass || "unknown",
+    googleStatus: diagnostics.googleStatus,
+    googleReason: diagnostics.googleReason,
+    accessTokenRefreshed: diagnostics.accessTokenRefreshed === true,
+    rootFolderReady: diagnostics.rootFolderReady === true,
+    transferFolderReady: diagnostics.transferFolderReady === true,
+    inboxFolderReady: diagnostics.inboxFolderReady === true,
+    assetFolderReady: diagnostics.assetFolderReady === true,
+    resumableSessionReturned: diagnostics.resumableSessionReturned === true,
+    afterResumableSession: diagnostics.afterResumableSession === true,
+  });
 }
 
 function parseCookies(req: Request) {
@@ -387,6 +503,16 @@ function appProperties(accountId: string, savedVideo: SafeSavedVideo, clarityTyp
 }
 
 export function publicTransferSession(session: VideoTransferSession) {
+  const phase: TransferPhase =
+    session.status === "ready"
+      ? "ready"
+      : session.status === "verifying"
+        ? "verifying"
+        : session.status === "uploading" || session.status === "paused"
+          ? "uploading"
+          : session.status === "session-created"
+            ? "session-created"
+            : "preparing";
   return {
     version: session.version,
     transferId: session.transferId,
@@ -425,6 +551,8 @@ export function publicTransferSession(session: VideoTransferSession) {
     updatedAt: session.updatedAt,
     lastErrorCode: session.lastErrorCode,
     lastErrorMessage: session.lastErrorMessage,
+    phase,
+    retryable: ["failed", "expired", "cancelled"].includes(session.status),
   };
 }
 
@@ -437,7 +565,7 @@ export function validateChunkRequest(
   }
   if (session.status === "paused") throw new TransferError("TRANSFER_PAUSED", "Transfer is paused.", 409);
   if (session.status === "cancelled") throw new TransferError("TRANSFER_CANCELLED", "Transfer was cancelled.", 409);
-  if (!["preparing", "uploading"].includes(session.status)) {
+  if (!["preparing", "session-created", "uploading"].includes(session.status)) {
     throw new TransferError("DRIVE_UPLOAD_SESSION_EXPIRED", "Start or resume an upload session before sending chunks.", 409);
   }
   if (args.startByte !== session.acceptedOffsetBytes) {
@@ -522,37 +650,159 @@ export function validateFinalizePayload(body: any, savedVideoIdFromPath: string)
   return { savedVideo, video, analysisJson };
 }
 
-async function ensureDriveReady(accountId: string) {
+async function ensureDriveReady(accountId: string, diagnostics: ProviderDiagnostics = {}) {
+  diagnostics.step = "provider-token-load";
   const connection = await loadGoogleProviderConnection(accountId);
   if (!connection?.driveEnabled) {
-    throw new TransferError("DRIVE_NOT_CONNECTED", "Connect Clarity Cloud before sending saved videos.", 409);
+    throw new TransferError(
+      "DRIVE_NOT_CONNECTED",
+      "Connect Clarity Cloud before sending saved videos.",
+      403,
+      providerErrorOptions({
+        ...diagnostics,
+        endpointClass: "provider-token-store",
+        accessTokenRefreshed: false,
+      })
+    );
   }
   if (connection.connectionStatus === "reconnect_required") {
-    throw new TransferError("GOOGLE_RECONNECT_REQUIRED", "Reconnect Google before sending saved videos.", 409);
+    throw new TransferError(
+      "GOOGLE_RECONNECT_REQUIRED",
+      "Reconnect Clarity Cloud to continue.",
+      403,
+      providerErrorOptions({
+        ...diagnostics,
+        endpointClass: "provider-token-store",
+        accessTokenRefreshed: false,
+      })
+    );
   }
   if (!hasGoogleScopes(connection, [googleDriveFileScope])) {
-    throw new TransferError("DRIVE_SCOPE_MISSING", "Grant Clarity Cloud permission before sending saved videos.", 409);
+    throw new TransferError(
+      "DRIVE_SCOPE_MISSING",
+      "Grant Clarity Cloud permission before sending saved videos.",
+      403,
+      providerErrorOptions({
+        ...diagnostics,
+        endpointClass: "provider-token-store",
+        accessTokenRefreshed: false,
+      })
+    );
   }
-  return getGoogleAccessToken(accountId, [googleDriveFileScope]);
+  diagnostics.step = "provider-token-refresh";
+  diagnostics.endpointClass = "oauth-token";
+  try {
+    const accessToken = await getGoogleAccessToken(accountId, [googleDriveFileScope]);
+    diagnostics.accessTokenRefreshed = true;
+    return accessToken;
+  } catch (error: any) {
+    diagnostics.accessTokenRefreshed = false;
+    const code: TransferErrorCode =
+      error?.code === "GOOGLE_RECONNECT_REQUIRED" || error?.code === "GOOGLE_TOKEN_DECRYPT_FAILED"
+        ? "GOOGLE_RECONNECT_REQUIRED"
+        : error?.code === "GOOGLE_SCOPE_MISSING"
+          ? "DRIVE_SCOPE_MISSING"
+          : error?.code === "GOOGLE_TOKEN_ENCRYPTION_KEY_MISSING" || error?.code === "GOOGLE_TOKEN_ENCRYPTION_KEY_INVALID"
+            ? "PROVIDER_STORAGE_UNAVAILABLE"
+            : "GOOGLE_TOKEN_REFRESH_FAILED";
+    throw new TransferError(
+      code,
+      code === "GOOGLE_RECONNECT_REQUIRED"
+        ? "Reconnect Clarity Cloud to continue."
+        : code === "DRIVE_SCOPE_MISSING"
+          ? "Grant Clarity Cloud permission before sending saved videos."
+          : code === "PROVIDER_STORAGE_UNAVAILABLE"
+            ? "Secure provider storage is unavailable."
+            : "Clarity Cloud could not refresh the Google connection.",
+      code === "PROVIDER_STORAGE_UNAVAILABLE" ? 503 : code === "GOOGLE_TOKEN_REFRESH_FAILED" ? 502 : 403,
+      providerErrorOptions({
+        ...diagnostics,
+        googleStatus: Number(error?.status) || undefined,
+        googleReason: cleanString(error?.code, "token_refresh_failed", 160),
+      })
+    );
+  }
 }
 
-async function googleJson<T>(accessToken: string, url: string, init: RequestInit = {}, errorCode: TransferErrorCode): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-      ...(init.headers || {}),
-    },
-  });
+async function googleJson<T>(
+  accessToken: string,
+  url: string,
+  init: RequestInit = {},
+  errorCode: TransferErrorCode,
+  diagnostics: ProviderDiagnostics = {}
+): Promise<T> {
+  const endpointClass = diagnostics.endpointClass || "drive-json";
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+        ...(init.headers || {}),
+      },
+    });
+  } catch (error: any) {
+    throw new TransferError(
+      errorCode,
+      "Google Drive could not be reached.",
+      502,
+      providerErrorOptions({
+        ...diagnostics,
+        endpointClass,
+        googleReason: "fetch_failed",
+      })
+    );
+  }
   const text = await response.text();
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.toLowerCase().includes("application/json")) {
-    throw new TransferError(errorCode, "Google Drive returned an unexpected non-JSON response.", 502);
+    throw new TransferError(
+      errorCode,
+      "Google Drive returned an unexpected non-JSON response.",
+      502,
+      providerErrorOptions({
+        ...diagnostics,
+        endpointClass,
+        googleStatus: response.status,
+        googleReason: contentType ? "non_json_response" : "empty_content_type",
+      })
+    );
   }
-  const data = text ? JSON.parse(text) : {};
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new TransferError(
+      errorCode,
+      "Google Drive returned invalid JSON.",
+      502,
+      providerErrorOptions({
+        ...diagnostics,
+        endpointClass,
+        googleStatus: response.status,
+        googleReason: "invalid_json_response",
+      })
+    );
+  }
   if (!response.ok) {
-    throw new TransferError(errorCode, data.error?.message || "Google Drive request failed.", response.status);
+    const reason = safeGoogleReason(data, "google_error");
+    const code = codeForGoogleProviderFailure(errorCode, response.status, reason);
+    throw new TransferError(
+      code,
+      code === "GOOGLE_RECONNECT_REQUIRED"
+        ? "Reconnect Clarity Cloud to continue."
+        : code === "DRIVE_SCOPE_MISSING"
+          ? "Grant Clarity Cloud permission before sending saved videos."
+          : "Google Drive request failed.",
+      statusForGoogleProviderFailure(response.status, reason),
+      providerErrorOptions({
+        ...diagnostics,
+        endpointClass,
+        googleStatus: response.status,
+        googleReason: reason,
+      })
+    );
   }
   return data as T;
 }
@@ -568,18 +818,40 @@ function driveQueryForAppProperties(props: Record<string, string>, parentId?: st
   ].filter(Boolean).join(" and ");
 }
 
-async function findDriveFile(accessToken: string, props: Record<string, string>, parentId?: string) {
+async function findDriveFile(accessToken: string, props: Record<string, string>, parentId?: string, diagnostics: ProviderDiagnostics = {}) {
   const query = driveQueryForAppProperties(props, parentId);
   const url = new URL("https://www.googleapis.com/drive/v3/files");
   url.searchParams.set("q", query);
   url.searchParams.set("spaces", "drive");
   url.searchParams.set("fields", "files(id,name,mimeType,size,md5Checksum,parents,appProperties,webViewLink)");
   url.searchParams.set("pageSize", "1");
-  const data = await googleJson<{ files?: DriveFile[] }>(accessToken, url.toString(), {}, "DRIVE_FOLDER_PROVISION_FAILED");
+  const data = await googleJson<{ files?: DriveFile[] }>(
+    accessToken,
+    url.toString(),
+    {},
+    "DRIVE_TRANSFER_FOLDER_FAILED",
+    {
+      ...diagnostics,
+      endpointClass: "drive-files-list",
+    }
+  );
   return data.files?.[0] || null;
 }
 
-async function createDriveFile(accessToken: string, metadata: Record<string, unknown>) {
+async function getDriveFile(accessToken: string, fileId: string, diagnostics: ProviderDiagnostics = {}) {
+  return googleJson<DriveFile>(
+    accessToken,
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,size,md5Checksum,parents,appProperties,webViewLink`,
+    {},
+    "DRIVE_TRANSFER_FOLDER_FAILED",
+    {
+      ...diagnostics,
+      endpointClass: "drive-files-metadata",
+    }
+  );
+}
+
+async function createDriveFile(accessToken: string, metadata: Record<string, unknown>, diagnostics: ProviderDiagnostics = {}) {
   return googleJson<DriveFile>(
     accessToken,
     "https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType,size,parents,appProperties,webViewLink",
@@ -588,49 +860,96 @@ async function createDriveFile(accessToken: string, metadata: Record<string, unk
       headers: { "Content-Type": "application/json; charset=utf-8" },
       body: JSON.stringify(metadata),
     },
-    "DRIVE_FOLDER_PROVISION_FAILED"
+    "DRIVE_TRANSFER_FOLDER_FAILED",
+    {
+      ...diagnostics,
+      endpointClass: "drive-files-create",
+    }
   );
 }
 
-async function ensureFolder(accessToken: string, name: string, props: Record<string, string>, parentId?: string) {
-  const existing = await findDriveFile(accessToken, props, parentId);
+async function ensureFolder(accessToken: string, name: string, props: Record<string, string>, parentId?: string, diagnostics: ProviderDiagnostics = {}) {
+  const existing = await findDriveFile(accessToken, props, parentId, diagnostics);
   if (existing) return existing;
   return createDriveFile(accessToken, {
     name,
     mimeType: "application/vnd.google-apps.folder",
     ...(parentId ? { parents: [parentId] } : {}),
     appProperties: props,
-  });
+  }, diagnostics);
 }
 
-export async function ensureTransferFolders(accessToken: string, accountId: string, settings: Record<string, string>) {
-  const root = settings.googleDriveRootFolderId
-    ? ({ id: settings.googleDriveRootFolderId, name: "Clarity Golf" } as DriveFile)
-    : await ensureFolder(accessToken, "Clarity Golf", {
-        clarityType: "root-folder",
-        clarityAccountId: accountId,
-        clarityVersion,
-      });
+function matchesAppProperties(file: DriveFile | null, props: Record<string, string>) {
+  if (!file || file.mimeType !== "application/vnd.google-apps.folder") return false;
+  return Object.entries(props).every(([key, value]) => file.appProperties?.[key] === value);
+}
+
+async function loadStoredRootFolder(accessToken: string, folderId: string, props: Record<string, string>, diagnostics: ProviderDiagnostics) {
+  if (!folderId) return null;
+  try {
+    const folder = await getDriveFile(accessToken, folderId, {
+      ...diagnostics,
+      step: "drive-root-folder-verify",
+    });
+    return matchesAppProperties(folder, props) ? folder : null;
+  } catch (error: any) {
+    const googleStatus = error instanceof TransferError ? error.options.diagnostics?.googleStatus : undefined;
+    if (googleStatus === 404 || googleStatus === 403) return null;
+    throw error;
+  }
+}
+
+export async function ensureTransferFolders(
+  accessToken: string,
+  accountId: string,
+  settings: Record<string, string>,
+  diagnostics: ProviderDiagnostics = {}
+) {
+  const rootProps = {
+    clarityType: "root-folder",
+    clarityAccountId: accountId,
+    clarityVersion,
+  };
+  const storedRoot = await loadStoredRootFolder(accessToken, settings.googleDriveRootFolderId || "", rootProps, diagnostics);
+  const root = storedRoot || await ensureFolder(accessToken, "Clarity Golf", rootProps, undefined, {
+    ...diagnostics,
+    step: "drive-root-folder-provision",
+  });
+  diagnostics.rootFolderReady = true;
   const transfer = await ensureFolder(accessToken, "Video Transfer", {
     clarityType: "video-transfer-folder",
     clarityAccountId: accountId,
     clarityVersion,
-  }, root.id);
+  }, root.id, {
+    ...diagnostics,
+    step: "drive-transfer-folder-provision",
+  });
+  diagnostics.transferFolderReady = true;
   const inbox = await ensureFolder(accessToken, "Inbox", {
     clarityType: "video-transfer-inbox",
     clarityAccountId: accountId,
     clarityVersion,
-  }, transfer.id);
+  }, transfer.id, {
+    ...diagnostics,
+    step: "drive-inbox-folder-provision",
+  });
+  diagnostics.inboxFolderReady = true;
   const imported = await ensureFolder(accessToken, "Imported", {
     clarityType: "video-transfer-imported",
     clarityAccountId: accountId,
     clarityVersion,
-  }, transfer.id);
+  }, transfer.id, {
+    ...diagnostics,
+    step: "drive-imported-folder-provision",
+  });
   const failed = await ensureFolder(accessToken, "Failed", {
     clarityType: "video-transfer-failed",
     clarityAccountId: accountId,
     clarityVersion,
-  }, transfer.id);
+  }, transfer.id, {
+    ...diagnostics,
+    step: "drive-failed-folder-provision",
+  });
   if (
     root.id !== settings.googleDriveRootFolderId ||
     inbox.id !== settings.googleDriveInboxFolderId ||
@@ -648,11 +967,35 @@ export async function ensureTransferFolders(accessToken: string, accountId: stri
   return { root, transfer, inbox, imported, failed };
 }
 
-async function ensureAssetFolder(accessToken: string, accountId: string, savedVideo: SafeSavedVideo, inboxFolderId: string) {
-  return ensureFolder(accessToken, savedVideo.savedVideoId, appProperties(accountId, savedVideo, "video-transfer-asset-folder"), inboxFolderId);
+async function ensureAssetFolder(
+  accessToken: string,
+  accountId: string,
+  savedVideo: SafeSavedVideo,
+  inboxFolderId: string,
+  diagnostics: ProviderDiagnostics = {}
+) {
+  const folder = await ensureFolder(
+    accessToken,
+    savedVideo.savedVideoId,
+    appProperties(accountId, savedVideo, "video-transfer-asset-folder"),
+    inboxFolderId,
+    {
+      ...diagnostics,
+      step: "drive-asset-folder-provision",
+    }
+  );
+  diagnostics.assetFolderReady = true;
+  return folder;
 }
 
-async function uploadJsonFile(accessToken: string, folderId: string, name: string, props: Record<string, string>, payload: unknown) {
+async function uploadJsonFile(
+  accessToken: string,
+  folderId: string,
+  name: string,
+  props: Record<string, string>,
+  payload: unknown,
+  diagnostics: ProviderDiagnostics = {}
+) {
   const boundary = `clarity_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const body = [
     `--${boundary}`,
@@ -674,34 +1017,98 @@ async function uploadJsonFile(accessToken: string, folderId: string, name: strin
       headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
       body,
     },
-    "DRIVE_FINALIZE_FAILED"
+    "DRIVE_FINALIZE_FAILED",
+    {
+      ...diagnostics,
+      endpointClass: "drive-upload-multipart",
+    }
   );
 }
 
-async function startResumableUpload(accessToken: string, accountId: string, savedVideo: SafeSavedVideo, folderId: string, video: UploadVideoMetadata) {
+async function startResumableUpload(
+  accessToken: string,
+  accountId: string,
+  savedVideo: SafeSavedVideo,
+  folderId: string,
+  video: UploadVideoMetadata,
+  diagnostics: ProviderDiagnostics = {}
+) {
   const extension = extensionFor(video.fileName, video.mimeType);
-  const response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,md5Checksum,appProperties", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json; charset=utf-8",
-      "X-Upload-Content-Type": video.mimeType,
-      "X-Upload-Content-Length": String(video.sizeBytes),
-    },
-    body: JSON.stringify({
-      name: `video.${extension}`,
-      parents: [folderId],
-      mimeType: video.mimeType,
-      appProperties: appProperties(accountId, savedVideo, "video"),
-    }),
-  });
+  const endpointClass = "drive-upload-resumable";
+  let response: Response;
+  try {
+    response = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,size,md5Checksum,appProperties", {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json; charset=utf-8",
+        "X-Upload-Content-Type": video.mimeType,
+        "X-Upload-Content-Length": String(video.sizeBytes),
+      },
+      body: JSON.stringify({
+        name: `video.${extension}`,
+        parents: [folderId],
+        mimeType: video.mimeType,
+        appProperties: appProperties(accountId, savedVideo, "video"),
+      }),
+    });
+  } catch {
+    throw new TransferError(
+      "DRIVE_UPLOAD_SESSION_FAILED",
+      "Clarity Cloud could not start the video upload.",
+      502,
+      providerErrorOptions({
+        ...diagnostics,
+        step: "drive-resumable-session-create",
+        endpointClass,
+        googleReason: "fetch_failed",
+        resumableSessionReturned: false,
+        afterResumableSession: false,
+      })
+    );
+  }
   if (!response.ok) {
-    throw new TransferError("DRIVE_UPLOAD_SESSION_FAILED", "Google Drive could not start a resumable upload.", response.status);
+    const googleError = await readGoogleError(response);
+    const code = codeForGoogleProviderFailure("DRIVE_UPLOAD_SESSION_FAILED", response.status, googleError.reason);
+    throw new TransferError(
+      code,
+      code === "GOOGLE_RECONNECT_REQUIRED"
+        ? "Reconnect Clarity Cloud to continue."
+        : code === "DRIVE_SCOPE_MISSING"
+          ? "Grant Clarity Cloud permission before sending saved videos."
+          : "Clarity Cloud could not start the video upload.",
+      statusForGoogleProviderFailure(response.status, googleError.reason),
+      providerErrorOptions({
+        ...diagnostics,
+        step: "drive-resumable-session-create",
+        endpointClass,
+        googleStatus: response.status,
+        googleReason: googleError.reason,
+        resumableSessionReturned: false,
+        afterResumableSession: false,
+      })
+    );
   }
   const uploadUrl = response.headers.get("location") || "";
   if (!uploadUrl) {
-    throw new TransferError("DRIVE_UPLOAD_SESSION_FAILED", "Google Drive did not return a resumable upload URL.", 502);
+    throw new TransferError(
+      "DRIVE_UPLOAD_SESSION_FAILED",
+      "Clarity Cloud could not start the video upload.",
+      502,
+      providerErrorOptions({
+        ...diagnostics,
+        step: "drive-resumable-session-create",
+        endpointClass,
+        googleStatus: response.status,
+        googleReason: "missing_location_header",
+        resumableSessionReturned: false,
+        afterResumableSession: false,
+      })
+    );
   }
+  diagnostics.resumableSessionReturned = true;
+  diagnostics.afterResumableSession = true;
   const id = new URL(uploadUrl).searchParams.get("id") || "";
   return { uploadUrl, videoFileId: id };
 }
@@ -711,11 +1118,19 @@ async function uploadedFile(accessToken: string, fileId: string) {
     accessToken,
     `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,size,md5Checksum,parents,appProperties`,
     {},
-    "DRIVE_UPLOAD_VERIFY_FAILED"
+    "DRIVE_UPLOAD_VERIFY_FAILED",
+    {
+      step: "drive-uploaded-file-verify",
+      endpointClass: "drive-files-metadata",
+    }
   );
 }
 
-function googleDriveProviderAdapter(accessToken: string, settings: Record<string, string>): ClarityCloudProviderAdapter {
+function googleDriveProviderAdapter(
+  accessToken: string,
+  settings: Record<string, string>,
+  diagnostics: ProviderDiagnostics = {}
+): ClarityCloudProviderAdapter {
   return {
     id: "google-drive",
     displayName: "Google Drive",
@@ -735,7 +1150,7 @@ function googleDriveProviderAdapter(accessToken: string, settings: Record<string
     },
 
     ensureTransferStorage(accountId) {
-      return ensureTransferFolders(accessToken, accountId, settings);
+      return ensureTransferFolders(accessToken, accountId, settings, diagnostics);
     },
 
     async createUploadSession(context) {
@@ -743,14 +1158,16 @@ function googleDriveProviderAdapter(accessToken: string, settings: Record<string
         accessToken,
         context.accountId,
         context.savedVideo,
-        context.storage.inbox.id
+        context.storage.inbox.id,
+        diagnostics
       );
       const uploadSession = await startResumableUpload(
         accessToken,
         context.accountId,
         context.savedVideo,
         assetFolder.id,
-        context.video
+        context.video,
+        diagnostics
       );
       const folderLink = await this.getTransferFolderLink?.({ folderId: assetFolder.id });
       return {
@@ -909,7 +1326,12 @@ function googleDriveProviderAdapter(accessToken: string, settings: Record<string
           accessToken,
           `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(context.folderId)}?fields=webViewLink`,
           {},
-          "CLARITY_CLOUD_PROVIDER_FAILED"
+          "CLARITY_CLOUD_PROVIDER_FAILED",
+          {
+            ...diagnostics,
+            step: "drive-transfer-folder-link",
+            endpointClass: "drive-files-metadata",
+          }
         );
         return metadata.webViewLink || null;
       } catch {
@@ -1091,7 +1513,8 @@ async function handleSession(
   accessToken: string,
   settings: Record<string, string>,
   provider: ClarityCloudProviderAdapter,
-  savedVideoId: string
+  savedVideoId: string,
+  diagnostics: ProviderDiagnostics = {}
 ) {
   if (req.method === "GET") {
     const session = await readTransferSession(accountId, savedVideoId);
@@ -1111,9 +1534,9 @@ async function handleSession(
   // "verifying" must be resumable: a failed finalize leaves the row in
   // "verifying", and inserting a second active session for the same saved
   // video would violate the one-active-session unique index.
-  if (existing && ["preparing", "uploading", "paused", "verifying", "failed"].includes(existing.status)) {
+  if (existing && ["preparing", "session-created", "uploading", "paused", "verifying"].includes(existing.status)) {
     if (sourceMatchesExisting) {
-      const nextStatus: TransferStatus = existing.status === "paused" || existing.status === "failed" ? "uploading" : existing.status;
+      const nextStatus: TransferStatus = existing.status === "paused" ? "uploading" : existing.status;
       const resumed = await patchTransferSession(existing, {
         status: nextStatus,
         catalogueStatus: "uploading",
@@ -1138,10 +1561,13 @@ async function handleSession(
   // finalized manifest in Drive is stale — skip the ready shortcut and
   // re-upload the new bytes.
   const sourceChangedAfterReady = existing?.status === "ready" && !sourceMatchesExisting;
-  const assetFolder = await ensureAssetFolder(accessToken, accountId, savedVideo, folders.inbox.id);
+  const assetFolder = await ensureAssetFolder(accessToken, accountId, savedVideo, folders.inbox.id, diagnostics);
   const existingReady = sourceChangedAfterReady
     ? null
-    : await findDriveFile(accessToken, appProperties(accountId, savedVideo, "manifest"), assetFolder.id);
+    : await findDriveFile(accessToken, appProperties(accountId, savedVideo, "manifest"), assetFolder.id, {
+        ...diagnostics,
+        step: "drive-ready-manifest-lookup",
+      });
   if (existingReady) {
     const manifest = await provider.readJsonFile({ fileId: existingReady.id }).catch(() => ({})) as any;
     const readyVideoFileId = cleanString(manifest?.video?.driveFileId, "", 180);
@@ -1180,43 +1606,76 @@ async function handleSession(
 
   const uploadSession = await provider.createUploadSession({ accountId, savedVideo, video, storage: folders });
   const now = new Date();
-  const session = await saveTransferSession({
-    version: 1,
-    transferId: randomUUID(),
-    savedVideoId,
-    accountId,
-    providerId: provider.id,
-    catalogueStatus: "uploading",
-    playerId: savedVideo.playerId,
-    lessonId: savedVideo.lessonId,
-    analysisId: savedVideo.analysisId,
-    status: "uploading",
-    expectedSizeBytes: video.sizeBytes,
-    checksumSha256: video.checksumSha256,
-    acceptedOffsetBytes: 0,
-    chunkSizeBytes: defaultChunkSizeBytes,
-    driveAssetFolderId: uploadSession.assetFolderId,
-    driveVideoFileId: uploadSession.videoFileId,
-    resumableSessionUrl: uploadSession.resumableSessionUrl,
-    resumableSessionCreatedAt: now.toISOString(),
-    resumableSessionExpiresAt: new Date(now.getTime() + transferSessionTtlMs).toISOString(),
-    sourceDeviceId: cleanString(body?.sourceDevice?.deviceId, "", 160) || undefined,
-    providerFolderLink: uploadSession.folderLink || undefined,
-    cleanupStatus: "not_scheduled",
-    createdAt: now.toISOString(),
-    updatedAt: now.toISOString(),
-  });
-  await uploadJsonFile(
-    accessToken,
-    uploadSession.assetFolderId,
-    "manifest.json",
-    appProperties(accountId, savedVideo, "provisional-manifest"),
-    transferManifest({ accountId, savedVideo, video, assetFolderId: uploadSession.assetFolderId, videoFileId: uploadSession.videoFileId, sourceDeviceId: session.sourceDeviceId, status: "uploading", providerId: provider.id })
-  );
+  let session: VideoTransferSession;
+  try {
+    session = await saveTransferSession({
+      version: 1,
+      transferId: randomUUID(),
+      savedVideoId,
+      accountId,
+      providerId: provider.id,
+      catalogueStatus: "uploading",
+      playerId: savedVideo.playerId,
+      lessonId: savedVideo.lessonId,
+      analysisId: savedVideo.analysisId,
+      status: "session-created",
+      expectedSizeBytes: video.sizeBytes,
+      checksumSha256: video.checksumSha256,
+      acceptedOffsetBytes: 0,
+      chunkSizeBytes: defaultChunkSizeBytes,
+      driveAssetFolderId: uploadSession.assetFolderId,
+      driveVideoFileId: uploadSession.videoFileId,
+      resumableSessionUrl: uploadSession.resumableSessionUrl,
+      resumableSessionCreatedAt: now.toISOString(),
+      resumableSessionExpiresAt: new Date(now.getTime() + transferSessionTtlMs).toISOString(),
+      sourceDeviceId: cleanString(body?.sourceDevice?.deviceId, "", 160) || undefined,
+      providerFolderLink: uploadSession.folderLink || undefined,
+      cleanupStatus: "not_scheduled",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    });
+  } catch {
+    throw new TransferError(
+      "DRIVE_TRANSFER_STATE_FAILED",
+      "Clarity Cloud could not store the upload session.",
+      503,
+      providerErrorOptions({
+        ...diagnostics,
+        step: "transfer-session-store",
+        endpointClass: "transfer-session-table",
+        resumableSessionReturned: true,
+        afterResumableSession: true,
+      }, "session-created")
+    );
+  }
+  try {
+    await uploadJsonFile(
+      accessToken,
+      uploadSession.assetFolderId,
+      "manifest.json",
+      appProperties(accountId, savedVideo, "provisional-manifest"),
+      transferManifest({ accountId, savedVideo, video, assetFolderId: uploadSession.assetFolderId, videoFileId: uploadSession.videoFileId, sourceDeviceId: session.sourceDeviceId, status: "uploading", providerId: provider.id }),
+      {
+        ...diagnostics,
+        step: "drive-provisional-manifest-create",
+      }
+    );
+  } catch (error: any) {
+    console.warn("video_transfer:provisional_manifest_failed", {
+      transferId: session.transferId,
+      savedVideoId,
+      accountId,
+      code: error?.code || "DRIVE_FINALIZE_FAILED",
+      message: redactForLogs(error?.message || error),
+      googleStatus: error instanceof TransferError ? error.options.diagnostics?.googleStatus : undefined,
+      googleReason: error instanceof TransferError ? error.options.diagnostics?.googleReason : undefined,
+    });
+  }
   console.info("video_transfer:resumable_session_created", {
     transferId: session.transferId,
     savedVideoId,
     accountId,
+    status: session.status,
     expectedSizeBytes: session.expectedSizeBytes,
     chunkSizeBytes: session.chunkSizeBytes,
   });
@@ -1285,7 +1744,9 @@ async function handleChunk(req: Request, accountId: string, savedVideoId: string
       lastErrorCode: providerResult.responseStatus === 401 ? "GOOGLE_RECONNECT_REQUIRED" : "DRIVE_SCOPE_MISSING",
       lastErrorMessage: "Reconnect Google Drive to continue.",
     });
-    return json({ ok: false, error: next.lastErrorCode, message: next.lastErrorMessage, session: publicTransferSession(next) }, 409);
+    return errorJson(next.lastErrorCode || "GOOGLE_RECONNECT_REQUIRED", next.lastErrorMessage || "Reconnect Clarity Cloud to continue.", 403, {
+      session: publicTransferSession(next),
+    });
   }
   if (providerResult.status === "expired") {
     const next = await patchTransferSession(session, {
@@ -1294,7 +1755,11 @@ async function handleChunk(req: Request, accountId: string, savedVideoId: string
       lastErrorCode: "DRIVE_UPLOAD_SESSION_EXPIRED",
       lastErrorMessage: "Google resumable upload session expired. Start a new transfer session.",
     });
-    return json({ ok: false, error: "DRIVE_UPLOAD_SESSION_EXPIRED", message: next.lastErrorMessage, session: publicTransferSession(next) }, 409);
+    return errorJson("DRIVE_UPLOAD_SESSION_EXPIRED", next.lastErrorMessage || "Google resumable upload session expired. Start a new transfer session.", 409, {
+      session: publicTransferSession(next),
+      phase: "uploading",
+      retryable: true,
+    });
   }
   if (providerResult.status === "interrupted") {
     const next = await patchTransferSession(session, {
@@ -1303,7 +1768,11 @@ async function handleChunk(req: Request, accountId: string, savedVideoId: string
       lastErrorCode: "DRIVE_UPLOAD_INTERRUPTED",
       lastErrorMessage: "Google Drive upload was interrupted. Retry the same chunk.",
     });
-    return json({ ok: false, error: "DRIVE_UPLOAD_INTERRUPTED", message: next.lastErrorMessage, session: publicTransferSession(next) }, 503);
+    return errorJson("DRIVE_UPLOAD_INTERRUPTED", next.lastErrorMessage || "Google Drive upload was interrupted. Retry the same chunk.", 503, {
+      session: publicTransferSession(next),
+      phase: "uploading",
+      retryable: true,
+    });
   }
   const next = await patchTransferSession(session, {
     status: "failed",
@@ -1311,7 +1780,11 @@ async function handleChunk(req: Request, accountId: string, savedVideoId: string
     lastErrorCode: "DRIVE_UPLOAD_PROXY_FAILED",
     lastErrorMessage: "Clarity could not complete the chunk upload.",
   });
-  return json({ ok: false, error: "DRIVE_UPLOAD_PROXY_FAILED", message: next.lastErrorMessage, session: publicTransferSession(next) }, providerResult.responseStatus || 502);
+  return errorJson("DRIVE_UPLOAD_PROXY_FAILED", next.lastErrorMessage || "Clarity could not complete the chunk upload.", providerResult.responseStatus || 502, {
+    session: publicTransferSession(next),
+    phase: "uploading",
+    retryable: true,
+  });
 }
 
 async function handleFinalize(
@@ -1379,16 +1852,19 @@ async function handleFinalize(
   });
 }
 
-async function handleStatus(accountId: string, accessToken: string, settings: Record<string, string>, savedVideoId: string) {
+async function handleStatus(accountId: string, accessToken: string, settings: Record<string, string>, savedVideoId: string, diagnostics: ProviderDiagnostics = {}) {
   const session = await readTransferSession(accountId, savedVideoId);
   if (session) return json({ ok: true, status: session.status, session: publicTransferSession(session), ...publicTransferSession(session) });
-  const folders = await ensureTransferFolders(accessToken, accountId, settings);
+  const folders = await ensureTransferFolders(accessToken, accountId, settings, diagnostics);
   const assetFolder = await findDriveFile(accessToken, {
     clarityType: "video-transfer-asset-folder",
     claritySavedVideoId: savedVideoId,
     clarityAccountId: accountId,
     clarityVersion,
-  }, folders.inbox.id);
+  }, folders.inbox.id, {
+    ...diagnostics,
+    step: "drive-status-asset-folder-lookup",
+  });
   if (!assetFolder) return json({ ok: true, status: "not-uploaded" });
   return json({ ok: true, status: "uploading", message: "Upload is not finalized.", assetFolderId: assetFolder.id });
 }
@@ -1396,6 +1872,14 @@ async function handleStatus(accountId: string, accessToken: string, settings: Re
 async function updateSessionStatus(accountId: string, savedVideoId: string, status: TransferStatus, message?: string) {
   const session = await readTransferSession(accountId, savedVideoId);
   if (!session) throw new TransferError("DRIVE_UPLOAD_SESSION_EXPIRED", "Transfer session was not found.", 404);
+  if (status === "paused" && (session.status !== "uploading" || session.acceptedOffsetBytes <= 0)) {
+    throw new TransferError(
+      "DRIVE_UPLOAD_SESSION_EXPIRED",
+      "Upload has not started yet.",
+      409,
+      { phase: session.status === "session-created" ? "session-created" : "preparing", retryable: true }
+    );
+  }
   const next = await patchTransferSession(session, {
     status,
     catalogueStatus:
@@ -1576,6 +2060,7 @@ export default async function handler(req: Request) {
     .replace(/^\/\.netlify\/functions\/video-transfer\/?/, "")
     .split("/")
     .filter(Boolean);
+  const diagnostics: ProviderDiagnostics = {};
 
   try {
     if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
@@ -1590,60 +2075,67 @@ export default async function handler(req: Request) {
       const body = await req.clone().json().catch(() => ({})) as any;
       const savedVideoId = cleanString(body?.savedVideoId || body?.savedVideo?.savedVideoId, "", 160);
       if (!savedVideoId) throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Saved video id is required.", 400);
-      const accessToken = await ensureDriveReady(accountId);
-      return handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings), savedVideoId);
+      const accessToken = await ensureDriveReady(accountId, diagnostics);
+      return handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId, diagnostics);
     }
     if (req.method === "GET" && parts[0] === "imports") {
-      const accessToken = await ensureDriveReady(accountId);
-      return handleImportList(accountId, googleDriveProviderAdapter(accessToken, settings));
+      const accessToken = await ensureDriveReady(accountId, diagnostics);
+      return handleImportList(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics));
     }
     if ((req.method === "POST" || req.method === "GET") && parts[1] === "session") {
-      const accessToken = req.method === "POST" ? await ensureDriveReady(accountId) : "";
-      return handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings), parts[0]);
+      const accessToken = req.method === "POST" ? await ensureDriveReady(accountId, diagnostics) : "";
+      return handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0], diagnostics);
     }
     if (req.method === "PUT" && (parts[1] === "chunk" || parts[1] === "upload")) {
-      return handleChunk(req, accountId, parts[0], googleDriveProviderAdapter("", settings));
+      return handleChunk(req, accountId, parts[0], googleDriveProviderAdapter("", settings, diagnostics));
     }
     if (req.method === "POST" && parts[1] === "pause") return updateSessionStatus(accountId, parts[0], "paused", "Paused");
     if (req.method === "POST" && (parts[1] === "resume" || parts[1] === "retry")) return updateSessionStatus(accountId, parts[0], "uploading");
     if (req.method === "POST" && parts[1] === "finalize") {
-      const accessToken = await ensureDriveReady(accountId);
-      return handleFinalize(req, accountId, accessToken, googleDriveProviderAdapter(accessToken, settings), parts[0]);
+      const accessToken = await ensureDriveReady(accountId, diagnostics);
+      return handleFinalize(req, accountId, accessToken, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
     }
     if (req.method === "GET" && parts[1] === "import") {
-      const accessToken = await ensureDriveReady(accountId);
-      return handleImportPackage(accountId, googleDriveProviderAdapter(accessToken, settings), parts[0]);
+      const accessToken = await ensureDriveReady(accountId, diagnostics);
+      return handleImportPackage(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
     }
     if (req.method === "GET" && parts[1] === "download") {
-      const accessToken = await ensureDriveReady(accountId);
-      return handleImportDownload(req, accountId, googleDriveProviderAdapter(accessToken, settings), parts[0]);
+      const accessToken = await ensureDriveReady(accountId, diagnostics);
+      return handleImportDownload(req, accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
     }
     if (req.method === "POST" && parts[1] === "import-receipt") return handleImportReceipt(req, accountId, parts[0]);
-    if (req.method === "GET" && parts[1] === "status") return handleStatus(accountId, await ensureDriveReady(accountId), settings, parts[0]);
+    if (req.method === "GET" && parts[1] === "status") return handleStatus(accountId, await ensureDriveReady(accountId, diagnostics), settings, parts[0], diagnostics);
     if (req.method === "DELETE" && (parts[1] === "session" || parts[0])) {
       const savedVideoId = parts[1] === "session" ? parts[0] : parts[0];
       return updateSessionStatus(accountId, savedVideoId, "cancelled", "Transfer cancelled. Local source was not deleted.");
     }
     return json({ error: "not_found", message: "Video transfer route not found." }, 404);
   } catch (error: any) {
-    console.error("video_transfer:failed", parts.join("/") || "root", error?.code || "", error?.message || error);
+    logProviderFailure(parts.join("/") || "root", error, diagnostics);
     if (error instanceof TransferError) {
-      return errorJson(error.code, error.message, error.status);
+      return errorJson(error.code, error.message, error.status, {
+        phase: error.options.phase,
+        retryable: error.options.retryable,
+      });
     }
     const code =
       error?.code === "GOOGLE_RECONNECT_REQUIRED"
         ? "GOOGLE_RECONNECT_REQUIRED"
         : error?.code === "GOOGLE_CONNECTION_NOT_FOUND"
           ? "DRIVE_NOT_CONNECTED"
-          : error?.code === "GOOGLE_SCOPE_MISSING"
-            ? "DRIVE_SCOPE_MISSING"
-            : error?.code === "GOOGLE_TOKEN_ENCRYPTION_KEY_MISSING" || error?.code === "GOOGLE_TOKEN_ENCRYPTION_KEY_INVALID"
-              ? "PROVIDER_STORAGE_UNAVAILABLE"
-              : "CLARITY_CLOUD_PROVIDER_FAILED";
-    const status = error?.status || (code === "GOOGLE_RECONNECT_REQUIRED" || code === "DRIVE_NOT_CONNECTED" || code === "DRIVE_SCOPE_MISSING" ? 409 : 503);
+          : error?.code === "GOOGLE_TOKEN_REFRESH_FAILED"
+            ? "GOOGLE_TOKEN_REFRESH_FAILED"
+            : error?.code === "GOOGLE_SCOPE_MISSING"
+              ? "DRIVE_SCOPE_MISSING"
+              : error?.code === "GOOGLE_TOKEN_ENCRYPTION_KEY_MISSING" || error?.code === "GOOGLE_TOKEN_ENCRYPTION_KEY_INVALID"
+                ? "PROVIDER_STORAGE_UNAVAILABLE"
+                : "CLARITY_CLOUD_PROVIDER_FAILED";
+    const status = error?.status || (code === "GOOGLE_RECONNECT_REQUIRED" || code === "DRIVE_NOT_CONNECTED" || code === "DRIVE_SCOPE_MISSING" ? 403 : code === "GOOGLE_TOKEN_REFRESH_FAILED" ? 502 : 503);
     const message =
       code === "PROVIDER_STORAGE_UNAVAILABLE"
         ? "Secure provider storage is unavailable."
+        : code === "GOOGLE_TOKEN_REFRESH_FAILED"
+          ? "Clarity Cloud could not refresh the Google connection."
         : code === "CLARITY_CLOUD_PROVIDER_FAILED"
           ? "Your local video is safe. The cloud transfer service could not be reached."
           : error instanceof Error
