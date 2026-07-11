@@ -4,11 +4,21 @@ import test from "node:test";
 import {
   defaultChunkSizeBytes,
   default as videoTransferHandler,
+  googleChunkGranularityBytes,
+  maxChunkSizeBytes,
   publicTransferSession,
   validateChunkRequest,
   validateFinalizePayload,
   validateUploadSessionPayload,
 } from "../video-transfer.mts";
+
+const netlifyBufferedPayloadLimitBytes = 6 * 1024 * 1024;
+
+test("chunk size stays under Netlify's 6 MB buffered payload limit and on Google's 256 KB granularity", () => {
+  assert.ok(defaultChunkSizeBytes < netlifyBufferedPayloadLimitBytes, "chunks must fit inside Netlify's buffered request body limit");
+  assert.equal(defaultChunkSizeBytes % googleChunkGranularityBytes, 0, "chunks must align to Google's 256 KB resumable granularity");
+  assert.equal(maxChunkSizeBytes, defaultChunkSizeBytes);
+});
 
 const compactPayload = {
   savedVideoId: "saved-video-1",

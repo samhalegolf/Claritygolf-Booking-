@@ -691,4 +691,48 @@ describe("saved video library", () => {
     assert.equal(getSavedVideoCloudStatus(ready).status, "ready");
     assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
   });
+
+  it("keeps ready cloud state when re-saving identical bytes but resets it when the source changes", async () => {
+    const store = createMemorySavedVideoLibraryStore();
+    const item = await store.saveItem({
+      playerId: "player-1",
+      sourceSide: "left",
+      sourceVideo: video,
+      sourceBlob: sourceBlob(),
+      analysisSnapshot,
+      workspaceSnapshot,
+    });
+    await store.putItem({
+      ...item,
+      cloud: {
+        status: "ready",
+        provider: "google-drive",
+        driveVideoFileId: "drive-video-1",
+        uploadedAt: "2026-07-10T01:00:00.000Z",
+      },
+    });
+
+    const resavedSame = await store.saveItem({
+      savedVideoId: item.savedVideoId,
+      playerId: "player-1",
+      sourceSide: "left",
+      sourceVideo: video,
+      sourceBlob: sourceBlob(),
+      analysisSnapshot,
+      workspaceSnapshot,
+    });
+    assert.equal(getSavedVideoCloudStatus(resavedSame).status, "ready");
+
+    const resavedChanged = await store.saveItem({
+      savedVideoId: item.savedVideoId,
+      playerId: "player-1",
+      sourceSide: "left",
+      sourceVideo: video,
+      sourceBlob: new Blob(["different-video-bytes"], { type: "video/mp4" }),
+      analysisSnapshot,
+      workspaceSnapshot,
+    });
+    assert.equal(getSavedVideoCloudStatus(resavedChanged).status, "not-uploaded");
+    assert.equal(resavedChanged.cloud?.driveVideoFileId, undefined);
+  });
 });

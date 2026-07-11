@@ -12,7 +12,10 @@ import {
 
 const sessionCookieName = "clarity_session";
 const clarityVersion = "1";
-export const defaultChunkSizeBytes = 8 * 1024 * 1024;
+// Netlify buffers synchronous function request bodies with a 6 MB payload limit,
+// so chunks must stay safely below it. 4 MB is also a multiple of Google's
+// 256 KB resumable-upload granularity (see googleChunkGranularityBytes).
+export const defaultChunkSizeBytes = 4 * 1024 * 1024;
 export const maxChunkSizeBytes = defaultChunkSizeBytes;
 export const googleChunkGranularityBytes = 256 * 1024;
 const transferSessionTtlMs = 1000 * 60 * 60 * 24;
@@ -677,11 +680,26 @@ async function handleSession(req: Request, accountId: string, accessToken: strin
   const body = await readJson(req) as any;
   const { savedVideo, video } = validateUploadSessionPayload(body, savedVideoId);
   const existing = await readTransferSession(accountId, savedVideoId);
-  if (existing?.status === "ready") return json({ ok: true, status: "ready", session: publicTransferSession(existing), ...publicTransferSession(existing) });
-  if (existing && ["preparing", "uploading", "paused", "failed"].includes(existing.status)) {
-    if (existing.expectedSizeBytes === video.sizeBytes && existing.checksumSha256 === video.checksumSha256) {
+  const sourceMatchesExisting = Boolean(
+    existing && existing.expectedSizeBytes === video.sizeBytes && existing.checksumSha256 === video.checksumSha256
+  );
+  if (existing?.status === "ready" && sourceMatchesExisting) {
+    return json({ ok: true, status: "ready", session: publicTransferSession(existing), ...publicTransferSession(existing) });
+  }
+  // "verifying" must be resumable: a failed finalize leaves the row in
+  // "verifying", and inserting a second active session for the same saved
+  // video would violate the one-active-session unique index.
+  if (existing && ["preparing", "uploading", "paused", "verifying", "failed"].includes(existing.status)) {
+    if (sourceMatchesExisting) {
       const nextStatus: TransferStatus = existing.status === "paused" || existing.status === "failed" ? "uploading" : existing.status;
-      const resumed = await patchTransferSession(existing, { status: nextStatus, lastErrorCode: undefined, lastErrorMessage: undefined });
+      const resumed = await patchTransferSession(existing, {
+        status: nextStatus,
+        // Older sessions may carry a chunk size above the current transport
+        // limit; clamp so resumed chunk uploads stay accepted.
+        chunkSizeBytes: Math.min(existing.chunkSizeBytes, defaultChunkSizeBytes),
+        lastErrorCode: undefined,
+        lastErrorMessage: undefined,
+      });
       return json({ ok: true, status: resumed.status, session: publicTransferSession(resumed), ...publicTransferSession(resumed) });
     }
     await patchTransferSession(existing, {
@@ -693,7 +711,13 @@ async function handleSession(req: Request, accountId: string, accessToken: strin
 
   const folders = await ensureTransferFolders(accessToken, accountId, settings);
   const assetFolder = await ensureAssetFolder(accessToken, accountId, savedVideo, folders.inbox.id);
-  const existingReady = await findDriveFile(accessToken, appProperties(accountId, savedVideo, "manifest"), assetFolder.id);
+  // If we know the saved source changed since the last completed upload, the
+  // finalized manifest in Drive is stale — skip the ready shortcut and
+  // re-upload the new bytes.
+  const sourceChangedAfterReady = existing?.status === "ready" && !sourceMatchesExisting;
+  const existingReady = sourceChangedAfterReady
+    ? null
+    : await findDriveFile(accessToken, appProperties(accountId, savedVideo, "manifest"), assetFolder.id);
   if (existingReady) {
     const ready = await saveTransferSession({
       version: 1,
@@ -881,6 +905,19 @@ async function handleFinalize(req: Request, accountId: string, accessToken: stri
     ...manifestPayload,
     manifestFileId: undefined,
   });
+  try {
+    // Best-effort: remove the provisional manifest so the asset folder holds a
+    // single authoritative manifest.json after finalize.
+    const provisional = await findDriveFile(accessToken, appProperties(accountId, savedVideo, "provisional-manifest"), assetFolderId);
+    if (provisional?.id && provisional.id !== manifest.id) {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(provisional.id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    }
+  } catch {
+    // The finalized manifest is authoritative; leftover provisional files are cosmetic.
+  }
   const ready = await patchTransferSession(session, {
     status: "ready",
     acceptedOffsetBytes: session.expectedSizeBytes,
@@ -923,7 +960,8 @@ async function updateSessionStatus(accountId: string, savedVideoId: string, stat
   const next = await patchTransferSession(session, {
     status,
     lastErrorCode: status === "failed" ? "DRIVE_UPLOAD_INTERRUPTED" : undefined,
-    lastErrorMessage: message,
+    // A pause is not an error; only keep messages for terminal states.
+    lastErrorMessage: status === "paused" ? undefined : message,
   });
   return json({ ok: true, status: next.status, session: publicTransferSession(next), ...publicTransferSession(next) });
 }
@@ -940,15 +978,18 @@ export default async function handler(req: Request) {
     if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
     const settings = await readSettings();
     const accountId = resolveGoogleAccountId(settings);
-    const accessToken = await ensureDriveReady(accountId);
+    // Only routes that talk to the Drive API need an access token. Chunk
+    // uploads go straight to the stored resumable URL, so skipping the
+    // refresh-token exchange here removes several round-trips per chunk.
 
     if (req.method === "POST" && parts[0] === "upload-session") {
       const body = await req.clone().json().catch(() => ({})) as any;
       const savedVideoId = cleanString(body?.savedVideoId || body?.savedVideo?.savedVideoId, "", 160);
       if (!savedVideoId) throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Saved video id is required.", 400);
-      return handleSession(req, accountId, accessToken, settings, savedVideoId);
+      return handleSession(req, accountId, await ensureDriveReady(accountId), settings, savedVideoId);
     }
     if ((req.method === "POST" || req.method === "GET") && parts[1] === "session") {
+      const accessToken = req.method === "POST" ? await ensureDriveReady(accountId) : "";
       return handleSession(req, accountId, accessToken, settings, parts[0]);
     }
     if (req.method === "PUT" && (parts[1] === "chunk" || parts[1] === "upload")) {
@@ -956,8 +997,8 @@ export default async function handler(req: Request) {
     }
     if (req.method === "POST" && parts[1] === "pause") return updateSessionStatus(accountId, parts[0], "paused", "Paused");
     if (req.method === "POST" && (parts[1] === "resume" || parts[1] === "retry")) return updateSessionStatus(accountId, parts[0], "uploading");
-    if (req.method === "POST" && parts[1] === "finalize") return handleFinalize(req, accountId, accessToken, parts[0]);
-    if (req.method === "GET" && parts[1] === "status") return handleStatus(accountId, accessToken, settings, parts[0]);
+    if (req.method === "POST" && parts[1] === "finalize") return handleFinalize(req, accountId, await ensureDriveReady(accountId), parts[0]);
+    if (req.method === "GET" && parts[1] === "status") return handleStatus(accountId, await ensureDriveReady(accountId), settings, parts[0]);
     if (req.method === "DELETE" && (parts[1] === "session" || parts[0])) {
       const savedVideoId = parts[1] === "session" ? parts[0] : parts[0];
       return updateSessionStatus(accountId, savedVideoId, "cancelled", "Transfer cancelled. Local source was not deleted.");
