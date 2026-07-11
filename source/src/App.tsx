@@ -71,6 +71,7 @@ import {
   listClarityCloudImportTransfers,
   pauseSavedVideoCloudUpload,
   reconnectManagedLocalVideoLibrary,
+  removeSavedVideoCloudTransfer,
   rescanManagedLocalVideoLibrary,
   saveSavedVideoToCloud,
   verifyManagedLocalVideoLibrary,
@@ -3394,8 +3395,17 @@ function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
       return "Clarity Cloud permission is required.";
     case "GOOGLE_RECONNECT_REQUIRED":
       return "Reconnect Clarity Cloud to continue.";
+    case "GOOGLE_TOKEN_REFRESH_FAILED":
+      return "Clarity Cloud could not refresh the Google connection.";
+    case "DRIVE_TRANSFER_FOLDER_FAILED":
+    case "DRIVE_FOLDER_PROVISION_FAILED":
+      return "Clarity Cloud could not prepare the transfer folder.";
     case "DRIVE_UPLOAD_SESSION_EXPIRED":
       return "Start a new upload session before retrying.";
+    case "DRIVE_UPLOAD_SESSION_FAILED":
+      return "Clarity Cloud could not start the video upload.";
+    case "DRIVE_TRANSFER_STATE_FAILED":
+      return "Clarity Cloud could not store the upload session.";
     case "DRIVE_UPLOAD_VERIFY_FAILED":
       return "Clarity Cloud could not verify the uploaded video.";
     case "DRIVE_UPLOAD_INTERRUPTED":
@@ -9041,6 +9051,27 @@ function App() {
       setToast({ message: "Transfer cancelled. Local video kept." });
     } catch {
       setToast({ message: "Transfer could not be cancelled." });
+    } finally {
+      setUploadingSavedVideoIds((current) => {
+        const next = new Set(current);
+        next.delete(item.savedVideoId);
+        return next;
+      });
+    }
+  }
+
+  async function removeSavedVideoTransfer(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    try {
+      await removeSavedVideoCloudTransfer(item.savedVideoId, store);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Cloud transfer removed. Local video kept." });
+    } catch {
+      setToast({ message: "Cloud transfer could not be removed." });
     } finally {
       setUploadingSavedVideoIds((current) => {
         const next = new Set(current);
@@ -17092,11 +17123,12 @@ function App() {
                                     <>
                                       {playerToolVideos.map((video) => {
                                         const cloudOperational = isClarityCloudOperational(clarityCloudHealth);
-                                        const cloudHasServerSession = Boolean(video.cloud?.transferId);
+                                        const cloudStatus = video.cloud?.status || "not-uploaded";
                                         const isUploading =
                                           cloudOperational &&
                                           (uploadingSavedVideoIds.has(video.savedVideoId) ||
                                             video.cloud?.status === "preparing" ||
+                                            video.cloud?.status === "session-created" ||
                                             video.cloud?.status === "uploading" ||
                                             video.cloud?.status === "verifying");
                                         const localLabel = getSavedVideoLocalStatusLabel(video);
@@ -17113,16 +17145,26 @@ function App() {
                                         const canSend =
                                           video.local.status === "available" &&
                                           cloudOperational &&
-                                          video.cloud?.status !== "ready" &&
-                                          video.cloud?.status !== "imported" &&
+                                          cloudStatus !== "ready" &&
+                                          cloudStatus !== "imported" &&
                                           !isUploading;
-                                        const canPause = cloudOperational && cloudHasServerSession && (video.cloud?.status === "uploading" || isUploading);
+                                        const sendLabel =
+                                          cloudStatus === "failed"
+                                            ? "Retry"
+                                            : cloudStatus === "paused"
+                                              ? "Resume"
+                                              : "Send to Clarity Cloud";
+                                        const canPause =
+                                          cloudOperational &&
+                                          cloudStatus === "uploading" &&
+                                          Number(video.cloud?.acceptedOffsetBytes || 0) > 0;
                                         const canCancel =
                                           cloudOperational &&
-                                          cloudHasServerSession &&
-                                          (video.cloud?.status === "preparing" ||
-                                            video.cloud?.status === "uploading" ||
-                                            video.cloud?.status === "paused");
+                                          (cloudStatus === "preparing" ||
+                                            cloudStatus === "session-created" ||
+                                            cloudStatus === "uploading" ||
+                                            cloudStatus === "paused");
+                                        const canRemoveTransfer = cloudOperational && cloudStatus === "failed";
                                         return (
                                           <article className="player-video-card" key={video.savedVideoId}>
                                             {video.thumbnailDataUrl ? (
@@ -17169,33 +17211,46 @@ function App() {
                                               </button>
                                               {cloudOperational ? (
                                                 <>
-                                                  <button
-                                                    type="button"
-                                                    className="outline-button"
-                                                    disabled={!canSend}
-                                                    onClick={() => void sendSavedVideoToPrimaryComputer(video)}
-                                                  >
-                                                    <Send size={14} />
-                                                    {video.cloud?.status === "failed" || video.cloud?.status === "paused" || video.cloud?.status === "cancelled" ? "Retry Cloud send" : "Send to Clarity Cloud"}
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    className="outline-button"
-                                                    disabled={!canPause}
-                                                    onClick={() => void pauseSavedVideoTransfer(video)}
-                                                  >
-                                                    <Pause size={14} />
-                                                    Pause
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    className="outline-button"
-                                                    disabled={!canCancel}
-                                                    onClick={() => void cancelSavedVideoTransfer(video)}
-                                                  >
-                                                    <X size={14} />
-                                                    Cancel
-                                                  </button>
+                                                  {canSend ? (
+                                                    <button
+                                                      type="button"
+                                                      className="outline-button"
+                                                      onClick={() => void sendSavedVideoToPrimaryComputer(video)}
+                                                    >
+                                                      <Send size={14} />
+                                                      {sendLabel}
+                                                    </button>
+                                                  ) : null}
+                                                  {canPause ? (
+                                                    <button
+                                                      type="button"
+                                                      className="outline-button"
+                                                      onClick={() => void pauseSavedVideoTransfer(video)}
+                                                    >
+                                                      <Pause size={14} />
+                                                      Pause
+                                                    </button>
+                                                  ) : null}
+                                                  {canCancel ? (
+                                                    <button
+                                                      type="button"
+                                                      className="outline-button"
+                                                      onClick={() => void cancelSavedVideoTransfer(video)}
+                                                    >
+                                                      <X size={14} />
+                                                      Cancel
+                                                    </button>
+                                                  ) : null}
+                                                  {canRemoveTransfer ? (
+                                                    <button
+                                                      type="button"
+                                                      className="outline-button"
+                                                      onClick={() => void removeSavedVideoTransfer(video)}
+                                                    >
+                                                      <X size={14} />
+                                                      Remove transfer
+                                                    </button>
+                                                  ) : null}
                                                 </>
                                               ) : null}
                                               <button

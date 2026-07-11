@@ -264,6 +264,25 @@ describe("storage health model", () => {
     );
   });
 
+  it("labels failed session creation separately from failed chunk upload", () => {
+    const video = savedVideo({
+      cloud: {
+        status: "failed",
+        provider: "google-drive",
+        lastUploadErrorCode: "DRIVE_UPLOAD_SESSION_FAILED",
+      },
+    });
+
+    assert.equal(
+      getSavedVideoCloudStatusLabel(video, {
+        isUploading: false,
+        cloudConnected: true,
+        cloudState: "connected",
+      }),
+      "Cloud - Could not start upload",
+    );
+  });
+
   it("shows separate Player Profile local and cloud labels", () => {
     const video = savedVideo({
       local: { status: "available", managed: { status: "permission-lost" } },

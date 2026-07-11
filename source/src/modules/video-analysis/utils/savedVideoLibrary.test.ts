@@ -14,6 +14,7 @@ import {
   getSavedVideoCloudStatus,
   importSavedVideoFromClarityCloud,
   listClarityCloudImportTransfers,
+  removeSavedVideoCloudTransfer,
   saveSavedVideoToCloud,
 } from "./savedVideoLibrary";
 
@@ -523,6 +524,36 @@ describe("saved video library", () => {
     }
   });
 
+  it("removes a failed cloud transfer marker without deleting the local saved video", async () => {
+    const { store, item } = await savedVideoWithLargeImages();
+    await store.putItem({
+      ...item,
+      cloud: {
+        status: "failed",
+        provider: "google-drive",
+        transferId: "transfer-1",
+        driveAssetId: "drive-folder-1",
+        lastUploadErrorCode: "DRIVE_UPLOAD_SESSION_FAILED",
+        errorMessage: "Clarity Cloud could not start the video upload.",
+      },
+    });
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method?: string }> = [];
+    globalThis.fetch = async (input, init) => {
+      requests.push({ url: String(input), method: init?.method });
+      return Response.json({ ok: true });
+    };
+    try {
+      const cleared = await removeSavedVideoCloudTransfer(item.savedVideoId, store);
+
+      assert.equal(cleared.cloud?.status, "not-uploaded");
+      assert.equal(requests.some((request) => request.url.endsWith("/session") && request.method === "DELETE"), true);
+      assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("sends only compact ownership metadata to upload-session", async () => {
     installBrowserGlobals();
     const { store, item } = await savedVideoWithLargeImages();
@@ -572,11 +603,11 @@ describe("saved video library", () => {
       if (String(input).includes(`/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/session`)) {
         return Response.json({
           ok: true,
-          status: "uploading",
+          status: "session-created",
           session: {
             transferId: "transfer-1",
             savedVideoId: item.savedVideoId,
-            status: "uploading",
+            status: "session-created",
             expectedSizeBytes: sourceBlob().size,
             acceptedOffsetBytes: 0,
             chunkSizeBytes: 4,

@@ -178,7 +178,7 @@ test("chunk validation rejects out-of-order overlapping and oversized chunks", (
   const session = {
     accountId: "account-1",
     savedVideoId: "saved-video-1",
-    status: "uploading" as const,
+    status: "session-created" as const,
     acceptedOffsetBytes: 4,
     expectedSizeBytes: 20,
     chunkSizeBytes: 8,

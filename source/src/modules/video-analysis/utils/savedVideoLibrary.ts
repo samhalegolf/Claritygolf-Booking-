@@ -62,7 +62,7 @@ export type ManagedLocalLibraryHealth =
   | "repair-required"
   | "not-configured"
   | "unsupported";
-export type SavedVideoCloudStatus = "not-uploaded" | "preparing" | "uploading" | "paused" | "verifying" | "ready" | "imported" | "failed" | "cancelled" | "expired";
+export type SavedVideoCloudStatus = "not-uploaded" | "preparing" | "session-created" | "uploading" | "paused" | "verifying" | "ready" | "imported" | "failed" | "cancelled" | "expired";
 export type SavedVideoCloudProvider = "google-drive";
 
 export type SavedVideoErrorCode =
@@ -239,8 +239,11 @@ export type SavedVideoCloudErrorCode =
   | "DRIVE_NOT_CONNECTED"
   | "DRIVE_SCOPE_MISSING"
   | "GOOGLE_RECONNECT_REQUIRED"
+  | "GOOGLE_TOKEN_REFRESH_FAILED"
   | "DRIVE_FOLDER_PROVISION_FAILED"
+  | "DRIVE_TRANSFER_FOLDER_FAILED"
   | "DRIVE_UPLOAD_SESSION_FAILED"
+  | "DRIVE_TRANSFER_STATE_FAILED"
   | "DRIVE_UPLOAD_PROXY_FAILED"
   | "DRIVE_UPLOAD_TOO_LARGE"
   | "DRIVE_UPLOAD_SESSION_EXPIRED"
@@ -941,6 +944,25 @@ export const cancelSavedVideoCloudUpload = async (
     lastUploadErrorCode: "DRIVE_UPLOAD_INTERRUPTED",
     errorMessage: "Upload cancelled. Retry when ready.",
   });
+};
+
+export const removeSavedVideoCloudTransfer = async (
+  savedVideoId: string,
+  store: SavedVideoLibraryStore
+): Promise<SavedVideoItem> => {
+  const item = await store.getItem(savedVideoId);
+  if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
+  if (item.cloud?.transferId) {
+    try {
+      await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/session`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+    } catch {
+      // Removing the local transfer badge should not depend on cleanup reaching the server.
+    }
+  }
+  return patchCloudState(store, item, { status: "not-uploaded" });
 };
 
 export const listClarityCloudImportTransfers = async (): Promise<ClarityCloudImportTransfer[]> => {
