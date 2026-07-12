@@ -2,6 +2,10 @@ import type {
   ManagedLocalVideoLibraryStatus,
   SavedVideoItem,
 } from "./modules/video-analysis/utils/savedVideoLibrary";
+import {
+  getSavedVideoCloudCatalogueState,
+  getSavedVideoDeviceState,
+} from "./modules/video-analysis/utils/savedVideoLibrary";
 
 export type GoogleDriveTransferState =
   | "not_connected"
@@ -204,8 +208,8 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
     return {
       state: "needs-folder",
       statusLabel: "Needs folder access",
-      message: "Choose where Clarity should store videos on this computer.",
-      detail: "Clarity Video Library",
+      message: "Choose where Clarity should keep videos permanently on this computer.",
+      detail: "My Library",
       action: "choose-folder",
     };
   }
@@ -214,8 +218,8 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
     return {
       state: "ready",
       statusLabel: "Ready",
-      message: "Videos are safely stored on this computer.",
-      detail: "Clarity Video Library",
+      message: "My Library can keep permanent copies on this computer.",
+      detail: "My Library",
     };
   }
 
@@ -223,8 +227,8 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
     return {
       state: "reconnect-required",
       statusLabel: "Reconnect required",
-      message: "Clarity no longer has access to the selected video library.",
-      detail: "Clarity Video Library",
+      message: "Clarity no longer has access to My Library.",
+      detail: "My Library",
       action: "reconnect-folder",
     };
   }
@@ -233,8 +237,8 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
     return {
       state: "library-missing",
       statusLabel: "Library not found",
-      message: "The selected Clarity Video Library may have been moved or renamed.",
-      detail: "Clarity Video Library",
+      message: "My Library may have been moved or renamed.",
+      detail: "My Library",
       action: "locate-library",
     };
   }
@@ -243,7 +247,7 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
     return {
       state: "cache-only",
       statusLabel: "Using browser backup",
-      message: "Videos are protected in browser storage, but the managed local library needs attention.",
+      message: "Videos are protected on this device, but My Library needs attention.",
       detail: "Browser IndexedDB cache and recovery",
       action: "reconnect-folder",
       safeErrorCode: "LOCAL_LIBRARY_REPAIR_REQUIRED",
@@ -253,7 +257,7 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
   return {
     state: "error",
     statusLabel: "Needs attention",
-    message: "Local Storage needs attention before it can be used as the durable video library.",
+    message: "My Library needs attention before it can keep permanent local copies.",
     detail: "Browser IndexedDB cache and recovery",
     safeErrorCode: safeCode(status.health, "LOCAL_STORAGE_UNAVAILABLE"),
   };
@@ -408,15 +412,17 @@ export function getClarityCloudActionLabel(action?: ClarityCloudAction) {
   return "";
 }
 
-export function getSavedVideoLocalStatusLabel(video: SavedVideoItem) {
-  const managedStatus = video.local.managed?.status;
-  if (managedStatus === "healthy") return "Local - Saved";
-  if (managedStatus && video.local.status !== "missing") return "Local - Cache only";
-  if (video.local.status === "available") return "Local - Saved";
-  if (video.local.status === "recovery-only") return "Local - Cache only";
-  if (video.local.status === "missing") return "Local - Missing";
-  return "Local - Needs attention";
+export function getSavedVideoDeviceStatusLabel(video: SavedVideoItem) {
+  const device = getSavedVideoDeviceState(video);
+  if (device.status === "permanent") return "My Library • Saved permanently";
+  if (device.status === "cached") return "Device • Available on this device";
+  if (device.status === "recovery-only") return "Device • Recovery copy safe";
+  if (device.status === "downloading") return "Device • Downloading";
+  if (device.status === "download-failed") return "Device • Download failed";
+  return "Device • Not downloaded";
 }
+
+export const getSavedVideoLocalStatusLabel = getSavedVideoDeviceStatusLabel;
 
 export function getSavedVideoCloudStatusLabel(
   video: SavedVideoItem,
@@ -427,30 +433,43 @@ export function getSavedVideoCloudStatusLabel(
     cloudHealth?: ClarityCloudHealth;
   }
 ) {
-  if (video.cloud?.status === "ready") return "Cloud - Ready to import";
-  if (video.cloud?.status === "imported") return "Cloud - Imported locally";
-  if (options.cloudHealth?.state === "setup-incomplete") return "Cloud - Setup incomplete";
-  if (options.cloudHealth?.state === "temporarily-unavailable") return "Cloud - Temporarily unavailable";
-  if (options.cloudHealth?.state === "not-connected") return "Cloud - Not connected";
-  if (options.cloudHealth?.state === "permission-required") return "Cloud - Permission required";
-  if (options.cloudHealth?.state === "reconnect-required") return "Cloud - Reconnect required";
-  if (video.cloud?.status === "paused") return "Cloud - Paused";
-  if (video.cloud?.status === "verifying") return "Cloud - Verifying";
-  if (video.cloud?.status === "session-created") return "Cloud - Starting upload";
-  if (video.cloud?.status === "preparing") return "Cloud - Preparing";
-  if (video.cloud?.status === "cancelled") return "Cloud - Cancelled";
+  const catalogueState = getSavedVideoCloudCatalogueState(video);
+  if (catalogueState === "ready") return "Cloud • Available";
+  if (catalogueState === "paused") return "Cloud • Upload paused";
+  if (catalogueState === "verifying") return "Cloud • Verifying";
+  if (catalogueState === "preparing") return "Cloud • Preparing Clarity Cloud";
   if (options.isUploading) {
     const progress = Math.max(0, Math.min(100, Math.round(video.cloud?.progress || 0)));
-    return `Cloud - Sending ${progress}%`;
+    return `Cloud • Uploading ${progress}%`;
   }
-  if (video.cloud?.status === "failed" && video.cloud.lastUploadErrorCode === "DRIVE_UPLOAD_SESSION_FAILED") {
-    return "Cloud - Could not start upload";
+  if (catalogueState === "uploading") {
+    const progress = Math.max(0, Math.min(100, Math.round(video.cloud?.progress || 0)));
+    return `Cloud • Uploading ${progress}%`;
   }
-  if (video.cloud?.status === "failed") return "Cloud - Failed - Retry";
-  if (options.cloudState === "permission_upgrade_required") return "Cloud - Permission required";
-  if (options.cloudState === "reconnect_required") return "Cloud - Reconnect required";
-  if (options.cloudState === "blocked") return "Cloud - Setup incomplete";
-  if (options.cloudState === "error") return "Cloud - Service unavailable";
-  if (!options.cloudConnected || options.cloudState === "not_connected") return "Cloud - Connect Clarity Cloud";
-  return "Cloud - Not sent";
+  if (catalogueState === "failed") {
+    const setupBlocked =
+      video.cloud?.lastUploadErrorCode === "CLOUD_OAUTH_NOT_CONFIGURED" ||
+      video.cloud?.lastUploadErrorCode === "PROVIDER_STORAGE_UNAVAILABLE" ||
+      video.cloud?.lastUploadErrorCode === "DRIVE_NOT_CONNECTED" ||
+      video.cloud?.lastUploadErrorCode === "DRIVE_SCOPE_MISSING" ||
+      video.cloud?.lastUploadErrorCode === "GOOGLE_RECONNECT_REQUIRED";
+    return setupBlocked ? "Cloud • Waiting to upload" : "Cloud • Upload failed - Retry";
+  }
+  if (
+    options.cloudHealth?.state === "setup-incomplete" ||
+    options.cloudHealth?.state === "temporarily-unavailable" ||
+    options.cloudHealth?.state === "not-connected" ||
+    options.cloudHealth?.state === "permission-required" ||
+    options.cloudHealth?.state === "reconnect-required" ||
+    !options.cloudConnected ||
+    options.cloudState === "not_connected" ||
+    options.cloudState === "blocked" ||
+    options.cloudState === "error" ||
+    options.cloudState === "permission_upgrade_required" ||
+    options.cloudState === "reconnect_required"
+  ) {
+    return "Cloud • Waiting to upload";
+  }
+  if (catalogueState === "archived-locally") return "Cloud • Waiting to upload";
+  return "Cloud • Waiting to upload";
 }

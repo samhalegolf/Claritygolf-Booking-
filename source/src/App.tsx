@@ -86,7 +86,7 @@ import {
   getLocalStorageActionLabel,
   getLocalStorageHealth,
   getSavedVideoCloudStatusLabel,
-  getSavedVideoLocalStatusLabel,
+  getSavedVideoDeviceStatusLabel,
   type ClarityCloudHealth,
   type ClarityCloudAction,
   type GoogleDriveTransferStatus,
@@ -3413,7 +3413,7 @@ function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
     case "SAVED_VIDEO_SOURCE_MISSING":
       return "Source unavailable.";
     case "CLARITY_CLOUD_IMPORT_NOT_READY":
-      return "This transfer is not ready to import.";
+      return "This video is not ready to download from Clarity Cloud.";
     case "CLARITY_CLOUD_IMPORT_VERIFY_FAILED":
       return "Imported video did not match the Clarity Cloud catalogue.";
     case "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED":
@@ -3480,7 +3480,7 @@ const defaultManagedLocalLibraryStatus: ManagedLocalVideoLibraryStatus = {
   supported: false,
   configured: false,
   health: "unsupported",
-  message: "File System Access is unavailable. Working from local cache.",
+  message: "File System Access is unavailable. Working from device cache.",
 };
 
 function createDefaultVideoWorkspaceState(side: ComparisonSide): ComparisonWorkspaceState {
@@ -4418,6 +4418,7 @@ function App() {
   const [googleDriveAction, setGoogleDriveAction] = useState<GoogleDriveActionState>("idle");
   const [clarityCloudImports, setClarityCloudImports] = useState<ClarityCloudImportTransfer[]>([]);
   const [clarityCloudImportActionIds, setClarityCloudImportActionIds] = useState<Set<string>>(() => new Set());
+  const autoCloudUploadKeyRef = useRef("");
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
   const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
@@ -4440,13 +4441,17 @@ function App() {
   }, [isAdminUser, settingsTab]);
 
   useEffect(() => {
-    if (activeView === "settings" && settingsTab === "integrations") {
+    if ((activeView === "settings" && settingsTab === "integrations") || activeView === "players") {
       void refreshGoogleDriveTransferStatus();
     }
   }, [activeView, settingsTab]);
 
   useEffect(() => {
-    if (activeView === "settings" && settingsTab === "integrations" && googleDriveTransfer.connected && googleDriveTransfer.incomingImportReady) {
+    const shouldLoadCloudCatalogue =
+      googleDriveTransfer.connected &&
+      googleDriveTransfer.incomingImportReady &&
+      (activeView === "players" || (activeView === "settings" && settingsTab === "integrations"));
+    if (shouldLoadCloudCatalogue) {
       void refreshClarityCloudImports();
       return;
     }
@@ -4997,6 +5002,24 @@ function App() {
   const clarityCloudHealth = getClarityCloudHealth(googleDriveTransfer);
   const localStoragePrimaryAction = "action" in localStorageHealth ? localStorageHealth.action : undefined;
   const clarityCloudPrimaryAction = "action" in clarityCloudHealth ? clarityCloudHealth.action : undefined;
+  const automaticCloudUploadCandidates = useMemo(() => {
+    if (!isClarityCloudOperational(clarityCloudHealth)) return [];
+    return savedVideoItems.filter((item) => {
+      const cloudStatus = item.cloud?.status || "not-uploaded";
+      const waitingFailure =
+        cloudStatus === "failed" &&
+        (item.cloud?.lastUploadErrorCode === "CLOUD_OAUTH_NOT_CONFIGURED" ||
+          item.cloud?.lastUploadErrorCode === "PROVIDER_STORAGE_UNAVAILABLE" ||
+          item.cloud?.lastUploadErrorCode === "DRIVE_NOT_CONNECTED" ||
+          item.cloud?.lastUploadErrorCode === "DRIVE_SCOPE_MISSING" ||
+          item.cloud?.lastUploadErrorCode === "GOOGLE_RECONNECT_REQUIRED");
+      return (
+        item.local.status === "available" &&
+        !uploadingSavedVideoIds.has(item.savedVideoId) &&
+        (cloudStatus === "not-uploaded" || cloudStatus === "cancelled" || cloudStatus === "expired" || waitingFailure)
+      );
+    });
+  }, [clarityCloudHealth, savedVideoItems, uploadingSavedVideoIds]);
   const hasMissingInvoiceCoachSettings =
     !invoiceSettings.bankAccount.trim() || !invoiceSettings.taxNumber.trim() || !invoiceSettings.businessAddress.trim();
   const activeAccountEntitlements = accountEntitlements(activeAccount);
@@ -6848,11 +6871,17 @@ function App() {
     savedVideoItems.forEach((video) => {
       if (video.playerId) ids.add(video.playerId);
     });
+    clarityCloudImports.forEach((transfer) => {
+      const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+      if (savedVideoId && !savedVideoIds.has(savedVideoId) && transfer.savedVideo?.playerId) {
+        ids.add(transfer.savedVideo.playerId);
+      }
+    });
     legacyVideoRecords.forEach((record) => {
       if (record.video.playerId && !savedVideoIds.has(record.video.id)) ids.add(record.video.playerId);
     });
     return ids;
-  }, [legacyVideoRecords, savedVideoIds, savedVideoItems]);
+  }, [clarityCloudImports, legacyVideoRecords, savedVideoIds, savedVideoItems]);
 
   const lessonNotePlayerIds = useMemo(() => {
     const ids = new Set<string>();
@@ -6975,6 +7004,25 @@ function App() {
       .filter((video) => playerIds.has(video.playerId))
       .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
   }, [notesWorkspaceClient, savedVideoItems]);
+  const playerToolCloudVideos = useMemo(() => {
+    if (!notesWorkspaceClient) return [];
+    const playerIds = profileIdsForClient(notesWorkspaceClient);
+    return clarityCloudImports
+      .filter((transfer) => {
+        const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+        return Boolean(
+          savedVideoId &&
+            !savedVideoIds.has(savedVideoId) &&
+            transfer.savedVideo?.playerId &&
+            playerIds.has(transfer.savedVideo.playerId)
+        );
+      })
+      .sort((a, b) =>
+        String(b.savedVideo?.updatedAt || b.savedVideo?.createdAt || "").localeCompare(
+          String(a.savedVideo?.updatedAt || a.savedVideo?.createdAt || "")
+        )
+      );
+  }, [clarityCloudImports, notesWorkspaceClient, savedVideoIds]);
   const playerToolLegacyVideoRecords = useMemo(() => {
     if (!notesWorkspaceClient) return [];
     const playerIds = profileIdsForClient(notesWorkspaceClient);
@@ -7019,10 +7067,24 @@ function App() {
       lessonId: video.lessonId,
       sourceId: video.savedVideoId,
     }));
-    return [...noteRecords, ...videoRecords]
+    const cloudVideoRecords: PlayerToolRecord[] = playerToolCloudVideos.map((transfer) => {
+      const savedVideo = transfer.savedVideo;
+      const savedVideoId = transfer.savedVideoId || savedVideo?.savedVideoId || transfer.transferId;
+      const timestamp = savedVideo?.updatedAt || savedVideo?.createdAt || transfer.readyToImportAt || "";
+      return {
+        id: `cloud-video-${savedVideoId}`,
+        kind: "video",
+        title: profileRecordTitle(notesWorkspaceClient?.name, timestamp),
+        subtitle: `${savedVideo?.title || "Video file"} · Available in Clarity Cloud`,
+        timestamp,
+        lessonId: savedVideo?.lessonId,
+        sourceId: savedVideoId,
+      };
+    });
+    return [...noteRecords, ...videoRecords, ...cloudVideoRecords]
       .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
       .slice(0, 6);
-  }, [linkedLessonVideoIds, notesWorkspaceClient?.name, notesWorkspaceLessonNotes, playerToolVideos]);
+  }, [linkedLessonVideoIds, notesWorkspaceClient?.name, notesWorkspaceLessonNotes, playerToolCloudVideos, playerToolVideos]);
   const selectedAppointmentNotifications = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return [];
     return notificationsByAppointment.get(selected.id) ?? [];
@@ -8879,12 +8941,19 @@ function App() {
     setSavedVideoItems((current) => mergeSavedVideoItems(current, result.savedItems));
     refreshSavedVideoLibrary();
     returnToPlayerProfileVideos(result);
-    setToast({
-      message:
-        result.reason === "save-and-send"
-          ? "Saved locally. Clarity Cloud upload started."
-          : "Saved to Local Storage.",
-    });
+    if (isClarityCloudOperational(clarityCloudHealth)) {
+      void startSavedVideoCloudTransfers(result.savedItems).catch(() => {
+        // The transfer helper surfaces product-safe feedback and preserves the device copy.
+      });
+      setToast({
+        message:
+          result.reason === "my-library-save"
+            ? "Saved permanently to My Library. Uploading to Clarity Cloud."
+            : "Saved. Uploading to Clarity Cloud.",
+      });
+      return;
+    }
+    setToast({ message: "Saved safely on this device. Clarity will upload it when Cloud is available." });
   }
 
   async function renameSavedVideo(item: SavedVideoItem) {
@@ -8931,6 +9000,25 @@ function App() {
     }
   }
 
+  async function removeSavedVideoFromDevice(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    if (item.cloud?.status !== "ready" && item.cloud?.status !== "imported") {
+      setToast({ message: "Wait until this video is available in Clarity Cloud before removing the device copy." });
+      return;
+    }
+    try {
+      await store.removeDeviceCopy(item.savedVideoId);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Removed from this device. Clarity Cloud copy kept." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Device copy could not be removed." });
+    }
+  }
+
   async function startSavedVideoCloudTransfers(
     itemsToSend: SavedVideoItem[],
     options: { openSettingsOnConfigurationIssue?: boolean } = {},
@@ -8941,8 +9029,8 @@ function App() {
       throw new Error("Transfer service unavailable");
     }
     if (!itemsToSend.length) {
-      setToast({ message: "Save locally before sending to Clarity Cloud." });
-      throw new Error("Save locally before sending to Clarity Cloud.");
+      setToast({ message: "No saved videos are waiting to upload." });
+      throw new Error("No saved videos are waiting to upload.");
     }
 
     const cloudReason = clarityCloudTransferBlockReason(clarityCloudHealth);
@@ -8969,7 +9057,7 @@ function App() {
       ids.forEach((id) => next.add(id));
       return next;
     });
-    setToast({ message: itemsToSend.length === 1 ? "Preparing Clarity Cloud transfer..." : `Preparing ${itemsToSend.length} Clarity Cloud transfers...` });
+    setToast({ message: itemsToSend.length === 1 ? "Preparing Clarity Cloud..." : `Preparing ${itemsToSend.length} Clarity Cloud uploads...` });
     refreshSavedVideoLibrary();
 
     void Promise.all(
@@ -8982,7 +9070,7 @@ function App() {
       .then(async () => {
         refreshSavedVideoLibrary();
         await refreshClarityCloudImports();
-        setToast({ message: itemsToSend.length === 1 ? "Ready to import in Clarity Cloud." : "Transfers are ready to import in Clarity Cloud." });
+        setToast({ message: itemsToSend.length === 1 ? "Available in Clarity Cloud." : "Videos are available in Clarity Cloud." });
       })
       .catch((error) => {
         refreshSavedVideoLibrary();
@@ -8992,7 +9080,7 @@ function App() {
           safeErrorCode: code || "CLARITY_CLOUD_TRANSFER_FAILED",
           savedVideoIds: ids,
         });
-        setToast({ message: "Cloud transfer failed. Your local video is still safe." });
+        setToast({ message: "Upload failed - Retry from the Player Profile card. Your device copy is safe." });
       })
       .finally(() => {
         setUploadingSavedVideoIds((current) => {
@@ -9010,6 +9098,18 @@ function App() {
       // startSavedVideoCloudTransfers already surfaced product-safe feedback.
     }
   }
+
+  useEffect(() => {
+    if (!automaticCloudUploadCandidates.length) return;
+    const key = automaticCloudUploadCandidates
+      .map((item) => `${item.savedVideoId}:${item.updatedAt}:${item.cloud?.status || "not-uploaded"}`)
+      .join("|");
+    if (autoCloudUploadKeyRef.current === key) return;
+    autoCloudUploadKeyRef.current = key;
+    void startSavedVideoCloudTransfers(automaticCloudUploadCandidates).catch(() => {
+      // Waiting items remain visible on their Player Profile cards.
+    });
+  }, [automaticCloudUploadCandidates]);
 
   async function handleVideoAnalysisSaveAndSend(result: VideoWorkspaceSaveResult) {
     setSavedVideoItems((current) => mergeSavedVideoItems(current, result.savedItems));
@@ -9111,17 +9211,17 @@ function App() {
         await chooseManagedLocalVideoLibrary();
         if (store) {
           const result = await migrateSavedVideosToManagedLocalLibrary(store);
-          setToast({ message: result.migrated ? `Migrated ${result.migrated} saved videos.` : "Clarity Video Library connected." });
+          setToast({ message: result.migrated ? `Moved ${result.migrated} saved videos to My Library.` : "My Library connected." });
         } else {
-          setToast({ message: "Clarity Video Library connected." });
+          setToast({ message: "My Library connected." });
         }
       } else if (action === "reconnect") {
         await reconnectManagedLocalVideoLibrary();
-        setToast({ message: "Clarity Video Library reconnected." });
+        setToast({ message: "My Library reconnected." });
       } else if (action === "move") {
         if (!store) throw new Error("Saved video library is unavailable in this browser.");
         await moveManagedLocalVideoLibrary(store);
-        setToast({ message: "Clarity Video Library moved." });
+        setToast({ message: "My Library moved." });
       } else if (action === "verify" || action === "rescan") {
         if (!store) throw new Error("Saved video library is unavailable in this browser.");
         const result = action === "verify"
@@ -9134,7 +9234,7 @@ function App() {
         setToast({ message: result.failed ? `Migrated ${result.migrated}; ${result.failed} need attention.` : `Migrated ${result.migrated} saved videos.` });
       }
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Clarity Video Library action failed." });
+      setToast({ message: error instanceof Error ? error.message : "My Library action failed." });
     } finally {
       refreshSavedVideoLibrary();
     }
@@ -9174,10 +9274,6 @@ function App() {
       setToast({ message: "Saved video library is unavailable in this browser." });
       return;
     }
-    if (managedLocalLibraryStatus.health !== "healthy") {
-      setToast({ message: "Connect Local Storage before importing from Clarity Cloud." });
-      return;
-    }
     const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
     if (!savedVideoId) {
       setToast({ message: "Clarity Cloud transfer metadata is incomplete." });
@@ -9188,9 +9284,43 @@ function App() {
       const imported = await importSavedVideoFromClarityCloud(savedVideoId, store);
       refreshSavedVideoLibrary();
       await refreshClarityCloudImports();
-      setToast({ message: `${imported.title || "Video"} imported to Local Storage.` });
+      setToast({ message: `${imported.title || "Video"} is available on this device.` });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not import from Clarity Cloud." });
+      setToast({ message: error instanceof Error ? error.message : "Could not download from Clarity Cloud." });
+    } finally {
+      setClarityCloudImportActionIds((current) => {
+        const next = new Set(current);
+        next.delete(savedVideoId);
+        return next;
+      });
+    }
+  }
+
+  async function openCloudVideoFromCatalogue(transfer: ClarityCloudImportTransfer, playerName: string) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+    const playerId = transfer.savedVideo?.playerId;
+    if (!savedVideoId || !playerId) {
+      setToast({ message: "Clarity Cloud catalogue metadata is incomplete." });
+      return;
+    }
+    setClarityCloudImportActionIds((current) => new Set(current).add(savedVideoId));
+    try {
+      setToast({ message: "Downloading from Clarity Cloud..." });
+      const imported = await importSavedVideoFromClarityCloud(savedVideoId, store);
+      refreshSavedVideoLibrary();
+      await refreshClarityCloudImports();
+      openVideoAnalysisForClient({
+        id: imported.playerId || playerId,
+        name: playerName,
+        savedVideoId: imported.savedVideoId,
+      });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not download from Clarity Cloud." });
     } finally {
       setClarityCloudImportActionIds((current) => {
         const next = new Set(current);
@@ -9218,7 +9348,7 @@ function App() {
 
   async function showSavedVideoInFinder(item: SavedVideoItem) {
     if (item.local.managed?.status === "healthy") {
-      setToast({ message: "Saved video is in the Clarity Video Library." });
+      setToast({ message: "Saved video is kept in My Library." });
       return;
     }
     if (!managedLocalLibraryStatus.configured) {
@@ -17083,8 +17213,8 @@ function App() {
                                         <FolderOpen size={16} />
                                       </div>
                                       <div className="player-video-card-body">
-                                        <strong>Local Storage needs folder access</strong>
-                                        <span>Saved videos stay in local cache until a library folder is connected.</span>
+                                        <strong>My Library not connected</strong>
+                                        <span>Videos stay available through device cache. Connect My Library only for permanent local copies.</span>
                                       </div>
                                       <div className="player-video-card-actions">
                                         <button
@@ -17094,7 +17224,7 @@ function App() {
                                           onClick={() => void runManagedLibraryAction("choose")}
                                         >
                                           <FolderOpen size={14} />
-                                          Choose folder
+                                          Choose My Library
                                         </button>
                                       </div>
                                     </article>
@@ -17105,7 +17235,7 @@ function App() {
                                       </div>
                                       <div className="player-video-card-body">
                                         <strong>{managedLocalLibraryStatus.message}</strong>
-                                        <span>Working from local cache. Reconnect the library when available.</span>
+                                        <span>Working from device cache. Reconnect My Library when available.</span>
                                       </div>
                                       <div className="player-video-card-actions">
                                         <button
@@ -17119,7 +17249,7 @@ function App() {
                                       </div>
                                     </article>
                                   ) : null}
-                                  {playerToolVideos.length || playerToolLegacyVideoRecords.length ? (
+                                  {playerToolVideos.length || playerToolCloudVideos.length || playerToolLegacyVideoRecords.length ? (
                                     <>
                                       {playerToolVideos.map((video) => {
                                         const cloudOperational = isClarityCloudOperational(clarityCloudHealth);
@@ -17131,7 +17261,7 @@ function App() {
                                             video.cloud?.status === "session-created" ||
                                             video.cloud?.status === "uploading" ||
                                             video.cloud?.status === "verifying");
-                                        const localLabel = getSavedVideoLocalStatusLabel(video);
+                                        const deviceLabel = getSavedVideoDeviceStatusLabel(video);
                                         const cloudLabel = getSavedVideoCloudStatusLabel(video, {
                                           isUploading,
                                           cloudConnected: googleDriveTransfer.connected,
@@ -17142,7 +17272,7 @@ function App() {
                                           video.cloud?.status === "failed"
                                             ? savedVideoCloudErrorLabel(video.cloud.lastUploadErrorCode, video.cloud.errorMessage)
                                             : "";
-                                        const canSend =
+                                        const canRetryCloud =
                                           video.local.status === "available" &&
                                           cloudOperational &&
                                           cloudStatus !== "ready" &&
@@ -17150,10 +17280,10 @@ function App() {
                                           !isUploading;
                                         const sendLabel =
                                           cloudStatus === "failed"
-                                            ? "Retry"
+                                            ? "Retry upload"
                                             : cloudStatus === "paused"
-                                              ? "Resume"
-                                              : "Send to Clarity Cloud";
+                                              ? "Resume upload"
+                                              : "Retry upload";
                                         const canPause =
                                           cloudOperational &&
                                           cloudStatus === "uploading" &&
@@ -17165,6 +17295,10 @@ function App() {
                                             cloudStatus === "uploading" ||
                                             cloudStatus === "paused");
                                         const canRemoveTransfer = cloudOperational && cloudStatus === "failed";
+                                        const hasDeviceCopy = video.local.status !== "missing";
+                                        const canRemoveFromDevice =
+                                          (cloudStatus === "ready" || cloudStatus === "imported") &&
+                                          hasDeviceCopy;
                                         return (
                                           <article className="player-video-card" key={video.savedVideoId}>
                                             {video.thumbnailDataUrl ? (
@@ -17185,7 +17319,7 @@ function App() {
                                                 {" · "}
                                                 {formatVideoDurationLabel(video.source.duration)}
                                                 {" · "}
-                                                {localLabel}
+                                                {deviceLabel}
                                                 {" · "}
                                                 {cloudLabel}
                                                 {linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}
@@ -17211,7 +17345,7 @@ function App() {
                                               </button>
                                               {cloudOperational ? (
                                                 <>
-                                                  {canSend ? (
+                                                  {canRetryCloud ? (
                                                     <button
                                                       type="button"
                                                       className="outline-button"
@@ -17248,35 +17382,49 @@ function App() {
                                                       onClick={() => void removeSavedVideoTransfer(video)}
                                                     >
                                                       <X size={14} />
-                                                      Remove transfer
+                                                      Clear failed upload
                                                     </button>
                                                   ) : null}
                                                 </>
                                               ) : null}
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                onClick={() => void showSavedVideoInFinder(video)}
-                                              >
-                                                <FolderOpen size={14} />
-                                                Show in Finder
-                                              </button>
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                onClick={() => void revealSavedVideoFile(video)}
-                                              >
-                                                <ExternalLink size={14} />
-                                                Reveal file
-                                              </button>
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                onClick={() => void verifySavedVideoInLibrary(video)}
-                                              >
-                                                <Check size={14} />
-                                                Verify
-                                              </button>
+                                              {hasDeviceCopy ? (
+                                                <>
+                                                  <button
+                                                    type="button"
+                                                    className="outline-button"
+                                                    onClick={() => void showSavedVideoInFinder(video)}
+                                                  >
+                                                    <FolderOpen size={14} />
+                                                    Keep on this device
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className="outline-button"
+                                                    onClick={() => void revealSavedVideoFile(video)}
+                                                  >
+                                                    <ExternalLink size={14} />
+                                                    Open stored file
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className="outline-button"
+                                                    onClick={() => void verifySavedVideoInLibrary(video)}
+                                                  >
+                                                    <Check size={14} />
+                                                    Verify file
+                                                  </button>
+                                                </>
+                                              ) : null}
+                                              {canRemoveFromDevice ? (
+                                                <button
+                                                  type="button"
+                                                  className="outline-button"
+                                                  onClick={() => void removeSavedVideoFromDevice(video)}
+                                                >
+                                                  <X size={14} />
+                                                  Remove from this device
+                                                </button>
+                                              ) : null}
                                               <button
                                                 type="button"
                                                 className="outline-button"
@@ -17292,6 +17440,42 @@ function App() {
                                               >
                                                 <Trash2 size={14} />
                                                 Delete
+                                              </button>
+                                            </div>
+                                          </article>
+                                        );
+                                      })}
+                                      {playerToolCloudVideos.map((transfer) => {
+                                        const savedVideo = transfer.savedVideo;
+                                        const savedVideoId = transfer.savedVideoId || savedVideo?.savedVideoId || transfer.transferId;
+                                        const timestamp = savedVideo?.updatedAt || savedVideo?.createdAt || transfer.readyToImportAt || "";
+                                        const isDownloading = clarityCloudImportActionIds.has(savedVideoId);
+                                        return (
+                                          <article className="player-video-card is-cloud-only" key={savedVideoId}>
+                                            <div className="player-video-thumb is-empty">
+                                              <Download size={16} />
+                                            </div>
+                                            <div className="player-video-card-body">
+                                              <strong>{savedVideo?.title || profileRecordTitle(notesWorkspaceClient.name, timestamp)}</strong>
+                                              <span>
+                                                {profileRecordTitle(notesWorkspaceClient.name, timestamp)}
+                                                {" · "}
+                                                {formatVideoDurationLabel(transfer.video?.duration)}
+                                                {" · "}
+                                                Cloud • Available
+                                                {" · "}
+                                                Device • Not downloaded
+                                              </span>
+                                            </div>
+                                            <div className="player-video-card-actions">
+                                              <button
+                                                type="button"
+                                                className="outline-button"
+                                                disabled={isDownloading}
+                                                onClick={() => void openCloudVideoFromCatalogue(transfer, notesWorkspaceClient.name)}
+                                              >
+                                                <Download size={14} />
+                                                {isDownloading ? "Downloading" : "Open"}
                                               </button>
                                             </div>
                                           </article>
@@ -20152,7 +20336,7 @@ function App() {
                   <div className="video-storage-heading">
                     <div>
                       <span>VIDEO STORAGE</span>
-                      <h3 id="video-storage-heading">Local Storage and Clarity Cloud</h3>
+                      <h3 id="video-storage-heading">My Library and Clarity Cloud</h3>
                     </div>
                     <Video size={20} />
                   </div>
@@ -20162,7 +20346,7 @@ function App() {
                       <div className="storage-card-header">
                         <FolderOpen size={18} />
                         <div>
-                          <span>Local Storage</span>
+                          <span>My Library</span>
                           <strong>{localStorageHealth.statusLabel}</strong>
                         </div>
                       </div>
@@ -20209,11 +20393,11 @@ function App() {
                     </article>
                   </div>
 
-                  <section className="storage-transfer-inbox" aria-label="Clarity Cloud imports">
+                  <section className="storage-transfer-inbox" aria-label="Clarity Cloud catalogue">
                     <div className="storage-transfer-inbox-header">
                       <div>
-                        <span>CLARITY CLOUD INBOX</span>
-                        <h4>Ready to import</h4>
+                        <span>CLARITY CLOUD CATALOGUE</span>
+                        <h4>Available in Clarity Cloud</h4>
                       </div>
                       <button
                         type="button"
@@ -20231,15 +20415,16 @@ function App() {
                           const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId || transfer.transferId;
                           const statusLabel =
                             transfer.catalogueStatus === "complete"
-                              ? "Transfer complete"
+                              ? "Available"
                               : transfer.catalogueStatus === "imported" || transfer.catalogueStatus === "cleanup_scheduled"
-                                ? "Imported"
+                                ? "Available on this device"
                                 : transfer.catalogueStatus === "repair_required"
                                   ? "Needs repair"
-                                  : "Ready to import";
+                                  : "Available";
                           const canImport =
-                            managedLocalLibraryStatus.health === "healthy" &&
-                            transfer.catalogueStatus === "ready_to_import" &&
+                            (transfer.catalogueStatus === "ready_to_import" ||
+                              transfer.catalogueStatus === "complete" ||
+                              transfer.catalogueStatus === "cleanup_scheduled") &&
                             !clarityCloudImportActionIds.has(savedVideoId);
                           return (
                             <article className="storage-transfer-row" key={savedVideoId}>
@@ -20261,7 +20446,7 @@ function App() {
                                 onClick={() => void importClarityCloudTransfer(transfer)}
                               >
                                 <Download size={16} />
-                                {clarityCloudImportActionIds.has(savedVideoId) ? "Importing" : "Import to Local Storage"}
+                                {clarityCloudImportActionIds.has(savedVideoId) ? "Downloading" : "Download to this device"}
                               </button>
                             </article>
                           );
@@ -20270,7 +20455,7 @@ function App() {
                     ) : (
                       <p className="storage-transfer-empty">
                         {googleDriveTransfer.connected
-                          ? "No videos are waiting to import."
+                          ? "No Cloud videos are available yet."
                           : "Connect Clarity Cloud to see transfers from other devices."}
                       </p>
                     )}

@@ -64,6 +64,22 @@ export type ManagedLocalLibraryHealth =
   | "unsupported";
 export type SavedVideoCloudStatus = "not-uploaded" | "preparing" | "session-created" | "uploading" | "paused" | "verifying" | "ready" | "imported" | "failed" | "cancelled" | "expired";
 export type SavedVideoCloudProvider = "google-drive";
+export type SavedVideoCloudCatalogueState =
+  | "waiting-to-upload"
+  | "preparing"
+  | "uploading"
+  | "verifying"
+  | "ready"
+  | "paused"
+  | "failed"
+  | "archived-locally";
+export type DeviceVideoState =
+  | "not-downloaded"
+  | "downloading"
+  | "cached"
+  | "permanent"
+  | "recovery-only"
+  | "download-failed";
 
 export type SavedVideoErrorCode =
   | "SAVED_VIDEO_BLOB_MISSING"
@@ -111,6 +127,56 @@ export interface SavedVideoCloudState {
   errorMessage?: string;
 }
 
+export interface SavedVideoAnalysisSummary {
+  markerCount: number;
+  drawingCount: number;
+  focusSnapshotCount: number;
+  noteCount: number;
+}
+
+export interface SavedVideoCloudMediaRecord {
+  provider: SavedVideoCloudProvider;
+  providerAssetId?: string;
+  providerVideoFileId?: string;
+  providerManifestFileId?: string;
+  providerAnalysisFileId?: string;
+  providerFolderLink?: string;
+  checksumSha256?: string;
+  sizeBytes: number;
+  mimeType: string;
+}
+
+export interface SavedVideoCloudCatalogueRecord {
+  savedVideoId: string;
+  playerId: string;
+  lessonId?: string;
+  title: string;
+  capturedAt?: string;
+  duration?: number;
+  fileSizeBytes: number;
+  mimeType: string;
+  thumbnailDataUrl?: string;
+  analysisSummary: SavedVideoAnalysisSummary;
+  cloudState: SavedVideoCloudCatalogueState;
+  provider: SavedVideoCloudProvider;
+  media: SavedVideoCloudMediaRecord;
+  checksumSha256?: string;
+  sourceDeviceId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SavedVideoDeviceStateRecord {
+  status: DeviceVideoState;
+  source: "device-cache" | "my-library" | "temporary-recovery" | "clarity-cloud";
+  availableOnThisDevice: boolean;
+  keepOnDevice: boolean;
+  sizeBytes: number;
+  checksumSha256?: string;
+  updatedAt: string;
+  errorMessage?: string;
+}
+
 export interface SavedVideoManagedLocalState {
   status: ManagedLocalLibraryHealth;
   libraryId?: string;
@@ -146,6 +212,8 @@ export interface SavedVideoItem {
     managed?: SavedVideoManagedLocalState;
   };
   cloud?: SavedVideoCloudState;
+  cloudCatalogue?: SavedVideoCloudCatalogueRecord;
+  device?: SavedVideoDeviceStateRecord;
   analysisSnapshot: VideoAnalysis;
   workspaceSnapshot: ComparisonWorkspaceState;
   thumbnailDataUrl?: string;
@@ -210,6 +278,7 @@ export interface SaveSavedVideoInput {
   analysisSnapshot: VideoAnalysis;
   workspaceSnapshot: ComparisonWorkspaceState;
   thumbnailDataUrl?: string;
+  archiveToMyLibrary?: boolean;
 }
 
 export interface MigratedTransientVideoInput {
@@ -230,6 +299,7 @@ export interface SavedVideoLibraryStore {
   listItemsForPlayer(playerId: string): Promise<SavedVideoItem[]>;
   putItem(item: SavedVideoItem): Promise<void>;
   deleteItem(savedVideoId: string): Promise<void>;
+  removeDeviceCopy(savedVideoId: string): Promise<SavedVideoItem>;
   verifyItem(savedVideoId: string): Promise<SavedVideoItem>;
 }
 
@@ -310,6 +380,20 @@ const createStableId = (prefix: string) => {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
+const getStoredClarityDeviceId = () => {
+  const fallback = "browser";
+  if (typeof window === "undefined") return fallback;
+  try {
+    const existing = window.localStorage.getItem("clarityDeviceId");
+    if (existing) return existing;
+    const next = createStableId("clarity-device");
+    window.localStorage.setItem("clarityDeviceId", next);
+    return next;
+  } catch {
+    return fallback;
+  }
+};
+
 const sanitizeSegment = (value: string, fallback: string) => {
   const safe = value
     .trim()
@@ -348,6 +432,121 @@ const sortSavedItems = (items: SavedVideoItem[]) =>
   [...items].sort((left, right) =>
     String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))
   );
+
+const analysisSummaryFromItem = (item: SavedVideoItem): SavedVideoAnalysisSummary => ({
+  markerCount: item.analysisSnapshot.markers.length,
+  drawingCount: item.analysisSnapshot.drawings.length,
+  focusSnapshotCount: item.analysisSnapshot.focusSnapshots.length,
+  noteCount: item.analysisSnapshot.notes.length,
+});
+
+export const getSavedVideoCloudCatalogueState = (item: SavedVideoItem): SavedVideoCloudCatalogueState => {
+  if (item.cloud?.status === "ready" || item.cloud?.status === "imported") return "ready";
+  if (item.cloud?.status === "preparing" || item.cloud?.status === "session-created") return "preparing";
+  if (item.cloud?.status === "uploading") return "uploading";
+  if (item.cloud?.status === "verifying") return "verifying";
+  if (item.cloud?.status === "paused") return "paused";
+  if (item.cloud?.status === "failed" || item.cloud?.status === "expired" || item.cloud?.status === "cancelled") return "failed";
+  if (item.local.managed?.status === "healthy" && item.cloud?.status === "not-uploaded") return "archived-locally";
+  return "waiting-to-upload";
+};
+
+export const getSavedVideoDeviceState = (item: SavedVideoItem): SavedVideoDeviceStateRecord => {
+  if (item.local.managed?.status === "healthy") {
+    return {
+      status: "permanent",
+      source: "my-library",
+      availableOnThisDevice: true,
+      keepOnDevice: true,
+      sizeBytes: item.source.sizeBytes,
+      checksumSha256: item.source.checksumSha256,
+      updatedAt: item.local.managed.verifiedAt || item.updatedAt,
+    };
+  }
+  if (item.local.status === "available") {
+    return {
+      status: "cached",
+      source: "device-cache",
+      availableOnThisDevice: true,
+      keepOnDevice: false,
+      sizeBytes: item.source.sizeBytes,
+      checksumSha256: item.source.checksumSha256,
+      updatedAt: item.updatedAt,
+    };
+  }
+  if (item.local.status === "recovery-only") {
+    return {
+      status: "recovery-only",
+      source: "temporary-recovery",
+      availableOnThisDevice: true,
+      keepOnDevice: false,
+      sizeBytes: item.source.sizeBytes,
+      checksumSha256: item.source.checksumSha256,
+      updatedAt: item.updatedAt,
+      errorMessage: item.local.managed?.lastError,
+    };
+  }
+  if (item.local.status === "error") {
+    return {
+      status: "download-failed",
+      source: "device-cache",
+      availableOnThisDevice: false,
+      keepOnDevice: false,
+      sizeBytes: item.source.sizeBytes,
+      checksumSha256: item.source.checksumSha256,
+      updatedAt: item.updatedAt,
+      errorMessage: item.local.managed?.lastError,
+    };
+  }
+  return {
+    status: "not-downloaded",
+    source: "clarity-cloud",
+    availableOnThisDevice: false,
+    keepOnDevice: false,
+    sizeBytes: item.source.sizeBytes,
+    checksumSha256: item.source.checksumSha256,
+    updatedAt: item.updatedAt,
+  };
+};
+
+export const buildSavedVideoCloudCatalogueRecord = (item: SavedVideoItem): SavedVideoCloudCatalogueRecord => {
+  const provider = item.cloud?.provider || "google-drive";
+  return {
+    savedVideoId: item.savedVideoId,
+    playerId: item.playerId,
+    lessonId: item.lessonId,
+    title: item.title,
+    capturedAt: item.capturedAt,
+    duration: item.source.duration,
+    fileSizeBytes: item.source.sizeBytes,
+    mimeType: item.source.mimeType,
+    thumbnailDataUrl: item.thumbnailDataUrl,
+    analysisSummary: analysisSummaryFromItem(item),
+    cloudState: getSavedVideoCloudCatalogueState(item),
+    provider,
+    media: {
+      provider,
+      providerAssetId: item.cloud?.driveAssetId || item.cloud?.driveFolderId,
+      providerVideoFileId: item.cloud?.driveVideoFileId,
+      providerManifestFileId: item.cloud?.driveManifestFileId,
+      providerAnalysisFileId: item.cloud?.driveAnalysisFileId,
+      providerFolderLink: item.cloud?.providerFolderLink,
+      checksumSha256: item.source.checksumSha256,
+      sizeBytes: item.source.sizeBytes,
+      mimeType: item.source.mimeType,
+    },
+    checksumSha256: item.source.checksumSha256,
+    sourceDeviceId: item.source.sourceDeviceId,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+};
+
+const withSavedVideoArchitectureState = (item: SavedVideoItem): SavedVideoItem => ({
+  ...item,
+  cloudCatalogue: buildSavedVideoCloudCatalogueRecord(item),
+  device: getSavedVideoDeviceState(item),
+});
 
 const runStoreRequest = async <T>(
   storeName: string,
@@ -417,6 +616,7 @@ const buildItem = async (
       width: input.sourceVideo.width ?? input.analysisSnapshot.videoMeta?.width,
       height: input.sourceVideo.height ?? input.analysisSnapshot.videoMeta?.height,
       checksumSha256,
+      sourceDeviceId: existing?.source.sourceDeviceId || getStoredClarityDeviceId(),
     },
     local: {
       status: "available",
@@ -435,7 +635,7 @@ const buildItem = async (
   };
 
   return {
-    item,
+    item: withSavedVideoArchitectureState(item),
     blobRecord: {
       savedVideoId,
       blob: input.sourceBlob,
@@ -670,22 +870,11 @@ const stripDataUrls = (value: unknown): unknown => {
 };
 
 const getClarityDevice = () => {
-  const fallback = "browser";
   if (typeof window === "undefined") {
-    return { deviceId: fallback, deviceName: "Server render", platform: "" };
-  }
-  let deviceId = "";
-  try {
-    deviceId = window.localStorage.getItem("clarityDeviceId") || "";
-    if (!deviceId) {
-      deviceId = createStableId("clarity-device");
-      window.localStorage.setItem("clarityDeviceId", deviceId);
-    }
-  } catch {
-    deviceId = fallback;
+    return { deviceId: "browser", deviceName: "Server render", platform: "" };
   }
   return {
-    deviceId: deviceId || fallback,
+    deviceId: getStoredClarityDeviceId(),
     deviceName: window.navigator.userAgent.slice(0, 120),
     platform: window.navigator.platform,
   };
@@ -730,14 +919,14 @@ const patchCloudState = async (
   item: SavedVideoItem,
   cloud: SavedVideoCloudState
 ) => {
-  const next: SavedVideoItem = {
+  const next: SavedVideoItem = withSavedVideoArchitectureState({
     ...item,
     source: {
       ...item.source,
       checksumSha256: item.source.checksumSha256 || undefined,
     },
     cloud,
-  };
+  });
   await store.putItem(next);
   return next;
 };
@@ -1286,10 +1475,10 @@ const managedStatusMessage = (health: ManagedLocalLibraryHealth) => {
     case "repair-required":
       return "Repair required";
     case "unsupported":
-      return "File System Access is unavailable. Working from local cache.";
+      return "File System Access is unavailable. Working from device cache.";
     case "not-configured":
     default:
-      return "Choose Clarity Video Library";
+      return "Choose My Library";
   }
 };
 
@@ -1385,7 +1574,7 @@ export const moveManagedLocalVideoLibrary = async (store: SavedVideoLibraryStore
 
 const markManagedFailure = (item: SavedVideoItem, error: unknown): SavedVideoItem => {
   const status = managedHealthFromError(error);
-  return {
+  return withSavedVideoArchitectureState({
     ...item,
     local: {
       ...item.local,
@@ -1396,7 +1585,7 @@ const markManagedFailure = (item: SavedVideoItem, error: unknown): SavedVideoIte
         lastError: error instanceof Error ? error.message : managedStatusMessage(status),
       },
     },
-  };
+  });
 };
 
 const writeManagedSavedVideo = async (
@@ -1454,7 +1643,7 @@ const writeManagedSavedVideo = async (
   if (verified.size !== blobRecord.sizeBytes) {
     throw new SavedVideoLibraryError("SAVED_VIDEO_VERIFY_FAILED", "Managed library video did not match metadata.");
   }
-  return {
+  return withSavedVideoArchitectureState({
     ...item,
     local: {
       ...item.local,
@@ -1466,7 +1655,7 @@ const writeManagedSavedVideo = async (
         verifiedAt: nowIso(),
       },
     },
-  };
+  });
 };
 
 const readManagedSavedVideoBlob = async (item: SavedVideoItem): Promise<Blob | null> => {
@@ -1478,6 +1667,22 @@ const readManagedSavedVideoBlob = async (item: SavedVideoItem): Promise<Blob | n
   return file.size > 0 ? file : null;
 };
 
+const removeManagedSavedVideoDirectory = async (item: SavedVideoItem) => {
+  const root = await getStoredManagedRootHandle();
+  if (!root || (await getManagedPermission(root)) !== "granted") return;
+  await getManagedSavedVideoDirectory(root, item.playerId, item.savedVideoId, false)
+    .then(async () => {
+      const videos = await root
+        .getDirectoryHandle("Players")
+        .then((players) => players.getDirectoryHandle(sanitizeSegment(item.playerId, "player")))
+        .then((player) => player.getDirectoryHandle("Videos"));
+      await videos.removeEntry?.(sanitizeSegment(item.savedVideoId, "saved-video"), { recursive: true });
+    })
+    .catch(() => {
+      // Device-cache metadata cleanup should still proceed.
+    });
+};
+
 const verifyManagedSavedVideo = async (item: SavedVideoItem): Promise<SavedVideoItem> => {
   try {
     const blob = await readManagedSavedVideoBlob(item);
@@ -1485,7 +1690,7 @@ const verifyManagedSavedVideo = async (item: SavedVideoItem): Promise<SavedVideo
     if (blobSize(blob) !== item.source.sizeBytes) {
       throw new SavedVideoLibraryError("SAVED_VIDEO_VERIFY_FAILED", "Managed library file size does not match metadata.");
     }
-    return {
+    return withSavedVideoArchitectureState({
       ...item,
       local: {
         ...item.local,
@@ -1496,7 +1701,7 @@ const verifyManagedSavedVideo = async (item: SavedVideoItem): Promise<SavedVideo
           verifiedAt: nowIso(),
         },
       },
-    };
+    });
   } catch (error) {
     return markManagedFailure(item, error);
   }
@@ -1579,10 +1784,12 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
         const existing = input.savedVideoId ? await getItem(input.savedVideoId) : null;
         const { item, blobRecord } = await buildItem(input, existing);
         let durableItem = item;
-        try {
-          durableItem = await writeManagedSavedVideo(item, blobRecord);
-        } catch (error) {
-          durableItem = markManagedFailure(item, error);
+        if (input.archiveToMyLibrary) {
+          try {
+            durableItem = await writeManagedSavedVideo(item, blobRecord);
+          } catch (error) {
+            durableItem = markManagedFailure(item, error);
+          }
         }
         await runStoreRequest(SAVED_BLOBS_STORE, "readwrite", (objectStore) =>
           objectStore.put(blobRecord)
@@ -1648,28 +1855,16 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
     },
 
     async putItem(item) {
+      const next = withSavedVideoArchitectureState({ ...item, updatedAt: new Date().toISOString() });
       await runStoreRequest(SAVED_ITEMS_STORE, "readwrite", (objectStore) =>
-        objectStore.put({ ...item, updatedAt: new Date().toISOString() })
+        objectStore.put(next)
       );
     },
 
     async deleteItem(savedVideoId) {
       try {
         const item = await getItem(savedVideoId);
-        const root = await getStoredManagedRootHandle();
-        if (item && root && (await getManagedPermission(root)) === "granted") {
-          await getManagedSavedVideoDirectory(root, item.playerId, item.savedVideoId, false)
-            .then(async (_directory) => {
-              const videos = await root
-                .getDirectoryHandle("Players")
-                .then((players) => players.getDirectoryHandle(sanitizeSegment(item.playerId, "player")))
-                .then((player) => player.getDirectoryHandle("Videos"));
-              await videos.removeEntry?.(sanitizeSegment(item.savedVideoId, "saved-video"), { recursive: true });
-            })
-            .catch(() => {
-              // IndexedDB metadata/cache cleanup must still proceed.
-            });
-        }
+        if (item) await removeManagedSavedVideoDirectory(item);
         await runStoreRequest(SAVED_BLOBS_STORE, "readwrite", (objectStore) =>
           objectStore.delete(savedVideoId)
         );
@@ -1683,6 +1878,28 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
           error
         );
       }
+    },
+
+    async removeDeviceCopy(savedVideoId) {
+      const item = await getItem(savedVideoId);
+      if (!item) {
+        throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
+      }
+      await removeManagedSavedVideoDirectory(item);
+      await runStoreRequest(SAVED_BLOBS_STORE, "readwrite", (objectStore) =>
+        objectStore.delete(savedVideoId)
+      );
+      const next = withSavedVideoArchitectureState({
+        ...item,
+        updatedAt: nowIso(),
+        local: {
+          status: "missing",
+        },
+      });
+      await runStoreRequest(SAVED_ITEMS_STORE, "readwrite", (objectStore) =>
+        objectStore.put(next)
+      );
+      return next;
     },
 
     async verifyItem(savedVideoId) {
@@ -1718,7 +1935,11 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
           "Saved video blob size did not match metadata."
         );
       }
-      return currentItem;
+      const verified = withSavedVideoArchitectureState(currentItem);
+      await runStoreRequest(SAVED_ITEMS_STORE, "readwrite", (objectStore) =>
+        objectStore.put(verified)
+      );
+      return verified;
     },
   };
 
@@ -1770,12 +1991,29 @@ export const createMemorySavedVideoLibraryStore = (): SavedVideoLibraryStore => 
     },
 
     async putItem(item) {
-      items.set(item.savedVideoId, { ...item, updatedAt: new Date().toISOString() });
+      items.set(item.savedVideoId, withSavedVideoArchitectureState({ ...item, updatedAt: new Date().toISOString() }));
     },
 
     async deleteItem(savedVideoId) {
       blobs.delete(savedVideoId);
       items.delete(savedVideoId);
+    },
+
+    async removeDeviceCopy(savedVideoId) {
+      const item = items.get(savedVideoId);
+      if (!item) {
+        throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata is missing.");
+      }
+      blobs.delete(savedVideoId);
+      const next = withSavedVideoArchitectureState({
+        ...item,
+        updatedAt: nowIso(),
+        local: {
+          status: "missing",
+        },
+      });
+      items.set(savedVideoId, next);
+      return next;
     },
 
     async verifyItem(savedVideoId) {
@@ -1799,7 +2037,9 @@ export const createMemorySavedVideoLibraryStore = (): SavedVideoLibraryStore => 
           "Saved video blob size did not match metadata."
         );
       }
-      return item;
+      const verified = withSavedVideoArchitectureState(item);
+      items.set(savedVideoId, verified);
+      return verified;
     },
   };
 

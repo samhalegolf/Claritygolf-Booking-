@@ -6,7 +6,7 @@ import {
   getLocalStorageActionLabel,
   getLocalStorageHealth,
   getSavedVideoCloudStatusLabel,
-  getSavedVideoLocalStatusLabel,
+  getSavedVideoDeviceStatusLabel,
   type GoogleDriveTransferStatus,
 } from "./storageHealth";
 import type {
@@ -244,7 +244,35 @@ describe("storage health model", () => {
     assert.equal(health.message.includes("https://"), false);
   });
 
-  it("keeps local saved status successful when Cloud transfer fails", () => {
+  it("labels Cloud catalogue availability separately from device downloads", () => {
+    const cloudOnly = savedVideo({
+      local: { status: "missing" },
+      cloud: { status: "ready", provider: "google-drive" },
+    });
+    const uploading = savedVideo({
+      cloud: { status: "uploading", provider: "google-drive", progress: 42 },
+    });
+
+    assert.equal(getSavedVideoDeviceStatusLabel(cloudOnly), "Device • Not downloaded");
+    assert.equal(
+      getSavedVideoCloudStatusLabel(cloudOnly, {
+        isUploading: false,
+        cloudConnected: true,
+        cloudState: "connected",
+      }),
+      "Cloud • Available",
+    );
+    assert.equal(
+      getSavedVideoCloudStatusLabel(uploading, {
+        isUploading: true,
+        cloudConnected: true,
+        cloudState: "connected",
+      }),
+      "Cloud • Uploading 42%",
+    );
+  });
+
+  it("keeps device state successful when Cloud transfer fails", () => {
     const video = savedVideo({
       cloud: {
         status: "failed",
@@ -253,18 +281,18 @@ describe("storage health model", () => {
       },
     });
 
-    assert.equal(getSavedVideoLocalStatusLabel(video), "Local - Saved");
+    assert.equal(getSavedVideoDeviceStatusLabel(video), "My Library • Saved permanently");
     assert.equal(
       getSavedVideoCloudStatusLabel(video, {
         isUploading: false,
         cloudConnected: true,
         cloudState: "connected",
       }),
-      "Cloud - Failed - Retry",
+      "Cloud • Upload failed - Retry",
     );
   });
 
-  it("labels failed session creation separately from failed chunk upload", () => {
+  it("labels failed session creation as an upload retry state", () => {
     const video = savedVideo({
       cloud: {
         status: "failed",
@@ -279,39 +307,39 @@ describe("storage health model", () => {
         cloudConnected: true,
         cloudState: "connected",
       }),
-      "Cloud - Could not start upload",
+      "Cloud • Upload failed - Retry",
     );
   });
 
-  it("shows separate Player Profile local and cloud labels", () => {
+  it("shows separate Player Profile device and cloud labels", () => {
     const video = savedVideo({
       local: { status: "available", managed: { status: "permission-lost" } },
       cloud: { status: "not-uploaded" },
     });
 
-    assert.equal(getSavedVideoLocalStatusLabel(video), "Local - Cache only");
+    assert.equal(getSavedVideoDeviceStatusLabel(video), "Device • Available on this device");
     assert.equal(
       getSavedVideoCloudStatusLabel(video, {
         isUploading: false,
         cloudConnected: true,
         cloudState: "connected",
       }),
-      "Cloud - Not sent",
+      "Cloud • Waiting to upload",
     );
   });
 
-  it("shows an actionable Cloud connection reason on saved-video cards", () => {
+  it("shows waiting to upload when Cloud is not connected", () => {
     assert.equal(
       getSavedVideoCloudStatusLabel(savedVideo({ cloud: { status: "not-uploaded" } }), {
         isUploading: false,
         cloudConnected: false,
         cloudState: "not_connected",
       }),
-      "Cloud - Connect Clarity Cloud",
+      "Cloud • Waiting to upload",
     );
   });
 
-  it("shows setup and service blockers instead of a silent Cloud action", () => {
+  it("keeps setup and service blockers in the waiting-to-upload state", () => {
     const setupHealth = getClarityCloudHealth(cloudStatus({
       configured: false,
       state: "blocked",
@@ -324,7 +352,7 @@ describe("storage health model", () => {
         cloudState: "blocked",
         cloudHealth: setupHealth,
       }),
-      "Cloud - Setup incomplete",
+      "Cloud • Waiting to upload",
     );
     assert.equal(
       getSavedVideoCloudStatusLabel(savedVideo({ cloud: { status: "not-uploaded" } }), {
@@ -332,7 +360,7 @@ describe("storage health model", () => {
         cloudConnected: true,
         cloudState: "error",
       }),
-      "Cloud - Service unavailable",
+      "Cloud • Waiting to upload",
     );
   });
 
