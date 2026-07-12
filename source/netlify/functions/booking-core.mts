@@ -2572,6 +2572,56 @@ async function readItems() {
   return rows.map(rowToItem);
 }
 
+function publicBookingSlotsWeek(value) {
+  const rawWeek = Number(value ?? currentWeekOffset());
+  return Number.isInteger(rawWeek) ? rawWeek : currentWeekOffset();
+}
+
+export function publicSlotCalendarItemsQuery({ accountId, week, useAccountScope = true } = {}) {
+  const safeWeek = publicBookingSlotsWeek(week);
+  const query = ["select=*"];
+  if (useAccountScope) {
+    query.push(`account_id=eq.${encodeURIComponent(cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id))}`);
+  }
+  query.push(
+    `week=eq.${encodeURIComponent(String(safeWeek))}`,
+    "order=day.asc,start.asc,id.asc",
+  );
+  return query.join("&");
+}
+
+export async function readPublicSlotItemsForWeek({ accountId, week } = {}) {
+  const safeWeek = publicBookingSlotsWeek(week);
+  const primaryQuery = publicSlotCalendarItemsQuery({ accountId, week: safeWeek, useAccountScope: true });
+  try {
+    const rows = await requestSupabaseRows("calendar_items", { query: primaryQuery });
+    return {
+      items: rows.map(rowToItem),
+      rowsFetched: rows.length,
+      query: primaryQuery,
+      queryMode: "account_week",
+      usedLegacySchemaFallback: false,
+    };
+  } catch (error) {
+    if (!isSupabaseAccountScopeMissingError(error)) throw error;
+    const fallbackQuery = publicSlotCalendarItemsQuery({ accountId, week: safeWeek, useAccountScope: false });
+    console.warn("public_booking_slots:calendar_items_account_scope_fallback", {
+      week: safeWeek,
+      accountId: cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id),
+      error: error instanceof Error ? error.message.slice(0, 300) : String(error || "").slice(0, 300),
+    });
+    const rows = await requestSupabaseRows("calendar_items", { query: fallbackQuery });
+    return {
+      items: rows.map(rowToItem),
+      rowsFetched: rows.length,
+      query: fallbackQuery,
+      attemptedQuery: primaryQuery,
+      queryMode: "week_only_legacy_schema",
+      usedLegacySchemaFallback: true,
+    };
+  }
+}
+
 function queryRows(result) {
   return Array.isArray(result) ? result : result?.rows || [];
 }
@@ -3696,6 +3746,79 @@ async function readPublicCalendarState() {
     availability: availabilityFromSettings(settingsMap),
     brand: brandSettingsFromSettings(settingsMap, account),
     account,
+  };
+}
+
+export async function readPublicSlotContext({ serviceId, week } = {}, options = {}) {
+  const metrics = options.metrics || null;
+  const safeWeek = publicBookingSlotsWeek(week);
+  const settingsStartedAt = Date.now();
+  const snapshot = options.settingsSnapshot || await readStateSettingsSnapshot();
+  const settingsMap = snapshot.settings || {};
+  const syncKey = snapshot.syncKey || settingValue(settingsMap, "syncKey") || "";
+  const updatedAt = snapshot.updatedAt || settingValue(settingsMap, "updatedAt") || nowIso();
+  const account = coachAccountFromSettings(settingsMap);
+  const state = {
+    syncKey,
+    updatedAt,
+    items: [],
+    services: servicesFromSettings(settingsMap),
+    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
+    coaches: coachProfilesFromSettings(settingsMap, account),
+    locations: locationsFromSettings(settingsMap, account),
+    availability: availabilityFromSettings(settingsMap),
+    brand: brandSettingsFromSettings(settingsMap, account),
+    account,
+  };
+  if (metrics) metrics.settingsReadMs = Date.now() - settingsStartedAt;
+
+  const { workspaceAccount, state: accountState } = publicAccountState(state);
+  const cleanServiceId = cleanString(serviceId, "", 140);
+  if (!cleanServiceId) {
+    throw publicBookingSlotsRequestError("Choose a public lesson type.", 400, "service_required");
+  }
+  const targetService = publicBookableServices(accountState.services).find((service) => service.id === cleanServiceId);
+  if (!targetService) {
+    throw publicBookingSlotsRequestError("Choose a public lesson type.", 404);
+  }
+
+  const itemsStartedAt = Date.now();
+  const readItemsForWeek = options.readItemsForWeek || readPublicSlotItemsForWeek;
+  const itemRead = await readItemsForWeek({
+    accountId: workspaceAccount.id,
+    serviceId: targetService.id,
+    week: safeWeek,
+  });
+  const rawItems = Array.isArray(itemRead) ? itemRead : itemRead?.items || [];
+  const rowsFetched = Number.isFinite(Number(itemRead?.rowsFetched)) ? Number(itemRead.rowsFetched) : rawItems.length;
+  const accountItems = rawItems.filter((item) => recordBelongsToAccount(item, workspaceAccount.id));
+  const requestedWeekItems = publicSlotRequestedWeekItems(accountItems, safeWeek);
+  const relevantResourceItems = publicSlotRelevantResourceItems(requestedWeekItems, targetService, accountState);
+
+  if (metrics) {
+    metrics.itemsReadMs = Date.now() - itemsStartedAt;
+    metrics.rowsFetched = rowsFetched;
+    metrics.requestedWeekItemCount = requestedWeekItems.length;
+    metrics.relevantResourceItemCount = relevantResourceItems.length;
+    metrics.queryMode = itemRead?.queryMode || "injected";
+    metrics.usedLegacySchemaFallback = itemRead?.usedLegacySchemaFallback === true;
+  }
+
+  return {
+    ...state,
+    items: relevantResourceItems,
+    workspaceAccount,
+    service: targetService,
+    publicSlotRead: {
+      week: safeWeek,
+      rowsFetched,
+      requestedWeekItemCount: requestedWeekItems.length,
+      relevantResourceItemCount: relevantResourceItems.length,
+      query: itemRead?.query || "",
+      attemptedQuery: itemRead?.attemptedQuery || "",
+      queryMode: itemRead?.queryMode || "injected",
+      usedLegacySchemaFallback: itemRead?.usedLegacySchemaFallback === true,
+    },
   };
 }
 
@@ -5845,8 +5968,7 @@ function publicSlotsForService(accountState, service, week, ignoreId = "") {
 
 export function publicBookingSlots(state, options = {}) {
   const { state: accountState } = publicAccountState(state);
-  const rawWeek = Number(options.week ?? currentWeekOffset());
-  const week = Number.isInteger(rawWeek) ? rawWeek : currentWeekOffset();
+  const week = publicBookingSlotsWeek(options.week);
   const serviceId = cleanString(options.serviceId, "", 140);
   const ignoreId = cleanString(options.ignoreId, "", 160);
   const metrics = options.metrics;
@@ -5858,7 +5980,7 @@ export function publicBookingSlots(state, options = {}) {
   if (metrics) {
     metrics.serviceId = serviceId;
     metrics.week = week;
-    metrics.totalPublicItemCount = totalPublicItemCount;
+    if (metrics.totalPublicItemCount == null) metrics.totalPublicItemCount = totalPublicItemCount;
   }
   const targetService = services.find((service) => service.id === serviceId);
   if (!targetService) {
@@ -5868,8 +5990,8 @@ export function publicBookingSlots(state, options = {}) {
   const relevantResourceItems = publicSlotRelevantResourceItems(requestedWeekItems, targetService, accountState);
   const filteredAccountState = { ...accountState, items: relevantResourceItems };
   if (metrics) {
-    metrics.requestedWeekItemCount = requestedWeekItems.length;
-    metrics.relevantResourceItemCount = relevantResourceItems.length;
+    if (metrics.requestedWeekItemCount == null) metrics.requestedWeekItemCount = requestedWeekItems.length;
+    if (metrics.relevantResourceItemCount == null) metrics.relevantResourceItemCount = relevantResourceItems.length;
   }
   const slots = publicSlotsForService(filteredAccountState, targetService, week, ignoreId);
   if (metrics) metrics.returnedSlotCount = slots.length;
@@ -5877,7 +5999,7 @@ export function publicBookingSlots(state, options = {}) {
   servicesById[targetService.id] = {
     serviceId: targetService.id,
     week,
-    slots,
+    slots: slots.map((slot) => ({ ...slot })),
   };
   return {
     updatedAt: state.updatedAt,
@@ -5889,17 +6011,24 @@ export function publicBookingSlots(state, options = {}) {
   };
 }
 
-export async function handlePublicBookingSlotsRequest(req) {
+export async function handlePublicBookingSlotsRequest(req, options = {}) {
   const startedAt = Date.now();
   const url = new URL(req.url);
   const serviceId = cleanString(url.searchParams.get("serviceId") || "", "", 140);
+  const week = publicBookingSlotsWeek(url.searchParams.get("week") || "");
   const metrics = {
     serviceId,
-    week: url.searchParams.get("week") || "",
+    week,
+    settingsReadMs: null,
+    itemsReadMs: null,
+    slotCalculationMs: null,
     totalPublicItemCount: null,
+    rowsFetched: null,
     requestedWeekItemCount: null,
     relevantResourceItemCount: null,
     returnedSlotCount: null,
+    queryMode: "",
+    usedLegacySchemaFallback: false,
     status: 500,
   };
   try {
@@ -5913,12 +6042,16 @@ export async function handlePublicBookingSlotsRequest(req) {
         400,
       );
     }
-    const payload = publicBookingSlots(await readPublicCalendarState(), {
+    const readSlotContext = options.readPublicSlotContext || readPublicSlotContext;
+    const slotContext = await readSlotContext({ serviceId, week }, { ...options, metrics });
+    const slotCalculationStartedAt = Date.now();
+    const payload = publicBookingSlots(slotContext, {
       serviceId,
-      week: url.searchParams.get("week") || "",
+      week,
       ignoreId: url.searchParams.get("ignoreId") || "",
       metrics,
     });
+    metrics.slotCalculationMs = Date.now() - slotCalculationStartedAt;
     metrics.status = 200;
     return json(payload);
   } catch (error) {
@@ -5933,9 +6066,11 @@ export async function handlePublicBookingSlotsRequest(req) {
       status,
     );
   } finally {
+    const durationMs = Date.now() - startedAt;
     console.info("public_booking_slots:timing", {
       ...metrics,
-      durationMs: Date.now() - startedAt,
+      durationMs,
+      totalMs: durationMs,
     });
   }
 }
