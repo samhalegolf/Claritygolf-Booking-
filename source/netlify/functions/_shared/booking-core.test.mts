@@ -3,7 +3,10 @@ import test from "node:test";
 
 import {
   handlePublicBookingSlotsRequest,
+  publicSlotCalendarItemsQuery,
   publicBookingSlots,
+  readPublicSlotContext,
+  readPublicSlotItemsForWeek,
 } from "../booking-core.mts";
 
 const accountId = "test-account";
@@ -180,6 +183,31 @@ function calendarState(overrides = {}) {
   };
 }
 
+function settingsSnapshotFromState(state = calendarState()) {
+  return {
+    syncKey: state.syncKey,
+    updatedAt: state.updatedAt,
+    settings: {
+      syncKey: state.syncKey,
+      updatedAt: state.updatedAt,
+      accountId: state.account.id,
+      accountCoachName: state.account.coachName,
+      accountBusinessName: state.account.businessName,
+      accountVenueName: "Test Range",
+      accountVenueShortName: "Range",
+      accountTimezone: state.account.timezone,
+      accountContactEmail: "coach@example.test",
+      accountBookingUrl: "",
+      accountCalendarSlug: accountId,
+      workspaceAccountsJson: JSON.stringify(state.workspaceAccounts),
+      coachProfilesJson: JSON.stringify(state.coaches),
+      locationsJson: JSON.stringify(state.locations),
+      servicesJson: JSON.stringify(state.services),
+      availabilityJson: JSON.stringify(state.availability),
+    },
+  };
+}
+
 function item(overrides = {}) {
   return {
     id: "item-1",
@@ -232,6 +260,229 @@ test("invalid or non-public public booking serviceId keeps the request error pat
       (error: any) => error?.status === 404 && /choose a public lesson type/i.test(error.message),
     );
   }
+});
+
+test("public slot calendar item query scopes by account and requested week", () => {
+  const query = publicSlotCalendarItemsQuery({ accountId, week: testWeek });
+
+  assert.match(query, /select=\*/);
+  assert.match(query, new RegExp(`(?:^|&)account_id=eq\\.${accountId}(?:&|$)`));
+  assert.match(query, new RegExp(`(?:^|&)week=eq\\.${testWeek}(?:&|$)`));
+  assert.doesNotMatch(query, /order=week\.asc/);
+});
+
+test("public slot item read falls back to week-only when the account column is missing", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.SUPABASE_URL;
+  const originalKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const originalInfo = console.warn;
+  const requests: string[] = [];
+  process.env.SUPABASE_URL = "https://supabase.example";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key";
+  console.warn = () => undefined;
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.includes("account_id=eq.")) {
+      return Response.json(
+        {
+          code: "PGRST204",
+          message: "Could not find the 'account_id' column of 'calendar_items' in the schema cache",
+        },
+        { status: 400 },
+      );
+    }
+    assert.match(url, new RegExp(`(?:\\?|&)week=eq\\.${testWeek}(?:&|$)`));
+    assert.doesNotMatch(url, /account_id=eq\./);
+    return Response.json([
+      {
+        id: "legacy-week-row",
+        kind: "block",
+        week: testWeek,
+        day,
+        start: firstSlot,
+        duration: 30,
+        title: "Busy",
+      },
+    ]);
+  };
+
+  try {
+    const result = await readPublicSlotItemsForWeek({ accountId, week: testWeek });
+
+    assert.equal(result.usedLegacySchemaFallback, true);
+    assert.equal(result.queryMode, "week_only_legacy_schema");
+    assert.equal(result.rowsFetched, 1);
+    assert.equal(result.items[0].id, "legacy-week-row");
+    assert.equal(requests.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.warn = originalInfo;
+    if (originalUrl === undefined) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = originalUrl;
+    if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = originalKey;
+  }
+});
+
+test("public slot context keeps requested-week relevant resource records only", async () => {
+  const metrics: any = {};
+  let readArgs: any = null;
+  const rows = [
+    item({ id: "same-coach" }),
+    item({
+      id: "unrelated",
+      serviceId: otherServiceId,
+      coachId: otherCoachId,
+      locationId: otherLocationId,
+    }),
+    item({
+      id: "selected-location-block",
+      kind: "block",
+      serviceId: "",
+      start: secondSlot,
+      coachId: "",
+      locationId,
+    }),
+    item({
+      id: "selected-coach-block",
+      kind: "block",
+      serviceId: "",
+      start: thirdSlot,
+      coachId,
+      locationId: "",
+    }),
+    item({
+      id: "ambiguous-legacy-row",
+      kind: "block",
+      serviceId: "",
+      coachId: "",
+      locationId: "",
+    }),
+    item({
+      id: "other-week",
+      week: testWeek + 1,
+    }),
+    item({
+      id: "cancelled",
+      status: "cancelled",
+    }),
+    item({
+      id: "no-show",
+      status: "no_show",
+      start: secondSlot,
+    }),
+  ];
+
+  const context = await readPublicSlotContext(
+    { serviceId, week: testWeek },
+    {
+      settingsSnapshot: settingsSnapshotFromState(),
+      metrics,
+      readItemsForWeek: async (args: any) => {
+        readArgs = args;
+        return {
+          items: rows,
+          rowsFetched: rows.length,
+          query: "mock-week-query",
+          queryMode: "mock_week",
+        };
+      },
+    },
+  );
+
+  assert.equal(readArgs.accountId, accountId);
+  assert.equal(readArgs.serviceId, serviceId);
+  assert.equal(readArgs.week, testWeek);
+  assert.deepEqual(
+    context.items.map((candidate: any) => candidate.id).sort(),
+    ["ambiguous-legacy-row", "same-coach", "selected-coach-block", "selected-location-block"],
+  );
+  assert.equal(metrics.rowsFetched, rows.length);
+  assert.equal(metrics.requestedWeekItemCount, 5);
+  assert.equal(metrics.relevantResourceItemCount, 4);
+  assert.equal(metrics.queryMode, "mock_week");
+});
+
+test("public slot context retains same-service group bookings for capacity", async () => {
+  const context = await readPublicSlotContext(
+    { serviceId: groupServiceId, week: testWeek },
+    {
+      settingsSnapshot: settingsSnapshotFromState(),
+      readItemsForWeek: async () => ({
+        items: [
+          item({
+            id: "group-booking-1",
+            serviceId: groupServiceId,
+            day: 2,
+            start: minutes(10, 0),
+            duration: 60,
+          }),
+          item({
+            id: "unrelated",
+            serviceId: otherServiceId,
+            coachId: otherCoachId,
+            locationId: otherLocationId,
+          }),
+        ],
+        rowsFetched: 2,
+        query: "mock-week-query",
+        queryMode: "mock_week",
+      }),
+    },
+  );
+  const payload = publicBookingSlots(context, {
+    serviceId: groupServiceId,
+    week: testWeek,
+  });
+
+  assert.deepEqual(context.items.map((candidate: any) => candidate.id), ["group-booking-1"]);
+  assert.equal(payload.slots.length, 1);
+  assert.equal(payload.slots[0].remainingSpots, 1);
+});
+
+test("public booking slots endpoint uses the narrow slot context reader", async () => {
+  const originalInfo = console.info;
+  let calls = 0;
+  console.info = () => undefined;
+  try {
+    const response = await handlePublicBookingSlotsRequest(
+      new Request(`https://example.test/api/public-booking-slots?serviceId=${serviceId}&week=${testWeek}`),
+      {
+        readPublicSlotContext: async (params: any) => {
+          calls += 1;
+          assert.deepEqual(params, { serviceId, week: testWeek });
+          return calendarState();
+        },
+      },
+    );
+    const body = await response.json() as any;
+
+    assert.equal(response.status, 200);
+    assert.equal(calls, 1);
+    assert.equal(body.week, testWeek);
+    assert.equal(body.serviceId, serviceId);
+    assert.ok(Array.isArray(body.slots));
+    assert.deepEqual(body.services[serviceId].slots, body.slots);
+  } finally {
+    console.info = originalInfo;
+  }
+});
+
+test("public slot context preserves invalid serviceId error behaviour", async () => {
+  await assert.rejects(
+    () =>
+      readPublicSlotContext(
+        { serviceId: "missing-service", week: testWeek },
+        {
+          settingsSnapshot: settingsSnapshotFromState(),
+          readItemsForWeek: async () => {
+            throw new Error("calendar items should not be read for an invalid service");
+          },
+        },
+      ),
+    (error: any) => error?.status === 404 && /choose a public lesson type/i.test(error.message),
+  );
 });
 
 test("items from another week do not affect requested-week public slots", () => {
