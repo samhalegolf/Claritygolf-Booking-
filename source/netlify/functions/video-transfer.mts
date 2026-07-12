@@ -1837,7 +1837,7 @@ async function handleFinalize(
     ok: true,
     status: "ready",
     catalogueStatus: "ready_to_import",
-    message: "Ready to import in Clarity Cloud",
+    message: "Available in Clarity Cloud",
     assetFolderId: finalized.assetFolderId,
     videoFileId: finalized.videoFileId,
     analysisFileId: finalized.analysisFileId,
@@ -1945,7 +1945,7 @@ function assertImportable(session: VideoTransferSession) {
   if (session.status !== "ready" || !session.driveVideoFileId || !session.driveManifestFileId) {
     throw new TransferError(
       "CLARITY_CLOUD_IMPORT_NOT_READY",
-      "This transfer is not ready to import into Local Storage.",
+      "This video is not ready to download from Clarity Cloud.",
       409
     );
   }
@@ -2002,7 +2002,7 @@ async function handleImportReceipt(req: Request, accountId: string, savedVideoId
   if (sizeBytes !== session.expectedSizeBytes || checksumSha256 !== session.checksumSha256) {
     throw new TransferError(
       "CLARITY_CLOUD_IMPORT_VERIFY_FAILED",
-      "Local Storage verification did not match the Clarity Cloud transfer catalogue.",
+      "Device download verification did not match the Clarity Cloud catalogue.",
       409
     );
   }

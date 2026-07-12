@@ -36,6 +36,7 @@ import {
 } from "./utils/videoBlobStore";
 import {
   createIndexedDbSavedVideoLibrary,
+  importSavedVideoFromClarityCloud,
   SavedVideoCloudError,
   SavedVideoLibraryError,
   type SavedVideoItem,
@@ -68,7 +69,7 @@ const SNAPSHOT_STORAGE_WARNING_LIMIT = 12;
 const SNAPSHOT_PREVIEW_WIDTH = 88;
 const SNAPSHOT_PREVIEW_HEIGHT = 50;
 const DEFAULT_PLAYER_ID = "player-demo-1";
-type SaveStatus = "idle" | "saving" | "sending" | "saved" | "error";
+type SaveStatus = "idle" | "saving" | "sending" | "downloading" | "saved" | "error";
 type RecordingStatus = "ready" | "recording" | "processing" | "error";
 type CloudUploadFailureStage =
   | "Configuration"
@@ -94,12 +95,12 @@ export interface VideoWorkspaceNavigationContext {
   lessonId?: string;
   savedVideoId?: string;
   hasPlayerContext: boolean;
-  reason: "toolbar-back" | "local-save" | "save-and-send";
+  reason: "toolbar-back" | "save" | "my-library-save";
 }
 
 export interface VideoWorkspaceSaveResult extends VideoWorkspaceNavigationContext {
   savedItems: SavedVideoItem[];
-  reason: "local-save" | "save-and-send";
+  reason: "save" | "my-library-save";
 }
 
 interface LiveRecordingSession {
@@ -446,7 +447,6 @@ export function VideoWorkspace({
   const [currentSavedVideoIds, setCurrentSavedVideoIds] = useState<Partial<Record<ComparisonSide, string>>>({});
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveMessage, setSaveMessage] = useState("Nothing to save yet.");
-  const [showSaveAndSendOffer, setShowSaveAndSendOffer] = useState(false);
   const [dragTargetSide, setDragTargetSide] = useState<ComparisonSide | null>(null);
   const [intakeError, setIntakeError] = useState("");
   const [liveRecording, setLiveRecording] = useState<LiveRecordingSession | null>(null);
@@ -1001,7 +1001,7 @@ export function VideoWorkspace({
         );
       }
 
-      const item = await savedVideoStore.getItem(targetSavedVideoId);
+      let item = await savedVideoStore.getItem(targetSavedVideoId);
       if (!item) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_METADATA_MISSING",
@@ -1009,10 +1009,17 @@ export function VideoWorkspace({
         );
       }
 
-      const blob = await savedVideoStore.getBlob(targetSavedVideoId);
+      let blob = await savedVideoStore.getBlob(targetSavedVideoId);
+      if (!blob && (item.cloud?.status === "ready" || item.cloud?.status === "imported")) {
+        setSaveStatus("downloading");
+        setSaveMessage("Downloading from Clarity Cloud...");
+        item = await importSavedVideoFromClarityCloud(targetSavedVideoId, savedVideoStore);
+        onSavedVideoLibraryChange?.();
+        blob = await savedVideoStore.getBlob(item.savedVideoId);
+      }
       if (!blob) {
         setSaveStatus("error");
-        setSaveMessage("Local file unavailable. Saved card was kept for recovery.");
+        setSaveMessage("Device copy unavailable. Saved card was kept for recovery.");
         return;
       }
 
@@ -1089,6 +1096,7 @@ export function VideoWorkspace({
       rightStore,
       savedVideoStore,
       setActiveSideInCompare,
+      onSavedVideoLibraryChange,
     ]
   );
 
@@ -1988,31 +1996,30 @@ export function VideoWorkspace({
     workspaceContext,
   ]);
 
-  const performDurableSave = useCallback(async (reason: VideoWorkspaceSaveResult["reason"]) => {
+  const performDurableSave = useCallback(async (
+    reason: VideoWorkspaceSaveResult["reason"],
+    options: { archiveToMyLibrary?: boolean } = {}
+  ) => {
     if (!canManualSave) {
       setSaveStatus("error");
       setSaveMessage("Add or record a clip before saving.");
-      setShowSaveAndSendOffer(false);
       return null;
     }
 
     if (!saveableSides.length) {
       setSaveStatus("error");
       setSaveMessage("Save needs an uploaded or recorded video.");
-      setShowSaveAndSendOffer(false);
       return null;
     }
 
     if (!savedVideoStore || !persistenceLayer.videoStore) {
       setSaveStatus("error");
       setSaveMessage("Device video storage is unavailable in this browser.");
-      setShowSaveAndSendOffer(false);
       return null;
     }
 
     setSaveStatus("saving");
-    setSaveMessage("Saving to Clarity Video Library...");
-    setShowSaveAndSendOffer(false);
+    setSaveMessage(options.archiveToMyLibrary ? "Saving permanently to My Library..." : "Saving...");
     setCloudUploadFailure(null);
 
     try {
@@ -2054,6 +2061,7 @@ export function VideoWorkspace({
           analysisSnapshot: analysisStore.analysis as VideoAnalysis,
           workspaceSnapshot: buildWorkspaceState(),
           thumbnailDataUrl: captureSideThumbnail(side),
+          archiveToMyLibrary: options.archiveToMyLibrary,
         });
         savedItems.push(item);
         nextSavedVideoIds = { ...nextSavedVideoIds, [side]: item.savedVideoId };
@@ -2075,13 +2083,15 @@ export function VideoWorkspace({
       onSavedVideoLibraryChange?.();
       const managedCount = savedItems.filter((item) => item.local.managed?.status === "healthy").length;
       setSaveMessage(
-        managedCount === savedItems.length
+        options.archiveToMyLibrary && managedCount === savedItems.length
           ? savedItems.length === 1
-            ? "Saved to Clarity Video Library."
-            : `Saved ${savedItems.length} videos to Clarity Video Library.`
+            ? "Saved permanently to My Library."
+            : `Saved ${savedItems.length} videos permanently to My Library.`
+          : options.archiveToMyLibrary
+            ? "Saved safely on this device. Reconnect My Library when available."
           : savedItems.length === 1
-            ? "Working from local cache. Reconnect library when available."
-            : `Saved ${savedItems.length} videos to local cache. Reconnect library when available.`
+            ? "Saved safely on this device. Preparing Clarity Cloud."
+            : `Saved ${savedItems.length} videos safely on this device. Preparing Clarity Cloud.`
       );
       setSaveStatus("saved");
       return {
@@ -2133,27 +2143,19 @@ export function VideoWorkspace({
   );
 
   const handleManualSave = useCallback(async () => {
-    const result = await performDurableSave("local-save");
+    const result = await performDurableSave("save");
     if (!result) return;
-    await completeSuccessfulSave(result, "Saved to Local Storage.");
+    await completeSuccessfulSave(result, "Saved safely. Returning to Player Profile.");
   }, [completeSuccessfulSave, performDurableSave]);
 
-  const handleCloudSavePrompt = useCallback(() => {
-    if (!canManualSave) {
-      setSaveStatus("error");
-      setSaveMessage("Add or record a clip before saving.");
-      setShowSaveAndSendOffer(false);
-      setCloudUploadFailure(null);
-      return;
-    }
-    setSaveStatus("idle");
-    setSaveMessage("Save locally before sending to Clarity Cloud.");
-    setShowSaveAndSendOffer(true);
-    setCloudUploadFailure(null);
-  }, [canManualSave]);
+  const handleMyLibrarySave = useCallback(async () => {
+    const result = await performDurableSave("my-library-save", { archiveToMyLibrary: true });
+    if (!result) return;
+    await completeSuccessfulSave(result, "Saved permanently to My Library.");
+  }, [completeSuccessfulSave, performDurableSave]);
 
   const handleSaveAndSend = useCallback(async () => {
-    const result = await performDurableSave("save-and-send");
+    const result = await performDurableSave("save");
     if (!result) return;
 
     if (!onSaveAndSend) {
@@ -2499,7 +2501,7 @@ export function VideoWorkspace({
               type="button"
               className="upload-button"
               onClick={() => void handleSaveAndSend()}
-              disabled={saveStatus === "saving" || saveStatus === "sending"}
+              disabled={saveStatus === "saving" || saveStatus === "sending" || saveStatus === "downloading"}
             >
               Retry
             </button>
@@ -2566,28 +2568,18 @@ export function VideoWorkspace({
               type="button"
               className="upload-button video-save-button"
               onClick={handleManualSave}
-              disabled={saveStatus === "saving" || saveStatus === "sending"}
+              disabled={saveStatus === "saving" || saveStatus === "sending" || saveStatus === "downloading"}
             >
               {saveStatus === "saving" ? "Saving..." : "Save"}
             </button>
             <button
               type="button"
               className="upload-button video-save-button"
-              onClick={handleCloudSavePrompt}
-              disabled={saveStatus === "saving" || saveStatus === "sending"}
+              onClick={handleMyLibrarySave}
+              disabled={saveStatus === "saving" || saveStatus === "sending" || saveStatus === "downloading"}
             >
-              Save to Clarity Cloud
+              Save permanently to My Library
             </button>
-            {showSaveAndSendOffer ? (
-              <button
-                type="button"
-                className="upload-button video-save-button"
-                onClick={handleSaveAndSend}
-                disabled={saveStatus === "saving" || saveStatus === "sending"}
-              >
-                {saveStatus === "sending" ? "Preparing..." : "Save and send"}
-              </button>
-            ) : null}
             <span className={`analysis-save-status is-${saveStatus}`} role="status">
               {saveMessage}
             </span>

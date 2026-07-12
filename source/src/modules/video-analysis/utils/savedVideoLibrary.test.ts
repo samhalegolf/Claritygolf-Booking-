@@ -198,6 +198,11 @@ describe("saved video library", () => {
     assert.match(item.savedVideoId, /^saved-video-/);
     assert.equal(item.local.status, "available");
     assert.equal(item.local.blobRecordId, item.savedVideoId);
+    assert.equal(item.device?.status, "cached");
+    assert.equal(item.device?.source, "device-cache");
+    assert.equal(item.cloudCatalogue?.savedVideoId, item.savedVideoId);
+    assert.equal(item.cloudCatalogue?.cloudState, "waiting-to-upload");
+    assert.equal(item.cloudCatalogue?.fileSizeBytes, sourceBlob().size);
     assert.equal(item.workspaceSnapshot.savedVideoIds?.left, item.savedVideoId);
     assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
   });
@@ -247,6 +252,30 @@ describe("saved video library", () => {
     assert.equal((await store.getBlob(first.savedVideoId))?.size, "updated-video-bytes".length);
   });
 
+  it("can remove a device copy while keeping the Cloud catalogue item", async () => {
+    const store = createMemorySavedVideoLibraryStore();
+    const item = await store.saveItem({
+      playerId: "player-1",
+      lessonId: "lesson-1",
+      sourceSide: "left",
+      sourceVideo: video,
+      sourceBlob: sourceBlob(),
+      analysisSnapshot,
+      workspaceSnapshot,
+    });
+    await store.putItem({
+      ...item,
+      cloud: { status: "ready", provider: "google-drive" },
+    });
+
+    const removed = await store.removeDeviceCopy(item.savedVideoId);
+
+    assert.equal(removed.local.status, "missing");
+    assert.equal(removed.device?.status, "not-downloaded");
+    assert.equal(removed.cloudCatalogue?.cloudState, "ready");
+    assert.equal(await store.getBlob(item.savedVideoId), null);
+  });
+
   it("keeps saved blobs independent from transient slot cleanup", async () => {
     const store = createMemorySavedVideoLibraryStore();
     const transientSlots = new Map<string, Blob>([["player-1.default.left", sourceBlob()]]);
@@ -265,7 +294,7 @@ describe("saved video library", () => {
     assert.equal((await store.getBlob(item.savedVideoId))?.size, sourceBlob().size);
   });
 
-  it("reports local-cache recovery mode when File System Access is unavailable", async () => {
+  it("reports device-cache recovery mode when File System Access is unavailable", async () => {
     Object.defineProperty(globalThis, "window", {
       value: {},
       configurable: true,
@@ -276,7 +305,7 @@ describe("saved video library", () => {
     assert.equal(status.supported, false);
     assert.equal(status.configured, false);
     assert.equal(status.health, "unsupported");
-    assert.match(status.message, /local cache/i);
+    assert.match(status.message, /device cache/i);
   });
 
   it("keeps managed-library metadata on the saved item while retaining the cache blob", async () => {
