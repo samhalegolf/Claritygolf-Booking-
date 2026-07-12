@@ -5684,6 +5684,10 @@ function hasCollision(items, candidate, service, state = {}) {
   return Boolean(findCollision(items, candidate, service, state));
 }
 
+function publicBookingSlotsRequestError(message, status, code = "request_error") {
+  return Object.assign(new Error(message), { status, code });
+}
+
 function publicAccountState(state) {
   const workspaceAccount = publicWorkspaceAccount(state);
   assertAccountFeature(workspaceAccount, "publicBooking");
@@ -5727,6 +5731,53 @@ function groupSlotRemainingSpots(items, candidate, service) {
       ),
   ).length;
   return Math.max(0, capacity - bookedCount);
+}
+
+function publicSlotRequestedWeekItems(items = [], week) {
+  return items.filter((item) => itemWeek(item) === week && !isInactiveForConflict(item));
+}
+
+function publicSlotItemMayAffectService(item, service, state = {}) {
+  const services = state.services || defaultServices;
+  const coaches = state.coaches || [];
+  const locations = state.locations || [];
+  const account = state.account || defaultCoachAccount();
+  const itemService = serviceForCalendarItem(item, services);
+  const serviceCoachId = service?.coachId || defaultCoachId(coaches);
+  const serviceLocationId = serviceLocation(service, locations, account).id;
+  const itemCoachId = isLocationOnlyBlock(item)
+    ? ""
+    : resolvedCalendarItemCoachId(item, itemService, coaches, account);
+  const itemLocationId = resolvedCalendarItemLocationId(item, itemService, locations, account);
+
+  if (item.serviceId && item.serviceId === service?.id) return true;
+
+  if (isLocationOnlyBlock(item)) {
+    if (!itemLocationId || !serviceLocationId) return true;
+    return itemLocationId === serviceLocationId;
+  }
+
+  if (isCoachOnlyBlock(item)) {
+    if (!itemCoachId || !serviceCoachId) return true;
+    return itemCoachId === serviceCoachId;
+  }
+
+  if (isCoachLocationBlock(item)) {
+    if (!itemCoachId || !serviceCoachId) return true;
+    return itemCoachId === serviceCoachId;
+  }
+
+  if (item.kind === "appointment") {
+    if (!itemCoachId || !serviceCoachId) return true;
+    return itemCoachId === serviceCoachId;
+  }
+
+  if (!itemCoachId || !itemLocationId || !serviceCoachId || !serviceLocationId) return true;
+  return itemCoachId === serviceCoachId || itemLocationId === serviceLocationId;
+}
+
+function publicSlotRelevantResourceItems(items = [], service, state = {}) {
+  return items.filter((item) => publicSlotItemMayAffectService(item, service, state));
 }
 
 function publicSlotsForService(accountState, service, week, ignoreId = "") {
@@ -5798,49 +5849,94 @@ export function publicBookingSlots(state, options = {}) {
   const week = Number.isInteger(rawWeek) ? rawWeek : currentWeekOffset();
   const serviceId = cleanString(options.serviceId, "", 140);
   const ignoreId = cleanString(options.ignoreId, "", 160);
+  const metrics = options.metrics;
+  if (!serviceId) {
+    throw publicBookingSlotsRequestError("Choose a public lesson type.", 400, "service_required");
+  }
   const services = publicBookableServices(accountState.services);
-  const targetServices = serviceId ? services.filter((service) => service.id === serviceId) : services;
-  if (serviceId && !targetServices.length) {
-    throw Object.assign(new Error("Choose a public lesson type."), { status: 404 });
+  const totalPublicItemCount = accountState.items.length;
+  if (metrics) {
+    metrics.serviceId = serviceId;
+    metrics.week = week;
+    metrics.totalPublicItemCount = totalPublicItemCount;
   }
+  const targetService = services.find((service) => service.id === serviceId);
+  if (!targetService) {
+    throw publicBookingSlotsRequestError("Choose a public lesson type.", 404);
+  }
+  const requestedWeekItems = publicSlotRequestedWeekItems(accountState.items, week);
+  const relevantResourceItems = publicSlotRelevantResourceItems(requestedWeekItems, targetService, accountState);
+  const filteredAccountState = { ...accountState, items: relevantResourceItems };
+  if (metrics) {
+    metrics.requestedWeekItemCount = requestedWeekItems.length;
+    metrics.relevantResourceItemCount = relevantResourceItems.length;
+  }
+  const slots = publicSlotsForService(filteredAccountState, targetService, week, ignoreId);
+  if (metrics) metrics.returnedSlotCount = slots.length;
   const servicesById = {};
-  for (const service of targetServices) {
-    servicesById[service.id] = {
-      serviceId: service.id,
-      week,
-      slots: publicSlotsForService(accountState, service, week, ignoreId),
-    };
-  }
+  servicesById[targetService.id] = {
+    serviceId: targetService.id,
+    week,
+    slots,
+  };
   return {
     updatedAt: state.updatedAt,
     week,
     serviceId,
     ignoreId,
-    slots: serviceId && targetServices[0] ? servicesById[targetServices[0].id].slots : undefined,
+    slots,
     services: servicesById,
   };
 }
 
 export async function handlePublicBookingSlotsRequest(req) {
+  const startedAt = Date.now();
+  const url = new URL(req.url);
+  const serviceId = cleanString(url.searchParams.get("serviceId") || "", "", 140);
+  const metrics = {
+    serviceId,
+    week: url.searchParams.get("week") || "",
+    totalPublicItemCount: null,
+    requestedWeekItemCount: null,
+    relevantResourceItemCount: null,
+    returnedSlotCount: null,
+    status: 500,
+  };
   try {
-    const url = new URL(req.url);
-    return json(
-      publicBookingSlots(await readPublicCalendarState(), {
-        serviceId: url.searchParams.get("serviceId") || "",
-        week: url.searchParams.get("week") || "",
-        ignoreId: url.searchParams.get("ignoreId") || "",
-      }),
-    );
+    if (!serviceId) {
+      metrics.status = 400;
+      return json(
+        {
+          error: "service_required",
+          message: "Choose a public lesson type.",
+        },
+        400,
+      );
+    }
+    const payload = publicBookingSlots(await readPublicCalendarState(), {
+      serviceId,
+      week: url.searchParams.get("week") || "",
+      ignoreId: url.searchParams.get("ignoreId") || "",
+      metrics,
+    });
+    metrics.status = 200;
+    return json(payload);
   } catch (error) {
     console.error("public_booking_slots_error", error);
     const status = error?.status || 500;
+    metrics.status = status;
     return json(
       {
-        error: status === 500 ? "public_booking_slots_error" : "request_error",
+        error: error?.code === "service_required" ? "service_required" : status === 500 ? "public_booking_slots_error" : "request_error",
         message: error instanceof Error ? error.message : "Unknown public booking slots error",
       },
       status,
     );
+  } finally {
+    console.info("public_booking_slots:timing", {
+      ...metrics,
+      durationMs: Date.now() - startedAt,
+    });
   }
 }
 
