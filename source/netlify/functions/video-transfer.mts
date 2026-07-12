@@ -1420,7 +1420,7 @@ function sessionToRow(session: VideoTransferSession) {
 
 async function readTransferSession(accountId: string, savedVideoId: string) {
   const rows = await supabase(transferSessionTable, {
-    query: `select=*&account_id=eq.${encodeURIComponent(accountId)}&saved_video_id=eq.${encodeURIComponent(savedVideoId)}&status=in.(preparing,uploading,paused,verifying,ready,failed)&order=created_at.desc&limit=1`,
+    query: `select=*&account_id=eq.${encodeURIComponent(accountId)}&saved_video_id=eq.${encodeURIComponent(savedVideoId)}&status=in.(preparing,session-created,uploading,paused,verifying,ready,failed)&order=created_at.desc&limit=1`,
   });
   return rows[0] ? rowToSession(rows[0]) : null;
 }
@@ -2075,38 +2075,41 @@ export default async function handler(req: Request) {
       const savedVideoId = cleanString(body?.savedVideoId || body?.savedVideo?.savedVideoId, "", 160);
       if (!savedVideoId) throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Saved video id is required.", 400);
       const accessToken = await ensureDriveReady(accountId, diagnostics);
-      return handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId, diagnostics);
+      // NOTE: every route below must use `return await` so rejections are caught
+      // by this try/catch. A bare `return somePromise` escapes the try block and
+      // crashes the function process (Netlify then returns an opaque 502).
+      return await handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId, diagnostics);
     }
     if (req.method === "GET" && parts[0] === "imports") {
       const accessToken = await ensureDriveReady(accountId, diagnostics);
-      return handleImportList(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics));
+      return await handleImportList(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics));
     }
     if ((req.method === "POST" || req.method === "GET") && parts[1] === "session") {
       const accessToken = req.method === "POST" ? await ensureDriveReady(accountId, diagnostics) : "";
-      return handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0], diagnostics);
+      return await handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0], diagnostics);
     }
     if (req.method === "PUT" && (parts[1] === "chunk" || parts[1] === "upload")) {
-      return handleChunk(req, accountId, parts[0], googleDriveProviderAdapter("", settings, diagnostics));
+      return await handleChunk(req, accountId, parts[0], googleDriveProviderAdapter("", settings, diagnostics));
     }
-    if (req.method === "POST" && parts[1] === "pause") return updateSessionStatus(accountId, parts[0], "paused", "Paused");
-    if (req.method === "POST" && (parts[1] === "resume" || parts[1] === "retry")) return updateSessionStatus(accountId, parts[0], "uploading");
+    if (req.method === "POST" && parts[1] === "pause") return await updateSessionStatus(accountId, parts[0], "paused", "Paused");
+    if (req.method === "POST" && (parts[1] === "resume" || parts[1] === "retry")) return await updateSessionStatus(accountId, parts[0], "uploading");
     if (req.method === "POST" && parts[1] === "finalize") {
       const accessToken = await ensureDriveReady(accountId, diagnostics);
-      return handleFinalize(req, accountId, accessToken, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
+      return await handleFinalize(req, accountId, accessToken, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
     }
     if (req.method === "GET" && parts[1] === "import") {
       const accessToken = await ensureDriveReady(accountId, diagnostics);
-      return handleImportPackage(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
+      return await handleImportPackage(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
     }
     if (req.method === "GET" && parts[1] === "download") {
       const accessToken = await ensureDriveReady(accountId, diagnostics);
-      return handleImportDownload(req, accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
+      return await handleImportDownload(req, accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
     }
-    if (req.method === "POST" && parts[1] === "import-receipt") return handleImportReceipt(req, accountId, parts[0]);
-    if (req.method === "GET" && parts[1] === "status") return handleStatus(accountId, await ensureDriveReady(accountId, diagnostics), settings, parts[0], diagnostics);
+    if (req.method === "POST" && parts[1] === "import-receipt") return await handleImportReceipt(req, accountId, parts[0]);
+    if (req.method === "GET" && parts[1] === "status") return await handleStatus(accountId, await ensureDriveReady(accountId, diagnostics), settings, parts[0], diagnostics);
     if (req.method === "DELETE" && (parts[1] === "session" || parts[0])) {
       const savedVideoId = parts[1] === "session" ? parts[0] : parts[0];
-      return updateSessionStatus(accountId, savedVideoId, "cancelled", "Transfer cancelled. Local source was not deleted.");
+      return await updateSessionStatus(accountId, savedVideoId, "cancelled", "Transfer cancelled. Local source was not deleted.");
     }
     return json({ error: "not_found", message: "Video transfer route not found." }, 404);
   } catch (error: any) {
