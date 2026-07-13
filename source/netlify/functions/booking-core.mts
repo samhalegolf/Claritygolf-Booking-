@@ -1901,11 +1901,24 @@ async function ensureNotificationHistoryTable() {
 
 async function backfillLegacyPeopleAccountIds(accountId) {
   const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  await db().sql`
-    UPDATE people
-    SET account_id = ${cleanAccountId}
-    WHERE account_id IS NULL OR BTRIM(account_id) = ''
-  `;
+  try {
+    await db().sql`
+      UPDATE people
+      SET account_id = ${cleanAccountId}
+      WHERE account_id IS NULL OR BTRIM(account_id) = ''
+    `;
+  } catch (error) {
+    const code = cleanString(error?.code, "", 120);
+    const message = error instanceof Error ? error.message : String(error || "");
+    if (code === "DUPLICATE_PERSON_EMAIL" || /Another person already uses that email address|duplicate key|idx_people_.*email/i.test(message)) {
+      console.warn("people_account_backfill_duplicate_email_skipped", {
+        accountId: cleanAccountId,
+        message: message.slice(0, 300),
+      });
+      return;
+    }
+    throw error;
+  }
 }
 
 async function ensureSeeded() {
