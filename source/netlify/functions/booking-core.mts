@@ -5048,8 +5048,8 @@ function customGroupConfirmUrl(token) {
   }
 }
 
-function customGroupInviteEmail({ appointment, attendee, service, account }) {
-  const variables = bookingEmailVariables({ appointment, service, account });
+function customGroupInviteEmail({ appointment, attendee, service, account, coach = null }) {
+  const variables = bookingEmailVariables({ appointment, service, account, coach });
   const confirmUrl = customGroupConfirmUrl(attendee.token);
   const title = `${appointment.client || "A golfer"} invited you to ${variables.service}`;
   const intro = `${attendee.name || "Hi"}, you have been invited to join ${appointment.client || "the booker"} for ${variables.service}.`;
@@ -5095,7 +5095,28 @@ function modernClientEmailFooter(value) {
     : "We look forward to seeing you.";
 }
 
-function bookingEmailVariables({ appointment, service, account }) {
+// Coach emails used to go to a single global `settings.coachEmail`, ignoring the coach who
+// actually owns the booking. Resolve from the live coach profile first (so profile edits take
+// effect on existing bookings), then the snapshot stored on the appointment, then the legacy
+// account-wide setting as a last resort.
+function resolveAppointmentCoach(appointment, coaches = [], account = defaultCoachAccount(), settings = {}) {
+  const snapshot = appointment?.coach || null;
+  const coachId = cleanSlug(appointment?.coachId || snapshot?.coachId || "", "") || defaultCoachId(coaches);
+  const profile = coachById(coaches, coachId);
+  const email =
+    cleanEmail(profile?.email, "") ||
+    cleanEmail(snapshot?.email, "") ||
+    cleanEmail(settings?.coachEmail, "") ||
+    cleanEmail(account?.contactEmail, "");
+  const name =
+    cleanString(profile?.displayName || profile?.name, "", 120) ||
+    cleanString(snapshot?.displayName || snapshot?.name, "", 120) ||
+    cleanString(account?.coachName, "", 120) ||
+    cleanString(account?.businessName, "", 120);
+  return { coachId, email, name };
+}
+
+function bookingEmailVariables({ appointment, service, account, coach = null }) {
   const client = appointment.client || appointment.title || "Client";
   const location = cleanBookingLocationSnapshot(appointment.location, {
     name: account.venueName,
@@ -5115,7 +5136,7 @@ function bookingEmailVariables({ appointment, service, account }) {
   return {
     client,
     firstName: client.split(/\s+/)[0] || client,
-    coach: account.coachName || account.businessName,
+    coach: coach?.name || account.coachName || account.businessName,
     service: service?.name || "Golf Lesson",
     date: formatBookingDate(itemWeek(appointment), appointment.day),
     time: formatRange(appointment.start, appointment.duration),
@@ -5205,13 +5226,17 @@ async function sendBookingNotifications(
   appointment,
   { kind = "booking", testRecipient = "", clientOnly = false, idempotencyNonce = "" } = {},
 ) {
-  const settings = await readAdminSettings();
-  const account = await readCoachAccount();
-  const services = await readServices();
+  const [settings, account, services, coaches] = await Promise.all([
+    readAdminSettings(),
+    readCoachAccount(),
+    readServices(),
+    readCoachProfiles(),
+  ]);
   const service = services.find(
     (candidate) => candidate.id === appointment.serviceId,
   );
-  const variables = bookingEmailVariables({ appointment, service, account });
+  const coach = resolveAppointmentCoach(appointment, coaches, account, settings);
+  const variables = bookingEmailVariables({ appointment, service, account, coach });
   const personKey = notificationPersonKey({
     name: appointment.client || appointment.title,
     email: appointment.email,
@@ -5358,7 +5383,7 @@ async function sendBookingNotifications(
     : [];
   if (!clientOnly && (kind === "booking" || kind === "updated") && inviteAttendees.length) {
     for (const attendee of inviteAttendees) {
-      const invite = customGroupInviteEmail({ appointment, attendee, service, account });
+      const invite = customGroupInviteEmail({ appointment, attendee, service, account, coach });
       if (settings.sendClientEmail) {
         jobs.push(
           sendAndRecord(
@@ -5377,7 +5402,7 @@ async function sendBookingNotifications(
   }
 
   if (!clientOnly && settings.sendCoachEmail && kind !== "test") {
-    const recipient = settings.coachEmail || "";
+    const recipient = coach.email || "";
     const subject = renderTemplate(settings.adminEmailSubject, variables);
     const intro = renderTemplate(settings.adminEmailIntro, variables);
     if (recipient) {
@@ -5396,7 +5421,7 @@ async function sendBookingNotifications(
     }
   } else if (!clientOnly && kind !== "test") {
     const subject = renderTemplate(settings.adminEmailSubject, variables);
-    jobs.push(recordSkipped("coach", settings.coachEmail || "", subject, "disabled_in_notification_settings"));
+    jobs.push(recordSkipped("coach", coach.email || "", subject, "disabled_in_notification_settings"));
   }
 
   if (!clientOnly && settings.sendAdminEmail && kind !== "test") {
@@ -5485,16 +5510,21 @@ async function sendInitialBookingNotifications(appointment, kind = "booking") {
 
     const fallbackResults = [];
     try {
-      const settings = await readAdminSettings();
-      const account = await readCoachAccount();
-      const services = await readServices();
+      const [settings, account, services, coaches] = await Promise.all([
+        readAdminSettings(),
+        readCoachAccount(),
+        readServices(),
+        readCoachProfiles(),
+      ]);
       const service = services.find(
         (candidate) => candidate.id === appointment?.serviceId,
       );
+      const coach = resolveAppointmentCoach(appointment, coaches, account, settings);
       const variables = bookingEmailVariables({
         appointment,
         service,
         account,
+        coach,
       });
       const personKey = notificationPersonKey({
         name: appointment?.client || appointment?.title,
@@ -5541,10 +5571,10 @@ async function sendInitialBookingNotifications(appointment, kind = "booking") {
         );
       }
 
-      if (settings.sendCoachEmail && settings.coachEmail) {
+      if (settings.sendCoachEmail && coach.email) {
         await recordFailed(
           "coach",
-          settings.coachEmail,
+          coach.email,
           renderTemplate(settings.adminEmailSubject, variables),
         );
       }

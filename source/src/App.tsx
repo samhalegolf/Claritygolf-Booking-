@@ -20809,7 +20809,7 @@ function App() {
                     />
                   </label>
                   <label className="settings-field">
-                    <span>Coach email</span>
+                    <span>Coach email (fallback)</span>
                     <input
                       value={notificationSettings.coachEmail}
                       onChange={(event) => updateNotificationSetting("coachEmail", event.target.value)}
@@ -20817,6 +20817,10 @@ function App() {
                       type="email"
                     />
                   </label>
+                  <p className="field-help">
+                    Coach booking alerts go to the email on the coach profile of whoever is taking the lesson
+                    (Settings → Coaches). This address is only used if that profile has no email.
+                  </p>
                   <label className="settings-field">
                     <span>Notification delay seconds</span>
                     <input

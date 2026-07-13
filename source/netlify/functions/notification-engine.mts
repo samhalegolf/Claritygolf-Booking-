@@ -83,6 +83,25 @@ function cleanBookingLocationSnapshot(raw: any, fallback: any = {}) {
   };
 }
 
+function cleanBookingCoachSnapshot(raw: any) {
+  let source = raw;
+  if (typeof raw === "string") {
+    try {
+      source = JSON.parse(raw);
+    } catch {
+      source = null;
+    }
+  }
+  if (!source?.name && !source?.displayName && !source?.coachId) return null;
+  return {
+    coachId: cleanText(source.coachId, "", 120) || undefined,
+    name: cleanText(source.name, "", 120) || undefined,
+    displayName: cleanText(source.displayName, "", 120) || undefined,
+    email: cleanEmail(source.email, "") || undefined,
+    phone: cleanText(source.phone, "", 80) || undefined,
+  };
+}
+
 function bookingLocationDisplay(location: any) {
   return [location?.name, location?.address].filter(Boolean).join(" · ");
 }
@@ -168,6 +187,41 @@ async function readSettings() {
     bookingUrl: cleanUrl(s.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"), "https://book.claritygolf.app/"),
     siteUrl,
     contactEmail: cleanEmail(s.accountContactEmail, env("CLARITY_CONTACT_EMAIL", "sam@samhalegolf.co.nz")),
+    coachProfiles: parseCoachProfiles(s.coachProfilesJson),
+  };
+}
+
+function parseCoachProfiles(raw: unknown) {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// The coach receipt follows the coach who owns the booking: live profile first, then the
+// snapshot stored on the appointment, then the legacy account-wide `coachEmail` setting.
+function resolveAppointmentCoach(appt: any, settings: any) {
+  const snapshot = appt?.coach || null;
+  const coaches: any[] = Array.isArray(settings?.coachProfiles) ? settings.coachProfiles : [];
+  const coachId = cleanText(appt?.coachId || snapshot?.coachId, "", 120);
+  const profile =
+    coaches.find((coach) => coach?.id && coach.id === coachId) ||
+    coaches.find((coach) => coach?.isDefault && coach?.active !== false && coach?.archived !== true) ||
+    null;
+  return {
+    email:
+      cleanEmail(profile?.email, "") ||
+      cleanEmail(snapshot?.email, "") ||
+      cleanEmail(settings?.coachEmail, "") ||
+      cleanEmail(settings?.contactEmail, ""),
+    name:
+      cleanText(profile?.displayName || profile?.name, "", 120) ||
+      cleanText(snapshot?.displayName || snapshot?.name, "", 120) ||
+      cleanText(settings?.coachName, "", 120) ||
+      cleanText(settings?.businessName, "", 120),
   };
 }
 
@@ -250,6 +304,8 @@ function normaliseAppointment(raw: any = {}) {
     phone: cleanText(raw.phone, "", 80),
     email: cleanEmail(raw.email, ""),
     note: cleanText(raw.note || raw.notes, "", 1200),
+    coachId: cleanText(raw.coachId || raw.coach_id, "", 120),
+    coach: cleanBookingCoachSnapshot(raw.coach),
     location: cleanBookingLocationSnapshot(raw.location),
     customGroup: raw.customGroup === true || raw.customGroupEnabled === true || attendees.length > 0,
     attendees,
@@ -446,7 +502,7 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
   return {
     client: appt.client || appt.title,
     firstName: String(appt.client || appt.title || "Client").split(/\s+/)[0] || "Client",
-    coach: settings.coachName || settings.businessName,
+    coach: resolveAppointmentCoach(appt, settings).name || settings.coachName || settings.businessName,
     business: settings.businessName,
     service: serviceName,
     date: slotDateLabel(appt.week, appt.day),
@@ -672,10 +728,11 @@ export async function notifyBookingEvent(input: NotifyInput) {
     await recordNotification({ personKey, calendarItemId: appt.id, recipient: appt.email, subject: subjects.client, kind: `${action}_client_email`, status: "skipped", provider: "settings", error: "disabled_client_email" });
   }
 
+  const bookingCoach = resolveAppointmentCoach(appt, settings);
   if (settings.sendCoachEmail || action === "cancelled" || action === "rescheduled") {
-    await sendAndRecord("coach", settings.coachEmail || "", subjects.admin);
+    await sendAndRecord("coach", bookingCoach.email, subjects.admin);
   } else {
-    await recordNotification({ personKey, calendarItemId: appt.id, recipient: settings.coachEmail || "", subject: subjects.admin, kind: `${action}_coach_email`, status: "skipped", provider: "settings", error: "disabled_coach_email" });
+    await recordNotification({ personKey, calendarItemId: appt.id, recipient: bookingCoach.email, subject: subjects.admin, kind: `${action}_coach_email`, status: "skipped", provider: "settings", error: "disabled_coach_email" });
   }
 
   if (settings.sendAdminEmail || action === "cancelled" || action === "rescheduled") {
