@@ -106,8 +106,192 @@ import type {
   MouseEvent as ReactMouseEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
+  ReactNode,
   TouchEvent as ReactTouchEvent,
 } from "react";
+
+type EditableBlockStatus = "idle" | "editing" | "saving" | "saved" | "error";
+type EditableBlockState = {
+  status: EditableBlockStatus;
+  dirty: boolean;
+  errorMessage: string | null;
+};
+
+const editableBlockSavedDelayMs = 1600;
+
+function cloneEditableValue<T>(value: T): T {
+  if (typeof structuredClone === "function") return structuredClone(value);
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function defaultEditableEqual<T>(a: T, b: T) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function useEditableBlock<T>({
+  value,
+  onSave,
+  isEqual = defaultEditableEqual,
+}: {
+  value: T;
+  onSave: (draft: T) => Promise<T>;
+  isEqual?: (a: T, b: T) => boolean;
+}) {
+  const [savedValue, setSavedValue] = useState<T>(() => cloneEditableValue(value));
+  const [draftValue, setDraftValueState] = useState<T>(() => cloneEditableValue(value));
+  const [state, setState] = useState<EditableBlockState>({
+    status: "idle",
+    dirty: false,
+    errorMessage: null,
+  });
+  const savedTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setSavedValue(cloneEditableValue(value));
+    setState((current) => {
+      if (current.dirty || current.status === "editing" || current.status === "saving" || current.status === "error") {
+        return current;
+      }
+      setDraftValueState(cloneEditableValue(value));
+      return { ...current, status: current.status === "saved" ? "saved" : "idle", errorMessage: null };
+    });
+  }, [value]);
+
+  useEffect(
+    () => () => {
+      if (savedTimeoutRef.current !== null) window.clearTimeout(savedTimeoutRef.current);
+    },
+    [],
+  );
+
+  function edit() {
+    if (savedTimeoutRef.current !== null) window.clearTimeout(savedTimeoutRef.current);
+    setDraftValueState(cloneEditableValue(savedValue));
+    setState({ status: "editing", dirty: false, errorMessage: null });
+  }
+
+  function cancel() {
+    if (savedTimeoutRef.current !== null) window.clearTimeout(savedTimeoutRef.current);
+    setDraftValueState(cloneEditableValue(savedValue));
+    setState({ status: "idle", dirty: false, errorMessage: null });
+  }
+
+  function setDraftValue(next: T | ((current: T) => T)) {
+    setDraftValueState((current) => {
+      const nextValue = typeof next === "function" ? (next as (current: T) => T)(current) : next;
+      setState((currentState) => ({
+        status: currentState.status === "error" ? "editing" : currentState.status,
+        dirty: !isEqual(nextValue, savedValue),
+        errorMessage: currentState.status === "error" ? null : currentState.errorMessage,
+      }));
+      return nextValue;
+    });
+  }
+
+  async function save() {
+    if (state.status === "saving" || !state.dirty) return false;
+    if (savedTimeoutRef.current !== null) window.clearTimeout(savedTimeoutRef.current);
+    setState((current) => ({ ...current, status: "saving", errorMessage: null }));
+    try {
+      const saved = await onSave(cloneEditableValue(draftValue));
+      const cleanSaved = cloneEditableValue(saved);
+      setSavedValue(cleanSaved);
+      setDraftValueState(cleanSaved);
+      setState({ status: "saved", dirty: false, errorMessage: null });
+      savedTimeoutRef.current = window.setTimeout(() => {
+        setState((current) => (current.status === "saved" ? { ...current, status: "idle" } : current));
+      }, editableBlockSavedDelayMs);
+      return true;
+    } catch (error) {
+      setState({
+        status: "error",
+        dirty: true,
+        errorMessage: error instanceof Error ? error.message : "Could not save these settings.",
+      });
+      return false;
+    }
+  }
+
+  return {
+    savedValue,
+    draftValue,
+    status: state.status,
+    dirty: state.dirty,
+    errorMessage: state.errorMessage,
+    edit,
+    cancel,
+    setDraftValue,
+    save,
+  };
+}
+
+function EditableSettingsBlock({
+  id,
+  title,
+  status,
+  dirty,
+  errorMessage,
+  onEdit,
+  onCancel,
+  onSave,
+  children,
+}: {
+  id: string;
+  title: string;
+  status: EditableBlockStatus;
+  dirty: boolean;
+  errorMessage: string | null;
+  onEdit: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+  children: ReactNode;
+}) {
+  const isEditing = status === "editing" || status === "error";
+  const isSaving = status === "saving";
+  const isError = status === "error";
+  return (
+    <section
+      className={`editable-settings-block is-${status}${isEditing ? " is-editing" : ""}${isSaving ? " is-saving" : ""}${isError ? " is-error" : ""}`}
+      id={id}
+    >
+      <div className="editable-settings-block-header">
+        <div>
+          <span>{title}</span>
+          {dirty ? <em>Unsaved changes</em> : status === "saved" ? <em aria-live="polite">Saved</em> : null}
+        </div>
+        <div className="editable-settings-block-actions">
+          {status === "idle" || status === "saved" ? (
+            <button className="outline-button" onClick={onEdit} type="button">
+              <Pencil size={15} />
+              Edit
+            </button>
+          ) : (
+            <>
+              <button className="outline-button" disabled={isSaving} onClick={onCancel} type="button">
+                Cancel
+              </button>
+              <button className="primary-button" disabled={!dirty || isSaving} onClick={onSave} type="button">
+                {isSaving ? "Saving..." : isError ? "Try Again" : "Save"}
+              </button>
+            </>
+          )}
+          {status === "saved" ? (
+            <span className="editable-settings-saved" aria-live="polite">
+              <Check size={15} />
+              Saved
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <div className="editable-settings-block-body">{children}</div>
+      {errorMessage ? (
+        <p className="workspace-save-error" role="alert">
+          {errorMessage}
+        </p>
+      ) : null}
+    </section>
+  );
+}
 
 type LessonFormat = "private" | "group" | "package";
 type GroupServiceSchedule = {
@@ -4451,6 +4635,205 @@ function App() {
   const activeAccount =
     accountById(workspaceAccounts, activeAccountId) ?? defaultWorkspaceAccountFromCoachAccount(coachAccount);
   const isAdminUser = currentAppUser.role === "admin" || currentAppUser.role === "account_admin" || currentAppUser.role === "platform_admin";
+  const coachAccountEditor = useEditableBlock<CoachAccount>({
+    value: coachAccount,
+    onSave: saveCoachAccount,
+  });
+  const billingSettingsEditor = useEditableBlock<CoachAccount>({
+    value: coachAccount,
+    onSave: saveCoachAccount,
+  });
+  const emailNotificationsEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: saveNotificationSettings,
+  });
+  const textMachineEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: saveNotificationSettings,
+  });
+  const emailTemplateEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: saveNotificationSettings,
+  });
+  const bookingNoticeEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: saveNotificationSettings,
+  });
+  const bookingScreenNameEditor = useEditableBlock<Record<string, string>>({
+    value: bookingScreenNames,
+    onSave: async (draft) => {
+      setBookingScreenNames(draft);
+      setToast({ message: "Booking screen names saved for this browser." });
+      return draft;
+    },
+  });
+  const editableBlocks = useMemo(
+    () => [
+      { id: "coach-account", title: "Coach Account", editor: coachAccountEditor },
+      { id: "billing-settings", title: "Billing Settings", editor: billingSettingsEditor },
+      { id: "email-notifications", title: "Email Notifications", editor: emailNotificationsEditor },
+      { id: "text-machine", title: "Text Machine", editor: textMachineEditor },
+      { id: "email-template", title: "Email Template", editor: emailTemplateEditor },
+      { id: "booking-page-notice", title: "Booking Page notice", editor: bookingNoticeEditor },
+      { id: "booking-screen-name", title: "Booking Page screen name", editor: bookingScreenNameEditor },
+    ],
+    [
+      coachAccountEditor,
+      billingSettingsEditor,
+      emailNotificationsEditor,
+      textMachineEditor,
+      emailTemplateEditor,
+      bookingNoticeEditor,
+      bookingScreenNameEditor,
+    ],
+  );
+  const [activeEditableBlockId, setActiveEditableBlockId] = useState<string | null>(null);
+  const activeEditableBlock = editableBlocks.find((block) => block.id === activeEditableBlockId) ?? null;
+  const dirtyEditableBlock = editableBlocks.find((block) => block.editor.dirty) ?? null;
+
+  function confirmDiscardEditableBlock(blockTitle: string) {
+    return window.confirm(`You have unsaved changes in ${blockTitle}.\n\nDiscard changes and continue?`);
+  }
+
+  function startEditableBlock(id: string) {
+    const nextBlock = editableBlocks.find((block) => block.id === id);
+    if (!nextBlock) return;
+    if (activeEditableBlock && activeEditableBlock.id !== id) {
+      if (activeEditableBlock.editor.dirty && !confirmDiscardEditableBlock(activeEditableBlock.title)) return;
+      activeEditableBlock.editor.cancel();
+    }
+    setActiveEditableBlockId(id);
+    nextBlock.editor.edit();
+  }
+
+  function cancelEditableBlock(id: string) {
+    const block = editableBlocks.find((candidate) => candidate.id === id);
+    if (!block) return;
+    if (block.editor.dirty && !confirmDiscardEditableBlock(block.title)) return;
+    block.editor.cancel();
+    if (activeEditableBlockId === id) setActiveEditableBlockId(null);
+  }
+
+  async function saveEditableBlock(id: string) {
+    const block = editableBlocks.find((candidate) => candidate.id === id);
+    if (!block) return;
+    const saved = await block.editor.save();
+    if (saved) setActiveEditableBlockId(null);
+  }
+
+  function switchSettingsTab(nextTab: SettingsTab) {
+    if (settingsTab === nextTab) return;
+    if (dirtyEditableBlock && !confirmDiscardEditableBlock(dirtyEditableBlock.title)) return;
+    if (activeEditableBlock) activeEditableBlock.editor.cancel();
+    setActiveEditableBlockId(null);
+    setSettingsTab(nextTab);
+  }
+
+  const coachAccountDraft = coachAccountEditor.draftValue;
+  const coachAccountIsLocked = coachAccountEditor.status !== "editing" && coachAccountEditor.status !== "error";
+  const billingAccountDraft = billingSettingsEditor.draftValue;
+  const invoiceSettingsDraft = billingAccountDraft.invoiceSettings;
+  const billingSettingsIsLocked = billingSettingsEditor.status !== "editing" && billingSettingsEditor.status !== "error";
+  const emailNotificationsDraft = emailNotificationsEditor.draftValue;
+  const emailNotificationsIsLocked = emailNotificationsEditor.status !== "editing" && emailNotificationsEditor.status !== "error";
+  const textMachineDraft = textMachineEditor.draftValue;
+  const textMachineIsLocked = textMachineEditor.status !== "editing" && textMachineEditor.status !== "error";
+  const emailTemplateDraft = emailTemplateEditor.draftValue;
+  const emailTemplateIsLocked = emailTemplateEditor.status !== "editing" && emailTemplateEditor.status !== "error";
+  const bookingNoticeDraft = bookingNoticeEditor.draftValue;
+  const bookingNoticeIsLocked = bookingNoticeEditor.status !== "editing" && bookingNoticeEditor.status !== "error";
+  const bookingScreenNameDraft = bookingScreenNameEditor.draftValue;
+  const bookingScreenNameIsLocked = bookingScreenNameEditor.status !== "editing" && bookingScreenNameEditor.status !== "error";
+
+  function updateCoachAccountBlockDraft<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
+    coachAccountEditor.setDraftValue((current) => cleanCoachAccount({ ...current, [field]: value }));
+  }
+
+  function updateBillingAccountDraft<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
+    if ((field === "enabled" || field === "showBillingWorkspace") && value === true && !canUseFeature(activeAccount, "invoicing")) {
+      setToast({ message: featureUnavailableMessage("invoicing") });
+      return;
+    }
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          [field]: value,
+        },
+      }),
+    );
+  }
+
+  function updateBillingCustomFieldDraft<K extends keyof InvoiceCustomField>(id: string, field: K, value: InvoiceCustomField[K]) {
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: current.invoiceSettings.customFields.map((customField) =>
+            customField.id === id ? { ...customField, [field]: value } : customField,
+          ),
+        },
+      }),
+    );
+  }
+
+  function addBillingCustomFieldDraft() {
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: [
+            ...current.invoiceSettings.customFields,
+            { id: `field-${Date.now()}`, label: "", value: "", placement: "footer" },
+          ],
+        },
+      }),
+    );
+  }
+
+  function removeBillingCustomFieldDraft(id: string) {
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: current.invoiceSettings.customFields.filter((field) => field.id !== id),
+        },
+      }),
+    );
+  }
+
+  function updateNotificationBlockDraft(
+    editor: typeof emailNotificationsEditor,
+    field: keyof NotificationSettings,
+    value: NotificationSettings[keyof NotificationSettings],
+  ) {
+    editor.setDraftValue((current) => ({ ...current, [field]: value }));
+  }
+
+  useEffect(() => {
+    if (!dirtyEditableBlock) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirtyEditableBlock]);
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !activeEditableBlock) return;
+      event.preventDefault();
+      cancelEditableBlock(activeEditableBlock.id);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [activeEditableBlock]);
+
   useEffect(() => {
     if (isAdminUser) return;
     if (["coaches", "locations", "email", "experience", "account", "branding", "integrations", "data"].includes(settingsTab)) {
@@ -5194,6 +5577,8 @@ function App() {
     : "";
   const minBookingNoticeHours = Math.max(0, Math.round((notificationSettings.minBookingNoticeMinutes / 60) * 100) / 100);
   const minBookingNoticeSummary = formatBookingNoticeLabel(notificationSettings.minBookingNoticeMinutes);
+  const bookingNoticeDraftHours = Math.max(0, Math.round((bookingNoticeDraft.minBookingNoticeMinutes / 60) * 100) / 100);
+  const bookingNoticeDraftSummary = formatBookingNoticeLabel(bookingNoticeDraft.minBookingNoticeMinutes);
   const emailTemplateExample = {
     adminIntro: renderTemplate(notificationSettings.adminEmailIntro, emailTemplateVariables),
     adminSubject: renderTemplate(notificationSettings.adminEmailSubject, emailTemplateVariables),
@@ -9951,12 +10336,14 @@ function App() {
   }
 
   function insertNotificationSubjectToken(token: string) {
-    const next = `${notificationSettings.notificationSubjectLine ?? ""} ${token}`.trim().slice(0, 180);
-    updateNotificationSetting("notificationSubjectLine", next);
+    emailTemplateEditor.setDraftValue((current) => ({
+      ...current,
+      notificationSubjectLine: `${current.notificationSubjectLine ?? ""} ${token}`.trim().slice(0, 180),
+    }));
   }
 
   function updateBookingNoticeHours(hours: number) {
-    updateNotificationSetting("minBookingNoticeMinutes", cleanMinBookingNoticeMinutes(hours * 60));
+    updateNotificationBlockDraft(bookingNoticeEditor, "minBookingNoticeMinutes", cleanMinBookingNoticeMinutes(hours * 60));
   }
 
   function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
@@ -12472,8 +12859,8 @@ function App() {
     }
   }
 
-  async function saveCoachAccount() {
-    const clean = cleanCoachAccount(coachAccount);
+  async function saveCoachAccount(draft = coachAccount): Promise<CoachAccount> {
+    const clean = cleanCoachAccount(draft);
     setCoachAccount(clean);
     setCoachAccountSaveState("saving");
     try {
@@ -12492,9 +12879,13 @@ function App() {
       setCoachAccountSaveState("saved");
       setToast({ message: "Coach account saved." });
       window.setTimeout(() => setCoachAccountSaveState("idle"), 1600);
+      return cleanCoachAccount(saved);
     } catch (error) {
+      setCoachAccount(draft);
       setCoachAccountSaveState("idle");
-      setToast({ message: error instanceof Error ? error.message : "Could not save coach account." });
+      const message = error instanceof Error ? error.message : "Could not save coach account.";
+      setToast({ message });
+      throw new Error(message);
     }
   }
 
@@ -12664,7 +13055,7 @@ function App() {
     setCalendarSaveError("");
   }
 
-  async function saveNotificationSettings() {
+  async function saveNotificationSettings(draft = notificationSettings): Promise<NotificationSettings> {
     const saveVersion = ++settingsSaveVersionRef.current;
     beginAdminSave("settings");
     const isCurrentSave = () => settingsSaveVersionRef.current === saveVersion;
@@ -12674,7 +13065,7 @@ function App() {
       const response = await fetch("/api/admin-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(notificationSettings),
+        body: JSON.stringify(draft),
       });
       if (response.status === 401) {
         setAuthStatus("guest");
@@ -12682,19 +13073,21 @@ function App() {
       }
       if (!response.ok) throw new Error(await readApiFailure(response, "Settings save failed"));
       const settings = (await response.json()) as NotificationSettings;
-      if (!isCurrentSave()) return;
+      if (!isCurrentSave()) return draft;
       applyNotificationSettings(settings);
       setSettingsSaveState("saved");
       setToast({ message: "Notification and text settings saved." });
       window.setTimeout(() => {
         if (isCurrentSave()) setSettingsSaveState("idle");
       }, 1600);
+      return settings;
     } catch (error) {
-      if (!isCurrentSave()) return;
+      if (!isCurrentSave()) return draft;
       const message = error instanceof Error ? error.message : "Could not save notification settings.";
       setSettingsSaveState("idle");
       setSettingsSaveError(message);
       setToast({ message });
+      throw new Error(message);
     } finally {
       endAdminSave("settings");
     }
@@ -15219,12 +15612,22 @@ function App() {
 
         </div>
       </details>
+      <EditableSettingsBlock
+        id="booking-page-notice-block"
+        title="Booking Page notice"
+        status={bookingNoticeEditor.status}
+        dirty={bookingNoticeEditor.dirty}
+        errorMessage={bookingNoticeEditor.errorMessage}
+        onEdit={() => startEditableBlock("booking-page-notice")}
+        onCancel={() => cancelEditableBlock("booking-page-notice")}
+        onSave={() => void saveEditableBlock("booking-page-notice")}
+      >
       <details className="settings-subsection">
         <summary className="settings-subsection-title">
           <Clock size={18} />
           <div>
             <span>Minimum notice before a public booking</span>
-            <strong>{minBookingNoticeSummary}</strong>
+            <strong>{bookingNoticeDraftSummary}</strong>
           </div>
         </summary>
         <label className="settings-field">
@@ -15234,7 +15637,8 @@ function App() {
             min={0}
             max={168}
             step={0.25}
-            value={minBookingNoticeHours}
+            value={bookingNoticeDraftHours}
+            readOnly={bookingNoticeIsLocked}
             onChange={(event) => updateBookingNoticeHours(Math.max(0, Number(event.target.value || 0)))}
           />
         </label>
@@ -15243,6 +15647,7 @@ function App() {
           {MIN_BOOKING_NOTICE_PRESETS_HOURS.map((hours) => (
             <button
               className="outline-button"
+              disabled={bookingNoticeIsLocked}
               key={hours}
               onClick={() => updateBookingNoticeHours(hours)}
               type="button"
@@ -15251,18 +15656,21 @@ function App() {
             </button>
           ))}
         </div>
-        <button className="outline-button" onClick={() => updateBookingNoticeHours(0)} type="button">
+        <button className="outline-button" disabled={bookingNoticeIsLocked} onClick={() => updateBookingNoticeHours(0)} type="button">
           Clear buffer
         </button>
-        <button className="primary-button settings-save" onClick={saveNotificationSettings}>
-          {settingsSaveState === "saving"
-            ? "Saving"
-            : settingsSaveState === "saved"
-              ? "Saved"
-              : "Save minimum notice"}
-        </button>
-        {settingsSaveErrorNotice()}
       </details>
+      </EditableSettingsBlock>
+      <EditableSettingsBlock
+        id="booking-screen-name-block"
+        title="Booking Page screen name"
+        status={bookingScreenNameEditor.status}
+        dirty={bookingScreenNameEditor.dirty}
+        errorMessage={bookingScreenNameEditor.errorMessage}
+        onEdit={() => startEditableBlock("booking-screen-name")}
+        onCancel={() => cancelEditableBlock("booking-screen-name")}
+        onSave={() => void saveEditableBlock("booking-screen-name")}
+      >
               <details className="settings-subsection">
                 <summary className="settings-subsection-title">
                   <Code2 size={18} />
@@ -15277,7 +15685,11 @@ function App() {
                     <button
                       className={`booking-screen-tab ${selectedBookingScreenId === bookingScreen.id ? "active" : ""}`}
                       key={bookingScreen.id}
-                      onClick={() => setSelectedBookingScreenId(bookingScreen.id)}
+                      onClick={() => {
+                        if (bookingScreenNameEditor.dirty && !confirmDiscardEditableBlock("Booking Page screen name")) return;
+                        if (bookingScreenNameEditor.dirty) bookingScreenNameEditor.cancel();
+                        setSelectedBookingScreenId(bookingScreen.id);
+                      }}
                       type="button"
                     >
                       {bookingScreen.label}
@@ -15289,8 +15701,14 @@ function App() {
                     <label className="settings-field">
                       <span>Screen name</span>
                       <input
-                        value={selectedBookingScreen.label}
-                        onChange={(event) => updateBookingScreenName(selectedBookingScreen.id, event.target.value)}
+                        value={bookingScreenNameDraft[selectedBookingScreen.id] || selectedBookingScreen.label}
+                        readOnly={bookingScreenNameIsLocked}
+                        onChange={(event) =>
+                          bookingScreenNameEditor.setDraftValue((current) => ({
+                            ...current,
+                            [selectedBookingScreen.id]: event.target.value,
+                          }))
+                        }
                         type="text"
                       />
                     </label>
@@ -15350,6 +15768,7 @@ function App() {
                 )}
               </div>
       </details>
+      </EditableSettingsBlock>
     </article>
   );
 
@@ -18871,39 +19290,52 @@ function App() {
                     These defaults are used when creating a new invoice and are saved on the Coach Account record.
                     Current next number: {invoiceNumber}
                   </p>
+                  <EditableSettingsBlock
+                    id="billing-settings-block"
+                    title="Billing Settings"
+                    status={billingSettingsEditor.status}
+                    dirty={billingSettingsEditor.dirty}
+                    errorMessage={billingSettingsEditor.errorMessage}
+                    onEdit={() => startEditableBlock("billing-settings")}
+                    onCancel={() => cancelEditableBlock("billing-settings")}
+                    onSave={() => void saveEditableBlock("billing-settings")}
+                  >
                   <div className="service-form-row">
                     <label className="settings-field">
                       <span>Currency</span>
                       <input
-                        value={invoiceSettings.currency}
-                        onChange={(event) => updateInvoiceSettings("currency", event.target.value)}
+                        value={invoiceSettingsDraft.currency}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("currency", event.target.value)}
                       />
                     </label>
                     <label className="settings-field">
                       <span>Time zone</span>
-                      <input value={coachAccount.timezone} onChange={(event) => updateCoachAccount("timezone", event.target.value)} />
+                      <input value={billingAccountDraft.timezone} readOnly={billingSettingsIsLocked} onChange={(event) => billingSettingsEditor.setDraftValue((current) => cleanCoachAccount({ ...current, timezone: event.target.value }))} />
                     </label>
                   </div>
                   <div className="service-form-row">
                     <label className="settings-field">
                       <span>Invoice prefix</span>
-                      <input value={invoiceSettings.prefix} onChange={(event) => updateInvoiceSettings("prefix", event.target.value)} />
+                      <input value={invoiceSettingsDraft.prefix} readOnly={billingSettingsIsLocked} onChange={(event) => updateBillingAccountDraft("prefix", event.target.value)} />
                     </label>
                     <label className="settings-field">
                       <span>Start / next number</span>
                       <input
-                        value={invoiceSettings.nextNumber}
+                        value={invoiceSettingsDraft.nextNumber}
                         inputMode="numeric"
-                        onChange={(event) => updateInvoiceSettings("nextNumber", parseQuantityInput(event.target.value))}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("nextNumber", parseQuantityInput(event.target.value))}
                         type="text"
                       />
                     </label>
                     <label className="settings-field">
                       <span>Payment terms (days)</span>
                       <input
-                        value={invoiceSettings.paymentTermsDays}
+                        value={invoiceSettingsDraft.paymentTermsDays}
                         inputMode="numeric"
-                        onChange={(event) => updateInvoiceSettings("paymentTermsDays", parseQuantityInput(event.target.value))}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("paymentTermsDays", parseQuantityInput(event.target.value))}
                         type="text"
                       />
                     </label>
@@ -18912,24 +19344,27 @@ function App() {
                     <label className="settings-field">
                       <span>GST / tax name</span>
                       <input
-                        value={invoiceSettings.taxName}
-                        onChange={(event) => updateInvoiceSettings("taxName", event.target.value)}
+                        value={invoiceSettingsDraft.taxName}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("taxName", event.target.value)}
                       />
                     </label>
                     <label className="settings-field">
                       <span>Tax number</span>
                       <input
-                        value={invoiceSettings.taxNumber}
-                        onChange={(event) => updateInvoiceSettings("taxNumber", event.target.value)}
+                        value={invoiceSettingsDraft.taxNumber}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("taxNumber", event.target.value)}
                         placeholder="GST / tax number"
                       />
                     </label>
                     <label className="settings-field">
                       <span>Tax rate</span>
                       <input
-                        value={invoiceSettings.taxRate}
+                        value={invoiceSettingsDraft.taxRate}
                         inputMode="decimal"
-                        onChange={(event) => updateInvoiceSettings("taxRate", parseMoneyInput(event.target.value))}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("taxRate", parseMoneyInput(event.target.value))}
                         type="text"
                       />
                     </label>
@@ -18937,8 +19372,9 @@ function App() {
                   <label className="settings-field">
                     <span>Unpaid invoice loudness</span>
                     <select
-                      value={invoiceSettings.unpaidLoudness}
-                      onChange={(event) => updateInvoiceSettings("unpaidLoudness", Number(event.target.value) as 1 | 2 | 3)}
+                      value={invoiceSettingsDraft.unpaidLoudness}
+                      disabled={billingSettingsIsLocked}
+                      onChange={(event) => updateBillingAccountDraft("unpaidLoudness", Number(event.target.value) as 1 | 2 | 3)}
                     >
                       <option value={1}>Level 1 - Subtle (small count only)</option>
                       <option value={2}>Level 2 - Noticeable (dashboard banner)</option>
@@ -18952,26 +19388,22 @@ function App() {
                   <label className="settings-field">
                     <span>Default customer note</span>
                     <textarea
-                      value={invoiceSettings.defaultCustomerNote}
-                      onChange={(event) => updateInvoiceSettings("defaultCustomerNote", event.target.value)}
+                      value={invoiceSettingsDraft.defaultCustomerNote}
+                      readOnly={billingSettingsIsLocked}
+                      onChange={(event) => updateBillingAccountDraft("defaultCustomerNote", event.target.value)}
                       rows={2}
                     />
                   </label>
                   <label className="settings-field">
                     <span>Payment instructions</span>
                     <textarea
-                      value={invoiceSettings.paymentInstructions}
-                      onChange={(event) => updateInvoiceSettings("paymentInstructions", event.target.value)}
+                      value={invoiceSettingsDraft.paymentInstructions}
+                      readOnly={billingSettingsIsLocked}
+                      onChange={(event) => updateBillingAccountDraft("paymentInstructions", event.target.value)}
                       rows={2}
                     />
                   </label>
-                  <button className="primary-button settings-save" onClick={saveCoachAccount}>
-                    {coachAccountSaveState === "saving"
-                      ? "Saving"
-                      : coachAccountSaveState === "saved"
-                        ? "Saved"
-                        : "Save Billing Settings"}
-                  </button>
+                  </EditableSettingsBlock>
                 </article>
 
                 <article className="data-card">
@@ -19767,7 +20199,7 @@ function App() {
             <div className="settings-tabs" role="tablist" aria-label="Settings sections">
               <button
                 className={settingsTab === "services" ? "active" : ""}
-                onClick={() => setSettingsTab("services")}
+                onClick={() => switchSettingsTab("services")}
                 role="tab"
                 aria-selected={settingsTab === "services"}
                 type="button"
@@ -19778,7 +20210,7 @@ function App() {
               {isAdminUser ? (
                 <button
                   className={settingsTab === "coaches" ? "active" : ""}
-                  onClick={() => setSettingsTab("coaches")}
+                  onClick={() => switchSettingsTab("coaches")}
                   role="tab"
                   aria-selected={settingsTab === "coaches"}
                   type="button"
@@ -19789,7 +20221,7 @@ function App() {
               ) : null}
               <button
                 className={settingsTab === "availability" ? "active" : ""}
-                onClick={() => setSettingsTab("availability")}
+                onClick={() => switchSettingsTab("availability")}
                 role="tab"
                 aria-selected={settingsTab === "availability"}
                 type="button"
@@ -19799,7 +20231,7 @@ function App() {
               </button>
               <button
                 className={settingsTab === "locations" ? "active" : ""}
-                onClick={() => setSettingsTab("locations")}
+                onClick={() => switchSettingsTab("locations")}
                 role="tab"
                 aria-selected={settingsTab === "locations"}
                 type="button"
@@ -19811,7 +20243,7 @@ function App() {
                 <>
                   <button
                     className={settingsTab === "email" ? "active" : ""}
-                    onClick={() => setSettingsTab("email")}
+                    onClick={() => switchSettingsTab("email")}
                     role="tab"
                     aria-selected={settingsTab === "email"}
                     type="button"
@@ -19821,7 +20253,7 @@ function App() {
                   </button>
                   <button
                     className={settingsTab === "experience" ? "active" : ""}
-                    onClick={() => setSettingsTab("experience")}
+                    onClick={() => switchSettingsTab("experience")}
                     role="tab"
                     aria-selected={settingsTab === "experience"}
                     type="button"
@@ -19831,7 +20263,7 @@ function App() {
                   </button>
                   <button
                     className={settingsTab === "account" ? "active" : ""}
-                    onClick={() => setSettingsTab("account")}
+                    onClick={() => switchSettingsTab("account")}
                     role="tab"
                     aria-selected={settingsTab === "account"}
                     type="button"
@@ -19841,7 +20273,7 @@ function App() {
                   </button>
                   <button
                     className={settingsTab === "branding" ? "active" : ""}
-                    onClick={() => setSettingsTab("branding")}
+                    onClick={() => switchSettingsTab("branding")}
                     role="tab"
                     aria-selected={settingsTab === "branding"}
                     type="button"
@@ -19851,7 +20283,7 @@ function App() {
                   </button>
                   <button
                     className={settingsTab === "integrations" ? "active" : ""}
-                    onClick={() => setSettingsTab("integrations")}
+                    onClick={() => switchSettingsTab("integrations")}
                     role="tab"
                     aria-selected={settingsTab === "integrations"}
                     type="button"
@@ -19861,7 +20293,7 @@ function App() {
                   </button>
                   <button
                     className={settingsTab === "data" ? "active" : ""}
-                    onClick={() => setSettingsTab("data")}
+                    onClick={() => switchSettingsTab("data")}
                     role="tab"
                     aria-selected={settingsTab === "data"}
                     type="button"
@@ -19932,6 +20364,16 @@ function App() {
                   <p className="field-help">This is the account wrapper for subscription entitlements. Billing automation and platform admin tools are not implemented here.</p>
                 </details>
                 <div className="account-settings-groups">
+                  <EditableSettingsBlock
+                    id="coach-account-block"
+                    title="Coach Account"
+                    status={coachAccountEditor.status}
+                    dirty={coachAccountEditor.dirty}
+                    errorMessage={coachAccountEditor.errorMessage}
+                    onEdit={() => startEditableBlock("coach-account")}
+                    onCancel={() => cancelEditableBlock("coach-account")}
+                    onSave={() => void saveEditableBlock("coach-account")}
+                  >
                   <details className="settings-subsection">
                     <summary className="settings-subsection-title">
                       <User size={18} />
@@ -19944,23 +20386,26 @@ function App() {
                       <label className="settings-field">
                         <span>Coach name</span>
                         <input
-                          value={coachAccount.coachName}
-                          onChange={(event) => updateCoachAccount("coachName", event.target.value)}
+                          value={coachAccountDraft.coachName}
+                          readOnly={coachAccountIsLocked}
+                          onChange={(event) => updateCoachAccountBlockDraft("coachName", event.target.value)}
                         />
                       </label>
                       <label className="settings-field">
                         <span>Business name</span>
                         <input
-                          value={coachAccount.businessName}
-                          onChange={(event) => updateCoachAccount("businessName", event.target.value)}
+                          value={coachAccountDraft.businessName}
+                          readOnly={coachAccountIsLocked}
+                          onChange={(event) => updateCoachAccountBlockDraft("businessName", event.target.value)}
                         />
                       </label>
                     </div>
                     <label className="settings-field">
                       <span>Contact email</span>
                       <input
-                        value={coachAccount.contactEmail}
-                        onChange={(event) => updateCoachAccount("contactEmail", event.target.value)}
+                        value={coachAccountDraft.contactEmail}
+                        readOnly={coachAccountIsLocked}
+                        onChange={(event) => updateCoachAccountBlockDraft("contactEmail", event.target.value)}
                         type="email"
                       />
                     </label>
@@ -19977,23 +20422,26 @@ function App() {
                     <label className="settings-field">
                       <span>Venue name</span>
                       <input
-                        value={coachAccount.venueName}
-                        onChange={(event) => updateCoachAccount("venueName", event.target.value)}
+                        value={coachAccountDraft.venueName}
+                        readOnly={coachAccountIsLocked}
+                        onChange={(event) => updateCoachAccountBlockDraft("venueName", event.target.value)}
                       />
                     </label>
                     <div className="service-form-row">
                       <label className="settings-field">
                         <span>Short label</span>
                         <input
-                          value={coachAccount.venueShortName}
-                          onChange={(event) => updateCoachAccount("venueShortName", event.target.value)}
+                          value={coachAccountDraft.venueShortName}
+                          readOnly={coachAccountIsLocked}
+                          onChange={(event) => updateCoachAccountBlockDraft("venueShortName", event.target.value)}
                         />
                       </label>
                       <label className="settings-field">
                         <span>Timezone</span>
                         <input
-                          value={coachAccount.timezone}
-                          onChange={(event) => updateCoachAccount("timezone", event.target.value)}
+                          value={coachAccountDraft.timezone}
+                          readOnly={coachAccountIsLocked}
+                          onChange={(event) => updateCoachAccountBlockDraft("timezone", event.target.value)}
                         />
                       </label>
                     </div>
@@ -20010,9 +20458,10 @@ function App() {
                     <label className="settings-field">
                       <span>Booking app URL</span>
                       <input
-                        value={coachAccount.bookingUrl}
+                        value={coachAccountDraft.bookingUrl}
+                        readOnly={coachAccountIsLocked}
                         onChange={(event) => {
-                          updateCoachAccount("bookingUrl", event.target.value);
+                          updateCoachAccountBlockDraft("bookingUrl", event.target.value);
                           setSyncBaseUrl(event.target.value);
                         }}
                       />
@@ -20021,19 +20470,22 @@ function App() {
                       <label className="settings-field">
                         <span>Calendar slug</span>
                         <input
-                          value={coachAccount.calendarSlug}
-                          onChange={(event) => updateCoachAccount("calendarSlug", event.target.value)}
+                          value={coachAccountDraft.calendarSlug}
+                          readOnly={coachAccountIsLocked}
+                          onChange={(event) => updateCoachAccountBlockDraft("calendarSlug", event.target.value)}
                         />
                       </label>
                       <label className="settings-field">
                         <span>Caddy workspace</span>
                         <input
-                          value={coachAccount.caddyWorkspaceUrl}
-                          onChange={(event) => updateCoachAccount("caddyWorkspaceUrl", event.target.value)}
+                          value={coachAccountDraft.caddyWorkspaceUrl}
+                          readOnly={coachAccountIsLocked}
+                          onChange={(event) => updateCoachAccountBlockDraft("caddyWorkspaceUrl", event.target.value)}
                         />
                       </label>
 	                    </div>
 	                  </details>
+                  </EditableSettingsBlock>
 
                   <details className="settings-subsection">
                     <summary className="settings-subsection-title">
@@ -20084,6 +20536,16 @@ function App() {
                     </form>
                   </details>
 
+                  <EditableSettingsBlock
+                    id="billing-settings-account-block"
+                    title="Billing Settings"
+                    status={billingSettingsEditor.status}
+                    dirty={billingSettingsEditor.dirty}
+                    errorMessage={billingSettingsEditor.errorMessage}
+                    onEdit={() => startEditableBlock("billing-settings")}
+                    onCancel={() => cancelEditableBlock("billing-settings")}
+                    onSave={() => void saveEditableBlock("billing-settings")}
+                  >
                   <details className="settings-subsection">
                     <summary className="settings-subsection-title">
                       <FileText size={18} />
@@ -20097,18 +20559,18 @@ function App() {
                     <div className="service-form-row">
                       <label className="settings-toggle">
                         <input
-                          checked={invoiceSettings.enabled}
-                          disabled={!canUseFeature(activeAccount, "invoicing")}
-                          onChange={(event) => updateInvoiceSettings("enabled", event.target.checked)}
+                          checked={invoiceSettingsDraft.enabled}
+                          disabled={billingSettingsIsLocked || !canUseFeature(activeAccount, "invoicing")}
+                          onChange={(event) => updateBillingAccountDraft("enabled", event.target.checked)}
                           type="checkbox"
                         />
                         <span>Enable invoicing</span>
                       </label>
                       <label className="settings-toggle">
                         <input
-                          checked={invoiceSettings.showBillingWorkspace}
-                          disabled={!canUseFeature(activeAccount, "invoicing")}
-                          onChange={(event) => updateInvoiceSettings("showBillingWorkspace", event.target.checked)}
+                          checked={invoiceSettingsDraft.showBillingWorkspace}
+                          disabled={billingSettingsIsLocked || !canUseFeature(activeAccount, "invoicing")}
+                          onChange={(event) => updateBillingAccountDraft("showBillingWorkspace", event.target.checked)}
                           type="checkbox"
                         />
                         <span>Show Billing workspace</span>
@@ -20118,24 +20580,27 @@ function App() {
                       <label className="settings-field">
                         <span>Invoice prefix</span>
                         <input
-                          value={invoiceSettings.prefix}
-                          onChange={(event) => updateInvoiceSettings("prefix", event.target.value)}
+                          value={invoiceSettingsDraft.prefix}
+                          readOnly={billingSettingsIsLocked}
+                          onChange={(event) => updateBillingAccountDraft("prefix", event.target.value)}
                         />
                       </label>
                       <label className="settings-field">
                         <span>Start / next number</span>
                         <input
-                          value={invoiceSettings.nextNumber}
+                          value={invoiceSettingsDraft.nextNumber}
                           inputMode="numeric"
-                          onChange={(event) => updateInvoiceSettings("nextNumber", parseQuantityInput(event.target.value))}
+                          readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("nextNumber", parseQuantityInput(event.target.value))}
                           type="text"
                         />
                       </label>
                       <label className="settings-field">
                         <span>Currency</span>
                         <input
-                          value={invoiceSettings.currency}
-                          onChange={(event) => updateInvoiceSettings("currency", event.target.value)}
+                          value={invoiceSettingsDraft.currency}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("currency", event.target.value)}
                         />
                       </label>
                     </div>
@@ -20143,24 +20608,27 @@ function App() {
                       <label className="settings-field">
                         <span>Tax label</span>
                         <input
-                          value={invoiceSettings.taxName}
-                          onChange={(event) => updateInvoiceSettings("taxName", event.target.value)}
+                          value={invoiceSettingsDraft.taxName}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("taxName", event.target.value)}
                         />
                       </label>
                       <label className="settings-field">
                         <span>Tax number</span>
                         <input
-                          value={invoiceSettings.taxNumber}
-                          onChange={(event) => updateInvoiceSettings("taxNumber", event.target.value)}
+                          value={invoiceSettingsDraft.taxNumber}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("taxNumber", event.target.value)}
                           placeholder="GST / tax number"
                         />
                       </label>
                       <label className="settings-field">
                         <span>Tax rate</span>
                         <input
-                          value={invoiceSettings.taxRate}
+                          value={invoiceSettingsDraft.taxRate}
                           inputMode="decimal"
-                          onChange={(event) => updateInvoiceSettings("taxRate", parseMoneyInput(event.target.value))}
+                          readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("taxRate", parseMoneyInput(event.target.value))}
                           type="text"
                         />
                       </label>
@@ -20169,16 +20637,18 @@ function App() {
                       <label className="settings-field">
                         <span>Bank account</span>
                         <input
-                          value={invoiceSettings.bankAccount}
-                          onChange={(event) => updateInvoiceSettings("bankAccount", event.target.value)}
+                          value={invoiceSettingsDraft.bankAccount}
+                          readOnly={billingSettingsIsLocked}
+                          onChange={(event) => updateBillingAccountDraft("bankAccount", event.target.value)}
                         />
                       </label>
                       <label className="settings-field">
                         <span>Payment terms days</span>
                         <input
-                          value={invoiceSettings.paymentTermsDays}
+                          value={invoiceSettingsDraft.paymentTermsDays}
                           inputMode="numeric"
-                          onChange={(event) => updateInvoiceSettings("paymentTermsDays", parseQuantityInput(event.target.value))}
+                          readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("paymentTermsDays", parseQuantityInput(event.target.value))}
                           type="text"
                         />
                       </label>
@@ -20186,8 +20656,9 @@ function App() {
                     <label className="settings-field">
                       <span>Business address</span>
                       <textarea
-                        value={invoiceSettings.businessAddress}
-                        onChange={(event) => updateInvoiceSettings("businessAddress", event.target.value)}
+                        value={invoiceSettingsDraft.businessAddress}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("businessAddress", event.target.value)}
                         rows={2}
                       />
                     </label>
@@ -20195,16 +20666,18 @@ function App() {
                       <label className="settings-field">
                         <span>Header text</span>
                         <textarea
-                          value={invoiceSettings.headerText}
-                          onChange={(event) => updateInvoiceSettings("headerText", event.target.value)}
+                          value={invoiceSettingsDraft.headerText}
+                          readOnly={billingSettingsIsLocked}
+                          onChange={(event) => updateBillingAccountDraft("headerText", event.target.value)}
                           rows={2}
                         />
                       </label>
                       <label className="settings-field">
                         <span>Footer text</span>
                         <textarea
-                          value={invoiceSettings.footerText}
-                          onChange={(event) => updateInvoiceSettings("footerText", event.target.value)}
+                          value={invoiceSettingsDraft.footerText}
+                          readOnly={billingSettingsIsLocked}
+                          onChange={(event) => updateBillingAccountDraft("footerText", event.target.value)}
                           rows={2}
                         />
                       </label>
@@ -20212,8 +20685,9 @@ function App() {
                     <label className="settings-field">
                       <span>Payment instructions</span>
                       <textarea
-                        value={invoiceSettings.paymentInstructions}
-                        onChange={(event) => updateInvoiceSettings("paymentInstructions", event.target.value)}
+                        value={invoiceSettingsDraft.paymentInstructions}
+                      readOnly={billingSettingsIsLocked}
+                      onChange={(event) => updateBillingAccountDraft("paymentInstructions", event.target.value)}
                         rows={2}
                       />
                     </label>
@@ -20223,33 +20697,36 @@ function App() {
                           <span>Custom fields</span>
                           <h2>Invoice fields</h2>
                         </div>
-                        <button className="outline-button" onClick={addInvoiceCustomField} type="button">
+                        <button className="outline-button" disabled={billingSettingsIsLocked} onClick={addBillingCustomFieldDraft} type="button">
                           <Plus size={16} />
                           Add Field
                         </button>
                       </div>
-                      {invoiceSettings.customFields.map((field) => (
+                      {invoiceSettingsDraft.customFields.map((field) => (
                         <div className="custom-field-row" key={field.id}>
                           <label className="settings-field">
                             <span>Label</span>
                             <input
                               value={field.label}
-                              onChange={(event) => updateInvoiceCustomField(field.id, "label", event.target.value)}
+                              readOnly={billingSettingsIsLocked}
+                              onChange={(event) => updateBillingCustomFieldDraft(field.id, "label", event.target.value)}
                             />
                           </label>
                           <label className="settings-field">
                             <span>Value</span>
                             <input
                               value={field.value}
-                              onChange={(event) => updateInvoiceCustomField(field.id, "value", event.target.value)}
+                              readOnly={billingSettingsIsLocked}
+                              onChange={(event) => updateBillingCustomFieldDraft(field.id, "value", event.target.value)}
                             />
                           </label>
                           <label className="settings-field">
                             <span>Placement</span>
                             <select
                               value={field.placement}
+                              disabled={billingSettingsIsLocked}
                               onChange={(event) =>
-                                updateInvoiceCustomField(field.id, "placement", event.target.value as InvoiceCustomFieldPlacement)
+                                updateBillingCustomFieldDraft(field.id, "placement", event.target.value as InvoiceCustomFieldPlacement)
                               }
                             >
                               <option value="header">Header</option>
@@ -20260,7 +20737,8 @@ function App() {
                           </label>
                           <button
                             className="icon-button"
-                            onClick={() => removeInvoiceCustomField(field.id)}
+                            disabled={billingSettingsIsLocked}
+                            onClick={() => removeBillingCustomFieldDraft(field.id)}
                             type="button"
                             aria-label="Remove custom field"
                           >
@@ -20270,14 +20748,8 @@ function App() {
                       ))}
                     </div>
                   </details>
+                  </EditableSettingsBlock>
                 </div>
-                <button className="primary-button settings-save" onClick={saveCoachAccount}>
-                  {coachAccountSaveState === "saving"
-                    ? "Saving"
-                    : coachAccountSaveState === "saved"
-                    ? "Saved"
-                    : "Save Coach Account"}
-                </button>
               </article>
 
               <article className="data-card sync-card settings-section settings-integrations">
@@ -20774,6 +21246,16 @@ function App() {
               <article className="data-card notification-card settings-section settings-email">
                 <span>Email Notifications</span>
                 <h2>Confirmation emails</h2>
+                <EditableSettingsBlock
+                  id="email-notifications-block"
+                  title="Email Notifications"
+                  status={emailNotificationsEditor.status}
+                  dirty={emailNotificationsEditor.dirty}
+                  errorMessage={emailNotificationsEditor.errorMessage}
+                  onEdit={() => startEditableBlock("email-notifications")}
+                  onCancel={() => cancelEditableBlock("email-notifications")}
+                  onSave={() => void saveEditableBlock("email-notifications")}
+                >
                 <div className="settings-summary-grid">
                   <span>
                     <strong>{notificationSettings.notificationDelaySeconds}s</strong>
@@ -20803,16 +21285,18 @@ function App() {
                   <label className="settings-field">
                     <span>Admin notification email</span>
                     <input
-                      value={notificationSettings.notificationEmail}
-                      onChange={(event) => updateNotificationSetting("notificationEmail", event.target.value)}
+                      value={emailNotificationsDraft.notificationEmail}
+                      readOnly={emailNotificationsIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "notificationEmail", event.target.value)}
                       placeholder={coachAccount.contactEmail}
                     />
                   </label>
                   <label className="settings-field">
                     <span>Coach email (fallback)</span>
                     <input
-                      value={notificationSettings.coachEmail}
-                      onChange={(event) => updateNotificationSetting("coachEmail", event.target.value)}
+                      value={emailNotificationsDraft.coachEmail}
+                      readOnly={emailNotificationsIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "coachEmail", event.target.value)}
                       placeholder="coach@email.co.nz"
                       type="email"
                     />
@@ -20824,12 +21308,14 @@ function App() {
                   <label className="settings-field">
                     <span>Notification delay seconds</span>
                     <input
-                      value={notificationSettings.notificationDelaySeconds}
+                      value={emailNotificationsDraft.notificationDelaySeconds}
+                      readOnly={emailNotificationsIsLocked}
                       min={30}
                       step={5}
                       inputMode="numeric"
                       onChange={(event) =>
-                        updateNotificationSetting(
+                        updateNotificationBlockDraft(
+                          emailNotificationsEditor,
                           "notificationDelaySeconds",
                           clamp(Number(event.target.value || 30), 30, 3600),
                         )
@@ -20856,42 +21342,48 @@ function App() {
                   </summary>
                   <label className="settings-toggle">
                     <input
-                      checked={notificationSettings.sendClientEmail}
-                      onChange={(event) => updateNotificationSetting("sendClientEmail", event.target.checked)}
+                      checked={emailNotificationsDraft.sendClientEmail}
+                      disabled={emailNotificationsIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "sendClientEmail", event.target.checked)}
                       type="checkbox"
                     />
                     <span>Send client confirmation email</span>
                   </label>
                   <label className="settings-toggle">
                     <input
-                      checked={notificationSettings.sendCoachEmail}
-                      onChange={(event) => updateNotificationSetting("sendCoachEmail", event.target.checked)}
+                      checked={emailNotificationsDraft.sendCoachEmail}
+                      disabled={emailNotificationsIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "sendCoachEmail", event.target.checked)}
                       type="checkbox"
                     />
                     <span>Send coach booking alert</span>
                   </label>
                   <label className="settings-toggle">
                     <input
-                      checked={notificationSettings.sendAdminEmail}
-                      onChange={(event) => updateNotificationSetting("sendAdminEmail", event.target.checked)}
+                      checked={emailNotificationsDraft.sendAdminEmail}
+                      disabled={emailNotificationsIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "sendAdminEmail", event.target.checked)}
                       type="checkbox"
                     />
                     <span>Send admin booking alert</span>
                   </label>
                 </details>
-                <button className="primary-button settings-save" onClick={saveNotificationSettings}>
-                  {settingsSaveState === "saving"
-                    ? "Saving"
-                    : settingsSaveState === "saved"
-                      ? "Saved"
-                      : "Save Email Settings"}
-                </button>
-                {settingsSaveErrorNotice()}
+                </EditableSettingsBlock>
               </article>
 
               <article className="data-card notification-card settings-section settings-experience settings-integrations">
                 <span>Text Machine</span>
                 <h2>SMS/webhook hook</h2>
+                <EditableSettingsBlock
+                  id="text-machine-block"
+                  title="Text Machine"
+                  status={textMachineEditor.status}
+                  dirty={textMachineEditor.dirty}
+                  errorMessage={textMachineEditor.errorMessage}
+                  onEdit={() => startEditableBlock("text-machine")}
+                  onCancel={() => cancelEditableBlock("text-machine")}
+                  onSave={() => void saveEditableBlock("text-machine")}
+                >
                 <div className="settings-summary-grid">
                   <span>
                     <strong>{notificationSettings.smsProviderName || "Not set"}</strong>
@@ -20917,24 +21409,27 @@ function App() {
                   <label className="settings-field">
                     <span>Provider name</span>
                     <input
-                      value={notificationSettings.smsProviderName}
-                      onChange={(event) => updateNotificationSetting("smsProviderName", event.target.value)}
+                      value={textMachineDraft.smsProviderName}
+                      readOnly={textMachineIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "smsProviderName", event.target.value)}
                       placeholder="Twilio, MessageMedia, Zapier..."
                     />
                   </label>
                   <label className="settings-field">
                     <span>Webhook or API URL</span>
                     <input
-                      value={notificationSettings.smsWebhookUrl}
-                      onChange={(event) => updateNotificationSetting("smsWebhookUrl", event.target.value)}
+                      value={textMachineDraft.smsWebhookUrl}
+                      readOnly={textMachineIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "smsWebhookUrl", event.target.value)}
                       placeholder="https://..."
                     />
                   </label>
                   <label className="settings-field">
                     <span>Sender or text number</span>
                     <input
-                      value={notificationSettings.smsFromNumber}
-                      onChange={(event) => updateNotificationSetting("smsFromNumber", event.target.value)}
+                      value={textMachineDraft.smsFromNumber}
+                      readOnly={textMachineIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "smsFromNumber", event.target.value)}
                       placeholder="+64..."
                     />
                   </label>
@@ -20953,29 +21448,24 @@ function App() {
                   </summary>
                   <label className="settings-toggle">
                     <input
-                      checked={notificationSettings.sendClientSms}
-                      onChange={(event) => updateNotificationSetting("sendClientSms", event.target.checked)}
+                      checked={textMachineDraft.sendClientSms}
+                      disabled={textMachineIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "sendClientSms", event.target.checked)}
                       type="checkbox"
                     />
                     <span>Send client text confirmation</span>
                   </label>
                   <label className="settings-toggle">
                     <input
-                      checked={notificationSettings.sendAdminSms}
-                      onChange={(event) => updateNotificationSetting("sendAdminSms", event.target.checked)}
+                      checked={textMachineDraft.sendAdminSms}
+                      disabled={textMachineIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "sendAdminSms", event.target.checked)}
                       type="checkbox"
                     />
                     <span>Send admin text alert</span>
                   </label>
                 </details>
-                <button className="primary-button settings-save" onClick={saveNotificationSettings}>
-                  {settingsSaveState === "saving"
-                    ? "Saving"
-                    : settingsSaveState === "saved"
-                      ? "Saved"
-                      : "Save Text Settings"}
-                </button>
-                {settingsSaveErrorNotice()}
+                </EditableSettingsBlock>
               </article>
 
               <article className="data-card notification-card email-template-card settings-section settings-email">
@@ -21010,6 +21500,16 @@ function App() {
                     Admin alert: {emailTemplateExample.adminSubject} - {emailTemplateExample.adminIntro}
                   </em>
                 </div>
+                <EditableSettingsBlock
+                  id="email-template-block"
+                  title="Email Template"
+                  status={emailTemplateEditor.status}
+                  dirty={emailTemplateEditor.dirty}
+                  errorMessage={emailTemplateEditor.errorMessage}
+                  onEdit={() => startEditableBlock("email-template")}
+                  onCancel={() => cancelEditableBlock("email-template")}
+                  onSave={() => void saveEditableBlock("email-template")}
+                >
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Mail size={18} />
@@ -21022,10 +21522,11 @@ function App() {
                     <span>Email sender name</span>
                     <input
                       placeholder="Sam Hale Golf"
-                      value={notificationSettings.notificationFromName}
+                      value={emailTemplateDraft.notificationFromName}
+                      readOnly={emailTemplateIsLocked}
                       maxLength={120}
                       onChange={(event) =>
-                        updateNotificationSetting("notificationFromName", event.target.value.slice(0, 120))}
+                        updateNotificationBlockDraft(emailTemplateEditor, "notificationFromName", event.target.value.slice(0, 120))}
                     />
                   </label>
                   <p className="field-help">This is the display name clients see in their inbox.</p>
@@ -21043,8 +21544,9 @@ function App() {
                   <label className="settings-field">
                     <span>Reply-to email</span>
                     <input
-                      value={notificationSettings.replyToEmail}
-                      onChange={(event) => updateNotificationSetting("replyToEmail", event.target.value)}
+                      value={emailTemplateDraft.replyToEmail}
+                      readOnly={emailTemplateIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "replyToEmail", event.target.value)}
                       placeholder={coachAccount.contactEmail}
                     />
                   </label>
@@ -21061,9 +21563,10 @@ function App() {
                     <span>Google review URL</span>
                     <input
                       type="url"
-                      value={notificationSettings.googleReviewUrl}
+                      value={emailTemplateDraft.googleReviewUrl}
+                      readOnly={emailTemplateIsLocked}
                       maxLength={700}
-                      onChange={(event) => updateNotificationSetting("googleReviewUrl", event.target.value.slice(0, 700))}
+                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "googleReviewUrl", event.target.value.slice(0, 700))}
                       placeholder="direct Google review link"
                     />
                   </label>
@@ -21102,24 +21605,27 @@ function App() {
                   <label className="settings-field">
                     <span>Customer subject</span>
                     <input
-                      value={notificationSettings.clientEmailSubject}
-                      onChange={(event) => updateNotificationSetting("clientEmailSubject", event.target.value)}
+                      value={emailTemplateDraft.clientEmailSubject}
+                      readOnly={emailTemplateIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "clientEmailSubject", event.target.value)}
                     />
                   </label>
                   <label className="settings-field">
                     <span>Customer opening</span>
                     <textarea
                       rows={3}
-                      value={notificationSettings.clientEmailIntro}
-                      onChange={(event) => updateNotificationSetting("clientEmailIntro", event.target.value)}
+                      value={emailTemplateDraft.clientEmailIntro}
+                      readOnly={emailTemplateIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "clientEmailIntro", event.target.value)}
                     />
                   </label>
                   <label className="settings-field">
                     <span>Footer / reschedule note</span>
                     <textarea
                       rows={3}
-                      value={notificationSettings.clientEmailFooter}
-                      onChange={(event) => updateNotificationSetting("clientEmailFooter", event.target.value)}
+                      value={emailTemplateDraft.clientEmailFooter}
+                      readOnly={emailTemplateIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "clientEmailFooter", event.target.value)}
                     />
                   </label>
                 </details>
@@ -21138,9 +21644,10 @@ function App() {
                     <input
                       maxLength={180}
                       placeholder="Use {{client}}, {{service}}, {{date}}, {{time}}, {{action}}"
-                      value={notificationSettings.notificationSubjectLine}
+                      value={emailTemplateDraft.notificationSubjectLine}
+                      readOnly={emailTemplateIsLocked}
                       onChange={(event) =>
-                        updateNotificationSetting("notificationSubjectLine", event.target.value.slice(0, 180))}
+                        updateNotificationBlockDraft(emailTemplateEditor, "notificationSubjectLine", event.target.value.slice(0, 180))}
                     />
                   </label>
                   <p className="field-help">Blank keeps existing per-notification defaults.</p>
@@ -21161,7 +21668,7 @@ function App() {
                     <button
                       className="outline-button"
                       type="button"
-                      onClick={() => updateNotificationSetting("notificationSubjectLine", "")}
+                      onClick={() => updateNotificationBlockDraft(emailTemplateEditor, "notificationSubjectLine", "")}
                     >
                       Clear override
                     </button>
@@ -21178,16 +21685,18 @@ function App() {
                   <label className="settings-field">
                     <span>Admin subject</span>
                     <input
-                      value={notificationSettings.adminEmailSubject}
-                      onChange={(event) => updateNotificationSetting("adminEmailSubject", event.target.value)}
+                      value={emailTemplateDraft.adminEmailSubject}
+                      readOnly={emailTemplateIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "adminEmailSubject", event.target.value)}
                     />
                   </label>
                   <label className="settings-field">
                     <span>Admin summary</span>
                     <textarea
                       rows={3}
-                      value={notificationSettings.adminEmailIntro}
-                      onChange={(event) => updateNotificationSetting("adminEmailIntro", event.target.value)}
+                      value={emailTemplateDraft.adminEmailIntro}
+                      readOnly={emailTemplateIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "adminEmailIntro", event.target.value)}
                     />
                   </label>
                 </details>
@@ -21209,14 +21718,7 @@ function App() {
                     <code>{"{{price}}"}</code>
                   </div>
                 </details>
-                <button className="primary-button settings-save" onClick={saveNotificationSettings}>
-                  {settingsSaveState === "saving"
-                    ? "Saving"
-                    : settingsSaveState === "saved"
-                      ? "Saved"
-                      : "Save Template"}
-                </button>
-                {settingsSaveErrorNotice()}
+                </EditableSettingsBlock>
               </article>
 
               <article className="data-card notification-card settings-section settings-experience settings-branding">

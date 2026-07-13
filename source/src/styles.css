@@ -2515,6 +2515,109 @@ button {
   gap: 8px;
 }
 
+.editable-settings-block {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 82%, var(--panel-soft));
+}
+
+.editable-settings-block.is-editing {
+  border-color: color-mix(in srgb, var(--coach-primary) 34%, var(--border));
+  background: var(--panel);
+}
+
+.editable-settings-block.is-saving {
+  border-color: color-mix(in srgb, var(--coach-primary) 25%, var(--border));
+}
+
+.editable-settings-block.is-error {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  background: color-mix(in srgb, var(--danger-soft) 34%, var(--panel));
+}
+
+.editable-settings-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+}
+
+.editable-settings-block-header > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.editable-settings-block-header span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.editable-settings-block-header em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.editable-settings-block-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 180px;
+}
+
+.editable-settings-block-actions .primary-button,
+.editable-settings-block-actions .outline-button {
+  min-height: 34px;
+}
+
+.editable-settings-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.editable-settings-block-body {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-field input:read-only,
+.settings-field textarea:read-only {
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--panel-soft) 45%, transparent);
+  color: var(--text);
+  box-shadow: none;
+  cursor: default;
+}
+
+.settings-field input:read-only:focus,
+.settings-field textarea:read-only:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.settings-field select:disabled,
+.settings-toggle input:disabled,
+.editable-settings-block button:disabled {
+  cursor: not-allowed;
+}
+
+.settings-field select:disabled,
+.settings-toggle input:disabled {
+  opacity: 0.72;
+}
+
 .settings-toggle {
   min-height: 38px;
   display: flex;
