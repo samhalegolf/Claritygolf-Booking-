@@ -13,6 +13,8 @@ const OPTIONAL_CALENDAR_ITEM_COLUMNS = [
 ];
 const ACCOUNT_SCOPE_COLUMNS = ["account_id", "coach_id", "location_id", "coach", "location"];
 const BASE_WEEK_START = Date.UTC(2026, 5, 1);
+const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
+const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -399,6 +401,52 @@ function slotOverlaps(a: any, b: any) {
   return a.week === b.week && a.day === b.day && a.start < b.start + b.duration && a.start + a.duration > b.start;
 }
 
+function isCancelledGroupSessionRecord(item: any, serviceId: string, session: any) {
+  return (
+    item?.kind === "block" &&
+    (item?.note === CANCELLED_GROUP_SESSION_NOTE || item?.title === CANCELLED_GROUP_SESSION_TITLE) &&
+    item?.serviceId === serviceId &&
+    Number(item?.week ?? 0) === session.week &&
+    Number(item?.day) === session.day &&
+    Number(item?.start) === session.start
+  );
+}
+
+// Recurring group sessions have no calendar row until someone books one, so overlapping
+// occurrences must be synthesised as holds or a private lesson can land on top of them.
+function scheduledGroupSessionHolds(items: any[], slot: any, service: any, state: any) {
+  const services = state?.services || [];
+  if (!Number.isInteger(slot?.week)) return [];
+  const holds: any[] = [];
+  for (const groupService of services) {
+    if (groupService?.id === service?.id) continue;
+    if (!groupService?.active || groupService.archived === true) continue;
+    if (!isScheduledGroupService(groupService)) continue;
+    const schedule = groupService.groupSchedule;
+    if (!schedule || schedule.active === false) continue;
+    const session = {
+      week: slot.week,
+      day: Number(schedule.dayOfWeek),
+      start: Number(schedule.startMinutes),
+      duration: Number(groupService.duration),
+    };
+    if (!isGroupSlotMatch(groupService, session)) continue;
+    if (!slotOverlaps(session, slot)) continue;
+    if (items.some((item) => isCancelledGroupSessionRecord(item, groupService.id, session))) continue;
+    holds.push({
+      ...session,
+      id: `group-session-hold-${groupService.id}-${session.week}`,
+      kind: "appointment",
+      status: "booked",
+      serviceId: groupService.id,
+      coachId: groupService.coachId || defaultCoachId(state.coaches || []),
+      locationId: serviceLocationSnapshot(groupService, state.locations || [], state.account).locationId,
+      title: `${groupService.name} (group session)`,
+    });
+  }
+  return holds;
+}
+
 function itemActiveForConflict(item: any) {
   return !["cancelled", "no_show"].includes(item?.status || "");
 }
@@ -458,7 +506,9 @@ function conflictItemSummary(item: any, state: any) {
 function findCollision(items: any[], slot: any, service: any, state: any) {
   const candidateCoachId = service?.coachId || defaultCoachId(state.coaches || []);
   const candidateLocationId = serviceLocationSnapshot(service, state.locations || [], state.account).locationId;
-  const overlaps = items.filter((item) => slotOverlaps(item, slot) && itemActiveForConflict(item));
+  const groupHolds = scheduledGroupSessionHolds(items, slot, service, state);
+  const conflictItems = groupHolds.length ? [...items, ...groupHolds] : items;
+  const overlaps = conflictItems.filter((item) => slotOverlaps(item, slot) && itemActiveForConflict(item));
   const isCoachConflict = (item: any) => {
     if (isLocationOnlyBlock(item)) return false;
     const existingService = itemService(item, state.services || []);

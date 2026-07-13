@@ -5847,6 +5847,66 @@ function isGroupServiceSlotMatch(service, candidate) {
   return true;
 }
 
+function isCancelledGroupSessionRecord(item, serviceId, session) {
+  return (
+    isCancelledGroupSessionLike(item) &&
+    (item.serviceId || item.service_id) === serviceId &&
+    itemWeek(item) === session.week &&
+    Number(item.day) === session.day &&
+    Number(item.start) === session.start
+  );
+}
+
+// Scheduled group sessions are recurring service definitions, not stored calendar rows.
+// They only become rows once someone books one, so conflict checks must synthesise a
+// "hold" for every live occurrence — otherwise a private lesson can be booked on top of
+// an empty group session.
+function scheduledGroupSessionHolds(items = [], candidate, state = {}) {
+  const services = state.services || defaultServices;
+  const coaches = state.coaches || [];
+  const locations = state.locations || [];
+  const account = state.account || defaultCoachAccount();
+  if (!Number.isInteger(candidate?.week)) return [];
+  // Cancelled-session rows are stripped from some conflict item lists (they are status
+  // "cancelled"), so callers can supply them separately to keep cancelled occurrences bookable.
+  const cancellations = Array.isArray(state.cancelledGroupSessions) ? state.cancelledGroupSessions : items;
+  const holds = [];
+  for (const groupService of services) {
+    if (!groupService?.active || groupService.archived === true) continue;
+    if (!isScheduledGroupService(groupService)) continue;
+    const schedule = groupService.groupSchedule;
+    if (!schedule?.active) continue;
+    const session = {
+      week: candidate.week,
+      day: schedule.dayOfWeek,
+      start: schedule.startMinutes,
+      duration: groupService.duration,
+    };
+    if (!isGroupServiceSlotMatch(groupService, session)) continue;
+    if (!slotOverlaps(session, candidate)) continue;
+    if (cancellations.some((item) => isCancelledGroupSessionRecord(item, groupService.id, session))) continue;
+    const holdSeed = { serviceId: groupService.id };
+    holds.push({
+      ...session,
+      id: `group-session-hold-${groupService.id}-${session.week}`,
+      kind: "appointment",
+      status: "booked",
+      serviceId: groupService.id,
+      coachId: resolvedCalendarItemCoachId(holdSeed, groupService, coaches, account),
+      locationId: resolvedCalendarItemLocationId(holdSeed, groupService, locations, account),
+      title: `${groupService.name} (group session)`,
+      syntheticGroupSlot: true,
+      readOnly: true,
+    });
+  }
+  return holds;
+}
+
+function itemsWithGroupSessionHolds(items = [], candidate, service, state = {}) {
+  const holds = scheduledGroupSessionHolds(items, candidate, state).filter((hold) => hold.serviceId !== service?.id);
+  return holds.length ? [...items, ...holds] : items;
+}
+
 function conflictItemSummary(item, state = {}) {
   if (!item) return null;
   const services = state.services || defaultServices;
@@ -5898,7 +5958,8 @@ function findCollision(items, candidate, service, state = {}) {
     return candidateItem.kind === "block" && isLocationOnlyBlock(candidateItem);
   };
   const isAppointmentConflict = (item) => isCoachConflict(item) || isLocationConflict(item);
-  const overlapping = items.filter((item) =>
+  const conflictItems = itemsWithGroupSessionHolds(items, candidate, service, state);
+  const overlapping = conflictItems.filter((item) =>
     slotOverlaps(
       {
         week: itemWeek(item),
@@ -6109,7 +6170,10 @@ export function publicBookingSlots(state, options = {}) {
   }
   const requestedWeekItems = publicSlotRequestedWeekItems(accountState.items, week);
   const relevantResourceItems = publicSlotRelevantResourceItems(requestedWeekItems, targetService, accountState);
-  const filteredAccountState = { ...accountState, items: relevantResourceItems };
+  const cancelledGroupSessions = (accountState.items || []).filter(
+    (item) => isCancelledGroupSessionLike(item) && itemWeek(item) === week,
+  );
+  const filteredAccountState = { ...accountState, items: relevantResourceItems, cancelledGroupSessions };
   if (metrics) {
     if (metrics.requestedWeekItemCount == null) metrics.requestedWeekItemCount = requestedWeekItems.length;
     if (metrics.relevantResourceItemCount == null) metrics.relevantResourceItemCount = relevantResourceItems.length;

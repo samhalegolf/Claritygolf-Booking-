@@ -7837,6 +7837,51 @@ function App() {
     return availability[day].some((window) => start >= window.start && end <= window.end);
   }
 
+  // Recurring group sessions are service definitions, not stored calendar items: no row
+  // exists until someone books one. Conflict checks therefore synthesise a hold for every
+  // live occurrence, otherwise a private lesson can be booked on top of an empty group session.
+  function groupSessionHolds(candidate: SlotCandidate, service?: Service): CalendarItem[] {
+    if (!Number.isInteger(candidate.week)) return [];
+    return services
+      .filter(
+        (groupService) =>
+          groupService.id !== service?.id &&
+          groupService.active &&
+          groupService.archived !== true &&
+          isScheduledGroupService(groupService) &&
+          groupService.groupSchedule?.active,
+      )
+      .flatMap((groupService) => {
+        const schedule = groupService.groupSchedule!;
+        const session = {
+          week: candidate.week,
+          day: schedule.dayOfWeek,
+          start: schedule.startMinutes,
+          duration: groupService.duration,
+        };
+        if (!isGroupServiceSlotMatch(groupService, session.week, session.day, session.start)) return [];
+        if (!overlaps(session, candidate)) return [];
+        if (items.some((item) => isCancelledGroupSessionMatch(item, groupService.id, session.week, session.day, session.start))) {
+          return [];
+        }
+        return [
+          {
+            ...session,
+            id: `group-session-hold-${groupService.id}-${session.week}`,
+            kind: "appointment" as const,
+            status: "booked" as BookingStatus,
+            accountId: activeAccountId,
+            serviceId: groupService.id,
+            coachId: groupService.coachId,
+            locationId: serviceLocation(groupService, locations, coachAccount).id,
+            title: `${groupService.name} (group session)`,
+            syntheticGroupSlot: true,
+            readOnly: true,
+          } as CalendarItem,
+        ];
+      });
+  }
+
   function hasCollision(
     candidate: SlotCandidate,
     ignoreId?: string,
@@ -7852,7 +7897,8 @@ function App() {
       locationId: candidateLocationId,
       ...candidate,
     };
-    const overlappingItems = items.filter((item) => {
+    const conflictItems = [...items, ...groupSessionHolds(candidate, service)];
+    const overlappingItems = conflictItems.filter((item) => {
       if (item.id === ignoreId || itemWeek(item) !== candidate.week || item.day !== candidate.day) return false;
       return overlaps(itemSlot(item), candidate);
     });

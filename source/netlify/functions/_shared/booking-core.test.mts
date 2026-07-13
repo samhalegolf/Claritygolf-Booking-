@@ -678,3 +678,85 @@ test("successful public booking slots response shape stays frontend compatible",
   assert.deepEqual(payload.services[serviceId].slots, payload.slots);
   assert.deepEqual(Object.keys(payload.services), [serviceId]);
 });
+
+const groupDay = 2;
+const groupStart = minutes(10, 0);
+
+function availabilityOverGroupSession() {
+  const days = availability();
+  days[groupDay].push({
+    accountId,
+    coachId,
+    start: minutes(9, 30),
+    end: minutes(11, 30),
+  });
+  return days;
+}
+
+function privateSlotsOverGroupSession(items = []) {
+  return publicBookingSlots(
+    calendarState({ availability: availabilityOverGroupSession(), items }),
+    { serviceId, week: testWeek },
+  );
+}
+
+function groupDaySlotStarts(payload: any) {
+  return payload.slots
+    .filter((slot: any) => slot.day === groupDay)
+    .map((slot: any) => slot.start)
+    .sort((left: number, right: number) => left - right);
+}
+
+test("an unbooked scheduled group session blocks overlapping private slots", () => {
+  // Regression: group sessions have no calendar row until someone books one, so an empty
+  // session used to be invisible to conflict checks and a private lesson could be booked over it.
+  assert.deepEqual(groupDaySlotStarts(privateSlotsOverGroupSession()), [minutes(9, 30), minutes(11, 0)]);
+});
+
+test("a booked scheduled group session still blocks overlapping private slots", () => {
+  const payload = privateSlotsOverGroupSession([
+    item({
+      id: "group-booking-1",
+      serviceId: groupServiceId,
+      day: groupDay,
+      start: groupStart,
+      duration: 60,
+    }),
+  ]);
+
+  assert.deepEqual(groupDaySlotStarts(payload), [minutes(9, 30), minutes(11, 0)]);
+});
+
+test("a cancelled scheduled group session frees the slot for private bookings", () => {
+  const payload = privateSlotsOverGroupSession([
+    item({
+      id: "group-cancellation",
+      kind: "block",
+      serviceId: groupServiceId,
+      day: groupDay,
+      start: groupStart,
+      duration: 60,
+      status: "cancelled",
+      title: "Cancelled group session",
+      note: "__cancelled_group_session__",
+    }),
+  ]);
+
+  assert.deepEqual(groupDaySlotStarts(payload), [
+    minutes(9, 30),
+    minutes(10, 0),
+    minutes(10, 30),
+    minutes(11, 0),
+  ]);
+});
+
+test("the group service can still be booked into its own session slot", () => {
+  const payload = publicBookingSlots(
+    calendarState({ availability: availabilityOverGroupSession() }),
+    { serviceId: groupServiceId, week: testWeek },
+  );
+
+  assert.equal(payload.slots.length, 1);
+  assert.equal(payload.slots[0].start, groupStart);
+  assert.equal(payload.slots[0].remainingSpots, 2);
+});
