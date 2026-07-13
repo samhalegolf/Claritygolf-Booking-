@@ -131,18 +131,20 @@ async function deleteVerifiedAppointment(appointmentId: string, accountId: strin
   }
 }
 
-async function readRemainingRows(accountId: string) {
+async function readRemainingRowsForWeek(accountId: string, week: number) {
   try {
-    return await supabase("calendar_items", {
-      query: `select=*&account_id=eq.${encodeURIComponent(accountId)}&order=week.asc,day.asc,start.asc,id.asc`,
+    const rows = await supabase("calendar_items", {
+      query: `select=*&account_id=eq.${encodeURIComponent(accountId)}&week=eq.${encodeURIComponent(String(week))}&order=day.asc,start.asc,id.asc`,
     });
+    return { rows, rowsFetched: rows.length, queryMode: "account_week" };
   } catch (error) {
     if (!missingCalendarAccountColumn(error)) throw error;
     console.warn("public_cancel:account_id_column_missing_refresh_fallback", error);
     const rows = await supabase("calendar_items", {
-      query: "select=*&order=week.asc,day.asc,start.asc,id.asc",
+      query: `select=*&week=eq.${encodeURIComponent(String(week))}&order=day.asc,start.asc,id.asc`,
     });
-    return rows.filter((row: any) => (row.account_id || accountId) === accountId);
+    const filteredRows = rows.filter((row: any) => (row.account_id || accountId) === accountId);
+    return { rows: filteredRows, rowsFetched: rows.length, queryMode: "week_only_legacy_schema" };
   }
 }
 
@@ -233,8 +235,15 @@ async function cancelPublicBooking(payload: any) {
 
   let stateItems: any[] | null = null;
   try {
-    const remainingRows = await readRemainingRows(account.id);
-    stateItems = remainingRows.map(rowToItem).map((item: any) => ({
+    const remainingRead = await readRemainingRowsForWeek(account.id, appointment.week);
+    console.info("public_cancel:remaining_items_read", {
+      accountId: account.id,
+      week: appointment.week,
+      rowsFetched: remainingRead.rowsFetched,
+      itemCount: remainingRead.rows.length,
+      queryMode: remainingRead.queryMode,
+    });
+    stateItems = remainingRead.rows.map(rowToItem).map((item: any) => ({
       id: item.id,
       kind: item.kind,
       week: item.week,
