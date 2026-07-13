@@ -2634,6 +2634,20 @@ export function publicAppointmentReadQuery({ appointmentId, accountId, useAccoun
   return query.join("&");
 }
 
+export function publicAppointmentContactQuery({ accountId, email, useAccountScope = true } = {}) {
+  const cleanEmailValue = cleanString(email, "", 180).toLowerCase();
+  const query = [
+    "select=*",
+    "kind=eq.appointment",
+    `email=ilike.${encodeURIComponent(cleanEmailValue)}`,
+  ];
+  if (useAccountScope) {
+    query.push(`account_id=eq.${encodeURIComponent(cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id))}`);
+  }
+  query.push("order=week.asc,day.asc,start.asc,id.asc", "limit=50");
+  return query.join("&");
+}
+
 async function readPublicAppointmentById(appointmentId, accountId) {
   const cleanAppointmentId = cleanString(appointmentId, "", 160);
   const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
@@ -2660,6 +2674,44 @@ async function readPublicAppointmentById(appointmentId, accountId) {
     });
     const rows = await requestSupabaseRows("calendar_items", { query: fallbackQuery });
     return rows.map(rowToItem).find((item) => recordBelongsToAccount(item, cleanAccountId)) || null;
+  }
+}
+
+async function readPublicAppointmentsForContact({ accountId, email, phone } = {}) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const cleanEmailValue = cleanString(email, "", 180).toLowerCase();
+  const normalizedEmail = normalizeRescheduleContact(cleanEmailValue);
+  const normalizedPhone = normalizeRescheduleContact(phone);
+  if (!cleanEmailValue || !normalizedEmail || !normalizedPhone) {
+    return { items: [], rowsFetched: 0, queryMode: "invalid_contact" };
+  }
+  const primaryQuery = publicAppointmentContactQuery({
+    accountId: cleanAccountId,
+    email: cleanEmailValue,
+    useAccountScope: true,
+  });
+  try {
+    const rows = await requestSupabaseRows("calendar_items", { query: primaryQuery });
+    const items = rows
+      .map(rowToItem)
+      .filter((item) => recordBelongsToAccount(item, cleanAccountId) && matchesRescheduleContact(item, normalizedEmail, normalizedPhone));
+    return { items, rowsFetched: rows.length, query: primaryQuery, queryMode: "account_email" };
+  } catch (error) {
+    if (!isSupabaseAccountScopeMissingError(error)) throw error;
+    const fallbackQuery = publicAppointmentContactQuery({
+      accountId: cleanAccountId,
+      email: cleanEmailValue,
+      useAccountScope: false,
+    });
+    console.warn("public_reschedule_lookup:calendar_items_account_scope_fallback", {
+      accountId: cleanAccountId,
+      error: error instanceof Error ? error.message.slice(0, 300) : String(error || "").slice(0, 300),
+    });
+    const rows = await requestSupabaseRows("calendar_items", { query: fallbackQuery });
+    const items = rows
+      .map(rowToItem)
+      .filter((item) => recordBelongsToAccount(item, cleanAccountId) && matchesRescheduleContact(item, normalizedEmail, normalizedPhone));
+    return { items, rowsFetched: rows.length, query: fallbackQuery, attemptedQuery: primaryQuery, queryMode: "email_only_legacy_schema" };
   }
 }
 
@@ -3887,6 +3939,7 @@ async function readPublicCatalogState() {
     workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
     coaches: coachProfilesFromSettings(settingsMap, account),
     locations: locationsFromSettings(settingsMap, account),
+    availability: availabilityFromSettings(settingsMap),
     brand: brandSettingsFromSettings(settingsMap, account),
     account,
   };
@@ -6633,6 +6686,7 @@ async function triggerPublicBookingNotifications(payload) {
 }
 
 async function lookupPublicReschedule(payload) {
+  const rawEmail = cleanString(payload?.email, "", 180).toLowerCase();
   const email = normalizeRescheduleContact(payload?.email);
   const phone = normalizeRescheduleContact(payload?.phone);
   if (!email || !phone) {
@@ -6642,17 +6696,26 @@ async function lookupPublicReschedule(payload) {
     );
   }
 
-  const state = await readPublicCalendarState();
+  const state = await readPublicCatalogState();
   const workspaceAccount = publicWorkspaceAccount(state);
   assertAccountFeature(workspaceAccount, "publicBooking");
   const accountState = {
     ...state,
-    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
     services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
   };
   const serviceList = accountState.services || defaultServices;
-  const matches = accountState.items
-    .filter((item) => matchesRescheduleContact(item, email, phone))
+  const itemRead = await readPublicAppointmentsForContact({
+    accountId: workspaceAccount.id,
+    email: rawEmail,
+    phone,
+  });
+  console.info("public_reschedule_lookup:items_read", {
+    accountId: workspaceAccount.id,
+    rowsFetched: itemRead.rowsFetched,
+    itemCount: itemRead.items.length,
+    queryMode: itemRead.queryMode,
+  });
+  const matches = itemRead.items
     .sort(
       (a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start,
     )
@@ -6686,18 +6749,18 @@ async function reschedulePublicBooking(payload, context = null) {
     });
   }
 
-  const state = await readPublicCalendarState();
+  const state = await readPublicCatalogState();
   const workspaceAccount = publicWorkspaceAccount(state);
   assertAccountFeature(workspaceAccount, "publicBooking");
   const accountState = {
     ...state,
-    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
+    items: [],
     services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
     coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
     locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
     availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
   };
-  const appointment = accountState.items.find((item) => item.id === appointmentId);
+  const appointment = await readPublicAppointmentById(appointmentId, workspaceAccount.id);
   if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
     throw Object.assign(new Error("That booking could not be verified."), {
       status: 404,
@@ -6711,7 +6774,23 @@ async function reschedulePublicBooking(payload, context = null) {
   const duration = service?.duration || appointment.duration;
   const serviceCoachId = appointment.coachId || service?.coachId || defaultCoachId(accountState.coaches || []);
   const slot = { week, day, start, duration };
-  const itemsWithoutOriginal = accountState.items.filter(
+  const itemRead = await readPublicSlotItemsForWeek({ accountId: workspaceAccount.id, week });
+  const accountItems = (itemRead.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id));
+  const requestedWeekItems = publicSlotRequestedWeekItems(accountItems, week);
+  const relevantResourceItems = service
+    ? publicSlotRelevantResourceItems(requestedWeekItems, service, accountState)
+    : requestedWeekItems;
+  accountState.items = relevantResourceItems;
+  console.info("public_reschedule:items_read", {
+    accountId: workspaceAccount.id,
+    appointmentId,
+    week,
+    rowsFetched: itemRead.rowsFetched,
+    requestedWeekItemCount: requestedWeekItems.length,
+    relevantResourceItemCount: relevantResourceItems.length,
+    queryMode: itemRead.queryMode,
+  });
+  const itemsWithoutOriginal = relevantResourceItems.filter(
     (item) => item.id !== appointment.id,
   );
   if (
@@ -6743,11 +6822,10 @@ async function reschedulePublicBooking(payload, context = null) {
     duration,
     note: appointment.note || "Rescheduled from public booking page.",
   };
-  await writePublicBookingState(
+  await writePublicBookingAppointment(
     state,
-    state.items.map((item) =>
-      item.id === appointment.id ? updatedAppointment : item,
-    ),
+    updatedAppointment,
+    context,
   );
   let notifications = [];
   try {

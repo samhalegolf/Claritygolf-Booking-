@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   handlePublicBookingSlotsRequest,
+  publicAppointmentContactQuery,
   publicAppointmentReadQuery,
   publicSlotCalendarItemsQuery,
   publicBookingSlots,
@@ -289,6 +290,24 @@ test("public appointment read query scopes by account and appointment only", () 
   assert.doesNotMatch(fallbackQuery, /account_id=eq\./);
   assert.match(fallbackQuery, /(?:^|&)id=eq\.booking-123(?:&|$)/);
   assert.match(fallbackQuery, /(?:^|&)limit=1(?:&|$)/);
+});
+
+test("public appointment contact query scopes by account and customer email", () => {
+  const query = publicAppointmentContactQuery({ accountId, email: "SAM@Example.test" });
+  const fallbackQuery = publicAppointmentContactQuery({
+    accountId,
+    email: "SAM@Example.test",
+    useAccountScope: false,
+  });
+
+  assert.match(query, /select=\*/);
+  assert.match(query, /(?:^|&)kind=eq\.appointment(?:&|$)/);
+  assert.match(query, /(?:^|&)email=ilike\.sam%40example\.test(?:&|$)/);
+  assert.match(query, new RegExp(`(?:^|&)account_id=eq\\.${accountId}(?:&|$)`));
+  assert.match(query, /(?:^|&)limit=50(?:&|$)/);
+  assert.doesNotMatch(query, /week=eq\./);
+  assert.doesNotMatch(fallbackQuery, /account_id=eq\./);
+  assert.match(fallbackQuery, /(?:^|&)email=ilike\.sam%40example\.test(?:&|$)/);
 });
 
 test("public slot item read falls back to week-only when the account column is missing", async () => {
