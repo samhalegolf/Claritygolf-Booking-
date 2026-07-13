@@ -4253,11 +4253,20 @@ async function writeCalendarState(nextState, context = null) {
     accountId: context?.accountId,
   });
   const updatedAt = nowIso();
-  await setSetting("syncKey", syncKey);
-  await setSetting("updatedAt", updatedAt);
   const peopleAccountId = context?.accountId || defaultAccountId(current.workspaceAccounts);
+  await Promise.all([setSetting("syncKey", syncKey), setSetting("updatedAt", updatedAt)]);
+  // readPeople must see the backfill, so this one stays ordered.
   await importPeople(items.map(personFromAppointment).filter(Boolean), "appointment", peopleAccountId);
-  const googleCalendarSync = await syncGoogleCalendarWithinBudget();
+  // The response payload rebuilds the whole admin state. None of these reads depend on each
+  // other, and running them one after another stacked six round trips onto every save.
+  const [people, notifications, settings, brand, account, googleCalendarSync] = await Promise.all([
+    readPeople(peopleAccountId),
+    readNotificationHistory(),
+    readAdminSettings(),
+    readBrandSettings(),
+    readCoachAccount(),
+    syncGoogleCalendarWithinBudget(),
+  ]);
   return {
     syncKey,
     items: context ? items.filter((item) => canReadCalendarItem(context, item, { ...current, items })) : items,
@@ -4268,11 +4277,11 @@ async function writeCalendarState(nextState, context = null) {
     coaches: current.coaches,
     locations: current.locations,
     availability: current.availability,
-    people: await readPeople(peopleAccountId),
-    notifications: await readNotificationHistory(),
-    settings: await readAdminSettings(),
-    brand: await readBrandSettings(),
-    account: await readCoachAccount(),
+    people,
+    notifications,
+    settings,
+    brand,
+    account,
     googleCalendar: await getGoogleCalendarSyncStatus(),
     googleCalendarSync,
   };
