@@ -4170,6 +4170,42 @@ export async function handlePublicBookingCatalogRequest() {
   }
 }
 
+const GOOGLE_SYNC_RESPONSE_BUDGET_MS = 5000;
+
+// The calendar rows are committed before Google Calendar is synced, so a slow Google round trip
+// used to hold the save response open past the function timeout. The client then retried, hit a
+// 409 against its own committed write, and reported "not saved" for a booking that had saved.
+// Time-box the sync: if Google is slow we answer the client now and let the sync finish in the
+// background (it re-runs on the next save or state read anyway).
+async function syncGoogleCalendarWithinBudget(budgetMs = GOOGLE_SYNC_RESPONSE_BUDGET_MS) {
+  const sync = syncGoogleCalendarIfEnabled().then(
+    (result) => result,
+    async (error) => ({
+      ...(await getGoogleCalendarSyncStatus().catch(() => ({}))),
+      ok: false,
+      skipped: false,
+      error: error instanceof Error ? error.message : "Google Calendar sync failed.",
+    }),
+  );
+  let budgetTimer = null;
+  const budget = new Promise((resolve) => {
+    budgetTimer = setTimeout(() => resolve(null), budgetMs);
+  });
+  const settled = await Promise.race([sync, budget]);
+  if (budgetTimer) clearTimeout(budgetTimer);
+  if (settled) return settled;
+  sync
+    .then((result) => console.info("calendar_state:google_sync_completed_after_response", { ok: result?.ok !== false }))
+    .catch((error) => console.error("calendar_state:google_sync_failed_after_response", error));
+  console.warn("calendar_state:google_sync_deferred", { budgetMs });
+  return {
+    ...(await getGoogleCalendarSyncStatus().catch(() => ({}))),
+    ok: true,
+    skipped: false,
+    pending: true,
+  };
+}
+
 async function writeCalendarState(nextState, context = null) {
   const current = await readCalendarState();
   if (context) {
@@ -4221,17 +4257,7 @@ async function writeCalendarState(nextState, context = null) {
   await setSetting("updatedAt", updatedAt);
   const peopleAccountId = context?.accountId || defaultAccountId(current.workspaceAccounts);
   await importPeople(items.map(personFromAppointment).filter(Boolean), "appointment", peopleAccountId);
-  let googleCalendarSync = null;
-  try {
-    googleCalendarSync = await syncGoogleCalendarIfEnabled();
-  } catch (error) {
-    googleCalendarSync = {
-      ...(await getGoogleCalendarSyncStatus()),
-      ok: false,
-      skipped: false,
-      error: error instanceof Error ? error.message : "Google Calendar sync failed.",
-    };
-  }
+  const googleCalendarSync = await syncGoogleCalendarWithinBudget();
   return {
     syncKey,
     items: context ? items.filter((item) => canReadCalendarItem(context, item, { ...current, items })) : items,
@@ -4364,17 +4390,7 @@ async function deleteCalendarItemById(id, context = null) {
 
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  let googleCalendarSync = null;
-  try {
-    googleCalendarSync = await syncGoogleCalendarIfEnabled();
-  } catch (error) {
-    googleCalendarSync = {
-      ...(await getGoogleCalendarSyncStatus()),
-      ok: false,
-      skipped: false,
-      error: error instanceof Error ? error.message : "Google Calendar sync failed.",
-    };
-  }
+  const googleCalendarSync = await syncGoogleCalendarWithinBudget();
   let nextState = null;
   try {
     nextState = await readCalendarState();

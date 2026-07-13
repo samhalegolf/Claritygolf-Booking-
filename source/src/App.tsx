@@ -384,6 +384,15 @@ function customGroupStatusLabel(status: CustomGroupAttendeeStatus) {
   return "Invited";
 }
 
+// Calendar item ids must be globally unique: two items created in the same millisecond used
+// to share an id, and a retried save could not tell its own landed write from someone else's row.
+function newCalendarItemId(prefix: "appt" | "block") {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function newCustomGroupAttendeeId(prefix = "attendee") {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `${prefix}-${crypto.randomUUID()}`;
@@ -3284,6 +3293,14 @@ function mergeCalendarItemsAfterConflict(
     const baselineItem = baselineById.get(id);
     const latestItem = latestById.get(id);
     const desiredItem = desiredById.get(id);
+    // The live row already matches what we want (our earlier attempt landed, or the response
+    // was lost to a timeout and we retried). Not a conflict — nothing to resolve.
+    if (calendarItemEquivalent(latestItem, desiredItem)) continue;
+    // We are creating this id and it already exists live. Calendar item ids are client-generated
+    // UUIDs, so this can only be our own write landing before its response reached us — the
+    // server just echoes it back normalised (coach/location snapshots, default status). Keep our
+    // version rather than failing the save and telling the coach nothing was saved.
+    if (!baselineItem && latestItem && desiredItem) continue;
     if (!baselineItem && latestItem) return null;
     if (baselineItem && latestItem && !calendarItemEquivalent(latestItem, baselineItem)) return null;
     if (baselineItem && !latestItem && desiredItem) return null;
@@ -5667,7 +5684,10 @@ function App() {
         }
         if (calendarSaveVersionRef.current !== saveVersion) return;
         let data = (recoveredData ?? (await response.json().catch(() => ({})))) as CalendarStateSaveResponse;
-        if (response.status === 409) {
+        // A conflict can recur: our own merged save bumps updatedAt, and a concurrent writer
+        // (public booking, Google sync, notification engine) can land again while we retry.
+        // Resolving only once meant the second conflict fell straight through to a hard failure.
+        for (let conflictAttempt = 0; response.status === 409 && conflictAttempt < 3; conflictAttempt += 1) {
           const liveResponse = await readLiveState();
           const latestData = (await liveResponse.json().catch(() => ({}))) as CalendarStateSaveResponse;
           if (liveResponse.status === 401) {
@@ -8433,7 +8453,7 @@ function App() {
       const blockCoachId = blockLocationOnly ? undefined : selectedCalendarCoachId || currentAppUser.coachId || defaultCoachId(coachProfiles);
       const blockLocationId = blockLocationOnly ? selectedCalendarLocationId : defaultLocationId(locations);
       const newBlock: CalendarItem = {
-        id: `block-${Date.now()}`,
+        id: newCalendarItemId("block"),
         kind: "block",
       accountId: activeAccountId,
         week: activeDraft.week,
@@ -8475,7 +8495,7 @@ function App() {
       const coachId = service.coachId || selectedCalendarCoachId || defaultCoachId(coachProfiles);
       const location = bookingLocationSnapshotFor(service, locations, coachAccount);
       const item: CalendarItem = {
-        id: `appt-${Date.now()}`,
+        id: newCalendarItemId("appt"),
         kind: "appointment",
       accountId: activeAccountId,
         week: activeDraft.week,
@@ -8694,7 +8714,7 @@ function App() {
     const coachId = quickCreateService.coachId || selectedCalendarCoachId || activeCoachId || defaultCoachId(coachProfiles);
     const location = bookingLocationSnapshotFor(quickCreateService, locations, coachAccount);
     const item: CalendarItem = {
-      id: `appt-${Date.now()}`,
+      id: newCalendarItemId("appt"),
       kind: "appointment",
       accountId: activeAccountId,
       title: clientName,
@@ -8749,7 +8769,7 @@ function App() {
     }
     const previous = items;
     const item: CalendarItem = {
-      id: `block-${Date.now()}`,
+      id: newCalendarItemId("block"),
       kind: "block",
       accountId: activeAccountId,
       title: locationOnly ? "Location unavailable" : "Coach unavailable",
@@ -8783,7 +8803,7 @@ function App() {
     const coachId = service.coachId || selectedCalendarCoachId || activeCoachId || defaultCoachId(coachProfiles);
     const location = bookingLocationSnapshotFor(service, locations, coachAccount);
     const item: CalendarItem = {
-      id: `appt-${Date.now()}`,
+      id: newCalendarItemId("appt"),
       kind: "appointment",
       accountId: activeAccountId,
       title: "New client",
@@ -8869,7 +8889,7 @@ function App() {
     const coachId = service.coachId || defaultCoachId(coachProfiles);
     const location = bookingLocationSnapshotFor(service, locations, coachAccount);
     const item: CalendarItem = {
-      id: `appt-${Date.now()}`,
+      id: newCalendarItemId("appt"),
       kind: "appointment",
       accountId: activeAccountId,
       week: candidate.week,
@@ -13475,7 +13495,7 @@ function App() {
     }
 
     const item: CalendarItem = {
-      id: `appt-${Date.now()}`,
+      id: newCalendarItemId("appt"),
       kind: "appointment",
       accountId: activeAccountId,
       ...candidate,
