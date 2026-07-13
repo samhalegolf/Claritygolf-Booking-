@@ -14,6 +14,7 @@ import {
 
 const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
+const googleCalendarManualSyncOnly = true;
 
 const defaultServices = [
   { id: "lesson-30", name: "30min Lesson", duration: 30, price: 100, lessonNote: "Bay hire included", location: "Bay hire included" },
@@ -198,7 +199,8 @@ export async function getGoogleCalendarSyncStatus(req?: Request) {
     connected,
     accountId,
     calendarId: settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"),
-    autoSync: settings.googleCalendarAutoSync !== "false",
+    autoSync: googleCalendarManualSyncOnly ? false : settings.googleCalendarAutoSync !== "false",
+    manualOnly: googleCalendarManualSyncOnly,
     accountEmail: providerStatus.accountEmail || settings.googleCalendarAccountEmail || "",
     lastSyncAt: settings.googleCalendarLastSyncAt || "",
     lastSyncStatus: legacyMigrationRequired ? "migration_required" : settings.googleCalendarLastSyncStatus || "",
@@ -221,7 +223,9 @@ export async function updateGoogleCalendarSyncSettings(body: any) {
     values.googleCalendarId = cleanCalendarId(body.calendarId);
   }
   if (Object.prototype.hasOwnProperty.call(body || {}, "autoSync")) {
-    values.googleCalendarAutoSync = body.autoSync === false ? "false" : "true";
+    values.googleCalendarAutoSync = googleCalendarManualSyncOnly ? "false" : body.autoSync === false ? "false" : "true";
+  } else if (googleCalendarManualSyncOnly) {
+    values.googleCalendarAutoSync = "false";
   }
   await setSettings(values);
   return getGoogleCalendarSyncStatus();
@@ -623,6 +627,9 @@ export async function syncGoogleCalendarNow() {
 }
 
 export async function syncGoogleCalendarIfEnabled() {
+  if (googleCalendarManualSyncOnly) {
+    return { ...(await getGoogleCalendarSyncStatus()), ok: true, skipped: true, reason: "manual_sync_only" };
+  }
   const settings = await readSettings();
   if (settings.googleCalendarAutoSync === "false") {
     return { ...(await getGoogleCalendarSyncStatus()), ok: true, skipped: true, reason: "auto_sync_disabled" };

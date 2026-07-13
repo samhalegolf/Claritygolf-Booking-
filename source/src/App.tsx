@@ -854,6 +854,7 @@ type GoogleCalendarSyncStatus = {
   lastSyncAt: string;
   lastSyncStatus: string;
   lastSyncError: string;
+  manualOnly?: boolean;
   connectedAt: string;
   redirectUri: string;
   scope: string;
@@ -4057,7 +4058,7 @@ const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
   configured: false,
   connected: false,
   calendarId: "primary",
-  autoSync: true,
+  autoSync: false,
   accountEmail: "",
   lastSyncAt: "",
   lastSyncStatus: "",
@@ -5810,7 +5811,7 @@ function App() {
       ...defaultGoogleCalendarStatus,
       ...(status ?? {}),
       calendarId: typeof status?.calendarId === "string" && status.calendarId.trim() ? status.calendarId : "primary",
-      autoSync: status?.autoSync !== false,
+      autoSync: status?.autoSync === true,
     });
   }
 
@@ -20230,7 +20231,9 @@ function App() {
                       : !googleCalendar.configured
                       ? "Needs OAuth credentials"
                       : googleCalendar.connected
-                        ? googleCalendar.lastSyncStatus === "failed"
+                        ? googleCalendar.manualOnly
+                          ? "Manual sync only"
+                          : googleCalendar.lastSyncStatus === "failed"
                           ? "Connected, sync failed"
                           : "Connected"
                         : "Ready to connect"}
@@ -20238,12 +20241,15 @@ function App() {
                   <em>
                     {!googleCalendarSyncEnabled
                       ? featureUnavailableMessage("googleCalendarSync")
-                      : googleCalendar.lastSyncError ||
-                      (googleCalendar.connected
+                      : googleCalendar.lastSyncError
+                      ? googleCalendar.manualOnly
+                        ? `Last sync failed: ${googleCalendar.lastSyncError}`
+                        : googleCalendar.lastSyncError
+                      : googleCalendar.connected
                         ? `${googleCalendar.accountEmail || "Google account"} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`
                         : googleCalendar.legacyMigrationRequired
                           ? "Legacy plaintext token migration required."
-                          : googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify.")}
+                          : googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify."}
                   </em>
                 </div>
 
@@ -20264,15 +20270,10 @@ function App() {
                       placeholder="primary or calendar email"
                     />
                   </label>
-                  <label className="settings-toggle">
-                    <input
-                      checked={googleCalendar.autoSync}
-                      disabled={!googleCalendarSyncEnabled}
-                      onChange={(event) => void saveGoogleCalendarSettings({ autoSync: event.target.checked })}
-                      type="checkbox"
-                    />
-                    <span>Auto-sync bookings and busy blocks after every save</span>
-                  </label>
+                  <div className="sync-meta">
+                    <span>Sync mode</span>
+                    <strong>Manual only</strong>
+                  </div>
                   <div className="sync-meta">
                     <span>Redirect URI</span>
                     <code>{googleCalendar.redirectUri || "Set GOOGLE_CALENDAR_REDIRECT_URI or use /api/google-calendar/callback"}</code>
