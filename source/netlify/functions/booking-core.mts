@@ -2622,6 +2622,47 @@ export async function readPublicSlotItemsForWeek({ accountId, week } = {}) {
   }
 }
 
+export function publicAppointmentReadQuery({ appointmentId, accountId, useAccountScope = true } = {}) {
+  const query = [
+    "select=*",
+    `id=eq.${encodeURIComponent(cleanString(appointmentId, "", 160))}`,
+  ];
+  if (useAccountScope) {
+    query.push(`account_id=eq.${encodeURIComponent(cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id))}`);
+  }
+  query.push("limit=1");
+  return query.join("&");
+}
+
+async function readPublicAppointmentById(appointmentId, accountId) {
+  const cleanAppointmentId = cleanString(appointmentId, "", 160);
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  if (!cleanAppointmentId) return null;
+  const primaryQuery = publicAppointmentReadQuery({
+    appointmentId: cleanAppointmentId,
+    accountId: cleanAccountId,
+    useAccountScope: true,
+  });
+  try {
+    const rows = await requestSupabaseRows("calendar_items", { query: primaryQuery });
+    return rows.map(rowToItem).find((item) => recordBelongsToAccount(item, cleanAccountId)) || null;
+  } catch (error) {
+    if (!isSupabaseAccountScopeMissingError(error)) throw error;
+    const fallbackQuery = publicAppointmentReadQuery({
+      appointmentId: cleanAppointmentId,
+      accountId: cleanAccountId,
+      useAccountScope: false,
+    });
+    console.warn("public_booking:calendar_item_account_scope_fallback", {
+      appointmentId: cleanAppointmentId,
+      accountId: cleanAccountId,
+      error: error instanceof Error ? error.message.slice(0, 300) : String(error || "").slice(0, 300),
+    });
+    const rows = await requestSupabaseRows("calendar_items", { query: fallbackQuery });
+    return rows.map(rowToItem).find((item) => recordBelongsToAccount(item, cleanAccountId)) || null;
+  }
+}
+
 function queryRows(result) {
   return Array.isArray(result) ? result : result?.rows || [];
 }
@@ -2743,6 +2784,19 @@ async function readNotificationHistory() {
     FROM notification_history
     ORDER BY created_at DESC
     LIMIT 500
+  `;
+  return rows.map(rowToNotification);
+}
+
+async function readNotificationHistoryForAppointment(appointmentId) {
+  const cleanAppointmentId = cleanString(appointmentId, "", 160);
+  if (!cleanAppointmentId) return [];
+  const rows = await db().sql`
+    SELECT *
+    FROM notification_history
+    WHERE calendar_item_id = ${cleanAppointmentId}
+    ORDER BY created_at DESC
+    LIMIT 50
   `;
   return rows.map(rowToNotification);
 }
@@ -6353,15 +6407,15 @@ export async function handlePublicNotificationStatusRequest(req) {
     );
     if (!appointmentId || (!email && !phone)) return json({ sent: false }, 400);
 
-    const state = await readPublicCalendarState();
+    const state = await readPublicCatalogState();
     const workspaceAccount = publicWorkspaceAccount(state);
     assertAccountFeature(workspaceAccount, "publicBooking");
-    const appointment = state.items.find((item) => recordBelongsToAccount(item, workspaceAccount.id) && item.id === appointmentId);
+    const appointment = await readPublicAppointmentById(appointmentId, workspaceAccount.id);
     if (!appointment || !matchesNotificationContact(appointment, email, phone)) {
       return json({ sent: false }, 404);
     }
 
-    const history = await readNotificationHistory();
+    const history = await readNotificationHistoryForAppointment(appointmentId);
     const notification = history.find(
       (candidate) =>
         candidate.calendarItemId === appointmentId &&
@@ -6538,18 +6592,10 @@ async function triggerPublicBookingNotifications(payload) {
     });
   }
 
-  const state = await readPublicCalendarState();
+  const state = await readPublicCatalogState();
   const workspaceAccount = publicWorkspaceAccount(state);
   assertAccountFeature(workspaceAccount, "publicBooking");
-  const accountState = {
-    ...state,
-    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
-    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
-  };
-  const appointment = accountState.items.find((item) => item.id === appointmentId);
+  const appointment = await readPublicAppointmentById(appointmentId, workspaceAccount.id);
   if (!appointment || !matchesNotificationContact(appointment, email, phone)) {
     throw Object.assign(
       new Error("That booking could not be verified for email notification."),
@@ -6558,7 +6604,7 @@ async function triggerPublicBookingNotifications(payload) {
   }
 
   const existing = clientNotificationRecords(
-    await readNotificationHistory(),
+    await readNotificationHistoryForAppointment(appointmentId),
     appointmentId,
   ).filter((notification) => notification.kind.startsWith(`${kind}_`));
   const alreadySent = existing.some(
@@ -6580,7 +6626,7 @@ async function triggerPublicBookingNotifications(payload) {
     alreadySent: false,
     results,
     notifications: clientNotificationRecords(
-      await readNotificationHistory(),
+      await readNotificationHistoryForAppointment(appointmentId),
       appointmentId,
     ),
   };

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   handlePublicBookingSlotsRequest,
+  publicAppointmentReadQuery,
   publicSlotCalendarItemsQuery,
   publicBookingSlots,
   readPublicSlotContext,
@@ -269,6 +270,25 @@ test("public slot calendar item query scopes by account and requested week", () 
   assert.match(query, new RegExp(`(?:^|&)account_id=eq\\.${accountId}(?:&|$)`));
   assert.match(query, new RegExp(`(?:^|&)week=eq\\.${testWeek}(?:&|$)`));
   assert.doesNotMatch(query, /order=week\.asc/);
+});
+
+test("public appointment read query scopes by account and appointment only", () => {
+  const query = publicAppointmentReadQuery({ appointmentId: "booking-123", accountId });
+  const fallbackQuery = publicAppointmentReadQuery({
+    appointmentId: "booking-123",
+    accountId,
+    useAccountScope: false,
+  });
+
+  assert.match(query, /select=\*/);
+  assert.match(query, /(?:^|&)id=eq\.booking-123(?:&|$)/);
+  assert.match(query, new RegExp(`(?:^|&)account_id=eq\\.${accountId}(?:&|$)`));
+  assert.match(query, /(?:^|&)limit=1(?:&|$)/);
+  assert.doesNotMatch(query, /week=eq\./);
+  assert.doesNotMatch(query, /order=/);
+  assert.doesNotMatch(fallbackQuery, /account_id=eq\./);
+  assert.match(fallbackQuery, /(?:^|&)id=eq\.booking-123(?:&|$)/);
+  assert.match(fallbackQuery, /(?:^|&)limit=1(?:&|$)/);
 });
 
 test("public slot item read falls back to week-only when the account column is missing", async () => {

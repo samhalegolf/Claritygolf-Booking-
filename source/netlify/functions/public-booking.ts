@@ -240,6 +240,49 @@ class SupabaseRest {
     return rows.map(rowToItem);
   }
 
+  calendarItemsWeekQuery(accountId: string, week: number, useAccountScope = true) {
+    const query = ["select=*"];
+    if (useAccountScope) query.push(`account_id=eq.${encodeURIComponent(accountId)}`);
+    query.push(`week=eq.${encodeURIComponent(String(week))}`, "order=day.asc,start.asc,id.asc");
+    return query.join("&");
+  }
+
+  missingAccountScopeColumn(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error || "");
+    return (
+      /calendar_items/i.test(message) &&
+      /account_id/i.test(message) &&
+      /(schema cache|column|PGRST204|42703|Could not find|does not exist)/i.test(message)
+    );
+  }
+
+  async readItemsForWeek(accountId: string, week: number) {
+    const primaryQuery = this.calendarItemsWeekQuery(accountId, week, true);
+    try {
+      const rows = await this.request("calendar_items", { query: primaryQuery });
+      return {
+        items: rows.map(rowToItem),
+        rowsFetched: rows.length,
+        queryMode: "account_week",
+      };
+    } catch (error) {
+      if (!this.missingAccountScopeColumn(error)) throw error;
+      const fallbackQuery = this.calendarItemsWeekQuery(accountId, week, false);
+      console.warn("public_booking_lean:calendar_items_account_scope_fallback", {
+        accountId,
+        week,
+        error: errorMessage(error).slice(0, 300),
+      });
+      const rows = await this.request("calendar_items", { query: fallbackQuery });
+      const items = rows.map(rowToItem).filter((item: any) => recordBelongsToAccount(item, accountId));
+      return {
+        items,
+        rowsFetched: rows.length,
+        queryMode: "week_only_legacy_schema",
+      };
+    }
+  }
+
   missingOptionalColumn(error: unknown) {
     const message = error instanceof Error ? error.message : String(error || "");
     if (!/calendar_items/i.test(message)) return "";
@@ -609,8 +652,8 @@ function successPayload(appointment: any, items: any[], fallback = false, fallba
 
 async function createPublicBooking(payload: any) {
   const store = new SupabaseRest();
-  const [settings, items] = await Promise.all([store.readSettingsMap(), store.readItems()]);
-  const state = publicStateFromSettings(settings, items);
+  const settings = await store.readSettingsMap();
+  const state = publicStateFromSettings(settings, []);
   const workspaceAccount = state.workspaceAccounts.find((account: any) => account.id === defaultAccountId(state.workspaceAccounts)) || state.workspaceAccounts[0] || defaultWorkspaceAccountFromCoachAccount(state.account);
   if (!accountHasPublicBooking(workspaceAccount)) {
     throw Object.assign(new Error("Public booking is not available for this workspace."), { status: 403 });
@@ -621,7 +664,6 @@ async function createPublicBooking(payload: any) {
   const coaches = state.coaches.filter((coach: any) => recordBelongsToAccount(coach, accountId));
   const locations = state.locations.filter((location: any) => recordBelongsToAccount(location, accountId));
   const availability = (state.availability || []).map((day: any[]) => (Array.isArray(day) ? day.filter((window) => recordBelongsToAccount(window, accountId)) : []));
-  const scopedState = { ...state, services, coaches, locations, availability, items: state.items };
 
   const service = services.find((candidate: any) => candidate.id === payload?.serviceId && candidate.active !== false && candidate.archived !== true && candidate.visibility === "public" && candidate.lessonFormat !== "package");
   if (!service) throw Object.assign(new Error("Choose a public lesson type."), { status: 400 });
@@ -641,6 +683,16 @@ async function createPublicBooking(payload: any) {
     throw Object.assign(new Error("Choose a valid appointment time."), { status: 400 });
   }
 
+  const itemRead = await store.readItemsForWeek(accountId, week);
+  const items = itemRead.items.filter((item: any) => recordBelongsToAccount(item, accountId));
+  console.info("public_booking_lean:items_read", {
+    accountId,
+    week,
+    rowsFetched: itemRead.rowsFetched,
+    itemCount: items.length,
+    queryMode: itemRead.queryMode,
+  });
+  const scopedState = { ...state, services, coaches, locations, availability, items };
   const slot = { week, day, start, duration };
   const coachId = service.coachId || defaultCoachId(coaches);
   const location = serviceLocationSnapshot(service, locations, state.account);
@@ -650,7 +702,7 @@ async function createPublicBooking(payload: any) {
     slot,
     coachId,
     locationId: location.locationId,
-    itemCount: scopedState.items.length,
+    itemCount: items.length,
   };
   if (isScheduledGroupService(service)) {
     if (!isGroupSlotMatch(service, slot)) {
