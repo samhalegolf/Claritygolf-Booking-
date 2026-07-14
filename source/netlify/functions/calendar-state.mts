@@ -1,6 +1,9 @@
 import type { Config, Context } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { createHash, randomUUID } from "node:crypto";
+import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
+import { activeCurrency } from "./_shared/locale.mts";
+import { setActivePhoneCountry } from "./_shared/phone.mts";
 
 type BookingCoreModule = {
   handleBookingApiRoute: (req: Request, forcedPathname?: string, context?: Context) => Promise<Response> | Response;
@@ -15,7 +18,7 @@ const defaultInvoiceSettings = {
   showBillingWorkspace: true,
   prefix: "INV",
   nextNumber: 1001,
-  currency: "NZD",
+  currency: activeCurrency(),
   taxName: "GST",
   taxNumber: "",
   taxRate: 15,
@@ -191,7 +194,7 @@ async function readAdminSession(req: Request) {
 
 function defaultCoachAccount() {
   return {
-    id: env("CLARITY_COACH_ACCOUNT_ID", "sam-hale-golf"),
+    id: fallbackAccountId(),
     coachName: env("CLARITY_COACH_NAME", "Sam Hale"),
     businessName: env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
     venueName: env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
@@ -199,7 +202,7 @@ function defaultCoachAccount() {
     timezone: env("CLARITY_TIMEZONE", "Pacific/Auckland"),
     contactEmail: env("CLARITY_CONTACT_EMAIL", ""),
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
-    calendarSlug: env("CLARITY_CALENDAR_SLUG", "sam-hale-golf"),
+    calendarSlug: defaultCalendarSlug(),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
     invoiceSettings: defaultInvoiceSettings,
   };
@@ -230,7 +233,7 @@ function cleanCoachAccount(account: Record<string, unknown> = {}) {
 
 function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
-  const slug = cleanSlug(clean.calendarSlug || clean.businessName, "sam-hale-golf");
+  const slug = cleanSlug(clean.calendarSlug || clean.businessName, fallbackAccountId());
   return {
     id: slug,
     name: clean.businessName || "Sam Hale Golf",
@@ -246,7 +249,7 @@ function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
   const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(clean);
   return {
-    id: clean.id || "sam-hale-golf",
+    id: clean.id || fallbackAccountId(),
     accountId: workspaceAccount.id,
     name: clean.coachName,
     displayName: clean.coachName || clean.businessName,
@@ -647,6 +650,9 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
   });
 
   const [settingsMap, items] = await Promise.all([readSettingsMap(), readItems()]);
+  // Resolve the workspace's country before any date or price is formatted, so
+  // this lambda uses the coach's conventions rather than New Zealand's.
+  setActivePhoneCountry(settingValue(settingsMap, "accountCountry"));
   const account = coachAccountFromSettings(settingsMap);
   const workspaceAccounts = normalizeWorkspaceAccounts(parseSettingJson(settingsMap, "workspaceAccountsJson", []), account);
   const accountId = workspaceAccounts.find((workspaceAccount) => workspaceAccount.active)?.id || workspaceAccounts[0]?.id || defaultWorkspaceAccountFromCoachAccount(account).id;

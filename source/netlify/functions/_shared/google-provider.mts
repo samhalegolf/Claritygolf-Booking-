@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import { getClarityCloudGoogleConfig } from "./clarity-cloud-google-config.mts";
+import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./account.mts";
 
 export const googleCalendarScopes = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -214,7 +215,7 @@ function parseJson<T>(value: string | undefined, fallback: T): T {
   }
 }
 
-function cleanSlug(value: unknown, fallback = "sam-hale-golf") {
+function cleanSlug(value: unknown, fallback = fallbackAccountId()) {
   const trimmed = cleanString(value, "", 140)
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, "-")
@@ -225,7 +226,7 @@ function cleanSlug(value: unknown, fallback = "sam-hale-golf") {
 export function resolveGoogleAccountId(settings: Record<string, string>) {
   const accounts = parseJson<Array<{ id?: string; active?: boolean }>>(settings.workspaceAccountsJson, []);
   const active = accounts.find((account) => account?.active !== false)?.id || accounts[0]?.id;
-  return cleanSlug(active || settings.accountCalendarSlug || settings.accountId, "sam-hale-golf");
+  return cleanSlug(active || settings.accountCalendarSlug || settings.accountId, fallbackAccountId());
 }
 
 export function mergeGoogleScopes(existing: string[] = [], next: string[] = []) {

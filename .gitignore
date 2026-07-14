@@ -9,3 +9,11 @@ source/.netlify/
 .env
 .env.*
 !.env.example
+
+# Local dev database. Held the admin password hash, salt and seed key in a
+# public repo. Never commit it.
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+source/server/clarity-booking.sqlite

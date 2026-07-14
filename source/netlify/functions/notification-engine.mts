@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { activeLocale } from "./_shared/locale.mts";
+import { setActivePhoneCountry } from "./_shared/phone.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
@@ -154,6 +156,9 @@ async function settingRows() {
 async function readSettings() {
   const rows = await settingRows();
   const s = Object.fromEntries(rows.map((row: any) => [row.key, row.value]));
+  // Resolve the workspace's country before any date is formatted, so this
+  // lambda formats dates the coach's way rather than New Zealand's.
+  setActivePhoneCountry(s.accountCountry);
   const siteUrl = cleanUrl(
     env("URL") || env("DEPLOY_PRIME_URL") || env("CLARITY_SITE_URL", "https://claritygolf.app"),
     "https://claritygolf.app/",
@@ -247,7 +252,7 @@ function slotDate(week = 0, day = 0) {
 }
 
 function slotDateLabel(week = 0, day = 0) {
-  return slotDate(week, day).toLocaleDateString("en-NZ", {
+  return slotDate(week, day).toLocaleDateString(activeLocale(), {
     weekday: "long",
     month: "short",
     day: "numeric",

@@ -1,4 +1,5 @@
 import type { Config } from "@netlify/functions";
+import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
@@ -92,7 +93,7 @@ async function readSettings() {
     workspaceAccounts = [];
   }
   const fallbackAccount = {
-    id: settings.accountCalendarSlug || settings.accountId || "sam-hale-golf",
+    id: settings.accountCalendarSlug || settings.accountId || fallbackAccountId(),
     planKey: "founder",
     subscriptionStatus: "comped",
     active: true,

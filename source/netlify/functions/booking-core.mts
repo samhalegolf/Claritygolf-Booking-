@@ -9,6 +9,8 @@ import {
 
 import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
+import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
+import { activeCurrency, activeLocale } from "./_shared/locale.mts";
 import {
   canonicalPhoneKey,
   cleanPhoneCountry,
@@ -58,7 +60,7 @@ const defaultInvoiceSettings = {
   showBillingWorkspace: true,
   prefix: "INV",
   nextNumber: 1001,
-  currency: "NZD",
+  currency: activeCurrency(),
   taxName: "GST",
   taxNumber: "",
   taxRate: 15,
@@ -383,7 +385,7 @@ function cleanString(value, fallback = "", max = 600) {
   return value.trim().slice(0, max);
 }
 
-function cleanSlug(value, fallback = "sam-hale-golf") {
+function cleanSlug(value, fallback = fallbackAccountId()) {
   if (typeof value !== "string") return fallback;
   const slug = value
     .trim()
@@ -411,7 +413,7 @@ function formatBookingDate(week, day) {
   const date = dateForSlot(week, day);
   return new Date(
     Date.UTC(date.year, date.month - 1, date.day),
-  ).toLocaleDateString("en-NZ", {
+  ).toLocaleDateString(activeLocale(), {
     weekday: "long",
     month: "short",
     day: "numeric",
@@ -644,12 +646,12 @@ function normalizeAvailability(availability) {
 
 function defaultCoachAccount() {
   return {
-    id: env("CLARITY_COACH_ACCOUNT_ID", "sam-hale-golf"),
+    id: fallbackAccountId(),
     coachName: env("CLARITY_COACH_NAME", "Sam Hale"),
     businessName: env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
     venueName: env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
     venueShortName: env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
-    timezone: env("CLARITY_TIMEZONE", "Pacific/Auckland"),
+    timezone: defaultTimeZone(),
     // ISO 3166-1 alpha-2. The workspace's home country: what a phone number
     // with no + is assumed to be, and the default selection in the country
     // dropdown. Everything else that is currently hardcoded to New Zealand
@@ -657,7 +659,7 @@ function defaultCoachAccount() {
     country: cleanPhoneCountry(env("CLARITY_COUNTRY", FALLBACK_PHONE_COUNTRY)),
     contactEmail: env("CLARITY_CONTACT_EMAIL", ""),
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
-    calendarSlug: env("CLARITY_CALENDAR_SLUG", "sam-hale-golf"),
+    calendarSlug: defaultCalendarSlug(),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
     invoiceSettings: defaultInvoiceSettings,
 	  };
@@ -868,7 +870,7 @@ function permissionDenied(message = "You do not have permission to perform this 
 
 function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
-  const slug = cleanSlug(clean.calendarSlug || clean.businessName, "sam-hale-golf");
+  const slug = cleanSlug(clean.calendarSlug || clean.businessName, fallbackAccountId());
   return {
     id: slug,
     name: clean.businessName || "Sam Hale Golf",
@@ -948,7 +950,7 @@ function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
   const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(clean);
   return {
-    id: clean.id || "sam-hale-golf",
+    id: clean.id || fallbackAccountId(),
     accountId: workspaceAccount.id,
     name: clean.coachName,
     displayName: clean.coachName || clean.businessName,
@@ -1955,6 +1957,7 @@ async function ensureSeeded() {
       setActivePhoneCountry(
         cleanPhoneCountry(await getSetting("accountCountry"), defaultPhoneCountry()),
       );
+      setActiveTimeZone(await getSetting("accountTimezone"));
       await backfillLegacyPeopleAccountIds(peopleAccountIdFromSettings(await readSettingsMap()));
       await ensureNotificationHistoryTable();
       await seedItems();
@@ -2487,6 +2490,29 @@ function normalizedPersonEmail(value) {
 // shared phone module so the frontend and the server cannot drift apart.
 function defaultPhoneCountry() {
   return cleanPhoneCountry(env("CLARITY_PHONE_COUNTRY", FALLBACK_PHONE_COUNTRY));
+}
+
+// UTC, not Auckland. When we genuinely do not know where the coach is, being
+// obviously wrong everywhere beats being silently right in one country.
+const FALLBACK_TIME_ZONE = "UTC";
+
+// The workspace's timezone, resolved once per instance in ensureSeeded and kept
+// fresh by writeCoachAccount — mirroring how the phone country is handled. This
+// exists so that no call site anywhere can fall back to a hardcoded country's
+// clock by forgetting an argument.
+let activeTimeZone = null;
+
+function defaultTimeZone() {
+  return cleanString(env("CLARITY_TIMEZONE", ""), "", 80) || FALLBACK_TIME_ZONE;
+}
+
+function accountTimeZone() {
+  return activeTimeZone || defaultTimeZone();
+}
+
+function setActiveTimeZone(value) {
+  activeTimeZone = cleanString(value, "", 80) || null;
+  return accountTimeZone();
 }
 
 // Phone numbers reach us in three shapes for the same person: the booking form
@@ -3723,6 +3749,7 @@ async function writeCoachAccount(account) {
   // Keep contact matching in step with the country the coach just chose,
   // without waiting for this instance to be recycled.
   setActivePhoneCountry(clean.country);
+  setActiveTimeZone(clean.timezone);
   await setSetting("accountContactEmail", clean.contactEmail);
   await setSetting("accountBookingUrl", clean.bookingUrl);
   await setSetting("accountCalendarSlug", clean.calendarSlug);
@@ -4665,28 +4692,38 @@ function slotDateParts(week = 0, day = 0) {
   };
 }
 
-function nowInTimeZoneParts(timeZone = "Pacific/Auckland") {
+// The locale here is arbitrary and deliberately fixed: every field below is
+// numeric and read back by part type, so the locale cannot change the result.
+// It is not a formatting choice and must not be confused with one.
+const CLOCK_PARTS_LOCALE = "en-GB";
+
+function clockParts(timeZone) {
+  return new Intl.DateTimeFormat(CLOCK_PARTS_LOCALE, {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+}
+
+// No "Pacific/Auckland" default. This function decides what "now" is, and
+// isAppointmentInPast() below uses it to decide whether a lesson has already
+// happened. A caller that forgot to pass a timezone used to silently get
+// Auckland — an 11-to-13 hour error for a coach anywhere in Europe, in the code
+// path that hides past lessons and suppresses their reminders. The workspace's
+// timezone is now resolved once (accountTimeZone) so no call site can forget it,
+// and a genuinely unusable timezone falls back to UTC loudly rather than
+// pretending the coach is in New Zealand.
+function nowInTimeZoneParts(timeZone = accountTimeZone()) {
   let parts;
   try {
-    parts = new Intl.DateTimeFormat("en-NZ", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(new Date());
+    parts = clockParts(timeZone);
   } catch {
-    parts = new Intl.DateTimeFormat("en-NZ", {
-      timeZone: "Pacific/Auckland",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(new Date());
+    console.warn("booking_core:invalid_timezone_falling_back_to_utc", { timeZone });
+    parts = clockParts(FALLBACK_TIME_ZONE);
   }
   const value = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
   return {
@@ -4701,7 +4738,7 @@ function dateSortValue(parts) {
   return parts.year * 10000 + parts.month * 100 + parts.day;
 }
 
-function isAppointmentInPast(item, timeZone = "Pacific/Auckland") {
+function isAppointmentInPast(item, timeZone = accountTimeZone()) {
   if (!item || item.kind !== "appointment") return false;
   const slotDate = slotDateParts(Number(item.week ?? 0), Number(item.day ?? 0));
   const now = nowInTimeZoneParts(timeZone);
@@ -4752,7 +4789,7 @@ async function processAdminNotificationDebounce(
   options = {},
 ) {
   const now = Date.now();
-  const timeZone = cleanString(options.timeZone, "Pacific/Auckland", 80);
+  const timeZone = cleanString(options.timeZone, accountTimeZone(), 80);
   const queueById = new Map(
     (await readPendingAdminNotifications()).map((entry) => [
       entry.calendarItemId,
@@ -5069,7 +5106,7 @@ function bookingGoogleCalendarUrl({ appointment, service, account, rescheduleUrl
       .filter(Boolean)
       .join("\n"),
     location: bookingLocationDisplay(location),
-    ctz: location?.timezone || account.timezone || "Pacific/Auckland",
+    ctz: location?.timezone || account.timezone || accountTimeZone(),
   });
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }

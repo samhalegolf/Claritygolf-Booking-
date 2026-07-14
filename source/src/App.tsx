@@ -61,6 +61,7 @@ import {
   phoneCountryOptions,
   setActivePhoneCountry,
 } from "../netlify/functions/_shared/phone.mts";
+import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
 import {
   VideoAnalysisPage,
   type VideoWorkspaceNavigationContext,
@@ -1528,7 +1529,7 @@ const defaultInvoiceSettings: InvoiceSettings = {
   showBillingWorkspace: true,
   prefix: "INV",
   nextNumber: 1001,
-  currency: "NZD",
+  currency: "NZD", // seed value; readCoachAccount derives the real one from country
   taxName: "GST",
   taxNumber: "",
   taxRate: DEFAULT_TAX_RATE,
@@ -1861,7 +1862,7 @@ function buildWeekDays(week: number): WeekDay[] {
   return baseWeekDays.map((short, index) => {
     const date = new Date(baseWeekStart);
     date.setDate(baseWeekStart.getDate() + week * 7 + index);
-    const month = date.toLocaleString("en-NZ", { month: "short" });
+    const month = date.toLocaleString(activeLocale(), { month: "short" });
     return {
       short,
       label: `${fullDayNames[index]}, ${month} ${date.getDate()}`,
@@ -1899,7 +1900,7 @@ function escapeIcsText(value: string) {
 function formatWeekTitle(week: number) {
   const date = new Date(baseWeekStart);
   date.setDate(baseWeekStart.getDate() + week * 7);
-  const month = date.toLocaleString("en-NZ", { month: "long" });
+  const month = date.toLocaleString(activeLocale(), { month: "long" });
   return `Week of ${month} ${date.getDate()}, ${date.getFullYear()}`;
 }
 
@@ -3888,10 +3889,12 @@ function parseExpenseCsvAmount(value: string): number {
   return Number.isFinite(numeric) ? Math.abs(numeric) : 0;
 }
 
-function formatMoney(amount: number, currency = "NZD") {
-  return new Intl.NumberFormat("en-NZ", {
+// Currency follows the workspace country. It was hardcoded to NZD, which meant
+// a coach in another country was quoted prices in New Zealand dollars.
+function formatMoney(amount: number, currency = activeCurrency()) {
+  return new Intl.NumberFormat(activeLocale(), {
     style: "currency",
-    currency: currency || "NZD",
+    currency: currency || activeCurrency(),
     maximumFractionDigits: 2,
   }).format(Number.isFinite(amount) ? amount : 0);
 }
@@ -5114,7 +5117,7 @@ function App() {
     ? dateForSlot(selectedGroupSession.week, selectedGroupSession.day)
     : null;
   const selectedGroupSessionLabel = selectedGroupSessionDate
-    ? selectedGroupSessionDate.toLocaleDateString("en-NZ", {
+    ? selectedGroupSessionDate.toLocaleDateString(activeLocale(), {
         weekday: "long",
         month: "long",
         day: "numeric",
@@ -7593,7 +7596,7 @@ function App() {
       service: groupSessionContext
         ? `Group Session · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
         : service?.name ?? "Golf lesson",
-      time: `${dateForSlot(itemWeek(item), item.day).toLocaleDateString("en-NZ", { weekday: "long", month: "short", day: "numeric" })}, ${formatRange(item.start, item.duration)}`,
+      time: `${dateForSlot(itemWeek(item), item.day).toLocaleDateString(activeLocale(), { weekday: "long", month: "short", day: "numeric" })}, ${formatRange(item.start, item.duration)}`,
       venue: bookingLocationShortDisplay(calendarItemLocation(item, service ?? undefined, locations, coachAccount)) || coachAccount.venueShortName || coachAccount.venueName,
       phone: groupSessionContext ? "" : item.phone || "",
       email: groupSessionContext ? "" : item.email || "",
@@ -15572,7 +15575,7 @@ function App() {
                   ) : bookingSlots.length ? (
                     visibleBookingSlots.map((slot) => {
                       const slotLabel = isGroupBookingTimeSelection
-                        ? `${dateForSlot(slot.week, slot.day).toLocaleDateString("en-NZ", { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
+                        ? `${dateForSlot(slot.week, slot.day).toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
                         : formatTime(slot.start);
                       return (
                         <button
@@ -20041,7 +20044,7 @@ function App() {
                             ) : bookingSlots.length ? (
                               visibleBookingSlots.map((slot) => {
                                 const slotLabel = isGroupBookingTimeSelection
-                                  ? `${dateForSlot(slot.week, slot.day).toLocaleDateString("en-NZ", { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
+                                  ? `${dateForSlot(slot.week, slot.day).toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
                                   : formatTime(slot.start);
                                 return (
                                   <button

@@ -1,6 +1,9 @@
 import type { Config } from "@netlify/functions";
 
 import { randomUUID } from "node:crypto";
+import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
+import { activeLocale } from "./_shared/locale.mts";
+import { setActivePhoneCountry } from "./_shared/phone.mts";
 
 const OPTIONAL_CALENDAR_ITEM_COLUMNS = [
   "account_id",
@@ -43,7 +46,7 @@ function cleanEmail(value: unknown, fallback = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : fallback;
 }
 
-function cleanSlug(value: unknown, fallback = "sam-hale-golf") {
+function cleanSlug(value: unknown, fallback = fallbackAccountId()) {
   if (typeof value !== "string") return fallback;
   const slug = value
     .trim()
@@ -66,7 +69,7 @@ function safeJsonParse<T>(value: unknown, fallback: T): T {
 
 function defaultCoachAccount() {
   return {
-    id: env("CLARITY_COACH_ACCOUNT_ID", "sam-hale-golf"),
+    id: fallbackAccountId(),
     coachName: env("CLARITY_COACH_NAME", "Sam Hale"),
     businessName: env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
     venueName: env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
@@ -74,12 +77,12 @@ function defaultCoachAccount() {
     timezone: env("CLARITY_TIMEZONE", "Pacific/Auckland"),
     contactEmail: env("CLARITY_CONTACT_EMAIL", ""),
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
-    calendarSlug: env("CLARITY_CALENDAR_SLUG", "sam-hale-golf"),
+    calendarSlug: defaultCalendarSlug(),
   };
 }
 
 function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
-  const slug = cleanSlug(account.calendarSlug || account.businessName, "sam-hale-golf");
+  const slug = cleanSlug(account.calendarSlug || account.businessName, fallbackAccountId());
   return {
     id: slug,
     name: account.businessName || "Sam Hale Golf",
@@ -140,7 +143,7 @@ function recordBelongsToAccount(record: any, accountId: string) {
 }
 
 function defaultCoachId(coaches: any[] = []) {
-  const fallbackCoachId = defaultCoachAccount().id || "sam-hale-golf";
+  const fallbackCoachId = defaultCoachAccount().id || fallbackAccountId();
   return cleanSlug(
     coaches.find((coach) => coach?.isDefault && coach?.active !== false && !coach?.archived)?.id ||
       coaches.find((coach) => coach?.active !== false && !coach?.archived)?.id ||
@@ -576,7 +579,7 @@ function escapeHtml(value: unknown) {
 function slotDateLabel(week = 0, day = 0) {
   const date = new Date(BASE_WEEK_START);
   date.setUTCDate(date.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
-  return date.toLocaleDateString("en-NZ", { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+  return date.toLocaleDateString(activeLocale(), { weekday: "long", month: "short", day: "numeric", year: "numeric" });
 }
 
 function timeLabel(minutes = 0) {
@@ -708,6 +711,9 @@ function successPayload(appointment: any, items: any[], fallback = false, fallba
 async function createPublicBooking(payload: any) {
   const store = new SupabaseRest();
   const settings = await store.readSettingsMap();
+  // Resolve the workspace's country before any date is formatted, so this
+  // lambda formats dates the coach's way rather than New Zealand's.
+  setActivePhoneCountry(settings.accountCountry);
   const state = publicStateFromSettings(settings, []);
   const workspaceAccount = state.workspaceAccounts.find((account: any) => account.id === defaultAccountId(state.workspaceAccounts)) || state.workspaceAccounts[0] || defaultWorkspaceAccountFromCoachAccount(state.account);
   if (!accountHasPublicBooking(workspaceAccount)) {
@@ -926,9 +932,9 @@ async function fallbackFromRawPayload(payload: any, originalError: unknown) {
     day,
     start,
     duration: Number(payload.duration ?? 0),
-    coachId: cleanSlug(payload.coachId, account.id || "sam-hale-golf"),
+    coachId: cleanSlug(payload.coachId, account.id || fallbackAccountId()),
     locationId: cleanSlug(payload.locationId, "default-location"),
-    coach: payload.coach || { coachId: cleanSlug(payload.coachId, account.id || "sam-hale-golf"), name: account.coachName },
+    coach: payload.coach || { coachId: cleanSlug(payload.coachId, account.id || fallbackAccountId()), name: account.coachName },
     serviceId: cleanString(payload.serviceId, "", 180),
     client: `${firstName} ${lastName}`,
     title: `${firstName} ${lastName}`,

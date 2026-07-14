@@ -1,5 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
+import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 
 // Billing is a new, isolated top-level app section. This function owns its
 // own tables (billing_products_services, billing_invoices,
@@ -134,7 +135,7 @@ async function resolveAccountId() {
   const map = Object.fromEntries(rows.map((row: { key: string; value: string }) => [row.key, row.value]));
   const businessName = map.accountBusinessName || map.coachName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf");
   const slugSource = map.accountCalendarSlug || businessName;
-  return cleanSlug(slugSource, env("CLARITY_COACH_ACCOUNT_ID", "sam-hale-golf"));
+  return cleanSlug(slugSource, fallbackAccountId());
 }
 
 async function parseBody(req: Request) {

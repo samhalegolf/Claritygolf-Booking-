@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions";
 
 import { syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
 import { notifyBookingEvent } from "./notification-engine.mts";
+import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -40,7 +41,7 @@ async function readWorkspaceAccount() {
     accounts = [];
   }
   return accounts.find((account: any) => account?.active !== false) || {
-    id: settings.accountCalendarSlug || settings.accountId || "sam-hale-golf",
+    id: settings.accountCalendarSlug || settings.accountId || fallbackAccountId(),
     planKey: "founder",
     subscriptionStatus: "comped",
     active: true,
@@ -151,7 +152,7 @@ async function readRemainingRowsForWeek(accountId: string, week: number) {
 function rowToItem(row: any) {
   return {
     id: row.id,
-    accountId: row.account_id || "sam-hale-golf",
+    accountId: row.account_id || fallbackAccountId(),
     kind: row.kind,
     week: Number(row.week ?? 0),
     day: Number(row.day ?? 0),
