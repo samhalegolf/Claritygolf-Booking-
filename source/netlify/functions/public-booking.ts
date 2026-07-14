@@ -715,7 +715,11 @@ async function createPublicBooking(payload: any) {
   const locations = state.locations.filter((location: any) => recordBelongsToAccount(location, accountId));
   const availability = (state.availability || []).map((day: any[]) => (Array.isArray(day) ? day.filter((window) => recordBelongsToAccount(window, accountId)) : []));
 
-  const service = services.find((candidate: any) => candidate.id === payload?.serviceId && candidate.active !== false && candidate.archived !== true && candidate.visibility === "public" && candidate.lessonFormat !== "package");
+  // A lesson type removed from every booking screen is not publicly bookable,
+  // even with a direct link. A missing field means legacy data (main screen).
+  const onBookingScreen = (candidate: any) =>
+    !Array.isArray(candidate?.bookingScreenIds) || candidate.bookingScreenIds.length > 0;
+  const service = services.find((candidate: any) => candidate.id === payload?.serviceId && candidate.active !== false && candidate.archived !== true && candidate.visibility === "public" && candidate.lessonFormat !== "package" && onBookingScreen(candidate));
   if (!service) throw Object.assign(new Error("Choose a public lesson type."), { status: 400 });
 
   const week = Number(payload.week ?? 0);

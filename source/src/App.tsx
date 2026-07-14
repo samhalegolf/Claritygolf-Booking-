@@ -3894,6 +3894,27 @@ function parseDraftNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+type ServiceNumberField =
+  | "duration"
+  | "price"
+  | "packageAllowance"
+  | "baseParticipants"
+  | "basePrice"
+  | "extraPersonPrice";
+
+const SERVICE_NUMBER_LIMITS: Record<ServiceNumberField, { min: number; max: number; fallback: number }> = {
+  duration: { min: 15, max: 240, fallback: 60 },
+  price: { min: 0, max: 100000, fallback: 0 },
+  packageAllowance: { min: 1, max: 100, fallback: 5 },
+  baseParticipants: {
+    min: DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+    max: DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
+    fallback: DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS,
+  },
+  basePrice: { min: 0, max: 100000, fallback: DEFAULT_CUSTOM_GROUP_BASE_PRICE },
+  extraPersonPrice: { min: 0, max: 100000, fallback: DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE },
+};
+
 function generateServiceDraftId() {
   return `service-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -4370,6 +4391,7 @@ function App() {
   const [groupOccurrenceInput, setGroupOccurrenceInput] = useState("");
   const [groupMinimumInput, setGroupMinimumInput] = useState("");
   const [groupMaximumInput, setGroupMaximumInput] = useState("");
+  const [serviceNumberDrafts, setServiceNumberDrafts] = useState<Partial<Record<ServiceNumberField, string>>>({});
   const [availability, setAvailability] = useState<AvailabilityWindow[][]>(() => (isEmbedMode ? emptyAvailability() : defaultAvailability));
   const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
@@ -11195,6 +11217,53 @@ function App() {
     });
   }
 
+  function serviceNumberEditorValue(field: ServiceNumberField, editor: ServiceEditor = serviceEditor) {
+    const limits = SERVICE_NUMBER_LIMITS[field];
+    const raw = Number(editor[field] ?? limits.fallback);
+    return Number.isFinite(raw) ? raw : limits.fallback;
+  }
+
+  function serviceNumberInputValue(field: ServiceNumberField) {
+    const draft = serviceNumberDrafts[field];
+    return draft !== undefined ? draft : String(serviceNumberEditorValue(field));
+  }
+
+  function resolveServiceNumberDraft(field: ServiceNumberField, draft: string, editor: ServiceEditor) {
+    const limits = SERVICE_NUMBER_LIMITS[field];
+    const parsed = parseDraftNumber(draft);
+    // A blank or invalid entry keeps the value the field already had.
+    if (parsed === null) return serviceNumberEditorValue(field, editor);
+    return clamp(Math.round(parsed), limits.min, limits.max);
+  }
+
+  function updateServiceNumberDraft(field: ServiceNumberField, raw: string) {
+    setServiceSaveState("idle");
+    setServiceNumberDrafts((current) => ({ ...current, [field]: raw }));
+  }
+
+  function commitServiceNumberDraft(field: ServiceNumberField) {
+    const draft = serviceNumberDrafts[field];
+    if (draft === undefined) return;
+    const value = resolveServiceNumberDraft(field, draft, serviceEditor);
+    setServiceNumberDrafts((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+    setServiceEditor((current) => ({ ...current, [field]: value }));
+  }
+
+  function applyServiceNumberDrafts(editor: ServiceEditor): ServiceEditor {
+    const entries = Object.entries(serviceNumberDrafts) as [ServiceNumberField, string][];
+    if (!entries.length) return editor;
+    const patch: Record<string, number> = {};
+    for (const [field, draft] of entries) {
+      patch[field] = resolveServiceNumberDraft(field, draft, editor);
+    }
+    setServiceNumberDrafts({});
+    return { ...editor, ...patch } as ServiceEditor;
+  }
+
   function normalizeGroupDraftInputs(editor: ServiceEditor) {
     if (editor.lessonFormat === "package") {
       return editor;
@@ -11269,6 +11338,7 @@ function App() {
 
   function editService(service: Service) {
     setEditingServiceId(service.id);
+    setServiceNumberDrafts({});
     setServiceEditor({
       ...service,
       customGroup: isCustomGroupService(service),
@@ -11286,6 +11356,7 @@ function App() {
 
   function startNewService() {
     setEditingServiceId(null);
+    setServiceNumberDrafts({});
     setServiceEditor({
       ...emptyServiceEditor(),
       id: generateServiceDraftId(),
@@ -12639,7 +12710,7 @@ function App() {
       setToast({ message: "Give the lesson type a name before saving." });
       return;
     }
-    const normalizedEditor = applyGroupDraftInputs();
+    const normalizedEditor = applyServiceNumberDrafts(applyGroupDraftInputs());
     const editableEditor = {
       ...normalizedEditor,
       accountId: normalizedEditor.accountId || activeAccountId,
@@ -14363,6 +14434,7 @@ function App() {
                 onClick={() => {
                   setShowServiceEditor(false);
                   setEditingServiceId(null);
+                  setServiceNumberDrafts({});
                   setServiceEditor(emptyServiceEditor());
                 }}
               >
@@ -14436,24 +14508,26 @@ function App() {
                 <label className="settings-field">
                   <span>Duration</span>
                   <input
-                    value={serviceEditor.duration}
+                    value={serviceNumberInputValue("duration")}
                     min={15}
                     max={240}
                     step={15}
                     inputMode="numeric"
-                    onChange={(event) => updateServiceEditor("duration", Number(event.target.value))}
-                    type="text"
+                    onChange={(event) => updateServiceNumberDraft("duration", event.target.value)}
+                    onBlur={() => commitServiceNumberDraft("duration")}
+                    type="number"
                   />
                 </label>
                 <label className="settings-field">
                   <span>Price NZD</span>
                   <input
-                    value={serviceEditor.price}
+                    value={serviceNumberInputValue("price")}
                     min={0}
                     step={1}
                     inputMode="decimal"
-                    onChange={(event) => updateServiceEditor("price", Number(event.target.value))}
-                    type="text"
+                    onChange={(event) => updateServiceNumberDraft("price", event.target.value)}
+                    onBlur={() => commitServiceNumberDraft("price")}
+                    type="number"
                   />
                 </label>
                 <label className="settings-field">
@@ -14475,35 +14549,38 @@ function App() {
                   <label className="settings-field">
                     <span>Base participants</span>
                     <input
-                      value={serviceEditor.baseParticipants ?? DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS}
+                      value={serviceNumberInputValue("baseParticipants")}
                       min={serviceEditor.minParticipants}
                       max={serviceEditor.capacity}
                       step={1}
                       inputMode="numeric"
-                      onChange={(event) => updateServiceEditor("baseParticipants", Number(event.target.value))}
-                      type="text"
+                      onChange={(event) => updateServiceNumberDraft("baseParticipants", event.target.value)}
+                      onBlur={() => commitServiceNumberDraft("baseParticipants")}
+                      type="number"
                     />
                   </label>
                   <label className="settings-field">
                     <span>Base price NZD</span>
                     <input
-                      value={serviceEditor.basePrice ?? DEFAULT_CUSTOM_GROUP_BASE_PRICE}
+                      value={serviceNumberInputValue("basePrice")}
                       min={0}
                       step={1}
                       inputMode="decimal"
-                      onChange={(event) => updateServiceEditor("basePrice", Number(event.target.value))}
-                      type="text"
+                      onChange={(event) => updateServiceNumberDraft("basePrice", event.target.value)}
+                      onBlur={() => commitServiceNumberDraft("basePrice")}
+                      type="number"
                     />
                   </label>
                   <label className="settings-field">
                     <span>Extra person NZD</span>
                     <input
-                      value={serviceEditor.extraPersonPrice ?? DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE}
+                      value={serviceNumberInputValue("extraPersonPrice")}
                       min={0}
                       step={1}
                       inputMode="decimal"
-                      onChange={(event) => updateServiceEditor("extraPersonPrice", Number(event.target.value))}
-                      type="text"
+                      onChange={(event) => updateServiceNumberDraft("extraPersonPrice", event.target.value)}
+                      onBlur={() => commitServiceNumberDraft("extraPersonPrice")}
+                      type="number"
                     />
                   </label>
                 </div>
@@ -14555,7 +14632,7 @@ function App() {
                       inputMode="numeric"
                       onChange={(event) => setGroupOccurrenceInput(event.target.value)}
                       onBlur={() => void applyGroupDraftInputs()}
-                      type="text"
+                      type="number"
                     />
                   </label>
                 )}
@@ -14570,7 +14647,7 @@ function App() {
                       inputMode="numeric"
                       onChange={(event) => setGroupMinimumInput(event.target.value)}
                       onBlur={() => void applyGroupDraftInputs()}
-                      type="text"
+                      type="number"
                     />
                   </label>
                 )}
@@ -14601,7 +14678,7 @@ function App() {
                       inputMode="numeric"
                       onChange={(event) => setGroupMaximumInput(event.target.value)}
                       onBlur={() => void applyGroupDraftInputs()}
-                      type="text"
+                      type="number"
                     />
                   </label>
                 )}
@@ -14648,13 +14725,14 @@ function App() {
                   <label className="settings-field">
                     <span>Allowance</span>
                     <input
-                      value={serviceEditor.packageAllowance ?? 5}
+                      value={serviceNumberInputValue("packageAllowance")}
                       min={1}
                       max={100}
                       step={1}
                       inputMode="numeric"
-                      onChange={(event) => updateServiceEditor("packageAllowance", Number(event.target.value))}
-                      type="text"
+                      onChange={(event) => updateServiceNumberDraft("packageAllowance", event.target.value)}
+                      onBlur={() => commitServiceNumberDraft("packageAllowance")}
+                      type="number"
                     />
                   </label>
                   <label className="settings-field">

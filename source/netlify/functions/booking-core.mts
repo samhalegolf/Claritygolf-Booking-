@@ -477,15 +477,16 @@ function cleanGroupSchedule(value, fallback = {}) {
 }
 
 function cleanBookingScreenIds(value) {
+  // A missing field means legacy data, which defaults to the main screen.
+  // An explicit empty list means "show on no booking screens" and is preserved.
   if (!Array.isArray(value)) return ["main"];
-  const cleaned = Array.from(
+  return Array.from(
     new Set(
       value
         .map((candidate) => (typeof candidate === "string" ? candidate.trim() : ""))
         .filter((candidate) => BOOKING_SCREEN_IDS.has(candidate)),
     ),
   );
-  return cleaned.length ? cleaned : ["main"];
 }
 
 function cleanEditableServiceText(value, fallback = "", max = 600) {
@@ -502,10 +503,12 @@ function cleanService(service, index = 0) {
   const duration = Number.isFinite(Number(service?.duration)) ? Number(service.duration) : fallback.duration;
   const price = Number.isFinite(Number(service?.price)) ? Number(service.price) : fallback.price;
   const capacity = Number.isFinite(Number(service?.capacity)) ? Number(service.capacity) : fallback.capacity || 1;
+  // The chosen lesson format is authoritative. Legacy rows that predate the
+  // lessonFormat field are still detected by their "package-" id prefix, but a
+  // service name is never used to infer the format.
   const looksLikePackage =
     service?.lessonFormat === "package" ||
-    String(service?.id || fallback.id || "").startsWith("package-") ||
-    /package/i.test(name);
+    (!service?.lessonFormat && String(service?.id || "").startsWith("package-"));
   const lessonFormat =
     looksLikePackage ? "package" : service?.lessonFormat === "group" ? "group" : "private";
   const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
@@ -573,11 +576,10 @@ function cleanService(service, index = 0) {
   };
 }
 
-function normalizeServices(serviceList) {
-  const source =
-    Array.isArray(serviceList) && serviceList.length
-      ? serviceList
-      : defaultServices;
+export function normalizeServices(serviceList) {
+  // Only seed the demo lesson types when there is no services data at all.
+  // An explicit empty list means the coach deleted them and must stay empty.
+  const source = Array.isArray(serviceList) ? serviceList : defaultServices;
   const seen = new Set();
   return source.map((service, index) => {
     const clean = cleanService(service, index);
@@ -6064,13 +6066,20 @@ function publicAccountState(state) {
   };
 }
 
-function publicBookableServices(services = []) {
+function serviceHasBookingScreen(service) {
+  // Legacy rows without the field are treated as visible on the main screen.
+  if (!Array.isArray(service?.bookingScreenIds)) return true;
+  return service.bookingScreenIds.length > 0;
+}
+
+export function publicBookableServices(services = []) {
   return services.filter(
     (service) =>
       service.active &&
       service.archived !== true &&
       service.visibility === "public" &&
-      service.lessonFormat !== "package",
+      service.lessonFormat !== "package" &&
+      serviceHasBookingScreen(service),
   );
 }
 
