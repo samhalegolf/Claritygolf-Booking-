@@ -2046,13 +2046,14 @@ function getBookingScreenId(pathname = "") {
 }
 
 function normalizeBookingScreenIds(value: unknown): string[] {
-  const source = Array.isArray(value) ? value : [];
-  const filtered = source
+  // A missing field means legacy data, which defaults to the main screen.
+  // An explicit empty list means "show on no booking screens" and is preserved.
+  if (!Array.isArray(value)) return ["main"];
+  const filtered = value
     .map((candidate) => (typeof candidate === "string" ? candidate.trim() : ""))
     .filter((candidate) => candidate.length > 0)
     .filter((candidate) => BOOKING_SCREEN_IDS.has(candidate));
-  const uniq = Array.from(new Set(filtered));
-  return uniq.length ? uniq : ["main"];
+  return Array.from(new Set(filtered));
 }
 
 function formatBookingScreenLabels(screenIds: string[] = []) {
@@ -3332,10 +3333,12 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
   const duration = Number.isFinite(Number(service?.duration)) ? Number(service?.duration) : fallback.duration;
   const price = Number.isFinite(Number(service?.price)) ? Number(service?.price) : fallback.price;
   const capacity = Number.isFinite(Number(service?.capacity)) ? Number(service?.capacity) : fallback.capacity || 1;
+  // The chosen lesson format is authoritative. Legacy rows that predate the
+  // lessonFormat field are still detected by their "package-" id prefix, but a
+  // service name is never used to infer the format.
   const looksLikePackage =
     service?.lessonFormat === "package" ||
-    String(service?.id || fallback.id || "").startsWith("package-") ||
-    /package/i.test(name);
+    (!service?.lessonFormat && String(service?.id || "").startsWith("package-"));
   const lessonFormat: LessonFormat =
     looksLikePackage ? "package" : service?.lessonFormat === "group" ? "group" : "private";
   const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
@@ -3398,7 +3401,9 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
 }
 
 function cleanServices(serviceList?: Partial<Service>[]): Service[] {
-  const source = Array.isArray(serviceList) && serviceList.length ? serviceList : defaultServices;
+  // Only seed the demo lesson types when there is no services data at all.
+  // An explicit empty list means the coach deleted them and must stay empty.
+  const source = Array.isArray(serviceList) ? serviceList : defaultServices;
   const seen = new Set<string>();
   return source.map((service, index) => {
     const clean = cleanService(service, index);
@@ -4466,7 +4471,12 @@ function App() {
     if (serviceEditor.lessonFormat !== "group") {
       setGroupOccurrenceInput("");
       setGroupMinimumInput("");
-      setGroupMaximumInput("");
+      // Private lessons still show the capacity box, so it must stay populated.
+      setGroupMaximumInput(
+        serviceEditor.lessonFormat === "package"
+          ? ""
+          : String(clamp(Math.round(Number(serviceEditor.capacity) || 1), 1, 24)),
+      );
       return;
     }
 
@@ -11186,8 +11196,14 @@ function App() {
   }
 
   function normalizeGroupDraftInputs(editor: ServiceEditor) {
-    if (editor.lessonFormat !== "group") {
+    if (editor.lessonFormat === "package") {
       return editor;
+    }
+
+    if (editor.lessonFormat !== "group") {
+      // Private lessons share the same capacity input, so commit it here too.
+      const capacity = clamp(Math.round(parseDraftNumber(groupMaximumInput) ?? editor.capacity), 1, 24);
+      return { ...editor, capacity, minParticipants: 1 };
     }
 
     if (hasCustomGroupFlag(editor)) {
@@ -11225,13 +11241,15 @@ function App() {
   }
 
   function applyGroupDraftInputs() {
-    if (serviceEditor.lessonFormat !== "group") return serviceEditor;
+    if (serviceEditor.lessonFormat === "package") return serviceEditor;
     const next = normalizeGroupDraftInputs(serviceEditor);
     setServiceEditor(next);
-    const nextSchedule = next.groupSchedule ?? defaultGroupSchedule();
-    setGroupOccurrenceInput(String(nextSchedule.occurrenceCount));
     setGroupMaximumInput(String(next.capacity));
-    setGroupMinimumInput(String(next.minParticipants));
+    if (next.lessonFormat === "group") {
+      const nextSchedule = next.groupSchedule ?? defaultGroupSchedule();
+      setGroupOccurrenceInput(String(nextSchedule.occurrenceCount));
+      setGroupMinimumInput(String(next.minParticipants));
+    }
     return next;
   }
 
@@ -12621,7 +12639,7 @@ function App() {
       setToast({ message: "Give the lesson type a name before saving." });
       return;
     }
-    const normalizedEditor = serviceEditor.lessonFormat === "group" ? applyGroupDraftInputs() : serviceEditor;
+    const normalizedEditor = applyGroupDraftInputs();
     const editableEditor = {
       ...normalizedEditor,
       accountId: normalizedEditor.accountId || activeAccountId,
