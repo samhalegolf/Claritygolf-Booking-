@@ -9,6 +9,13 @@ import {
 
 import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
+import {
+  canonicalPhoneKey,
+  cleanPhoneCountry,
+  getActivePhoneCountry,
+  setActivePhoneCountry,
+  FALLBACK_PHONE_COUNTRY,
+} from "./_shared/phone.mts";
 
 const sessionCookieName = "clarity_session";
 const sessionDays = 7;
@@ -643,6 +650,11 @@ function defaultCoachAccount() {
     venueName: env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
     venueShortName: env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
     timezone: env("CLARITY_TIMEZONE", "Pacific/Auckland"),
+    // ISO 3166-1 alpha-2. The workspace's home country: what a phone number
+    // with no + is assumed to be, and the default selection in the country
+    // dropdown. Everything else that is currently hardcoded to New Zealand
+    // (date formatting, currency) should eventually derive from this too.
+    country: cleanPhoneCountry(env("CLARITY_COUNTRY", FALLBACK_PHONE_COUNTRY)),
     contactEmail: env("CLARITY_CONTACT_EMAIL", ""),
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
     calendarSlug: env("CLARITY_CALENDAR_SLUG", "sam-hale-golf"),
@@ -744,6 +756,7 @@ function cleanCoachAccount(account) {
       80,
     ),
     timezone: cleanString(account?.timezone, defaults.timezone, 80),
+    country: cleanPhoneCountry(account?.country, defaults.country),
     contactEmail: cleanEmail(account?.contactEmail, defaults.contactEmail),
     bookingUrl: cleanUrl(account?.bookingUrl, defaults.bookingUrl),
     calendarSlug: cleanSlug(
@@ -1937,6 +1950,11 @@ async function ensureSeeded() {
     seedReadyPromise = (async () => {
       await ensureCoreTables();
       await seedSettings();
+      // Contact matching parses bare national numbers against the workspace's
+      // country, so it has to be resolved before any person write happens.
+      setActivePhoneCountry(
+        cleanPhoneCountry(await getSetting("accountCountry"), defaultPhoneCountry()),
+      );
       await backfillLegacyPeopleAccountIds(peopleAccountIdFromSettings(await readSettingsMap()));
       await ensureNotificationHistoryTable();
       await seedItems();
@@ -2463,32 +2481,24 @@ function normalizedPersonEmail(value) {
   return cleanString(value, "", 180).toLowerCase();
 }
 
-// Country codes we can safely strip back to a national (trunk-prefixed) number.
-// Ordered longest-first so 353 is tested before 3/1-style prefixes.
-const PHONE_COUNTRY_CODES = ["353", "64", "61", "44", "1"];
+// The country a bare national number (one with no leading +) is assumed to
+// belong to. The deployment default comes from CLARITY_PHONE_COUNTRY; the
+// workspace's own country setting overrides it. The active value lives in the
+// shared phone module so the frontend and the server cannot drift apart.
+function defaultPhoneCountry() {
+  return cleanPhoneCountry(env("CLARITY_PHONE_COUNTRY", FALLBACK_PHONE_COUNTRY));
+}
 
 // Phone numbers reach us in three shapes for the same person: the booking form
 // captures the national form (0274637700), spreadsheet imports carry the
 // international form (+64274637700), and Excel prefixes text cells with an
 // apostrophe ('+64274637700). Comparing raw digits treated these as three
-// different people, so compatiblePersonMatch would miss an existing contact,
-// fall through to INSERT, and collide with the account-scoped unique index on
-// lower(email) — taking the caller's entire calendar save down with it.
-// Canonicalising to the national form makes all three compare equal.
-function normalizedPersonPhone(value) {
-  let digits = cleanString(value, "", 80).replace(/\D/g, "");
-  if (!digits) return "";
-  if (digits.startsWith("00")) digits = digits.slice(2);
-  for (const code of PHONE_COUNTRY_CODES) {
-    // Only treat a leading match as a country code when what remains is still a
-    // plausible subscriber number, so a national number that merely happens to
-    // begin with those digits is left alone.
-    if (digits.startsWith(code) && digits.length - code.length >= 8) {
-      const national = digits.slice(code.length);
-      return national.startsWith("0") ? national : `0${national}`;
-    }
-  }
-  return digits.startsWith("0") ? digits : `0${digits}`;
+// different people, so compatiblePersonMatch missed an existing contact, fell
+// through to INSERT, and collided with the account-scoped unique index on
+// lower(email) — taking the caller's entire calendar save down with it. The
+// shared module is the single source of truth the frontend uses too.
+function normalizedPersonPhone(value, country = getActivePhoneCountry()) {
+  return canonicalPhoneKey(cleanString(value, "", 80), country);
 }
 
 function compatiblePersonMatch(candidate, rows = []) {
@@ -3712,6 +3722,7 @@ async function readCoachAccount() {
     venueShortName:
       (await getSetting("accountVenueShortName")) || defaults.venueShortName,
     timezone: (await getSetting("accountTimezone")) || defaults.timezone,
+    country: (await getSetting("accountCountry")) || defaults.country,
     contactEmail:
       (await getSetting("accountContactEmail")) || defaults.contactEmail,
     bookingUrl: (await getSetting("accountBookingUrl")) || defaults.bookingUrl,
@@ -3735,6 +3746,10 @@ async function writeCoachAccount(account) {
   await setSetting("accountVenueName", clean.venueName);
   await setSetting("accountVenueShortName", clean.venueShortName);
   await setSetting("accountTimezone", clean.timezone);
+  await setSetting("accountCountry", clean.country);
+  // Keep contact matching in step with the country the coach just chose,
+  // without waiting for this instance to be recycled.
+  setActivePhoneCountry(clean.country);
   await setSetting("accountContactEmail", clean.contactEmail);
   await setSetting("accountBookingUrl", clean.bookingUrl);
   await setSetting("accountCalendarSlug", clean.calendarSlug);

@@ -52,6 +52,16 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  canonicalPhoneKey as sharedCanonicalPhoneKey,
+  cleanPhoneCountry,
+  dialCodeFor,
+  formatPhoneForDisplay,
+  getActivePhoneCountry,
+  isValidPhone,
+  phoneCountryOptions,
+  setActivePhoneCountry,
+} from "../netlify/functions/_shared/phone.mts";
+import {
   VideoAnalysisPage,
   type VideoWorkspaceNavigationContext,
   type VideoWorkspaceSaveResult,
@@ -1240,6 +1250,8 @@ type CoachAccount = {
   venueName: string;
   venueShortName: string;
   timezone: string;
+  /** ISO 3166-1 alpha-2. The workspace's home country. */
+  country: string;
   contactEmail: string;
   bookingUrl: string;
   calendarSlug: string;
@@ -2088,22 +2100,32 @@ function normalizePhoneDigits(value: unknown = "") {
   return safeText(value).replace(/\D/g, "");
 }
 
+// Identity. Must agree with the server exactly — when these two disagreed about
+// whether "+64274637700" and "0274637700" were the same person, the server
+// created a duplicate contact and the resulting unique-index collision failed
+// the coach's whole calendar save. Both sides now call the same function.
+// This was hardcoded to New Zealand ("64"); it is now country-aware.
 function canonicalPhoneKey(value: unknown = "") {
-  const digits = normalizePhoneDigits(value);
-  if (digits.startsWith("64") && digits.length >= 9) return `0${digits.slice(2)}`;
-  return digits;
+  return sharedCanonicalPhoneKey(safeText(value));
 }
 
+// Fuzzy search, not identity. Deliberately generous: it powers type-ahead over
+// the client list, where a coach may type any fragment of a number in any
+// format. Seeded with the canonical key so the international and national
+// spellings of a number always find each other.
 function phoneVariants(value: unknown = "") {
   const digits = normalizePhoneDigits(value);
   const variants = new Set<string>();
+  const canonical = normalizePhoneDigits(canonicalPhoneKey(value));
+  if (canonical) variants.add(canonical);
   if (digits) variants.add(digits);
-  if (digits.startsWith("64") && digits.length > 2) {
-    variants.add(`0${digits.slice(2)}`);
-    variants.add(digits.slice(2));
+  const callingCode = normalizePhoneDigits(dialCodeFor());
+  if (callingCode && digits.startsWith(callingCode) && digits.length > callingCode.length) {
+    variants.add(`0${digits.slice(callingCode.length)}`);
+    variants.add(digits.slice(callingCode.length));
   }
   if (digits.startsWith("0") && digits.length > 1) {
-    variants.add(`64${digits.slice(1)}`);
+    if (callingCode) variants.add(`${callingCode}${digits.slice(1)}`);
     variants.add(digits.slice(1));
   }
   if (digits.length > 8) variants.add(digits.slice(-8));
@@ -2448,6 +2470,7 @@ const defaultCoachAccount: CoachAccount = {
   venueName: "The Range 24/7 - Three Kings",
   venueShortName: "The Range 24/7",
   timezone: "Pacific/Auckland",
+  country: "NZ",
   contactEmail: "",
   bookingUrl: "https://book.claritygolf.app",
   calendarSlug: "sam-hale-golf",
@@ -2586,6 +2609,7 @@ function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
       typeof account?.timezone === "string" && account.timezone.trim()
         ? account.timezone.trim().slice(0, 80)
         : defaultCoachAccount.timezone,
+    country: cleanPhoneCountry(account?.country, defaultCoachAccount.country),
     contactEmail: cleanEmail(account?.contactEmail, defaultCoachAccount.contactEmail),
     bookingUrl: cleanUrl(account?.bookingUrl, defaultCoachAccount.bookingUrl),
     calendarSlug: cleanSlug(account?.calendarSlug, cleanSlug(businessName, defaultCoachAccount.calendarSlug)),
@@ -4336,6 +4360,14 @@ function App() {
   const isEmbedMode = isPublicBookingMode();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
+  // Contact matching and phone formatting resolve bare national numbers against
+  // the workspace's country. The server does the same, from the same setting —
+  // if these two ever disagree, the client and server disagree about whether
+  // two numbers belong to the same person, which is what produced duplicate
+  // contacts and the failed saves.
+  useEffect(() => {
+    setActivePhoneCountry(coachAccount.country);
+  }, [coachAccount.country]);
   const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>(() =>
     cleanWorkspaceAccounts(undefined, getStoredCoachAccount()),
   );
@@ -20644,6 +20676,24 @@ function App() {
                           readOnly={coachAccountIsLocked}
                           onChange={(event) => updateCoachAccountBlockDraft("timezone", event.target.value)}
                         />
+                      </label>
+                      <label className="settings-field">
+                        <span>Country</span>
+                        <select
+                          value={cleanPhoneCountry(coachAccountDraft.country)}
+                          disabled={coachAccountIsLocked}
+                          onChange={(event) => updateCoachAccountBlockDraft("country", event.target.value)}
+                        >
+                          {phoneCountryOptions().map((option) => (
+                            <option key={option.code} value={option.code}>
+                              {option.name} ({option.dialCode})
+                            </option>
+                          ))}
+                        </select>
+                        <small className="settings-field-hint">
+                          Sets the dialling code for new phone numbers, and how a number typed
+                          without a country code is understood.
+                        </small>
                       </label>
                     </div>
                   </details>
