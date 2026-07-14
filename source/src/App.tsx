@@ -6,6 +6,9 @@ import {
   BarChart3,
   CalendarDays,
   Check,
+  Cloud,
+  CloudOff,
+  CloudUpload,
   Code2,
   Copy,
   Clock,
@@ -23,11 +26,13 @@ import {
   Mail,
   MapPin,
   Moon,
+  MoreHorizontal,
   Package,
   Palette,
   Pause,
   Percent,
   Phone,
+  Play,
   Plus,
   Pencil,
   Receipt,
@@ -86,7 +91,6 @@ import {
   getLocalStorageActionLabel,
   getLocalStorageHealth,
   getSavedVideoCloudStatusLabel,
-  getSavedVideoDeviceStatusLabel,
   type ClarityCloudHealth,
   type ClarityCloudAction,
   type GoogleDriveTransferStatus,
@@ -4394,6 +4398,7 @@ function App() {
   const [savedVideoItems, setSavedVideoItems] = useState<SavedVideoItem[]>([]);
   const [legacyVideoRecords, setLegacyVideoRecords] = useState<StoredVideoRecord[]>([]);
   const [uploadingSavedVideoIds, setUploadingSavedVideoIds] = useState<Set<string>>(() => new Set());
+  const [openSavedVideoMenuId, setOpenSavedVideoMenuId] = useState<string | null>(null);
   const [managedLocalLibraryStatus, setManagedLocalLibraryStatus] =
     useState<ManagedLocalVideoLibraryStatus>(defaultManagedLocalLibraryStatus);
   const [showPlayerAddDialog, setShowPlayerAddDialog] = useState(false);
@@ -17747,7 +17752,6 @@ function App() {
                                             video.cloud?.status === "session-created" ||
                                             video.cloud?.status === "uploading" ||
                                             video.cloud?.status === "verifying");
-                                        const deviceLabel = getSavedVideoDeviceStatusLabel(video);
                                         const cloudLabel = getSavedVideoCloudStatusLabel(video, {
                                           isUploading,
                                           cloudConnected: googleDriveTransfer.connected,
@@ -17785,148 +17789,247 @@ function App() {
                                         const canRemoveFromDevice =
                                           (cloudStatus === "ready" || cloudStatus === "imported") &&
                                           hasDeviceCopy;
+                                        const cloudSaved = cloudStatus === "ready" || cloudStatus === "imported";
+                                        const cloudFailed = cloudStatus === "failed" || !cloudOperational;
+                                        const cloudState = isUploading
+                                          ? "uploading"
+                                          : cloudSaved
+                                            ? "saved"
+                                            : cloudFailed
+                                              ? "failed"
+                                              : "pending";
+                                        const cloudBadgeLabel = isUploading
+                                          ? "Uploading to Clarity Cloud"
+                                          : cloudSaved
+                                            ? "Saved in Clarity Cloud"
+                                            : cloudStatus === "failed"
+                                              ? cloudErrorLabel || "Clarity Cloud upload failed"
+                                              : !cloudOperational
+                                                ? cloudLabel
+                                                : "Waiting to upload to Clarity Cloud";
+                                        const videoTitle =
+                                          video.title ||
+                                          profileRecordTitle(notesWorkspaceClient.name, video.updatedAt || video.createdAt);
+                                        const menuOpen = openSavedVideoMenuId === video.savedVideoId;
+                                        const closeMenu = () => setOpenSavedVideoMenuId(null);
+                                        const playVideo = () =>
+                                          openVideoAnalysisForClient({
+                                            id: video.playerId,
+                                            name: notesWorkspaceClient.name,
+                                            savedVideoId: video.savedVideoId,
+                                          });
                                         return (
                                           <article className="player-video-card" key={video.savedVideoId}>
-                                            {video.thumbnailDataUrl ? (
-                                              <img
-                                                className="player-video-thumb"
-                                                src={video.thumbnailDataUrl}
-                                                alt=""
-                                              />
-                                            ) : (
-                                              <div className="player-video-thumb is-empty">
-                                                <Video size={16} />
-                                              </div>
-                                            )}
-                                            <div className="player-video-card-body">
-                                              <strong>{video.title || profileRecordTitle(notesWorkspaceClient.name, video.updatedAt || video.createdAt)}</strong>
-                                              <span>
-                                                {profileRecordTitle(notesWorkspaceClient.name, video.updatedAt || video.createdAt)}
-                                                {" · "}
-                                                {formatVideoDurationLabel(video.source.duration)}
-                                                {" · "}
-                                                {deviceLabel}
-                                                {" · "}
-                                                {cloudLabel}
-                                                {linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}
+                                            <button
+                                              type="button"
+                                              className="player-video-thumb-button"
+                                              onClick={playVideo}
+                                              title={`Play ${videoTitle}`}
+                                              aria-label={`Play ${videoTitle}`}
+                                            >
+                                              {video.thumbnailDataUrl ? (
+                                                <img
+                                                  className="player-video-thumb"
+                                                  src={video.thumbnailDataUrl}
+                                                  alt=""
+                                                />
+                                              ) : (
+                                                <div className="player-video-thumb is-empty">
+                                                  <Video size={16} />
+                                                </div>
+                                              )}
+                                              <span className="player-video-thumb-play" aria-hidden="true">
+                                                <Play size={14} />
                                               </span>
-                                              {cloudErrorLabel ? (
-                                                <span className="player-video-card-error">{cloudErrorLabel}</span>
+                                            </button>
+                                            <div className="player-video-card-body">
+                                              <strong>{videoTitle}</strong>
+                                              {linkedLessonVideoIds.has(video.savedVideoId) ? (
+                                                <span>Linked lesson note</span>
                                               ) : null}
                                             </div>
                                             <div className="player-video-card-actions">
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                onClick={() =>
-                                                  openVideoAnalysisForClient({
-                                                    id: video.playerId,
-                                                    name: notesWorkspaceClient.name,
-                                                    savedVideoId: video.savedVideoId,
-                                                  })
-                                                }
+                                              <span
+                                                className={`player-video-cloud-badge is-${cloudState}`}
+                                                title={cloudBadgeLabel}
+                                                aria-label={cloudBadgeLabel}
+                                                role="img"
                                               >
-                                                <Video size={14} />
-                                                Open
-                                              </button>
-                                              {cloudOperational ? (
-                                                <>
-                                                  {canRetryCloud ? (
-                                                    <button
-                                                      type="button"
-                                                      className="outline-button"
-                                                      onClick={() => void sendSavedVideoToPrimaryComputer(video)}
-                                                    >
-                                                      <Send size={14} />
-                                                      {sendLabel}
-                                                    </button>
-                                                  ) : null}
-                                                  {canPause ? (
-                                                    <button
-                                                      type="button"
-                                                      className="outline-button"
-                                                      onClick={() => void pauseSavedVideoTransfer(video)}
-                                                    >
-                                                      <Pause size={14} />
-                                                      Pause
-                                                    </button>
-                                                  ) : null}
-                                                  {canCancel ? (
-                                                    <button
-                                                      type="button"
-                                                      className="outline-button"
-                                                      onClick={() => void cancelSavedVideoTransfer(video)}
-                                                    >
-                                                      <X size={14} />
-                                                      Cancel
-                                                    </button>
-                                                  ) : null}
-                                                  {canRemoveTransfer ? (
-                                                    <button
-                                                      type="button"
-                                                      className="outline-button"
-                                                      onClick={() => void removeSavedVideoTransfer(video)}
-                                                    >
-                                                      <X size={14} />
-                                                      Clear failed upload
-                                                    </button>
-                                                  ) : null}
-                                                </>
-                                              ) : null}
-                                              {hasDeviceCopy ? (
-                                                <>
-                                                  <button
-                                                    type="button"
-                                                    className="outline-button"
-                                                    onClick={() => void showSavedVideoInFinder(video)}
-                                                  >
-                                                    <FolderOpen size={14} />
-                                                    Keep on this device
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    className="outline-button"
-                                                    onClick={() => void revealSavedVideoFile(video)}
-                                                  >
-                                                    <ExternalLink size={14} />
-                                                    Open stored file
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    className="outline-button"
-                                                    onClick={() => void verifySavedVideoInLibrary(video)}
-                                                  >
-                                                    <Check size={14} />
-                                                    Verify file
-                                                  </button>
-                                                </>
-                                              ) : null}
-                                              {canRemoveFromDevice ? (
+                                                {cloudState === "uploading" ? (
+                                                  <CloudUpload size={16} />
+                                                ) : cloudState === "saved" ? (
+                                                  <Cloud size={16} />
+                                                ) : cloudState === "failed" ? (
+                                                  <CloudOff size={16} />
+                                                ) : (
+                                                  <CloudUpload size={16} />
+                                                )}
+                                              </span>
+                                              <div className="player-video-menu">
                                                 <button
                                                   type="button"
-                                                  className="outline-button"
-                                                  onClick={() => void removeSavedVideoFromDevice(video)}
+                                                  className="icon-button"
+                                                  aria-haspopup="menu"
+                                                  aria-expanded={menuOpen}
+                                                  aria-label="Video options"
+                                                  title="Video options"
+                                                  onClick={() =>
+                                                    setOpenSavedVideoMenuId(menuOpen ? null : video.savedVideoId)
+                                                  }
                                                 >
-                                                  <X size={14} />
-                                                  Remove from this device
+                                                  <MoreHorizontal size={16} />
                                                 </button>
-                                              ) : null}
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                onClick={() => void renameSavedVideo(video)}
-                                              >
-                                                <Pencil size={14} />
-                                                Rename
-                                              </button>
-                                              <button
-                                                type="button"
-                                                className="danger-button"
-                                                onClick={() => void deleteSavedVideo(video)}
-                                              >
-                                                <Trash2 size={14} />
-                                                Delete
-                                              </button>
+                                                {menuOpen ? (
+                                                  <>
+                                                    <button
+                                                      type="button"
+                                                      className="player-video-menu-scrim"
+                                                      aria-label="Close video options"
+                                                      onClick={closeMenu}
+                                                    />
+                                                    <div className="player-video-menu-panel" role="menu">
+                                                      <button
+                                                        type="button"
+                                                        role="menuitem"
+                                                        onClick={() => {
+                                                          closeMenu();
+                                                          playVideo();
+                                                        }}
+                                                      >
+                                                        <Play size={14} />
+                                                        Play
+                                                      </button>
+                                                      {cloudOperational && canRetryCloud ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void sendSavedVideoToPrimaryComputer(video);
+                                                          }}
+                                                        >
+                                                          <Send size={14} />
+                                                          {sendLabel}
+                                                        </button>
+                                                      ) : null}
+                                                      {canPause ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void pauseSavedVideoTransfer(video);
+                                                          }}
+                                                        >
+                                                          <Pause size={14} />
+                                                          Pause upload
+                                                        </button>
+                                                      ) : null}
+                                                      {canCancel ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void cancelSavedVideoTransfer(video);
+                                                          }}
+                                                        >
+                                                          <X size={14} />
+                                                          Cancel upload
+                                                        </button>
+                                                      ) : null}
+                                                      {canRemoveTransfer ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void removeSavedVideoTransfer(video);
+                                                          }}
+                                                        >
+                                                          <X size={14} />
+                                                          Clear failed upload
+                                                        </button>
+                                                      ) : null}
+                                                      {hasDeviceCopy && video.local.managed?.status !== "healthy" ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void showSavedVideoInFinder(video);
+                                                          }}
+                                                        >
+                                                          <FolderOpen size={14} />
+                                                          Keep a copy in My Library
+                                                        </button>
+                                                      ) : null}
+                                                      {hasDeviceCopy ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void revealSavedVideoFile(video);
+                                                          }}
+                                                        >
+                                                          <ExternalLink size={14} />
+                                                          Open stored file
+                                                        </button>
+                                                      ) : null}
+                                                      {hasDeviceCopy ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void verifySavedVideoInLibrary(video);
+                                                          }}
+                                                        >
+                                                          <Check size={14} />
+                                                          Verify file
+                                                        </button>
+                                                      ) : null}
+                                                      {canRemoveFromDevice ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void removeSavedVideoFromDevice(video);
+                                                          }}
+                                                        >
+                                                          <X size={14} />
+                                                          Free up space on this device
+                                                        </button>
+                                                      ) : null}
+                                                      <button
+                                                        type="button"
+                                                        role="menuitem"
+                                                        onClick={() => {
+                                                          closeMenu();
+                                                          void renameSavedVideo(video);
+                                                        }}
+                                                      >
+                                                        <Pencil size={14} />
+                                                        Rename
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        role="menuitem"
+                                                        className="is-danger"
+                                                        onClick={() => {
+                                                          closeMenu();
+                                                          void deleteSavedVideo(video);
+                                                        }}
+                                                      >
+                                                        <Trash2 size={14} />
+                                                        Delete
+                                                      </button>
+                                                    </div>
+                                                  </>
+                                                ) : null}
+                                              </div>
                                             </div>
                                           </article>
                                         );
@@ -17938,31 +18041,33 @@ function App() {
                                         const isDownloading = clarityCloudImportActionIds.has(savedVideoId);
                                         return (
                                           <article className="player-video-card is-cloud-only" key={savedVideoId}>
-                                            <div className="player-video-thumb is-empty">
-                                              <Download size={16} />
-                                            </div>
+                                            <button
+                                              type="button"
+                                              className="player-video-thumb-button"
+                                              disabled={isDownloading}
+                                              title={isDownloading ? "Downloading from Clarity Cloud" : "Play video"}
+                                              aria-label={isDownloading ? "Downloading from Clarity Cloud" : "Play video"}
+                                              onClick={() => void openCloudVideoFromCatalogue(transfer, notesWorkspaceClient.name)}
+                                            >
+                                              <div className="player-video-thumb is-empty">
+                                                <Video size={16} />
+                                              </div>
+                                              <span className="player-video-thumb-play" aria-hidden="true">
+                                                {isDownloading ? <Download size={14} /> : <Play size={14} />}
+                                              </span>
+                                            </button>
                                             <div className="player-video-card-body">
                                               <strong>{savedVideo?.title || profileRecordTitle(notesWorkspaceClient.name, timestamp)}</strong>
-                                              <span>
-                                                {profileRecordTitle(notesWorkspaceClient.name, timestamp)}
-                                                {" · "}
-                                                {formatVideoDurationLabel(transfer.video?.duration)}
-                                                {" · "}
-                                                Cloud • Available
-                                                {" · "}
-                                                Device • Not downloaded
-                                              </span>
                                             </div>
                                             <div className="player-video-card-actions">
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                disabled={isDownloading}
-                                                onClick={() => void openCloudVideoFromCatalogue(transfer, notesWorkspaceClient.name)}
+                                              <span
+                                                className="player-video-cloud-badge is-saved"
+                                                title="Saved in Clarity Cloud"
+                                                aria-label="Saved in Clarity Cloud"
+                                                role="img"
                                               >
-                                                <Download size={14} />
-                                                {isDownloading ? "Downloading" : "Open"}
-                                              </button>
+                                                <Cloud size={16} />
+                                              </span>
                                             </div>
                                           </article>
                                         );
