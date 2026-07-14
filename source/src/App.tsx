@@ -8236,6 +8236,66 @@ function App() {
     }
   }
 
+  // Undo/rollback only needs to talk to the server if the change it's reverting
+  // already made it past the debounced blob autosave (or a granular save) and is
+  // sitting in the database. If it isn't, the client-side revert alone already
+  // matches what's persisted, and lastPersistedCalendarFingerprintRef is left
+  // untouched on purpose so the whole-array autosave stays the fallback if this
+  // best-effort reconciliation fails.
+  async function reconcileUndoByDelete(itemId: string, previousItems: CalendarItem[]) {
+    if (!lastPersistedCalendarItemsRef.current.some((entry) => entry.id === itemId)) return;
+    beginAdminSave("calendar_delete");
+    try {
+      const response = await fetch(`/api/calendar-state?id=${encodeURIComponent(itemId)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.message || "Could not undo that change.");
+      const persistedItems: CalendarItem[] = Array.isArray(data.items) ? data.items : previousItems;
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+      lastPersistedCalendarItemsRef.current = persistedItems;
+      if (typeof data.updatedAt === "string") {
+        setCalendarStateVersion(data.updatedAt);
+      }
+    } catch (error) {
+      console.error("calendar_state:undo_delete_failed", error);
+    } finally {
+      endAdminSave("calendar_delete");
+    }
+  }
+
+  async function reconcileUndoByUpsert(item: CalendarItem, previousItems: CalendarItem[]) {
+    if (!lastPersistedCalendarItemsRef.current.some((entry) => entry.id === item.id)) return;
+    beginAdminSave("upsert_item");
+    try {
+      const response = await fetch("/api/calendar-state", {
+        method: "PUT",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "upsert_item", item }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data?.ok === false || !data?.item) {
+        throw new Error(data?.message || "Could not undo that change.");
+      }
+      const persistedItem = { ...item, ...data.item } as CalendarItem;
+      const persistedItems = previousItems.map((entry) => (entry.id === item.id ? persistedItem : entry));
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+      lastPersistedCalendarItemsRef.current = persistedItems;
+      if (typeof data.updatedAt === "string") {
+        setCalendarStateVersion(data.updatedAt);
+      }
+    } catch (error) {
+      console.error("calendar_state:undo_upsert_failed", error);
+    } finally {
+      endAdminSave("upsert_item");
+    }
+  }
+
   function dockAppointmentItem(movedItem: CalendarItem, options: { fromFlick?: boolean } = {}) {
     if (!requireLiveDatabase("dock appointments")) return false;
     if (movedItem.kind !== "appointment") return false;
@@ -9027,6 +9087,7 @@ function App() {
         undo: () => {
           setItems(previous);
           closeCalendarDetails();
+          void reconcileUndoByDelete(newBlock.id, previous);
         },
       });
       clearGesture();
@@ -9351,7 +9412,10 @@ function App() {
     setQuickCreate(null);
     setToast({
       message: `Blocked ${weekDays[item.day].short}, ${formatRange(item.start, item.duration)}.`,
-      undo: () => setItems(previous),
+      undo: () => {
+        setItems(previous);
+        void reconcileUndoByDelete(item.id, previous);
+      },
     });
   }
 
@@ -9388,7 +9452,10 @@ function App() {
     closeCalendarDetails();
     setToast({
       message: `Added ${service.name} inside blocked time at ${formatTime(item.start)}.`,
-      undo: () => setItems(previous),
+      undo: () => {
+        setItems(previous);
+        void reconcileUndoByDelete(item.id, previous);
+      },
     });
   }
 
@@ -11557,7 +11624,10 @@ function App() {
       }
       setToast({
         message: `Lesson marked ${status.replace("_", "-")}.`,
-        undo: () => setItems(previousItems),
+        undo: () => {
+          setItems(previousItems);
+          void reconcileUndoByUpsert(targetItem, previousItems);
+        },
       });
       scheduleAdminNotificationDebounceFlush();
     } catch (error) {
@@ -11589,6 +11659,7 @@ function App() {
   function reassignSelectedAppointmentClient(client: ClientSummary) {
     if (!selected || selected.kind !== "appointment") return;
     const itemId = selected.id;
+    const targetItem = selected;
     const previous = items;
     // A synthetic appointment-<key> id (see the `clients` grouping above) is a
     // display-only stand-in for a booking that was never linked to a real
@@ -11612,7 +11683,10 @@ function App() {
     closeClientReassign();
     setToast({
       message: `Linked this booking to ${client.name}.`,
-      undo: () => setItems(previous),
+      undo: () => {
+        setItems(previous);
+        void reconcileUndoByUpsert(targetItem, previous);
+      },
     });
   }
 
