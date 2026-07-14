@@ -2571,43 +2571,13 @@ function compatiblePersonMatch(candidate, rows = []) {
   return null;
 }
 
-function personByEmail(rows = [], email = "", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const normalizedEmail = normalizedPersonEmail(email);
-  if (!normalizedEmail || !Array.isArray(rows)) return null;
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  return (
-    rows.find(
-      (row) =>
-        recordBelongsToAccount(row, cleanAccountId) &&
-        normalizedPersonEmail(row?.email) === normalizedEmail,
-    ) || null
-  );
-}
-
-function duplicatePersonEmailError(person, existing, route = "PUT /api/people") {
-  const email = normalizedPersonEmail(person?.email);
-  const personId = cleanString(person?.id, "", 120);
-  const duplicatePersonId = cleanString(existing?.id, "", 120);
-  return Object.assign(
-    new Error("Another person already uses that email address."),
-    {
-      status: 409,
-      code: "DUPLICATE_PERSON_EMAIL",
-      operationOwner: "people_patch",
-      route,
-      personId,
-      email,
-      details: {
-        operationOwner: "people_patch",
-        route,
-        httpStatus: 409,
-        personId,
-        duplicatePersonId,
-        email,
-      },
-    },
-  );
-}
+// personByEmail() and duplicatePersonEmailError() were removed on 14 July 2026.
+// They existed to enforce one-person-per-email, which the unique index on
+// lower(email) also enforced at the database level. Both are gone: an email
+// address is a contact method, not an identity, and families, clubs and couples
+// legitimately share one. Same-person merging is compatiblePersonMatch's job and
+// happens on name plus a compatible phone or email — never on an email alone.
+// Please do not reintroduce a "this email is taken" rule here.
 
 function personFromAppointment(item) {
   if (!item || item.kind !== "appointment") return null;
@@ -3180,11 +3150,14 @@ async function updatePerson(rawPerson, accountId = defaultWorkspaceAccountFromCo
     (person.id && !person.id.startsWith("appointment-")
       ? person.id
       : randomUUID());
-  const emailOwner = personByEmail(knownPeople, person.email, cleanAccountId);
-  const emailOwnerId = cleanString(emailOwner?.id, "", 120);
-  if (emailOwnerId && emailOwnerId !== personId) {
-    throw duplicatePersonEmailError({ ...person, id: personId }, emailOwner);
-  }
+
+  // No email-ownership check. A parent booking for two children, a club booking
+  // for its players, a couple sharing an inbox — all use one address for several
+  // people, and refusing the second one is wrong. compatiblePersonMatch above has
+  // already merged this record into an existing contact if it genuinely is the
+  // same person (matching name with a compatible phone or email); if it did not,
+  // this is a different person who happens to share an address, and they are
+  // entitled to their own row.
 
   const client = await db().pool.connect();
   try {

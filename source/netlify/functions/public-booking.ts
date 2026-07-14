@@ -592,19 +592,24 @@ function rangeLabel(start = 0, duration = 0) {
   return `${timeLabel(start)}-${timeLabel(Number(start || 0) + Number(duration || 0))}`;
 }
 
+// Never fall back to a personal address. This used to end in a hardcoded
+// "samhalegolf@gmail.com", which meant any workspace that had not configured a
+// notification address would send its clients' booking details — names, phone
+// numbers, times — to that inbox. The caller already treats an empty recipient
+// as a hard error, which is the correct outcome: fail loudly rather than
+// silently deliver one coach's client data to someone else.
 function fallbackRecipient(settings: Record<string, string> = {}, account = defaultCoachAccount()) {
   return (
     cleanEmail(settings.notificationEmail, "") ||
     cleanEmail(settings.coachEmail, "") ||
     cleanEmail(account.contactEmail, "") ||
     cleanEmail(env("CLARITY_NOTIFICATION_EMAIL"), "") ||
-    cleanEmail(env("CLARITY_CONTACT_EMAIL"), "") ||
-    "samhalegolf@gmail.com"
+    cleanEmail(env("CLARITY_CONTACT_EMAIL"), "")
   );
 }
 
 function emailFrom(settings: Record<string, string> = {}, account = defaultCoachAccount()) {
-  const businessName = cleanString(settings.accountBusinessName, account.businessName, 140) || "Sam Hale Golf";
+  const businessName = cleanString(settings.accountBusinessName, account.businessName, 140);
   return env("CLARITY_EMAIL_FROM", `${businessName} <onboarding@resend.dev>`);
 }
 

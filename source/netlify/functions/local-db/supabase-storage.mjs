@@ -351,15 +351,11 @@ class SupabaseRestStore {
   }
 
   async savePerson(row) {
+    // Keep in sync with netlify/functions/supabase-storage.mts. Reusing an
+    // existing row by email alone was only ever a workaround for the unique
+    // index on lower(email); that index is gone, and a shared family email must
+    // not cause one person's record to overwrite another's.
     const email = String(row?.email || "").toLowerCase();
-    if (email) {
-      const existing = await this.select("people", `select=id,email&email=ilike.${encodeFilter(email)}&limit=1`);
-      const existingId = existing[0]?.id || "";
-      if (existingId) {
-        await upsertPersonAccepting(this, { ...row, id: existingId, email });
-        return;
-      }
-    }
     await upsertPersonAccepting(this, { ...row, email: email || row.email });
   }
 

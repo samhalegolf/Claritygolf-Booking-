@@ -158,10 +158,16 @@ async function readSettings() {
     env("URL") || env("DEPLOY_PRIME_URL") || env("CLARITY_SITE_URL", "https://claritygolf.app"),
     "https://claritygolf.app/",
   );
+  // No personal addresses as fallbacks. These used to end in a hardcoded
+  // "sam@samhalegolf.co.nz", so any workspace that had not configured a
+  // notification address would email its clients' booking details to that inbox.
+  // An unset recipient is now empty, and sendAndRecord() skips the send and logs
+  // "missing_recipient" — the coach's own address belongs in their account
+  // settings, not in this file.
   return {
-    notificationEmail: cleanEmail(s.notificationEmail, env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz")),
+    notificationEmail: cleanEmail(s.notificationEmail, env("CLARITY_NOTIFICATION_EMAIL", "")),
     coachEmail: cleanEmail(s.coachEmail, env("CLARITY_COACH_EMAIL", "")),
-    replyToEmail: cleanEmail(s.replyToEmail, env("CLARITY_REPLY_TO_EMAIL", env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz"))),
+    replyToEmail: cleanEmail(s.replyToEmail, env("CLARITY_REPLY_TO_EMAIL", env("CLARITY_NOTIFICATION_EMAIL", ""))),
     googleReviewUrl: cleanUrl(s.googleReviewUrl || "", ""),
     notificationSubjectLine: cleanText(s.notificationSubjectLine, "", 180),
     notificationFromName: cleanText(s.notificationFromName, "", 120),
@@ -180,13 +186,13 @@ async function readSettings() {
     updateClientSubject: s.updateClientSubject || "Your {{service}} booking has been updated",
     updateAdminSubject: s.updateAdminSubject || "Updated booking: {{client}}",
     reminderClientSubject: s.reminderClientSubject || "Reminder: {{service}} at {{time}}",
-    businessName: s.accountBusinessName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
-    coachName: s.accountCoachName || env("CLARITY_COACH_NAME", "Sam Hale"),
-    venueName: s.accountVenueName || env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
+    businessName: s.accountBusinessName || env("CLARITY_BUSINESS_NAME", ""),
+    coachName: s.accountCoachName || env("CLARITY_COACH_NAME", ""),
+    venueName: s.accountVenueName || env("CLARITY_VENUE_NAME", ""),
     timezone: s.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
     bookingUrl: cleanUrl(s.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"), "https://book.claritygolf.app/"),
     siteUrl,
-    contactEmail: cleanEmail(s.accountContactEmail, env("CLARITY_CONTACT_EMAIL", "sam@samhalegolf.co.nz")),
+    contactEmail: cleanEmail(s.accountContactEmail, env("CLARITY_CONTACT_EMAIL", "")),
     coachProfiles: parseCoachProfiles(s.coachProfilesJson),
   };
 }
@@ -448,7 +454,7 @@ async function sendEmail(message: { to: string; subject: string; html: string; t
   const fromName = cleanText(settings.notificationFromName, "", 120) || fromNameFallback;
   const from = formatFromHeader(
     fromName,
-    cleanEmail(rawFromHeader, env("CLARITY_NOTIFICATION_EMAIL", "sam@samhalegolf.co.nz")),
+    cleanEmail(rawFromHeader, env("CLARITY_NOTIFICATION_EMAIL", "")),
     rawFromHeader,
   );
   const response = await fetch("https://api.resend.com/emails", {

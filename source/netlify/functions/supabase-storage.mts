@@ -422,15 +422,16 @@ class SupabaseRestStore {
   }
 
   async savePerson(row) {
+    // This used to hijack any existing row that shared an email address, purely
+    // to avoid tripping the unique index on lower(email). That index is gone —
+    // an email is a contact method, not an identity, and a parent may share one
+    // across several children. Reusing a row by email alone would now silently
+    // overwrite one child with another.
+    //
+    // Deciding whether two records are the same person is compatiblePersonMatch's
+    // job (name plus a compatible phone or email); by the time a row reaches here
+    // that decision has already been made, so honour the id we were given.
     const email = String(row?.email || "").toLowerCase();
-    if (email) {
-      const existing = await this.select("people", `select=id,email&email=ilike.${encodeFilter(email)}&limit=1`);
-      const existingId = existing[0]?.id || "";
-      if (existingId) {
-        await upsertPersonAccepting(this, { ...row, id: existingId, email });
-        return;
-      }
-    }
     await upsertPersonAccepting(this, { ...row, email: email || row.email });
   }
 

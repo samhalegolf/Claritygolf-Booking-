@@ -26,9 +26,12 @@ SET account_id = COALESCE(
 )
 WHERE account_id IS NULL OR BTRIM(account_id) = '';
 
+-- No unique index on email: families, clubs and couples share addresses.
+-- Same-person merging is done in the application, not by the database.
 DROP INDEX IF EXISTS public.idx_people_email_unique;
+DROP INDEX IF EXISTS public.idx_people_account_email_unique;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_people_account_email_unique
+CREATE INDEX IF NOT EXISTS idx_people_account_email_lookup
   ON public.people (account_id, LOWER(email))
   WHERE email IS NOT NULL AND BTRIM(email) <> '';
 

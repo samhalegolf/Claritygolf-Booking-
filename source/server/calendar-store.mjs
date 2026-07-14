@@ -688,7 +688,11 @@ function getDb() {
       updated_at TEXT NOT NULL
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_people_email_unique
+    DROP INDEX IF EXISTS idx_people_email_unique;
+
+    -- Not unique: families, clubs and couples legitimately share one address.
+    -- Same-person merging is the application's job, not the database's.
+    CREATE INDEX IF NOT EXISTS idx_people_email_lookup
       ON people (LOWER(email))
       WHERE email IS NOT NULL AND email <> '';
 

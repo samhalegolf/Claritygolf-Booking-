@@ -52,10 +52,15 @@ create table if not exists public.people (
   updated_at timestamptz not null default now()
 );
 
--- Email uniqueness is scoped by workspace account, not global across all clients.
+-- Email is a contact method, not an identity: parents book for several children
+-- on one address, clubs book for their players, couples share an inbox. So there
+-- is deliberately NO unique index on email — only a lookup index. Same-person
+-- merging is done in the application (compatiblePersonMatch), on a matching name
+-- plus a compatible phone or email, never on an email alone.
 drop index if exists public.idx_people_email_unique;
+drop index if exists public.idx_people_account_email_unique;
 
-create unique index if not exists idx_people_account_email_unique
+create index if not exists idx_people_account_email_lookup
   on public.people (account_id, lower(email))
   where email is not null and btrim(email) <> '';
 
