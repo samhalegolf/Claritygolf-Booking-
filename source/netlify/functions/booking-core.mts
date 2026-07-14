@@ -3162,8 +3162,11 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
               person.accountId || cleanAccountId,
 	          ],
 	        );
-        knownPeople.push({ ...person, id: personId });
+        const created = { ...person, id: personId };
+        knownPeople.push(created);
+        knownById.set(personId, created);
         result.imported += 1;
+        resolvedIds[sourceIndex] = personId;
       }
         await client.query(`RELEASE SAVEPOINT ${savepoint}`);
       } catch (error) {
