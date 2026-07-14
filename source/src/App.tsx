@@ -8201,6 +8201,41 @@ function App() {
     );
   }
 
+  async function persistUpsertItem(item: CalendarItem, previousItems: CalendarItem[], optimisticItems: CalendarItem[]) {
+    beginAdminSave("upsert_item");
+    try {
+      const response = await fetch("/api/calendar-state", {
+        method: "PUT",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "upsert_item", item }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data?.message || "Admin login expired. Sign in again before saving calendar changes.");
+      }
+      if (!response.ok || data?.ok === false || !data?.item) {
+        throw new Error(data?.message || "Calendar change could not be saved.");
+      }
+      const persistedItem = { ...item, ...data.item } as CalendarItem;
+      const persistedItems = optimisticItems.map((candidate) => (candidate.id === item.id ? persistedItem : candidate));
+      setItems(persistedItems);
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+      lastPersistedCalendarItemsRef.current = persistedItems;
+      if (typeof data.updatedAt === "string") {
+        setCalendarStateVersion(data.updatedAt);
+      }
+      scheduleAdminNotificationDebounceFlush();
+    } catch (error) {
+      setItems(previousItems);
+      setToast({ message: error instanceof Error ? error.message : "Calendar change could not be saved." });
+    } finally {
+      endAdminSave("upsert_item");
+    }
+  }
+
   function dockAppointmentItem(movedItem: CalendarItem, options: { fromFlick?: boolean } = {}) {
     if (!requireLiveDatabase("dock appointments")) return false;
     if (movedItem.kind !== "appointment") return false;
@@ -8228,25 +8263,57 @@ function App() {
     const fromX = dockRect ? startX - dockRect.left : undefined;
     const fromY = dockRect ? startY - dockRect.top : undefined;
 
+    const previousItems = items;
     setItems(items.filter((item) => item.id !== movedItem.id));
     setFloatingDrag(null);
     closeCalendarDetails();
     setFlyingBooking({ ...docked, fromX, fromY });
-    window.setTimeout(() => {
-      setDockBookings((current) => [...current, docked]);
-      setActiveDockBookingId(docked.id);
-      setFlyingBooking((current) => (current?.id === docked.id ? null : current));
-      setToast({
-        message: options.fromFlick
-          ? `${docked.client} flew into the dock.`
-          : `${docked.client} is parked on the shelf.`,
-        undo: () => {
-          setDockBookings((current) => current.filter((booking) => booking.id !== docked.id));
-          setItems((current) => [...current, movedItem]);
-          setActiveDockBookingId("");
-        },
-      });
-    }, 680);
+    void (async () => {
+      beginAdminSave("calendar_delete");
+      try {
+        const response = await fetch(`/api/calendar-state?id=${encodeURIComponent(movedItem.id)}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          setAuthStatus("guest");
+          throw new Error(data?.message || "Admin login expired. Sign in again before docking bookings.");
+        }
+        if (!response.ok) {
+          throw new Error(data?.message || "Booking could not be docked.");
+        }
+        const persistedItems: CalendarItem[] = Array.isArray(data.items) ? data.items : previousItems.filter((item) => item.id !== movedItem.id);
+        lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+        lastPersistedCalendarItemsRef.current = persistedItems;
+        if (typeof data.updatedAt === "string") {
+          setCalendarStateVersion(data.updatedAt);
+        }
+        window.setTimeout(() => {
+          setDockBookings((current) => [...current, docked]);
+          setActiveDockBookingId(docked.id);
+          setFlyingBooking((current) => (current?.id === docked.id ? null : current));
+          setToast({
+            message: options.fromFlick
+              ? `${docked.client} flew into the dock.`
+              : `${docked.client} is parked on the shelf.`,
+            undo: () => {
+              setDockBookings((current) => current.filter((booking) => booking.id !== docked.id));
+              setItems((current) => [...current, movedItem]);
+              setActiveDockBookingId("");
+            },
+          });
+        }, 680);
+      } catch (error) {
+        setItems(previousItems);
+        setFlyingBooking(null);
+        setToast({ message: error instanceof Error ? error.message : "Booking could not be docked." });
+      } finally {
+        endAdminSave("calendar_delete");
+      }
+    })();
     return true;
   }
 
@@ -9000,12 +9067,21 @@ function App() {
         attendees: session.booking.attendees,
         calculatedPrice: session.booking.calculatedPrice,
       };
-      setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
+      const previousItems = items;
+      const carvedItems = carveBusyBlocksForAppointment([...items, item], itemSlot(item));
+      const previousOtherIds = new Set(previousItems.map((candidate) => candidate.id));
+      const carvedOtherIds = new Set(carvedItems.filter((candidate) => candidate.id !== item.id).map((candidate) => candidate.id));
+      const isSimpleInsert =
+        previousOtherIds.size === carvedOtherIds.size && [...previousOtherIds].every((id) => carvedOtherIds.has(id));
+      setItems(carvedItems);
       setDockBookings(dockBookings.filter((booking) => booking.id !== session.booking.id));
       setActiveDockBookingId((current) => (current === session.booking.id ? "" : current));
       closeCalendarDetails();
       setToast({ message: `Placed ${session.booking.client} on ${weekDays[item.day].short} at ${formatTime(item.start)}.` });
       clearGesture();
+      if (isSimpleInsert) {
+        void persistUpsertItem(item, previousItems, carvedItems);
+      }
       return;
     }
 
@@ -9027,20 +9103,26 @@ function App() {
       return;
     }
 
-    const nextItems = items.map((item) =>
-        item.id === activeDraft.itemId
-          ? {
-              ...item,
-              week: activeDraft.week,
-              day: activeDraft.day,
-              start: activeDraft.start,
-              duration: activeDraft.duration,
-            }
-          : item,
-    );
-    setItems(movedItem.kind === "appointment" ? carveBusyBlocksForAppointment(nextItems, activeDraft) : nextItems);
+    const movedUpdatedItem: CalendarItem = {
+      ...movedItem,
+      week: activeDraft.week,
+      day: activeDraft.day,
+      start: activeDraft.start,
+      duration: activeDraft.duration,
+    };
+    const nextItems = items.map((item) => (item.id === activeDraft.itemId ? movedUpdatedItem : item));
+    const previousItems = items;
+    const finalItems = movedItem.kind === "appointment" ? carveBusyBlocksForAppointment(nextItems, activeDraft) : nextItems;
+    const previousOtherIds = new Set(previousItems.filter((candidate) => candidate.id !== activeDraft.itemId).map((candidate) => candidate.id));
+    const finalOtherIds = new Set(finalItems.filter((candidate) => candidate.id !== activeDraft.itemId).map((candidate) => candidate.id));
+    const isSimpleUpdate =
+      previousOtherIds.size === finalOtherIds.size && [...previousOtherIds].every((id) => finalOtherIds.has(id));
+    setItems(finalItems);
     closeCalendarDetails();
     clearGesture();
+    if (isSimpleUpdate) {
+      void persistUpsertItem(movedUpdatedItem, previousItems, finalItems);
+    }
   }
 
   function applyQuickClient(client: ClientSummary) {
