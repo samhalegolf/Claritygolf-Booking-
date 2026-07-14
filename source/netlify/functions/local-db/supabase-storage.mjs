@@ -223,9 +223,16 @@ function peopleRowWithKnownColumns(store, row) {
   return omitRowColumns(row, store.omittedPeopleColumns);
 }
 
+// Keep in sync with netlify/functions/supabase-storage.mts. Only an
+// email-uniqueness violation may be reported to the coach as a duplicate email;
+// the previous test matched any 409 on PATCH people and blamed the email field
+// for unrelated conflicts.
+const PEOPLE_EMAIL_UNIQUE_CONSTRAINT =
+  /idx_people_email_unique|idx_people_account_email_unique|people_email_key/i;
+
 function peoplePatchDuplicateEmailError(error, query, patch) {
   const message = error instanceof Error ? error.message : String(error || "");
-  if (!/(supabase patch people failed 409|idx_people_email_unique|duplicate key)/i.test(message)) return null;
+  if (!PEOPLE_EMAIL_UNIQUE_CONSTRAINT.test(message)) return null;
   const idMatch = String(query || "").match(/(?:^|&)id=eq\.([^&]+)/);
   let personId = idMatch ? idMatch[1] : "";
   try {
@@ -360,6 +367,17 @@ class SupabaseRestStore {
     const sql = normalizeSql(sqlText);
     if (!sql || sql.startsWith("create table") || sql.startsWith("create index") || sql.startsWith("create unique index") || sql.startsWith("drop index") || sql.startsWith("alter table")) return [];
     if (sql === "begin" || sql === "commit" || sql === "rollback") return { rows: [] };
+    // Supabase REST gives us no transaction, so transaction control is a no-op
+    // here exactly as begin/commit/rollback are above. Callers still use
+    // savepoints to isolate a single failing row when running against real
+    // Postgres; over REST the caller's try/catch does that work instead.
+    if (
+      sql.startsWith("savepoint ") ||
+      sql.startsWith("release savepoint ") ||
+      sql.startsWith("rollback to savepoint ")
+    ) {
+      return { rows: [] };
+    }
 
     if (sql.includes("insert into settings")) {
       const [key, value] = values;

@@ -1912,7 +1912,16 @@ async function backfillLegacyPeopleAccountIds(accountId) {
   } catch (error) {
     const code = cleanString(error?.code, "", 120);
     const message = error instanceof Error ? error.message : String(error || "");
-    if (code === "DUPLICATE_PERSON_EMAIL" || /Another person already uses that email address|duplicate key|idx_people_.*email/i.test(message)) {
+    // Stamping the account on to a legacy row can collide with the
+    // account-scoped unique index on lower(email) when an orphaned duplicate
+    // shares an address with a row that already belongs to the account. That is
+    // a data-hygiene problem, not a reason to fail whatever the caller was
+    // actually trying to do, so any constraint violation is logged and skipped.
+    if (
+      code === "DUPLICATE_PERSON_EMAIL" ||
+      code === "23505" ||
+      /Another person already uses that email address|duplicate key|unique constraint|idx_people_.*email/i.test(message)
+    ) {
       console.warn("people_account_backfill_duplicate_email_skipped", {
         accountId: cleanAccountId,
         message: message.slice(0, 300),
@@ -2454,8 +2463,32 @@ function normalizedPersonEmail(value) {
   return cleanString(value, "", 180).toLowerCase();
 }
 
+// Country codes we can safely strip back to a national (trunk-prefixed) number.
+// Ordered longest-first so 353 is tested before 3/1-style prefixes.
+const PHONE_COUNTRY_CODES = ["353", "64", "61", "44", "1"];
+
+// Phone numbers reach us in three shapes for the same person: the booking form
+// captures the national form (0274637700), spreadsheet imports carry the
+// international form (+64274637700), and Excel prefixes text cells with an
+// apostrophe ('+64274637700). Comparing raw digits treated these as three
+// different people, so compatiblePersonMatch would miss an existing contact,
+// fall through to INSERT, and collide with the account-scoped unique index on
+// lower(email) — taking the caller's entire calendar save down with it.
+// Canonicalising to the national form makes all three compare equal.
 function normalizedPersonPhone(value) {
-  return cleanString(value, "", 80).replace(/\D/g, "");
+  let digits = cleanString(value, "", 80).replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  for (const code of PHONE_COUNTRY_CODES) {
+    // Only treat a leading match as a country code when what remains is still a
+    // plausible subscriber number, so a national number that merely happens to
+    // begin with those digits is left alone.
+    if (digits.startsWith(code) && digits.length - code.length >= 8) {
+      const national = digits.slice(code.length);
+      return national.startsWith("0") ? national : `0${national}`;
+    }
+  }
+  return digits.startsWith("0") ? digits : `0${digits}`;
 }
 
 function compatiblePersonMatch(candidate, rows = []) {
@@ -3011,9 +3044,21 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
 
   const knownPeople = await readPeople(cleanAccountId);
   const client = await db().pool.connect();
+  let personIndex = 0;
   try {
     await client.query("BEGIN");
     for (const person of people) {
+      // Every person write gets its own savepoint. Deriving contacts from
+      // appointments is housekeeping that rides along with the caller's save;
+      // when one contact cannot be reconciled (for example its email already
+      // belongs to another row under the account-scoped unique index) it must
+      // not abort the transaction and take the lesson the coach just booked
+      // down with it. Previously a single duplicate contact rolled back the
+      // whole calendar save and surfaced as a 409 the coach could not act on.
+      const savepoint = `person_${personIndex}`;
+      personIndex += 1;
+      await client.query(`SAVEPOINT ${savepoint}`);
+      try {
       const existing = compatiblePersonMatch(person, knownPeople);
       const existingId = existing?.id || "";
 
@@ -3073,6 +3118,27 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
 	        );
         knownPeople.push({ ...person, id: personId });
         result.imported += 1;
+      }
+        await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+      } catch (error) {
+        await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+        await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+        const message = error instanceof Error ? error.message : String(error || "");
+        result.failed += 1;
+        result.errors.push({
+          name: person.name || "",
+          email: person.email || "",
+          reason: /duplicate key|idx_people_.*email/i.test(message)
+            ? "A contact in this account already uses that email address."
+            : message.slice(0, 300),
+        });
+        console.warn("people_import_person_skipped", {
+          source,
+          accountId: cleanAccountId,
+          name: person.name || "",
+          email: person.email || "",
+          message: message.slice(0, 300),
+        });
       }
     }
     await client.query("COMMIT");
