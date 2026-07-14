@@ -14,6 +14,12 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
+    // src/App.tsx imports the canonical phone module that the Netlify functions
+    // also use (netlify/functions/_shared/phone.mts), so frontend and server can
+    // never disagree about whether two numbers are the same person. Importing it
+    // by its real .mts path needs this flag; it is safe because noEmit is on and
+    // Vite/esbuild resolve the extension directly.
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx"
   },
   "include": ["src"],

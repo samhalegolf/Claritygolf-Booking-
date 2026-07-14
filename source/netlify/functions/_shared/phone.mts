@@ -31,12 +31,18 @@ export function isPhoneCountry(value: unknown): value is CountryCode {
   return code.length === 2 && isSupportedCountry(code);
 }
 
+// `fallback` is deliberately `unknown`: callers hold the country as a plain
+// string (it arrives from settings and from JSON), and forcing every call site
+// to cast to CountryCode would be noise. Anything unrecognised lands on the
+// module fallback rather than throwing.
 export function cleanPhoneCountry(
   value: unknown,
-  fallback: CountryCode = FALLBACK_PHONE_COUNTRY,
+  fallback: unknown = FALLBACK_PHONE_COUNTRY,
 ): CountryCode {
   const code = String(value ?? "").trim().toUpperCase();
-  return isPhoneCountry(code) ? (code as CountryCode) : fallback;
+  if (isPhoneCountry(code)) return code;
+  const fallbackCode = String(fallback ?? "").trim().toUpperCase();
+  return isPhoneCountry(fallbackCode) ? fallbackCode : FALLBACK_PHONE_COUNTRY;
 }
 
 // The workspace's home country, held here so the pure key-building helpers on
