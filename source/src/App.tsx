@@ -931,7 +931,7 @@ type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
 type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
 type PublicBookingStateStatus = "loading" | "loaded" | "error";
 type PublicBookingSlotStatus = "idle" | "loading" | "loaded" | "error";
-type AdminSaveOwner = "lesson_complete" | "calendar_delete" | "locations" | "coaches" | "settings";
+type AdminSaveOwner = "lesson_complete" | "upsert_item" | "calendar_delete" | "locations" | "coaches" | "settings";
 type DiagnosticStatus = "started" | "success" | "failed" | "warning" | "skipped" | "verified";
 type DiagnosticSystem =
   | "supabase"
@@ -11431,24 +11431,61 @@ function App() {
     setServiceSaveState("idle");
   }
 
-  function updateAppointmentStatus(itemId: string, status: BookingStatus) {
+  async function updateAppointmentStatus(itemId: string, status: BookingStatus) {
     if (status === "completed") {
       void completeAppointmentSafely(itemId);
       return;
     }
-    const previous = items;
-    setItems((current) =>
-      current.map((item) => (item.id === itemId && item.kind === "appointment" ? { ...item, status } : item)),
-    );
+    const targetItem = items.find((item) => item.id === itemId && item.kind === "appointment");
+    if (!targetItem) return;
+    const previousItems = items;
+    const optimisticAt = new Date().toISOString();
+    const optimisticItem: CalendarItem = { ...targetItem, status, updatedAt: optimisticAt };
+    const optimisticItems = items.map((item) => (item.id === itemId ? optimisticItem : item));
+    setItems(optimisticItems);
     setLessonCompleteErrors((current) => {
       if (!current[itemId]) return current;
       const { [itemId]: _removed, ...next } = current;
       return next;
     });
-    setToast({
-      message: `Lesson marked ${status.replace("_", "-")}.`,
-      undo: () => setItems(previous),
-    });
+    beginAdminSave("upsert_item");
+    try {
+      const response = await fetch("/api/calendar-state", {
+        method: "PUT",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "upsert_item", item: optimisticItem }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data?.message || "Admin login expired. Sign in again before updating bookings.");
+      }
+      if (!response.ok || data?.ok === false || !data?.item) {
+        throw new Error(data?.message || "Status update could not be saved.");
+      }
+      const persistedItem = { ...optimisticItem, ...data.item } as CalendarItem;
+      const persistedItems = optimisticItems.map((item) => (item.id === itemId ? persistedItem : item));
+      setItems(persistedItems);
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+      lastPersistedCalendarItemsRef.current = persistedItems;
+      if (typeof data.updatedAt === "string") {
+        setCalendarStateVersion(data.updatedAt);
+      }
+      setToast({
+        message: `Lesson marked ${status.replace("_", "-")}.`,
+        undo: () => setItems(previousItems),
+      });
+      scheduleAdminNotificationDebounceFlush();
+    } catch (error) {
+      setItems(previousItems);
+      setToast({
+        message: error instanceof Error ? error.message : "Status update could not be saved.",
+      });
+    } finally {
+      endAdminSave("upsert_item");
+    }
   }
 
   function viewSelectedClientProfile() {
@@ -11848,7 +11885,7 @@ function App() {
       setToast({ message: "Could not find that attendee." });
       return;
     }
-    updateAppointmentStatus(appointment.id, "cancelled");
+    void updateAppointmentStatus(appointment.id, "cancelled");
   }
 
   function markInvoiceDraftDirty() {
