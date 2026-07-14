@@ -3304,6 +3304,7 @@ async function updatePerson(rawPerson, accountId = defaultWorkspaceAccountFromCo
 
 async function writeItems(items, options = {}) {
   const cleanItems = normalizeItems(items);
+  const returnedRows = [];
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
@@ -3315,7 +3316,7 @@ async function writeItems(items, options = {}) {
       }
     }
     for (const item of cleanItems) {
-      await client.query(
+      const insertResult = await client.query(
         `INSERT INTO calendar_items (
           id, account_id, kind, week, day, start, duration, coach_id, location_id, service_id, client, title, phone, email, person_id, note, status, custom_group, coach, location, created_at, updated_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19::jsonb, $20::jsonb, NOW(), NOW())
@@ -3339,7 +3340,8 @@ async function writeItems(items, options = {}) {
           custom_group = EXCLUDED.custom_group,
           coach = EXCLUDED.coach,
           location = EXCLUDED.location,
-          updated_at = NOW()`,
+          updated_at = NOW()
+        RETURNING *`,
         [
           item.id,
           item.accountId || defaultWorkspaceAccountFromCoachAccount().id,
@@ -3363,6 +3365,7 @@ async function writeItems(items, options = {}) {
           item.location ? JSON.stringify(cleanBookingLocationSnapshot(item.location)) : null,
         ],
       );
+      returnedRows.push(...queryRows(insertResult));
     }
     if (options.replaceItems === true && cleanItems.length) {
       const keepIds = new Set(cleanItems.map((item) => item.id));
@@ -3395,6 +3398,14 @@ async function writeItems(items, options = {}) {
     throw error;
   } finally {
     client.release();
+  }
+  if (
+    options.returnMode === "single" &&
+    cleanItems.length === 1 &&
+    options.clearItems !== true &&
+    options.replaceItems !== true
+  ) {
+    return rowToItem(returnedRows[0]);
   }
   return readItems();
 }
@@ -7732,6 +7743,84 @@ export async function handleBookingApiRoute(
             },
             diagnostics.httpStatus || 500,
           );
+        }
+      }
+      if (action === "upsert_item") {
+        const startAt = Date.now();
+        const requestContext = await resolveBackendRequestContext(req, current);
+        const candidateItem = { ...(body?.item || {}), accountId: requestContext.accountId };
+        const item = cleanCalendarItem(candidateItem);
+        const timedDetails = {
+          action: "upsert_item",
+          itemId: item?.id || cleanString(body?.item?.id, "", 140),
+          calendarId: current.account?.id || "",
+          route: "PUT /api/calendar-state",
+          operationOwner: "upsert_item",
+          accountId: requestContext.accountId || "",
+        };
+        if (!item) {
+          console.error("upsert_item_failed", {
+            ...timedDetails,
+            httpStatus: 400,
+            message: "Calendar item was invalid.",
+          });
+          return json(
+            { error: "BOOKING_UPSERT_INVALID_ITEM", message: "Calendar item was invalid." },
+            400,
+          );
+        }
+        console.info("upsert_item_started", { ...timedDetails, httpStatus: 0 });
+        try {
+          const previousItem = current.items.find((existing) => existing.id === item.id) || null;
+          assertCanWriteCalendarItem(requestContext, item, previousItem, current);
+          const nextItems = previousItem
+            ? current.items.map((existing) => (existing.id === item.id ? item : existing))
+            : [...current.items, item];
+          const savedItem = await writeItems([item], {
+            returnMode: "single",
+            accountId: requestContext.accountId,
+          });
+          const updatedAt = nowIso();
+          await setSetting("updatedAt", updatedAt);
+          let notificationResults = [];
+          let notificationWarning = "";
+          try {
+            notificationResults = await processAdminNotificationDebounce(
+              current.items,
+              nextItems,
+              { timeZone: current.account?.timezone },
+            );
+          } catch (error) {
+            notificationWarning =
+              "Calendar saved, but booking alerts could not be processed.";
+            console.error("calendar_state:notification_failed", error);
+          }
+          const durationMs = Date.now() - startAt;
+          console.info("upsert_item_saved", {
+            ...timedDetails,
+            httpStatus: 200,
+            durationMs,
+          });
+          return json({
+            ok: true,
+            action: "upsert_item",
+            item: savedItem,
+            updatedAt,
+            notificationResults,
+            ...(notificationWarning ? { warnings: [notificationWarning] } : {}),
+          });
+        } catch (error) {
+          const durationMs = Date.now() - startAt;
+          const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+          const errorCode = cleanString(error?.code, "BOOKING_UPSERT_FAILED", 120);
+          const backendMessage = error instanceof Error ? error.message : String(error || "Calendar item could not be saved.");
+          console.error("upsert_item_failed", {
+            ...timedDetails,
+            httpStatus: status,
+            durationMs,
+            message: backendMessage,
+          });
+          return json({ error: errorCode, message: backendMessage }, status);
         }
       }
       const requestContext = await resolveBackendRequestContext(req, current);
