@@ -1994,6 +1994,7 @@ function rowToItem(row) {
     title: row.title,
     phone: row.phone || "",
     email: row.email || "",
+    personId: row.person_id || "",
     note: row.note || "",
     coach: cleanBookingCoachSnapshot(row.coach),
     location: cleanBookingLocationSnapshot(row.location),
@@ -2421,6 +2422,7 @@ function cleanCalendarItem(item) {
       : cleanString(item.title, kind === "block" ? "Busy" : "Appointment"),
     phone: cancelledGroupSession ? "" : cleanString(item.phone),
     email: cancelledGroupSession ? "" : cleanString(item.email),
+    personId: cancelledGroupSession ? "" : cleanString(item.personId, "", 120),
     note: cancelledGroupSession ? CANCELLED_GROUP_SESSION_NOTE : cleanString(item.note),
     coach: cancelledGroupSession ? undefined : cleanBookingCoachSnapshot(item.coach),
     location: cancelledGroupSession ? undefined : cleanBookingLocationSnapshot(item.location),
@@ -2609,6 +2611,13 @@ function personFromAppointment(item) {
   if (!item || item.kind !== "appointment") return null;
   return cleanPerson(
     {
+      // A personId already stamped on the booking (see person_id on
+      // calendar_items) is a stable link set up on a previous save. Carrying
+      // it through here means importPeople's id-first match (see
+      // compatiblePersonMatch) updates that same row instead of re-deriving
+      // the link from name/email/phone, which used to spin off a duplicate,
+      // disconnected profile whenever an edit changed any of those fields.
+      id: item.personId,
       name: item.client || item.title,
       email: item.email,
       phone: item.phone,
@@ -2616,6 +2625,18 @@ function personFromAppointment(item) {
     },
     "appointment",
   );
+}
+
+// Applies the per-index results of importPeople(items.map(personFromAppointment))
+// back onto the appointments they came from. Must run before writeItems so the
+// resolved id is persisted in the same write instead of a second round trip.
+function stampResolvedPersonIds(items, resolvedIds = []) {
+  return items.map((item, index) => {
+    if (item.kind !== "appointment") return item;
+    const resolvedId = resolvedIds[index];
+    if (!resolvedId || resolvedId === item.personId) return item;
+    return { ...item, personId: resolvedId };
+  });
 }
 
 async function readItems() {
@@ -3035,9 +3056,15 @@ async function deleteLessonNote(noteId, accountId = defaultWorkspaceAccountFromC
 
 async function importPeople(rawPeople, source = "import", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
   const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  const people = Array.isArray(rawPeople)
-    ? rawPeople.map((person) => cleanPerson(person, source, cleanAccountId)).filter(Boolean)
+  // Indexed (not filtered) so callers that need to stamp a resolved person id
+  // back onto the record a given input came from (see resolvedIds below) can
+  // line results up positionally with rawPeople, including the null/skipped
+  // entries.
+  const indexedPeople = Array.isArray(rawPeople)
+    ? rawPeople.map((person) => cleanPerson(person, source, cleanAccountId))
     : [];
+  const people = indexedPeople.filter(Boolean);
+  const resolvedIds = indexedPeople.map(() => "");
   const result = {
     imported: 0,
     updated: 0,
@@ -3045,15 +3072,19 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
     failed: 0,
     errors: [],
     people: [],
+    resolvedIds,
   };
   if (!Array.isArray(rawPeople)) return result;
 
   const knownPeople = await readPeople(cleanAccountId);
+  const knownById = new Map(knownPeople.map((row) => [row.id, row]));
   const client = await db().pool.connect();
   let personIndex = 0;
   try {
     await client.query("BEGIN");
-    for (const person of people) {
+    for (let sourceIndex = 0; sourceIndex < indexedPeople.length; sourceIndex += 1) {
+      const person = indexedPeople[sourceIndex];
+      if (!person) continue;
       // Every person write gets its own savepoint. Deriving contacts from
       // appointments is housekeeping that rides along with the caller's save;
       // when one contact cannot be reconciled (for example its email already
@@ -3065,7 +3096,15 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
       personIndex += 1;
       await client.query(`SAVEPOINT ${savepoint}`);
       try {
-      const existing = compatiblePersonMatch(person, knownPeople);
+      // A person id carried on the incoming record (an appointment's stored
+      // person_id, see personFromAppointment) is an explicit, stable link set
+      // up on a previous save. Trust it ahead of the fuzzy name/email/phone
+      // heuristic below: compatiblePersonMatch already checks this id first,
+      // but knownById lets us confirm the id still resolves to a real row
+      // before treating the fuzzy match as a fallback.
+      const linkedId = cleanString(person.id, "", 120);
+      const linked = linkedId && !linkedId.startsWith("appointment-") ? knownById.get(linkedId) : null;
+      const existing = linked || compatiblePersonMatch(person, knownPeople);
       const existingId = existing?.id || "";
 
       if (existingId) {
@@ -3104,8 +3143,9 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
           caddyProfileUrl: person.caddyProfileUrl || existing.caddyProfileUrl,
         });
         result.updated += 1;
+        resolvedIds[sourceIndex] = existingId;
       } else {
-        const personId = person.id || randomUUID();
+        const personId = linkedId && !linkedId.startsWith("appointment-") ? linkedId : randomUUID();
 	        await client.query(
 	          `INSERT INTO people (
 	             id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id, created_at, updated_at
@@ -3274,8 +3314,8 @@ async function writeItems(items, options = {}) {
     for (const item of cleanItems) {
       await client.query(
         `INSERT INTO calendar_items (
-          id, account_id, kind, week, day, start, duration, coach_id, location_id, service_id, client, title, phone, email, note, status, custom_group, coach, location, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb, $19::jsonb, NOW(), NOW())
+          id, account_id, kind, week, day, start, duration, coach_id, location_id, service_id, client, title, phone, email, person_id, note, status, custom_group, coach, location, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19::jsonb, $20::jsonb, NOW(), NOW())
         ON CONFLICT (id) DO UPDATE SET
           account_id = EXCLUDED.account_id,
           kind = EXCLUDED.kind,
@@ -3290,6 +3330,7 @@ async function writeItems(items, options = {}) {
           title = EXCLUDED.title,
           phone = EXCLUDED.phone,
           email = EXCLUDED.email,
+          person_id = EXCLUDED.person_id,
           note = EXCLUDED.note,
           status = EXCLUDED.status,
           custom_group = EXCLUDED.custom_group,
@@ -3311,6 +3352,7 @@ async function writeItems(items, options = {}) {
           item.title,
           item.phone || "",
           item.email || "",
+          item.personId || "",
           item.note || "",
           item.status || "booked",
           item.customGroup ? JSON.stringify(cleanCustomGroupData(item)) : null,
@@ -4330,16 +4372,24 @@ async function writeCalendarState(nextState, context = null) {
       requestedItems = [...preservedItems, ...requestedItems];
     }
   }
-  const items = await writeItems(requestedItems, {
+  const peopleAccountId = context?.accountId || defaultAccountId(current.workspaceAccounts);
+  // Resolve/sync the client link before writing the items so the resolved
+  // person_id can be stamped onto each appointment in the same write, rather
+  // than a second pass. See stampResolvedPersonIds for why this must run
+  // before writeItems.
+  const peopleSync = await importPeople(
+    requestedItems.map(personFromAppointment),
+    "appointment",
+    peopleAccountId,
+  );
+  const itemsToWrite = stampResolvedPersonIds(requestedItems, peopleSync.resolvedIds);
+  const items = await writeItems(itemsToWrite, {
     replaceItems: nextState?.replaceItems === true || nextState?.itemsOperation === "replace",
     clearItems: nextState?.clearItems === true,
     accountId: context?.accountId,
   });
   const updatedAt = nowIso();
-  const peopleAccountId = context?.accountId || defaultAccountId(current.workspaceAccounts);
   await Promise.all([setSetting("syncKey", syncKey), setSetting("updatedAt", updatedAt)]);
-  // readPeople must see the backfill, so this one stays ordered.
-  await importPeople(items.map(personFromAppointment).filter(Boolean), "appointment", peopleAccountId);
   // The response payload rebuilds the whole admin state. None of these reads depend on each
   // other, and running them one after another stacked six round trips onto every save.
   const [people, notifications, settings, brand, account, googleCalendarSync] = await Promise.all([
@@ -4510,11 +4560,12 @@ async function deleteCalendarItemById(id, context = null) {
 }
 
 async function writePublicBookingState(currentState, items) {
-  const cleanItems = await writeItems(items);
+  const peopleAccountId = items.find((item) => item.accountId)?.accountId || defaultAccountId(currentState.workspaceAccounts || []);
+  const peopleSync = await importPeople(items.map(personFromAppointment), "appointment", peopleAccountId);
+  const itemsToWrite = stampResolvedPersonIds(items, peopleSync.resolvedIds);
+  const cleanItems = await writeItems(itemsToWrite);
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  const peopleAccountId = cleanItems.find((item) => item.accountId)?.accountId || defaultAccountId(currentState.workspaceAccounts || []);
-  await importPeople(cleanItems.map(personFromAppointment).filter(Boolean), "appointment", peopleAccountId);
   await syncGoogleCalendarIfEnabled().catch((error) => console.error("public_booking_state:google_calendar_sync_failed", error));
   return {
     syncKey: currentState.syncKey,
@@ -4529,7 +4580,21 @@ async function writePublicBookingState(currentState, items) {
 
 function schedulePublicBookingSideEffects(context, appointment) {
   const task = (async () => {
-    await importPeople([personFromAppointment(appointment)].filter(Boolean), "appointment", appointment?.accountId || defaultWorkspaceAccountFromCoachAccount().id);
+    // The appointment was already written without waiting on this (public
+    // booking latency matters more than the client link being instant). Once
+    // the person is resolved/created here, stamp its id back onto the row so
+    // the coach's calendar sees the same link a moment later — and so the
+    // *next* edit to this booking finds it via id instead of re-deriving the
+    // match from name/email/phone.
+    const peopleSync = await importPeople(
+      [personFromAppointment(appointment)],
+      "appointment",
+      appointment?.accountId || defaultWorkspaceAccountFromCoachAccount().id,
+    );
+    const [stamped] = stampResolvedPersonIds([appointment], peopleSync.resolvedIds);
+    if (stamped.personId && stamped.personId !== appointment.personId) {
+      await writeItems([stamped]);
+    }
     await syncGoogleCalendarIfEnabled().catch((error) =>
       console.error("public_booking:google_calendar_sync_failed", error),
     );

@@ -384,6 +384,11 @@ type CalendarItem = {
   title: string;
   phone?: string;
   email?: string;
+  // Stable link to a people/client row, set by the backend once a booking is
+  // matched or created. Carry it through on every edit (it just needs to
+  // survive object-spread updates) so a later correction to name/email/phone
+  // never loses the connection to the client's real profile.
+  personId?: string;
   note?: string;
   location?: BookingLocationSnapshot;
   coach?: BookingCoachSnapshot;
@@ -4449,6 +4454,8 @@ function App() {
   const [playerProfileTool, setPlayerProfileTool] = useState<PlayerProfileTool>("recent");
   const [playerToolExpanded, setPlayerToolExpanded] = useState(true);
   const [selectedId, setSelectedId] = useState("");
+  const [clientReassignOpen, setClientReassignOpen] = useState(false);
+  const [clientReassignSearch, setClientReassignSearch] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
   const [videoContext, setVideoContext] = useState<{ playerId: string; playerName: string; savedVideoId?: string } | null>(null);
@@ -7277,15 +7284,19 @@ function App() {
   const floatingService = floatingItem ? itemService(floatingItem, services) : null;
 
   const clients = useMemo<ClientSummary[]>(() => {
-    const byKey = new Map<string, ClientSummary>();
+    // Grouping keys off personId first — the stable backend link — and only
+    // falls back to the name/email/phone heuristic (clientKey) for legacy
+    // bookings saved before that link existed. Grouping by clientKey alone
+    // used to split one real client across multiple cards whenever a booking
+    // had a different email/phone on file (see clientKey: it keys on email
+    // alone when present, ignoring phone, so a second address for the same
+    // person never lined up with their existing card).
+    const byId = new Map<string, ClientSummary>();
+    const legacyIdByKey = new Map<string, string>();
 
     filterRecordsForAccount(people, activeAccountId).forEach((person) => {
-      byKey.set(clientKey(person.name, person.email, person.phone), {
-        ...person,
-        count: 0,
-        next: null,
-        last: null,
-      });
+      byId.set(person.id, { ...person, count: 0, next: null, last: null });
+      legacyIdByKey.set(clientKey(person.name, person.email, person.phone), person.id);
     });
 
     accountItems
@@ -7294,10 +7305,11 @@ function App() {
       .forEach((item) => {
         const name = item.client ?? item.title;
         const key = clientKey(name, item.email ?? "", item.phone ?? "");
+        const id = (item.personId && byId.has(item.personId) ? item.personId : "") || legacyIdByKey.get(key) || `appointment-${key}`;
         const existing =
-          byKey.get(key) ??
+          byId.get(id) ??
           ({
-            id: `appointment-${key}`,
+            id,
             name,
             email: item.email ?? "",
             phone: item.phone ?? "",
@@ -7310,7 +7322,7 @@ function App() {
             last: null,
           } satisfies ClientSummary);
         const next = !existing.next || itemWeek(item) < itemWeek(existing.next) ? item : existing.next;
-        byKey.set(key, {
+        byId.set(id, {
           ...existing,
           name: existing.name || name,
           email: existing.email || item.email || "",
@@ -7322,11 +7334,15 @@ function App() {
         });
       });
 
-    return Array.from(byKey.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [accountItems, activeAccountId, coachAccount, coachProfiles, isAdminUser, people, services, serviceScopeCoachId]);
 
   const selectedPerson = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return null;
+    if (selected.personId) {
+      const linked = clients.find((client) => client.id === selected.personId);
+      if (linked) return linked;
+    }
     const key = clientKey(selected.client || selected.title, selected.email ?? "", selected.phone ?? "");
     return clients.find((client) => clientKey(client.name, client.email, client.phone) === key) ?? null;
   }, [clients, selected]);
@@ -7336,6 +7352,11 @@ function App() {
     if (!clientSearchTerm) return clients;
     return clients.filter((client) => clientMatchesSearchTerm(client, clientSearchTerm));
   }, [clientSearchTerm, clients]);
+  const clientReassignSearchTerm = clientReassignSearch.trim();
+  const clientReassignMatches = useMemo(() => {
+    if (!clientReassignOpen || !clientReassignSearchTerm) return [];
+    return clients.filter((client) => clientMatchesSearchTerm(client, clientReassignSearchTerm)).slice(0, 6);
+  }, [clientReassignOpen, clientReassignSearchTerm, clients]);
 
   // ----- Player Profiles derivations -----
   const savedVideoIds = useMemo(() => {
@@ -7457,7 +7478,11 @@ function App() {
     return items
       .filter((item) => item.kind === "appointment")
       .filter(itemInCoachScope)
-      .filter((item) => clientKey(item.client || item.title, item.email ?? "", item.phone ?? "") === key)
+      .filter((item) =>
+        item.personId
+          ? item.personId === selectedClient.id
+          : clientKey(item.client || item.title, item.email ?? "", item.phone ?? "") === key,
+      )
       .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
   }, [coachAccount, coachProfiles, isAdminUser, items, selectedClient, services, serviceScopeCoachId]);
   const notesWorkspaceClient = useMemo(() => {
@@ -7643,6 +7668,8 @@ function App() {
   function closeCalendarDetails() {
     setSelectedId("");
     setSelectedGroupSession(null);
+    setClientReassignOpen(false);
+    setClientReassignSearch("");
   }
 
   function isGroupServiceSlotMatch(service: Service | null | undefined, week: number, day: number, start: number) {
@@ -11420,6 +11447,52 @@ function App() {
     });
     setToast({
       message: `Lesson marked ${status.replace("_", "-")}.`,
+      undo: () => setItems(previous),
+    });
+  }
+
+  function viewSelectedClientProfile() {
+    if (!selectedPerson) return;
+    switchView("clients");
+    openClientProfile(selectedPerson);
+  }
+
+  function openClientReassign() {
+    setClientReassignSearch(selected?.kind === "appointment" ? selected.client ?? "" : "");
+    setClientReassignOpen(true);
+  }
+
+  function closeClientReassign() {
+    setClientReassignOpen(false);
+    setClientReassignSearch("");
+  }
+
+  function reassignSelectedAppointmentClient(client: ClientSummary) {
+    if (!selected || selected.kind !== "appointment") return;
+    const itemId = selected.id;
+    const previous = items;
+    // A synthetic appointment-<key> id (see the `clients` grouping above) is a
+    // display-only stand-in for a booking that was never linked to a real
+    // people row — never persist it as personId. The next save will resolve
+    // and stamp a real one (see personFromAppointment/stampResolvedPersonIds).
+    const linkedId = client.id.startsWith("appointment-") ? "" : client.id;
+    setItems((current) =>
+      current.map((item) =>
+        item.id === itemId && item.kind === "appointment"
+          ? {
+              ...item,
+              personId: linkedId,
+              client: client.name,
+              title: client.name,
+              email: client.email || item.email,
+              phone: client.phone || item.phone,
+            }
+          : item,
+      ),
+    );
+    closeClientReassign();
+    setToast({
+      message: `Linked this booking to ${client.name}.`,
       undo: () => setItems(previous),
     });
   }
@@ -15931,7 +16004,68 @@ function App() {
           <X size={17} />
         </button>
       </div>
-      <h2 id="appointment-details-title">{selected.kind === "block" ? selected.title : selected.client}</h2>
+      {selected.kind === "appointment" ? (
+        <div className="booking-client-identity">
+          {selectedPerson ? (
+            <button
+              className="booking-client-name-link"
+              id="appointment-details-title"
+              onClick={viewSelectedClientProfile}
+              type="button"
+            >
+              {selected.client}
+            </button>
+          ) : (
+            <h2 id="appointment-details-title">{selected.client}</h2>
+          )}
+          <button
+            className="icon-button small booking-client-reassign-toggle"
+            onClick={clientReassignOpen ? closeClientReassign : openClientReassign}
+            aria-label="Change linked client"
+            title="Change linked client"
+            type="button"
+          >
+            <Pencil size={13} />
+          </button>
+        </div>
+      ) : (
+        <h2 id="appointment-details-title">{selected.title}</h2>
+      )}
+      {selected.kind === "appointment" && selectedPerson && profileNotesText(selectedPerson) && (
+        <p className="muted booking-client-notes-preview">{profileNotesText(selectedPerson)}</p>
+      )}
+      {selected.kind === "appointment" && selectedPerson && selectedPerson.count > 1 && (
+        <p className="muted booking-client-history">
+          {selectedPerson.count} booking{selectedPerson.count === 1 ? "" : "s"} with this client
+        </p>
+      )}
+      {selected.kind === "appointment" && clientReassignOpen && (
+        <div className="booking-client-reassign-panel">
+          <input
+            autoFocus
+            onChange={(event) => setClientReassignSearch(event.target.value)}
+            placeholder="Search clients by name, email, or phone"
+            value={clientReassignSearch}
+          />
+          <div className="booking-client-reassign-results">
+            {clientReassignMatches.length ? (
+              clientReassignMatches.map((client) => (
+                <button
+                  className="booking-client-reassign-result"
+                  key={client.id}
+                  onClick={() => reassignSelectedAppointmentClient(client)}
+                  type="button"
+                >
+                  <strong>{client.name}</strong>
+                  <span>{[client.phone, client.email].filter(Boolean).join(" · ")}</span>
+                </button>
+              ))
+            ) : clientReassignSearchTerm ? (
+              <p className="muted">No matching client.</p>
+            ) : null}
+          </div>
+        </div>
+      )}
       <p className="muted">{selectedService?.name ?? selected.note}</p>
 
       <div className="info-stack">
@@ -17086,6 +17220,8 @@ function App() {
                         setSelectedGroupSession(null);
                         setSelectedId(item.id);
                         setQuickCreate(null);
+                        setClientReassignOpen(false);
+                        setClientReassignSearch("");
                       }}
                       onKeyDown={(event) => {
                         if ((event.key === "Enter" || event.key === " ") && groupSessionItem && !scheduledGroupSession) {

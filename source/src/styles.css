@@ -1493,6 +1493,91 @@ button {
   margin-top: 12px;
 }
 
+.booking-client-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 18px 0 8px;
+}
+
+.booking-client-name-link {
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 120ms ease;
+}
+
+.booking-client-name-link:hover {
+  text-decoration-color: currentColor;
+}
+
+.booking-client-reassign-toggle {
+  width: 26px;
+  height: 26px;
+  min-height: 26px;
+  opacity: 0.55;
+}
+
+.booking-client-reassign-toggle:hover {
+  opacity: 1;
+}
+
+.booking-client-notes-preview,
+.booking-client-history {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.booking-client-reassign-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  border: 1px solid #deded8;
+  background: #f8f8f4;
+}
+
+.booking-client-reassign-panel input {
+  height: 34px;
+}
+
+.booking-client-reassign-results {
+  display: grid;
+  gap: 4px;
+}
+
+.booking-client-reassign-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: none;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+
+.booking-client-reassign-result:hover {
+  background: #eeeeea;
+}
+
+.booking-client-reassign-result span {
+  color: #76736d;
+  font-size: 12px;
+}
+
 .public-booking {
   background: #fff;
 }

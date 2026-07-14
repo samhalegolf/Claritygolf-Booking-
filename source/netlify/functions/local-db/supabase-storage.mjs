@@ -37,7 +37,7 @@ function cleanRow(row) {
   return Object.fromEntries(Object.entries(row || {}).filter(([, value]) => value !== undefined));
 }
 
-const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["account_id", "status", "custom_group", "coach_id", "location_id", "coach", "location"]);
+const OPTIONAL_CALENDAR_ITEM_COLUMNS = new Set(["account_id", "status", "custom_group", "coach_id", "location_id", "coach", "location", "person_id"]);
 const CALENDAR_ITEM_JSON_COLUMNS = new Set(["custom_group", "coach", "location"]);
 const CALENDAR_ITEM_ACCOUNT_SCOPE_COLUMNS = ["account_id", "coach_id", "location_id", "coach", "location"];
 const OPTIONAL_PEOPLE_COLUMNS = new Set(["account_id"]);
