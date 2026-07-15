@@ -6832,10 +6832,6 @@ button {
   margin-top: 12px;
 }
 
-.invoice-add-line .outline-button {
-  width: 100%;
-}
-
 .invoice-line-delete-tab {
   width: 52px;
   min-width: 52px;
@@ -7147,18 +7143,10 @@ button {
     text-align: left;
   }
 
-  .invoice-line-search .outline-button,
-  .invoice-actions .outline-button,
-  .invoice-actions .primary-button {
-    width: 100%;
-  }
-
+  /* Buttons hug their text/icon on narrow screens too - they don't span the
+     full width. Action rows just wrap and left-align. */
   .invoice-actions {
-    justify-content: stretch;
-  }
-
-  .invoice-line-delete-tab {
-    width: 100%;
+    justify-content: flex-start;
   }
 
   .lesson-status-options {
