@@ -6766,6 +6766,28 @@ button {
   white-space: nowrap;
 }
 
+/* Plain (locked-in or pre-set) line: reads like a finished invoice row, no
+   input chrome. Uses the same column grid so it aligns with the header. */
+.invoice-document-line-row-plain {
+  align-items: center;
+  min-height: 44px;
+}
+
+.invoice-document-line-row-plain > span {
+  align-self: center;
+  color: #101510;
+  font-size: 14px;
+}
+
+.invoice-document-line-row-plain .invoice-line-plain-desc {
+  font-weight: 600;
+}
+
+.invoice-document-line-row-plain .invoice-line-plain-qty,
+.invoice-document-line-row-plain .invoice-line-plain-unit {
+  color: #3c433a;
+}
+
 .invoice-line-delete-tab {
   width: 52px;
   min-width: 52px;
@@ -6807,12 +6829,20 @@ button {
   gap: 12px;
 }
 
-.invoice-payment-block,
 .custom-field-list {
   padding: 12px;
   border: 1px solid #d8ded3;
   border-radius: 8px;
   background: #f6f8f3;
+}
+
+/* Payment details are fixed (they come from settings, not editable here). Per
+   the invoice-card rule, fixed content is plain labelled text on the card with
+   no border/box of its own - only editable fields get a bordered input. */
+.invoice-payment-block {
+  padding: 0;
+  border: 0;
+  background: none;
 }
 
 .invoice-payment-block p {

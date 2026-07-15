@@ -19554,46 +19554,78 @@ function App() {
                         <span>Amount</span>
                         <span />
                       </div>
-                      {invoiceDraft.lines.map((line) => (
-                        <div className="invoice-document-line-row" key={line.id}>
-                          <label className="settings-field">
-                            <span>Line item</span>
-                            <input
-                              value={line.description}
-                              onChange={(event) => updateInvoiceLine(line.id, "description", event.target.value)}
-                              placeholder="Lesson, package, product, or service"
-                            />
-                          </label>
-                          <label className="settings-field">
-                            <span>Qty</span>
-                            <input
-                              value={line.quantity}
-                              inputMode="numeric"
-                              onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
-                              type="text"
-                            />
-                          </label>
-                          <label className="settings-field">
-                            <span>Unit price</span>
-                            <input
-                              value={line.unitPrice}
-                              inputMode="decimal"
-                              onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
-                              type="text"
-                            />
-                          </label>
-                          <strong>{formatMoney(line.quantity * line.unitPrice, invoiceSettings.currency)}</strong>
-                          <button
-                            className="invoice-line-delete-tab"
-                            onClick={() => removeInvoiceLine(line.id)}
-                            aria-label="Delete line item"
-                            title="Delete line item"
-                            type="button"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      ))}
+                      {invoiceDraft.lines.map((line) => {
+                        // The rule: an editable line shows the boxed form; a
+                        // locked-in (confirmed invoice) or pre-set (pulled from a
+                        // booking / selected from the catalog) line reads as a
+                        // plain invoice line. Only a manual line on an unconfirmed
+                        // invoice stays editable.
+                        const lineLocked = Boolean(confirmedInvoiceNumber);
+                        const linePlain = lineLocked || line.source !== "manual";
+                        if (linePlain) {
+                          return (
+                            <div className="invoice-document-line-row invoice-document-line-row-plain" key={line.id}>
+                              <span className="invoice-line-plain-desc">{line.description}</span>
+                              <span className="invoice-line-plain-qty">{line.quantity}</span>
+                              <span className="invoice-line-plain-unit">{formatMoney(line.unitPrice, invoiceSettings.currency)}</span>
+                              <strong>{formatMoney(line.quantity * line.unitPrice, invoiceSettings.currency)}</strong>
+                              {lineLocked ? (
+                                <span />
+                              ) : (
+                                <button
+                                  className="invoice-line-delete-tab"
+                                  onClick={() => removeInvoiceLine(line.id)}
+                                  aria-label="Remove line item"
+                                  title="Remove line item"
+                                  type="button"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="invoice-document-line-row" key={line.id}>
+                            <label className="settings-field">
+                              <span>Line item</span>
+                              <input
+                                value={line.description}
+                                onChange={(event) => updateInvoiceLine(line.id, "description", event.target.value)}
+                                placeholder="Lesson, package, product, or service"
+                              />
+                            </label>
+                            <label className="settings-field">
+                              <span>Qty</span>
+                              <input
+                                value={line.quantity}
+                                inputMode="numeric"
+                                onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
+                                type="text"
+                              />
+                            </label>
+                            <label className="settings-field">
+                              <span>Unit price</span>
+                              <input
+                                value={line.unitPrice}
+                                inputMode="decimal"
+                                onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
+                                type="text"
+                              />
+                            </label>
+                            <strong>{formatMoney(line.quantity * line.unitPrice, invoiceSettings.currency)}</strong>
+                            <button
+                              className="invoice-line-delete-tab"
+                              onClick={() => removeInvoiceLine(line.id)}
+                              aria-label="Delete line item"
+                              title="Delete line item"
+                              type="button"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        );
+                      })}
                       {!invoiceDraft.lines.length && (
                         <div className="invoice-empty-line">
                           <span>Use Add line item or pull a completed booking.</span>
