@@ -3534,6 +3534,7 @@ function coachAccountFromSettings(settings) {
     venueShortName:
       settingValue(settings, "accountVenueShortName") || defaults.venueShortName,
     timezone: settingValue(settings, "accountTimezone") || defaults.timezone,
+    country: settingValue(settings, "accountCountry") || defaults.country,
     contactEmail:
       settingValue(settings, "accountContactEmail") || defaults.contactEmail,
     bookingUrl: settingValue(settings, "accountBookingUrl") || defaults.bookingUrl,
@@ -3847,32 +3848,12 @@ async function writeAvailability(availability, context = null) {
 
 async function readCoachAccount() {
   await ensureSeeded();
-  const defaults = defaultCoachAccount();
-  return cleanCoachAccount({
-    id: (await getSetting("accountId")) || defaults.id,
-    coachName: (await getSetting("accountCoachName")) || defaults.coachName,
-    businessName:
-      (await getSetting("accountBusinessName")) ||
-      (await getSetting("coachName")) ||
-      defaults.businessName,
-    venueName: (await getSetting("accountVenueName")) || defaults.venueName,
-    venueShortName:
-      (await getSetting("accountVenueShortName")) || defaults.venueShortName,
-    timezone: (await getSetting("accountTimezone")) || defaults.timezone,
-    country: (await getSetting("accountCountry")) || defaults.country,
-    contactEmail:
-      (await getSetting("accountContactEmail")) || defaults.contactEmail,
-    bookingUrl: (await getSetting("accountBookingUrl")) || defaults.bookingUrl,
-    calendarSlug:
-      (await getSetting("accountCalendarSlug")) || defaults.calendarSlug,
-    caddyWorkspaceUrl:
-      (await getSetting("accountCaddyWorkspaceUrl")) ||
-      defaults.caddyWorkspaceUrl,
-    invoiceSettings: safeJsonParse(
-      (await getSetting("accountInvoiceSettingsJson")) || "",
-      defaults.invoiceSettings,
-    ),
-  });
+  // Was 13 sequential single-key `getSetting` round trips -- reuse the same
+  // bulk-read + settings-map derivation that readCalendarState already uses
+  // (coachAccountFromSettings), instead of re-fetching the same rows one at a
+  // time on every one of this function's ~16 call sites.
+  const settingsMap = await readSettingsMap();
+  return coachAccountFromSettings(settingsMap);
 }
 
 async function writeCoachAccount(account) {
