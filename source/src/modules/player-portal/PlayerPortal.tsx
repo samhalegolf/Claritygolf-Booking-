@@ -15,6 +15,20 @@ export function isPlayerPortalMode(): boolean {
   );
 }
 
+// True when the URL is asking for the booking embed. Used by the entry point so
+// a signed-in player handing off to book escapes the portal even on the portal
+// host. Kept in sync with isPublicBookingMode / BOOKING_EMBED_* in App.tsx.
+export function isBookingHandoff(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("embed") === "booking";
+}
+
+// Must match BOOKING_LOGIN_STORAGE_KEY in src/App.tsx -- the booking embed reads
+// this on mount (getInitialBookingLogin) to pre-fill the booking form. Writing
+// it here, same-origin, is how the player's identity crosses into the booking
+// flow without ever putting personal data in a URL.
+const BOOKING_LOGIN_STORAGE_KEY = "clarity-booking-login";
+
 // Must match baseWeekStart in src/App.tsx -- calendar_items store `week` as an
 // absolute offset from this anchor Monday, so the same anchor is needed to turn
 // a booking's (week, day, start) back into a real date.
@@ -81,6 +95,8 @@ export default function PlayerPortal() {
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [playerEmail, setPlayerEmail] = useState("");
+  const [playerName, setPlayerName] = useState("");
+  const [playerPhone, setPlayerPhone] = useState("");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -101,12 +117,16 @@ export default function PlayerPortal() {
       }
       const data = (await res.json().catch(() => ({}))) as {
         message?: string;
+        player?: { email?: string; name?: string; phone?: string };
         bookings?: Booking[];
         notes?: Note[];
       };
       if (!res.ok) throw new Error(data?.message || "We couldn't load your profile.");
       setBookings(Array.isArray(data.bookings) ? data.bookings : []);
       setNotes(Array.isArray(data.notes) ? data.notes : []);
+      if (data.player?.email) setPlayerEmail(data.player.email);
+      if (data.player?.name) setPlayerName(data.player.name);
+      if (data.player?.phone) setPlayerPhone(data.player.phone);
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : "We couldn't load your profile.");
     } finally {
@@ -160,12 +180,14 @@ export default function PlayerPortal() {
       const data = (await res.json().catch(() => ({}))) as {
         authenticated?: boolean;
         message?: string;
-        player?: { email?: string };
+        player?: { email?: string; name?: string };
       };
       if (!res.ok || data?.authenticated !== true) {
         throw new Error(data?.message || "We couldn't log you in. Check your details and try again.");
       }
       setPlayerEmail(data.player?.email || email.trim());
+      if (data.player?.name) setPlayerName(data.player.name);
+      setPlayerPhone(phone.trim());
       setStatus("authenticated");
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Login failed. Please try again.");
@@ -186,7 +208,30 @@ export default function PlayerPortal() {
     setPlayerEmail("");
     setBookings([]);
     setNotes([]);
+    setPlayerName("");
+    setPlayerPhone("");
     setProfileError("");
+  }
+
+  // Hand off to the booking embed pre-filled, without ever putting personal data
+  // in a URL: write the same localStorage key the embed reads on mount, then
+  // navigate to ?embed=booking on this same origin.
+  function startBooking() {
+    try {
+      const parts = (playerName || "").trim().split(/\s+/).filter(Boolean);
+      const firstName = parts[0] || "";
+      const lastName = parts.slice(1).join(" ");
+      window.localStorage.setItem(
+        BOOKING_LOGIN_STORAGE_KEY,
+        JSON.stringify({ firstName, lastName, phone: playerPhone.trim(), email: playerEmail.trim() }),
+      );
+    } catch {
+      // If storage is unavailable the player can still fill the form manually.
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete("portal");
+    url.searchParams.set("embed", "booking");
+    window.location.href = url.toString();
   }
 
   if (status === "checking") {
@@ -282,8 +327,13 @@ export default function PlayerPortal() {
             Sign out
           </button>
         </div>
-        <h1>Your profile</h1>
+        <h1>{playerName ? `Hi, ${playerName.split(/\s+/)[0]}` : "Your profile"}</h1>
         {playerEmail && <p className="player-portal-lead">{playerEmail}</p>}
+
+        <button className="player-portal-primary" type="button" onClick={startBooking}>
+          Book a lesson
+        </button>
+
 
         {profileLoading && bookings.length === 0 && notes.length === 0 ? (
           <p className="player-portal-lead">Loading your bookings and lesson notes…</p>

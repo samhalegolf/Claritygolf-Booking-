@@ -6146,7 +6146,19 @@ async function readPlayerProfile(session) {
       updatedAt: note.updatedAt,
     }));
 
-  return { player: { email: session.email }, bookings, notes };
+  // Surface display name + original-formatted phone (from the matched
+  // appointment) so the client can pre-fill the booking form on hand-off
+  // without ever re-asking the player for their details.
+  const primary = itemRead.items[0];
+  return {
+    player: {
+      email: session.email,
+      name: primary?.client || primary?.title || "",
+      phone: primary?.phone || session.phone || "",
+    },
+    bookings,
+    notes,
+  };
 }
 
 async function readBackendSettings() {
