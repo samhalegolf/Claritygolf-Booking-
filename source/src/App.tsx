@@ -19529,15 +19529,9 @@ function App() {
                     </div>
                   </div>
 
-                  {(hasMissingInvoiceCoachSettings || latestVoidedInvoiceNumber) && (
+                  {latestVoidedInvoiceNumber && (
                     <div className="invoice-document-alerts">
-                      {latestVoidedInvoiceNumber && <span>{latestVoidedInvoiceNumber} voided</span>}
-                      {hasMissingInvoiceCoachSettings && (
-                        <button className="outline-button small-action" onClick={openInvoiceCoachSettings} type="button">
-                          <Settings size={15} />
-                          Billing Settings
-                        </button>
-                      )}
+                      <span>{latestVoidedInvoiceNumber} voided</span>
                     </div>
                   )}
 
