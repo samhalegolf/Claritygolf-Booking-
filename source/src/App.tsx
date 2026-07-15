@@ -4478,6 +4478,26 @@ function App() {
     notesStamps: {},
     createdStamps: {},
   }));
+  // Player Profiles promotes a client when a lesson note, saved video, or cloud
+  // import references them -- but those four sources load independently and at
+  // different speeds (two network fetches, an IndexedDB read, and a chained
+  // Drive-status-then-cloud-catalogue fetch). Track when each has settled at
+  // least once so the page can show a loading state instead of a misleading
+  // "No player profiles yet" while some of them are still in flight.
+  const [playerProfilesSourcesReady, setPlayerProfilesSourcesReady] = useState({
+    people: false,
+    notes: false,
+    videos: false,
+    cloudImports: false,
+  });
+  const markPlayerProfilesSourceReady = useCallback((source: keyof typeof playerProfilesSourcesReady) => {
+    setPlayerProfilesSourcesReady((current) => (current[source] ? current : { ...current, [source]: true }));
+  }, []);
+  const playerProfilesDataReady =
+    playerProfilesSourcesReady.people &&
+    playerProfilesSourcesReady.notes &&
+    playerProfilesSourcesReady.videos &&
+    playerProfilesSourcesReady.cloudImports;
   const [savedVideoItems, setSavedVideoItems] = useState<SavedVideoItem[]>([]);
   const [legacyVideoRecords, setLegacyVideoRecords] = useState<StoredVideoRecord[]>([]);
   const [uploadingSavedVideoIds, setUploadingSavedVideoIds] = useState<Set<string>>(() => new Set());
@@ -4507,19 +4527,22 @@ function App() {
     void getManagedLocalVideoLibraryStatus()
       .then((status) => setManagedLocalLibraryStatus(status))
       .catch(() => setManagedLocalLibraryStatus(defaultManagedLocalLibraryStatus));
-    void savedStore
+    const savedItemsLoaded = savedStore
       ?.listItems()
       .then((items) => setSavedVideoItems(items))
       .catch(() => {
         // Ignore; an empty list simply hides saved-library profile activity.
       });
-    void transientStore
+    const legacyRecordsLoaded = transientStore
       ?.listVideoRecords()
       .then((records) => setLegacyVideoRecords(records))
       .catch(() => {
         // Ignore; legacy recovery records are best-effort migration helpers.
       });
-  }, []);
+    void Promise.allSettled([savedItemsLoaded, legacyRecordsLoaded]).then(() =>
+      markPlayerProfilesSourceReady("videos"),
+    );
+  }, [markPlayerProfilesSourceReady]);
 
   useEffect(() => {
     refreshSavedVideoLibrary();
@@ -6011,6 +6034,8 @@ function App() {
       if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
     } catch {
       // Client profiles are secondary to the calendar frame.
+    } finally {
+      markPlayerProfilesSourceReady("people");
     }
   }
 
@@ -6032,6 +6057,8 @@ function App() {
       if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
     } catch {
       // Lesson notes are secondary to the calendar frame.
+    } finally {
+      markPlayerProfilesSourceReady("notes");
     }
   }
 
@@ -13618,6 +13645,13 @@ function App() {
       applyGoogleDriveTransferStatus(await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive status did not return JSON."));
     } catch {
       // Google Drive transfer is optional; keep the rest of Settings usable.
+    } finally {
+      // This is what actually determines whether a cloud-imports fetch will
+      // follow (see the effect that reacts to googleDriveTransfer.connected) --
+      // marking readiness here, rather than inside refreshClarityCloudImports,
+      // avoids treating the untouched default (connected: false) as a real
+      // "checked and not connected" result before this request has resolved.
+      markPlayerProfilesSourceReady("cloudImports");
     }
   }
 
@@ -18103,8 +18137,17 @@ function App() {
               <div className="player-profiles-list">
                 {playerProfiles.length === 0 ? (
                   <div className="player-profiles-empty">
-                    <h2>No player profiles yet</h2>
-                    <p>Add a lesson note or video to a client, or use + to add one.</p>
+                    {playerProfilesDataReady ? (
+                      <>
+                        <h2>No player profiles yet</h2>
+                        <p>Add a lesson note or video to a client, or use + to add one.</p>
+                      </>
+                    ) : (
+                      <>
+                        <h2>Loading player profiles…</h2>
+                        <p>Fetching lesson notes, saved videos, and cloud imports.</p>
+                      </>
+                    )}
                   </div>
                 ) : (
                   playerProfiles.map((player) => {
