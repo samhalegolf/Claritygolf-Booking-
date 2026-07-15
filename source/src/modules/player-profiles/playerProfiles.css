@@ -260,6 +260,7 @@
   height: 42px;
   object-fit: cover;
   border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--panel-soft);
 }
 
@@ -274,6 +275,8 @@
   display: block;
   padding: 0;
   border: 0;
+  border-radius: 8px;
+  overflow: hidden;
   background: none;
   cursor: pointer;
   line-height: 0;
@@ -294,10 +297,22 @@
   transition: background 120ms ease;
 }
 
+.player-video-thumb-play svg {
+  width: 22px;
+  height: 22px;
+  transition: transform 120ms ease, fill 120ms ease;
+}
+
 .player-video-thumb-button:hover .player-video-thumb-play,
 .player-video-thumb-button:focus-visible .player-video-thumb-play,
 .player-video-thumb-button:disabled .player-video-thumb-play {
   background: rgba(15, 23, 32, 0.48);
+}
+
+.player-video-thumb-button:hover .player-video-thumb-play svg,
+.player-video-thumb-button:focus-visible .player-video-thumb-play svg {
+  fill: currentColor;
+  transform: scale(1.15);
 }
 
 .player-video-card span {
