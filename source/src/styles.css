@@ -6595,6 +6595,26 @@ button {
   text-transform: uppercase;
 }
 
+/* Small text/pencil marker that flips a fixed field (e.g. invoice dates) to
+   editable, then back on "Done". */
+.invoice-inline-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #2f6b46;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.invoice-inline-edit:hover,
+.invoice-inline-edit:focus-visible {
+  text-decoration: underline;
+}
+
 .invoice-section-heading strong {
   color: #626a60;
   font-size: 12px;

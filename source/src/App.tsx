@@ -3799,6 +3799,15 @@ function addDaysInputValue(days: number) {
   return dateInputValue(date);
 }
 
+// "2026-07-15" -> "15 Jul 2026". Parsed as a local date (not UTC) so the day
+// never shifts; falls back to the raw value / em dash if it isn't a plain date.
+function formatDateForDisplay(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+  if (!match) return value || "—";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
 // Whole days between two "YYYY-MM-DD" strings, computed via UTC midnight so
 // it isn't affected by daylight saving or the browser's local time zone.
 function isoDateDiffDays(laterIso: string, earlierIso: string) {
@@ -4641,6 +4650,9 @@ function App() {
   const [selectedDiscountPresetId, setSelectedDiscountPresetId] = useState("");
   // A set discount collapses to a plain line; this reopens the editable controls.
   const [discountEditing, setDiscountEditing] = useState(false);
+  // Invoice/due dates default from settings and show as plain text; the edit
+  // marker flips them to editable date inputs.
+  const [datesEditing, setDatesEditing] = useState(false);
   // When non-null, the invoice customer picker is showing the "new customer"
   // form. Creating one adds a real client to the people list (not an invoice-only
   // record), then selects it as the payer.
@@ -13002,6 +13014,7 @@ function App() {
     setEditingInvoiceNumber("");
     setSelectedDiscountPresetId("");
     setDiscountEditing(false);
+    setDatesEditing(false);
     setNewInvoiceCustomer(null);
   }
 
@@ -13079,6 +13092,7 @@ function App() {
       setShowInvoiceLinePicker(false);
       setSelectedDiscountPresetId("");
       setDiscountEditing(false);
+      setDatesEditing(false);
       setNewInvoiceCustomer(null);
       setActiveInvoiceId(String(invoice.id || record.id));
       setEditingInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
@@ -19592,12 +19606,28 @@ function App() {
                   <section className="invoice-section">
                     <div className="invoice-section-heading">
                       <span>Invoice details</span>
+                      {!invoiceLocked && (
+                        <button
+                          className="invoice-inline-edit"
+                          onClick={() => setDatesEditing((current) => !current)}
+                          type="button"
+                        >
+                          {datesEditing ? (
+                            "Done"
+                          ) : (
+                            <>
+                              <Pencil size={13} />
+                              Edit dates
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                     <div className="invoice-form-grid invoice-detail-grid">
                       <label className="settings-field">
                         <span>Invoice date</span>
-                        {invoiceLocked ? (
-                          <p className="settings-static-value">{invoiceDraft.invoiceDate || "—"}</p>
+                        {invoiceLocked || !datesEditing ? (
+                          <p className="settings-static-value">{formatDateForDisplay(invoiceDraft.invoiceDate)}</p>
                         ) : (
                           <input
                             value={invoiceDraft.invoiceDate}
@@ -19608,8 +19638,8 @@ function App() {
                       </label>
                       <label className="settings-field">
                         <span>Due date</span>
-                        {invoiceLocked ? (
-                          <p className="settings-static-value">{invoiceDraft.dueDate || "—"}</p>
+                        {invoiceLocked || !datesEditing ? (
+                          <p className="settings-static-value">{formatDateForDisplay(invoiceDraft.dueDate)}</p>
                         ) : (
                           <input
                             value={invoiceDraft.dueDate}
