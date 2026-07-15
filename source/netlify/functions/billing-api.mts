@@ -852,6 +852,17 @@ async function updateInvoiceStatus(accountId: string, id: string, body: Record<s
 
 // --- Booking / invoice link lookups ------------------------------------------
 
+// Hard-delete an invoice. Its items and booking links are removed by the ON
+// DELETE CASCADE foreign keys. The UI only calls this for drafts/voided
+// invoices; committed ones are voided (status change) instead of deleted.
+async function deleteInvoice(accountId: string, id: string) {
+  await supabase("billing_invoices", {
+    method: "DELETE",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+  });
+  return { deleted: true };
+}
+
 async function checkBookingLinks(accountId: string, bookingIds: string[]) {
   if (!bookingIds.length) return { links: {} };
   const filter = bookingIds.map((id) => `"${id.replace(/"/g, '\\"')}"`).join(",");
@@ -1581,6 +1592,9 @@ export default async function handler(req: Request) {
     if (action.startsWith("invoices/") && req.method === "PATCH") {
       const invoice = await updateInvoiceStatus(accountId, action.slice("invoices/".length), await parseBody(req));
       return json({ invoice });
+    }
+    if (action.startsWith("invoices/") && req.method === "DELETE") {
+      return json(await deleteInvoice(accountId, action.slice("invoices/".length)));
     }
 
     if (action === "booking-links" && req.method === "GET") {

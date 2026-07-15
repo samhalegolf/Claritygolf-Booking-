@@ -13382,6 +13382,45 @@ function App() {
     }
   }
 
+  // Delete the open invoice. Drafts (and already-voided ones) are hard-deleted;
+  // committed invoices are voided instead so the record survives for accounting.
+  async function deleteOpenedInvoice() {
+    if (!activeInvoiceId) return;
+    const hardDelete = openedInvoiceStatus === "draft" || openedInvoiceStatus === "void" || openedInvoiceStatus === "";
+    const label = activeInvoiceNumber;
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(
+        hardDelete
+          ? `Delete invoice ${label}? This can't be undone.`
+          : `Void invoice ${label}? It stays on record marked void.`,
+      );
+    if (!confirmed) return;
+    try {
+      if (hardDelete) {
+        const response = await fetch(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (response.status === 401) {
+          setAuthStatus("guest");
+          throw new Error("Admin login required");
+        }
+        if (!response.ok) throw new Error(await readApiFailure(response, "Could not delete invoice."));
+        setToast({ message: `${label} deleted.` });
+      } else {
+        await patchInvoiceStatus(activeInvoiceId, "void");
+        setToast({ message: `${label} voided.` });
+      }
+      resetInvoiceDraft();
+      void fetchRecentInvoices();
+      void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not delete invoice." });
+    }
+  }
+
   async function persistServices(
     nextServices: Service[],
     message = "Lesson types saved.",
@@ -20057,6 +20096,12 @@ function App() {
                   <p className="invoice-footer">{invoiceSettings.footerText}</p>
 
                   <div className="invoice-actions invoice-bottom-actions">
+                    {activeInvoiceId && (
+                      <button className="danger-button" onClick={deleteOpenedInvoice} type="button">
+                        <Trash2 size={16} />
+                        {openedInvoiceStatus === "draft" || openedInvoiceStatus === "void" ? "Delete" : "Void"}
+                      </button>
+                    )}
                     {invoiceEditing ? (
                       isRevisingInvoice ? (
                         <>
