@@ -1952,13 +1952,14 @@ async function ensureSeeded() {
     seedReadyPromise = (async () => {
       await ensureCoreTables();
       await seedSettings();
+      const settingsMap = await readSettingsMap();
       // Contact matching parses bare national numbers against the workspace's
       // country, so it has to be resolved before any person write happens.
       setActivePhoneCountry(
-        cleanPhoneCountry(await getSetting("accountCountry"), defaultPhoneCountry()),
+        cleanPhoneCountry(settingValue(settingsMap, "accountCountry"), defaultPhoneCountry()),
       );
-      setActiveTimeZone(await getSetting("accountTimezone"));
-      await backfillLegacyPeopleAccountIds(peopleAccountIdFromSettings(await readSettingsMap()));
+      setActiveTimeZone(settingValue(settingsMap, "accountTimezone"));
+      await backfillLegacyPeopleAccountIds(peopleAccountIdFromSettings(settingsMap));
       await ensureNotificationHistoryTable();
       await seedItems();
       await seedPeopleFromAppointments();
@@ -3639,44 +3640,9 @@ function availabilityFromSettings(settings) {
   );
 }
 
-async function readAdminSettings() {
+async function readAdminSettings(settingsMap = null) {
   await ensureSeeded();
-  const delaySeconds = Number(
-    (await getSetting("notificationDelaySeconds")) || 30,
-  );
-  return {
-    emailNotificationsEnabled: (await getSetting("emailNotificationsEnabled")) !== "false",
-    notificationEmail: await getSetting("notificationEmail"),
-    coachEmail: await getSetting("coachEmail"),
-    replyToEmail: await getSetting("replyToEmail"),
-    notificationDelaySeconds: Number.isFinite(delaySeconds)
-      ? Math.max(30, Math.min(3600, delaySeconds))
-      : 30,
-    sendClientEmail: (await getSetting("sendClientEmail")) !== "false",
-    sendCoachEmail: (await getSetting("sendCoachEmail")) !== "false",
-    sendAdminEmail: (await getSetting("sendAdminEmail")) !== "false",
-    clientEmailSubject:
-      (await getSetting("clientEmailSubject")) ||
-      defaultEmailTemplates.clientEmailSubject,
-    clientEmailIntro:
-      (await getSetting("clientEmailIntro")) ||
-      defaultEmailTemplates.clientEmailIntro,
-    clientEmailFooter: modernClientEmailFooter(
-      (await getSetting("clientEmailFooter")) ||
-        defaultEmailTemplates.clientEmailFooter,
-    ),
-    adminEmailSubject:
-      (await getSetting("adminEmailSubject")) ||
-      defaultEmailTemplates.adminEmailSubject,
-    adminEmailIntro:
-      (await getSetting("adminEmailIntro")) ||
-      defaultEmailTemplates.adminEmailIntro,
-    smsProviderName: await getSetting("smsProviderName"),
-    smsWebhookUrl: await getSetting("smsWebhookUrl"),
-    smsFromNumber: await getSetting("smsFromNumber"),
-    sendClientSms: (await getSetting("sendClientSms")) === "true",
-    sendAdminSms: (await getSetting("sendAdminSms")) === "true",
-  };
+  return adminSettingsFromSettings(settingsMap || (await readSettingsMap()));
 }
 
 async function writeAdminSettings(settings) {
@@ -3846,14 +3812,16 @@ async function writeAvailability(availability, context = null) {
   return clean;
 }
 
-async function readCoachAccount() {
+async function readCoachAccount(settingsMap = null) {
   await ensureSeeded();
   // Was 13 sequential single-key `getSetting` round trips -- reuse the same
   // bulk-read + settings-map derivation that readCalendarState already uses
   // (coachAccountFromSettings), instead of re-fetching the same rows one at a
-  // time on every one of this function's ~16 call sites.
-  const settingsMap = await readSettingsMap();
-  return coachAccountFromSettings(settingsMap);
+  // time on every one of this function's ~16 call sites. Callers that already
+  // have a settings map (e.g. because they're also calling readAdminSettings
+  // or readBrandSettings in the same batch) can pass it in to skip the read
+  // entirely instead of each function fetching its own copy in parallel.
+  return coachAccountFromSettings(settingsMap || (await readSettingsMap()));
 }
 
 async function writeCoachAccount(account) {
@@ -3882,21 +3850,11 @@ async function writeCoachAccount(account) {
   return clean;
 }
 
-async function readBrandSettings() {
+async function readBrandSettings(settingsMap = null) {
   await ensureSeeded();
-  const account = await readCoachAccount();
-  return {
-    coachName: (await getSetting("coachName")) || account.businessName,
-    logoName: await getSetting("brandLogoName"),
-    logoPreview: await getSetting("brandLogoPreview"),
-    showLogo: (await getSetting("brandShowLogo")) === "true",
-    neutral: (await getSetting("brandNeutral")) || "#ffffff",
-    primary: (await getSetting("brandPrimary")) || "#1fd36d",
-    secondary: (await getSetting("brandSecondary")) || "#d7b06b",
-    accent: (await getSetting("brandAccent")) || "#07100a",
-    bookingTheme:
-      (await getSetting("brandBookingTheme")) === "light" ? "light" : "dark",
-  };
+  const resolvedSettingsMap = settingsMap || (await readSettingsMap());
+  const account = coachAccountFromSettings(resolvedSettingsMap);
+  return brandSettingsFromSettings(resolvedSettingsMap, account);
 }
 
 async function writeBrandSettings(settings) {
@@ -4469,12 +4427,15 @@ async function writeCalendarState(nextState, context = null) {
   await Promise.all([setSetting("syncKey", syncKey), setSetting("updatedAt", updatedAt)]);
   // The response payload rebuilds the whole admin state. None of these reads depend on each
   // other, and running them one after another stacked six round trips onto every save.
+  // readAdminSettings/readBrandSettings/readCoachAccount all derive from the same settings
+  // table, so share one bulk read across them instead of each fetching its own copy in parallel.
+  const sharedSettingsMap = await readSettingsMap();
   const [people, notifications, settings, brand, account, googleCalendarSync] = await Promise.all([
     readPeople(peopleAccountId),
     readNotificationHistory(),
-    readAdminSettings(),
-    readBrandSettings(),
-    readCoachAccount(),
+    readAdminSettings(sharedSettingsMap),
+    readBrandSettings(sharedSettingsMap),
+    readCoachAccount(sharedSettingsMap),
     syncGoogleCalendarWithinBudget(),
   ]);
   return {
@@ -5461,9 +5422,10 @@ async function sendBookingNotifications(
   appointment,
   { kind = "booking", testRecipient = "", clientOnly = false, idempotencyNonce = "" } = {},
 ) {
+  const sharedSettingsMap = await readSettingsMap();
   const [settings, account, services, coaches] = await Promise.all([
-    readAdminSettings(),
-    readCoachAccount(),
+    readAdminSettings(sharedSettingsMap),
+    readCoachAccount(sharedSettingsMap),
     readServices(),
     readCoachProfiles(),
   ]);
@@ -5745,9 +5707,10 @@ async function sendInitialBookingNotifications(appointment, kind = "booking") {
 
     const fallbackResults = [];
     try {
+      const sharedSettingsMap = await readSettingsMap();
       const [settings, account, services, coaches] = await Promise.all([
-        readAdminSettings(),
-        readCoachAccount(),
+        readAdminSettings(sharedSettingsMap),
+        readCoachAccount(sharedSettingsMap),
         readServices(),
         readCoachProfiles(),
       ]);
