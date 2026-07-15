@@ -18408,9 +18408,11 @@ function App() {
                                               : !cloudOperational
                                                 ? cloudLabel
                                                 : "Waiting to upload to Clarity Cloud";
-                                        const videoTitle =
-                                          video.title ||
-                                          profileRecordTitle(notesWorkspaceClient.name, video.updatedAt || video.createdAt);
+                                        const videoTitle = profileRecordTitle(
+                                          notesWorkspaceClient.name,
+                                          video.updatedAt || video.createdAt,
+                                        );
+                                        const videoRawTitle = video.title || videoTitle;
                                         const menuOpen = openSavedVideoMenuId === video.savedVideoId;
                                         const closeMenu = () => setOpenSavedVideoMenuId(null);
                                         const playVideo = () =>
@@ -18444,7 +18446,9 @@ function App() {
                                               </span>
                                             </button>
                                             <div className="player-video-card-body">
-                                              <strong>{videoTitle}</strong>
+                                              <strong title={videoRawTitle !== videoTitle ? videoRawTitle : undefined}>
+                                                {videoTitle}
+                                              </strong>
                                               {linkedLessonVideoIds.has(video.savedVideoId) ? (
                                                 <span>Linked lesson note</span>
                                               ) : null}
@@ -18640,6 +18644,8 @@ function App() {
                                         const savedVideoId = transfer.savedVideoId || savedVideo?.savedVideoId || transfer.transferId;
                                         const timestamp = savedVideo?.updatedAt || savedVideo?.createdAt || transfer.readyToImportAt || "";
                                         const isDownloading = clarityCloudImportActionIds.has(savedVideoId);
+                                        const cloudVideoTitle = profileRecordTitle(notesWorkspaceClient.name, timestamp);
+                                        const cloudVideoRawTitle = savedVideo?.title || cloudVideoTitle;
                                         return (
                                           <article className="player-video-card is-cloud-only" key={savedVideoId}>
                                             <button
@@ -18658,7 +18664,9 @@ function App() {
                                               </span>
                                             </button>
                                             <div className="player-video-card-body">
-                                              <strong>{savedVideo?.title || profileRecordTitle(notesWorkspaceClient.name, timestamp)}</strong>
+                                              <strong title={cloudVideoRawTitle !== cloudVideoTitle ? cloudVideoRawTitle : undefined}>
+                                                {cloudVideoTitle}
+                                              </strong>
                                             </div>
                                             <div className="player-video-card-actions">
                                               <span

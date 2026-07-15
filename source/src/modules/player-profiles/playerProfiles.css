@@ -289,15 +289,15 @@
   display: grid;
   place-items: center;
   color: #fff;
-  background: rgba(15, 23, 32, 0.32);
-  opacity: 0;
-  transition: opacity 120ms ease;
+  background: rgba(15, 23, 32, 0.28);
+  opacity: 1;
+  transition: background 120ms ease;
 }
 
 .player-video-thumb-button:hover .player-video-thumb-play,
 .player-video-thumb-button:focus-visible .player-video-thumb-play,
 .player-video-thumb-button:disabled .player-video-thumb-play {
-  opacity: 1;
+  background: rgba(15, 23, 32, 0.48);
 }
 
 .player-video-card span {
