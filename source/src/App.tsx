@@ -12561,13 +12561,13 @@ function App() {
     }
     const service = itemService(item, services);
     markInvoiceDraftDirty();
-    setInvoiceCustomerSearch("");
+    // Pulling a lesson only adds the line item. The billing customer is never
+    // inferred from the lesson attendee - who attended isn't necessarily who pays
+    // (e.g. a junior's lesson billed to a parent), so the payer stays whatever was
+    // explicitly chosen from the client list.
     setInvoiceDraft((current) => ({
       ...current,
       coachId: resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount),
-      payerName: current.payerName || item.client || item.title,
-      payerEmail: current.payerEmail || item.email || "",
-      payerPhone: current.payerPhone || item.phone || "",
       lines: [
         ...current.lines.filter((line) => line.description.trim() || line.unitPrice > 0),
         {
