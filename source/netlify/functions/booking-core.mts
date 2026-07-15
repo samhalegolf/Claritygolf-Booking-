@@ -6084,6 +6084,71 @@ async function verifyPlayerContact(rawEmail, rawPhone) {
   };
 }
 
+function playerBase64(value) {
+  try {
+    return Buffer.from(String(value ?? ""), "utf8").toString("base64");
+  } catch {
+    return "";
+  }
+}
+
+// Mirrors the client's profileIdsForClient (src/App.tsx): lesson notes are
+// keyed by whatever id form a note was saved under -- a resolved people.id
+// (which for legacy rows is itself often `email-<base64>`), the raw email, an
+// `email-<base64>` derivation, or `phone-<canonical>`. Building the same
+// candidate set here lets the player see every note that belongs to them
+// regardless of which historical form its playerId took. Both padded and
+// unpadded base64 are included because legacy people ids stored it unpadded.
+function playerProfileIdCandidates({ personId, email, phone }) {
+  const ids = new Set();
+  const cleanId = cleanString(personId, "", 160).trim();
+  const cleanEmailValue = cleanString(email, "", 180).trim().toLowerCase();
+  const cleanPhone = normalizedPersonPhone(phone);
+  if (cleanId) ids.add(cleanId);
+  if (cleanEmailValue) {
+    ids.add(cleanEmailValue);
+    const encoded = playerBase64(cleanEmailValue);
+    if (encoded) {
+      ids.add(`email-${encoded}`);
+      ids.add(`email-${encoded.replace(/=+$/, "")}`);
+    }
+  }
+  if (cleanPhone) ids.add(`phone-${cleanPhone}`);
+  return ids;
+}
+
+async function readPlayerProfile(session) {
+  const state = await readPublicCatalogState();
+  const workspaceAccount = publicWorkspaceAccount(state);
+  const accountId = session.accountId || workspaceAccount.id;
+  const serviceList = (state.services || []).filter((service) =>
+    recordBelongsToAccount(service, workspaceAccount.id),
+  );
+
+  const itemRead = await readPublicAppointmentsForContact({
+    accountId,
+    email: session.email,
+    phone: session.phone,
+  });
+  const bookings = itemRead.items
+    .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start)
+    .map((item) => publicRescheduleItem(item, serviceList));
+
+  const candidates = playerProfileIdCandidates(session);
+  const notes = (await readLessonNotes(accountId))
+    .filter((note) => note.playerId && candidates.has(note.playerId))
+    .map((note) => ({
+      id: note.id,
+      title: note.title,
+      body: note.body,
+      playerName: note.playerName,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+    }));
+
+  return { player: { email: session.email }, bookings, notes };
+}
+
 async function readBackendSettings() {
   return readCalendarState();
 }
@@ -7874,6 +7939,14 @@ export async function handleBookingApiRoute(
     if (req.method === "POST" && pathname === "/api/player/logout") {
       await destroyPlayerSession(playerSessionTokenFromRequest(req));
       return json({ authenticated: false }, 200, { "Set-Cookie": clearPlayerCookieHeader() });
+    }
+
+    if (req.method === "GET" && pathname === "/api/player/profile") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      return json(await readPlayerProfile(session));
     }
 
     if (pathname.startsWith("/api/")) {
