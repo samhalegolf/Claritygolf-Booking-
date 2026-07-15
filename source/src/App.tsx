@@ -1358,6 +1358,7 @@ type InvoiceDraft = {
   discountAmount: number;
   message: string;
   lineSearch: string;
+  taxInclusive: boolean;
   lines: InvoiceLine[];
 };
 
@@ -3985,6 +3986,7 @@ function emptyInvoiceDraft(settings = defaultInvoiceSettings, coachId = defaultC
     // Customer note starts empty - not pre-filled from the default-note setting.
     message: "",
     lineSearch: "",
+    taxInclusive: false,
     lines: [],
   };
 }
@@ -5704,8 +5706,13 @@ function App() {
   );
   const invoiceDiscountTotal = Math.min(invoiceLineSubtotal, Math.max(0, Number(invoiceDraft.discountAmount) || 0));
   const invoiceTaxableSubtotal = Math.max(0, invoiceLineSubtotal - invoiceDiscountTotal);
-  const invoiceTaxTotal = invoiceTaxableSubtotal * (Math.max(0, Number(invoiceSettings.taxRate) || 0) / 100);
-  const invoiceTotal = invoiceTaxableSubtotal + invoiceTaxTotal;
+  const invoiceTaxRatePct = Math.max(0, Number(invoiceSettings.taxRate) || 0);
+  // Inclusive: prices already contain tax, so tax is the rate/(100+rate) fraction
+  // of the taxable amount and the total equals it. Exclusive: tax is added on top.
+  const invoiceTaxTotal = invoiceDraft.taxInclusive
+    ? invoiceTaxableSubtotal * (invoiceTaxRatePct / (100 + invoiceTaxRatePct))
+    : invoiceTaxableSubtotal * (invoiceTaxRatePct / 100);
+  const invoiceTotal = invoiceDraft.taxInclusive ? invoiceTaxableSubtotal : invoiceTaxableSubtotal + invoiceTaxTotal;
   const activeInvoiceNumber = confirmedInvoiceNumber || editingInvoiceNumber || invoiceNumber;
   // Once an invoice is confirmed/sent it's committed - the whole card reads as a
   // plain invoice (no editable inputs), per the "locked in = plain invoice" rule.
@@ -13089,6 +13096,7 @@ function App() {
       discountAmount: Number(invoice.discountTotal) || 0,
       message: invoice.customerNote || "",
       lineSearch: "",
+      taxInclusive: Boolean((invoice as { taxInclusive?: boolean }).taxInclusive),
       lines: (invoice.items || []).map((item) => ({
         id: String(item.id || `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
         source: lineSourceFromServer(item.sourceType),
@@ -13176,6 +13184,7 @@ function App() {
           customerNote: invoiceDraft.message,
           discountLabel: invoiceDraft.discountLabel,
           discountAmount: invoiceDraft.discountAmount,
+          taxInclusive: invoiceDraft.taxInclusive,
           items: billableLines.map((line) => ({
             sourceType: billingSourceType(line.source),
             sourceId: line.sourceId,
@@ -13289,6 +13298,7 @@ function App() {
           customerNote: invoiceDraft.message,
           discountLabel: invoiceDraft.discountLabel,
           discountAmount: invoiceDraft.discountAmount,
+          taxInclusive: invoiceDraft.taxInclusive,
           items: billableLines.map((line) => ({
             sourceType: billingSourceType(line.source),
             sourceId: line.sourceId,
@@ -19976,6 +19986,24 @@ function App() {
                             )}
                           </div>
                         ))}
+                      {!invoiceLocked && (
+                        <div className="invoice-tax-toggle" role="group" aria-label={`${invoiceSettings.taxName} handling`}>
+                          <button
+                            className={invoiceDraft.taxInclusive ? "" : "active"}
+                            onClick={() => updateInvoiceDraft("taxInclusive", false)}
+                            type="button"
+                          >
+                            {invoiceSettings.taxName} not included
+                          </button>
+                          <button
+                            className={invoiceDraft.taxInclusive ? "active" : ""}
+                            onClick={() => updateInvoiceDraft("taxInclusive", true)}
+                            type="button"
+                          >
+                            {invoiceSettings.taxName} included
+                          </button>
+                        </div>
+                      )}
                       <div className="invoice-total-lines">
                         <span>
                           <em>Subtotal</em>
@@ -19989,7 +20017,7 @@ function App() {
                         )}
                         <span>
                           <em>
-                            {invoiceSettings.taxName} ({invoiceSettings.taxRate}%)
+                            {invoiceSettings.taxName} ({invoiceSettings.taxRate}%){invoiceDraft.taxInclusive ? " incl" : ""}
                           </em>
                           <strong>{formatMoney(invoiceTaxTotal, invoiceSettings.currency)}</strong>
                         </span>

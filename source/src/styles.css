@@ -7027,6 +7027,36 @@ button {
   gap: 8px;
 }
 
+/* GST included / not-included segmented toggle above the totals. */
+.invoice-tax-toggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 10px;
+  border: 1px solid #d8ded3;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.invoice-tax-toggle button {
+  flex: 1;
+  padding: 8px 10px;
+  border: 0;
+  background: #f6f8f3;
+  color: #3c433a;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.invoice-tax-toggle button + button {
+  border-left: 1px solid #d8ded3;
+}
+
+.invoice-tax-toggle button.active {
+  background: #1fbf6a;
+  color: #07100a;
+}
+
 .invoice-total-lines span {
   display: flex;
   align-items: center;

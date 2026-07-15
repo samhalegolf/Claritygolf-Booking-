@@ -527,14 +527,19 @@ type InvoiceItemInput = {
   discountAmount?: number;
 };
 
-function cleanInvoiceItem(raw: InvoiceItemInput) {
+function cleanInvoiceItem(raw: InvoiceItemInput, taxInclusive = false) {
   const sourceType = ["booking", "product", "manual"].includes(String(raw?.sourceType)) ? String(raw.sourceType) : "manual";
   const quantity = cleanNumber(raw?.quantity, 1, { min: 0 });
   const unitPrice = round2(cleanNumber(raw?.unitPrice, 0, { min: 0 }));
   const taxRate = round2(cleanNumber(raw?.taxRate, 0, { min: 0, max: 100 }));
   const discountAmount = round2(cleanNumber(raw?.discountAmount, 0, { min: 0 }));
-  const lineSubtotal = Math.max(0, round2(quantity * unitPrice) - discountAmount);
-  const taxAmount = round2(lineSubtotal * (taxRate / 100));
+  const lineAmount = Math.max(0, round2(quantity * unitPrice) - discountAmount);
+  // Inclusive: the unit price already contains tax, so tax is the fraction
+  // rate/(100+rate) of the line and the line total is just the line amount.
+  // Exclusive: tax is added on top of the line.
+  const taxAmount = taxInclusive
+    ? round2(lineAmount * (taxRate / (100 + taxRate)))
+    : round2(lineAmount * (taxRate / 100));
   return {
     id: randomUUID(),
     source_type: sourceType,
@@ -545,7 +550,7 @@ function cleanInvoiceItem(raw: InvoiceItemInput) {
     tax_rate: taxRate,
     tax_amount: taxAmount,
     discount_amount: discountAmount,
-    line_total: round2(lineSubtotal + taxAmount),
+    line_total: taxInclusive ? lineAmount : round2(lineAmount + taxAmount),
   };
 }
 
@@ -563,6 +568,7 @@ function invoiceRowToApi(row: Record<string, unknown>, items: Array<Record<strin
     currency: row.currency,
     subtotal: Number(row.subtotal) || 0,
     taxTotal: Number(row.tax_total) || 0,
+    taxInclusive: row.tax_inclusive === true,
     discountTotal: Number(row.discount_total) || 0,
     discountLabel: row.discount_label || "",
     total: Number(row.total) || 0,
@@ -656,14 +662,16 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
   if (!invoiceNumber) throw Object.assign(new Error("Invoice number is required."), { status: 400 });
   if (!customerName) throw Object.assign(new Error("Customer is required."), { status: 400 });
 
+  const taxInclusive = body?.taxInclusive === true;
   const itemsInput = Array.isArray(body?.items) ? (body.items as InvoiceItemInput[]) : [];
-  const items = itemsInput.map(cleanInvoiceItem).filter((item) => item.description && item.quantity > 0);
+  const items = itemsInput.map((item) => cleanInvoiceItem(item, taxInclusive)).filter((item) => item.description && item.quantity > 0);
   if (!items.length) throw Object.assign(new Error("Add at least one invoice line."), { status: 400 });
 
   const subtotal = round2(items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0));
   const discountTotal = round2(Math.min(subtotal, cleanNumber(body?.discountAmount, 0, { min: 0 })));
   const taxTotal = round2(items.reduce((sum, item) => sum + item.tax_amount, 0));
-  const total = round2(Math.max(0, subtotal - discountTotal) + taxTotal);
+  // Inclusive: tax is already inside the line prices, so it isn't added again.
+  const total = round2(Math.max(0, subtotal - discountTotal) + (taxInclusive ? 0 : taxTotal));
 
   const status = ["draft", "sent"].includes(String(body?.status)) ? String(body.status) : "draft";
   const invoiceId = randomUUID();
@@ -681,6 +689,7 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
     currency: cleanString(body?.currency, "NZD", 10),
     subtotal,
     tax_total: taxTotal,
+    tax_inclusive: taxInclusive,
     discount_total: discountTotal,
     discount_label: cleanString(body?.discountLabel, "", 120) || null,
     total,
@@ -741,14 +750,15 @@ async function updateInvoiceDraft(accountId: string, id: string, body: Record<st
   const customerName = cleanString(body?.customerName, "", 140);
   if (!customerName) throw Object.assign(new Error("Customer is required."), { status: 400 });
 
+  const taxInclusive = body?.taxInclusive === true;
   const itemsInput = Array.isArray(body?.items) ? (body.items as InvoiceItemInput[]) : [];
-  const items = itemsInput.map(cleanInvoiceItem).filter((item) => item.description && item.quantity > 0);
+  const items = itemsInput.map((item) => cleanInvoiceItem(item, taxInclusive)).filter((item) => item.description && item.quantity > 0);
   if (!items.length) throw Object.assign(new Error("Add at least one invoice line."), { status: 400 });
 
   const subtotal = round2(items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0));
   const discountTotal = round2(Math.min(subtotal, cleanNumber(body?.discountAmount, 0, { min: 0 })));
   const taxTotal = round2(items.reduce((sum, item) => sum + item.tax_amount, 0));
-  const total = round2(Math.max(0, subtotal - discountTotal) + taxTotal);
+  const total = round2(Math.max(0, subtotal - discountTotal) + (taxInclusive ? 0 : taxTotal));
 
   const patch = {
     customer_id: cleanString(body?.customerId, "", 160) || null,
@@ -760,6 +770,7 @@ async function updateInvoiceDraft(accountId: string, id: string, body: Record<st
     currency: cleanString(body?.currency, "NZD", 10),
     subtotal,
     tax_total: taxTotal,
+    tax_inclusive: taxInclusive,
     discount_total: discountTotal,
     discount_label: cleanString(body?.discountLabel, "", 120) || null,
     total,
@@ -1124,6 +1135,7 @@ interface InvoiceApi {
   currency: string;
   subtotal: number;
   taxTotal: number;
+  taxInclusive: boolean;
   discountTotal: number;
   discountLabel: string;
   total: number;
@@ -1334,10 +1346,15 @@ export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBra
   if ((Number(invoice.discountTotal) || 0) > 0) {
     totalRow(invoice.discountLabel || "Discount", `- ${formatMoney(invoice.discountTotal, currency)}`);
   }
-  if ((Number(invoice.taxTotal) || 0) > 0) {
+  // Exclusive tax is a line added before the total; inclusive tax is shown as a
+  // note under the total (it's already inside the prices).
+  if (!invoice.taxInclusive && (Number(invoice.taxTotal) || 0) > 0) {
     totalRow(branding.taxName || "Tax", formatMoney(invoice.taxTotal, currency));
   }
   totalRow("Total", formatMoney(invoice.total, currency), { bold: true, size: 12, color: brand });
+  if (invoice.taxInclusive && (Number(invoice.taxTotal) || 0) > 0) {
+    totalRow(`Includes ${branding.taxName || "Tax"}`, formatMoney(invoice.taxTotal, currency));
+  }
   if ((Number(invoice.amountPaid) || 0) > 0) {
     totalRow("Paid", `- ${formatMoney(invoice.amountPaid, currency)}`);
     totalRow("Balance due", formatMoney(round2((Number(invoice.total) || 0) - (Number(invoice.amountPaid) || 0)), currency), { bold: true });
