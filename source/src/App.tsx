@@ -5635,6 +5635,39 @@ function App() {
     () => completedAppointments.filter(inPullRange),
     [completedAppointments, pullRangeFrom, pullRangeTo],
   );
+  // When a billing customer is chosen, surface that client's own completed
+  // lessons at the top of the pull list and flag them. Matches on email, then
+  // phone, then exact name - a lesson billed to someone else (e.g. a parent)
+  // simply won't match, since the payer is never inferred from the attendee.
+  const invoicePayerEmailKey = invoiceDraft.payerEmail.trim().toLowerCase();
+  const invoicePayerPhoneKey = invoiceDraft.payerPhone.replace(/\D/g, "");
+  const invoicePayerNameKey = invoiceDraft.payerName.trim().toLowerCase();
+  const invoicePayerBookingIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!invoicePayerEmailKey && !invoicePayerPhoneKey && !invoicePayerNameKey) return ids;
+    for (const item of calendarPullRangeList) {
+      const email = (item.email || "").trim().toLowerCase();
+      const phone = (item.phone || "").replace(/\D/g, "");
+      const name = (item.client || "").trim().toLowerCase();
+      if (
+        (invoicePayerEmailKey && email && email === invoicePayerEmailKey) ||
+        (invoicePayerPhoneKey && phone && phone === invoicePayerPhoneKey) ||
+        (invoicePayerNameKey && name && name === invoicePayerNameKey)
+      ) {
+        ids.add(item.id);
+      }
+    }
+    return ids;
+  }, [calendarPullRangeList, invoicePayerEmailKey, invoicePayerPhoneKey, invoicePayerNameKey]);
+  const calendarPullRangeSorted = useMemo(() => {
+    if (!invoicePayerBookingIds.size) return calendarPullRangeList;
+    const matches: CalendarItem[] = [];
+    const rest: CalendarItem[] = [];
+    for (const item of calendarPullRangeList) {
+      (invoicePayerBookingIds.has(item.id) ? matches : rest).push(item);
+    }
+    return [...matches, ...rest];
+  }, [calendarPullRangeList, invoicePayerBookingIds]);
   const invoiceLineSubtotal = invoiceDraft.lines.reduce(
     (total, line) => total + Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0),
     0,
@@ -19988,21 +20021,25 @@ function App() {
                       )}
                     </div>
                     <div className="completed-booking-list">
-                      {calendarPullRangeList.length ? (
-                        calendarPullRangeList.map((item) => {
+                      {calendarPullRangeSorted.length ? (
+                        calendarPullRangeSorted.map((item) => {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
                           const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
+                          const matchesPayer = invoicePayerBookingIds.has(item.id);
                           return (
                             <button
                               key={item.id}
-                              className={alreadyInvoiced ? "already-invoiced" : ""}
+                              className={`${alreadyInvoiced ? "already-invoiced" : ""}${matchesPayer ? " for-billing-client" : ""}`.trim()}
                               disabled={alreadyInvoiced}
                               onClick={() => addCompletedBookingLine(item)}
                               type="button"
                             >
                               <span>
-                                <strong>{item.client || item.title}</strong>
+                                <strong>
+                                  {item.client || item.title}
+                                  {matchesPayer && <span className="pull-billing-flag">Billing client</span>}
+                                </strong>
                                 <em>
                                   {service?.name ?? "Lesson"} - {days[item.day].label}, {formatRange(item.start, item.duration)}
                                 </em>

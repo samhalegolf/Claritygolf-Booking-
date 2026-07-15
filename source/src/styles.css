@@ -6681,6 +6681,28 @@ button {
   background: #f2f6ef;
 }
 
+/* Completed lesson that belongs to the chosen billing customer: floated to the
+   top of the pull list and accented. */
+.completed-booking-list button.for-billing-client {
+  border-color: #7fd6a3;
+  background: #f1fbf5;
+  box-shadow: inset 3px 0 0 #1fbf6a;
+}
+
+.pull-billing-flag {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #dff5e8;
+  color: #1c7a49;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
 .invoice-customer-results button span,
 .invoice-customer-settled div,
 .invoice-option-list button span,
