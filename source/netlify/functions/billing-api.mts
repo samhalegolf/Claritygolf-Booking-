@@ -1,5 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 
 // Billing is a new, isolated top-level app section. This function owns its
@@ -68,6 +69,21 @@ function cleanNumber(value: unknown, fallback = 0, { min = -1e12, max = 1e12 } =
 
 function round2(value: number) {
   return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+// Plain "NZD 120.00" style. Deliberately not locale-formatted: the PDF and
+// email must render identically regardless of the server's locale, and the
+// currency is a free-text code (NZD/AUD/USD/...), not a symbol we can trust.
+function formatMoney(amount: unknown, currency: string) {
+  return `${currency} ${(Number(amount) || 0).toFixed(2)}`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // --- Supabase REST helper -------------------------------------------------
@@ -593,10 +609,15 @@ async function getInvoiceWithItems(accountId: string, id: string) {
   const items = await supabase("billing_invoice_items", {
     query: `select=*&invoice_id=eq.${encodeFilter(id)}&order=created_at.asc`,
   });
-  return invoiceRowToApi(row, items);
+  return invoiceRowToApi(row, items) as unknown as InvoiceApi;
 }
 
-async function createBookingLinks(accountId: string, invoiceId: string, bookingIds: string[]) {
+async function createBookingLinks(
+  accountId: string,
+  invoiceId: string,
+  bookingIds: string[],
+  { rollbackInvoiceOnConflict = true }: { rollbackInvoiceOnConflict?: boolean } = {},
+) {
   if (!bookingIds.length) return;
   const rows = bookingIds.map((bookingId) => ({
     id: randomUUID(),
@@ -610,13 +631,16 @@ async function createBookingLinks(accountId: string, invoiceId: string, bookingI
   } catch (error) {
     const status = (error as { supabaseStatus?: number })?.supabaseStatus;
     if (status === 409) {
-      // At least one booking already has an invoice. Roll back the invoice
-      // we just created so a failed pull doesn't leave an orphaned draft,
-      // then surface which bookings were already invoiced.
-      await supabase("billing_invoices", {
-        method: "DELETE",
-        query: `id=eq.${encodeFilter(invoiceId)}&account_id=eq.${encodeFilter(accountId)}`,
-      }).catch(() => {});
+      // At least one booking already has an invoice. On create we roll back the
+      // invoice we just made so a failed pull doesn't leave an orphaned draft;
+      // on edit we must NOT delete the (pre-existing) invoice - just surface the
+      // conflict so the caller can restore its prior links.
+      if (rollbackInvoiceOnConflict) {
+        await supabase("billing_invoices", {
+          method: "DELETE",
+          query: `id=eq.${encodeFilter(invoiceId)}&account_id=eq.${encodeFilter(accountId)}`,
+        }).catch(() => {});
+      }
       throw Object.assign(new Error("One or more of these bookings has already been invoiced."), {
         status: 409,
         code: "BOOKING_ALREADY_INVOICED",
@@ -693,6 +717,92 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
   await createBookingLinks(accountId, invoiceId, bookingIds);
 
   return getInvoiceWithItems(accountId, invoiceId);
+}
+
+// Edit a draft in place. Only draft invoices are editable - once an invoice is
+// sent/paid/void its numbers are committed, so those come back as a 409 the UI
+// reads as "not editable". The invoice_number itself is never changed here: it
+// was already issued to this draft and is the account-unique key. Line items and
+// booking links are replaced wholesale, and totals are recomputed exactly as in
+// createInvoice so an edited draft and a freshly created one are indistinguishable.
+async function updateInvoiceDraft(accountId: string, id: string, body: Record<string, unknown>) {
+  const existingRows = await supabase("billing_invoices", {
+    query: `select=id,status&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+  });
+  const existing = existingRows[0];
+  if (!existing) throw Object.assign(new Error("Invoice not found."), { status: 404 });
+  if (existing.status !== "draft") {
+    throw Object.assign(new Error("Only draft invoices can be edited. Void this invoice to make changes."), {
+      status: 409,
+      code: "INVOICE_NOT_EDITABLE",
+    });
+  }
+
+  const customerName = cleanString(body?.customerName, "", 140);
+  if (!customerName) throw Object.assign(new Error("Customer is required."), { status: 400 });
+
+  const itemsInput = Array.isArray(body?.items) ? (body.items as InvoiceItemInput[]) : [];
+  const items = itemsInput.map(cleanInvoiceItem).filter((item) => item.description && item.quantity > 0);
+  if (!items.length) throw Object.assign(new Error("Add at least one invoice line."), { status: 400 });
+
+  const subtotal = round2(items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0));
+  const discountTotal = round2(Math.min(subtotal, cleanNumber(body?.discountAmount, 0, { min: 0 })));
+  const taxTotal = round2(items.reduce((sum, item) => sum + item.tax_amount, 0));
+  const total = round2(Math.max(0, subtotal - discountTotal) + taxTotal);
+
+  const patch = {
+    customer_id: cleanString(body?.customerId, "", 160) || null,
+    customer_name: customerName,
+    customer_email: cleanString(body?.customerEmail, "", 180) || null,
+    customer_phone: cleanString(body?.customerPhone, "", 80) || null,
+    issue_date: cleanString(body?.issueDate, new Date().toISOString().slice(0, 10), 20),
+    due_date: cleanString(body?.dueDate, "", 20) || null,
+    currency: cleanString(body?.currency, "NZD", 10),
+    subtotal,
+    tax_total: taxTotal,
+    discount_total: discountTotal,
+    discount_label: cleanString(body?.discountLabel, "", 120) || null,
+    total,
+    customer_note: cleanString(body?.customerNote, "", 2000) || null,
+    internal_note: cleanString(body?.internalNote, "", 2000) || null,
+    reference: cleanString(body?.reference, "", 160) || null,
+    updated_at: nowIso(),
+  };
+  // Re-assert status=draft in the filter so a concurrent send/void can't be
+  // silently overwritten between the read above and this write.
+  const updated = await supabase("billing_invoices", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&status=eq.draft`,
+    body: patch,
+    prefer: "return=representation",
+  });
+  if (!updated.length) {
+    throw Object.assign(new Error("Only draft invoices can be edited. Void this invoice to make changes."), {
+      status: 409,
+      code: "INVOICE_NOT_EDITABLE",
+    });
+  }
+
+  // Replace the line items wholesale.
+  await supabase("billing_invoice_items", { method: "DELETE", query: `invoice_id=eq.${encodeFilter(id)}` });
+  const itemRows = items.map((item) => ({ ...item, invoice_id: id, account_id: accountId, created_at: nowIso() }));
+  await supabase("billing_invoice_items", { method: "POST", body: itemRows, prefer: "return=minimal" });
+
+  // Rebuild booking links (an edit can add or drop booking-sourced lines). Drop
+  // this invoice's own links first so re-selecting the same bookings doesn't
+  // collide with itself; a 409 now means another invoice grabbed the booking.
+  await supabase("billing_booking_invoice_links", {
+    method: "DELETE",
+    query: `invoice_id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+  });
+  const bookingIds = [...new Set(
+    itemsInput
+      .filter((item) => item.sourceType === "booking" && item.sourceId)
+      .map((item) => String(item.sourceId)),
+  )];
+  await createBookingLinks(accountId, id, bookingIds, { rollbackInvoiceOnConflict: false });
+
+  return getInvoiceWithItems(accountId, id);
 }
 
 async function updateInvoiceStatus(accountId: string, id: string, body: Record<string, unknown>) {
@@ -893,6 +1003,502 @@ async function revenueReport(accountId: string, url: URL) {
   };
 }
 
+// --- Invoice branding + PDF + send -------------------------------------------
+// Reads the same settings keys booking-core.mts writes when the coach saves
+// their account/invoice settings (accountInvoiceSettingsJson + business name,
+// coach name, contact email), so a generated PDF matches what the in-app
+// invoice editor renders. Read-only against the shared settings table, in the
+// same spirit as resolveAccountId/resolveDefaultCurrency above.
+
+type InvoiceBranding = {
+  businessName: string;
+  coachName: string;
+  contactEmail: string;
+  fromName: string;
+  currency: string;
+  taxName: string;
+  taxNumber: string;
+  bankAccount: string;
+  businessAddress: string;
+  paymentInstructions: string;
+  footerText: string;
+  // Coach branding (same keys booking-core writes from the Brand settings tab):
+  // logo is a data:image/... URL, colours are #rrggbb hex.
+  logoDataUrl: string;
+  primaryColor: string;
+  accentColor: string;
+};
+
+async function resolveInvoiceBranding(): Promise<InvoiceBranding> {
+  const rows = await supabase("settings", {
+    query: `select=key,value&key=in.(${[
+      "accountBusinessName",
+      "accountCoachName",
+      "coachName",
+      "accountContactEmail",
+      "accountInvoiceSettingsJson",
+      "notificationFromName",
+      "brandLogoPreview",
+      "brandPrimary",
+      "brandAccent",
+    ].join(",")})`,
+  });
+  const map = Object.fromEntries(rows.map((row: { key: string; value: string }) => [row.key, row.value]));
+  let invoice: Record<string, unknown> = {};
+  try {
+    invoice = map.accountInvoiceSettingsJson ? JSON.parse(map.accountInvoiceSettingsJson) : {};
+  } catch {
+    invoice = {};
+  }
+  const businessName =
+    cleanString(map.accountBusinessName, "", 140) ||
+    cleanString(map.coachName, "", 140) ||
+    env("CLARITY_BUSINESS_NAME", "Sam Hale Golf");
+  const coachName = cleanString(map.accountCoachName, "", 140) || cleanString(map.coachName, "", 140) || businessName;
+  return {
+    businessName,
+    coachName,
+    contactEmail: cleanString(map.accountContactEmail, "", 180),
+    fromName: cleanString(map.notificationFromName, "", 140) || coachName || businessName,
+    currency: cleanString(invoice.currency, "NZD", 10),
+    taxName: cleanString(invoice.taxName, "GST", 40),
+    taxNumber: cleanString(invoice.taxNumber, "", 60),
+    bankAccount: cleanString(invoice.bankAccount, "", 120),
+    businessAddress: cleanString(invoice.businessAddress, "", 300),
+    paymentInstructions: cleanString(invoice.paymentInstructions, "", 600),
+    footerText: cleanString(invoice.footerText, "", 600),
+    logoDataUrl: typeof map.brandLogoPreview === "string" && map.brandLogoPreview.startsWith("data:image/") ? map.brandLogoPreview : "",
+    primaryColor: cleanHexColor(map.brandPrimary, "#1fd36d"),
+    accentColor: cleanHexColor(map.brandAccent, "#111318"),
+  };
+}
+
+// Parse a #rgb / #rrggbb string; fall back if malformed. Keeps a bad colour
+// value in settings from ever throwing while rendering an invoice.
+function cleanHexColor(value: unknown, fallback: string) {
+  const raw = String(value ?? "").trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(raw)) return raw.toLowerCase();
+  if (/^#[0-9a-fA-F]{3}$/.test(raw)) {
+    return `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}`.toLowerCase();
+  }
+  return fallback;
+}
+
+function hexToRgb(hex: string) {
+  const clean = cleanHexColor(hex, "#111318").slice(1);
+  return rgb(
+    parseInt(clean.slice(0, 2), 16) / 255,
+    parseInt(clean.slice(2, 4), 16) / 255,
+    parseInt(clean.slice(4, 6), 16) / 255,
+  );
+}
+
+// Relative luminance (WCAG). Used to avoid painting near-white brand colours as
+// text/rules on the white PDF where they'd be invisible.
+function colorLuminance(hex: string) {
+  const clean = cleanHexColor(hex, "#111318").slice(1);
+  const channel = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const r = channel(parseInt(clean.slice(0, 2), 16));
+  const g = channel(parseInt(clean.slice(2, 4), 16));
+  const b = channel(parseInt(clean.slice(4, 6), 16));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+// Explicit shape of the API invoice object (invoiceRowToApi returns the same
+// structure but with unknown-typed fields, since it reads Supabase rows). The
+// PDF/send helpers below want concrete string/number types, so getInvoiceWithItems
+// casts to this and everything downstream stays type-safe.
+interface InvoiceApi {
+  id: string;
+  invoiceNumber: string;
+  status: string;
+  customerId: string | null;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  issueDate: string;
+  dueDate: string | null;
+  currency: string;
+  subtotal: number;
+  taxTotal: number;
+  discountTotal: number;
+  discountLabel: string;
+  total: number;
+  amountPaid: number;
+  customerNote: string;
+  internalNote: string;
+  reference: string;
+  sentAt: string | null;
+  paidAt: string | null;
+  createdAt: unknown;
+  updatedAt: unknown;
+  items: Array<{
+    id: string;
+    sourceType: string;
+    sourceId: string | null;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    taxRate: number;
+    taxAmount: number;
+    discountAmount: number;
+    lineTotal: number;
+  }>;
+}
+
+// Wrap a string to a pixel width for the current font/size, breaking on spaces
+// (and hard-splitting any single word too long to fit). Keeps the line-item
+// descriptions and free-text notes inside their columns instead of overrunning.
+function wrapText(
+  text: string,
+  font: Awaited<ReturnType<PDFDocument["embedFont"]>>,
+  size: number,
+  maxWidth: number,
+): string[] {
+  const words = String(text ?? "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  if (!words.length) return [""];
+  const lines: string[] = [];
+  let current = "";
+  const widthOf = (value: string) => font.widthOfTextAtSize(value, size);
+  for (const word of words) {
+    let candidate = current ? `${current} ${word}` : word;
+    if (widthOf(candidate) <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+    if (current) {
+      lines.push(current);
+      current = "";
+    }
+    // Single word longer than the column: hard-split it.
+    let chunk = word;
+    while (widthOf(chunk) > maxWidth && chunk.length > 1) {
+      let cut = chunk.length - 1;
+      while (cut > 1 && widthOf(chunk.slice(0, cut)) > maxWidth) cut -= 1;
+      lines.push(chunk.slice(0, cut));
+      chunk = chunk.slice(cut);
+    }
+    current = chunk;
+  }
+  if (current) lines.push(current);
+  return lines.length ? lines : [""];
+}
+
+// Embed the coach logo (a data:image/png|jpeg URL from Brand settings). Returns
+// null on anything unexpected - a malformed or unsupported logo must never break
+// invoice rendering, it just falls back to the text wordmark.
+async function embedLogo(pdf: PDFDocument, dataUrl: string) {
+  const match = /^data:image\/(png|jpe?g);base64,(.+)$/i.exec(dataUrl || "");
+  if (!match) return null;
+  try {
+    const bytes = Buffer.from(match[2], "base64");
+    return /png/i.test(match[1]) ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+  } catch {
+    return null;
+  }
+}
+
+export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBranding): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const pageWidth = 595.28; // A4 portrait, points
+  const pageHeight = 841.89;
+  const margin = 50;
+  const contentRight = pageWidth - margin;
+  const currency = invoice.currency || branding.currency;
+
+  const ink = rgb(0.11, 0.13, 0.16);
+  const muted = rgb(0.42, 0.45, 0.5);
+  const hair = rgb(0.82, 0.84, 0.87);
+  // Coach brand accent. The primary colour is used for the wordmark, the header
+  // rule and the Total line - but only if it's dark enough to read on white;
+  // otherwise we fall back to the (dark) accent colour so nothing goes invisible.
+  const brandReadable = colorLuminance(branding.primaryColor) < 0.72;
+  const brand = brandReadable ? hexToRgb(branding.primaryColor) : hexToRgb(branding.accentColor);
+
+  const logo = await embedLogo(pdf, branding.logoDataUrl);
+  let logoW = 0;
+  let logoH = 0;
+  if (logo) {
+    const scale = Math.min(44 / logo.height, 150 / logo.width, 1);
+    logoW = logo.width * scale;
+    logoH = logo.height * scale;
+  }
+
+  let page = pdf.addPage([pageWidth, pageHeight]);
+  let y = pageHeight - margin;
+
+  const text = (value: unknown, x: number, yy: number, opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb> } = {}) => {
+    page.drawText(String(value ?? ""), { x, y: yy, size: opts.size ?? 10, font: opts.bold ? bold : font, color: opts.color ?? ink });
+  };
+  const textRight = (value: string, xRight: number, yy: number, opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb> } = {}) => {
+    const size = opts.size ?? 10;
+    const usedFont = opts.bold ? bold : font;
+    const width = usedFont.widthOfTextAtSize(String(value ?? ""), size);
+    text(value, xRight - width, yy, opts);
+  };
+  const hrule = (yy: number) => {
+    page.drawLine({ start: { x: margin, y: yy }, end: { x: contentRight, y: yy }, thickness: 1, color: hair });
+  };
+  const ensureSpace = (needed: number) => {
+    if (y - needed >= margin) return;
+    page = pdf.addPage([pageWidth, pageHeight]);
+    y = pageHeight - margin;
+  };
+
+  // Header: logo + business name (left), INVOICE wordmark (right).
+  const headerTop = y;
+  if (logo) {
+    page.drawImage(logo, { x: margin, y: headerTop - logoH, width: logoW, height: logoH });
+  }
+  const nameX = logo ? margin + logoW + 12 : margin;
+  const nameY = logo ? headerTop - logoH / 2 - 6 : headerTop - 4;
+  text(branding.businessName, nameX, nameY, { size: 16, bold: true });
+  textRight("INVOICE", contentRight, headerTop - 4, { size: 18, bold: true, color: brand });
+  y = headerTop - Math.max(logoH, 22) - 8;
+  const brandLines = [
+    branding.businessAddress,
+    branding.contactEmail,
+    branding.taxNumber ? `${branding.taxName} No: ${branding.taxNumber}` : "",
+  ].filter(Boolean);
+  const metaLines = [
+    `Invoice #: ${invoice.invoiceNumber}`,
+    `Issued: ${invoice.issueDate || ""}`,
+    invoice.dueDate ? `Due: ${invoice.dueDate}` : "",
+    `Status: ${String(invoice.status || "").toUpperCase()}`,
+  ].filter(Boolean);
+  const headerRows = Math.max(brandLines.length, metaLines.length);
+  for (let i = 0; i < headerRows; i += 1) {
+    if (brandLines[i]) text(brandLines[i], margin, y, { size: 9, color: muted });
+    if (metaLines[i]) textRight(metaLines[i], contentRight, y, { size: 9, color: muted });
+    y -= 13;
+  }
+  y -= 6;
+  page.drawLine({ start: { x: margin, y }, end: { x: contentRight, y }, thickness: 1.6, color: brand });
+  y -= 22;
+
+  // Bill to.
+  text("BILL TO", margin, y, { size: 8, bold: true, color: muted });
+  y -= 14;
+  text(invoice.customerName || "-", margin, y, { size: 11, bold: true });
+  y -= 14;
+  for (const contact of [invoice.customerEmail, invoice.customerPhone, invoice.reference ? `Ref: ${invoice.reference}` : ""].filter(Boolean)) {
+    text(contact, margin, y, { size: 9, color: muted });
+    y -= 12;
+  }
+  y -= 10;
+
+  // Line-item table.
+  const colQtyRight = margin + 320;
+  const colUnitRight = margin + 410;
+  const descWidth = colQtyRight - margin - 60;
+  text("DESCRIPTION", margin, y, { size: 8, bold: true, color: muted });
+  textRight("QTY", colQtyRight, y, { size: 8, bold: true, color: muted });
+  textRight("UNIT", colUnitRight, y, { size: 8, bold: true, color: muted });
+  textRight("AMOUNT", contentRight, y, { size: 8, bold: true, color: muted });
+  y -= 8;
+  hrule(y);
+  y -= 16;
+
+  for (const item of invoice.items) {
+    const descLines = wrapText(item.description || "-", font, 10, descWidth);
+    ensureSpace(descLines.length * 13 + 6);
+    descLines.forEach((lineText, index) => {
+      text(lineText, margin, y - index * 13, { size: 10 });
+    });
+    const lineAmount = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0) - (Number(item.discountAmount) || 0);
+    textRight(String(item.quantity), colQtyRight, y, { size: 10 });
+    textRight((Number(item.unitPrice) || 0).toFixed(2), colUnitRight, y, { size: 10 });
+    textRight((lineAmount < 0 ? 0 : lineAmount).toFixed(2), contentRight, y, { size: 10 });
+    y -= descLines.length * 13 + 6;
+  }
+
+  y -= 4;
+  hrule(y);
+  y -= 20;
+
+  // Totals block (right-aligned key/value rows).
+  const totalRow = (label: string, value: string, opts: { bold?: boolean; size?: number; color?: ReturnType<typeof rgb> } = {}) => {
+    ensureSpace(18);
+    const size = opts.size ?? 10;
+    textRight(label, contentRight - 110, y, { size, bold: opts.bold, color: opts.color ?? (opts.bold ? ink : muted) });
+    textRight(value, contentRight, y, { size, bold: opts.bold, color: opts.color ?? ink });
+    y -= opts.bold ? 20 : 16;
+  };
+  totalRow("Subtotal", formatMoney(invoice.subtotal, currency));
+  if ((Number(invoice.discountTotal) || 0) > 0) {
+    totalRow(invoice.discountLabel || "Discount", `- ${formatMoney(invoice.discountTotal, currency)}`);
+  }
+  if ((Number(invoice.taxTotal) || 0) > 0) {
+    totalRow(branding.taxName || "Tax", formatMoney(invoice.taxTotal, currency));
+  }
+  totalRow("Total", formatMoney(invoice.total, currency), { bold: true, size: 12, color: brand });
+  if ((Number(invoice.amountPaid) || 0) > 0) {
+    totalRow("Paid", `- ${formatMoney(invoice.amountPaid, currency)}`);
+    totalRow("Balance due", formatMoney(round2((Number(invoice.total) || 0) - (Number(invoice.amountPaid) || 0)), currency), { bold: true });
+  }
+
+  // Notes / payment instructions / footer.
+  const noteBlocks: Array<{ heading: string; body: string }> = [];
+  if (invoice.customerNote) noteBlocks.push({ heading: "Notes", body: invoice.customerNote });
+  const paymentBody = [branding.paymentInstructions, branding.bankAccount ? `Bank account: ${branding.bankAccount}` : ""].filter(Boolean).join("\n");
+  if (paymentBody) noteBlocks.push({ heading: "Payment", body: paymentBody });
+  if (branding.footerText) noteBlocks.push({ heading: "", body: branding.footerText });
+
+  if (noteBlocks.length) {
+    y -= 10;
+    ensureSpace(20);
+    hrule(y);
+    y -= 20;
+    for (const block of noteBlocks) {
+      if (block.heading) {
+        ensureSpace(16);
+        text(block.heading.toUpperCase(), margin, y, { size: 8, bold: true, color: muted });
+        y -= 14;
+      }
+      for (const rawLine of block.body.split("\n")) {
+        for (const wrapped of wrapText(rawLine, font, 9, contentRight - margin)) {
+          ensureSpace(13);
+          text(wrapped, margin, y, { size: 9, color: muted });
+          y -= 12;
+        }
+      }
+      y -= 8;
+    }
+  }
+
+  return pdf.save();
+}
+
+// Self-contained Resend sender (billing stays isolated from booking/notification
+// code by design - see this file's header). Mirrors notification-engine.mts's
+// from-header handling and adds the invoice PDF as a base64 attachment.
+function invoiceEmailFrom(branding: InvoiceBranding) {
+  const rawFrom = env("CLARITY_EMAIL_FROM", `${branding.businessName} <onboarding@resend.dev>`);
+  if (/<[^>]+>/.test(rawFrom)) return rawFrom; // env already supplies a "Name <addr>" header
+  return `${branding.fromName || branding.businessName} <${rawFrom}>`;
+}
+
+async function emailInvoicePdf(
+  opts: { to: string; subject: string; text: string; html: string; replyTo?: string; pdf: Uint8Array; filename: string; idempotencyKey: string },
+  branding: InvoiceBranding,
+) {
+  const apiKey = env("RESEND_API_KEY");
+  if (!apiKey) {
+    throw Object.assign(new Error("Email sending is not configured (missing RESEND_API_KEY)."), {
+      status: 503,
+      code: "EMAIL_NOT_CONFIGURED",
+    });
+  }
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": opts.idempotencyKey,
+    },
+    body: JSON.stringify({
+      from: invoiceEmailFrom(branding),
+      to: [opts.to],
+      subject: opts.subject,
+      text: opts.text,
+      html: opts.html,
+      ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
+      attachments: [{ filename: opts.filename, content: Buffer.from(opts.pdf).toString("base64") }],
+    }),
+  });
+  const responseText = await response.text().catch(() => "");
+  if (!response.ok) {
+    throw Object.assign(new Error(`Email send failed (${response.status}): ${responseText.slice(0, 300)}`), {
+      status: 502,
+      code: "EMAIL_SEND_FAILED",
+    });
+  }
+  try {
+    return { id: (responseText ? JSON.parse(responseText)?.id : "") || "" };
+  } catch {
+    return { id: "" };
+  }
+}
+
+function pdfFilename(invoice: InvoiceApi) {
+  return `${String(invoice.invoiceNumber || "invoice").replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
+}
+
+async function sendInvoice(accountId: string, id: string, body: Record<string, unknown>) {
+  const invoice = await getInvoiceWithItems(accountId, id);
+  if (!invoice) throw Object.assign(new Error("Invoice not found."), { status: 404 });
+  const to = cleanString(body?.email, "", 180) || cleanString(invoice.customerEmail, "", 180);
+  if (!to) {
+    throw Object.assign(new Error("This invoice has no customer email to send to."), { status: 400, code: "MISSING_RECIPIENT" });
+  }
+
+  const branding = await resolveInvoiceBranding();
+  const pdf = await renderInvoicePdf(invoice, branding);
+  const subject = `Invoice ${invoice.invoiceNumber} from ${branding.businessName}`;
+  const bodyLines = [
+    `Hi ${invoice.customerName || "there"},`,
+    "",
+    `Please find attached invoice ${invoice.invoiceNumber} for ${formatMoney(invoice.total, invoice.currency)}.`,
+    invoice.dueDate ? `Due: ${invoice.dueDate}` : "",
+    branding.paymentInstructions,
+    branding.bankAccount ? `Bank account: ${branding.bankAccount}` : "",
+    "",
+    "Thanks,",
+    branding.businessName,
+  ].filter((line) => line !== undefined && line !== null) as string[];
+  const plain = bodyLines.filter(Boolean).join("\n");
+  const html =
+    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1a1c1f">` +
+    bodyLines.map((line) => (line === "" ? "<br/>" : `<p style="margin:0 0 8px">${escapeHtml(line)}</p>`)).join("") +
+    `</div>`;
+
+  const emailResult = await emailInvoicePdf(
+    {
+      to,
+      subject,
+      text: plain,
+      html,
+      replyTo: branding.contactEmail || undefined,
+      pdf,
+      filename: pdfFilename(invoice),
+      idempotencyKey: `invoice-send-${id}-${Date.now()}`,
+    },
+    branding,
+  );
+
+  // Advance to "sent" only from draft/sent - never drag a paid/void invoice
+  // backwards just because a copy was re-emailed.
+  await supabase("billing_invoices", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&status=in.(draft,sent)`,
+    body: { status: "sent", sent_at: nowIso(), updated_at: nowIso() },
+    prefer: "return=minimal",
+  });
+
+  return { invoice: await getInvoiceWithItems(accountId, id), emailed: true, emailId: emailResult.id, recipient: to };
+}
+
+async function invoicePdfResponse(accountId: string, id: string) {
+  const invoice = await getInvoiceWithItems(accountId, id);
+  if (!invoice) return json({ error: "not_found", message: "Invoice not found." }, 404);
+  const branding = await resolveInvoiceBranding();
+  const pdf = await renderInvoicePdf(invoice, branding);
+  return new Response(Buffer.from(pdf), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="${pdfFilename(invoice)}"`,
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 // --- Router ------------------------------------------------------------------
 
 export default async function handler(req: Request) {
@@ -932,12 +1538,27 @@ export default async function handler(req: Request) {
 
     if (action === "invoices" && req.method === "GET") return json(await listInvoices(accountId, url));
     if (action === "invoices" && req.method === "POST") return json(await createInvoice(accountId, await parseBody(req)), 201);
+    // Sub-actions (.../send, .../pdf) must be matched before the generic
+    // invoices/:id handlers, which would otherwise treat "id/send" as the id.
+    if (action.startsWith("invoices/") && action.endsWith("/send") && req.method === "POST") {
+      const invoiceId = action.slice("invoices/".length, -"/send".length);
+      return json(await sendInvoice(accountId, invoiceId, await parseBody(req)));
+    }
+    if (action.startsWith("invoices/") && action.endsWith("/pdf") && req.method === "GET") {
+      const invoiceId = action.slice("invoices/".length, -"/pdf".length);
+      return await invoicePdfResponse(accountId, invoiceId);
+    }
     if (action.startsWith("invoices/") && req.method === "GET") {
       const invoice = await getInvoiceWithItems(accountId, action.slice("invoices/".length));
       if (!invoice) return json({ error: "not_found", message: "Invoice not found." }, 404);
       return json({ invoice });
     }
-    if (action.startsWith("invoices/") && (req.method === "PATCH" || req.method === "PUT")) {
+    // PUT edits a draft's contents; PATCH changes only its status.
+    if (action.startsWith("invoices/") && req.method === "PUT") {
+      const invoice = await updateInvoiceDraft(accountId, action.slice("invoices/".length), await parseBody(req));
+      return json({ invoice });
+    }
+    if (action.startsWith("invoices/") && req.method === "PATCH") {
       const invoice = await updateInvoiceStatus(accountId, action.slice("invoices/".length), await parseBody(req));
       return json({ invoice });
     }

@@ -14,8 +14,12 @@ import {
   resolveGoogleAccountId,
   setSettings,
 } from "./_shared/google-provider.mts";
+import { canonicalPhoneKey } from "./_shared/phone.mts";
 
 const sessionCookieName = "clarity_session";
+// Player portal sessions (see booking-core.mts). Player video routes are scoped
+// to the player's own player_id; the admin transfer surface is untouched.
+const playerSessionCookieName = "clarity_player_session";
 const clarityVersion = "1";
 // Netlify buffers synchronous function request bodies with a 6 MB payload limit,
 // so chunks must stay safely below it. 4 MB is also a multiple of Google's
@@ -465,6 +469,49 @@ async function requireAdmin(req: Request) {
     query: `select=id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
   });
   return rows.length > 0;
+}
+
+type PlayerScope = { personId: string; email: string; phone: string };
+
+async function readPlayerScope(req: Request): Promise<PlayerScope | null> {
+  const token = parseCookies(req)[playerSessionCookieName] || "";
+  if (!token) return null;
+  const rows = await supabase("player_sessions", {
+    query: `select=person_id,email,phone&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
+  });
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    personId: cleanString(row.person_id, "", 160),
+    email: cleanString(row.email, "", 180).toLowerCase(),
+    phone: cleanString(row.phone, "", 80),
+  };
+}
+
+function playerVideoBase64(value: string) {
+  try {
+    return Buffer.from(String(value ?? ""), "utf8").toString("base64");
+  } catch {
+    return "";
+  }
+}
+
+// Mirrors playerProfileIdCandidates in booking-core.mts so a session's stored
+// player_id (whatever historical form it took) matches this player.
+function playerVideoIdCandidates(scope: PlayerScope): Set<string> {
+  const ids = new Set<string>();
+  if (scope.personId) ids.add(scope.personId);
+  if (scope.email) {
+    ids.add(scope.email);
+    const encoded = playerVideoBase64(scope.email);
+    if (encoded) {
+      ids.add(`email-${encoded}`);
+      ids.add(`email-${encoded.replace(/=+$/, "")}`);
+    }
+  }
+  const canonicalPhone = canonicalPhoneKey(scope.phone);
+  if (canonicalPhone) ids.add(`phone-${canonicalPhone}`);
+  return ids;
 }
 
 async function readJson(req: Request) {
@@ -2049,6 +2096,48 @@ async function handleImportReceipt(req: Request, accountId: string, savedVideoId
   });
 }
 
+// Player-scoped video routes (/api/video-transfer/player/*). A logged-in player
+// may only list and download videos whose transfer session player_id matches
+// their own identity -- never another player's, and never the admin routes.
+async function handlePlayerVideoRoute(
+  req: Request,
+  scope: PlayerScope,
+  sub: string[],
+  diagnostics: ProviderDiagnostics,
+) {
+  assertClarityCloudServerConfigured(req);
+  const settings = await readSettings();
+  const accountId = resolveGoogleAccountId(settings);
+  const candidates = playerVideoIdCandidates(scope);
+
+  if (req.method === "GET" && sub[0] === "imports") {
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    const provider = googleDriveProviderAdapter(accessToken, settings, diagnostics);
+    const sessions = (await listImportableSessions(accountId)).filter((s) => candidates.has(s.playerId));
+    const transfers = await Promise.all(
+      sessions.map(async (s) => importSummaryFromManifest(s, await readManifestForSession(provider, s))),
+    );
+    return json({ ok: true, transfers });
+  }
+
+  const savedVideoId = cleanString(sub[0], "", 160);
+  if (!savedVideoId) return json({ error: "not_found", message: "Player video route not found." }, 404);
+  const owned = await readTransferSession(accountId, savedVideoId);
+  if (!owned || !candidates.has(owned.playerId)) {
+    return json({ error: "not_found", message: "Video not found for this player." }, 404);
+  }
+
+  if (req.method === "GET" && sub[1] === "download") {
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    return await handleImportDownload(req, accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId);
+  }
+  if (req.method === "GET" && sub[1] === "import") {
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    return await handleImportPackage(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId);
+  }
+  return json({ error: "not_found", message: "Player video route not found." }, 404);
+}
+
 export default async function handler(req: Request) {
   const url = new URL(req.url);
   const parts = url.pathname
@@ -2059,6 +2148,14 @@ export default async function handler(req: Request) {
   const diagnostics: ProviderDiagnostics = {};
 
   try {
+    // Player-scoped routes run before the admin gate and require a player
+    // session instead; the admin gate below is intentionally left untouched.
+    if (parts[0] === "player") {
+      const scope = await readPlayerScope(req);
+      if (!scope) return json({ error: "unauthorized", message: "Player login required." }, 401);
+      return await handlePlayerVideoRoute(req, scope, parts.slice(1), diagnostics);
+    }
+
     if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
     if (req.method === "GET" && parts[0] === "diagnostics") {
       return json(getSafeClarityCloudGoogleRuntimeDiagnostic(req));

@@ -4609,7 +4609,13 @@ function App() {
   const [catalogSaveState, setCatalogSaveState] = useState<"idle" | "saving">("idle");
   const [billingDataLoadState, setBillingDataLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [activeInvoiceId, setActiveInvoiceId] = useState("");
+  // Set when an already-persisted draft is opened from Recent invoices for
+  // editing. editingInvoiceId drives PUT-vs-POST on save; editingInvoiceNumber
+  // is the number to display (instead of the next-number preview) while editing.
+  const [editingInvoiceId, setEditingInvoiceId] = useState("");
+  const [editingInvoiceNumber, setEditingInvoiceNumber] = useState("");
   const [invoiceIssueState, setInvoiceIssueState] = useState<"idle" | "saving">("idle");
+  const [invoiceSendState, setInvoiceSendState] = useState<"idle" | "sending">("idle");
   const [recentInvoices, setRecentInvoices] = useState<BillingInvoiceRecord[]>([]);
   const [revenuePeriod, setRevenuePeriod] = useState<"week" | "month" | "year">("month");
   const [revenueReport, setRevenueReport] = useState<BillingRevenueReport | null>(null);
@@ -5621,7 +5627,7 @@ function App() {
   const invoiceTaxableSubtotal = Math.max(0, invoiceLineSubtotal - invoiceDiscountTotal);
   const invoiceTaxTotal = invoiceTaxableSubtotal * (Math.max(0, Number(invoiceSettings.taxRate) || 0) / 100);
   const invoiceTotal = invoiceTaxableSubtotal + invoiceTaxTotal;
-  const activeInvoiceNumber = confirmedInvoiceNumber || invoiceNumber;
+  const activeInvoiceNumber = confirmedInvoiceNumber || editingInvoiceNumber || invoiceNumber;
   const latestVoidedInvoiceNumber = voidedInvoiceNumbers[voidedInvoiceNumbers.length - 1] || "";
   const invoiceDiscountLabel = invoiceDraft.discountLabel.trim() || "Discount / coupon";
   const invoiceEmailSubject = `${activeInvoiceNumber} from ${coachAccount.businessName}`;
@@ -12886,12 +12892,212 @@ function App() {
     setConfirmedInvoiceNumber("");
     setSentInvoiceNumber("");
     setActiveInvoiceId("");
+    setEditingInvoiceId("");
+    setEditingInvoiceNumber("");
   }
 
   function billingSourceType(source: InvoiceLineSource): "booking" | "product" | "manual" {
     if (source === "booking_snapshot") return "booking";
     if (source === "catalog" || source === "package_sale") return "product";
     return "manual";
+  }
+
+  // Reverse of billingSourceType, for loading a saved invoice back into the editor.
+  function lineSourceFromServer(sourceType: unknown): InvoiceLineSource {
+    if (sourceType === "booking") return "booking_snapshot";
+    if (sourceType === "product") return "catalog";
+    return "manual";
+  }
+
+  // Maps a persisted invoice (GET /api/billing/invoices/:id) back into the
+  // editor's in-progress draft shape so a saved draft can be re-opened and edited.
+  function invoiceRecordToDraft(invoice: {
+    customerName?: string;
+    customerEmail?: string;
+    customerPhone?: string;
+    issueDate?: string;
+    dueDate?: string | null;
+    reference?: string;
+    discountLabel?: string;
+    discountTotal?: number;
+    customerNote?: string;
+    items?: Array<Record<string, unknown>>;
+  }): InvoiceDraft {
+    return {
+      ...emptyInvoiceDraft(invoiceSettings, activeCoachId),
+      payerName: invoice.customerName || "",
+      payerEmail: invoice.customerEmail || "",
+      payerPhone: invoice.customerPhone || "",
+      invoiceDate: invoice.issueDate || dateInputValue(),
+      dueDate: invoice.dueDate || "",
+      reference: invoice.reference || "",
+      discountLabel: invoice.discountLabel || "",
+      discountAmount: Number(invoice.discountTotal) || 0,
+      message: invoice.customerNote || "",
+      lineSearch: "",
+      lines: (invoice.items || []).map((item) => ({
+        id: String(item.id || `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+        source: lineSourceFromServer(item.sourceType),
+        sourceId: item.sourceId ? String(item.sourceId) : undefined,
+        description: String(item.description || ""),
+        quantity: Number(item.quantity) || 0,
+        unitPrice: Number(item.unitPrice) || 0,
+        taxRate: Number(item.taxRate) || 0,
+      })),
+    };
+  }
+
+  // Open an invoice from the Recent invoices list. Drafts open editable (PUT on
+  // save); already-issued invoices open in the confirmed/send state (read + Send/
+  // Download/Mark paid), since their contents are committed.
+  async function openInvoiceForEdit(record: BillingInvoiceRecord) {
+    try {
+      const response = await fetch(`/api/billing/invoices/${encodeURIComponent(record.id)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { invoice?: Record<string, unknown> } | null;
+      if (!response.ok || !data?.invoice) {
+        throw new Error(await readApiFailure(response, "Could not open invoice."));
+      }
+      const invoice = data.invoice as Record<string, unknown>;
+      setInvoiceDraft(invoiceRecordToDraft(invoice));
+      setInvoiceCustomerSearch("");
+      setShowInvoiceLinePicker(false);
+      setActiveInvoiceId(String(invoice.id || record.id));
+      setEditingInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
+      if (invoice.status === "draft") {
+        // Editable: stay in the pre-confirm editing state, tracked as an edit.
+        setEditingInvoiceId(String(invoice.id || record.id));
+        setConfirmedInvoiceNumber("");
+        setSentInvoiceNumber("");
+      } else {
+        // Committed: open in the confirmed state so it can be re-sent/downloaded.
+        setEditingInvoiceId("");
+        setConfirmedInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
+        setSentInvoiceNumber(invoice.status === "void" ? "" : String(invoice.invoiceNumber || record.invoiceNumber));
+      }
+      setBillingSection("new-invoice");
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not open invoice." });
+    }
+  }
+
+  // Save edits to an already-persisted draft (PUT). Unlike issueInvoiceDraft this
+  // never advances the invoice number - the draft keeps the number it was issued.
+  async function saveInvoiceEdits() {
+    if (!editingInvoiceId) return;
+    if (!invoiceDraft.payerName.trim()) {
+      setToast({ message: "Choose or enter a payer before saving." });
+      return;
+    }
+    const billableLines = invoiceDraft.lines.filter((line) => line.description.trim() && Number(line.unitPrice) > 0);
+    if (!billableLines.length) {
+      setToast({ message: "Add at least one invoice line before saving." });
+      return;
+    }
+    setInvoiceIssueState("saving");
+    try {
+      const response = await fetch(`/api/billing/invoices/${encodeURIComponent(editingInvoiceId)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          customerName: invoiceDraft.payerName.trim(),
+          customerEmail: invoiceDraft.payerEmail.trim(),
+          customerPhone: invoiceDraft.payerPhone.trim(),
+          issueDate: invoiceDraft.invoiceDate,
+          dueDate: invoiceDraft.dueDate,
+          currency: invoiceSettings.currency,
+          reference: invoiceDraft.reference,
+          customerNote: invoiceDraft.message,
+          discountLabel: invoiceDraft.discountLabel,
+          discountAmount: invoiceDraft.discountAmount,
+          items: billableLines.map((line) => ({
+            sourceType: billingSourceType(line.source),
+            sourceId: line.sourceId,
+            description: line.description,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            taxRate: line.taxRate,
+          })),
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
+      if (!response.ok) {
+        if (data?.error === "BOOKING_ALREADY_INVOICED") {
+          void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+        }
+        throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
+      }
+      // Move into the confirmed state so Send / Download / Mark paid become available.
+      setConfirmedInvoiceNumber(editingInvoiceNumber);
+      setSentInvoiceNumber("");
+      setToast({ message: `${editingInvoiceNumber} updated.` });
+      void fetchRecentInvoices();
+      void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save invoice." });
+    } finally {
+      setInvoiceIssueState("idle");
+    }
+  }
+
+  // Email the invoice as a PDF via the server (Resend) and mark it sent.
+  async function sendActiveInvoice() {
+    if (!activeInvoiceId) {
+      setToast({ message: "Save the invoice before sending." });
+      return;
+    }
+    if (!invoiceDraft.payerEmail.trim()) {
+      setToast({ message: "Add a customer email before sending." });
+      return;
+    }
+    const number = confirmedInvoiceNumber || editingInvoiceNumber || activeInvoiceNumber;
+    setInvoiceSendState("sending");
+    try {
+      const response = await fetch(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}/send`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({}),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { recipient?: string; message?: string } | null;
+      if (!response.ok) {
+        throw new Error(data?.message || (await readApiFailure(response, "Could not send invoice.")));
+      }
+      setSentInvoiceNumber(confirmedInvoiceNumber || number);
+      setToast({ message: `${number} emailed${data?.recipient ? ` to ${data.recipient}` : ""}.` });
+      void fetchRecentInvoices();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not send invoice." });
+    } finally {
+      setInvoiceSendState("idle");
+    }
+  }
+
+  // Download the server-rendered PDF (opens the attachment endpoint in a new tab;
+  // the admin session cookie rides along on the same-origin request).
+  function downloadInvoicePdf() {
+    if (!activeInvoiceId) {
+      setToast({ message: "Save the invoice before downloading a PDF." });
+      return;
+    }
+    window.open(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}/pdf`, "_blank", "noopener");
   }
 
   async function issueInvoiceDraft() {
@@ -12983,14 +13189,6 @@ function App() {
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : `Could not mark invoice ${status}.` });
       return false;
-    }
-  }
-
-  async function markConfirmedInvoiceSent() {
-    if (!confirmedInvoiceNumber) return;
-    if (await patchActiveInvoiceStatus("sent")) {
-      setSentInvoiceNumber(confirmedInvoiceNumber);
-      setToast({ message: `${confirmedInvoiceNumber} marked sent.` });
     }
   }
 
@@ -19103,7 +19301,18 @@ function App() {
                         {recentInvoices.map((invoiceRecord) => (
                           <tr
                             key={invoiceRecord.id}
-                            className={invoiceSettings.unpaidLoudness === 3 && overdueInvoiceIds.has(invoiceRecord.id) ? "overdue-row" : ""}
+                            className={`clickable-invoice-row${invoiceSettings.unpaidLoudness === 3 && overdueInvoiceIds.has(invoiceRecord.id) ? " overdue-row" : ""}`}
+                            style={{ cursor: "pointer" }}
+                            role="button"
+                            tabIndex={0}
+                            title={invoiceRecord.status === "draft" ? "Open draft to edit" : "Open invoice to send or download"}
+                            onClick={() => openInvoiceForEdit(invoiceRecord)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                void openInvoiceForEdit(invoiceRecord);
+                              }
+                            }}
                           >
                             <td>{invoiceRecord.invoiceNumber}</td>
                             <td>{invoiceRecord.customerName}</td>
@@ -19499,22 +19708,22 @@ function App() {
                     </button>
                     {confirmedInvoiceNumber && (
                       <>
-                        <button
-                          className="outline-button"
-                          onClick={() => setToast({ message: "PDF download hooks into this invoice preview next." })}
-                          type="button"
-                        >
+                        <button className="outline-button" onClick={downloadInvoicePdf} type="button">
                           <Download size={16} />
                           Download PDF
                         </button>
                         <button
                           className="outline-button"
-                          disabled={sentInvoiceNumber === confirmedInvoiceNumber}
-                          onClick={markConfirmedInvoiceSent}
+                          disabled={invoiceSendState === "sending" || sentInvoiceNumber === confirmedInvoiceNumber}
+                          onClick={sendActiveInvoice}
                           type="button"
                         >
                           <Send size={16} />
-                          {sentInvoiceNumber === confirmedInvoiceNumber ? "Sent" : "Send Email"}
+                          {invoiceSendState === "sending"
+                            ? "Sending..."
+                            : sentInvoiceNumber === confirmedInvoiceNumber
+                              ? "Sent"
+                              : "Email PDF"}
                         </button>
                         {sentInvoiceNumber === confirmedInvoiceNumber && (
                           <button className="outline-button" onClick={markActiveInvoicePaid} type="button">
@@ -19530,10 +19739,16 @@ function App() {
                     <button
                       className="primary-button"
                       disabled={Boolean(confirmedInvoiceNumber) || invoiceIssueState === "saving"}
-                      onClick={issueInvoiceDraft}
+                      onClick={editingInvoiceId ? saveInvoiceEdits : issueInvoiceDraft}
                       type="button"
                     >
-                      {confirmedInvoiceNumber ? "Invoice Confirmed" : invoiceIssueState === "saving" ? "Saving..." : "Confirm Invoice"}
+                      {confirmedInvoiceNumber
+                        ? "Invoice Confirmed"
+                        : invoiceIssueState === "saving"
+                          ? "Saving..."
+                          : editingInvoiceId
+                            ? "Update Draft"
+                            : "Confirm Invoice"}
                     </button>
                   </div>
                 </article>

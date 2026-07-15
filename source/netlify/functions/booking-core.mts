@@ -1504,6 +1504,35 @@ function sessionTokenFromRequest(req) {
   return parseCookies(req)[sessionCookieName] || "";
 }
 
+// Player portal sessions are a separate space from the admin session above --
+// a distinct cookie name so a coach who is also a player on the same browser
+// can hold both without one masquerading as the other. Same HttpOnly/SameSite
+// posture as the admin cookie.
+const playerSessionCookieName = "clarity_player_session";
+const playerSessionDays = 30;
+
+function playerCookieHeader(token, req, maxAgeSeconds) {
+  const secure = new URL(req.url).protocol === "https:";
+  return [
+    `${playerSessionCookieName}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${maxAgeSeconds}`,
+    secure ? "Secure" : "",
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
+function clearPlayerCookieHeader() {
+  return `${playerSessionCookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+}
+
+function playerSessionTokenFromRequest(req) {
+  return parseCookies(req)[playerSessionCookieName] || "";
+}
+
 function db() {
   return getDatabase();
 }
@@ -1914,6 +1943,36 @@ async function ensureNotificationHistoryTable() {
       received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+}
+
+// Self-creating like the notification tables above -- the player portal is
+// additive, so its session table is provisioned on first use rather than
+// requiring a separate production migration step. A repo migration file exists
+// alongside it for the schema record (netlify/database/migrations).
+let playerSessionsTableReady = false;
+async function ensurePlayerSessionsTable() {
+  if (playerSessionsTableReady) return;
+  await db().sql`
+    CREATE TABLE IF NOT EXISTS player_sessions (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT UNIQUE NOT NULL,
+      person_id TEXT,
+      email TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      account_id TEXT,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  await db().sql`
+    CREATE INDEX IF NOT EXISTS idx_player_sessions_token
+    ON player_sessions (token_hash)
+  `;
+  await db().sql`
+    CREATE INDEX IF NOT EXISTS idx_player_sessions_expires
+    ON player_sessions (expires_at)
+  `;
+  playerSessionsTableReady = true;
 }
 
 async function backfillLegacyPeopleAccountIds(accountId) {
@@ -3488,7 +3547,14 @@ async function writeItems(items, options = {}) {
     options.clearItems !== true &&
     options.replaceItems !== true
   ) {
-    return rowToItem(returnedRows[0]);
+    // The Supabase REST adapter ignores `INSERT ... RETURNING` and always
+    // resolves with no rows, so returnedRows can be empty even though the write
+    // committed. Fall back to the item we just wrote instead of calling
+    // rowToItem(undefined), which threw *after* the commit -- surfacing to the
+    // client as a failed save that then rolled the optimistic edit back (a
+    // dragged lesson visibly jumped to its original slot, and the reschedule
+    // notification that runs after this write never fired).
+    return returnedRows[0] ? rowToItem(returnedRows[0]) : cleanItems[0];
   }
   return readItems();
 }
@@ -5943,6 +6009,165 @@ async function requireAdmin(req) {
   return session;
 }
 
+// --- Player portal sessions (email+phone identity, mirroring the reschedule
+// trust model) -----------------------------------------------------------
+
+async function createPlayerSession({ personId, email, phone, accountId }) {
+  await ensurePlayerSessionsTable();
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = hashToken(token);
+  const expiresAt = new Date(Date.now() + playerSessionDays * 24 * 60 * 60 * 1000).toISOString();
+  await db().sql`
+    INSERT INTO player_sessions (id, token_hash, person_id, email, phone, account_id, expires_at, created_at)
+    VALUES (${randomUUID()}, ${tokenHash}, ${personId || null}, ${email}, ${phone}, ${accountId || null}, ${expiresAt}, NOW())
+  `;
+  return { token, expiresAt };
+}
+
+async function readPlayerSession(token) {
+  if (!token) return null;
+  await ensurePlayerSessionsTable();
+  const rows = await db().sql`
+    SELECT person_id, email, phone, account_id, expires_at
+    FROM player_sessions
+    WHERE token_hash = ${hashToken(token)}
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  if (new Date(row.expires_at).getTime() <= Date.now()) {
+    await destroyPlayerSession(token);
+    return null;
+  }
+  return {
+    personId: row.person_id || "",
+    email: row.email || "",
+    phone: row.phone || "",
+    accountId: row.account_id || "",
+    expiresAt: row.expires_at,
+  };
+}
+
+async function destroyPlayerSession(token) {
+  if (!token) return;
+  await ensurePlayerSessionsTable();
+  await db().sql`DELETE FROM player_sessions WHERE token_hash = ${hashToken(token)}`;
+}
+
+// Verifies a would-be player by the same bar public reschedule already uses:
+// at least one appointment on file matches the given email AND phone. Returns
+// the resolved identity (person id + display name) or null if unverified.
+async function verifyPlayerContact(rawEmail, rawPhone) {
+  const email = cleanString(rawEmail, "", 180).toLowerCase();
+  const normalizedEmail = normalizeRescheduleContact(email);
+  const normalizedPhone = normalizeRescheduleContact(rawPhone);
+  if (!email || !normalizedEmail || !normalizedPhone) return null;
+
+  const state = await readPublicCatalogState();
+  const workspaceAccount = publicWorkspaceAccount(state);
+  const itemRead = await readPublicAppointmentsForContact({
+    accountId: workspaceAccount.id,
+    email,
+    phone: rawPhone,
+  });
+  if (!itemRead.items.length) return null;
+
+  const appointment = itemRead.items[0];
+  const knownPeople = await readPeople(workspaceAccount.id);
+  const person = compatiblePersonMatch(
+    {
+      id: appointment.personId || "",
+      name: appointment.client || appointment.title || "",
+      email,
+      phone: rawPhone,
+    },
+    knownPeople,
+  );
+  return {
+    accountId: workspaceAccount.id,
+    personId: person?.id || appointment.personId || "",
+    email,
+    phone: normalizedPhone,
+    name: person?.name || appointment.client || appointment.title || "",
+  };
+}
+
+function playerBase64(value) {
+  try {
+    return Buffer.from(String(value ?? ""), "utf8").toString("base64");
+  } catch {
+    return "";
+  }
+}
+
+// Mirrors the client's profileIdsForClient (src/App.tsx): lesson notes are
+// keyed by whatever id form a note was saved under -- a resolved people.id
+// (which for legacy rows is itself often `email-<base64>`), the raw email, an
+// `email-<base64>` derivation, or `phone-<canonical>`. Building the same
+// candidate set here lets the player see every note that belongs to them
+// regardless of which historical form its playerId took. Both padded and
+// unpadded base64 are included because legacy people ids stored it unpadded.
+function playerProfileIdCandidates({ personId, email, phone }) {
+  const ids = new Set();
+  const cleanId = cleanString(personId, "", 160).trim();
+  const cleanEmailValue = cleanString(email, "", 180).trim().toLowerCase();
+  const cleanPhone = normalizedPersonPhone(phone);
+  if (cleanId) ids.add(cleanId);
+  if (cleanEmailValue) {
+    ids.add(cleanEmailValue);
+    const encoded = playerBase64(cleanEmailValue);
+    if (encoded) {
+      ids.add(`email-${encoded}`);
+      ids.add(`email-${encoded.replace(/=+$/, "")}`);
+    }
+  }
+  if (cleanPhone) ids.add(`phone-${cleanPhone}`);
+  return ids;
+}
+
+async function readPlayerProfile(session) {
+  const state = await readPublicCatalogState();
+  const workspaceAccount = publicWorkspaceAccount(state);
+  const accountId = session.accountId || workspaceAccount.id;
+  const serviceList = (state.services || []).filter((service) =>
+    recordBelongsToAccount(service, workspaceAccount.id),
+  );
+
+  const itemRead = await readPublicAppointmentsForContact({
+    accountId,
+    email: session.email,
+    phone: session.phone,
+  });
+  const bookings = itemRead.items
+    .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start)
+    .map((item) => publicRescheduleItem(item, serviceList));
+
+  const candidates = playerProfileIdCandidates(session);
+  const notes = (await readLessonNotes(accountId))
+    .filter((note) => note.playerId && candidates.has(note.playerId))
+    .map((note) => ({
+      id: note.id,
+      title: note.title,
+      body: note.body,
+      playerName: note.playerName,
+      createdAt: note.createdAt,
+      updatedAt: note.updatedAt,
+    }));
+
+  // Surface display name + original-formatted phone (from the matched
+  // appointment) so the client can pre-fill the booking form on hand-off
+  // without ever re-asking the player for their details.
+  const primary = itemRead.items[0];
+  return {
+    player: {
+      email: session.email,
+      name: primary?.client || primary?.title || "",
+      phone: primary?.phone || session.phone || "",
+    },
+    bookings,
+    notes,
+  };
+}
+
 async function readBackendSettings() {
   return readCalendarState();
 }
@@ -7696,6 +7921,51 @@ export async function handleBookingApiRoute(
 
     if (req.method === "GET" && pathname === "/api/database-health") {
       return json(await runDatabaseHealth());
+    }
+
+    // --- Player portal (public, pre-gate). Each route does its own player-
+    // session check; the admin gate below is intentionally left untouched so
+    // the player surface can never widen admin access. ---------------------
+    if (req.method === "POST" && pathname === "/api/player/login") {
+      const body = await parseBody(req);
+      const verified = await verifyPlayerContact(body?.email || "", body?.phone || "");
+      if (!verified) {
+        return json(
+          {
+            error: "invalid_login",
+            message: "We couldn't find a booking with that email and phone. Check they match your booking confirmation.",
+          },
+          401,
+        );
+      }
+      const session = await createPlayerSession(verified);
+      return json(
+        { authenticated: true, player: { name: verified.name, email: verified.email } },
+        200,
+        { "Set-Cookie": playerCookieHeader(session.token, req, playerSessionDays * 24 * 60 * 60) },
+      );
+    }
+
+    if (req.method === "GET" && pathname === "/api/player/session") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      return json(
+        session
+          ? { authenticated: true, player: { email: session.email } }
+          : { authenticated: false },
+      );
+    }
+
+    if (req.method === "POST" && pathname === "/api/player/logout") {
+      await destroyPlayerSession(playerSessionTokenFromRequest(req));
+      return json({ authenticated: false }, 200, { "Set-Cookie": clearPlayerCookieHeader() });
+    }
+
+    if (req.method === "GET" && pathname === "/api/player/profile") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      return json(await readPlayerProfile(session));
     }
 
     if (pathname.startsWith("/api/")) {
