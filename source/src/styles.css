@@ -7448,7 +7448,9 @@ button {
 }
 
 .invoice-status-pill {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 11px;
@@ -7456,6 +7458,16 @@ button {
   text-transform: capitalize;
   background: var(--panel-soft, #f2f2f2);
   color: var(--text);
+}
+
+.invoice-status-published {
+  background: #eef3fb;
+  color: #2b5cb8;
+}
+
+.invoice-status-sent {
+  background: #eaf3ec;
+  color: #1c7a49;
 }
 
 .invoice-status-paid {

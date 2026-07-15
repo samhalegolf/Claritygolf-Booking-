@@ -697,7 +697,9 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
     customer_note: cleanString(body?.customerNote, "", 2000) || null,
     internal_note: cleanString(body?.internalNote, "", 2000) || null,
     reference: cleanString(body?.reference, "", 160) || null,
-    sent_at: status === "sent" ? nowIso() : null,
+    // sent_at means "actually emailed" - set only by the send endpoint. Status
+    // "sent" here means published/committed, not necessarily emailed.
+    sent_at: null,
     created_at: nowIso(),
     updated_at: nowIso(),
   };
@@ -822,7 +824,8 @@ async function updateInvoiceStatus(accountId: string, id: string, body: Record<s
     throw Object.assign(new Error("Invalid invoice status."), { status: 400 });
   }
   const patch: Record<string, unknown> = { status: nextStatus, updated_at: nowIso() };
-  if (nextStatus === "sent") patch.sent_at = nowIso();
+  // Publishing (status -> sent) does NOT set sent_at; only the send endpoint
+  // marks an invoice as emailed.
   if (nextStatus === "paid") {
     patch.paid_at = nowIso();
     if (body?.amountPaid !== undefined) patch.amount_paid = round2(cleanNumber(body.amountPaid, 0, { min: 0 }));

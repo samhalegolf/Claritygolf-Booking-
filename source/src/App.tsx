@@ -1378,6 +1378,9 @@ type BillingInvoiceRecord = {
   currency: string;
   total: number;
   amountPaid: number;
+  // Set once the invoice has actually been emailed. status "sent" without this =
+  // Published (committed but not emailed).
+  sentAt?: string | null;
 };
 
 // Shape returned by GET /api/billing/reports/revenue.
@@ -4589,9 +4592,16 @@ function App() {
   );
   const [invoiceCustomerSearch, setInvoiceCustomerSearch] = useState("");
   const [showInvoiceLinePicker, setShowInvoiceLinePicker] = useState(false);
-  const [confirmedInvoiceNumber, setConfirmedInvoiceNumber] = useState("");
-  const [sentInvoiceNumber, setSentInvoiceNumber] = useState("");
-  const [voidedInvoiceNumbers, setVoidedInvoiceNumbers] = useState<string[]>([]);
+  // Invoice editor lifecycle. invoiceEditing = fields editable (new invoices start
+  // editable, saved ones open read-only). openedInvoiceStatus/SentAt describe the
+  // saved invoice currently open (draft | sent | paid | overdue | void; sentAt set
+  // once emailed - status "sent" without it = Published). reviseSourceId is set
+  // when editing a published invoice: saving issues a fresh-numbered invoice and
+  // voids this source id.
+  const [invoiceEditing, setInvoiceEditing] = useState(true);
+  const [openedInvoiceStatus, setOpenedInvoiceStatus] = useState<"" | BillingInvoiceStatus>("");
+  const [openedInvoiceSentAt, setOpenedInvoiceSentAt] = useState("");
+  const [reviseSourceId, setReviseSourceId] = useState("");
 
   useEffect(() => {
     if (serviceEditor.lessonFormat !== "group") {
@@ -4634,10 +4644,8 @@ function App() {
   const [catalogSaveState, setCatalogSaveState] = useState<"idle" | "saving">("idle");
   const [billingDataLoadState, setBillingDataLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [activeInvoiceId, setActiveInvoiceId] = useState("");
-  // Set when an already-persisted draft is opened from Recent invoices for
-  // editing. editingInvoiceId drives PUT-vs-POST on save; editingInvoiceNumber
-  // is the number to display (instead of the next-number preview) while editing.
-  const [editingInvoiceId, setEditingInvoiceId] = useState("");
+  // The number of the invoice currently open/saved (blank for a brand-new one,
+  // where the next-number preview is shown instead).
   const [editingInvoiceNumber, setEditingInvoiceNumber] = useState("");
   const [invoiceIssueState, setInvoiceIssueState] = useState<"idle" | "saving">("idle");
   const [invoiceSendState, setInvoiceSendState] = useState<"idle" | "sending">("idle");
@@ -5715,11 +5723,27 @@ function App() {
     ? invoiceTaxableSubtotal * (invoiceTaxRatePct / (100 + invoiceTaxRatePct))
     : invoiceTaxableSubtotal * (invoiceTaxRatePct / 100);
   const invoiceTotal = invoiceDraft.taxInclusive ? invoiceTaxableSubtotal : invoiceTaxableSubtotal + invoiceTaxTotal;
-  const activeInvoiceNumber = confirmedInvoiceNumber || editingInvoiceNumber || invoiceNumber;
-  // Once an invoice is confirmed/sent it's committed - the whole card reads as a
-  // plain invoice (no editable inputs), per the "locked in = plain invoice" rule.
-  const invoiceLocked = confirmedInvoiceNumber !== "";
-  const latestVoidedInvoiceNumber = voidedInvoiceNumbers[voidedInvoiceNumbers.length - 1] || "";
+  const activeInvoiceNumber = editingInvoiceNumber || invoiceNumber;
+  // Fields render plain (read-only) whenever we're not actively editing - i.e.
+  // viewing/previewing a saved invoice.
+  const invoiceLocked = !invoiceEditing;
+  const isNewInvoice = !activeInvoiceId;
+  const isRevisingInvoice = reviseSourceId !== "";
+  // Editing an existing draft in place (PUT) vs creating a new invoice (POST).
+  const editingExistingDraft = Boolean(activeInvoiceId) && openedInvoiceStatus === "draft" && !isRevisingInvoice;
+  // Label for the invoice's current lifecycle state.
+  const openedInvoiceStateLabel =
+    openedInvoiceStatus === "sent"
+      ? openedInvoiceSentAt
+        ? "Sent"
+        : "Published"
+      : openedInvoiceStatus === "paid"
+        ? "Paid"
+        : openedInvoiceStatus === "overdue"
+          ? "Overdue"
+          : openedInvoiceStatus === "void"
+            ? "Void"
+            : "Draft";
   const invoiceDiscountLabel = invoiceDraft.discountLabel.trim() || "Discount / coupon";
   const discountSet = invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim() !== "";
   const invoiceEmailSubject = `${activeInvoiceNumber} from ${coachAccount.businessName}`;
@@ -12261,27 +12285,10 @@ function App() {
     void updateAppointmentStatus(appointment.id, "cancelled");
   }
 
-  function markInvoiceDraftDirty() {
-    if (confirmedInvoiceNumber && sentInvoiceNumber === confirmedInvoiceNumber) {
-      const voidedNumber = confirmedInvoiceNumber;
-      const voidedInvoiceId = activeInvoiceId;
-      setVoidedInvoiceNumbers((current) => (current.includes(voidedNumber) ? current : [...current, voidedNumber]));
-      setSentInvoiceNumber("");
-      setConfirmedInvoiceNumber("");
-      setActiveInvoiceId("");
-      setToast({ message: `${voidedNumber} voided. Edits will use ${invoiceNumber}.` });
-      if (voidedInvoiceId) {
-        fetch(`/api/billing/invoices/${encodeURIComponent(voidedInvoiceId)}`, {
-          method: "PATCH",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "void" }),
-        })
-          .then(() => fetchRecentInvoices())
-          .catch(() => {});
-      }
-    }
-  }
+  // Editing a committed invoice is now an explicit action (Edit -> revise, which
+  // issues a fresh number and voids the original on save), so field edits no
+  // longer trigger an implicit void.
+  function markInvoiceDraftDirty() {}
 
   function updateInvoiceDraft<K extends keyof InvoiceDraft>(field: K, value: InvoiceDraft[K]) {
     if (field !== "lineSearch") markInvoiceDraftDirty();
@@ -13044,15 +13051,17 @@ function App() {
     setPullRangeEditing(false);
   }
 
+  // Start a fresh, editable invoice.
   function resetInvoiceDraft() {
     setInvoiceDraft(emptyInvoiceDraft(invoiceSettings, activeCoachId));
     setInvoiceCustomerSearch("");
     setShowInvoiceLinePicker(false);
-    setConfirmedInvoiceNumber("");
-    setSentInvoiceNumber("");
     setActiveInvoiceId("");
-    setEditingInvoiceId("");
     setEditingInvoiceNumber("");
+    setOpenedInvoiceStatus("");
+    setOpenedInvoiceSentAt("");
+    setReviseSourceId("");
+    setInvoiceEditing(true);
     setSelectedDiscountPresetId("");
     setDiscountEditing(false);
     setDatesEditing(false);
@@ -13136,82 +13145,166 @@ function App() {
       setDiscountEditing(false);
       setDatesEditing(false);
       setNewInvoiceCustomer(null);
+      setReviseSourceId("");
       setActiveInvoiceId(String(invoice.id || record.id));
       setEditingInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
-      if (invoice.status === "draft") {
-        // Editable: stay in the pre-confirm editing state, tracked as an edit.
-        setEditingInvoiceId(String(invoice.id || record.id));
-        setConfirmedInvoiceNumber("");
-        setSentInvoiceNumber("");
-      } else {
-        // Committed: open in the confirmed state so it can be re-sent/downloaded.
-        setEditingInvoiceId("");
-        setConfirmedInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
-        setSentInvoiceNumber(invoice.status === "void" ? "" : String(invoice.invoiceNumber || record.invoiceNumber));
-      }
+      setOpenedInvoiceStatus((invoice.status as BillingInvoiceStatus) || "draft");
+      setOpenedInvoiceSentAt(typeof invoice.sentAt === "string" ? invoice.sentAt : "");
+      // Open read-only (a view for drafts, a preview for committed invoices); the
+      // Edit button unlocks it.
+      setInvoiceEditing(false);
       setBillingSection("new-invoice");
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Could not open invoice." });
     }
   }
 
-  // Save edits to an already-persisted draft (PUT). Unlike issueInvoiceDraft this
-  // never advances the invoice number - the draft keeps the number it was issued.
-  async function saveInvoiceEdits() {
-    if (!editingInvoiceId) return;
+  // Shared request body for create/update from the current draft.
+  function invoiceApiBody() {
+    const billableLines = invoiceDraft.lines.filter((line) => line.description.trim() && Number(line.unitPrice) > 0);
+    return {
+      hasLines: billableLines.length > 0,
+      body: {
+        customerName: invoiceDraft.payerName.trim(),
+        customerEmail: invoiceDraft.payerEmail.trim(),
+        customerPhone: invoiceDraft.payerPhone.trim(),
+        issueDate: invoiceDraft.invoiceDate,
+        dueDate: invoiceDraft.dueDate,
+        currency: invoiceSettings.currency,
+        reference: invoiceDraft.reference,
+        customerNote: invoiceDraft.message,
+        discountLabel: invoiceDraft.discountLabel,
+        discountAmount: invoiceDraft.discountAmount,
+        taxInclusive: invoiceDraft.taxInclusive,
+        items: billableLines.map((line) => ({
+          sourceType: billingSourceType(line.source),
+          sourceId: line.sourceId,
+          description: line.description,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          taxRate: line.taxRate,
+        })),
+      },
+    };
+  }
+
+  async function patchInvoiceStatus(id: string, status: BillingInvoiceStatus, extra: Record<string, unknown> = {}) {
+    const response = await fetch(`/api/billing/invoices/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ status, ...extra }),
+    });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      throw new Error("Admin login required");
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, `Could not mark invoice ${status}.`));
+  }
+
+  async function sendInvoiceById(id: string) {
+    const response = await fetch(`/api/billing/invoices/${encodeURIComponent(id)}/send`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({}),
+    });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      throw new Error("Admin login required");
+    }
+    const data = (await response.json().catch(() => null)) as { recipient?: string; message?: string } | null;
+    if (!response.ok) throw new Error(data?.message || (await readApiFailure(response, "Could not send invoice.")));
+    return data?.recipient || "";
+  }
+
+  // Save the current invoice. "draft" keeps it a draft; "publish" commits it
+  // (status sent, not emailed); "publish-send" also emails the PDF. An existing
+  // draft is updated in place; a new invoice or a revision creates a fresh one
+  // (and, when revising a committed invoice, voids the original).
+  async function commitInvoice(mode: "draft" | "publish" | "publish-send") {
     if (!invoiceDraft.payerName.trim()) {
-      setToast({ message: "Choose or enter a payer before saving." });
+      setToast({ message: "Choose or enter a payer first." });
       return;
     }
-    const billableLines = invoiceDraft.lines.filter((line) => line.description.trim() && Number(line.unitPrice) > 0);
-    if (!billableLines.length) {
-      setToast({ message: "Add at least one invoice line before saving." });
+    const { hasLines, body } = invoiceApiBody();
+    if (!hasLines) {
+      setToast({ message: "Add at least one invoice line first." });
+      return;
+    }
+    if (mode === "publish-send" && !invoiceDraft.payerEmail.trim()) {
+      setToast({ message: "Add a customer email to send the invoice." });
       return;
     }
     setInvoiceIssueState("saving");
     try {
-      const response = await fetch(`/api/billing/invoices/${encodeURIComponent(editingInvoiceId)}`, {
-        method: "PUT",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          customerName: invoiceDraft.payerName.trim(),
-          customerEmail: invoiceDraft.payerEmail.trim(),
-          customerPhone: invoiceDraft.payerPhone.trim(),
-          issueDate: invoiceDraft.invoiceDate,
-          dueDate: invoiceDraft.dueDate,
-          currency: invoiceSettings.currency,
-          reference: invoiceDraft.reference,
-          customerNote: invoiceDraft.message,
-          discountLabel: invoiceDraft.discountLabel,
-          discountAmount: invoiceDraft.discountAmount,
-          taxInclusive: invoiceDraft.taxInclusive,
-          items: billableLines.map((line) => ({
-            sourceType: billingSourceType(line.source),
-            sourceId: line.sourceId,
-            description: line.description,
-            quantity: line.quantity,
-            unitPrice: line.unitPrice,
-            taxRate: line.taxRate,
-          })),
-        }),
-      });
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        throw new Error("Admin login required");
-      }
-      const data = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
-      if (!response.ok) {
-        if (data?.error === "BOOKING_ALREADY_INVOICED") {
-          void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+      let id = activeInvoiceId;
+      let number = editingInvoiceNumber || invoiceNumber;
+      if (editingExistingDraft) {
+        const response = await fetch(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}`, {
+          method: "PUT",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify(body),
+        });
+        if (response.status === 401) {
+          setAuthStatus("guest");
+          throw new Error("Admin login required");
         }
-        throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
+        const data = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
+        if (!response.ok) {
+          if (data?.error === "BOOKING_ALREADY_INVOICED") void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+          throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
+        }
+      } else {
+        number = invoiceNumber;
+        const response = await fetch("/api/billing/invoices", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ invoiceNumber: number, status: "draft", ...body }),
+        });
+        if (response.status === 401) {
+          setAuthStatus("guest");
+          throw new Error("Admin login required");
+        }
+        const data = (await response.json().catch(() => null)) as { id?: string; error?: string; message?: string } | null;
+        if (!response.ok) {
+          if (data?.error === "BOOKING_ALREADY_INVOICED") void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+          throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
+        }
+        id = data?.id || "";
+        updateInvoiceSettings("nextNumber", invoiceSettings.nextNumber + 1);
+        if (reviseSourceId) await patchInvoiceStatus(reviseSourceId, "void").catch(() => {});
       }
-      // Move into the confirmed state so Send / Download / Mark paid become available.
-      setConfirmedInvoiceNumber(editingInvoiceNumber);
-      setSentInvoiceNumber("");
-      setToast({ message: `${editingInvoiceNumber} updated.` });
+      if (!id) throw new Error("Could not save invoice.");
+
+      if (mode !== "draft") await patchInvoiceStatus(id, "sent");
+      let sentAt = "";
+      let recipient = "";
+      if (mode === "publish-send") {
+        recipient = await sendInvoiceById(id);
+        sentAt = new Date().toISOString();
+      }
+
+      setActiveInvoiceId(id);
+      setEditingInvoiceNumber(number);
+      setOpenedInvoiceStatus(mode === "draft" ? "draft" : "sent");
+      setOpenedInvoiceSentAt(sentAt);
+      setReviseSourceId("");
+      setInvoiceEditing(false);
+      setToast({
+        message:
+          mode === "draft"
+            ? `${number} saved as a draft.`
+            : mode === "publish"
+              ? `${number} published.`
+              : `${number} published and emailed${recipient ? ` to ${recipient}` : ""}.`,
+      });
       void fetchRecentInvoices();
       void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
     } catch (error) {
@@ -13221,8 +13314,24 @@ function App() {
     }
   }
 
-  // Email the invoice as a PDF via the server (Resend) and mark it sent.
-  async function sendActiveInvoice() {
+  // View -> edit. A draft edits in place; a committed invoice is revised: its
+  // content loads into a fresh-numbered invoice and the original is voided on save.
+  function editOpenedInvoice() {
+    if (openedInvoiceStatus === "draft") {
+      setInvoiceEditing(true);
+      return;
+    }
+    setReviseSourceId(activeInvoiceId);
+    setActiveInvoiceId("");
+    setEditingInvoiceNumber(invoiceNumber);
+    setOpenedInvoiceStatus("");
+    setOpenedInvoiceSentAt("");
+    setInvoiceEditing(true);
+    setToast({ message: `Editing as a new invoice (${invoiceNumber}); the original is voided when you save.` });
+  }
+
+  // Email a committed invoice's PDF from the preview.
+  async function sendOpenedInvoice() {
     if (!activeInvoiceId) {
       setToast({ message: "Save the invoice before sending." });
       return;
@@ -13231,26 +13340,12 @@ function App() {
       setToast({ message: "Add a customer email before sending." });
       return;
     }
-    const number = confirmedInvoiceNumber || editingInvoiceNumber || activeInvoiceNumber;
     setInvoiceSendState("sending");
     try {
-      const response = await fetch(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}/send`, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({}),
-      });
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        throw new Error("Admin login required");
-      }
-      const data = (await response.json().catch(() => null)) as { recipient?: string; message?: string } | null;
-      if (!response.ok) {
-        throw new Error(data?.message || (await readApiFailure(response, "Could not send invoice.")));
-      }
-      setSentInvoiceNumber(confirmedInvoiceNumber || number);
-      setToast({ message: `${number} emailed${data?.recipient ? ` to ${data.recipient}` : ""}.` });
+      const recipient = await sendInvoiceById(activeInvoiceId);
+      setOpenedInvoiceStatus("sent");
+      setOpenedInvoiceSentAt(new Date().toISOString());
+      setToast({ message: `${activeInvoiceNumber} emailed${recipient ? ` to ${recipient}` : ""}.` });
       void fetchRecentInvoices();
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Could not send invoice." });
@@ -13269,103 +13364,15 @@ function App() {
     window.open(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}/pdf`, "_blank", "noopener");
   }
 
-  async function issueInvoiceDraft() {
-    if (!invoiceDraft.payerName.trim()) {
-      setToast({ message: "Choose or enter a payer before issuing." });
-      return;
-    }
-    const billableLines = invoiceDraft.lines.filter((line) => line.description.trim() && Number(line.unitPrice) > 0);
-    if (!billableLines.length) {
-      setToast({ message: "Add at least one invoice line before issuing." });
-      return;
-    }
-    const issuedNumber = invoiceNumber;
-    setInvoiceIssueState("saving");
-    try {
-      const response = await fetch("/api/billing/invoices", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({
-          invoiceNumber: issuedNumber,
-          status: "draft",
-          customerName: invoiceDraft.payerName.trim(),
-          customerEmail: invoiceDraft.payerEmail.trim(),
-          customerPhone: invoiceDraft.payerPhone.trim(),
-          issueDate: invoiceDraft.invoiceDate,
-          dueDate: invoiceDraft.dueDate,
-          currency: invoiceSettings.currency,
-          reference: invoiceDraft.reference,
-          customerNote: invoiceDraft.message,
-          discountLabel: invoiceDraft.discountLabel,
-          discountAmount: invoiceDraft.discountAmount,
-          taxInclusive: invoiceDraft.taxInclusive,
-          items: billableLines.map((line) => ({
-            sourceType: billingSourceType(line.source),
-            sourceId: line.sourceId,
-            description: line.description,
-            quantity: line.quantity,
-            unitPrice: line.unitPrice,
-            taxRate: line.taxRate,
-          })),
-        }),
-      });
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        throw new Error("Admin login required");
-      }
-      const data = (await response.json().catch(() => null)) as { id?: string; error?: string; message?: string } | null;
-      if (!response.ok) {
-        if (data?.error === "BOOKING_ALREADY_INVOICED") {
-          void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
-        }
-        throw new Error(data?.message || (await readApiFailure(response, "Could not issue invoice.")));
-      }
-      setActiveInvoiceId(data?.id || "");
-      setConfirmedInvoiceNumber(issuedNumber);
-      setSentInvoiceNumber("");
-      updateInvoiceSettings("nextNumber", invoiceSettings.nextNumber + 1);
-      setToast({ message: `${issuedNumber} saved as a draft invoice.` });
-      void fetchRecentInvoices();
-      void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not issue invoice." });
-    } finally {
-      setInvoiceIssueState("idle");
-    }
-  }
-
-  async function patchActiveInvoiceStatus(status: BillingInvoiceStatus) {
-    if (!activeInvoiceId) {
-      setToast({ message: "This invoice has not been saved yet." });
-      return;
-    }
-    try {
-      const response = await fetch(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}`, {
-        method: "PATCH",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ status }),
-      });
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        throw new Error("Admin login required");
-      }
-      if (!response.ok) throw new Error(await readApiFailure(response, `Could not mark invoice ${status}.`));
-      void fetchRecentInvoices();
-      return true;
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : `Could not mark invoice ${status}.` });
-      return false;
-    }
-  }
-
   async function markActiveInvoicePaid() {
-    if (!confirmedInvoiceNumber) return;
-    if (await patchActiveInvoiceStatus("paid")) {
-      setToast({ message: `${confirmedInvoiceNumber} marked paid.` });
+    if (!activeInvoiceId) return;
+    try {
+      await patchInvoiceStatus(activeInvoiceId, "paid");
+      setOpenedInvoiceStatus("paid");
+      setToast({ message: `${activeInvoiceNumber} marked paid.` });
+      void fetchRecentInvoices();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not mark invoice paid." });
     }
   }
 
@@ -19499,7 +19506,18 @@ function App() {
                             <td>{invoiceRecord.issueDate}</td>
                             <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
                             <td>
-                              <span className={`invoice-status-pill invoice-status-${invoiceRecord.status}`}>{invoiceRecord.status}</span>
+                              <span
+                                className={`invoice-status-pill invoice-status-${
+                                  invoiceRecord.status === "sent" && !invoiceRecord.sentAt ? "published" : invoiceRecord.status
+                                }`}
+                              >
+                                {invoiceRecord.status === "sent" && invoiceRecord.sentAt && <Send size={12} />}
+                                {invoiceRecord.status === "sent"
+                                  ? invoiceRecord.sentAt
+                                    ? "Sent"
+                                    : "Published"
+                                  : invoiceRecord.status.charAt(0).toUpperCase() + invoiceRecord.status.slice(1)}
+                              </span>
                             </td>
                           </tr>
                         ))}
@@ -19531,21 +19549,10 @@ function App() {
                     <div className="invoice-title-block">
                       <span>Invoice</span>
                       <h2>{activeInvoiceNumber}</h2>
-                      {sentInvoiceNumber === confirmedInvoiceNumber && confirmedInvoiceNumber ? (
-                        <em>Sent</em>
-                      ) : confirmedInvoiceNumber ? (
-                        <em>Confirmed</em>
-                      ) : (
-                        <em>Draft</em>
-                      )}
+                      <em>{invoiceEditing && isNewInvoice ? "Draft" : openedInvoiceStateLabel}</em>
                     </div>
                   </div>
 
-                  {latestVoidedInvoiceNumber && (
-                    <div className="invoice-document-alerts">
-                      <span>{latestVoidedInvoiceNumber} voided</span>
-                    </div>
-                  )}
 
                   {invoiceSettings.headerText && <p className="invoice-template-note">{invoiceSettings.headerText}</p>}
 
@@ -19745,7 +19752,7 @@ function App() {
                         // booking / selected from the catalog) line reads as a
                         // plain invoice line. Only a manual line on an unconfirmed
                         // invoice stays editable.
-                        const lineLocked = Boolean(confirmedInvoiceNumber);
+                        const lineLocked = invoiceLocked;
                         const linePlain = lineLocked || line.source !== "manual";
                         if (linePlain) {
                           return (
@@ -20045,42 +20052,78 @@ function App() {
 
                   <div className="invoice-actions invoice-bottom-actions">
                     <button className="outline-button" onClick={resetInvoiceDraft} type="button">
-                      Reset Draft
+                      New Invoice
                     </button>
-                    {confirmedInvoiceNumber ? (
+                    {invoiceEditing ? (
+                      isRevisingInvoice ? (
+                        <>
+                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
+                            {invoiceIssueState === "saving" ? "Saving..." : "Save"}
+                          </button>
+                          <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
+                            <Send size={16} />
+                            Save + Send
+                          </button>
+                          {activeInvoiceId && (
+                            <button className="outline-button" onClick={downloadInvoicePdf} type="button">
+                              <Download size={16} />
+                              Download PDF
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
+                            {invoiceIssueState === "saving" ? "Saving..." : "Save Draft"}
+                          </button>
+                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">
+                            Publish Invoice
+                          </button>
+                          <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
+                            <Send size={16} />
+                            Publish &amp; Send
+                          </button>
+                        </>
+                      )
+                    ) : openedInvoiceStatus === "draft" ? (
                       <>
+                        <button className="outline-button" onClick={editOpenedInvoice} type="button">
+                          <Pencil size={16} />
+                          Edit
+                        </button>
+                        <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">
+                          Publish
+                        </button>
+                        <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
+                          <Send size={16} />
+                          Publish &amp; Send
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="outline-button" onClick={editOpenedInvoice} type="button">
+                          <Pencil size={16} />
+                          Edit
+                        </button>
+                        <button
+                          className="primary-button"
+                          disabled={invoiceSendState === "sending" || Boolean(openedInvoiceSentAt)}
+                          onClick={sendOpenedInvoice}
+                          type="button"
+                        >
+                          <Send size={16} />
+                          {invoiceSendState === "sending" ? "Sending..." : openedInvoiceSentAt ? "Sent" : "Send"}
+                        </button>
                         <button className="outline-button" onClick={downloadInvoicePdf} type="button">
                           <Download size={16} />
                           Download PDF
                         </button>
-                        <button
-                          className="primary-button"
-                          disabled={invoiceSendState === "sending" || sentInvoiceNumber === confirmedInvoiceNumber}
-                          onClick={sendActiveInvoice}
-                          type="button"
-                        >
-                          <Send size={16} />
-                          {invoiceSendState === "sending"
-                            ? "Sending..."
-                            : sentInvoiceNumber === confirmedInvoiceNumber
-                              ? "Sent"
-                              : "Email PDF"}
-                        </button>
-                        {sentInvoiceNumber === confirmedInvoiceNumber && (
+                        {(openedInvoiceStatus === "sent" || openedInvoiceStatus === "overdue") && (
                           <button className="outline-button" onClick={markActiveInvoicePaid} type="button">
                             Mark Paid
                           </button>
                         )}
                       </>
-                    ) : (
-                      <button
-                        className="primary-button"
-                        disabled={invoiceIssueState === "saving"}
-                        onClick={editingInvoiceId ? saveInvoiceEdits : issueInvoiceDraft}
-                        type="button"
-                      >
-                        {invoiceIssueState === "saving" ? "Saving..." : editingInvoiceId ? "Update Draft" : "Confirm Invoice"}
-                      </button>
                     )}
                   </div>
                 </article>
