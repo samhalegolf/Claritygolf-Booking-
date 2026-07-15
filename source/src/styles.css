@@ -6906,6 +6906,47 @@ button {
   gap: 8px;
 }
 
+/* A set discount reads as plain text (its value is in the totals below); these
+   are text links, not boxed inputs. */
+.invoice-discount-set {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.invoice-discount-set > span {
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  color: #626a60;
+}
+
+.invoice-discount-set-actions {
+  display: flex;
+  gap: 14px;
+}
+
+.invoice-discount-set-actions button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #2f6b46;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.invoice-discount-set-actions button:hover,
+.invoice-discount-set-actions button:focus-visible {
+  text-decoration: underline;
+}
+
+.invoice-discount-done {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
 .invoice-total-lines {
   display: grid;
   gap: 8px;

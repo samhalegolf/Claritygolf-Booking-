@@ -4630,6 +4630,8 @@ function App() {
   });
   const [discountSaveState, setDiscountSaveState] = useState<"idle" | "saving">("idle");
   const [selectedDiscountPresetId, setSelectedDiscountPresetId] = useState("");
+  // A set discount collapses to a plain line; this reopens the editable controls.
+  const [discountEditing, setDiscountEditing] = useState(false);
   const [expenseCategories, setExpenseCategories] = useState<BillingExpenseCategory[]>([]);
   const [expenseCategoryEditor, setExpenseCategoryEditor] = useState<{ id: string; name: string }>({ id: "", name: "" });
   const [expenseCategorySaveState, setExpenseCategorySaveState] = useState<"idle" | "saving">("idle");
@@ -5633,6 +5635,7 @@ function App() {
   const invoiceLocked = confirmedInvoiceNumber !== "";
   const latestVoidedInvoiceNumber = voidedInvoiceNumbers[voidedInvoiceNumbers.length - 1] || "";
   const invoiceDiscountLabel = invoiceDraft.discountLabel.trim() || "Discount / coupon";
+  const discountSet = invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim() !== "";
   const invoiceEmailSubject = `${activeInvoiceNumber} from ${coachAccount.businessName}`;
   const invoiceEmailBody = [
     invoiceDraft.message,
@@ -12661,6 +12664,15 @@ function App() {
       discountLabel: preset.name,
       discountAmount: amount,
     }));
+    // Applying a preset is an atomic "set" - collapse straight to the plain line.
+    setDiscountEditing(false);
+  }
+
+  function clearInvoiceDiscount() {
+    markInvoiceDraftDirty();
+    setSelectedDiscountPresetId("");
+    setDiscountEditing(false);
+    setInvoiceDraft((current) => ({ ...current, discountLabel: "", discountAmount: 0 }));
   }
 
   async function addExpenseCategory() {
@@ -12897,6 +12909,8 @@ function App() {
     setActiveInvoiceId("");
     setEditingInvoiceId("");
     setEditingInvoiceNumber("");
+    setSelectedDiscountPresetId("");
+    setDiscountEditing(false);
   }
 
   function billingSourceType(source: InvoiceLineSource): "booking" | "product" | "manual" {
@@ -12971,6 +12985,8 @@ function App() {
       setInvoiceDraft(invoiceRecordToDraft(invoice));
       setInvoiceCustomerSearch("");
       setShowInvoiceLinePicker(false);
+      setSelectedDiscountPresetId("");
+      setDiscountEditing(false);
       setActiveInvoiceId(String(invoice.id || record.id));
       setEditingInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
       if (invoice.status === "draft") {
@@ -19681,45 +19697,71 @@ function App() {
                     </div>
 
                     <div className="invoice-total-box">
-                      {!invoiceLocked && (
-                      <div className="invoice-discount-controls">
-                        {discountPresets.some((preset) => preset.active) && (
-                          <label className="settings-field invoice-discount-preset">
-                            <span>Preset discount</span>
-                            <select
-                              value={selectedDiscountPresetId}
-                              onChange={(event) => applyDiscountPreset(event.target.value)}
-                            >
-                              <option value="">None (manual)</option>
-                              {discountPresets
-                                .filter((preset) => preset.active)
-                                .map((preset) => (
-                                  <option key={preset.id} value={preset.id}>
-                                    {preset.name} ({preset.discountType === "percentage" ? `${preset.value}%` : formatMoney(preset.value, invoiceSettings.currency)})
-                                  </option>
-                                ))}
-                            </select>
-                          </label>
-                        )}
-                        <label className="settings-field">
-                          <span>Discount / coupon</span>
-                          <input
-                            value={invoiceDraft.discountLabel}
-                            onChange={(event) => updateInvoiceDraft("discountLabel", event.target.value)}
-                            placeholder="Optional"
-                          />
-                        </label>
-                        <label className="settings-field">
-                          <span>Amount</span>
-                          <input
-                            value={invoiceDraft.discountAmount}
-                            inputMode="decimal"
-                            onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
-                            type="text"
-                          />
-                        </label>
-                      </div>
-                      )}
+                      {!invoiceLocked &&
+                        (discountSet && !discountEditing ? (
+                          // A set discount is plain text (the amount shows in the
+                          // totals below); the boxed controls only appear while editing.
+                          <div className="invoice-discount-set">
+                            <span>Discount applied</span>
+                            <div className="invoice-discount-set-actions">
+                              <button onClick={() => setDiscountEditing(true)} type="button">
+                                Change
+                              </button>
+                              <button onClick={clearInvoiceDiscount} type="button">
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="invoice-discount-controls">
+                            {discountPresets.some((preset) => preset.active) && (
+                              <label className="settings-field invoice-discount-preset">
+                                <span>Preset discount</span>
+                                <select
+                                  value={selectedDiscountPresetId}
+                                  onChange={(event) => applyDiscountPreset(event.target.value)}
+                                >
+                                  <option value="">None (manual)</option>
+                                  {discountPresets
+                                    .filter((preset) => preset.active)
+                                    .map((preset) => (
+                                      <option key={preset.id} value={preset.id}>
+                                        {preset.name} ({preset.discountType === "percentage" ? `${preset.value}%` : formatMoney(preset.value, invoiceSettings.currency)})
+                                      </option>
+                                    ))}
+                                </select>
+                              </label>
+                            )}
+                            <label className="settings-field">
+                              <span>Discount / coupon</span>
+                              <input
+                                value={invoiceDraft.discountLabel}
+                                onFocus={() => setDiscountEditing(true)}
+                                onChange={(event) => updateInvoiceDraft("discountLabel", event.target.value)}
+                                placeholder="Optional"
+                              />
+                            </label>
+                            <label className="settings-field">
+                              <span>Amount</span>
+                              <input
+                                value={invoiceDraft.discountAmount}
+                                inputMode="decimal"
+                                onFocus={() => setDiscountEditing(true)}
+                                onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
+                                type="text"
+                              />
+                            </label>
+                            {discountSet && (
+                              <button
+                                className="outline-button small-action invoice-discount-done"
+                                onClick={() => setDiscountEditing(false)}
+                                type="button"
+                              >
+                                Done
+                              </button>
+                            )}
+                          </div>
+                        ))}
                       <div className="invoice-total-lines">
                         <span>
                           <em>Subtotal</em>
