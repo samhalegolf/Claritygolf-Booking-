@@ -4958,21 +4958,16 @@ function App() {
   }, [isAdminUser, settingsTab]);
 
   useEffect(() => {
+    // Fire both in parallel rather than waiting for the Drive status check to
+    // resolve before even starting the cloud-imports fetch -- the two used to
+    // be sequential (this effect used to only kick off refreshGoogleDriveTransferStatus,
+    // with a second effect gated on its result calling refreshClarityCloudImports
+    // afterwards), which stacked a full extra round trip onto how long it took
+    // a cloud-only saved video to become eligible for a player profile.
     if ((activeView === "settings" && settingsTab === "integrations") || activeView === "players") {
       void refreshGoogleDriveTransferStatus();
-    }
-  }, [activeView, settingsTab]);
-
-  useEffect(() => {
-    const shouldLoadCloudCatalogue =
-      googleDriveTransfer.connected &&
-      googleDriveTransfer.incomingImportReady &&
-      (activeView === "players" || (activeView === "settings" && settingsTab === "integrations"));
-    if (shouldLoadCloudCatalogue) {
       void refreshClarityCloudImports();
-      return;
     }
-    if (!googleDriveTransfer.connected) setClarityCloudImports([]);
   }, [activeView, settingsTab, googleDriveTransfer.connected, googleDriveTransfer.incomingImportReady]);
   const attemptedSavedRescheduleRef = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -13645,25 +13640,24 @@ function App() {
       applyGoogleDriveTransferStatus(await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive status did not return JSON."));
     } catch {
       // Google Drive transfer is optional; keep the rest of Settings usable.
-    } finally {
-      // This is what actually determines whether a cloud-imports fetch will
-      // follow (see the effect that reacts to googleDriveTransfer.connected) --
-      // marking readiness here, rather than inside refreshClarityCloudImports,
-      // avoids treating the untouched default (connected: false) as a real
-      // "checked and not connected" result before this request has resolved.
-      markPlayerProfilesSourceReady("cloudImports");
     }
   }
 
   async function refreshClarityCloudImports() {
+    // Deliberately does not wait on googleDriveTransfer.connected first --
+    // this used to only fire from an effect gated on that flag, chaining
+    // behind the Drive status round trip before even starting. The server
+    // route already handles "not connected" by failing this fetch (caught
+    // below), so it's safe to run in parallel with the Drive status check
+    // instead of waiting for it to resolve.
     try {
-      if (!googleDriveTransfer.connected) {
-        setClarityCloudImports([]);
-        return;
-      }
       setClarityCloudImports(await listClarityCloudImportTransfers());
     } catch {
-      // The import inbox is optional; the status cards still show provider health.
+      // Not connected yet, or the import inbox is temporarily unavailable;
+      // the status cards elsewhere show provider health separately.
+      setClarityCloudImports([]);
+    } finally {
+      markPlayerProfilesSourceReady("cloudImports");
     }
   }
 
