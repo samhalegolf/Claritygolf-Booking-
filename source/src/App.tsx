@@ -4697,6 +4697,9 @@ function App() {
   // i.e. defaults to showing everything, same as before this filter existed.
   const [pullRangeFrom, setPullRangeFrom] = useState("");
   const [pullRangeTo, setPullRangeTo] = useState("");
+  // The pull range defaults smartly (last invoiced lesson -> today) and shows as
+  // plain text; this flips it to editable date inputs.
+  const [pullRangeEditing, setPullRangeEditing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pointerSession, setPointerSession] = useState<PointerSession>(null);
   const [toast, setToast] = useState<Toast | null>(null);
@@ -5634,25 +5637,37 @@ function App() {
   // calendar date the same way the rest of the app already does (dateForSlot),
   // so this stays correct if baseWeekStart or the week numbering ever changes.
   const itemDateValue = (item: CalendarItem) => dateInputValue(dateForSlot(itemWeek(item), item.day));
+  // Smart default range: start from the most recent already-invoiced lesson (so
+  // each invoice picks up where the last one left off) and run to today. The
+  // user can still override From/To; an empty override falls back to the smart
+  // value, so clearing a field reverts it to auto.
+  const lastInvoicedLessonDate = useMemo(() => {
+    let latest = "";
+    for (const item of completedAppointments) {
+      if (invoicedBookingIds[item.id]) {
+        const value = itemDateValue(item);
+        if (value > latest) latest = value;
+      }
+    }
+    return latest;
+  }, [completedAppointments, invoicedBookingIds]);
+  const smartPullFrom = lastInvoicedLessonDate;
+  const smartPullTo = dateInputValue();
+  const effectivePullFrom = pullRangeFrom || smartPullFrom;
+  const effectivePullTo = pullRangeTo || smartPullTo;
   const inPullRange = (item: CalendarItem) => {
     const itemDate = itemDateValue(item);
-    if (pullRangeFrom && itemDate < pullRangeFrom) return false;
-    if (pullRangeTo && itemDate > pullRangeTo) return false;
+    if (effectivePullFrom && itemDate < effectivePullFrom) return false;
+    if (effectivePullTo && itemDate > effectivePullTo) return false;
     return true;
   };
   const pullableCompletedAppointments = useMemo(
     () => uninvoicedCompletedAppointments.filter(inPullRange),
-    [uninvoicedCompletedAppointments, pullRangeFrom, pullRangeTo],
-  );
-  // Same range, but keeps already-invoiced items in (as "Already invoiced")
-  // for the fuller Calendar Pull panel in the invoice builder.
-  const calendarPullRangeList = useMemo(
-    () => completedAppointments.filter(inPullRange),
-    [completedAppointments, pullRangeFrom, pullRangeTo],
+    [uninvoicedCompletedAppointments, effectivePullFrom, effectivePullTo],
   );
   // When a billing customer is chosen, surface that client's own completed
-  // lessons at the top of the pull list and flag them. Matches on email, then
-  // phone, then exact name - a lesson billed to someone else (e.g. a parent)
+  // lessons at the top of the (unpaid) pull list and flag them. Matches on email,
+  // then phone, then exact name - a lesson billed to someone else (e.g. a parent)
   // simply won't match, since the payer is never inferred from the attendee.
   const invoicePayerEmailKey = invoiceDraft.payerEmail.trim().toLowerCase();
   const invoicePayerPhoneKey = invoiceDraft.payerPhone.replace(/\D/g, "");
@@ -5660,7 +5675,7 @@ function App() {
   const invoicePayerBookingIds = useMemo(() => {
     const ids = new Set<string>();
     if (!invoicePayerEmailKey && !invoicePayerPhoneKey && !invoicePayerNameKey) return ids;
-    for (const item of calendarPullRangeList) {
+    for (const item of pullableCompletedAppointments) {
       const email = (item.email || "").trim().toLowerCase();
       const phone = (item.phone || "").replace(/\D/g, "");
       const name = (item.client || "").trim().toLowerCase();
@@ -5673,16 +5688,16 @@ function App() {
       }
     }
     return ids;
-  }, [calendarPullRangeList, invoicePayerEmailKey, invoicePayerPhoneKey, invoicePayerNameKey]);
+  }, [pullableCompletedAppointments, invoicePayerEmailKey, invoicePayerPhoneKey, invoicePayerNameKey]);
   const calendarPullRangeSorted = useMemo(() => {
-    if (!invoicePayerBookingIds.size) return calendarPullRangeList;
+    if (!invoicePayerBookingIds.size) return pullableCompletedAppointments;
     const matches: CalendarItem[] = [];
     const rest: CalendarItem[] = [];
-    for (const item of calendarPullRangeList) {
+    for (const item of pullableCompletedAppointments) {
       (invoicePayerBookingIds.has(item.id) ? matches : rest).push(item);
     }
     return [...matches, ...rest];
-  }, [calendarPullRangeList, invoicePayerBookingIds]);
+  }, [pullableCompletedAppointments, invoicePayerBookingIds]);
   const invoiceLineSubtotal = invoiceDraft.lines.reduce(
     (total, line) => total + Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0),
     0,
@@ -13006,6 +13021,20 @@ function App() {
     }
   }
 
+  function openPullRangeEdit() {
+    // Seed the inputs with the current effective (smart) values so editing starts
+    // from those rather than blank date fields.
+    if (!pullRangeFrom) setPullRangeFrom(effectivePullFrom);
+    if (!pullRangeTo) setPullRangeTo(effectivePullTo);
+    setPullRangeEditing(true);
+  }
+
+  function resetPullRange() {
+    setPullRangeFrom("");
+    setPullRangeTo("");
+    setPullRangeEditing(false);
+  }
+
   function resetInvoiceDraft() {
     setInvoiceDraft(emptyInvoiceDraft(invoiceSettings, activeCoachId));
     setInvoiceCustomerSearch("");
@@ -19335,25 +19364,35 @@ function App() {
                       <CalendarDays size={24} />
                     </div>
                     <div className="ready-to-pull-range">
-                      <label className="settings-field">
-                        <span>From</span>
-                        <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
-                      </label>
-                      <label className="settings-field">
-                        <span>To</span>
-                        <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
-                      </label>
-                      {(pullRangeFrom || pullRangeTo) && (
-                        <button
-                          className="outline-button small-action"
-                          onClick={() => {
-                            setPullRangeFrom("");
-                            setPullRangeTo("");
-                          }}
-                          type="button"
-                        >
-                          Clear
-                        </button>
+                      {pullRangeEditing ? (
+                        <>
+                          <label className="settings-field">
+                            <span>From</span>
+                            <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
+                          </label>
+                          <label className="settings-field">
+                            <span>To</span>
+                            <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
+                          </label>
+                          <div className="pull-range-actions">
+                            <button className="invoice-inline-edit" onClick={resetPullRange} type="button">
+                              Reset to auto
+                            </button>
+                            <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">
+                              Done
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="pull-range-summary">
+                          <span>
+                            {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : "Earliest"} → {formatDateForDisplay(effectivePullTo)}
+                          </span>
+                          <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label="Edit pull range">
+                            <Pencil size={13} />
+                            Edit
+                          </button>
+                        </div>
                       )}
                     </div>
                     <div className="completed-booking-list compact">
@@ -20041,25 +20080,35 @@ function App() {
                       <CalendarDays size={24} />
                     </div>
                     <div className="ready-to-pull-range">
-                      <label className="settings-field">
-                        <span>From</span>
-                        <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
-                      </label>
-                      <label className="settings-field">
-                        <span>To</span>
-                        <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
-                      </label>
-                      {(pullRangeFrom || pullRangeTo) && (
-                        <button
-                          className="outline-button small-action"
-                          onClick={() => {
-                            setPullRangeFrom("");
-                            setPullRangeTo("");
-                          }}
-                          type="button"
-                        >
-                          Clear
-                        </button>
+                      {pullRangeEditing ? (
+                        <>
+                          <label className="settings-field">
+                            <span>From</span>
+                            <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
+                          </label>
+                          <label className="settings-field">
+                            <span>To</span>
+                            <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
+                          </label>
+                          <div className="pull-range-actions">
+                            <button className="invoice-inline-edit" onClick={resetPullRange} type="button">
+                              Reset to auto
+                            </button>
+                            <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">
+                              Done
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="pull-range-summary">
+                          <span>
+                            {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : "Earliest"} → {formatDateForDisplay(effectivePullTo)}
+                          </span>
+                          <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label="Edit pull range">
+                            <Pencil size={13} />
+                            Edit
+                          </button>
+                        </div>
                       )}
                     </div>
                     <div className="completed-booking-list">
