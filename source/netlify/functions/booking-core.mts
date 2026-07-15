@@ -3547,7 +3547,14 @@ async function writeItems(items, options = {}) {
     options.clearItems !== true &&
     options.replaceItems !== true
   ) {
-    return rowToItem(returnedRows[0]);
+    // The Supabase REST adapter ignores `INSERT ... RETURNING` and always
+    // resolves with no rows, so returnedRows can be empty even though the write
+    // committed. Fall back to the item we just wrote instead of calling
+    // rowToItem(undefined), which threw *after* the commit -- surfacing to the
+    // client as a failed save that then rolled the optimistic edit back (a
+    // dragged lesson visibly jumped to its original slot, and the reschedule
+    // notification that runs after this write never fired).
+    return returnedRows[0] ? rowToItem(returnedRows[0]) : cleanItems[0];
   }
   return readItems();
 }
