@@ -3302,6 +3302,88 @@ async function updatePerson(rawPerson, accountId = defaultWorkspaceAccountFromCo
   }
 }
 
+async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const survivorId = cleanString(rawSurvivorId, "", 120);
+  const loserId = cleanString(rawLoserId, "", 120);
+  if (!survivorId || !loserId || survivorId === loserId) {
+    throw Object.assign(new Error("Two different clients are required to merge."), {
+      status: 400,
+      code: "PEOPLE_MERGE_INVALID_IDS",
+    });
+  }
+
+  const knownPeople = await readPeople(cleanAccountId);
+  const survivorRow = knownPeople.find((person) => person.id === survivorId);
+  const loserRow = knownPeople.find((person) => person.id === loserId);
+  if (!survivorRow || !loserRow) {
+    throw Object.assign(new Error("One of the selected clients could not be found."), {
+      status: 404,
+      code: "PEOPLE_MERGE_NOT_FOUND",
+    });
+  }
+
+  const merged = cleanPerson({ ...survivorRow, ...fieldOverrides, id: survivorId }, survivorRow.source, cleanAccountId);
+  if (!merged) {
+    throw Object.assign(new Error("The merged client needs a name or email."), {
+      status: 400,
+      code: "PEOPLE_MERGE_INVALID_FIELDS",
+    });
+  }
+
+  const client = await db().pool.connect();
+  let mergedItemIds = [];
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE people
+       SET name = $2,
+           email = NULLIF($3, ''),
+           phone = NULLIF($4, ''),
+           notes = NULLIF($5, ''),
+           caddy_profile_id = NULLIF($6, ''),
+           caddy_profile_url = NULLIF($7, ''),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [survivorId, merged.name, merged.email, merged.phone, merged.notes, merged.caddyProfileId, merged.caddyProfileUrl],
+    );
+    const reassigned = await client.query(
+      "UPDATE calendar_items SET person_id = $1, updated_at = NOW() WHERE person_id = $2 RETURNING id",
+      [survivorId, loserId],
+    );
+    mergedItemIds = queryRows(reassigned).map((row) => row.id);
+    await client.query("DELETE FROM people WHERE id = $1", [loserId]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  // Lesson notes live in a per-account settings JSON blob (see
+  // LESSON_NOTES_SETTING_PREFIX), not a SQL table, so they can't be reassigned
+  // inside the transaction above. Do it right after the transaction commits so
+  // a note is never left pointing at a person id that no longer exists.
+  const currentNotes = await readLessonNotes(cleanAccountId);
+  const mergedNoteIds = currentNotes.filter((note) => note.playerId === loserId).map((note) => note.id);
+  if (mergedNoteIds.length) {
+    await writeLessonNotes(
+      currentNotes.map((note) => (note.playerId === loserId ? { ...note, playerId: survivorId } : note)),
+      cleanAccountId,
+    );
+  }
+
+  const savedRows = await db().sql`SELECT * FROM people WHERE id = ${survivorId} LIMIT 1`;
+  return {
+    person: rowToPerson(savedRows[0], cleanAccountId),
+    removedPersonId: loserId,
+    mergedItemIds,
+    mergedNoteIds,
+    people: await readPeople(cleanAccountId),
+  };
+}
+
 async function writeItems(items, options = {}) {
   const cleanItems = normalizeItems(items);
   const returnedRows = [];
@@ -8267,6 +8349,31 @@ export async function handleBookingApiRoute(
       assertCanManagePerson(requestContext, body.person || body, state);
 	      const result = await updatePerson(body.person || body, requestContext.accountId);
       return json({
+        ...result,
+        people: filterPeopleForContext(result.people, requestContext, state),
+      });
+    }
+
+    if (req.method === "POST" && pathname === "/api/people/merge") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      const survivorId = cleanString(body?.survivorId, "", 120);
+      const loserId = cleanString(body?.loserId, "", 120);
+      const knownPeople = await readPeople(requestContext.accountId);
+      const survivorRow = knownPeople.find((person) => person.id === survivorId);
+      const loserRow = knownPeople.find((person) => person.id === loserId);
+      if (!survivorRow || !loserRow) {
+        return json(
+          { error: "PEOPLE_MERGE_NOT_FOUND", message: "One of the selected clients could not be found." },
+          404,
+        );
+      }
+      assertCanManagePerson(requestContext, survivorRow, state);
+      assertCanManagePerson(requestContext, loserRow, state);
+      const result = await mergePeople(survivorId, loserId, body?.fields || {}, requestContext.accountId);
+      return json({
+        ok: true,
         ...result,
         people: filterPeopleForContext(result.people, requestContext, state),
       });

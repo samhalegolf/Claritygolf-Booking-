@@ -1187,6 +1187,107 @@ button {
   width: min(520px, calc(100vw - 32px));
 }
 
+.merge-clients-button.active {
+  background: #171717;
+  border-color: #171717;
+  color: #fff;
+}
+
+.client-merge-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #deded8;
+  background: #f7f6f1;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #171717;
+}
+
+.client-row.merge-mode {
+  grid-template-columns: 24px minmax(180px, 1fr) minmax(110px, 0.5fr) minmax(90px, 0.35fr);
+  cursor: pointer;
+}
+
+.client-row.merge-mode:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.client-row.merge-selected {
+  background: #f2f1ea;
+}
+
+.merge-row-check {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1.5px solid #b9b6ac;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.merge-row-check.checked {
+  background: #171717;
+  border-color: #171717;
+}
+
+.client-merge-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.client-merge-fields {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.client-merge-field-value {
+  margin: 0;
+  color: #171717;
+}
+
+.client-merge-field-options {
+  display: grid;
+  gap: 6px;
+}
+
+.client-merge-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #deded8;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.client-merge-option.selected {
+  border-color: #171717;
+  background: #f7f6f1;
+}
+
+.client-merge-option input {
+  margin: 0;
+}
+
+.client-merge-error {
+  color: #6f1d1d;
+  font-size: 13px;
+  margin-top: 12px;
+}
+
+.client-merge-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
 .service-delete-modal {
   width: min(420px, calc(100vw - 32px));
 }

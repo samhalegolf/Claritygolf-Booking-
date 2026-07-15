@@ -17,6 +17,7 @@ import {
   ExternalLink,
   FileText,
   FolderOpen,
+  GitMerge,
   GripVertical,
   ImagePlus,
   KeyRound,
@@ -508,6 +509,14 @@ type ClientSummary = Person & {
   count: number;
   next: CalendarItem | null;
   last: CalendarItem | null;
+};
+
+type ClientMergeFieldKey = "name" | "email" | "phone" | "notes";
+
+type ClientMergeReview = {
+  survivor: ClientSummary;
+  loser: ClientSummary;
+  fields: Record<ClientMergeFieldKey, string>;
 };
 
 
@@ -4456,6 +4465,11 @@ function App() {
   const [selectedId, setSelectedId] = useState("");
   const [clientReassignOpen, setClientReassignOpen] = useState(false);
   const [clientReassignSearch, setClientReassignSearch] = useState("");
+  const [clientMergeMode, setClientMergeMode] = useState(false);
+  const [clientMergeSelection, setClientMergeSelection] = useState<string[]>([]);
+  const [clientMergeReview, setClientMergeReview] = useState<ClientMergeReview | null>(null);
+  const [clientMergeSaving, setClientMergeSaving] = useState(false);
+  const [clientMergeError, setClientMergeError] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
   const [videoContext, setVideoContext] = useState<{ playerId: string; playerName: string; savedVideoId?: string } | null>(null);
@@ -11690,6 +11704,89 @@ function App() {
     });
   }
 
+  function toggleClientMergeMode() {
+    setClientMergeMode((current) => !current);
+    setClientMergeSelection([]);
+    setClientMergeReview(null);
+    setClientMergeError("");
+  }
+
+  function toggleClientMergeSelection(client: ClientSummary) {
+    if (client.id.startsWith("appointment-")) return;
+    setClientMergeSelection((current) => {
+      if (current.includes(client.id)) return current.filter((id) => id !== client.id);
+      if (current.length >= 2) return current;
+      return [...current, client.id];
+    });
+  }
+
+  function openClientMergeReview() {
+    if (clientMergeSelection.length !== 2) return;
+    const [survivor, loser] = clientMergeSelection
+      .map((id) => clients.find((client) => client.id === id))
+      .filter((client): client is ClientSummary => Boolean(client));
+    if (!survivor || !loser) return;
+    setClientMergeError("");
+    setClientMergeReview({
+      survivor,
+      loser,
+      fields: {
+        name: survivor.name || loser.name,
+        email: survivor.email || loser.email,
+        phone: survivor.phone || loser.phone,
+        notes: survivor.notes || loser.notes,
+      },
+    });
+  }
+
+  function setClientMergeFieldChoice(field: ClientMergeFieldKey, value: string) {
+    setClientMergeReview((current) => (current ? { ...current, fields: { ...current.fields, [field]: value } } : current));
+  }
+
+  function closeClientMergeReview() {
+    setClientMergeReview(null);
+    setClientMergeError("");
+  }
+
+  async function confirmClientMerge() {
+    if (!clientMergeReview || clientMergeSaving) return;
+    const { survivor, loser, fields } = clientMergeReview;
+    setClientMergeSaving(true);
+    setClientMergeError("");
+    try {
+      const response = await fetch("/api/people/merge", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ survivorId: survivor.id, loserId: loser.id, fields }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data?.message || "Admin login expired. Sign in again before merging clients.");
+      }
+      if (!response.ok || data?.ok === false) {
+        throw new Error(data?.message || "Clients could not be merged.");
+      }
+      if (Array.isArray(data.people)) setPeople(data.people);
+      const mergedItemIds: string[] = Array.isArray(data.mergedItemIds) ? data.mergedItemIds : [];
+      if (mergedItemIds.length) {
+        setItems((current) =>
+          current.map((item) => (mergedItemIds.includes(item.id) ? { ...item, personId: survivor.id } : item)),
+        );
+      }
+      setToast({ message: `Merged ${loser.name || loser.email || "that client"} into ${data.person?.name || survivor.name}.` });
+      setClientMergeReview(null);
+      setClientMergeSelection([]);
+      setClientMergeMode(false);
+    } catch (error) {
+      setClientMergeError(error instanceof Error ? error.message : "Clients could not be merged.");
+    } finally {
+      setClientMergeSaving(false);
+    }
+  }
+
   function logLessonCompleteDiagnostic(
     label: string,
     details: {
@@ -17840,6 +17937,15 @@ function App() {
                 Import
               </button>
               <button
+                className={`icon-button merge-clients-button${clientMergeMode ? " active" : ""}`}
+                onClick={toggleClientMergeMode}
+                aria-label={clientMergeMode ? "Cancel merging clients" : "Merge duplicate clients"}
+                title={clientMergeMode ? "Cancel merging clients" : "Merge duplicate clients"}
+                type="button"
+              >
+                <GitMerge size={18} />
+              </button>
+              <button
                 className="icon-button add-client-button"
                 onClick={openNewClient}
                 aria-label="Add client"
@@ -17848,6 +17954,26 @@ function App() {
                 <Plus size={18} />
               </button>
             </div>
+
+            {clientMergeMode && (
+              <div className="client-merge-bar">
+                <span>
+                  {clientMergeSelection.length === 2
+                    ? "2 clients selected."
+                    : clientMergeSelection.length === 1
+                      ? "Select 1 more client to merge."
+                      : "Select 2 clients to merge."}
+                </span>
+                <button
+                  className="primary-button"
+                  disabled={clientMergeSelection.length !== 2}
+                  onClick={openClientMergeReview}
+                  type="button"
+                >
+                  Review merge
+                </button>
+              </div>
+            )}
 
             {showClientImport && (
               <article className="data-card import-card">
@@ -17903,22 +18029,37 @@ function App() {
 
             <div className="client-table">
               {filteredClients.length ? (
-                filteredClients.map((client) => (
-                  <button className="client-row" key={client.id} onClick={() => openClientProfile(client)}>
-                    <div className="client-main">
-                    <strong>{client.name}</strong>
-                    <span>{client.email || "No email yet"}</span>
-                  </div>
-                    <span className="client-phone">{client.phone || "No phone"}</span>
-                    <span className="client-booking-count">
-                    {client.count} booking{client.count === 1 ? "" : "s"}
-                    {(client.caddyProfileId || client.caddyProfileUrl) && <em>Linked to Caddy</em>}
-                  </span>
-                    <span className="client-row-arrow">
-                      <ArrowRight size={17} />
-                    </span>
-                  </button>
-                ))
+                filteredClients.map((client) => {
+                  const mergeEligible = !client.id.startsWith("appointment-");
+                  const mergeSelected = clientMergeSelection.includes(client.id);
+                  return (
+                    <button
+                      className={`client-row${clientMergeMode ? " merge-mode" : ""}${mergeSelected ? " merge-selected" : ""}`}
+                      key={client.id}
+                      onClick={() => (clientMergeMode ? toggleClientMergeSelection(client) : openClientProfile(client))}
+                      disabled={clientMergeMode && !mergeEligible}
+                      title={clientMergeMode && !mergeEligible ? "Save this client before merging — it isn't linked to a client record yet." : undefined}
+                    >
+                      {clientMergeMode && (
+                        <span className={`merge-row-check${mergeSelected ? " checked" : ""}`} aria-hidden="true">
+                          {mergeSelected ? <Check size={14} /> : null}
+                        </span>
+                      )}
+                      <div className="client-main">
+                        <strong>{client.name}</strong>
+                        <span>{client.email || "No email yet"}</span>
+                      </div>
+                      <span className="client-phone">{client.phone || "No phone"}</span>
+                      <span className="client-booking-count">
+                        {client.count} booking{client.count === 1 ? "" : "s"}
+                        {(client.caddyProfileId || client.caddyProfileUrl) && <em>Linked to Caddy</em>}
+                      </span>
+                      <span className="client-row-arrow">
+                        {clientMergeMode ? null : <ArrowRight size={17} />}
+                      </span>
+                    </button>
+                  );
+                })
               ) : (
                 <div className="empty-panel compact">
                   <h2>No clients found</h2>
@@ -22578,6 +22719,83 @@ function App() {
               >
                 {pendingServiceAction.mode === "archive" ? <Archive size={16} /> : <Trash2 size={16} />}
                 {pendingServiceAction.mode === "archive" ? "Archive lesson type" : "Permanently delete"}
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {!isEmbedMode && clientMergeReview && (
+        <div className="details-overlay" role="presentation" onPointerDown={closeClientMergeReview}>
+          <aside
+            className="details-panel details-modal client-merge-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="client-merge-title"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header">
+              <span id="client-merge-title">Merge clients</span>
+              <button className="icon-button small" onClick={closeClientMergeReview} aria-label="Close merge review" type="button">
+                <X size={17} />
+              </button>
+            </div>
+            <p className="muted">
+              {clientMergeReview.loser.name || clientMergeReview.loser.email || "This client"} will be merged into{" "}
+              {clientMergeReview.survivor.name || clientMergeReview.survivor.email || "this client"} and removed.
+              {clientMergeReview.loser.count > 0 &&
+                ` ${clientMergeReview.loser.count} booking${clientMergeReview.loser.count === 1 ? "" : "s"} will move over.`}
+            </p>
+            <div className="client-merge-fields">
+              {(
+                [
+                  ["name", "Name"],
+                  ["email", "Email"],
+                  ["phone", "Phone"],
+                  ["notes", "Notes"],
+                ] as [ClientMergeFieldKey, string][]
+              ).map(([field, label]) => {
+                const survivorValue = clientMergeReview.survivor[field] || "";
+                const loserValue = clientMergeReview.loser[field] || "";
+                if (survivorValue === loserValue) {
+                  return (
+                    <div className="settings-field client-merge-field" key={field}>
+                      <span>{label}</span>
+                      <p className="client-merge-field-value">{survivorValue || "—"}</p>
+                    </div>
+                  );
+                }
+                const options = Array.from(new Set([survivorValue, loserValue].filter(Boolean)));
+                return (
+                  <div className="settings-field client-merge-field" key={field}>
+                    <span>{label}</span>
+                    <div className="client-merge-field-options">
+                      {options.map((value) => (
+                        <label
+                          className={`client-merge-option${clientMergeReview.fields[field] === value ? " selected" : ""}`}
+                          key={value}
+                        >
+                          <input
+                            type="radio"
+                            name={`client-merge-${field}`}
+                            checked={clientMergeReview.fields[field] === value}
+                            onChange={() => setClientMergeFieldChoice(field, value)}
+                          />
+                          <span>{value}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {clientMergeError && <p className="client-merge-error">{clientMergeError}</p>}
+            <div className="client-merge-actions">
+              <button className="outline-button" onClick={closeClientMergeReview} type="button" disabled={clientMergeSaving}>
+                Cancel
+              </button>
+              <button className="primary-button" onClick={confirmClientMerge} type="button" disabled={clientMergeSaving}>
+                {clientMergeSaving ? "Merging…" : "Merge clients"}
               </button>
             </div>
           </aside>
