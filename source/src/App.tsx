@@ -5675,9 +5675,19 @@ function App() {
     if (effectivePullTo && itemDate > effectivePullTo) return false;
     return true;
   };
+  // Bookings already pulled onto the invoice currently being edited (a
+  // booking_snapshot line). They're "Pulled" - drop them from the pull list so
+  // they can't be added twice; removing the line re-adds them automatically.
+  const draftBookingIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const line of invoiceDraft.lines) {
+      if (line.source === "booking_snapshot" && line.sourceId) ids.add(line.sourceId);
+    }
+    return ids;
+  }, [invoiceDraft.lines]);
   const pullableCompletedAppointments = useMemo(
-    () => uninvoicedCompletedAppointments.filter(inPullRange),
-    [uninvoicedCompletedAppointments, effectivePullFrom, effectivePullTo],
+    () => uninvoicedCompletedAppointments.filter((item) => inPullRange(item) && !draftBookingIds.has(item.id)),
+    [uninvoicedCompletedAppointments, effectivePullFrom, effectivePullTo, draftBookingIds],
   );
   // When a billing customer is chosen, surface that client's own completed
   // lessons at the top of the (unpaid) pull list and flag them. Matches on email,
