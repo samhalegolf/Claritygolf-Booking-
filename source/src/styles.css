@@ -6817,6 +6817,17 @@ button {
   color: #7e1c17;
 }
 
+/* A fixed field value rendered as plain text on the card (locked invoice, or an
+   always-read-only field like currency) instead of a boxed input. */
+.settings-static-value {
+  margin: 0;
+  padding: 6px 0;
+  color: #101510;
+  font-weight: 500;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .invoice-add-line {
   margin-top: 12px;
 }

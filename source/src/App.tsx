@@ -5628,6 +5628,9 @@ function App() {
   const invoiceTaxTotal = invoiceTaxableSubtotal * (Math.max(0, Number(invoiceSettings.taxRate) || 0) / 100);
   const invoiceTotal = invoiceTaxableSubtotal + invoiceTaxTotal;
   const activeInvoiceNumber = confirmedInvoiceNumber || editingInvoiceNumber || invoiceNumber;
+  // Once an invoice is confirmed/sent it's committed - the whole card reads as a
+  // plain invoice (no editable inputs), per the "locked in = plain invoice" rule.
+  const invoiceLocked = confirmedInvoiceNumber !== "";
   const latestVoidedInvoiceNumber = voidedInvoiceNumbers[voidedInvoiceNumbers.length - 1] || "";
   const invoiceDiscountLabel = invoiceDraft.discountLabel.trim() || "Discount / coupon";
   const invoiceEmailSubject = `${activeInvoiceNumber} from ${coachAccount.businessName}`;
@@ -19389,9 +19392,11 @@ function App() {
                           {invoiceDraft.payerEmail && <em>{invoiceDraft.payerEmail}</em>}
                           {invoiceDraft.payerPhone && <em>{invoiceDraft.payerPhone}</em>}
                         </div>
-                        <button className="outline-button small-action" onClick={clearInvoiceCustomer} type="button">
-                          Change
-                        </button>
+                        {!invoiceLocked && (
+                          <button className="outline-button small-action" onClick={clearInvoiceCustomer} type="button">
+                            Change
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <div className="invoice-customer-search">
@@ -19436,31 +19441,44 @@ function App() {
                     <div className="invoice-form-grid invoice-detail-grid">
                       <label className="settings-field">
                         <span>Invoice date</span>
-                        <input
-                          value={invoiceDraft.invoiceDate}
-                          onChange={(event) => updateInvoiceDraft("invoiceDate", event.target.value)}
-                          type="date"
-                        />
+                        {invoiceLocked ? (
+                          <p className="settings-static-value">{invoiceDraft.invoiceDate || "—"}</p>
+                        ) : (
+                          <input
+                            value={invoiceDraft.invoiceDate}
+                            onChange={(event) => updateInvoiceDraft("invoiceDate", event.target.value)}
+                            type="date"
+                          />
+                        )}
                       </label>
                       <label className="settings-field">
                         <span>Due date</span>
-                        <input
-                          value={invoiceDraft.dueDate}
-                          onChange={(event) => updateInvoiceDraft("dueDate", event.target.value)}
-                          type="date"
-                        />
+                        {invoiceLocked ? (
+                          <p className="settings-static-value">{invoiceDraft.dueDate || "—"}</p>
+                        ) : (
+                          <input
+                            value={invoiceDraft.dueDate}
+                            onChange={(event) => updateInvoiceDraft("dueDate", event.target.value)}
+                            type="date"
+                          />
+                        )}
                       </label>
+                      {/* Currency is always fixed (read-only), so it's plain text, not a boxed input. */}
                       <label className="settings-field">
                         <span>Currency</span>
-                        <input value={invoiceSettings.currency} readOnly />
+                        <p className="settings-static-value">{invoiceSettings.currency}</p>
                       </label>
                       <label className="settings-field">
                         <span>Reference</span>
-                        <input
-                          value={invoiceDraft.reference}
-                          onChange={(event) => updateInvoiceDraft("reference", event.target.value)}
-                          placeholder="Optional"
-                        />
+                        {invoiceLocked ? (
+                          <p className="settings-static-value">{invoiceDraft.reference || "—"}</p>
+                        ) : (
+                          <input
+                            value={invoiceDraft.reference}
+                            onChange={(event) => updateInvoiceDraft("reference", event.target.value)}
+                            placeholder="Optional"
+                          />
+                        )}
                       </label>
                     </div>
                   </section>
@@ -19637,11 +19655,15 @@ function App() {
                     <div className="invoice-note-block">
                       <label className="settings-field">
                         <span>Customer note</span>
-                        <textarea
-                          value={invoiceDraft.message}
-                          onChange={(event) => updateInvoiceDraft("message", event.target.value)}
-                          rows={3}
-                        />
+                        {invoiceLocked ? (
+                          <p className="settings-static-value">{invoiceDraft.message || "—"}</p>
+                        ) : (
+                          <textarea
+                            value={invoiceDraft.message}
+                            onChange={(event) => updateInvoiceDraft("message", event.target.value)}
+                            rows={3}
+                          />
+                        )}
                       </label>
                       <div className="invoice-payment-block">
                         <span>Payment</span>
@@ -19659,6 +19681,7 @@ function App() {
                     </div>
 
                     <div className="invoice-total-box">
+                      {!invoiceLocked && (
                       <div className="invoice-discount-controls">
                         {discountPresets.some((preset) => preset.active) && (
                           <label className="settings-field invoice-discount-preset">
@@ -19696,6 +19719,7 @@ function App() {
                           />
                         </label>
                       </div>
+                      )}
                       <div className="invoice-total-lines">
                         <span>
                           <em>Subtotal</em>
