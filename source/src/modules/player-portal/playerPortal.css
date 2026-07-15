@@ -1,0 +1,155 @@
+.player-portal {
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 16px;
+  background: #eef0ea;
+  box-sizing: border-box;
+}
+
+.player-portal * {
+  box-sizing: border-box;
+}
+
+.player-portal-card {
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: #fff;
+  border: 1px solid #deded8;
+  border-radius: 16px;
+  padding: 28px;
+  color: #171717;
+}
+
+.player-portal-brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.player-portal-brand strong {
+  font-size: 15px;
+}
+
+.player-portal-brand span {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: #77746d;
+}
+
+.player-portal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.player-portal-card h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.player-portal-lead {
+  margin: 0;
+  color: #57544d;
+  font-size: 14px;
+}
+
+.player-portal-field {
+  display: grid;
+  gap: 6px;
+}
+
+.player-portal-field span {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: #77746d;
+}
+
+.player-portal-field input {
+  min-height: 44px;
+  border: 1px solid #deded8;
+  border-radius: 9px;
+  padding: 0 12px;
+  background: #fbfbf8;
+  color: #171717;
+  font: inherit;
+}
+
+.player-portal-field input:focus {
+  outline: none;
+  border-color: #171717;
+  background: #fff;
+}
+
+.player-portal-primary {
+  min-height: 46px;
+  border: 0;
+  border-radius: 10px;
+  background: #171717;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.player-portal-primary:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.player-portal-ghost {
+  border: 1px solid #deded8;
+  border-radius: 999px;
+  padding: 7px 14px;
+  background: #fff;
+  color: #171717;
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.player-portal-ghost:hover {
+  background: #f6f6f2;
+}
+
+.player-portal-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #e4b4b4;
+  border-radius: 9px;
+  background: #fff4f4;
+  color: #6f1d1d;
+  font-size: 13px;
+}
+
+.player-portal-loading {
+  align-items: center;
+  text-align: center;
+  color: #57544d;
+}
+
+.player-portal-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid #deded8;
+  border-top-color: #171717;
+  animation: player-portal-spin 700ms linear infinite;
+}
+
+@keyframes player-portal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
