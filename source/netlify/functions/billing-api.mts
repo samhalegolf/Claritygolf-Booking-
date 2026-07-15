@@ -1515,6 +1515,67 @@ async function sendInvoice(accountId: string, id: string, body: Record<string, u
   return { invoice: await getInvoiceWithItems(accountId, id), emailed: true, emailId: emailResult.id, recipient: to };
 }
 
+// --- Clarity Pay (Stripe Checkout) -------------------------------------------
+// Create a one-time hosted Stripe Checkout page for an invoice's total. The
+// invoice record is the source of truth; Stripe just collects the payment. The
+// internal invoice id rides along in metadata so a webhook (if added later) can
+// reconcile it. Uses the Stripe REST API directly (form-encoded) so no SDK is
+// required. Requires STRIPE_SECRET_KEY in the environment.
+async function createInvoiceCheckout(accountId: string, id: string, req: Request) {
+  const secret = env("STRIPE_SECRET_KEY");
+  if (!secret) {
+    throw Object.assign(new Error("Clarity Pay is not configured yet (missing Stripe key)."), {
+      status: 503,
+      code: "STRIPE_NOT_CONFIGURED",
+    });
+  }
+  const invoice = await getInvoiceWithItems(accountId, id);
+  if (!invoice) throw Object.assign(new Error("Invoice not found."), { status: 404 });
+
+  const amount = Math.round((Number(invoice.total) || 0) * 100);
+  if (amount <= 0) {
+    throw Object.assign(new Error("Invoice total must be greater than zero to take a payment."), { status: 400 });
+  }
+  const currency = String(invoice.currency || "NZD").toLowerCase();
+  const branding = await resolveInvoiceBranding();
+  const origin = new URL(req.url).origin;
+
+  const params = new URLSearchParams();
+  params.set("mode", "payment");
+  params.set("success_url", `${origin}/?pay=success&invoice=${encodeURIComponent(String(invoice.invoiceNumber))}`);
+  params.set("cancel_url", `${origin}/?pay=cancel&invoice=${encodeURIComponent(String(invoice.invoiceNumber))}`);
+  params.set("client_reference_id", String(invoice.id));
+  params.set("metadata[invoice_id]", String(invoice.id));
+  params.set("metadata[account_id]", accountId);
+  params.set("metadata[invoice_number]", String(invoice.invoiceNumber));
+  if (invoice.customerEmail) params.set("customer_email", String(invoice.customerEmail));
+  // A single line for the invoice total keeps the charged amount identical to the
+  // invoice (no per-line rounding drift, tax already reflected in the total).
+  params.set("line_items[0][quantity]", "1");
+  params.set("line_items[0][price_data][currency]", currency);
+  params.set("line_items[0][price_data][unit_amount]", String(amount));
+  params.set("line_items[0][price_data][product_data][name]", `Invoice ${invoice.invoiceNumber} - ${branding.businessName}`);
+  if (invoice.customerName) {
+    params.set("line_items[0][price_data][product_data][description]", `Billed to ${invoice.customerName}`);
+  }
+
+  const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw Object.assign(new Error(`Stripe checkout failed (${response.status}): ${text.slice(0, 300)}`), {
+      status: 502,
+      code: "STRIPE_ERROR",
+    });
+  }
+  const session = text ? JSON.parse(text) : {};
+  if (!session.url) throw Object.assign(new Error("Stripe did not return a checkout URL."), { status: 502 });
+  return { url: session.url as string, sessionId: (session.id as string) || "" };
+}
+
 async function invoicePdfResponse(accountId: string, id: string) {
   const invoice = await getInvoiceWithItems(accountId, id);
   if (!invoice) return json({ error: "not_found", message: "Invoice not found." }, 404);
@@ -1578,6 +1639,10 @@ export default async function handler(req: Request) {
     if (action.startsWith("invoices/") && action.endsWith("/pdf") && req.method === "GET") {
       const invoiceId = action.slice("invoices/".length, -"/pdf".length);
       return await invoicePdfResponse(accountId, invoiceId);
+    }
+    if (action.startsWith("invoices/") && action.endsWith("/checkout") && req.method === "POST") {
+      const invoiceId = action.slice("invoices/".length, -"/checkout".length);
+      return json(await createInvoiceCheckout(accountId, invoiceId, req));
     }
     if (action.startsWith("invoices/") && req.method === "GET") {
       const invoice = await getInvoiceWithItems(accountId, action.slice("invoices/".length));

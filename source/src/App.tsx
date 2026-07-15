@@ -10,6 +10,7 @@ import {
   CloudOff,
   CloudUpload,
   Code2,
+  CreditCard,
   Copy,
   Clock,
   Download,
@@ -4649,6 +4650,7 @@ function App() {
   const [editingInvoiceNumber, setEditingInvoiceNumber] = useState("");
   const [invoiceIssueState, setInvoiceIssueState] = useState<"idle" | "saving">("idle");
   const [invoiceSendState, setInvoiceSendState] = useState<"idle" | "sending">("idle");
+  const [clarityPayState, setClarityPayState] = useState<"idle" | "loading">("idle");
   const [recentInvoices, setRecentInvoices] = useState<BillingInvoiceRecord[]>([]);
   const [revenuePeriod, setRevenuePeriod] = useState<"week" | "month" | "year">("month");
   const [revenueReport, setRevenueReport] = useState<BillingRevenueReport | null>(null);
@@ -13360,6 +13362,39 @@ function App() {
     }
   }
 
+  // Clarity Pay: open a Stripe-hosted checkout for this invoice's total. The
+  // server creates the session; we open the returned pay page in a new tab.
+  async function startClarityPay() {
+    if (!activeInvoiceId) {
+      setToast({ message: "Save the invoice before taking a payment." });
+      return;
+    }
+    setClarityPayState("loading");
+    try {
+      const response = await fetch(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}/checkout`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({}),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { url?: string; message?: string } | null;
+      if (!response.ok || !data?.url) {
+        throw new Error(data?.message || (await readApiFailure(response, "Could not start Clarity Pay.")));
+      }
+      window.open(data.url, "_blank", "noopener");
+      setToast({ message: `Clarity Pay opened for ${activeInvoiceNumber}. Mark it paid once payment clears.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not start Clarity Pay." });
+    } finally {
+      setClarityPayState("idle");
+    }
+  }
+
   // Download the server-rendered PDF (opens the attachment endpoint in a new tab;
   // the admin session cookie rides along on the same-origin request).
   function downloadInvoicePdf() {
@@ -20167,9 +20202,20 @@ function App() {
                           Download PDF
                         </button>
                         {(openedInvoiceStatus === "sent" || openedInvoiceStatus === "overdue") && (
-                          <button className="outline-button" onClick={markActiveInvoicePaid} type="button">
-                            Mark Paid
-                          </button>
+                          <>
+                            <button
+                              className="outline-button"
+                              disabled={clarityPayState === "loading"}
+                              onClick={startClarityPay}
+                              type="button"
+                            >
+                              <CreditCard size={16} />
+                              {clarityPayState === "loading" ? "Opening..." : "Clarity Pay"}
+                            </button>
+                            <button className="outline-button" onClick={markActiveInvoicePaid} type="button">
+                              Mark Paid
+                            </button>
+                          </>
                         )}
                       </>
                     )}
