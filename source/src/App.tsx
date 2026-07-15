@@ -2564,7 +2564,9 @@ function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): InvoiceSetti
       typeof settings?.prefix === "string" && settings.prefix.trim()
         ? settings.prefix.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 12)
         : defaultInvoiceSettings.prefix,
-    nextNumber: Number.isFinite(nextNumber) ? clamp(Math.round(nextNumber), 1, 999999) : defaultInvoiceSettings.nextNumber,
+    // Any starting number is allowed (min 0 so the field can be cleared while
+    // typing; up to 9 digits so year-based schemes like 20260001 work).
+    nextNumber: Number.isFinite(nextNumber) ? clamp(Math.round(nextNumber), 0, 999999999) : defaultInvoiceSettings.nextNumber,
     currency:
       typeof settings?.currency === "string" && settings.currency.trim()
         ? settings.currency.trim().toUpperCase().slice(0, 8)
@@ -20045,14 +20047,14 @@ function App() {
                     <button className="outline-button" onClick={resetInvoiceDraft} type="button">
                       Reset Draft
                     </button>
-                    {confirmedInvoiceNumber && (
+                    {confirmedInvoiceNumber ? (
                       <>
                         <button className="outline-button" onClick={downloadInvoicePdf} type="button">
                           <Download size={16} />
                           Download PDF
                         </button>
                         <button
-                          className="outline-button"
+                          className="primary-button"
                           disabled={invoiceSendState === "sending" || sentInvoiceNumber === confirmedInvoiceNumber}
                           onClick={sendActiveInvoice}
                           type="button"
@@ -20069,26 +20071,17 @@ function App() {
                             Mark Paid
                           </button>
                         )}
-                        <a className="outline-button" href={gmailComposeUrl} target="_blank" rel="noreferrer">
-                          <Mail size={16} />
-                          Gmail Draft
-                        </a>
                       </>
+                    ) : (
+                      <button
+                        className="primary-button"
+                        disabled={invoiceIssueState === "saving"}
+                        onClick={editingInvoiceId ? saveInvoiceEdits : issueInvoiceDraft}
+                        type="button"
+                      >
+                        {invoiceIssueState === "saving" ? "Saving..." : editingInvoiceId ? "Update Draft" : "Confirm Invoice"}
+                      </button>
                     )}
-                    <button
-                      className="primary-button"
-                      disabled={Boolean(confirmedInvoiceNumber) || invoiceIssueState === "saving"}
-                      onClick={editingInvoiceId ? saveInvoiceEdits : issueInvoiceDraft}
-                      type="button"
-                    >
-                      {confirmedInvoiceNumber
-                        ? "Invoice Confirmed"
-                        : invoiceIssueState === "saving"
-                          ? "Saving..."
-                          : editingInvoiceId
-                            ? "Update Draft"
-                            : "Confirm Invoice"}
-                    </button>
                   </div>
                 </article>
 
@@ -20559,11 +20552,12 @@ function App() {
                     <label className="settings-field">
                       <span>Start / next number</span>
                       <input
-                        value={invoiceSettingsDraft.nextNumber}
+                        value={invoiceSettingsDraft.nextNumber || ""}
                         inputMode="numeric"
                         readOnly={billingSettingsIsLocked}
                         onChange={(event) => updateBillingAccountDraft("nextNumber", parseQuantityInput(event.target.value))}
                         type="text"
+                        placeholder="e.g. 1001"
                       />
                     </label>
                     <label className="settings-field">
