@@ -4632,6 +4632,11 @@ function App() {
   const [selectedDiscountPresetId, setSelectedDiscountPresetId] = useState("");
   // A set discount collapses to a plain line; this reopens the editable controls.
   const [discountEditing, setDiscountEditing] = useState(false);
+  // When non-null, the invoice customer picker is showing the "new customer"
+  // form. Creating one adds a real client to the people list (not an invoice-only
+  // record), then selects it as the payer.
+  const [newInvoiceCustomer, setNewInvoiceCustomer] = useState<{ name: string; email: string; phone: string } | null>(null);
+  const [newInvoiceCustomerSaving, setNewInvoiceCustomerSaving] = useState(false);
   const [expenseCategories, setExpenseCategories] = useState<BillingExpenseCategory[]>([]);
   const [expenseCategoryEditor, setExpenseCategoryEditor] = useState<{ id: string; name: string }>({ id: "", name: "" });
   const [expenseCategorySaveState, setExpenseCategorySaveState] = useState<"idle" | "saving">("idle");
@@ -12211,25 +12216,69 @@ function App() {
       payerPhone: customer.phone || "",
     }));
     setInvoiceCustomerSearch("");
+    setNewInvoiceCustomer(null);
   }
 
-  function createInvoiceCustomerFromSearch() {
+  // Open the inline "new customer" form, pre-filling from whatever was typed in
+  // the search box (an email goes in the email field, anything else in name).
+  function openNewInvoiceCustomer() {
     const value = invoiceCustomerSearch.trim();
-    if (!value) {
-      setToast({ message: "Search or type a customer name first." });
-      return;
-    }
     const isEmail = value.includes("@");
-    selectInvoiceCustomer({
-      name: isEmail ? value.split("@")[0] : value,
+    setNewInvoiceCustomer({
+      name: isEmail ? "" : value,
       email: isEmail ? value : "",
       phone: "",
     });
   }
 
+  function updateNewInvoiceCustomer(field: "name" | "email" | "phone", value: string) {
+    setNewInvoiceCustomer((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  // Create a real client in the people list (same endpoint as Clients / player
+  // profiles use), then select it as the invoice payer. No separate customer store.
+  async function saveNewInvoiceCustomer() {
+    if (!newInvoiceCustomer) return;
+    const name = newInvoiceCustomer.name.trim();
+    const email = newInvoiceCustomer.email.trim();
+    const phone = newInvoiceCustomer.phone.trim();
+    if (!name && !email) {
+      setToast({ message: "Add a name or email for the customer." });
+      return;
+    }
+    setNewInvoiceCustomerSaving(true);
+    try {
+      const response = await fetch("/api/people", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person: { name, email, phone, notes: "", caddyProfileUrl: "" } }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not add customer."));
+      const result = (await response.json()) as PeopleUpdateResult;
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
+      const created = result.person;
+      selectInvoiceCustomer({
+        name: created?.name || name,
+        email: created?.email || email,
+        phone: created?.phone || phone,
+      });
+      setToast({ message: `${created?.name || name || "Customer"} added to clients.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not add customer." });
+    } finally {
+      setNewInvoiceCustomerSaving(false);
+    }
+  }
+
   function clearInvoiceCustomer() {
     markInvoiceDraftDirty();
     setInvoiceCustomerSearch(invoiceDraft.payerName || invoiceDraft.payerEmail);
+    setNewInvoiceCustomer(null);
     setInvoiceDraft((current) => ({
       ...current,
       payerName: "",
@@ -12911,6 +12960,7 @@ function App() {
     setEditingInvoiceNumber("");
     setSelectedDiscountPresetId("");
     setDiscountEditing(false);
+    setNewInvoiceCustomer(null);
   }
 
   function billingSourceType(source: InvoiceLineSource): "booking" | "product" | "manual" {
@@ -12987,6 +13037,7 @@ function App() {
       setShowInvoiceLinePicker(false);
       setSelectedDiscountPresetId("");
       setDiscountEditing(false);
+      setNewInvoiceCustomer(null);
       setActiveInvoiceId(String(invoice.id || record.id));
       setEditingInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
       if (invoice.status === "draft") {
@@ -19416,35 +19467,81 @@ function App() {
                       </div>
                     ) : (
                       <div className="invoice-customer-search">
-                        <label className="settings-field">
-                          <span>Find or create customer</span>
-                          <input
-                            value={invoiceCustomerSearch}
-                            onChange={(event) => setInvoiceCustomerSearch(event.target.value)}
-                            placeholder="Search name, email, or phone"
-                          />
-                        </label>
-                        {(invoiceCustomerMatches.length > 0 || invoiceCustomerCreateLabel) && (
-                          <div className="invoice-customer-results">
-                            {invoiceCustomerMatches.map((person) => (
-                              <button key={person.id} onClick={() => selectInvoiceCustomer(person)} type="button">
-                                <span>
-                                  <strong>{person.name}</strong>
-                                  <em>{person.email || person.phone || "No contact saved"}</em>
-                                </span>
-                                <Plus size={16} />
+                        {newInvoiceCustomer ? (
+                          <div className="invoice-new-customer">
+                            <label className="settings-field">
+                              <span>Name</span>
+                              <input
+                                value={newInvoiceCustomer.name}
+                                onChange={(event) => updateNewInvoiceCustomer("name", event.target.value)}
+                                placeholder="Customer name"
+                                autoFocus
+                              />
+                            </label>
+                            <label className="settings-field">
+                              <span>Email</span>
+                              <input
+                                value={newInvoiceCustomer.email}
+                                onChange={(event) => updateNewInvoiceCustomer("email", event.target.value)}
+                                placeholder="name@example.com"
+                                type="email"
+                              />
+                            </label>
+                            <label className="settings-field">
+                              <span>Phone</span>
+                              <input
+                                value={newInvoiceCustomer.phone}
+                                onChange={(event) => updateNewInvoiceCustomer("phone", event.target.value)}
+                                placeholder="Optional"
+                              />
+                            </label>
+                            <div className="invoice-new-customer-actions">
+                              <button className="outline-button" onClick={() => setNewInvoiceCustomer(null)} type="button">
+                                Cancel
                               </button>
-                            ))}
-                            {invoiceCustomerCreateLabel && (
-                              <button onClick={createInvoiceCustomerFromSearch} type="button">
-                                <span>
-                                  <strong>Create new customer</strong>
-                                  <em>{invoiceCustomerCreateLabel}</em>
-                                </span>
-                                <Plus size={16} />
+                              <button
+                                className="primary-button"
+                                onClick={saveNewInvoiceCustomer}
+                                disabled={newInvoiceCustomerSaving}
+                                type="button"
+                              >
+                                {newInvoiceCustomerSaving ? "Adding..." : "Add to clients"}
                               </button>
-                            )}
+                            </div>
                           </div>
+                        ) : (
+                          <>
+                            <label className="settings-field">
+                              <span>Find or create customer</span>
+                              <input
+                                value={invoiceCustomerSearch}
+                                onChange={(event) => setInvoiceCustomerSearch(event.target.value)}
+                                placeholder="Search name, email, or phone"
+                              />
+                            </label>
+                            {(invoiceCustomerMatches.length > 0 || invoiceCustomerCreateLabel) && (
+                              <div className="invoice-customer-results">
+                                {invoiceCustomerMatches.map((person) => (
+                                  <button key={person.id} onClick={() => selectInvoiceCustomer(person)} type="button">
+                                    <span>
+                                      <strong>{person.name}</strong>
+                                      <em>{person.email || person.phone || "No contact saved"}</em>
+                                    </span>
+                                    <Plus size={16} />
+                                  </button>
+                                ))}
+                                {invoiceCustomerCreateLabel && (
+                                  <button onClick={openNewInvoiceCustomer} type="button">
+                                    <span>
+                                      <strong>Create new customer</strong>
+                                      <em>{invoiceCustomerCreateLabel}</em>
+                                    </span>
+                                    <Plus size={16} />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     )}

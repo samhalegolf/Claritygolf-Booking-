@@ -6635,6 +6635,19 @@ button {
   gap: 8px;
 }
 
+/* Inline "new customer" form - creates a real client in the people list. */
+.invoice-new-customer {
+  display: grid;
+  gap: 10px;
+}
+
+.invoice-new-customer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .invoice-customer-results,
 .invoice-customer-settled,
 .invoice-option-list,
