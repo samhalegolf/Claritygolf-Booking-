@@ -15,6 +15,63 @@ export function isPlayerPortalMode(): boolean {
   );
 }
 
+// Must match baseWeekStart in src/App.tsx -- calendar_items store `week` as an
+// absolute offset from this anchor Monday, so the same anchor is needed to turn
+// a booking's (week, day, start) back into a real date.
+const BASE_WEEK_START = new Date(2026, 5, 1);
+
+function slotDate(week: number, day: number, start: number) {
+  const date = new Date(BASE_WEEK_START);
+  date.setDate(BASE_WEEK_START.getDate() + week * 7 + day);
+  date.setHours(Math.floor(start / 60), start % 60, 0, 0);
+  return date;
+}
+
+function formatMinutes(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  const period = hours >= 12 ? "PM" : "AM";
+  const hour12 = ((hours + 11) % 12) + 1;
+  return mins === 0 ? `${hour12} ${period}` : `${hour12}:${String(mins).padStart(2, "0")} ${period}`;
+}
+
+function formatBookingWhen(booking: Booking) {
+  const date = slotDate(booking.week, booking.day, booking.start);
+  const dateLabel = date.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+  return `${dateLabel} · ${formatMinutes(booking.start)}–${formatMinutes(booking.start + booking.duration)}`;
+}
+
+function formatNoteDate(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+type Booking = {
+  id: string;
+  serviceName?: string;
+  duration: number;
+  week: number;
+  day: number;
+  start: number;
+  client?: string;
+  location?: { name?: string } | null;
+};
+
+type Note = {
+  id: string;
+  title?: string;
+  body?: string;
+  playerName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 type PortalStatus = "checking" | "guest" | "authenticated";
 
 export default function PlayerPortal() {
@@ -24,6 +81,42 @@ export default function PlayerPortal() {
   const [loginBusy, setLoginBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [playerEmail, setPlayerEmail] = useState("");
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState("");
+
+  const loadProfile = useCallback(async () => {
+    setProfileLoading(true);
+    setProfileError("");
+    try {
+      const res = await fetch("/api/player/profile", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (res.status === 401) {
+        setStatus("guest");
+        return;
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        bookings?: Booking[];
+        notes?: Note[];
+      };
+      if (!res.ok) throw new Error(data?.message || "We couldn't load your profile.");
+      setBookings(Array.isArray(data.bookings) ? data.bookings : []);
+      setNotes(Array.isArray(data.notes) ? data.notes : []);
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : "We couldn't load your profile.");
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (status === "authenticated") void loadProfile();
+  }, [status, loadProfile]);
 
   const checkSession = useCallback(async () => {
     try {
@@ -91,6 +184,9 @@ export default function PlayerPortal() {
     setEmail("");
     setPhone("");
     setPlayerEmail("");
+    setBookings([]);
+    setNotes([]);
+    setProfileError("");
   }
 
   if (status === "checking") {
@@ -153,6 +249,27 @@ export default function PlayerPortal() {
     );
   }
 
+  const now = Date.now();
+  const upcomingBookings = bookings
+    .filter((b) => slotDate(b.week, b.day, b.start).getTime() + b.duration * 60 * 1000 >= now)
+    .sort((a, b) => slotDate(a.week, a.day, a.start).getTime() - slotDate(b.week, b.day, b.start).getTime());
+  const pastBookings = bookings
+    .filter((b) => slotDate(b.week, b.day, b.start).getTime() + b.duration * 60 * 1000 < now)
+    .sort((a, b) => slotDate(b.week, b.day, b.start).getTime() - slotDate(a.week, a.day, a.start).getTime());
+  const sortedNotes = [...notes].sort((a, b) =>
+    String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")),
+  );
+
+  const renderBooking = (booking: Booking) => (
+    <li className="player-portal-booking" key={booking.id}>
+      <div className="player-portal-booking-main">
+        <strong>{booking.serviceName || "Lesson"}</strong>
+        <span>{formatBookingWhen(booking)}</span>
+      </div>
+      {booking.location?.name && <span className="player-portal-booking-loc">{booking.location.name}</span>}
+    </li>
+  );
+
   return (
     <div className="player-portal">
       <div className="player-portal-card">
@@ -165,9 +282,58 @@ export default function PlayerPortal() {
             Sign out
           </button>
         </div>
-        <h1>You're signed in</h1>
+        <h1>Your profile</h1>
         {playerEmail && <p className="player-portal-lead">{playerEmail}</p>}
-        <p className="player-portal-lead">Your bookings and lesson notes will appear here.</p>
+
+        {profileLoading && bookings.length === 0 && notes.length === 0 ? (
+          <p className="player-portal-lead">Loading your bookings and lesson notes…</p>
+        ) : profileError ? (
+          <div className="player-portal-error" role="alert">
+            <p style={{ margin: 0 }}>{profileError}</p>
+            <button className="player-portal-ghost" type="button" onClick={() => void loadProfile()} style={{ marginTop: 10 }}>
+              Try again
+            </button>
+          </div>
+        ) : (
+          <>
+            <section className="player-portal-section">
+              <h2>Upcoming lessons</h2>
+              {upcomingBookings.length ? (
+                <ul className="player-portal-list">{upcomingBookings.map(renderBooking)}</ul>
+              ) : (
+                <p className="player-portal-empty">No upcoming lessons booked.</p>
+              )}
+            </section>
+
+            <section className="player-portal-section">
+              <h2>Lesson notes</h2>
+              {sortedNotes.length ? (
+                <ul className="player-portal-list">
+                  {sortedNotes.map((note) => (
+                    <li className="player-portal-note" key={note.id}>
+                      <div className="player-portal-note-head">
+                        <strong>{note.title || "Lesson note"}</strong>
+                        {formatNoteDate(note.updatedAt || note.createdAt) && (
+                          <span>{formatNoteDate(note.updatedAt || note.createdAt)}</span>
+                        )}
+                      </div>
+                      {note.body && <p>{note.body}</p>}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="player-portal-empty">No lesson notes yet.</p>
+              )}
+            </section>
+
+            {pastBookings.length > 0 && (
+              <section className="player-portal-section">
+                <h2>Past lessons</h2>
+                <ul className="player-portal-list">{pastBookings.slice(0, 20).map(renderBooking)}</ul>
+              </section>
+            )}
+          </>
+        )}
       </div>
     </div>
   );
