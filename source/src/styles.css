@@ -6728,9 +6728,6 @@ button {
 
 .invoice-document-lines {
   display: grid;
-  border: 1px solid #d8ded3;
-  border-radius: 8px;
-  overflow: hidden;
 }
 
 .invoice-document-line-head,
@@ -6766,26 +6763,66 @@ button {
   white-space: nowrap;
 }
 
-/* Plain (locked-in or pre-set) line: reads like a finished invoice row, no
-   input chrome. Uses the same column grid so it aligns with the header. */
-.invoice-document-line-row-plain {
-  align-items: center;
-  min-height: 44px;
+/* Plain (locked-in or pre-set) line: a boring invoice line. Description and
+   amount on one row, "qty x unit" and a small remove control underneath. No box
+   of its own - the invoice card is the only container. */
+.invoice-plain-line {
+  padding: 12px 0;
+  border-top: 1px solid #eef1ea;
 }
 
-.invoice-document-line-row-plain > span {
-  align-self: center;
-  color: #101510;
-  font-size: 14px;
+.invoice-document-lines > .invoice-plain-line:first-child {
+  border-top: 0;
 }
 
-.invoice-document-line-row-plain .invoice-line-plain-desc {
+.invoice-plain-line-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.invoice-plain-line-desc {
   font-weight: 600;
+  color: #101510;
 }
 
-.invoice-document-line-row-plain .invoice-line-plain-qty,
-.invoice-document-line-row-plain .invoice-line-plain-unit {
-  color: #3c433a;
+.invoice-plain-line-main > strong {
+  color: #101510;
+  white-space: nowrap;
+}
+
+.invoice-plain-line-sub {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 3px;
+  color: #626a60;
+  font-size: 13px;
+}
+
+.invoice-plain-line-remove {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: #a22c24;
+  cursor: pointer;
+}
+
+.invoice-plain-line-remove:hover,
+.invoice-plain-line-remove:focus-visible {
+  color: #7e1c17;
+}
+
+.invoice-add-line {
+  margin-top: 12px;
+}
+
+.invoice-add-line .outline-button {
+  width: 100%;
 }
 
 .invoice-line-delete-tab {
