@@ -1551,9 +1551,11 @@ const defaultInvoiceSettings: InvoiceSettings = {
   paymentTermsDays: 7,
   businessAddress: "",
   headerText: "",
-  footerText: "Thank you for training with Sam Hale Golf.",
-  defaultCustomerNote: "Thanks for your work on the lesson programme. Invoice attached below.",
-  paymentInstructions: "Please pay by bank transfer and use the invoice number as reference.",
+  // Footer and payment instructions are optional and not defaulted - they only
+  // appear on an invoice when the coach has actually set them in Billing Settings.
+  footerText: "",
+  defaultCustomerNote: "",
+  paymentInstructions: "",
   customFields: [],
   unpaidLoudness: 2,
 };
@@ -3980,7 +3982,8 @@ function emptyInvoiceDraft(settings = defaultInvoiceSettings, coachId = defaultC
     reference: "",
     discountLabel: "",
     discountAmount: 0,
-    message: settings.defaultCustomerNote,
+    // Customer note starts empty - not pre-filled from the default-note setting.
+    message: "",
     lineSearch: "",
     lines: [],
   };
@@ -19463,13 +19466,11 @@ function App() {
                 <article className="invoice-document-card" aria-label="Invoice editor">
                   <div className="invoice-document-header">
                     <div className="invoice-brand-block">
-                      <div className="invoice-logo-mark">
-                        {brandSettings.logoPreview ? (
+                      {brandSettings.logoPreview && (
+                        <div className="invoice-logo-mark">
                           <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
-                        ) : (
-                          <strong>{bookingBrandWords.map((word) => word[0]).join("").slice(0, 3).toUpperCase()}</strong>
-                        )}
-                      </div>
+                        </div>
+                      )}
                       <div>
                         <strong>{coachAccount.businessName}</strong>
                         <span>{coachAccount.contactEmail}</span>
@@ -19516,7 +19517,8 @@ function App() {
                           {invoiceDraft.payerPhone && <em>{invoiceDraft.payerPhone}</em>}
                         </div>
                         {!invoiceLocked && (
-                          <button className="outline-button small-action" onClick={clearInvoiceCustomer} type="button">
+                          <button className="invoice-inline-edit" onClick={clearInvoiceCustomer} type="button" aria-label="Change customer">
+                            <Pencil size={13} />
                             Change
                           </button>
                         )}
@@ -19850,19 +19852,29 @@ function App() {
                           />
                         )}
                       </label>
-                      <div className="invoice-payment-block">
-                        <span>Payment</span>
-                        <p>{invoiceSettings.paymentInstructions}</p>
-                        {invoiceSettings.bankAccount && <strong>{invoiceSettings.bankAccount}</strong>}
-                        {invoiceSettings.taxNumber && <em>{invoiceSettings.taxName} No. {invoiceSettings.taxNumber}</em>}
-                        {invoiceSettings.customFields
-                          .filter((field) => field.placement === "payment")
-                          .map((field) => (
-                            <em key={field.id}>
-                              {field.label}: {field.value || "Not set"}
-                            </em>
-                          ))}
-                      </div>
+                      {invoiceSettings.paymentInstructions ||
+                      invoiceSettings.bankAccount ||
+                      invoiceSettings.taxNumber ||
+                      invoiceSettings.customFields.some((field) => field.placement === "payment") ? (
+                        <div className="invoice-payment-block">
+                          <span>Payment</span>
+                          {invoiceSettings.paymentInstructions && <p>{invoiceSettings.paymentInstructions}</p>}
+                          {invoiceSettings.bankAccount && <strong>{invoiceSettings.bankAccount}</strong>}
+                          {invoiceSettings.taxNumber && <em>{invoiceSettings.taxName} No. {invoiceSettings.taxNumber}</em>}
+                          {invoiceSettings.customFields
+                            .filter((field) => field.placement === "payment")
+                            .map((field) => (
+                              <em key={field.id}>
+                                {field.label}: {field.value || "Not set"}
+                              </em>
+                            ))}
+                        </div>
+                      ) : !invoiceLocked ? (
+                        <button className="invoice-add-detail" onClick={openInvoiceCoachSettings} type="button">
+                          <Plus size={15} />
+                          Add payment details
+                        </button>
+                      ) : null}
                     </div>
 
                     <div className="invoice-total-box">
@@ -20086,88 +20098,6 @@ function App() {
                     </div>
                   </section>
 
-                  <section className="data-card completed-bookings-card">
-                    <div className="data-card-header">
-                      <div>
-                        <span>Catalog</span>
-                        <h2>Products & Services</h2>
-                      </div>
-                      <Package size={24} />
-                    </div>
-                    <div className="billing-catalog-editor">
-                      <label className="settings-field">
-                        <span>Name</span>
-                        <input
-                          value={catalogEditor.name}
-                          onChange={(event) => setCatalogEditor((current) => ({ ...current, name: event.target.value }))}
-                          placeholder="Product or service"
-                        />
-                      </label>
-                      <div className="service-form-row">
-                        <label className="settings-field">
-                          <span>Kind</span>
-                          <select
-                            value={catalogEditor.kind}
-                            onChange={(event) =>
-                              setCatalogEditor((current) => ({
-                                ...current,
-                                kind: event.target.value === "product" ? "product" : "service",
-                              }))
-                            }
-                          >
-                            <option value="service">Service</option>
-                            <option value="product">Product</option>
-                          </select>
-                        </label>
-                        <label className="settings-field">
-                          <span>Price</span>
-                          <input
-                            value={catalogEditor.price}
-                            inputMode="decimal"
-                            onChange={(event) =>
-                              setCatalogEditor((current) => ({ ...current, price: parseMoneyInput(event.target.value) }))
-                            }
-                            type="text"
-                          />
-                        </label>
-                      </div>
-                      <button className="outline-button" disabled={catalogSaveState === "saving"} onClick={addCatalogItem} type="button">
-                        <Plus size={16} />
-                        {catalogEditor.id ? (catalogSaveState === "saving" ? "Saving..." : "Save Changes") : catalogSaveState === "saving" ? "Saving..." : "Add Product/Service"}
-                      </button>
-                      {Boolean(catalogEditor.id) && (
-                        <button
-                          className="outline-button"
-                          onClick={() => setCatalogEditor({ id: "", kind: "service", name: "", description: "", price: 0, taxRate: invoiceSettings.taxRate })}
-                          type="button"
-                        >
-                          Cancel Edit
-                        </button>
-                      )}
-                    </div>
-                    <div className="billing-catalog-list">
-                      {catalogItems.length ? (
-                        catalogItems.map((product) => (
-                          <button
-                            key={product.id}
-                            className={`billing-catalog-list-item${product.active === false ? " inactive" : ""}`}
-                            onClick={() => setCatalogEditor(product)}
-                            type="button"
-                          >
-                            <span>
-                              <strong>{product.name}</strong>
-                              <em>
-                                {product.kind} - {formatMoney(product.price, invoiceSettings.currency)}
-                                {product.active === false ? " - inactive" : ""}
-                              </em>
-                            </span>
-                          </button>
-                        ))
-                      ) : (
-                        <p>No products or services yet.</p>
-                      )}
-                    </div>
-                  </section>
                 </aside>
               </div>
             )}

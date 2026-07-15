@@ -6615,6 +6615,26 @@ button {
   text-decoration: underline;
 }
 
+/* "+ Add …" prompt shown where an optional, unset settings-driven block would be
+   (e.g. payment details) instead of leaving a blank. */
+.invoice-add-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: #2f6b46;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.invoice-add-detail:hover,
+.invoice-add-detail:focus-visible {
+  text-decoration: underline;
+}
+
 .invoice-section-heading strong {
   color: #626a60;
   font-size: 12px;
