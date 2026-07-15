@@ -13051,6 +13051,12 @@ function App() {
     setPullRangeEditing(false);
   }
 
+  // Open the invoice editor on a fresh, blank invoice.
+  function startNewInvoice() {
+    resetInvoiceDraft();
+    setBillingSection("new-invoice");
+  }
+
   // Start a fresh, editable invoice.
   function resetInvoiceDraft() {
     setInvoiceDraft(emptyInvoiceDraft(invoiceSettings, activeCoachId));
@@ -19254,7 +19260,7 @@ function App() {
               </button>
               <button
                 className={billingSection === "new-invoice" ? "active" : ""}
-                onClick={() => setBillingSection("new-invoice")}
+                onClick={startNewInvoice}
                 role="tab"
                 aria-selected={billingSection === "new-invoice"}
                 type="button"
@@ -19369,7 +19375,7 @@ function App() {
                       <FileText size={24} />
                     </div>
                     <p>Manual invoice entry is ready, with lesson type, package, product, and completed-booking line sources.</p>
-                    <button className="primary-button" onClick={() => setBillingSection("new-invoice")} type="button">
+                    <button className="primary-button" onClick={startNewInvoice} type="button">
                       <Plus size={16} />
                       New Invoice
                     </button>
@@ -20051,9 +20057,6 @@ function App() {
                   <p className="invoice-footer">{invoiceSettings.footerText}</p>
 
                   <div className="invoice-actions invoice-bottom-actions">
-                    <button className="outline-button" onClick={resetInvoiceDraft} type="button">
-                      New Invoice
-                    </button>
                     {invoiceEditing ? (
                       isRevisingInvoice ? (
                         <>
