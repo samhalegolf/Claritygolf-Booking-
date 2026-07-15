@@ -4557,6 +4557,15 @@ function App() {
     }
   }, [activeView, refreshSavedVideoLibrary]);
 
+  // The client list is lazy-loaded (peopleDeferred on the initial workspace load),
+  // so it may not be in memory when the invoice editor opens. Ensure it's fetched
+  // when Billing is active so the customer search can suggest existing clients.
+  useEffect(() => {
+    if (activeView === "billing" && authStatus === "authenticated" && !people.length) {
+      void refreshPeopleList();
+    }
+  }, [activeView, authStatus, people.length]);
+
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
   const [billingSection, setBillingSection] = useState<BillingSection>("dashboard");
   const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
