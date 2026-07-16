@@ -94,9 +94,30 @@ async function akahu(path: string, params: Record<string, unknown> = {}) {
     if (value === undefined || value === null || value === "") continue;
     url.searchParams.append(key, String(value));
   }
-  const response = await fetch(url.toString(), {
-    headers: { "X-Akahu-Id": appToken, Authorization: `Bearer ${userToken}` },
-  });
+  // Bound every Akahu call so a stalled request surfaces as a clear error
+  // instead of hanging the whole function until Netlify kills it. 9s keeps us
+  // under the function timeout so the error is actually returned to the caller.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 9000);
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      headers: { "X-Akahu-Id": appToken, Authorization: `Bearer ${userToken}` },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const aborted = (error as { name?: string })?.name === "AbortError";
+    throw Object.assign(
+      new Error(
+        aborted
+          ? `Akahu GET ${path} timed out after 9s — no response from api.akahu.io (check token validity / connection).`
+          : `Akahu GET ${path} network error: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+      { status: 504 },
+    );
+  } finally {
+    clearTimeout(timer);
+  }
   const text = await response.text();
   if (!response.ok) {
     throw Object.assign(new Error(`Akahu GET ${path} failed ${response.status}: ${text.slice(0, 500)}`), {
