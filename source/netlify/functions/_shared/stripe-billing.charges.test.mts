@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { chargeStatus, mapCharge, mapChargeLine, shouldSyncCharge } from "./stripe-billing.mts";
+import { chargeInvoiceNumber, chargeStatus, mapCharge, mapChargeLine, shouldSyncCharge } from "./stripe-billing.mts";
 
 // A succeeded, unlinked card charge like the ones the booking site creates.
 function charge(overrides: Record<string, any> = {}) {
@@ -17,8 +17,10 @@ function charge(overrides: Record<string, any> = {}) {
     customer: null,
     invoice: null,
     payment_intent: "pi_123",
+    receipt_number: null,
     description: "Charge for mary@example.com",
     billing_details: { name: "Mary Wallace", email: "mary@example.com", phone: null },
+    metadata: { orderId: "268" },
     ...overrides,
   };
 }
@@ -26,7 +28,8 @@ function charge(overrides: Record<string, any> = {}) {
 test("succeeded charge maps to a paid invoice row in dollars", () => {
   const row = mapCharge(charge(), "sam-hale-golf");
   assert.equal(row.id, "ch_123");
-  assert.equal(row.invoice_number, "ch_123");
+  assert.equal(row.invoice_number, "ORD-268"); // booking order number, not the ch_ id
+  assert.equal(row.tax_inclusive, true); // NZ charge amount is GST-inclusive
   assert.equal(row.account_id, "sam-hale-golf");
   assert.equal(row.status, "paid");
   assert.equal(row.total, 160);
@@ -85,4 +88,13 @@ test("dedup + status gating: only succeeded, unlinked charges sync", () => {
   assert.equal(shouldSyncCharge(charge({ status: "failed" })), false);
   assert.equal(shouldSyncCharge(charge({ invoice: "in_456" })), false); // already an invoice
   assert.equal(shouldSyncCharge({}), false);
+});
+
+test("invoice number: order id > receipt number > short card code", () => {
+  assert.equal(chargeInvoiceNumber(charge()), "ORD-268");
+  assert.equal(chargeInvoiceNumber(charge({ metadata: {}, receipt_number: "2043-1191" })), "2043-1191");
+  assert.equal(
+    chargeInvoiceNumber(charge({ id: "ch_3Ttll2HT7TJ4nhHW0KEuYoTx", metadata: {}, receipt_number: null })),
+    "CARD-0KEUYOTX",
+  );
 });
