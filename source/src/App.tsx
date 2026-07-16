@@ -115,6 +115,39 @@ import {
 } from "./modules/player-profiles/playerProfilesStore";
 import "./modules/player-profiles/playerProfiles.css";
 import type {
+  InvoiceCustomFieldPlacement,
+  InvoiceCustomField,
+  InvoiceSettings,
+  BillingCatalogKind,
+  BillingCatalogItem,
+  InvoiceLineSource,
+  InvoiceLine,
+  InvoiceDraft,
+  BillingInvoiceStatus,
+  BillingInvoiceRecord,
+  BillingRevenueBucket,
+  BillingRevenueReport,
+  BillingDiscountType,
+  BillingDiscount,
+  BillingExpenseCategory,
+  BillingExpense,
+} from "./modules/billing/types";
+import {
+  defaultInvoiceSettings,
+  cleanInvoiceSettings,
+} from "./modules/billing/invoiceSettings";
+import { computeInvoiceTotals } from "./modules/billing/invoiceMath";
+import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
+import {
+  parseExpenseCsv,
+  inferExpenseCsvField,
+  expenseMappingByField,
+  buildExpenseCandidates,
+  type ExpenseCsvField,
+} from "./modules/billing/expenseCsv";
+import { clamp } from "./lib/number";
+import { dateInputValue } from "./lib/date";
+import type {
   ChangeEvent,
   CSSProperties,
   FormEvent,
@@ -1236,39 +1269,6 @@ type BrandSettings = {
   bookingTheme: ThemeMode;
 };
 
-type InvoiceCustomFieldPlacement = "header" | "bill-to" | "payment" | "footer";
-
-type InvoiceCustomField = {
-  id: string;
-  label: string;
-  value: string;
-  placement: InvoiceCustomFieldPlacement;
-};
-
-type InvoiceSettings = {
-  enabled: boolean;
-  showBillingWorkspace: boolean;
-  prefix: string;
-  nextNumber: number;
-  currency: string;
-  taxName: string;
-  taxNumber: string;
-  taxRate: number;
-  bankAccount: string;
-  paymentTermsDays: number;
-  businessAddress: string;
-  headerText: string;
-  footerText: string;
-  defaultCustomerNote: string;
-  paymentInstructions: string;
-  customFields: InvoiceCustomField[];
-  // How insistently the Dashboard should call out unpaid/overdue invoices.
-  // 1 = subtle count only, 2 = highlighted banner, 3 = urgent banner + row
-  // highlighting in Recent Invoices. Purely a display setting - it doesn't
-  // change invoice status, send reminders, or touch any other data.
-  unpaidLoudness: 1 | 2 | 3;
-};
-
 type CoachAccount = {
   id: string;
   coachName: string;
@@ -1329,126 +1329,6 @@ type WorkspaceApiFailureDetail = {
   failed?: string;
   text?: string;
   statusText?: string;
-};
-
-type BillingCatalogKind = "service" | "product" | "package" | "lesson-type";
-
-type BillingCatalogItem = {
-  id: string;
-  kind: BillingCatalogKind;
-  name: string;
-  description: string;
-  price: number;
-  taxRate: number;
-  sourceServiceId?: string;
-  active?: boolean;
-};
-
-type InvoiceLineSource = "manual" | "catalog" | "booking_snapshot" | "package_sale";
-
-type InvoiceLine = {
-  id: string;
-  source: InvoiceLineSource;
-  sourceId?: string;
-  description: string;
-  quantity: number;
-  unitPrice: number;
-  taxRate: number;
-};
-
-type InvoiceDraft = {
-  accountId?: string;
-  coachId?: string;
-  payerName: string;
-  payerEmail: string;
-  payerPhone: string;
-  invoiceDate: string;
-  dueDate: string;
-  reference: string;
-  discountLabel: string;
-  discountAmount: number;
-  message: string;
-  lineSearch: string;
-  taxInclusive: boolean;
-  lines: InvoiceLine[];
-};
-
-// Shape returned by /api/billing/invoices (billing-api.mts). This is the
-// persisted, backend-owned invoice record - distinct from InvoiceDraft, which
-// is just the in-progress editor state before an invoice has been saved.
-type BillingInvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "void";
-
-type BillingInvoiceRecord = {
-  id: string;
-  invoiceNumber: string;
-  status: BillingInvoiceStatus;
-  customerName: string;
-  customerEmail: string;
-  issueDate: string;
-  dueDate: string | null;
-  currency: string;
-  total: number;
-  amountPaid: number;
-  // Set once the invoice has actually been emailed. status "sent" without this =
-  // Published (committed but not emailed).
-  sentAt?: string | null;
-};
-
-// Shape returned by GET /api/billing/reports/revenue.
-type BillingRevenueBucket = {
-  label: string;
-  rangeStart: string;
-  rangeEnd: string;
-  total: number;
-};
-
-type BillingRevenueReport = {
-  period: "week" | "month" | "year";
-  currency: string;
-  rangeStart: string;
-  rangeEnd: string;
-  total: number;
-  previousYearTotal: number | null;
-  previousYearRangeStart: string;
-  previousYearRangeEnd: string;
-  buckets: BillingRevenueBucket[];
-};
-
-// Shape returned by /api/billing/discounts. Presets only - applying one to an
-// invoice just fills invoiceDraft.discountLabel/discountAmount, it does not
-// change how the invoice itself stores its discount.
-type BillingDiscountType = "percentage" | "fixed";
-
-type BillingDiscount = {
-  id: string;
-  name: string;
-  discountType: BillingDiscountType;
-  value: number;
-  couponCode: string;
-  active: boolean;
-};
-
-// Shape returned by /api/billing/expense-categories. Presets only, same
-// pattern as discounts above.
-type BillingExpenseCategory = {
-  id: string;
-  name: string;
-  active: boolean;
-};
-
-// Shape returned by /api/billing/expenses. Not linked to invoices/bookings -
-// this is simple outgoing-spend tracking, not cost-of-goods-sold.
-type BillingExpense = {
-  id: string;
-  description: string;
-  vendor: string;
-  amount: number;
-  currency: string;
-  expenseDate: string;
-  categoryId: string;
-  categoryName: string;
-  note: string;
-  voided: boolean;
 };
 
 type SlotCandidate = {
@@ -1545,35 +1425,12 @@ const BRAND_STORAGE_KEY = "clarity-booking-brand";
 const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
 const RESCHEDULE_LOGIN_STORAGE_KEY = "clarity-booking-reschedule-login";
 const BOOKING_LOGIN_STORAGE_KEY = "clarity-booking-login";
-const DEFAULT_TAX_RATE = 15;
 const PAST_ADMIN_LESSON_WARNING =
   "This lesson is in the past. It will be saved for records only and no emails will be sent.";
 
 const baseWeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const fullDayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const baseWeekStart = new Date(2026, 5, 1);
-
-const defaultInvoiceSettings: InvoiceSettings = {
-  enabled: true,
-  showBillingWorkspace: true,
-  prefix: "INV",
-  nextNumber: 1001,
-  currency: "NZD", // seed value; readCoachAccount derives the real one from country
-  taxName: "GST",
-  taxNumber: "",
-  taxRate: DEFAULT_TAX_RATE,
-  bankAccount: "",
-  paymentTermsDays: 7,
-  businessAddress: "",
-  headerText: "",
-  // Footer and payment instructions are optional and not defaulted - they only
-  // appear on an invoice when the coach has actually set them in Billing Settings.
-  footerText: "",
-  defaultCustomerNote: "",
-  paymentInstructions: "",
-  customFields: [],
-  unpaidLoudness: 2,
-};
 
 const defaultServices: Service[] = [
   {
@@ -1730,10 +1587,6 @@ function timeToMinutes(hour: number, minute: number) {
 
 function snap(value: number) {
   return Math.round(value / SNAP_MINUTES) * SNAP_MINUTES;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
 }
 
 function cleanMinBookingNoticeMinutes(value: number) {
@@ -2543,77 +2396,6 @@ function cleanEmail(value: unknown, fallback: string) {
   if (typeof value !== "string") return fallback;
   const email = value.trim().toLowerCase().slice(0, 180);
   return email.includes("@") ? email : fallback;
-}
-
-function cleanInvoiceCustomField(field?: Partial<InvoiceCustomField>, index = 0): InvoiceCustomField | null {
-  const label = typeof field?.label === "string" ? field.label.trim().slice(0, 80) : "";
-  const value = typeof field?.value === "string" ? field.value.trim().slice(0, 180) : "";
-  if (!label && !value) return null;
-  const placement: InvoiceCustomFieldPlacement =
-    field?.placement === "bill-to" || field?.placement === "payment" || field?.placement === "footer"
-      ? field.placement
-      : "header";
-  return {
-    id: typeof field?.id === "string" && field.id.trim() ? field.id.trim().slice(0, 80) : `field-${index + 1}`,
-    label: label || "Custom field",
-    value,
-    placement,
-  };
-}
-
-function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): InvoiceSettings {
-  const taxRate = Number(settings?.taxRate ?? defaultInvoiceSettings.taxRate);
-  const paymentTermsDays = Number(settings?.paymentTermsDays ?? defaultInvoiceSettings.paymentTermsDays);
-  const nextNumber = Number(settings?.nextNumber ?? defaultInvoiceSettings.nextNumber);
-  const customFields = Array.isArray(settings?.customFields)
-    ? settings.customFields
-        .map((field, index) => cleanInvoiceCustomField(field, index))
-        .filter((field): field is InvoiceCustomField => Boolean(field))
-        .slice(0, 12)
-    : [];
-  return {
-    enabled: settings?.enabled !== false,
-    showBillingWorkspace: settings?.showBillingWorkspace !== false,
-    prefix:
-      typeof settings?.prefix === "string" && settings.prefix.trim()
-        ? settings.prefix.trim().toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 12)
-        : defaultInvoiceSettings.prefix,
-    // Any starting number is allowed (min 0 so the field can be cleared while
-    // typing; up to 9 digits so year-based schemes like 20260001 work).
-    nextNumber: Number.isFinite(nextNumber) ? clamp(Math.round(nextNumber), 0, 999999999) : defaultInvoiceSettings.nextNumber,
-    currency:
-      typeof settings?.currency === "string" && settings.currency.trim()
-        ? settings.currency.trim().toUpperCase().slice(0, 8)
-        : defaultInvoiceSettings.currency,
-    taxName:
-      typeof settings?.taxName === "string" && settings.taxName.trim()
-        ? settings.taxName.trim().slice(0, 24)
-        : defaultInvoiceSettings.taxName,
-    taxNumber: typeof settings?.taxNumber === "string" ? settings.taxNumber.trim().slice(0, 80) : "",
-    taxRate: Number.isFinite(taxRate) ? clamp(taxRate, 0, 30) : defaultInvoiceSettings.taxRate,
-    bankAccount: typeof settings?.bankAccount === "string" ? settings.bankAccount.trim().slice(0, 120) : "",
-    paymentTermsDays: Number.isFinite(paymentTermsDays)
-      ? clamp(Math.round(paymentTermsDays), 0, 120)
-      : defaultInvoiceSettings.paymentTermsDays,
-    businessAddress: typeof settings?.businessAddress === "string" ? settings.businessAddress.trim().slice(0, 400) : "",
-    headerText: typeof settings?.headerText === "string" ? settings.headerText.trim().slice(0, 280) : "",
-    footerText:
-      typeof settings?.footerText === "string" && settings.footerText.trim()
-        ? settings.footerText.trim().slice(0, 400)
-        : defaultInvoiceSettings.footerText,
-    defaultCustomerNote:
-      typeof settings?.defaultCustomerNote === "string" && settings.defaultCustomerNote.trim()
-        ? settings.defaultCustomerNote.trim().slice(0, 400)
-        : defaultInvoiceSettings.defaultCustomerNote,
-    paymentInstructions:
-      typeof settings?.paymentInstructions === "string" && settings.paymentInstructions.trim()
-        ? settings.paymentInstructions.trim().slice(0, 400)
-        : defaultInvoiceSettings.paymentInstructions,
-    customFields,
-    unpaidLoudness: [1, 2, 3].includes(Number(settings?.unpaidLoudness))
-      ? (Number(settings?.unpaidLoudness) as 1 | 2 | 3)
-      : defaultInvoiceSettings.unpaidLoudness,
-  };
 }
 
 function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
@@ -3805,13 +3587,6 @@ function googleSyncTimeLabel(createdAt = "") {
   return Number.isNaN(time.getTime()) ? "Not synced yet" : time.toLocaleString();
 }
 
-function dateInputValue(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function addDaysInputValue(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -3842,94 +3617,6 @@ function isoDateDiffDays(laterIso: string, earlierIso: string) {
 // client-import parser (quote-aware, handles escaped "" quotes, mixed line
 // endings, BOM) - that script isn't a module and can't be imported into this
 // component, so the same logic is reimplemented here rather than shared.
-
-type ExpenseCsvField = "" | "date" | "description" | "debit" | "credit" | "reference";
-
-function guessExpenseCsvDelimiter(text: string) {
-  const sample = text.split(/\r?\n/).slice(0, 8).join("\n");
-  return (
-    [",", "\t", ";"]
-      .map((delimiter) => ({ delimiter, count: [...sample].filter((char) => char === delimiter).length }))
-      .sort((a, b) => b.count - a.count)[0]?.delimiter || ","
-  );
-}
-
-function parseExpenseCsv(text: string): string[][] {
-  const delimiter = guessExpenseCsvDelimiter(text);
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-  const input = text.replace(/^﻿/, "");
-
-  for (let index = 0; index < input.length; index += 1) {
-    const char = input[index];
-    const next = input[index + 1];
-    if (char === '"' && quoted && next === '"') {
-      cell += '"';
-      index += 1;
-    } else if (char === '"') {
-      quoted = !quoted;
-    } else if (char === delimiter && !quoted) {
-      row.push(cell.trim());
-      cell = "";
-    } else if ((char === "\n" || char === "\r") && !quoted) {
-      if (char === "\r" && next === "\n") index += 1;
-      row.push(cell.trim());
-      if (row.some(Boolean)) rows.push(row);
-      row = [];
-      cell = "";
-    } else {
-      cell += char;
-    }
-  }
-  row.push(cell.trim());
-  if (row.some(Boolean)) rows.push(row);
-  return rows;
-}
-
-// Bank column names vary a lot; this only needs to get close, since the
-// mapping UI always lets the user correct it before anything imports.
-function inferExpenseCsvField(header: string): ExpenseCsvField {
-  const key = header.toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (!key) return "";
-  if (key.includes("date")) return "date";
-  if (key.includes("debit")) return "debit";
-  if (key.includes("credit")) return "credit";
-  if (key.includes("reference") || key === "uniqueid" || key === "id") return "reference";
-  if (key.includes("payee") || key.includes("description") || key.includes("memo") || key.includes("particulars") || key.includes("narrative") || key.includes("details")) {
-    return "description";
-  }
-  if (key === "amount") return "debit";
-  return "";
-}
-
-// NZ bank exports are typically dd/mm/yyyy. ISO strings pass through
-// untouched; anything unrecognised returns "" so the row is flagged invalid
-// rather than silently imported with a wrong date.
-function parseExpenseCsvDate(value: string): string {
-  const trimmed = value.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  const dmy = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-  if (dmy) {
-    const [, day, month, year] = dmy;
-    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  }
-  const parsed = new Date(trimmed);
-  return Number.isNaN(parsed.getTime()) ? "" : dateInputValue(parsed);
-}
-
-// Strips currency symbols/thousands separators; treats parenthesised values
-// as negative (some exports show debits that way) but always returns a
-// positive magnitude, since the caller already knows this is the debit
-// (money-out) column - the sign convention lives in which column was picked,
-// not in the value itself.
-function parseExpenseCsvAmount(value: string): number {
-  const trimmed = value.trim();
-  if (!trimmed) return 0;
-  const numeric = Number(trimmed.replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(numeric) ? Math.abs(numeric) : 0;
-}
 
 // Currency follows the workspace country. It was hardcoded to NZD, which meant
 // a coach in another country was quoted prices in New Zealand dollars.
@@ -5732,19 +5419,14 @@ function App() {
     }
     return [...matches, ...rest];
   }, [pullableCompletedAppointments, invoicePayerBookingIds]);
-  const invoiceLineSubtotal = invoiceDraft.lines.reduce(
-    (total, line) => total + Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0),
-    0,
-  );
-  const invoiceDiscountTotal = Math.min(invoiceLineSubtotal, Math.max(0, Number(invoiceDraft.discountAmount) || 0));
-  const invoiceTaxableSubtotal = Math.max(0, invoiceLineSubtotal - invoiceDiscountTotal);
-  const invoiceTaxRatePct = Math.max(0, Number(invoiceSettings.taxRate) || 0);
-  // Inclusive: prices already contain tax, so tax is the rate/(100+rate) fraction
-  // of the taxable amount and the total equals it. Exclusive: tax is added on top.
-  const invoiceTaxTotal = invoiceDraft.taxInclusive
-    ? invoiceTaxableSubtotal * (invoiceTaxRatePct / (100 + invoiceTaxRatePct))
-    : invoiceTaxableSubtotal * (invoiceTaxRatePct / 100);
-  const invoiceTotal = invoiceDraft.taxInclusive ? invoiceTaxableSubtotal : invoiceTaxableSubtotal + invoiceTaxTotal;
+  const {
+    lineSubtotal: invoiceLineSubtotal,
+    discountTotal: invoiceDiscountTotal,
+    taxableSubtotal: invoiceTaxableSubtotal,
+    taxRatePct: invoiceTaxRatePct,
+    taxTotal: invoiceTaxTotal,
+    total: invoiceTotal,
+  } = computeInvoiceTotals(invoiceDraft, invoiceSettings.taxRate);
   const activeInvoiceNumber = editingInvoiceNumber || invoiceNumber;
   // Fields render plain (read-only) whenever we're not actively editing - i.e.
   // viewing/previewing a saved invoice.
@@ -12628,27 +12310,15 @@ function App() {
   const activeExpenses = expenses.filter((expense) => !expense.voided);
   const expenseTotalForRange = activeExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
-  const expenseImportMappingByField = useMemo(() => {
-    const map: Partial<Record<ExpenseCsvField, number>> = {};
-    Object.entries(expenseImportMapping).forEach(([colIndex, field]) => {
-      if (field) map[field] = Number(colIndex);
-    });
-    return map;
-  }, [expenseImportMapping]);
+  const expenseImportMappingByField = useMemo(
+    () => expenseMappingByField(expenseImportMapping),
+    [expenseImportMapping],
+  );
 
-  const expenseImportCandidates = useMemo(() => {
-    const cell = (row: string[], field: ExpenseCsvField) => {
-      const colIndex = expenseImportMappingByField[field];
-      return colIndex === undefined ? "" : (row[colIndex] || "").trim();
-    };
-    return expenseImportRows.map((row, index) => {
-      const date = parseExpenseCsvDate(cell(row, "date"));
-      const description = cell(row, "description");
-      const amount = parseExpenseCsvAmount(cell(row, "debit"));
-      const reference = cell(row, "reference");
-      return { index, date, description, amount, reference, valid: Boolean(date) && Boolean(description) && amount > 0 };
-    });
-  }, [expenseImportRows, expenseImportMappingByField]);
+  const expenseImportCandidates = useMemo(
+    () => buildExpenseCandidates(expenseImportRows, expenseImportMappingByField),
+    [expenseImportRows, expenseImportMappingByField],
+  );
 
   const expenseImportSelectedCandidates = expenseImportCandidates.filter(
     (candidate) => candidate.valid && !expenseImportExcluded[candidate.index],
@@ -20632,39 +20302,12 @@ function App() {
             )}
 
             {billingSection === "reports" && (
-              <div className="billing-reports">
-                <article className="data-card">
-                  <span>Revenue</span>
-                  <h2>By item source</h2>
-                  <div className="settings-summary-grid">
-                    <span>
-                      <strong>{services.filter((service) => service.lessonFormat !== "package").length}</strong>
-                      lesson types
-                    </span>
-                    <span>
-                      <strong>{packageServices.length}</strong>
-                      package types
-                    </span>
-                    <span>
-                      <strong>{catalogItems.length}</strong>
-                      products/services
-                    </span>
-                  </div>
-                </article>
-                <article className="data-card">
-                  <span>Reconciliation</span>
-                  <h2>Package dots coming next</h2>
-                  <p>
-                    Reports will read completed bookings, invoice-linked coverage, and manual coverage to classify green,
-                    blue, orange, grey, and red package slots.
-                  </p>
-                </article>
-                <article className="data-card">
-                  <span>Uninvoiced</span>
-                  <h2>{completedUninvoicedCount} completed lessons</h2>
-                  <p>These are ready to pull into a manual invoice without making calendar pull the only workflow.</p>
-                </article>
-              </div>
+              <BillingReportsPanel
+                lessonTypeCount={services.filter((service) => service.lessonFormat !== "package").length}
+                packageTypeCount={packageServices.length}
+                productCount={catalogItems.length}
+                completedUninvoicedCount={completedUninvoicedCount}
+              />
             )}
 
             {billingSection === "settings" && (
