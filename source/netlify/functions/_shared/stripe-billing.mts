@@ -312,12 +312,24 @@ export function chargeStatus(charge: Record<string, any>) {
   return "paid";
 }
 
+// A human-scaled invoice number for a card charge: the booking site's order
+// number (metadata.orderId, unique per charge) when present, else the Stripe
+// receipt number, else a short code off the charge id. Avoids dumping the raw
+// ch_… id, which renders as a giant string in the invoice header.
+export function chargeInvoiceNumber(charge: Record<string, any>) {
+  const orderId = cleanString(charge.metadata?.orderId, "", 40);
+  if (orderId) return `ORD-${orderId}`;
+  const receipt = cleanString(charge.receipt_number, "", 60);
+  if (receipt) return receipt;
+  return `CARD-${String(charge.id || "").slice(-8).toUpperCase()}` || String(charge.id);
+}
+
 export function mapCharge(charge: Record<string, any>, accountId: string) {
   const billing = charge.billing_details || {};
   return {
     id: charge.id,
     account_id: accountId,
-    invoice_number: cleanString(charge.id, "", 60) || charge.id,
+    invoice_number: chargeInvoiceNumber(charge),
     status: chargeStatus(charge),
     customer_id: cleanString(charge.customer, "", 160) || null,
     customer_name: cleanString(billing.name, "", 140) || "Stripe customer",
@@ -329,7 +341,10 @@ export function mapCharge(charge: Record<string, any>, accountId: string) {
     currency: String(charge.currency || "NZD").toUpperCase(),
     subtotal: fromCents(charge.amount),
     tax_total: 0,
-    tax_inclusive: false,
+    // The card charge amount is the final price paid (GST-inclusive in NZ), so
+    // mark it inclusive — otherwise the invoice editor re-adds tax on top of it
+    // and the total balloons past what was actually charged.
+    tax_inclusive: true,
     discount_total: 0,
     discount_label: null,
     total: fromCents(charge.amount),
