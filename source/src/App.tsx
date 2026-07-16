@@ -869,6 +869,18 @@ type Toast = {
 
 type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video" | "players";
 type BillingSection = "none" | "dashboard" | "new-invoice" | "invoices" | "expenses" | "reports" | "settings";
+// A money-out bank transaction (Akahu) awaiting review as an expense.
+type BankExpenseCandidate = {
+  id: string;
+  date: string;
+  amount: number;
+  description: string | null;
+  merchant: string | null;
+  type: string | null;
+  suggestedCategory: string | null;
+  accountId: string | null;
+  account: string | null;
+};
 type SettingsTab =
   | "none"
   | "services"
@@ -4383,6 +4395,10 @@ function App() {
   const [expenseCategorySaveState, setExpenseCategorySaveState] = useState<"idle" | "saving">("idle");
   const [expenses, setExpenses] = useState<BillingExpense[]>([]);
   const [expenseLoadState, setExpenseLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  // Akahu bank feed: money-out transactions awaiting review as expenses.
+  const [bankCandidates, setBankCandidates] = useState<BankExpenseCandidate[]>([]);
+  const [bankCandidatesLoadState, setBankCandidatesLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [bankCandidateBusy, setBankCandidateBusy] = useState<string | null>(null);
   const [expenseRangeFrom, setExpenseRangeFrom] = useState("");
   const [expenseRangeTo, setExpenseRangeTo] = useState("");
   const [expenseDraft, setExpenseDraft] = useState<{
@@ -12202,6 +12218,56 @@ function App() {
     }
   }
 
+  // Akahu bank feed → expense review. Money-out transactions the coach hasn't
+  // actioned yet; approving one creates a billing_expenses row, dismissing hides it.
+  async function fetchBankCandidates() {
+    setBankCandidatesLoadState("loading");
+    try {
+      const response = await fetch("/api/akahu-expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ action: "list" }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load the bank feed."));
+      const data = (await response.json()) as { candidates?: BankExpenseCandidate[] };
+      setBankCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      setBankCandidatesLoadState("ready");
+    } catch (error) {
+      console.error("fetchBankCandidates failed", error);
+      setBankCandidatesLoadState("error");
+    }
+  }
+
+  async function actionBankCandidate(candidate: BankExpenseCandidate, action: "approve" | "ignore") {
+    setBankCandidateBusy(candidate.id);
+    try {
+      const response = await fetch("/api/akahu-expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action, id: candidate.id }),
+      });
+      if (!response.ok) {
+        throw new Error(await readApiFailure(response, action === "approve" ? "Could not add the expense." : "Could not dismiss."));
+      }
+      setBankCandidates((prev) => prev.filter((row) => row.id !== candidate.id));
+      if (action === "approve") {
+        setToast({ message: `Added ${formatMoney(candidate.amount, "NZD")} expense.` });
+        void fetchExpenses();
+      }
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+    } finally {
+      setBankCandidateBusy(null);
+    }
+  }
+
   async function fetchRecentInvoices() {
     const response = await fetch("/api/billing/invoices?limit=50", { credentials: "same-origin", cache: "no-store" });
     if (response.status === 401) {
@@ -19089,7 +19155,10 @@ function App() {
               </button>
               <button
                 className={billingSection === "expenses" ? "active" : ""}
-                onClick={() => setBillingSection("expenses")}
+                onClick={() => {
+                  setBillingSection("expenses");
+                  void fetchBankCandidates();
+                }}
                 role="tab"
                 aria-selected={billingSection === "expenses"}
                 type="button"
@@ -20135,6 +20204,86 @@ function App() {
 
             {billingSection === "expenses" && (
               <div className="billing-dashboard">
+                <article className="data-card recent-invoices-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Bank feed</span>
+                      <h2>
+                        Expenses from your bank
+                        {bankCandidates.length ? <span className="unpaid-count-badge">{bankCandidates.length}</span> : null}
+                      </h2>
+                    </div>
+                    <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>
+                      Refresh
+                    </button>
+                  </div>
+                  <p className="field-help">
+                    Money-out transactions from your connected bank accounts (Akahu). Approve the business ones to add
+                    them to your expenses, or dismiss the rest. Approved items can't be imported twice.
+                  </p>
+                  {bankCandidatesLoadState === "loading" && !bankCandidates.length ? (
+                    <p>Loading bank transactions...</p>
+                  ) : bankCandidatesLoadState === "error" ? (
+                    <p>
+                      Couldn't load the bank feed.{" "}
+                      <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>
+                        Try again
+                      </button>
+                    </p>
+                  ) : bankCandidates.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Account</th>
+                          <th>Description</th>
+                          <th>Amount</th>
+                          <th aria-label="Actions" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bankCandidates.map((candidate) => (
+                          <tr key={candidate.id}>
+                            <td>{candidate.date}</td>
+                            <td>{candidate.account || "—"}</td>
+                            <td>
+                              {candidate.description || candidate.merchant || "—"}
+                              {candidate.suggestedCategory ? (
+                                <span className="field-help"> · {candidate.suggestedCategory}</span>
+                              ) : null}
+                            </td>
+                            <td>{formatMoney(candidate.amount, "NZD")}</td>
+                            <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                              <button
+                                className="outline-button"
+                                type="button"
+                                disabled={bankCandidateBusy === candidate.id}
+                                onClick={() => void actionBankCandidate(candidate, "approve")}
+                              >
+                                Approve
+                              </button>{" "}
+                              <button
+                                className="outline-button"
+                                type="button"
+                                disabled={bankCandidateBusy === candidate.id}
+                                onClick={() => void actionBankCandidate(candidate, "ignore")}
+                              >
+                                Dismiss
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p>
+                      No bank transactions waiting for review.{" "}
+                      <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>
+                        Check for new
+                      </button>
+                    </p>
+                  )}
+                </article>
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>

@@ -9,7 +9,10 @@
 // reconciliation fan-out lands in later phases.
 //
 // Self-contained on purpose (its own Supabase + Akahu REST helpers), same shape
-// as stripe-billing.mts — it owns nothing outside bank_transactions.
+// as stripe-billing.mts — it owns nothing outside bank_transactions (and, for
+// the Phase 2 expense fan-out, writes billing_expenses keyed by the Akahu id).
+
+import { randomUUID } from "node:crypto";
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -17,6 +20,14 @@ function env(name: string, fallback = "") {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function round2(value: unknown) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function encodeFilter(value: unknown) {
+  return encodeURIComponent(String(value ?? ""));
 }
 
 function cleanString(value: unknown, fallback = "", max = 600) {
@@ -244,4 +255,107 @@ export async function syncAkahuTransactionsByIds(accountId: string, ids: string[
   }
   await upsertTransactions(rows);
   return { ok: true, requested: ids.length, synced: rows.length };
+}
+
+// --- Phase 2: expense fan-out (money-out → billing_expenses) -----------------
+
+/** _account id → account display info, so candidates can show which account. */
+export async function getAkahuAccountMap() {
+  const accounts = await listAkahuAccounts();
+  const map: Record<string, { name: string | null; type: string | null; formatted: string | null }> = {};
+  for (const a of accounts) {
+    const id = cleanString(a?._id, "", 120);
+    if (id) {
+      map[id] = {
+        name: cleanString(a?.name, "", 120) || null,
+        type: cleanString(a?.type, "", 40) || null,
+        formatted: cleanString(a?.formatted_account, "", 60) || null,
+      };
+    }
+  }
+  return map;
+}
+
+/**
+ * Unreviewed money-out transactions, annotated with account name + a suggested
+ * category (from Akahu's enrichment). These are the review-first expense
+ * candidates the coach approves; nothing is written to billing_expenses until
+ * they do.
+ */
+export async function listBankExpenseCandidates(accountId: string, opts: { limit?: number } = {}) {
+  const limit = Math.max(1, Math.min(300, Number(opts.limit) || 150));
+  const rows = await supabase("bank_transactions", {
+    query: `select=id,date,amount,description,merchant_name,category_name,type,akahu_account_id&account_id=eq.${encodeFilter(accountId)}&direction=eq.out&status=eq.unreviewed&order=date.desc&limit=${limit}`,
+  });
+  let accMap: Record<string, { name: string | null }> = {};
+  try {
+    accMap = await getAkahuAccountMap();
+  } catch {
+    accMap = {};
+  }
+  return (Array.isArray(rows) ? rows : []).map((r: Record<string, any>) => ({
+    id: r.id,
+    date: r.date,
+    amount: round2(Math.abs(Number(r.amount) || 0)),
+    description: r.description,
+    merchant: r.merchant_name,
+    type: r.type,
+    suggestedCategory: r.category_name,
+    accountId: r.akahu_account_id,
+    account: accMap[r.akahu_account_id]?.name || null,
+  }));
+}
+
+/** Approve one candidate → create a billing_expenses row and mark the bank
+ *  transaction expensed. external_ref = the Akahu id, so it can never be
+ *  imported twice (unique index) and re-syncs won't touch it. */
+export async function approveBankExpenseCandidate(
+  accountId: string,
+  txnId: string,
+  overrides: { categoryId?: string; categoryName?: string; description?: string; vendor?: string } = {},
+) {
+  const rows = await supabase("bank_transactions", {
+    query: `select=*&id=eq.${encodeFilter(txnId)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+  });
+  const txn = Array.isArray(rows) ? rows[0] : null;
+  if (!txn) throw Object.assign(new Error("Bank transaction not found."), { status: 404 });
+  if (txn.direction !== "out") {
+    throw Object.assign(new Error("Only money-out transactions become expenses."), { status: 400 });
+  }
+  if (txn.status === "expensed" && txn.expense_id) {
+    return { ok: true, alreadyExpensed: true, expenseId: txn.expense_id as string, txnId };
+  }
+  const expenseId = randomUUID();
+  const expense = {
+    id: expenseId,
+    account_id: accountId,
+    category_id: cleanString(overrides.categoryId, "", 120) || null,
+    category_name_snapshot:
+      cleanString(overrides.categoryName, "", 120) || cleanString(txn.category_name, "", 120) || null,
+    description:
+      cleanString(overrides.description, "", 600) || cleanString(txn.description, "", 600) || "Bank expense",
+    vendor: cleanString(overrides.vendor, "", 200) || cleanString(txn.merchant_name, "", 200) || null,
+    amount: round2(Math.abs(Number(txn.amount) || 0)),
+    currency: cleanString(txn.currency, "NZD", 10) || "NZD",
+    expense_date: txn.date,
+    note: "Imported from bank feed (Akahu)",
+    external_ref: txn.id,
+  };
+  await supabase("billing_expenses", { method: "POST", prefer: "return=minimal", body: [expense] });
+  await supabase("bank_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(txnId)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: { status: "expensed", expense_id: expenseId, updated_at: nowIso() },
+  });
+  return { ok: true, expenseId, txnId };
+}
+
+/** Dismiss a candidate (not a business expense) — it drops out of the list. */
+export async function ignoreBankExpenseCandidate(accountId: string, txnId: string) {
+  await supabase("bank_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(txnId)}&account_id=eq.${encodeFilter(accountId)}&status=eq.unreviewed`,
+    body: { status: "ignored", updated_at: nowIso() },
+  });
+  return { ok: true, txnId };
 }
