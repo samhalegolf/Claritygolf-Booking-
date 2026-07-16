@@ -4907,6 +4907,20 @@ function dateSortValue(parts) {
   return parts.year * 10000 + parts.month * 100 + parts.day;
 }
 
+// True when the wall-clock start of a {week, day, start} slot is at or before
+// "now" in the workspace's timezone. Public booking uses this to stop offering
+// times that have already passed today (a slot starting exactly now is treated
+// as past — you can't book the instant it begins). Mirrors isAppointmentInPast
+// but works on a raw candidate rather than a stored calendar item.
+function isSlotInPast(week, day, start, timeZone = accountTimeZone()) {
+  const slotDate = slotDateParts(Number(week ?? 0), Number(day ?? 0));
+  const now = nowInTimeZoneParts(timeZone);
+  const slotValue = dateSortValue(slotDate);
+  const nowValue = dateSortValue(now);
+  if (slotValue !== nowValue) return slotValue < nowValue;
+  return Number(start ?? 0) <= now.minutes;
+}
+
 function isAppointmentInPast(item, timeZone = accountTimeZone()) {
   if (!item || item.kind !== "appointment") return false;
   const slotDate = slotDateParts(Number(item.week ?? 0), Number(item.day ?? 0));
@@ -6574,7 +6588,15 @@ function publicSlotsForService(accountState, service, week, ignoreId = "") {
   const ignoredItemId = cleanString(ignoreId, "", 160);
   const items = ignoredItemId ? accountState.items.filter((item) => item.id !== ignoredItemId) : accountState.items;
   const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
-  const serviceLocationId = serviceLocation(service, accountState.locations || [], accountState.account).id;
+  const serviceLocation_ = serviceLocation(service, accountState.locations || [], accountState.account);
+  const serviceLocationId = serviceLocation_.id;
+  // Past times must never be offered to the public. Use the location's timezone
+  // when it has one, otherwise the workspace timezone — the same precedence the
+  // calendar invite (ctz) uses — so "now" is computed where the lesson happens.
+  const slotTimeZone =
+    cleanString(serviceLocation_?.timezone, "", 80) ||
+    cleanString(accountState.account?.timezone, "", 80) ||
+    accountTimeZone();
 
   if (isScheduledGroupService(service)) {
     const schedule = service.groupSchedule;
@@ -6586,6 +6608,7 @@ function publicSlotsForService(accountState, service, week, ignoreId = "") {
       duration: service.duration,
     };
     if (!isGroupServiceSlotMatch(service, candidate)) return [];
+    if (isSlotInPast(candidate.week, candidate.day, candidate.start, slotTimeZone)) return [];
     if (hasCollision(items, candidate, service, accountState)) return [];
     const remainingSpots = groupSlotRemainingSpots(items, candidate, service);
     if (!remainingSpots) return [];
@@ -6615,6 +6638,7 @@ function publicSlotsForService(accountState, service, week, ignoreId = "") {
           duration: service.duration,
         };
         if (
+          !isSlotInPast(week, day, start, slotTimeZone) &&
           isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId) &&
           !hasCollision(items, candidate, service, accountState)
         ) {

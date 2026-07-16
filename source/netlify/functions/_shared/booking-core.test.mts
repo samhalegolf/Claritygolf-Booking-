@@ -760,3 +760,57 @@ test("the group service can still be booked into its own session slot", () => {
   assert.equal(payload.slots[0].start, groupStart);
   assert.equal(payload.slots[0].remainingSpots, 2);
 });
+
+// "now" in the account's timezone, expressed as the {week, day, minutes} the
+// slot grid uses. baseWeekStart is Mon 2026-06-01 UTC; day index 0 = Monday.
+function accountNowSlotCoords(timeZone = "Pacific/Auckland") {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
+  const year = value("year");
+  const month = value("month");
+  const dayOfMonth = value("day");
+  const nowMinutes = value("hour") * 60 + value("minute");
+  const todayUtc = Date.UTC(year, month - 1, dayOfMonth);
+  const baseUtc = Date.UTC(2026, 5, 1);
+  const dayIndex = (new Date(todayUtc).getUTCDay() + 6) % 7; // 0 = Monday
+  const offsetDays = Math.round((todayUtc - baseUtc) / (24 * 60 * 60 * 1000));
+  const week = (offsetDays - dayIndex) / 7;
+  return { week, dayIndex, nowMinutes };
+}
+
+test("public booking never offers times earlier than now today", () => {
+  const timeZone = "Pacific/Auckland";
+  const { week, dayIndex, nowMinutes } = accountNowSlotCoords(timeZone);
+  // Skip the rare case where "now" leaves no whole 30-minute slot before or
+  // after it inside a business day (very early / very late in the local day).
+  const windowStart = nowMinutes - 90;
+  const windowEnd = nowMinutes + 90;
+  if (windowStart < 6 * 60 || windowEnd > 22 * 60) return;
+
+  const availabilityDays = Array.from({ length: 7 }, () => [] as any[]);
+  availabilityDays[dayIndex].push({ accountId, coachId, start: windowStart, end: windowEnd });
+
+  const payload = publicBookingSlots(
+    calendarState({ availability: availabilityDays }),
+    { serviceId, week },
+  );
+  const starts = payload.slots.map((slot: any) => slot.start);
+
+  // Every returned slot is strictly in the future.
+  for (const start of starts) {
+    assert.ok(start > nowMinutes, `slot at ${start} should be after now (${nowMinutes})`);
+  }
+  // A slot 60 minutes from now is inside the window and must still be offered.
+  assert.ok(
+    starts.some((start: number) => start >= nowMinutes + 30),
+    "a clearly-future slot should remain bookable",
+  );
+});

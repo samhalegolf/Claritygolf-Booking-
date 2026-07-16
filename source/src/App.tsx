@@ -52,7 +52,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   canonicalPhoneKey as sharedCanonicalPhoneKey,
   cleanPhoneCountry,
@@ -64,12 +64,10 @@ import {
   setActivePhoneCountry,
 } from "../netlify/functions/_shared/phone.mts";
 import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
-import {
-  VideoAnalysisPage,
-  type VideoWorkspaceNavigationContext,
-  type VideoWorkspaceSaveResult,
+import type {
+  VideoWorkspaceNavigationContext,
+  VideoWorkspaceSaveResult,
 } from "./modules/video-analysis";
-import { ClarityVoiceTextPanel } from "./modules/clarity-voice";
 import {
   createIndexedDbVideoStore,
   type StoredVideoRecord,
@@ -126,6 +124,18 @@ import type {
   ReactNode,
   TouchEvent as ReactTouchEvent,
 } from "react";
+
+// Video analysis and voice notes are heavy, coach-only features (together well
+// over a third of the client bundle). They never render on the public booking
+// embed and only mount when a signed-in coach opens them, so they are split
+// into their own chunks and loaded on demand — this keeps the public
+// /book-a-lesson page and the initial admin paint from downloading them.
+const VideoAnalysisPage = lazy(() =>
+  import("./modules/video-analysis/VideoAnalysisPage").then((module) => ({ default: module.VideoAnalysisPage })),
+);
+const ClarityVoiceTextPanel = lazy(() =>
+  import("./modules/clarity-voice/ClarityVoiceTextPanel").then((module) => ({ default: module.ClarityVoiceTextPanel })),
+);
 
 type EditableBlockStatus = "idle" | "editing" | "saving" | "saved" | "error";
 type EditableBlockState = {
@@ -18748,11 +18758,13 @@ function App() {
                               </div>
                             ) : playerToolExpanded && playerProfileTool === "notes" ? (
                               <div className="player-tool-body">
-                                <ClarityVoiceTextPanel
-                                  fieldLabel="Lesson note"
-                                  placeholder="Type or dictate the coach lesson note."
-                                  onCommit={(text) => void saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
-                                />
+                                <Suspense fallback={<div className="module-loading">Loading voice notes…</div>}>
+                                  <ClarityVoiceTextPanel
+                                    fieldLabel="Lesson note"
+                                    placeholder="Type or dictate the coach lesson note."
+                                    onCommit={(text) => void saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
+                                  />
+                                </Suspense>
                                 <div className="lesson-notes-list">
                                   {notesWorkspaceLessonNotes.length ? (
                                     notesWorkspaceLessonNotes.map((note) => (
@@ -19312,20 +19324,22 @@ function App() {
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "video" && (
           <section className="module-page video-analysis-page-host">
-            <VideoAnalysisPage
-              playerId={videoContext?.playerId}
-              playerName={videoContext?.playerName}
-              savedVideoId={videoContext?.savedVideoId}
-              savedVideoLibrary={savedVideoLibraryRef.current}
-              onSavedVideoLibraryChange={refreshSavedVideoLibrary}
-              onNavigateBack={returnToPlayerProfileVideos}
-              onLocalSaveComplete={handleVideoAnalysisLocalSaveComplete}
-              onSaveAndSend={handleVideoAnalysisSaveAndSend}
-              onOpenCloudSettings={() => {
-                setActiveView("settings");
-                setSettingsTab("integrations");
-              }}
-            />
+            <Suspense fallback={<div className="module-loading">Loading video analysis…</div>}>
+              <VideoAnalysisPage
+                playerId={videoContext?.playerId}
+                playerName={videoContext?.playerName}
+                savedVideoId={videoContext?.savedVideoId}
+                savedVideoLibrary={savedVideoLibraryRef.current}
+                onSavedVideoLibraryChange={refreshSavedVideoLibrary}
+                onNavigateBack={returnToPlayerProfileVideos}
+                onLocalSaveComplete={handleVideoAnalysisLocalSaveComplete}
+                onSaveAndSend={handleVideoAnalysisSaveAndSend}
+                onOpenCloudSettings={() => {
+                  setActiveView("settings");
+                  setSettingsTab("integrations");
+                }}
+              />
+            </Suspense>
           </section>
         )}
 
