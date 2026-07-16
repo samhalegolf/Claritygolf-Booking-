@@ -29,6 +29,7 @@ export const config: Config = {
     "/api/billing-stripe-sync",
     "/api/stripe-billing-webhook",
     "/api/akahu-sync",
+    "/api/akahu-expenses",
     "/api/booking-confirmation-resend",
     "/api/calendar-state",
     "/api/coaches",
