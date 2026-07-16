@@ -1,14 +1,16 @@
 import type { Config } from "@netlify/functions";
 import { createHash } from "node:crypto";
 import { defaultAccountId } from "./_shared/account.mts";
-import { DEFAULT_SINCE_EPOCH, syncAllProducts, syncInvoicesSince } from "./_shared/stripe-billing.mts";
+import { DEFAULT_SINCE_EPOCH, syncAllProducts, syncChargesSince, syncInvoicesSince } from "./_shared/stripe-billing.mts";
 
-// Admin backfill endpoint: pulls Stripe invoices (2026-01-01 onwards by
-// default) and ALL Stripe products into the billing tables. Safe to re-run —
-// everything upserts on Stripe ids. Live updates arrive separately via
+// Admin backfill endpoint: pulls Stripe invoices, charges (card payments from
+// the booking site) and ALL Stripe products into the billing tables. Safe to
+// re-run — everything upserts on Stripe ids. Live updates arrive separately via
 // stripe-billing-webhook.mts; this endpoint is the manual catch-up/backfill.
 //
-// POST /api/billing-stripe-sync  { action?: "syncAll" | "syncInvoices" | "syncProducts", since?: string | number }
+// POST /api/billing-stripe-sync
+//   { action?: "syncAll" | "syncInvoices" | "syncCharges" | "syncProducts",
+//     since?: string | number }   // since "all" (or 0) backfills full history
 
 const sessionCookieName = "clarity_session";
 
@@ -85,8 +87,10 @@ async function resolveAccountId() {
 
 function normaliseSince(value: unknown) {
   if (value === undefined || value === null || value === "") return DEFAULT_SINCE_EPOCH;
+  // "all" / 0 → full history from the epoch (first backfill of pre-2026 rows).
+  if (String(value).trim().toLowerCase() === "all") return 0;
   const asNumber = Number(value);
-  if (Number.isFinite(asNumber) && asNumber > 0) return Math.floor(asNumber);
+  if (Number.isFinite(asNumber) && asNumber >= 0) return Math.floor(asNumber);
   const parsed = Date.parse(String(value));
   if (Number.isFinite(parsed)) return Math.floor(parsed / 1000);
   return DEFAULT_SINCE_EPOCH;
@@ -106,13 +110,18 @@ export default async function handler(req: Request) {
     if (action === "syncInvoices") {
       return json({ invoices: await syncInvoicesSince(normaliseSince(body?.since), accountId) });
     }
+    if (action === "syncCharges") {
+      return json({ charges: await syncChargesSince(normaliseSince(body?.since), accountId) });
+    }
     if (action === "syncProducts") {
       return json({ products: await syncAllProducts(accountId) });
     }
     if (action === "syncAll") {
+      const since = normaliseSince(body?.since);
       const products = await syncAllProducts(accountId);
-      const invoices = await syncInvoicesSince(normaliseSince(body?.since), accountId);
-      return json({ ok: products.ok && invoices.ok, products, invoices });
+      const invoices = await syncInvoicesSince(since, accountId);
+      const charges = await syncChargesSince(since, accountId);
+      return json({ ok: products.ok && invoices.ok && charges.ok, products, invoices, charges });
     }
 
     return json({ error: "unknown_action", message: "Unknown billing sync action." }, 400);
