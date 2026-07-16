@@ -214,7 +214,7 @@ function mapLine(line: Record<string, any>, invoice: Record<string, any>, accoun
     description: cleanString(line.description, "", 500) || "Stripe line item",
     quantity,
     unit_price: round2(lineTotal / quantity),
-    tax_rate: null,
+    tax_rate: 0,
     tax_amount: sumAmounts(line.tax_amounts),
     discount_amount: sumAmounts(line.discount_amounts),
     line_total: lineTotal,
@@ -284,6 +284,137 @@ export async function syncInvoicesSince(sinceEpoch: number, accountId: string) {
     invoicesFound: invoices.length,
     invoicesSynced: synced,
     lineItemsSynced: itemsSynced,
+    failures,
+  };
+}
+
+// --- Charge mapping -----------------------------------------------------------
+// Sam Hale Golf's card payments arrive as Stripe *charges* (via the external
+// booking site), not invoices, and none are linked to a Stripe invoice. Each
+// succeeded charge is mirrored into billing_invoices as a paid row so it shows
+// in the invoice list + revenue report exactly like every other row. Keyed by
+// the charge id (ch_...), so re-runs upsert and never collide with the SHG
+// invoices or the app's own randomUUID invoice ids.
+
+function chargeAmountPaid(charge: Record<string, any>) {
+  const captured = Number(charge.amount_captured);
+  const refunded = Number(charge.amount_refunded) || 0;
+  const base = Number.isFinite(captured) && captured > 0 ? captured : Number(charge.amount) || 0;
+  return fromCents(Math.max(0, base - refunded));
+}
+
+// Only succeeded charges are imported; a fully-refunded one is voided so it
+// drops out of revenue (billing-api.mts's REVENUE_STATUSES excludes 'void').
+export function chargeStatus(charge: Record<string, any>) {
+  const amount = Number(charge.amount) || 0;
+  const refunded = Number(charge.amount_refunded) || 0;
+  if (amount > 0 && refunded >= amount) return "void";
+  return "paid";
+}
+
+export function mapCharge(charge: Record<string, any>, accountId: string) {
+  const billing = charge.billing_details || {};
+  return {
+    id: charge.id,
+    account_id: accountId,
+    invoice_number: cleanString(charge.id, "", 60) || charge.id,
+    status: chargeStatus(charge),
+    customer_id: cleanString(charge.customer, "", 160) || null,
+    customer_name: cleanString(billing.name, "", 140) || "Stripe customer",
+    customer_email: cleanString(billing.email, "", 180) || null,
+    customer_phone: cleanString(billing.phone, "", 80) || null,
+    issue_date: toDateOnly(charge.created) || nowIso().slice(0, 10),
+    due_date: null,
+    // App stores display currency codes uppercase (formatMoney prints verbatim).
+    currency: String(charge.currency || "NZD").toUpperCase(),
+    subtotal: fromCents(charge.amount),
+    tax_total: 0,
+    tax_inclusive: false,
+    discount_total: 0,
+    discount_label: null,
+    total: fromCents(charge.amount),
+    amount_paid: chargeAmountPaid(charge),
+    customer_note: null,
+    internal_note: "Synced from Stripe charge",
+    reference: charge.id,
+    sent_at: toIso(charge.created),
+    paid_at: toIso(charge.created),
+    updated_at: nowIso(),
+  };
+}
+
+export function mapChargeLine(charge: Record<string, any>, accountId: string) {
+  const lineTotal = fromCents(charge.amount);
+  return {
+    id: `${charge.id}:line`,
+    invoice_id: charge.id,
+    account_id: accountId,
+    source_type: "stripe",
+    source_id: cleanString(charge.payment_intent, "", 160) || null,
+    description: cleanString(charge.description, "", 500) || "Card payment",
+    quantity: 1,
+    unit_price: lineTotal,
+    tax_rate: 0,
+    tax_amount: 0,
+    discount_amount: 0,
+    line_total: lineTotal,
+  };
+}
+
+// A charge is mirrored only when it succeeded and isn't already represented by
+// a Stripe invoice (charge.invoice set) — the dedup rule that stops a paid
+// invoice and its charge both counting as revenue.
+export function shouldSyncCharge(charge: Record<string, any>) {
+  if (!charge?.id) return false;
+  if (String(charge.status) !== "succeeded") return false;
+  if (charge.invoice) return false;
+  return true;
+}
+
+async function upsertCharge(charge: Record<string, any>, accountId: string) {
+  await supabase("billing_invoices", {
+    method: "POST",
+    query: "on_conflict=id",
+    prefer: "resolution=merge-duplicates",
+    body: mapCharge(charge, accountId),
+  });
+  // Replace the single synthetic line wholesale so a later refund/amount edit
+  // never leaves a stale line behind.
+  await supabase("billing_invoice_items", { method: "DELETE", query: `invoice_id=eq.${encodeFilter(charge.id)}` });
+  await supabase("billing_invoice_items", { method: "POST", body: [mapChargeLine(charge, accountId)] });
+}
+
+/** Sync a single Stripe charge (e.g. a webhook payload). Returns null when skipped. */
+export async function syncStripeCharge(charge: Record<string, any>, accountId: string) {
+  if (!shouldSyncCharge(charge)) return null;
+  await upsertCharge(charge, accountId);
+  return { chargeId: charge.id as string, status: chargeStatus(charge) };
+}
+
+/** Backfill all succeeded, unlinked Stripe charges created at/after sinceEpoch. */
+export async function syncChargesSince(sinceEpoch: number, accountId: string) {
+  const charges = await stripePageAll("/v1/charges", { "created[gte]": sinceEpoch });
+  let synced = 0;
+  let skipped = 0;
+  const failures: { chargeId: string; error: string }[] = [];
+  for (const charge of charges) {
+    if (!shouldSyncCharge(charge)) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      await upsertCharge(charge, accountId);
+      synced += 1;
+    } catch (error) {
+      failures.push({ chargeId: charge.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return {
+    ok: failures.length === 0,
+    since: new Date(sinceEpoch * 1000).toISOString(),
+    chargesFound: charges.length,
+    chargesSynced: synced,
+    chargesSkipped: skipped,
     failures,
   };
 }

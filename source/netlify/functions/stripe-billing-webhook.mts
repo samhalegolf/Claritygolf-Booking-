@@ -4,6 +4,7 @@ import { defaultAccountId } from "./_shared/account.mts";
 import {
   deactivateStripeProduct,
   deleteStripeInvoice,
+  syncStripeCharge,
   syncStripeInvoice,
   syncStripeProduct,
 } from "./_shared/stripe-billing.mts";
@@ -17,7 +18,8 @@ import {
 // events invoice.created, invoice.updated, invoice.finalized, invoice.sent,
 // invoice.paid, invoice.payment_failed, invoice.voided,
 // invoice.marked_uncollectible, invoice.deleted, product.created,
-// product.updated, product.deleted — and set STRIPE_BILLING_WEBHOOK_SECRET
+// product.updated, product.deleted, charge.succeeded, charge.updated,
+// charge.captured, charge.refunded — and set STRIPE_BILLING_WEBHOOK_SECRET
 // (falls back to STRIPE_WEBHOOK_SECRET) to that endpoint's signing secret.
 
 function env(name: string, fallback = "") {
@@ -93,6 +95,11 @@ export default async function handler(req: Request) {
         return json({ received: true, result: await syncStripeInvoice(object, accountId()) });
       case "invoice.deleted":
         return json({ received: true, result: await deleteStripeInvoice(String(object?.id || "")) });
+      case "charge.succeeded":
+      case "charge.updated":
+      case "charge.captured":
+      case "charge.refunded":
+        return json({ received: true, result: await syncStripeCharge(object, accountId()) });
       case "product.created":
       case "product.updated":
         return json({ received: true, result: await syncStripeProduct(object, accountId()) });
