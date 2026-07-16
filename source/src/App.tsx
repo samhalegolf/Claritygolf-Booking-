@@ -17,6 +17,7 @@ import {
   Eye,
   ExternalLink,
   FileText,
+  Files,
   FolderOpen,
   GitMerge,
   GripVertical,
@@ -867,7 +868,7 @@ type Toast = {
 };
 
 type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video" | "players";
-type BillingSection = "none" | "dashboard" | "new-invoice" | "expenses" | "reports" | "settings";
+type BillingSection = "none" | "dashboard" | "new-invoice" | "invoices" | "expenses" | "reports" | "settings";
 type SettingsTab =
   | "none"
   | "services"
@@ -4349,6 +4350,11 @@ function App() {
   const [invoiceSendState, setInvoiceSendState] = useState<"idle" | "sending">("idle");
   const [clarityPayState, setClarityPayState] = useState<"idle" | "loading">("idle");
   const [recentInvoices, setRecentInvoices] = useState<BillingInvoiceRecord[]>([]);
+  // The full invoice list backs the dedicated Invoices tab (loaded lazily when
+  // that tab opens); the Dashboard keeps showing recentInvoices unchanged.
+  const [allInvoices, setAllInvoices] = useState<BillingInvoiceRecord[]>([]);
+  const [allInvoicesLoadState, setAllInvoicesLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [invoiceSearch, setInvoiceSearch] = useState("");
   const [revenuePeriod, setRevenuePeriod] = useState<"week" | "month" | "year">("month");
   const [revenueReport, setRevenueReport] = useState<BillingRevenueReport | null>(null);
   const [revenueLoadState, setRevenueLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
@@ -12207,6 +12213,27 @@ function App() {
     setRecentInvoices(Array.isArray(data.invoices) ? data.invoices : []);
   }
 
+  // Full list for the Invoices tab. Pulls the max the endpoint allows (200),
+  // refetched each time the tab opens; the Dashboard's recentInvoices (50) stays
+  // independent so its "Recent invoices" card is unchanged.
+  async function fetchAllInvoices() {
+    setAllInvoicesLoadState("loading");
+    try {
+      const response = await fetch("/api/billing/invoices?limit=200", { credentials: "same-origin", cache: "no-store" });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load invoices."));
+      const data = (await response.json()) as { invoices?: BillingInvoiceRecord[] };
+      setAllInvoices(Array.isArray(data.invoices) ? data.invoices : []);
+      setAllInvoicesLoadState("ready");
+    } catch (error) {
+      console.error("fetchAllInvoices failed", error);
+      setAllInvoicesLoadState("error");
+    }
+  }
+
   async function fetchInvoicedBookingIds(bookingIds: string[]) {
     if (!bookingIds.length) {
       setInvoicedBookingIds({});
@@ -12300,6 +12327,17 @@ function App() {
     (sum, invoiceRecord) => sum + Math.max(0, invoiceRecord.total - invoiceRecord.amountPaid),
     0,
   );
+
+  // The Invoices tab list, filtered client-side by the search box over invoice
+  // number / customer / status.
+  const invoiceSearchQuery = invoiceSearch.trim().toLowerCase();
+  const filteredInvoices = invoiceSearchQuery
+    ? allInvoices.filter((invoiceRecord) =>
+        [invoiceRecord.invoiceNumber, invoiceRecord.customerName, invoiceRecord.status].some((field) =>
+          String(field ?? "").toLowerCase().includes(invoiceSearchQuery),
+        ),
+      )
+    : allInvoices;
   const overdueOldestDays = overdueInvoiceRecords.length
     ? Math.max(...overdueInvoiceRecords.map((invoiceRecord) => isoDateDiffDays(todayDateValue, invoiceRecord.dueDate as string)))
     : 0;
@@ -19037,6 +19075,19 @@ function App() {
                 New Invoice
               </button>
               <button
+                className={billingSection === "invoices" ? "active" : ""}
+                onClick={() => {
+                  setBillingSection("invoices");
+                  void fetchAllInvoices();
+                }}
+                role="tab"
+                aria-selected={billingSection === "invoices"}
+                type="button"
+              >
+                <Files size={16} />
+                Invoices
+              </button>
+              <button
                 className={billingSection === "expenses" ? "active" : ""}
                 onClick={() => setBillingSection("expenses")}
                 role="tab"
@@ -19297,6 +19348,91 @@ function App() {
                         ))}
                       </tbody>
                     </table>
+                  ) : (
+                    <p>No invoices yet. Issue your first invoice to see it here.</p>
+                  )}
+                </article>
+              </div>
+            )}
+
+            {billingSection === "invoices" && (
+              <div className="billing-invoices-panel">
+                <article className="data-card recent-invoices-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Invoices</span>
+                      <h2>All invoices</h2>
+                    </div>
+                    <input
+                      type="search"
+                      className="invoice-search-input"
+                      placeholder="Search number, customer or status…"
+                      value={invoiceSearch}
+                      onChange={(event) => setInvoiceSearch(event.target.value)}
+                      aria-label="Search invoices"
+                    />
+                  </div>
+                  {allInvoicesLoadState === "loading" && !allInvoices.length ? (
+                    <p>Loading invoices...</p>
+                  ) : allInvoicesLoadState === "error" ? (
+                    <p>
+                      Could not load invoices.{" "}
+                      <button className="outline-button" type="button" onClick={() => void fetchAllInvoices()}>
+                        Try again
+                      </button>
+                    </p>
+                  ) : filteredInvoices.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Invoice</th>
+                          <th>Customer</th>
+                          <th>Date</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredInvoices.map((invoiceRecord) => (
+                          <tr
+                            key={invoiceRecord.id}
+                            className={`clickable-invoice-row${invoiceSettings.unpaidLoudness === 3 && overdueInvoiceIds.has(invoiceRecord.id) ? " overdue-row" : ""}`}
+                            style={{ cursor: "pointer" }}
+                            role="button"
+                            tabIndex={0}
+                            title={invoiceRecord.status === "draft" ? "Open draft to edit" : "Open invoice to send or download"}
+                            onClick={() => openInvoiceForEdit(invoiceRecord)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                void openInvoiceForEdit(invoiceRecord);
+                              }
+                            }}
+                          >
+                            <td>{invoiceRecord.invoiceNumber}</td>
+                            <td>{invoiceRecord.customerName}</td>
+                            <td>{invoiceRecord.issueDate}</td>
+                            <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
+                            <td>
+                              <span
+                                className={`invoice-status-pill invoice-status-${
+                                  invoiceRecord.status === "sent" && !invoiceRecord.sentAt ? "published" : invoiceRecord.status
+                                }`}
+                              >
+                                {invoiceRecord.status === "sent" && invoiceRecord.sentAt && <Send size={12} />}
+                                {invoiceRecord.status === "sent"
+                                  ? invoiceRecord.sentAt
+                                    ? "Sent"
+                                    : "Published"
+                                  : invoiceRecord.status.charAt(0).toUpperCase() + invoiceRecord.status.slice(1)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : allInvoices.length ? (
+                    <p>No invoices match "{invoiceSearch}".</p>
                   ) : (
                     <p>No invoices yet. Issue your first invoice to see it here.</p>
                   )}
