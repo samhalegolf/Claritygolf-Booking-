@@ -11,6 +11,19 @@
   to = "/.netlify/functions/public-booking"
   status = 200
 
+# Stripe billing sync + webhook. booking-api owns the /api/* catch-all and its
+# route wins over these functions' config.path, so they need an explicit rewrite
+# here (same reason /api/public-booking has one).
+[[redirects]]
+  from = "/api/billing-stripe-sync"
+  to = "/.netlify/functions/stripe-billing-sync"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe-billing-webhook"
+  to = "/.netlify/functions/stripe-billing-webhook"
+  status = 200
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
