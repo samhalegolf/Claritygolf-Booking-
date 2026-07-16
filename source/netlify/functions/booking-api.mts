@@ -26,6 +26,8 @@ export const config: Config = {
     "/api/auth/logout",
     "/api/admin-settings",
     "/api/billing/*",
+    "/api/billing-stripe-sync",
+    "/api/stripe-billing-webhook",
     "/api/booking-confirmation-resend",
     "/api/calendar-state",
     "/api/coaches",
