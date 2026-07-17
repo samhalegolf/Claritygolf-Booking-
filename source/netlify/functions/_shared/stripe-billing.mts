@@ -229,11 +229,24 @@ async function fetchAllInvoiceLines(invoice: Record<string, any>) {
 }
 
 async function upsertInvoice(invoice: Record<string, any>, lines: Record<string, any>[], accountId: string) {
+  const body = mapInvoice(invoice, accountId) as Record<string, any>;
+  // Native bank reconciliation is the source of truth for "paid": an SHG invoice
+  // paid by bank transfer stays "open" in Stripe, so without this guard the sync
+  // would keep reverting it to sent/overdue. If the row was reconciled locally,
+  // preserve its paid status/amount/date and only refresh the rest.
+  const existing = await supabase("billing_invoices", {
+    query: `select=reconciled_locally&id=eq.${encodeFilter(invoice.id)}&limit=1`,
+  });
+  if (Array.isArray(existing) && existing[0]?.reconciled_locally) {
+    delete body.status;
+    delete body.amount_paid;
+    delete body.paid_at;
+  }
   await supabase("billing_invoices", {
     method: "POST",
     query: "on_conflict=id",
     prefer: "resolution=merge-duplicates",
-    body: mapInvoice(invoice, accountId),
+    body,
   });
   // Replace line items wholesale so removed/edited Stripe lines never linger.
   await supabase("billing_invoice_items", { method: "DELETE", query: `invoice_id=eq.${encodeFilter(invoice.id)}` });

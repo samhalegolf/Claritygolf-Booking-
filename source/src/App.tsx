@@ -881,6 +881,26 @@ type BankExpenseCandidate = {
   accountId: string | null;
   account: string | null;
 };
+// A money-in bank transaction awaiting reconciliation against an invoice.
+type ReconcileSuggestion = {
+  invoiceId: string;
+  invoiceNumber: string;
+  customer: string | null;
+  total: number;
+  outstanding: number;
+  refMatch: boolean;
+  amountMatch: boolean;
+};
+type ReconcileCandidate = {
+  id: string;
+  date: string;
+  amount: number;
+  description: string | null;
+  account: string | null;
+  reference: string | null;
+  autoInvoiceId: string | null;
+  suggestions: ReconcileSuggestion[];
+};
 type SettingsTab =
   | "none"
   | "services"
@@ -4399,6 +4419,10 @@ function App() {
   const [bankCandidates, setBankCandidates] = useState<BankExpenseCandidate[]>([]);
   const [bankCandidatesLoadState, setBankCandidatesLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [bankCandidateBusy, setBankCandidateBusy] = useState<string | null>(null);
+  // Akahu payment reconciliation: money-in transactions matched to invoices.
+  const [reconcileCandidates, setReconcileCandidates] = useState<ReconcileCandidate[]>([]);
+  const [reconcileLoadState, setReconcileLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [reconcileBusy, setReconcileBusy] = useState<string | null>(null);
   const [expenseRangeFrom, setExpenseRangeFrom] = useState("");
   const [expenseRangeTo, setExpenseRangeTo] = useState("");
   const [expenseDraft, setExpenseDraft] = useState<{
@@ -12268,6 +12292,92 @@ function App() {
     }
   }
 
+  // Akahu payment reconciliation. Incoming bank credits matched to open invoices;
+  // confirming marks the invoice paid locally (never touches Stripe).
+  async function fetchReconcileCandidates() {
+    setReconcileLoadState("loading");
+    try {
+      const response = await fetch("/api/akahu-reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ action: "list" }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load bank payments."));
+      const data = (await response.json()) as { candidates?: ReconcileCandidate[] };
+      setReconcileCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      setReconcileLoadState("ready");
+    } catch (error) {
+      console.error("fetchReconcileCandidates failed", error);
+      setReconcileLoadState("error");
+    }
+  }
+
+  async function reconcilePayment(candidate: ReconcileCandidate, invoiceId: string) {
+    setReconcileBusy(candidate.id);
+    try {
+      const response = await fetch("/api/akahu-reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "apply", id: candidate.id, invoiceId }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not reconcile the payment."));
+      setReconcileCandidates((prev) => prev.filter((row) => row.id !== candidate.id));
+      setToast({ message: `Marked an invoice paid from ${formatMoney(candidate.amount, "NZD")}.` });
+      void fetchAllInvoices();
+      void fetchRecentInvoices();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+    } finally {
+      setReconcileBusy(null);
+    }
+  }
+
+  async function dismissReconcile(candidate: ReconcileCandidate) {
+    setReconcileBusy(candidate.id);
+    try {
+      const response = await fetch("/api/akahu-reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "ignore", id: candidate.id }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not dismiss."));
+      setReconcileCandidates((prev) => prev.filter((row) => row.id !== candidate.id));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+    } finally {
+      setReconcileBusy(null);
+    }
+  }
+
+  async function autoReconcileAll() {
+    setReconcileLoadState("loading");
+    try {
+      const response = await fetch("/api/akahu-reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "auto" }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not auto-match."));
+      const data = (await response.json()) as { autoApplied?: number };
+      setToast({ message: `Auto-matched ${data.autoApplied ?? 0} payment(s).` });
+      void fetchAllInvoices();
+      void fetchRecentInvoices();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+    } finally {
+      void fetchReconcileCandidates();
+    }
+  }
+
   async function fetchRecentInvoices() {
     const response = await fetch("/api/billing/invoices?limit=50", { credentials: "same-origin", cache: "no-store" });
     if (response.status === 401) {
@@ -19145,6 +19255,7 @@ function App() {
                 onClick={() => {
                   setBillingSection("invoices");
                   void fetchAllInvoices();
+                  void fetchReconcileCandidates();
                 }}
                 role="tab"
                 aria-selected={billingSection === "invoices"}
@@ -19426,6 +19537,100 @@ function App() {
 
             {billingSection === "invoices" && (
               <div className="billing-invoices-panel">
+                <article className="data-card recent-invoices-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Bank payments</span>
+                      <h2>
+                        Reconcile from your bank
+                        {reconcileCandidates.length ? (
+                          <span className="unpaid-count-badge">{reconcileCandidates.length}</span>
+                        ) : null}
+                      </h2>
+                    </div>
+                    <button className="outline-button" type="button" onClick={() => void autoReconcileAll()}>
+                      Auto-match
+                    </button>
+                  </div>
+                  <p className="field-help">
+                    Money-in from your bank, matched to open invoices (by amount and the invoice number in the payment
+                    reference). Confirm a match to mark the invoice paid — this stays in Clarity and never changes
+                    anything in Stripe.
+                  </p>
+                  {reconcileLoadState === "loading" && !reconcileCandidates.length ? (
+                    <p>Loading bank payments...</p>
+                  ) : reconcileLoadState === "error" ? (
+                    <p>
+                      Couldn't load bank payments.{" "}
+                      <button className="outline-button" type="button" onClick={() => void fetchReconcileCandidates()}>
+                        Try again
+                      </button>
+                    </p>
+                  ) : reconcileCandidates.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Payment</th>
+                          <th>Amount</th>
+                          <th>Match</th>
+                          <th aria-label="Actions" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reconcileCandidates.map((candidate) => {
+                          const best = candidate.suggestions[0];
+                          return (
+                            <tr key={candidate.id}>
+                              <td>{candidate.date}</td>
+                              <td>
+                                {candidate.description || "—"}
+                                {candidate.reference ? (
+                                  <span className="field-help"> · ref: {candidate.reference}</span>
+                                ) : null}
+                              </td>
+                              <td>{formatMoney(candidate.amount, "NZD")}</td>
+                              <td>
+                                {best ? (
+                                  <span>
+                                    {best.invoiceNumber}
+                                    {best.customer ? ` · ${best.customer}` : ""}
+                                    {best.refMatch ? <span className="invoice-status-pill invoice-status-paid"> ref</span> : null}
+                                    {best.amountMatch ? <span className="field-help"> · amount ✓</span> : null}
+                                  </span>
+                                ) : (
+                                  <span className="field-help">No match found</span>
+                                )}
+                              </td>
+                              <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                                {best ? (
+                                  <button
+                                    className="outline-button"
+                                    type="button"
+                                    disabled={reconcileBusy === candidate.id}
+                                    onClick={() => void reconcilePayment(candidate, best.invoiceId)}
+                                  >
+                                    Confirm
+                                  </button>
+                                ) : null}{" "}
+                                <button
+                                  className="outline-button"
+                                  type="button"
+                                  disabled={reconcileBusy === candidate.id}
+                                  onClick={() => void dismissReconcile(candidate)}
+                                >
+                                  Dismiss
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p>No bank payments waiting to reconcile.</p>
+                  )}
+                </article>
                 <article className="data-card recent-invoices-card">
                   <div className="data-card-header">
                     <div>
