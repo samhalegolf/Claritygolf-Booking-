@@ -64,6 +64,10 @@ export type InvoiceLine = {
   quantity: number;
   unitPrice: number;
   taxRate: number;
+  // Optional per-line discount, a fixed amount in the invoice currency, applied
+  // to this line before tax (0 = no discount). Independent of the invoice-level
+  // discount (InvoiceDraft.discountAmount), which still applies on top.
+  discountAmount: number;
 };
 
 export type InvoiceDraft = {

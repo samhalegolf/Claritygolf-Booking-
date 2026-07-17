@@ -5,14 +5,33 @@
 // Extracted verbatim from the inline computation in App.tsx's invoice editor;
 // the formulas are unchanged.
 
-import type { InvoiceDraft } from "./types";
+import type { InvoiceDraft, InvoiceLine } from "./types";
+
+/**
+ * A single line's amount after its own per-line discount:
+ * max(0, quantity x unitPrice - discountAmount). Shared by the editor row, the
+ * read-only line, and computeInvoiceTotals so they never drift.
+ */
+export function invoiceLineNet(
+  line: Pick<InvoiceLine, "quantity" | "unitPrice" | "discountAmount">,
+): number {
+  const gross = Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0);
+  const discount = Math.min(gross, Math.max(0, Number(line.discountAmount) || 0));
+  return gross - discount;
+}
 
 export type InvoiceTotals = {
-  /** Sum of quantity x unitPrice across all lines (negatives floored to 0). */
+  /**
+   * Sum of each line's amount after its own per-line discount
+   * (quantity x unitPrice - line discount), negatives floored to 0. This is the
+   * "Subtotal" shown to the customer, so it already reflects per-line discounts.
+   */
   lineSubtotal: number;
-  /** Discount actually applied - never more than the subtotal. */
+  /** Sum of the per-line discounts (each capped at its line's gross amount). */
+  lineDiscountTotal: number;
+  /** Invoice-level discount actually applied - never more than the subtotal. */
   discountTotal: number;
-  /** Subtotal after discount; the base the tax is figured on. */
+  /** Subtotal after the invoice-level discount; the base the tax is figured on. */
   taxableSubtotal: number;
   /** Sanitised tax rate as a percentage. */
   taxRatePct: number;
@@ -26,10 +45,14 @@ export function computeInvoiceTotals(
   draft: Pick<InvoiceDraft, "lines" | "discountAmount" | "taxInclusive">,
   taxRate: number,
 ): InvoiceTotals {
-  const lineSubtotal = draft.lines.reduce(
-    (total, line) => total + Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0),
-    0,
-  );
+  let lineSubtotal = 0;
+  let lineDiscountTotal = 0;
+  for (const line of draft.lines) {
+    const gross = Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0);
+    const net = invoiceLineNet(line);
+    lineSubtotal += net;
+    lineDiscountTotal += gross - net;
+  }
   const discountTotal = Math.min(lineSubtotal, Math.max(0, Number(draft.discountAmount) || 0));
   const taxableSubtotal = Math.max(0, lineSubtotal - discountTotal);
   const taxRatePct = Math.max(0, Number(taxRate) || 0);
@@ -39,5 +62,5 @@ export function computeInvoiceTotals(
     ? taxableSubtotal * (taxRatePct / (100 + taxRatePct))
     : taxableSubtotal * (taxRatePct / 100);
   const total = draft.taxInclusive ? taxableSubtotal : taxableSubtotal + taxTotal;
-  return { lineSubtotal, discountTotal, taxableSubtotal, taxRatePct, taxTotal, total };
+  return { lineSubtotal, lineDiscountTotal, discountTotal, taxableSubtotal, taxRatePct, taxTotal, total };
 }

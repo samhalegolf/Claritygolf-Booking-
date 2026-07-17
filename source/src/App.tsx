@@ -137,7 +137,7 @@ import {
   defaultInvoiceSettings,
   cleanInvoiceSettings,
 } from "./modules/billing/invoiceSettings";
-import { computeInvoiceTotals } from "./modules/billing/invoiceMath";
+import { computeInvoiceTotals, invoiceLineNet } from "./modules/billing/invoiceMath";
 import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
 import {
   parseExpenseCsv,
@@ -12154,6 +12154,7 @@ function App() {
           quantity: 1,
           unitPrice: 0,
           taxRate: invoiceSettings.taxRate,
+          discountAmount: 0,
         },
       ],
       lineSearch: "",
@@ -12184,6 +12185,7 @@ function App() {
           quantity: 1,
           unitPrice: item.price,
           taxRate: item.taxRate,
+          discountAmount: 0,
         },
       ],
     }));
@@ -12590,6 +12592,7 @@ function App() {
           quantity: 1,
           unitPrice: service?.price ?? 0,
           taxRate: invoiceSettings.taxRate,
+          discountAmount: 0,
         },
       ],
     }));
@@ -13055,6 +13058,7 @@ function App() {
         quantity: Number(item.quantity) || 0,
         unitPrice: Number(item.unitPrice) || 0,
         taxRate: Number(item.taxRate) || 0,
+        discountAmount: Number(item.discountAmount) || 0,
       })),
     };
   }
@@ -13122,6 +13126,7 @@ function App() {
           quantity: line.quantity,
           unitPrice: line.unitPrice,
           taxRate: line.taxRate,
+          discountAmount: line.discountAmount || 0,
         })),
       },
     };
@@ -19987,11 +19992,14 @@ function App() {
                             <div className="invoice-plain-line" key={line.id}>
                               <div className="invoice-plain-line-main">
                                 <span className="invoice-plain-line-desc">{line.description}</span>
-                                <strong>{formatMoney(line.quantity * line.unitPrice, invoiceSettings.currency)}</strong>
+                                <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
                               </div>
                               <div className="invoice-plain-line-sub">
                                 <span>
                                   {line.quantity} × {formatMoney(line.unitPrice, invoiceSettings.currency)}
+                                  {(line.discountAmount || 0) > 0
+                                    ? ` − ${formatMoney(line.discountAmount, invoiceSettings.currency)} discount`
+                                    : ""}
                                 </span>
                                 {!lineLocked && (
                                   <button
@@ -20036,7 +20044,17 @@ function App() {
                                 type="text"
                               />
                             </label>
-                            <strong>{formatMoney(line.quantity * line.unitPrice, invoiceSettings.currency)}</strong>
+                            <label className="settings-field">
+                              <span>Discount</span>
+                              <input
+                                value={line.discountAmount || 0}
+                                inputMode="decimal"
+                                onChange={(event) => updateInvoiceLine(line.id, "discountAmount", parseMoneyInput(event.target.value))}
+                                type="text"
+                                title="Optional discount for this line, in the invoice currency"
+                              />
+                            </label>
+                            <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
                             <button
                               className="invoice-line-delete-tab"
                               onClick={() => removeInvoiceLine(line.id)}
