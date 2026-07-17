@@ -31,6 +31,7 @@ export const config: Config = {
     "/api/akahu-sync",
     "/api/akahu-expenses",
     "/api/akahu-reconcile",
+    "/api/akahu-webhook",
     "/api/booking-confirmation-resend",
     "/api/calendar-state",
     "/api/coaches",

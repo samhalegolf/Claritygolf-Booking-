@@ -531,17 +531,27 @@ export async function ignoreReconcileCandidate(accountId: string, txnId: string)
 
 /** Auto-apply every unambiguous match (user chose "auto everything", guarded to
  *  single-candidate matches so it never guesses between two invoices). */
-export async function autoReconcileCredits(accountId: string) {
+// maxApplies caps how many matches one call commits so it never blows the
+// function timeout — the caller loops (or the next webhook/poll continues). The
+// unmatched backlog is cheap to re-scan; only the per-match writes are costly.
+export async function autoReconcileCredits(accountId: string, maxApplies = 40) {
   const candidates = await listReconcileCandidates(accountId);
+  const matchable = candidates.filter((candidate) => candidate.autoInvoiceId);
   let autoApplied = 0;
-  for (const candidate of candidates) {
-    if (!candidate.autoInvoiceId) continue;
+  for (const candidate of matchable) {
+    if (autoApplied >= maxApplies) break;
     try {
-      await applyReconciliation(accountId, candidate.id, candidate.autoInvoiceId);
+      await applyReconciliation(accountId, candidate.id, candidate.autoInvoiceId as string);
       autoApplied += 1;
     } catch (error) {
       console.error("auto_reconcile_failed", candidate.id, error instanceof Error ? error.message : error);
     }
   }
-  return { ok: true, candidates: candidates.length, autoApplied, remaining: candidates.length - autoApplied };
+  return {
+    ok: true,
+    candidates: candidates.length,
+    matchable: matchable.length,
+    autoApplied,
+    remaining: matchable.length - autoApplied,
+  };
 }
