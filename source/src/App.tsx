@@ -137,7 +137,7 @@ import {
   defaultInvoiceSettings,
   cleanInvoiceSettings,
 } from "./modules/billing/invoiceSettings";
-import { computeInvoiceTotals, invoiceLineNet } from "./modules/billing/invoiceMath";
+import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
 import {
   parseExpenseCsv,
@@ -3659,6 +3659,22 @@ function formatMoney(amount: number, currency = activeCurrency()) {
     currency: currency || activeCurrency(),
     maximumFractionDigits: 2,
   }).format(Number.isFinite(amount) ? amount : 0);
+}
+
+// The currency's symbol (e.g. "$") for the active/selected currency, used to
+// prefix money inputs in the invoice editor so a raw number never shows without
+// its unit. Falls back to "$" if the locale can't produce one.
+function currencySymbol(currency = activeCurrency()) {
+  try {
+    const parts = new Intl.NumberFormat(activeLocale(), {
+      style: "currency",
+      currency: currency || activeCurrency(),
+      maximumFractionDigits: 0,
+    }).formatToParts(0);
+    return parts.find((part) => part.type === "currency")?.value || "$";
+  } catch {
+    return "$";
+  }
 }
 
 function parseMoneyInput(value: string) {
@@ -12141,6 +12157,45 @@ function App() {
     }));
   }
 
+  // Per-line discount picker. `selection` is the dropdown value:
+  //   ""            -> no discount
+  //   "amount"/"percent" -> custom, the coach types the value below
+  //   "preset:<id>" -> a saved discount preset (its %/amount is copied in)
+  function setInvoiceLineDiscount(id: string, selection: string) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lines: current.lines.map((line) => {
+        if (line.id !== id) return line;
+        if (selection.startsWith("preset:")) {
+          const preset = discountPresets.find((candidate) => candidate.id === selection.slice("preset:".length));
+          if (!preset) return line;
+          return {
+            ...line,
+            discountKind: preset.discountType === "percentage" ? "percent" : "amount",
+            discountValue: preset.value,
+            discountPresetId: preset.id,
+          };
+        }
+        const kind: InvoiceLine["discountKind"] = selection === "amount" || selection === "percent" ? selection : "none";
+        return {
+          ...line,
+          discountKind: kind,
+          discountValue: kind === "none" ? 0 : line.discountValue,
+          discountPresetId: undefined,
+        };
+      }),
+    }));
+  }
+
+  // The <select> value that reflects a line's current discount state.
+  function invoiceLineDiscountSelection(line: InvoiceLine): string {
+    if (line.discountPresetId && discountPresets.some((preset) => preset.id === line.discountPresetId)) {
+      return `preset:${line.discountPresetId}`;
+    }
+    return line.discountKind === "amount" || line.discountKind === "percent" ? line.discountKind : "";
+  }
+
   function addManualInvoiceLine() {
     markInvoiceDraftDirty();
     setInvoiceDraft((current) => ({
@@ -12154,6 +12209,8 @@ function App() {
           quantity: 1,
           unitPrice: 0,
           taxRate: invoiceSettings.taxRate,
+          discountKind: "none",
+          discountValue: 0,
           discountAmount: 0,
         },
       ],
@@ -12185,6 +12242,8 @@ function App() {
           quantity: 1,
           unitPrice: item.price,
           taxRate: item.taxRate,
+          discountKind: "none",
+          discountValue: 0,
           discountAmount: 0,
         },
       ],
@@ -12592,6 +12651,8 @@ function App() {
           quantity: 1,
           unitPrice: service?.price ?? 0,
           taxRate: invoiceSettings.taxRate,
+          discountKind: "none",
+          discountValue: 0,
           discountAmount: 0,
         },
       ],
@@ -13058,6 +13119,10 @@ function App() {
         quantity: Number(item.quantity) || 0,
         unitPrice: Number(item.unitPrice) || 0,
         taxRate: Number(item.taxRate) || 0,
+        // The backend only stores the resolved amount; a re-opened invoice shows
+        // it as a fixed amount discount (the % it may have started as is lost).
+        discountKind: (Number(item.discountAmount) || 0) > 0 ? "amount" : "none",
+        discountValue: Number(item.discountAmount) || 0,
         discountAmount: Number(item.discountAmount) || 0,
       })),
     };
@@ -13126,7 +13191,8 @@ function App() {
           quantity: line.quantity,
           unitPrice: line.unitPrice,
           taxRate: line.taxRate,
-          discountAmount: line.discountAmount || 0,
+          // Resolve percent/preset discounts to a currency amount for storage.
+          discountAmount: lineDiscountAmount(line),
         })),
       },
     };
@@ -19999,8 +20065,10 @@ function App() {
                               <div className="invoice-plain-line-sub">
                                 <span>
                                   {line.quantity} × {formatMoney(line.unitPrice, invoiceSettings.currency)}
-                                  {(line.discountAmount || 0) > 0
-                                    ? ` − ${formatMoney(line.discountAmount, invoiceSettings.currency)} discount`
+                                  {lineDiscountAmount(line) > 0
+                                    ? ` − ${formatMoney(lineDiscountAmount(line), invoiceSettings.currency)}${
+                                        line.discountKind === "percent" ? ` (${line.discountValue}%)` : ""
+                                      } discount`
                                     : ""}
                                 </span>
                                 {!lineLocked && (
@@ -20039,22 +20107,52 @@ function App() {
                             </label>
                             <label className="settings-field">
                               <span>Unit price</span>
-                              <input
-                                value={line.unitPrice}
-                                inputMode="decimal"
-                                onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
-                                type="text"
-                              />
+                              <div className="affixed-field" data-prefix={currencySymbol(invoiceSettings.currency)}>
+                                <input
+                                  value={line.unitPrice}
+                                  inputMode="decimal"
+                                  onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
+                                  type="text"
+                                />
+                              </div>
                             </label>
-                            <label className="settings-field">
+                            <label className="settings-field invoice-line-discount">
                               <span>Discount</span>
-                              <input
-                                value={line.discountAmount || 0}
-                                inputMode="decimal"
-                                onChange={(event) => updateInvoiceLine(line.id, "discountAmount", parseMoneyInput(event.target.value))}
-                                type="text"
-                                title="Optional discount for this line, in the invoice currency"
-                              />
+                              <select
+                                value={invoiceLineDiscountSelection(line)}
+                                onChange={(event) => setInvoiceLineDiscount(line.id, event.target.value)}
+                                title="Optional discount for this line"
+                              >
+                                <option value="">No discount</option>
+                                {discountPresets
+                                  .filter((preset) => preset.active)
+                                  .map((preset) => (
+                                    <option key={preset.id} value={`preset:${preset.id}`}>
+                                      {preset.name} (
+                                      {preset.discountType === "percentage"
+                                        ? `${preset.value}%`
+                                        : formatMoney(preset.value, invoiceSettings.currency)}
+                                      )
+                                    </option>
+                                  ))}
+                                <option value="amount">Custom amount</option>
+                                <option value="percent">Custom %</option>
+                              </select>
+                              {(line.discountKind === "amount" || line.discountKind === "percent") && !line.discountPresetId && (
+                                <div
+                                  className="affixed-field"
+                                  data-prefix={line.discountKind === "amount" ? `-${currencySymbol(invoiceSettings.currency)}` : undefined}
+                                  data-suffix={line.discountKind === "percent" ? "%" : undefined}
+                                >
+                                  <input
+                                    value={line.discountValue || 0}
+                                    inputMode="decimal"
+                                    onChange={(event) => updateInvoiceLine(line.id, "discountValue", parseMoneyInput(event.target.value))}
+                                    type="text"
+                                    aria-label={line.discountKind === "percent" ? "Discount percent" : "Discount amount"}
+                                  />
+                                </div>
+                              )}
                             </label>
                             <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
                             <button
@@ -20224,13 +20322,15 @@ function App() {
                             </label>
                             <label className="settings-field">
                               <span>Amount</span>
-                              <input
-                                value={invoiceDraft.discountAmount}
-                                inputMode="decimal"
-                                onFocus={() => setDiscountEditing(true)}
-                                onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
-                                type="text"
-                              />
+                              <div className="affixed-field" data-prefix={`-${currencySymbol(invoiceSettings.currency)}`}>
+                                <input
+                                  value={invoiceDraft.discountAmount}
+                                  inputMode="decimal"
+                                  onFocus={() => setDiscountEditing(true)}
+                                  onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
+                                  type="text"
+                                />
+                              </div>
                             </label>
                             {discountSet && (
                               <button

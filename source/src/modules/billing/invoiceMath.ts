@@ -7,17 +7,40 @@
 
 import type { InvoiceDraft, InvoiceLine } from "./types";
 
+/** A line's gross amount before any discount: max(0, quantity) x max(0, unitPrice). */
+export function invoiceLineGross(line: Pick<InvoiceLine, "quantity" | "unitPrice">): number {
+  return Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0);
+}
+
 /**
- * A single line's amount after its own per-line discount:
- * max(0, quantity x unitPrice - discountAmount). Shared by the editor row, the
- * read-only line, and computeInvoiceTotals so they never drift.
+ * The resolved per-line discount in the invoice currency, derived from the
+ * line's discountKind/discountValue (a percentage tracks the current gross), and
+ * always capped at the line's gross. Falls back to a legacy fixed discountAmount
+ * when kind/value aren't set (e.g. an invoice loaded before this field existed).
+ * Single source of truth for the editor row, computeInvoiceTotals, and the save
+ * payload so they never drift.
+ */
+export function lineDiscountAmount(
+  line: Pick<InvoiceLine, "quantity" | "unitPrice" | "discountKind" | "discountValue" | "discountAmount">,
+): number {
+  const gross = invoiceLineGross(line);
+  const value = Math.max(0, Number(line.discountValue) || 0);
+  let raw: number;
+  if (line.discountKind === "percent") raw = (gross * value) / 100;
+  else if (line.discountKind === "amount") raw = value;
+  else if (!line.discountKind) raw = Math.max(0, Number(line.discountAmount) || 0); // legacy rows
+  else raw = 0; // "none"
+  return Math.min(gross, Math.round(raw * 100) / 100);
+}
+
+/**
+ * A single line's amount after its own per-line discount. Shared by the editor
+ * row, the read-only line, and computeInvoiceTotals so they never drift.
  */
 export function invoiceLineNet(
-  line: Pick<InvoiceLine, "quantity" | "unitPrice" | "discountAmount">,
+  line: Pick<InvoiceLine, "quantity" | "unitPrice" | "discountKind" | "discountValue" | "discountAmount">,
 ): number {
-  const gross = Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0);
-  const discount = Math.min(gross, Math.max(0, Number(line.discountAmount) || 0));
-  return gross - discount;
+  return invoiceLineGross(line) - lineDiscountAmount(line);
 }
 
 export type InvoiceTotals = {
@@ -48,10 +71,8 @@ export function computeInvoiceTotals(
   let lineSubtotal = 0;
   let lineDiscountTotal = 0;
   for (const line of draft.lines) {
-    const gross = Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitPrice) || 0);
-    const net = invoiceLineNet(line);
-    lineSubtotal += net;
-    lineDiscountTotal += gross - net;
+    lineSubtotal += invoiceLineNet(line);
+    lineDiscountTotal += lineDiscountAmount(line);
   }
   const discountTotal = Math.min(lineSubtotal, Math.max(0, Number(draft.discountAmount) || 0));
   const taxableSubtotal = Math.max(0, lineSubtotal - discountTotal);

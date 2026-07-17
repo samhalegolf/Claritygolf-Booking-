@@ -6869,6 +6869,61 @@ button {
   white-space: nowrap;
 }
 
+/* Money/percent input adornment: a currency symbol, "-$", or "%" pinned inside
+   the input via a data-prefix / data-suffix attribute, so numbers in the invoice
+   editor never render without their unit. */
+.affixed-field {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.affixed-field > input {
+  width: 100%;
+}
+
+.affixed-field[data-prefix]::before {
+  content: attr(data-prefix);
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #76736d;
+  font-weight: 700;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.affixed-field[data-prefix] > input {
+  padding-left: 34px;
+}
+
+.affixed-field[data-suffix]::after {
+  content: attr(data-suffix);
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #76736d;
+  font-weight: 700;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.affixed-field[data-suffix] > input {
+  padding-right: 28px;
+}
+
+/* Per-line discount cell: a preset/custom dropdown with an optional value input
+   stacked beneath it. */
+.invoice-line-discount select {
+  width: 100%;
+}
+
+.invoice-line-discount .affixed-field {
+  margin-top: 6px;
+}
+
 /* Plain (locked-in or pre-set) line: a boring invoice line. Description and
    amount on one row, "qty x unit" and a small remove control underneath. No box
    of its own - the invoice card is the only container. */

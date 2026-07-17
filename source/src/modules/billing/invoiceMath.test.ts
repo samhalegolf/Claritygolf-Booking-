@@ -12,8 +12,23 @@ function draft(partial: Partial<Pick<InvoiceDraft, "lines" | "discountAmount" | 
   } as Pick<InvoiceDraft, "lines" | "discountAmount" | "taxInclusive">;
 }
 
-function line(quantity: number, unitPrice: number, discountAmount = 0): InvoiceDraft["lines"][number] {
-  return { id: "l", source: "manual", description: "", quantity, unitPrice, taxRate: 0, discountAmount };
+function line(
+  quantity: number,
+  unitPrice: number,
+  discountValue = 0,
+  discountKind: "none" | "amount" | "percent" = discountValue ? "amount" : "none",
+): InvoiceDraft["lines"][number] {
+  return {
+    id: "l",
+    source: "manual",
+    description: "",
+    quantity,
+    unitPrice,
+    taxRate: 0,
+    discountKind,
+    discountValue,
+    discountAmount: discountKind === "amount" ? discountValue : 0,
+  };
 }
 
 test("empty invoice is all zeros", () => {
@@ -59,6 +74,14 @@ test("per-line discount reduces the subtotal and the tax base", () => {
   assert.equal(t.taxableSubtotal, 110);
   assert.equal(t.taxTotal, 11); // 10% of 110
   assert.equal(t.total, 121);
+});
+
+test("a percentage line discount tracks the line gross", () => {
+  // 2 x 50 = 100 gross, 10% off -> 10 discount -> 90 net; plus a plain 1 x 40.
+  const t = computeInvoiceTotals(draft({ lines: [line(2, 50, 10, "percent"), line(1, 40)] }), 0);
+  assert.equal(t.lineDiscountTotal, 10);
+  assert.equal(t.lineSubtotal, 130); // 90 + 40
+  assert.equal(t.total, 130);
 });
 
 test("a line discount is capped at that line's gross amount", () => {
