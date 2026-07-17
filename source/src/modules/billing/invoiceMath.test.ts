@@ -12,14 +12,15 @@ function draft(partial: Partial<Pick<InvoiceDraft, "lines" | "discountAmount" | 
   } as Pick<InvoiceDraft, "lines" | "discountAmount" | "taxInclusive">;
 }
 
-function line(quantity: number, unitPrice: number): InvoiceDraft["lines"][number] {
-  return { id: "l", source: "manual", description: "", quantity, unitPrice, taxRate: 0 };
+function line(quantity: number, unitPrice: number, discountAmount = 0): InvoiceDraft["lines"][number] {
+  return { id: "l", source: "manual", description: "", quantity, unitPrice, taxRate: 0, discountAmount };
 }
 
 test("empty invoice is all zeros", () => {
   const t = computeInvoiceTotals(draft({}), 15);
   assert.deepEqual(t, {
     lineSubtotal: 0,
+    lineDiscountTotal: 0,
     discountTotal: 0,
     taxableSubtotal: 0,
     taxRatePct: 15,
@@ -48,6 +49,32 @@ test("discount is clamped to the subtotal and reduces the taxable base", () => {
   assert.equal(t.discountTotal, 100); // never more than subtotal
   assert.equal(t.taxableSubtotal, 0);
   assert.equal(t.total, 0);
+});
+
+test("per-line discount reduces the subtotal and the tax base", () => {
+  // Two lines: 2x50 = 100 with a 20 line discount -> 80; plus 1x30 -> 30.
+  const t = computeInvoiceTotals(draft({ lines: [line(2, 50, 20), line(1, 30)] }), 10);
+  assert.equal(t.lineDiscountTotal, 20);
+  assert.equal(t.lineSubtotal, 110); // 80 + 30
+  assert.equal(t.taxableSubtotal, 110);
+  assert.equal(t.taxTotal, 11); // 10% of 110
+  assert.equal(t.total, 121);
+});
+
+test("a line discount is capped at that line's gross amount", () => {
+  const t = computeInvoiceTotals(draft({ lines: [line(1, 40, 100)] }), 0);
+  assert.equal(t.lineDiscountTotal, 40); // not 100
+  assert.equal(t.lineSubtotal, 0);
+  assert.equal(t.total, 0);
+});
+
+test("per-line and invoice-level discounts stack", () => {
+  // 1x100 with 10 line discount -> 90 subtotal; then 15 invoice discount -> 75.
+  const t = computeInvoiceTotals(draft({ lines: [line(1, 100, 10)], discountAmount: 15 }), 0);
+  assert.equal(t.lineSubtotal, 90);
+  assert.equal(t.discountTotal, 15);
+  assert.equal(t.taxableSubtotal, 75);
+  assert.equal(t.total, 75);
 });
 
 test("negative quantities/prices and bad tax rate are floored to zero", () => {

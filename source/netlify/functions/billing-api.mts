@@ -711,7 +711,11 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
   const items = itemsInput.map((item) => cleanInvoiceItem(item, taxInclusive)).filter((item) => item.description && item.quantity > 0);
   if (!items.length) throw Object.assign(new Error("Add at least one invoice line."), { status: 400 });
 
-  const subtotal = round2(items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0));
+  // Subtotal is net of each line's own discount (matches what the line shows and
+  // what computeInvoiceTotals reports client-side). The invoice-level discount
+  // then applies on top. cleanInvoiceItem already floors line_total/tax at the
+  // per-line discount, so subtracting discount_amount here keeps totals aligned.
+  const subtotal = round2(items.reduce((sum, item) => sum + Math.max(0, item.quantity * item.unit_price - item.discount_amount), 0));
   const discountTotal = round2(Math.min(subtotal, cleanNumber(body?.discountAmount, 0, { min: 0 })));
   const taxTotal = round2(items.reduce((sum, item) => sum + item.tax_amount, 0));
   // Inclusive: tax is already inside the line prices, so it isn't added again.
@@ -1386,12 +1390,21 @@ export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBra
   y -= 16;
 
   for (const item of invoice.items) {
-    const descLines = wrapText(item.description || "-", font, 10, descWidth);
+    const lineDiscount = Number(item.discountAmount) || 0;
+    // When a line is discounted, note it under the description so the AMOUNT
+    // column (which is net of the discount) reads clearly to the customer.
+    const descText = item.description || "-";
+    const descLines = wrapText(
+      lineDiscount > 0 ? `${descText}  (incl. ${formatMoney(lineDiscount, currency)} discount)` : descText,
+      font,
+      10,
+      descWidth,
+    );
     ensureSpace(descLines.length * 13 + 6);
     descLines.forEach((lineText, index) => {
       text(lineText, margin, y - index * 13, { size: 10 });
     });
-    const lineAmount = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0) - (Number(item.discountAmount) || 0);
+    const lineAmount = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0) - lineDiscount;
     textRight(String(item.quantity), colQtyRight, y, { size: 10 });
     textRight((Number(item.unitPrice) || 0).toFixed(2), colUnitRight, y, { size: 10 });
     textRight((lineAmount < 0 ? 0 : lineAmount).toFixed(2), contentRight, y, { size: 10 });

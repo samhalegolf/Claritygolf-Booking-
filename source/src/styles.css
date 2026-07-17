@@ -6808,7 +6808,7 @@ button {
 .invoice-document-line-head,
 .invoice-document-line-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(72px, 0.22fr) minmax(108px, 0.32fr) minmax(100px, 0.32fr) 52px;
+  grid-template-columns: minmax(150px, 1fr) minmax(56px, 0.18fr) minmax(96px, 0.28fr) minmax(90px, 0.26fr) minmax(96px, 0.28fr) 52px;
   gap: 8px;
   align-items: end;
 }
