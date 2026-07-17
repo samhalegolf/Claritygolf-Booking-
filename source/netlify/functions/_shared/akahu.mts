@@ -428,7 +428,7 @@ function pickAutoMatch(scored: ScoredMatch[]): ScoredMatch | null {
 async function fetchReconcileInputs(accountId: string) {
   const [credits, invoices] = await Promise.all([
     supabase("bank_transactions", {
-      query: `select=id,date,amount,description,merchant_name,meta_particulars,meta_code,meta_reference,akahu_account_id&account_id=eq.${encodeFilter(accountId)}&direction=eq.in&status=eq.unreviewed&order=date.desc&limit=200`,
+      query: `select=id,date,amount,description,merchant_name,meta_particulars,meta_code,meta_reference,akahu_account_id,type,category_name&account_id=eq.${encodeFilter(accountId)}&direction=eq.in&status=eq.unreviewed&order=date.desc&limit=200`,
     }),
     supabase("billing_invoices", {
       query: `select=id,invoice_number,customer_name,total,amount_paid,status,issue_date&account_id=eq.${encodeFilter(accountId)}&status=in.(draft,sent,overdue)&reconciled_locally=eq.false&order=issue_date.desc&limit=500`,
@@ -460,6 +460,11 @@ export async function listReconcileCandidates(accountId: string) {
       description: txn.description,
       account: accMap[txn.akahu_account_id]?.name || null,
       reference: [txn.meta_particulars, txn.meta_code, txn.meta_reference].filter(Boolean).join(" ") || null,
+      // Akahu's enrichment (same signals the expense review uses): the txn type
+      // (e.g. TRANSFER for internal moves) and category, so the reconcile list
+      // can be filtered - internal transfers aren't customer payments.
+      type: cleanString(txn.type, "", 60) || null,
+      category: cleanString(txn.category_name, "", 200) || null,
       autoInvoiceId: auto?.invoice.id || null,
       suggestions: scored.slice(0, 4).map((s) => ({
         invoiceId: s.invoice.id,

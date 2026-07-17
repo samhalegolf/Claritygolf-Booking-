@@ -603,6 +603,68 @@ button {
   font-size: 18px;
 }
 
+/* Collapsible "Reconcile from your bank" card: sits below the invoice list and
+   defaults closed. The summary reuses the data-card-header layout with a +/-
+   marker, like .settings-subsection-title. */
+.reconcile-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.reconcile-summary::-webkit-details-marker {
+  display: none;
+}
+
+.reconcile-summary::after {
+  content: "+";
+  align-self: center;
+  margin-left: auto;
+  color: #76736d;
+  font-weight: 800;
+  font-size: 20px;
+}
+
+.reconcile-card[open] .reconcile-summary::after {
+  content: "-";
+}
+
+.reconcile-actions-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 8px 0 4px;
+}
+
+/* Reconcile type filter: toggle chips (one per Akahu transaction type) that
+   hide/show rows. Off = struck through and muted. */
+.reconcile-type-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.reconcile-type-chip {
+  border: 1px solid #d4d8cf;
+  background: #f5f7f2;
+  color: #76736d;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.reconcile-type-chip.active {
+  border-color: #101510;
+  background: #101510;
+  color: #fff;
+}
+
+.reconcile-type-chip:not(.active) {
+  text-decoration: line-through;
+}
+
 .meta-row {
   display: flex;
   flex-wrap: wrap;
@@ -6836,6 +6898,61 @@ button {
   color: #101510;
   text-align: right;
   white-space: nowrap;
+}
+
+/* Money/percent input adornment: a currency symbol, "-$", or "%" pinned inside
+   the input via a data-prefix / data-suffix attribute, so numbers in the invoice
+   editor never render without their unit. */
+.affixed-field {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.affixed-field > input {
+  width: 100%;
+}
+
+.affixed-field[data-prefix]::before {
+  content: attr(data-prefix);
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #76736d;
+  font-weight: 700;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.affixed-field[data-prefix] > input {
+  padding-left: 34px;
+}
+
+.affixed-field[data-suffix]::after {
+  content: attr(data-suffix);
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #76736d;
+  font-weight: 700;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.affixed-field[data-suffix] > input {
+  padding-right: 28px;
+}
+
+/* Per-line discount cell: a preset/custom dropdown with an optional value input
+   stacked beneath it. */
+.invoice-line-discount select {
+  width: 100%;
+}
+
+.invoice-line-discount .affixed-field {
+  margin-top: 6px;
 }
 
 /* Plain (locked-in or pre-set) line: a boring invoice line. Description and

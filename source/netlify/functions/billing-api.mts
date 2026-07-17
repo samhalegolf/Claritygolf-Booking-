@@ -672,8 +672,26 @@ function invoiceSequenceForPrefix(invoiceNumber: string, prefix: string): number
   return Number.isFinite(value) ? value : null;
 }
 
-async function nextInvoiceNumber(accountId: string, prefixInput: unknown) {
-  const prefix = normalizeInvoicePrefix(prefixInput);
+async function resolveInvoicePrefix() {
+  const rows = await supabase("settings", {
+    query: `select=value&key=eq.${encodeFilter("accountInvoiceSettingsJson")}&limit=1`,
+  });
+  try {
+    const parsed = rows[0]?.value ? JSON.parse(rows[0].value) : null;
+    return normalizeInvoicePrefix(parsed?.prefix);
+  } catch {
+    return normalizeInvoicePrefix(undefined);
+  }
+}
+
+// The prefix is an account setting, not a per-request choice. Always read it
+// from stored settings so a stale client value (e.g. the default "INV" sent
+// before the account finished loading) can't put a new invoice on the wrong
+// series. prefixInput is accepted for back-compat but only used if settings
+// have no prefix at all.
+async function nextInvoiceNumber(accountId: string, prefixInput?: unknown) {
+  const storedPrefix = await resolveInvoicePrefix();
+  const prefix = storedPrefix || normalizeInvoicePrefix(prefixInput);
   // Pull just the numbers already used for this prefix and compute the max in JS.
   // Charges (ORD-###) and un-numbered Stripe rows (in_…) use other prefixes and
   // are excluded both by the like filter and the exact ^PREFIX-<digits>$ match.

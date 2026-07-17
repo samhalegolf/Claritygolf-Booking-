@@ -137,7 +137,7 @@ import {
   defaultInvoiceSettings,
   cleanInvoiceSettings,
 } from "./modules/billing/invoiceSettings";
-import { computeInvoiceTotals, invoiceLineNet } from "./modules/billing/invoiceMath";
+import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
 import {
   parseExpenseCsv,
@@ -898,9 +898,27 @@ type ReconcileCandidate = {
   description: string | null;
   account: string | null;
   reference: string | null;
+  // Akahu enrichment used for filtering (same smart allocation the expense
+  // review uses): the transaction type (e.g. "TRANSFER") and category.
+  type: string | null;
+  category: string | null;
   autoInvoiceId: string | null;
   suggestions: ReconcileSuggestion[];
 };
+// Normalise an Akahu transaction type into a short filter label. Internal
+// transfers are the main thing to keep out of the reconcile list (they aren't
+// customer payments), so they collapse to a single "Transfer" bucket.
+function reconcileTypeLabel(type: string | null | undefined): string {
+  const raw = (type || "").trim().toUpperCase();
+  if (!raw) return "Other";
+  if (raw.includes("TRANSFER")) return "Transfer";
+  return raw
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 type SettingsTab =
   | "none"
   | "services"
@@ -3661,6 +3679,22 @@ function formatMoney(amount: number, currency = activeCurrency()) {
   }).format(Number.isFinite(amount) ? amount : 0);
 }
 
+// The currency's symbol (e.g. "$") for the active/selected currency, used to
+// prefix money inputs in the invoice editor so a raw number never shows without
+// its unit. Falls back to "$" if the locale can't produce one.
+function currencySymbol(currency = activeCurrency()) {
+  try {
+    const parts = new Intl.NumberFormat(activeLocale(), {
+      style: "currency",
+      currency: currency || activeCurrency(),
+      maximumFractionDigits: 0,
+    }).formatToParts(0);
+    return parts.find((part) => part.type === "currency")?.value || "$";
+  } catch {
+    return "$";
+  }
+}
+
 function parseMoneyInput(value: string) {
   const normalised = value.replace(/,/g, "").replace(/[^0-9.]/g, "");
   const firstDot = normalised.indexOf(".");
@@ -4428,6 +4462,10 @@ function App() {
   const [reconcileCandidates, setReconcileCandidates] = useState<ReconcileCandidate[]>([]);
   const [reconcileLoadState, setReconcileLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [reconcileBusy, setReconcileBusy] = useState<string | null>(null);
+  // Transaction-type labels hidden from the reconcile list. Internal transfers
+  // are hidden by default since they're never customer payments; the filter
+  // chips let the coach show them (or hide other types) again.
+  const [reconcileHiddenTypes, setReconcileHiddenTypes] = useState<Set<string>>(() => new Set(["Transfer"]));
   const [expenseRangeFrom, setExpenseRangeFrom] = useState("");
   const [expenseRangeTo, setExpenseRangeTo] = useState("");
   const [expenseDraft, setExpenseDraft] = useState<{
@@ -12141,6 +12179,45 @@ function App() {
     }));
   }
 
+  // Per-line discount picker. `selection` is the dropdown value:
+  //   ""            -> no discount
+  //   "amount"/"percent" -> custom, the coach types the value below
+  //   "preset:<id>" -> a saved discount preset (its %/amount is copied in)
+  function setInvoiceLineDiscount(id: string, selection: string) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lines: current.lines.map((line) => {
+        if (line.id !== id) return line;
+        if (selection.startsWith("preset:")) {
+          const preset = discountPresets.find((candidate) => candidate.id === selection.slice("preset:".length));
+          if (!preset) return line;
+          return {
+            ...line,
+            discountKind: preset.discountType === "percentage" ? "percent" : "amount",
+            discountValue: preset.value,
+            discountPresetId: preset.id,
+          };
+        }
+        const kind: InvoiceLine["discountKind"] = selection === "amount" || selection === "percent" ? selection : "none";
+        return {
+          ...line,
+          discountKind: kind,
+          discountValue: kind === "none" ? 0 : line.discountValue,
+          discountPresetId: undefined,
+        };
+      }),
+    }));
+  }
+
+  // The <select> value that reflects a line's current discount state.
+  function invoiceLineDiscountSelection(line: InvoiceLine): string {
+    if (line.discountPresetId && discountPresets.some((preset) => preset.id === line.discountPresetId)) {
+      return `preset:${line.discountPresetId}`;
+    }
+    return line.discountKind === "amount" || line.discountKind === "percent" ? line.discountKind : "";
+  }
+
   function addManualInvoiceLine() {
     markInvoiceDraftDirty();
     setInvoiceDraft((current) => ({
@@ -12154,6 +12231,8 @@ function App() {
           quantity: 1,
           unitPrice: 0,
           taxRate: invoiceSettings.taxRate,
+          discountKind: "none",
+          discountValue: 0,
           discountAmount: 0,
         },
       ],
@@ -12185,6 +12264,8 @@ function App() {
           quantity: 1,
           unitPrice: item.price,
           taxRate: item.taxRate,
+          discountKind: "none",
+          discountValue: 0,
           discountAmount: 0,
         },
       ],
@@ -12547,6 +12628,29 @@ function App() {
     ? Math.max(...overdueInvoiceRecords.map((invoiceRecord) => isoDateDiffDays(todayDateValue, invoiceRecord.dueDate as string)))
     : 0;
 
+  // Reconcile type filter: the distinct transaction-type labels present, and the
+  // candidates left after hiding the toggled-off types (internal transfers by
+  // default). Order chips by frequency so the common types lead.
+  const reconcileTypeCounts = reconcileCandidates.reduce<Record<string, number>>((counts, candidate) => {
+    const label = reconcileTypeLabel(candidate.type);
+    counts[label] = (counts[label] || 0) + 1;
+    return counts;
+  }, {});
+  const reconcileTypeOptions = Object.keys(reconcileTypeCounts).sort(
+    (a, b) => reconcileTypeCounts[b] - reconcileTypeCounts[a] || a.localeCompare(b),
+  );
+  const visibleReconcileCandidates = reconcileCandidates.filter(
+    (candidate) => !reconcileHiddenTypes.has(reconcileTypeLabel(candidate.type)),
+  );
+  function toggleReconcileType(label: string) {
+    setReconcileHiddenTypes((current) => {
+      const next = new Set(current);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
+
   // expenses is already server-filtered to expenseRangeFrom/expenseRangeTo;
   // voided entries stay visible in the list (for the audit trail) but never
   // count toward the total.
@@ -12592,6 +12696,8 @@ function App() {
           quantity: 1,
           unitPrice: service?.price ?? 0,
           taxRate: invoiceSettings.taxRate,
+          discountKind: "none",
+          discountValue: 0,
           discountAmount: 0,
         },
       ],
@@ -13058,6 +13164,10 @@ function App() {
         quantity: Number(item.quantity) || 0,
         unitPrice: Number(item.unitPrice) || 0,
         taxRate: Number(item.taxRate) || 0,
+        // The backend only stores the resolved amount; a re-opened invoice shows
+        // it as a fixed amount discount (the % it may have started as is lost).
+        discountKind: (Number(item.discountAmount) || 0) > 0 ? "amount" : "none",
+        discountValue: Number(item.discountAmount) || 0,
         discountAmount: Number(item.discountAmount) || 0,
       })),
     };
@@ -13126,7 +13236,8 @@ function App() {
           quantity: line.quantity,
           unitPrice: line.unitPrice,
           taxRate: line.taxRate,
-          discountAmount: line.discountAmount || 0,
+          // Resolve percent/preset discounts to a currency amount for storage.
+          discountAmount: lineDiscountAmount(line),
         })),
       },
     };
@@ -19585,100 +19696,6 @@ function App() {
                 <article className="data-card recent-invoices-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Bank payments</span>
-                      <h2>
-                        Reconcile from your bank
-                        {reconcileCandidates.length ? (
-                          <span className="unpaid-count-badge">{reconcileCandidates.length}</span>
-                        ) : null}
-                      </h2>
-                    </div>
-                    <button className="outline-button" type="button" onClick={() => void autoReconcileAll()}>
-                      Auto-match
-                    </button>
-                  </div>
-                  <p className="field-help">
-                    Money-in from your bank, matched to open invoices (by amount and the invoice number in the payment
-                    reference). Confirm a match to mark the invoice paid — this stays in Clarity and never changes
-                    anything in Stripe.
-                  </p>
-                  {reconcileLoadState === "loading" && !reconcileCandidates.length ? (
-                    <p>Loading bank payments...</p>
-                  ) : reconcileLoadState === "error" ? (
-                    <p>
-                      Couldn't load bank payments.{" "}
-                      <button className="outline-button" type="button" onClick={() => void fetchReconcileCandidates()}>
-                        Try again
-                      </button>
-                    </p>
-                  ) : reconcileCandidates.length ? (
-                    <table className="recent-invoices-table">
-                      <thead>
-                        <tr>
-                          <th>Date</th>
-                          <th>Payment</th>
-                          <th>Amount</th>
-                          <th>Match</th>
-                          <th aria-label="Actions" />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {reconcileCandidates.map((candidate) => {
-                          const best = candidate.suggestions[0];
-                          return (
-                            <tr key={candidate.id}>
-                              <td>{candidate.date}</td>
-                              <td>
-                                {candidate.description || "—"}
-                                {candidate.reference ? (
-                                  <span className="field-help"> · ref: {candidate.reference}</span>
-                                ) : null}
-                              </td>
-                              <td>{formatMoney(candidate.amount, "NZD")}</td>
-                              <td>
-                                {best ? (
-                                  <span>
-                                    {best.invoiceNumber}
-                                    {best.customer ? ` · ${best.customer}` : ""}
-                                    {best.refMatch ? <span className="invoice-status-pill invoice-status-paid"> ref</span> : null}
-                                    {best.amountMatch ? <span className="field-help"> · amount ✓</span> : null}
-                                  </span>
-                                ) : (
-                                  <span className="field-help">No match found</span>
-                                )}
-                              </td>
-                              <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
-                                {best ? (
-                                  <button
-                                    className="outline-button"
-                                    type="button"
-                                    disabled={reconcileBusy === candidate.id}
-                                    onClick={() => void reconcilePayment(candidate, best.invoiceId)}
-                                  >
-                                    Confirm
-                                  </button>
-                                ) : null}{" "}
-                                <button
-                                  className="outline-button"
-                                  type="button"
-                                  disabled={reconcileBusy === candidate.id}
-                                  onClick={() => void dismissReconcile(candidate)}
-                                >
-                                  Dismiss
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p>No bank payments waiting to reconcile.</p>
-                  )}
-                </article>
-                <article className="data-card recent-invoices-card">
-                  <div className="data-card-header">
-                    <div>
                       <span>Invoices</span>
                       <h2>All invoices</h2>
                     </div>
@@ -19756,6 +19773,126 @@ function App() {
                     <p>No invoices yet. Issue your first invoice to see it here.</p>
                   )}
                 </article>
+                <details className="data-card recent-invoices-card reconcile-card">
+                  <summary className="data-card-header reconcile-summary">
+                    <div>
+                      <span>Bank payments</span>
+                      <h2>
+                        Reconcile from your bank
+                        {reconcileCandidates.length ? (
+                          <span className="unpaid-count-badge">{reconcileCandidates.length}</span>
+                        ) : null}
+                      </h2>
+                    </div>
+                  </summary>
+                  <div className="reconcile-actions-row">
+                    <button className="outline-button" type="button" onClick={() => void autoReconcileAll()}>
+                      Auto-match
+                    </button>
+                  </div>
+                  <p className="field-help">
+                    Money-in from your bank, matched to open invoices (by amount and the invoice number in the payment
+                    reference). Confirm a match to mark the invoice paid — this stays in Clarity and never changes
+                    anything in Stripe.
+                  </p>
+                  {reconcileTypeOptions.length > 1 && (
+                    <div className="reconcile-type-filter" role="group" aria-label="Filter by transaction type">
+                      <span className="field-help">Show:</span>
+                      {reconcileTypeOptions.map((label) => {
+                        const shown = !reconcileHiddenTypes.has(label);
+                        return (
+                          <button
+                            key={label}
+                            type="button"
+                            className={`reconcile-type-chip${shown ? " active" : ""}`}
+                            aria-pressed={shown}
+                            onClick={() => toggleReconcileType(label)}
+                          >
+                            {label} ({reconcileTypeCounts[label]})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {reconcileLoadState === "loading" && !reconcileCandidates.length ? (
+                    <p>Loading bank payments...</p>
+                  ) : reconcileLoadState === "error" ? (
+                    <p>
+                      Couldn't load bank payments.{" "}
+                      <button className="outline-button" type="button" onClick={() => void fetchReconcileCandidates()}>
+                        Try again
+                      </button>
+                    </p>
+                  ) : visibleReconcileCandidates.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Payment</th>
+                          <th>Amount</th>
+                          <th>Match</th>
+                          <th aria-label="Actions" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleReconcileCandidates.map((candidate) => {
+                          const best = candidate.suggestions[0];
+                          return (
+                            <tr key={candidate.id}>
+                              <td>{candidate.date}</td>
+                              <td>
+                                {candidate.description || "—"}
+                                {candidate.type ? (
+                                  <span className="field-help"> · {reconcileTypeLabel(candidate.type)}</span>
+                                ) : null}
+                                {candidate.reference ? (
+                                  <span className="field-help"> · ref: {candidate.reference}</span>
+                                ) : null}
+                              </td>
+                              <td>{formatMoney(candidate.amount, "NZD")}</td>
+                              <td>
+                                {best ? (
+                                  <span>
+                                    {best.invoiceNumber}
+                                    {best.customer ? ` · ${best.customer}` : ""}
+                                    {best.refMatch ? <span className="invoice-status-pill invoice-status-paid"> ref</span> : null}
+                                    {best.amountMatch ? <span className="field-help"> · amount ✓</span> : null}
+                                  </span>
+                                ) : (
+                                  <span className="field-help">No match found</span>
+                                )}
+                              </td>
+                              <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                                {best ? (
+                                  <button
+                                    className="outline-button"
+                                    type="button"
+                                    disabled={reconcileBusy === candidate.id}
+                                    onClick={() => void reconcilePayment(candidate, best.invoiceId)}
+                                  >
+                                    Confirm
+                                  </button>
+                                ) : null}{" "}
+                                <button
+                                  className="outline-button"
+                                  type="button"
+                                  disabled={reconcileBusy === candidate.id}
+                                  onClick={() => void dismissReconcile(candidate)}
+                                >
+                                  Dismiss
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : reconcileCandidates.length ? (
+                    <p>All {reconcileCandidates.length} bank payment{reconcileCandidates.length === 1 ? "" : "s"} are hidden by the type filter above.</p>
+                  ) : (
+                    <p>No bank payments waiting to reconcile.</p>
+                  )}
+                </details>
               </div>
             )}
 
@@ -19997,8 +20134,10 @@ function App() {
                               <div className="invoice-plain-line-sub">
                                 <span>
                                   {line.quantity} × {formatMoney(line.unitPrice, invoiceSettings.currency)}
-                                  {(line.discountAmount || 0) > 0
-                                    ? ` − ${formatMoney(line.discountAmount, invoiceSettings.currency)} discount`
+                                  {lineDiscountAmount(line) > 0
+                                    ? ` − ${formatMoney(lineDiscountAmount(line), invoiceSettings.currency)}${
+                                        line.discountKind === "percent" ? ` (${line.discountValue}%)` : ""
+                                      } discount`
                                     : ""}
                                 </span>
                                 {!lineLocked && (
@@ -20037,22 +20176,52 @@ function App() {
                             </label>
                             <label className="settings-field">
                               <span>Unit price</span>
-                              <input
-                                value={line.unitPrice}
-                                inputMode="decimal"
-                                onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
-                                type="text"
-                              />
+                              <div className="affixed-field" data-prefix={currencySymbol(invoiceSettings.currency)}>
+                                <input
+                                  value={line.unitPrice}
+                                  inputMode="decimal"
+                                  onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
+                                  type="text"
+                                />
+                              </div>
                             </label>
-                            <label className="settings-field">
+                            <label className="settings-field invoice-line-discount">
                               <span>Discount</span>
-                              <input
-                                value={line.discountAmount || 0}
-                                inputMode="decimal"
-                                onChange={(event) => updateInvoiceLine(line.id, "discountAmount", parseMoneyInput(event.target.value))}
-                                type="text"
-                                title="Optional discount for this line, in the invoice currency"
-                              />
+                              <select
+                                value={invoiceLineDiscountSelection(line)}
+                                onChange={(event) => setInvoiceLineDiscount(line.id, event.target.value)}
+                                title="Optional discount for this line"
+                              >
+                                <option value="">No discount</option>
+                                {discountPresets
+                                  .filter((preset) => preset.active)
+                                  .map((preset) => (
+                                    <option key={preset.id} value={`preset:${preset.id}`}>
+                                      {preset.name} (
+                                      {preset.discountType === "percentage"
+                                        ? `${preset.value}%`
+                                        : formatMoney(preset.value, invoiceSettings.currency)}
+                                      )
+                                    </option>
+                                  ))}
+                                <option value="amount">Custom amount</option>
+                                <option value="percent">Custom %</option>
+                              </select>
+                              {(line.discountKind === "amount" || line.discountKind === "percent") && !line.discountPresetId && (
+                                <div
+                                  className="affixed-field"
+                                  data-prefix={line.discountKind === "amount" ? `-${currencySymbol(invoiceSettings.currency)}` : undefined}
+                                  data-suffix={line.discountKind === "percent" ? "%" : undefined}
+                                >
+                                  <input
+                                    value={line.discountValue || 0}
+                                    inputMode="decimal"
+                                    onChange={(event) => updateInvoiceLine(line.id, "discountValue", parseMoneyInput(event.target.value))}
+                                    type="text"
+                                    aria-label={line.discountKind === "percent" ? "Discount percent" : "Discount amount"}
+                                  />
+                                </div>
+                              )}
                             </label>
                             <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
                             <button
@@ -20222,13 +20391,15 @@ function App() {
                             </label>
                             <label className="settings-field">
                               <span>Amount</span>
-                              <input
-                                value={invoiceDraft.discountAmount}
-                                inputMode="decimal"
-                                onFocus={() => setDiscountEditing(true)}
-                                onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
-                                type="text"
-                              />
+                              <div className="affixed-field" data-prefix={`-${currencySymbol(invoiceSettings.currency)}`}>
+                                <input
+                                  value={invoiceDraft.discountAmount}
+                                  inputMode="decimal"
+                                  onFocus={() => setDiscountEditing(true)}
+                                  onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
+                                  type="text"
+                                />
+                              </div>
                             </label>
                             {discountSet && (
                               <button
