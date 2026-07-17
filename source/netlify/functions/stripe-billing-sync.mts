@@ -96,6 +96,17 @@ function normaliseSince(value: unknown) {
   return DEFAULT_SINCE_EPOCH;
 }
 
+// Optional upper bound so a big backfill can be run in date windows that each
+// finish inside the function timeout. undefined = no upper bound (up to now).
+function normaliseUntil(value: unknown) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber) && asNumber > 0) return Math.floor(asNumber);
+  const parsed = Date.parse(String(value));
+  if (Number.isFinite(parsed)) return Math.floor(parsed / 1000);
+  return undefined;
+}
+
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed", message: "POST only." }, 405);
 
@@ -107,11 +118,12 @@ export default async function handler(req: Request) {
     const body = raw ? JSON.parse(raw) : {};
     const action = String(body?.action || "syncAll");
 
+    const until = normaliseUntil(body?.until);
     if (action === "syncInvoices") {
-      return json({ invoices: await syncInvoicesSince(normaliseSince(body?.since), accountId) });
+      return json({ invoices: await syncInvoicesSince(normaliseSince(body?.since), accountId, until) });
     }
     if (action === "syncCharges") {
-      return json({ charges: await syncChargesSince(normaliseSince(body?.since), accountId) });
+      return json({ charges: await syncChargesSince(normaliseSince(body?.since), accountId, until) });
     }
     if (action === "syncProducts") {
       return json({ products: await syncAllProducts(accountId) });
@@ -119,8 +131,8 @@ export default async function handler(req: Request) {
     if (action === "syncAll") {
       const since = normaliseSince(body?.since);
       const products = await syncAllProducts(accountId);
-      const invoices = await syncInvoicesSince(since, accountId);
-      const charges = await syncChargesSince(since, accountId);
+      const invoices = await syncInvoicesSince(since, accountId, until);
+      const charges = await syncChargesSince(since, accountId, until);
       return json({ ok: products.ok && invoices.ok && charges.ok, products, invoices, charges });
     }
 
