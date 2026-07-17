@@ -20527,12 +20527,13 @@ function App() {
                         </button>
                         <button
                           className="primary-button"
-                          disabled={invoiceSendState === "sending" || Boolean(openedInvoiceSentAt)}
+                          disabled={invoiceSendState === "sending"}
                           onClick={sendOpenedInvoice}
                           type="button"
+                          title={openedInvoiceSentAt ? "Email this invoice to the customer again" : "Email this invoice to the customer"}
                         >
                           <Send size={16} />
-                          {invoiceSendState === "sending" ? "Sending..." : openedInvoiceSentAt ? "Sent" : "Send"}
+                          {invoiceSendState === "sending" ? "Sending..." : openedInvoiceSentAt ? "Resend" : "Send"}
                         </button>
                         <button className="outline-button" onClick={downloadInvoicePdf} type="button">
                           <Download size={16} />
