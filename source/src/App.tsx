@@ -898,9 +898,27 @@ type ReconcileCandidate = {
   description: string | null;
   account: string | null;
   reference: string | null;
+  // Akahu enrichment used for filtering (same smart allocation the expense
+  // review uses): the transaction type (e.g. "TRANSFER") and category.
+  type: string | null;
+  category: string | null;
   autoInvoiceId: string | null;
   suggestions: ReconcileSuggestion[];
 };
+// Normalise an Akahu transaction type into a short filter label. Internal
+// transfers are the main thing to keep out of the reconcile list (they aren't
+// customer payments), so they collapse to a single "Transfer" bucket.
+function reconcileTypeLabel(type: string | null | undefined): string {
+  const raw = (type || "").trim().toUpperCase();
+  if (!raw) return "Other";
+  if (raw.includes("TRANSFER")) return "Transfer";
+  return raw
+    .toLowerCase()
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 type SettingsTab =
   | "none"
   | "services"
@@ -4444,6 +4462,10 @@ function App() {
   const [reconcileCandidates, setReconcileCandidates] = useState<ReconcileCandidate[]>([]);
   const [reconcileLoadState, setReconcileLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [reconcileBusy, setReconcileBusy] = useState<string | null>(null);
+  // Transaction-type labels hidden from the reconcile list. Internal transfers
+  // are hidden by default since they're never customer payments; the filter
+  // chips let the coach show them (or hide other types) again.
+  const [reconcileHiddenTypes, setReconcileHiddenTypes] = useState<Set<string>>(() => new Set(["Transfer"]));
   const [expenseRangeFrom, setExpenseRangeFrom] = useState("");
   const [expenseRangeTo, setExpenseRangeTo] = useState("");
   const [expenseDraft, setExpenseDraft] = useState<{
@@ -12606,6 +12628,29 @@ function App() {
     ? Math.max(...overdueInvoiceRecords.map((invoiceRecord) => isoDateDiffDays(todayDateValue, invoiceRecord.dueDate as string)))
     : 0;
 
+  // Reconcile type filter: the distinct transaction-type labels present, and the
+  // candidates left after hiding the toggled-off types (internal transfers by
+  // default). Order chips by frequency so the common types lead.
+  const reconcileTypeCounts = reconcileCandidates.reduce<Record<string, number>>((counts, candidate) => {
+    const label = reconcileTypeLabel(candidate.type);
+    counts[label] = (counts[label] || 0) + 1;
+    return counts;
+  }, {});
+  const reconcileTypeOptions = Object.keys(reconcileTypeCounts).sort(
+    (a, b) => reconcileTypeCounts[b] - reconcileTypeCounts[a] || a.localeCompare(b),
+  );
+  const visibleReconcileCandidates = reconcileCandidates.filter(
+    (candidate) => !reconcileHiddenTypes.has(reconcileTypeLabel(candidate.type)),
+  );
+  function toggleReconcileType(label: string) {
+    setReconcileHiddenTypes((current) => {
+      const next = new Set(current);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
+
   // expenses is already server-filtered to expenseRangeFrom/expenseRangeTo;
   // voided entries stay visible in the list (for the audit trail) but never
   // count toward the total.
@@ -19750,6 +19795,25 @@ function App() {
                     reference). Confirm a match to mark the invoice paid — this stays in Clarity and never changes
                     anything in Stripe.
                   </p>
+                  {reconcileTypeOptions.length > 1 && (
+                    <div className="reconcile-type-filter" role="group" aria-label="Filter by transaction type">
+                      <span className="field-help">Show:</span>
+                      {reconcileTypeOptions.map((label) => {
+                        const shown = !reconcileHiddenTypes.has(label);
+                        return (
+                          <button
+                            key={label}
+                            type="button"
+                            className={`reconcile-type-chip${shown ? " active" : ""}`}
+                            aria-pressed={shown}
+                            onClick={() => toggleReconcileType(label)}
+                          >
+                            {label} ({reconcileTypeCounts[label]})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   {reconcileLoadState === "loading" && !reconcileCandidates.length ? (
                     <p>Loading bank payments...</p>
                   ) : reconcileLoadState === "error" ? (
@@ -19759,7 +19823,7 @@ function App() {
                         Try again
                       </button>
                     </p>
-                  ) : reconcileCandidates.length ? (
+                  ) : visibleReconcileCandidates.length ? (
                     <table className="recent-invoices-table">
                       <thead>
                         <tr>
@@ -19771,13 +19835,16 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {reconcileCandidates.map((candidate) => {
+                        {visibleReconcileCandidates.map((candidate) => {
                           const best = candidate.suggestions[0];
                           return (
                             <tr key={candidate.id}>
                               <td>{candidate.date}</td>
                               <td>
                                 {candidate.description || "—"}
+                                {candidate.type ? (
+                                  <span className="field-help"> · {reconcileTypeLabel(candidate.type)}</span>
+                                ) : null}
                                 {candidate.reference ? (
                                   <span className="field-help"> · ref: {candidate.reference}</span>
                                 ) : null}
@@ -19820,6 +19887,8 @@ function App() {
                         })}
                       </tbody>
                     </table>
+                  ) : reconcileCandidates.length ? (
+                    <p>All {reconcileCandidates.length} bank payment{reconcileCandidates.length === 1 ? "" : "s"} are hidden by the type filter above.</p>
                   ) : (
                     <p>No bank payments waiting to reconcile.</p>
                   )}
