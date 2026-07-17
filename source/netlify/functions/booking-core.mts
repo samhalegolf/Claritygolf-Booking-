@@ -8102,6 +8102,11 @@ export async function handleBookingApiRoute(
           });
           const updatedAt = nowIso();
           await setSetting("updatedAt", updatedAt);
+          // Keep Google Calendar in step with every single-booking change (drag
+          // reschedule, edit, lesson-complete). Time-boxed like the other save
+          // paths so a slow Google round trip finishes in the background instead
+          // of holding this response open.
+          const googleCalendarSync = await syncGoogleCalendarWithinBudget();
           let notificationResults = [];
           let notificationWarning = "";
           try {
@@ -8127,6 +8132,7 @@ export async function handleBookingApiRoute(
             item: savedItem,
             updatedAt,
             notificationResults,
+            googleCalendarSync,
             ...(notificationWarning ? { warnings: [notificationWarning] } : {}),
           });
         } catch (error) {

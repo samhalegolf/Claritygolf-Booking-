@@ -4378,6 +4378,11 @@ function App() {
   // The number of the invoice currently open/saved (blank for a brand-new one,
   // where the next-number preview is shown instead).
   const [editingInvoiceNumber, setEditingInvoiceNumber] = useState("");
+  // Server-suggested next number in the series, continuing the Stripe-imported
+  // invoices (e.g. SHG-0415). Derived from the highest existing invoice, so it
+  // stays aligned as more Stripe invoices import. Falls back to the local
+  // prefix+counter derivation if the lookup hasn't loaded.
+  const [suggestedInvoiceNumber, setSuggestedInvoiceNumber] = useState("");
   const [invoiceIssueState, setInvoiceIssueState] = useState<"idle" | "saving">("idle");
   const [invoiceSendState, setInvoiceSendState] = useState<"idle" | "sending">("idle");
   const [clarityPayState, setClarityPayState] = useState<"idle" | "loading">("idle");
@@ -5304,7 +5309,10 @@ function App() {
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
   const caddyWorkspaceUrl = coachAccount.caddyWorkspaceUrl || CADDY_APP_URL;
   const invoiceSettings = coachAccount.invoiceSettings;
-  const invoiceNumber = `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`;
+  // Prefer the server's next-in-series number (aligned with the Stripe imports);
+  // fall back to the local prefix+counter until that lookup resolves.
+  const invoiceNumber =
+    suggestedInvoiceNumber || `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`;
   const billingWorkspaceEnabled = invoiceSettings.enabled && invoiceSettings.showBillingWorkspace && canUseFeature(activeAccount, "invoicing");
   const googleCalendarSyncEnabled = canUseFeature(activeAccount, "googleCalendarSync");
   const localStorageHealth = getLocalStorageHealth(managedLocalLibraryStatus);
@@ -12410,6 +12418,25 @@ function App() {
     }
   }
 
+  // Ask the server for the next number in the series. It derives it from the
+  // highest existing invoice for this prefix (including the Stripe imports), so
+  // the New Invoice preview and the number actually assigned on save both
+  // continue the same sequence. Best-effort: on failure the local
+  // prefix+counter fallback in `invoiceNumber` still shows a sensible preview.
+  async function refreshSuggestedInvoiceNumber() {
+    try {
+      const response = await fetch(
+        `/api/billing/invoices/next-number?prefix=${encodeURIComponent(invoiceSettings.prefix)}`,
+        { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } },
+      );
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => null)) as { invoiceNumber?: string } | null;
+      if (data?.invoiceNumber) setSuggestedInvoiceNumber(String(data.invoiceNumber));
+    } catch {
+      /* keep the local fallback preview */
+    }
+  }
+
   async function fetchInvoicedBookingIds(bookingIds: string[]) {
     if (!bookingIds.length) {
       setInvoicedBookingIds({});
@@ -12427,7 +12454,7 @@ function App() {
   async function loadBillingWorkspace() {
     setBillingDataLoadState("loading");
     try {
-      await Promise.all([fetchBillingProducts(), fetchRecentInvoices(), fetchBillingDiscounts(), fetchExpenseCategories(), fetchExpenses()]);
+      await Promise.all([fetchBillingProducts(), fetchRecentInvoices(), fetchBillingDiscounts(), fetchExpenseCategories(), fetchExpenses(), refreshSuggestedInvoiceNumber()]);
       setBillingDataLoadState("loaded");
     } catch (error) {
       setBillingDataLoadState("error");
@@ -13178,19 +13205,32 @@ function App() {
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
-          body: JSON.stringify({ invoiceNumber: number, status: "draft", ...body }),
+          // autoNumber: the server assigns the real next-in-series number
+          // atomically at insert time (so two quick saves, or a Stripe import
+          // landing between preview and save, can't collide). invoiceNumber is
+          // still sent as the preview/fallback.
+          body: JSON.stringify({
+            autoNumber: true,
+            invoicePrefix: invoiceSettings.prefix,
+            invoiceNumber: number,
+            status: "draft",
+            ...body,
+          }),
         });
         if (response.status === 401) {
           setAuthStatus("guest");
           throw new Error("Admin login required");
         }
-        const data = (await response.json().catch(() => null)) as { id?: string; error?: string; message?: string } | null;
+        const data = (await response.json().catch(() => null)) as { id?: string; invoiceNumber?: string; error?: string; message?: string } | null;
         if (!response.ok) {
           if (data?.error === "BOOKING_ALREADY_INVOICED") void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
           throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
         }
         id = data?.id || "";
-        updateInvoiceSettings("nextNumber", invoiceSettings.nextNumber + 1);
+        // Use the number the server actually assigned (headings/toasts/PDF all
+        // key off `number`), then refresh the preview for the next new invoice.
+        if (data?.invoiceNumber) number = String(data.invoiceNumber);
+        void refreshSuggestedInvoiceNumber();
         if (reviseSourceId) await patchInvoiceStatus(reviseSourceId, "void").catch(() => {});
       }
       if (!id) throw new Error("Could not save invoice.");
@@ -19931,13 +19971,17 @@ function App() {
 
                     <div className="invoice-document-lines" aria-label="Invoice lines">
                       {invoiceDraft.lines.map((line) => {
-                        // The rule: an editable line shows the boxed form; a
-                        // locked-in (confirmed invoice) or pre-set (pulled from a
-                        // booking / selected from the catalog) line reads as a
-                        // plain invoice line. Only a manual line on an unconfirmed
-                        // invoice stays editable.
+                        // The rule: while the invoice is being edited, every
+                        // line shows the boxed form and stays fully editable -
+                        // including its description and unit price - no matter
+                        // where it came from (manual, catalog, package, or pulled
+                        // from a booking). Pulled-in prices are only a starting
+                        // point; the coach can always override them here. A line
+                        // reads as a plain, read-only invoice line only once the
+                        // invoice itself is locked (a saved invoice opened for
+                        // viewing, before entering edit/revise mode).
                         const lineLocked = invoiceLocked;
-                        const linePlain = lineLocked || line.source !== "manual";
+                        const linePlain = lineLocked;
                         if (linePlain) {
                           return (
                             <div className="invoice-plain-line" key={line.id}>
@@ -22353,7 +22397,7 @@ function App() {
                   </label>
                   <div className="sync-meta">
                     <span>Sync mode</span>
-                    <strong>Manual only</strong>
+                    <strong>{googleCalendar.manualOnly ? "Manual only" : "Automatic after every change"}</strong>
                   </div>
                   <div className="sync-meta">
                     <span>Redirect URI</span>

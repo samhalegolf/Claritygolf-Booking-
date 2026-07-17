@@ -14,7 +14,11 @@ import {
 
 const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
-const googleCalendarManualSyncOnly = true;
+// Auto-sync every booking change to Google Calendar. Each booking mutation path
+// (admin save/delete, single-item upsert, public booking + cancel) calls
+// syncGoogleCalendarIfEnabled(); with this false those calls actually run,
+// gated only by the per-account googleCalendarAutoSync setting.
+const googleCalendarManualSyncOnly = false;
 
 const defaultServices = [
   { id: "lesson-30", name: "30min Lesson", duration: 30, price: 100, lessonNote: "Bay hire included", location: "Bay hire included" },
