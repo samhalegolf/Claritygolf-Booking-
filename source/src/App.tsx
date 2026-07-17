@@ -19585,6 +19585,86 @@ function App() {
                 <article className="data-card recent-invoices-card">
                   <div className="data-card-header">
                     <div>
+                      <span>Invoices</span>
+                      <h2>All invoices</h2>
+                    </div>
+                    <input
+                      type="search"
+                      className="invoice-search-input"
+                      placeholder="Search number, customer or status…"
+                      value={invoiceSearch}
+                      onChange={(event) => setInvoiceSearch(event.target.value)}
+                      aria-label="Search invoices"
+                    />
+                  </div>
+                  {allInvoicesLoadState === "loading" && !allInvoices.length ? (
+                    <p>Loading invoices...</p>
+                  ) : allInvoicesLoadState === "error" ? (
+                    <p>
+                      Could not load invoices.{" "}
+                      <button className="outline-button" type="button" onClick={() => void fetchAllInvoices()}>
+                        Try again
+                      </button>
+                    </p>
+                  ) : filteredInvoices.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Invoice</th>
+                          <th>Customer</th>
+                          <th>Date</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredInvoices.map((invoiceRecord) => (
+                          <tr
+                            key={invoiceRecord.id}
+                            className={`clickable-invoice-row${invoiceSettings.unpaidLoudness === 3 && overdueInvoiceIds.has(invoiceRecord.id) ? " overdue-row" : ""}`}
+                            style={{ cursor: "pointer" }}
+                            role="button"
+                            tabIndex={0}
+                            title={invoiceRecord.status === "draft" ? "Open draft to edit" : "Open invoice to send or download"}
+                            onClick={() => openInvoiceForEdit(invoiceRecord)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                void openInvoiceForEdit(invoiceRecord);
+                              }
+                            }}
+                          >
+                            <td>{invoiceRecord.invoiceNumber}</td>
+                            <td>{invoiceRecord.customerName}</td>
+                            <td>{invoiceRecord.issueDate}</td>
+                            <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
+                            <td>
+                              <span
+                                className={`invoice-status-pill invoice-status-${
+                                  invoiceRecord.status === "sent" && !invoiceRecord.sentAt ? "published" : invoiceRecord.status
+                                }`}
+                              >
+                                {invoiceRecord.status === "sent" && invoiceRecord.sentAt && <Send size={12} />}
+                                {invoiceRecord.status === "sent"
+                                  ? invoiceRecord.sentAt
+                                    ? "Sent"
+                                    : "Published"
+                                  : invoiceRecord.status.charAt(0).toUpperCase() + invoiceRecord.status.slice(1)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : allInvoices.length ? (
+                    <p>No invoices match "{invoiceSearch}".</p>
+                  ) : (
+                    <p>No invoices yet. Issue your first invoice to see it here.</p>
+                  )}
+                </article>
+                <details className="data-card recent-invoices-card reconcile-card">
+                  <summary className="data-card-header reconcile-summary">
+                    <div>
                       <span>Bank payments</span>
                       <h2>
                         Reconcile from your bank
@@ -19593,6 +19673,8 @@ function App() {
                         ) : null}
                       </h2>
                     </div>
+                  </summary>
+                  <div className="reconcile-actions-row">
                     <button className="outline-button" type="button" onClick={() => void autoReconcileAll()}>
                       Auto-match
                     </button>
@@ -19675,87 +19757,7 @@ function App() {
                   ) : (
                     <p>No bank payments waiting to reconcile.</p>
                   )}
-                </article>
-                <article className="data-card recent-invoices-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>Invoices</span>
-                      <h2>All invoices</h2>
-                    </div>
-                    <input
-                      type="search"
-                      className="invoice-search-input"
-                      placeholder="Search number, customer or status…"
-                      value={invoiceSearch}
-                      onChange={(event) => setInvoiceSearch(event.target.value)}
-                      aria-label="Search invoices"
-                    />
-                  </div>
-                  {allInvoicesLoadState === "loading" && !allInvoices.length ? (
-                    <p>Loading invoices...</p>
-                  ) : allInvoicesLoadState === "error" ? (
-                    <p>
-                      Could not load invoices.{" "}
-                      <button className="outline-button" type="button" onClick={() => void fetchAllInvoices()}>
-                        Try again
-                      </button>
-                    </p>
-                  ) : filteredInvoices.length ? (
-                    <table className="recent-invoices-table">
-                      <thead>
-                        <tr>
-                          <th>Invoice</th>
-                          <th>Customer</th>
-                          <th>Date</th>
-                          <th>Amount</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredInvoices.map((invoiceRecord) => (
-                          <tr
-                            key={invoiceRecord.id}
-                            className={`clickable-invoice-row${invoiceSettings.unpaidLoudness === 3 && overdueInvoiceIds.has(invoiceRecord.id) ? " overdue-row" : ""}`}
-                            style={{ cursor: "pointer" }}
-                            role="button"
-                            tabIndex={0}
-                            title={invoiceRecord.status === "draft" ? "Open draft to edit" : "Open invoice to send or download"}
-                            onClick={() => openInvoiceForEdit(invoiceRecord)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
-                                event.preventDefault();
-                                void openInvoiceForEdit(invoiceRecord);
-                              }
-                            }}
-                          >
-                            <td>{invoiceRecord.invoiceNumber}</td>
-                            <td>{invoiceRecord.customerName}</td>
-                            <td>{invoiceRecord.issueDate}</td>
-                            <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
-                            <td>
-                              <span
-                                className={`invoice-status-pill invoice-status-${
-                                  invoiceRecord.status === "sent" && !invoiceRecord.sentAt ? "published" : invoiceRecord.status
-                                }`}
-                              >
-                                {invoiceRecord.status === "sent" && invoiceRecord.sentAt && <Send size={12} />}
-                                {invoiceRecord.status === "sent"
-                                  ? invoiceRecord.sentAt
-                                    ? "Sent"
-                                    : "Published"
-                                  : invoiceRecord.status.charAt(0).toUpperCase() + invoiceRecord.status.slice(1)}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : allInvoices.length ? (
-                    <p>No invoices match "{invoiceSearch}".</p>
-                  ) : (
-                    <p>No invoices yet. Issue your first invoice to see it here.</p>
-                  )}
-                </article>
+                </details>
               </div>
             )}
 

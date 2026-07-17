@@ -603,6 +603,37 @@ button {
   font-size: 18px;
 }
 
+/* Collapsible "Reconcile from your bank" card: sits below the invoice list and
+   defaults closed. The summary reuses the data-card-header layout with a +/-
+   marker, like .settings-subsection-title. */
+.reconcile-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.reconcile-summary::-webkit-details-marker {
+  display: none;
+}
+
+.reconcile-summary::after {
+  content: "+";
+  align-self: center;
+  margin-left: auto;
+  color: #76736d;
+  font-weight: 800;
+  font-size: 20px;
+}
+
+.reconcile-card[open] .reconcile-summary::after {
+  content: "-";
+}
+
+.reconcile-actions-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 8px 0 4px;
+}
+
 .meta-row {
   display: flex;
   flex-wrap: wrap;
