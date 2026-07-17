@@ -656,8 +656,52 @@ async function createBookingLinks(
   }
 }
 
+// Invoice numbering is derived from the highest existing number in the same
+// series, not a static local counter, so app-created invoices continue on from
+// the invoices imported from Stripe (e.g. SHG-0414 -> SHG-0415) and stay aligned
+// as more Stripe invoices import. The prefix is sanitised to [A-Z0-9-] so it is
+// safe to drop straight into the RegExp below (no metacharacters survive).
+function normalizeInvoicePrefix(value: unknown) {
+  return cleanString(value, "INV", 12).toUpperCase().replace(/[^A-Z0-9-]/g, "") || "INV";
+}
+
+function invoiceSequenceForPrefix(invoiceNumber: string, prefix: string): number | null {
+  const match = new RegExp(`^${prefix}-(\\d+)$`).exec(invoiceNumber);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+async function nextInvoiceNumber(accountId: string, prefixInput: unknown) {
+  const prefix = normalizeInvoicePrefix(prefixInput);
+  // Pull just the numbers already used for this prefix and compute the max in JS.
+  // Charges (ORD-###) and un-numbered Stripe rows (in_…) use other prefixes and
+  // are excluded both by the like filter and the exact ^PREFIX-<digits>$ match.
+  // Max computed in code (not via lexical ORDER BY) so 5-digit sequences don't
+  // lose to zero-padded 4-digit ones.
+  const rows = (await supabase("billing_invoices", {
+    query:
+      `select=invoice_number&account_id=eq.${encodeFilter(accountId)}` +
+      `&invoice_number=like.${encodeFilter(`${prefix}-*`)}&limit=100000`,
+  })) as Array<{ invoice_number?: string }>;
+  let highest = 0;
+  for (const row of rows) {
+    const sequence = invoiceSequenceForPrefix(cleanString(row?.invoice_number, "", 60), prefix);
+    if (sequence !== null && sequence > highest) highest = sequence;
+  }
+  const sequence = highest + 1;
+  // Keep the 4-digit zero padding the Stripe series uses (SHG-0415); sequences
+  // >= 10000 render at their natural width.
+  return { prefix, sequence, invoiceNumber: `${prefix}-${String(sequence).padStart(4, "0")}` };
+}
+
 async function createInvoice(accountId: string, body: Record<string, unknown>) {
-  const invoiceNumber = cleanString(body?.invoiceNumber, "", 60);
+  const autoNumber = body?.autoNumber === true;
+  // autoNumber => server assigns the next number in the series (the aligned
+  // path). Otherwise honour an explicit client-supplied number.
+  let invoiceNumber = autoNumber
+    ? (await nextInvoiceNumber(accountId, body?.invoicePrefix)).invoiceNumber
+    : cleanString(body?.invoiceNumber, "", 60);
   const customerName = cleanString(body?.customerName, "", 140);
   if (!invoiceNumber) throw Object.assign(new Error("Invoice number is required."), { status: 400 });
   if (!customerName) throw Object.assign(new Error("Customer is required."), { status: 400 });
@@ -704,17 +748,27 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
     updated_at: nowIso(),
   };
 
-  try {
-    await supabase("billing_invoices", { method: "POST", body: [invoiceRow], prefer: "return=minimal" });
-  } catch (error) {
-    const status = (error as { supabaseStatus?: number })?.supabaseStatus;
-    if (status === 409) {
-      throw Object.assign(new Error(`Invoice number ${invoiceNumber} is already in use.`), {
-        status: 409,
-        code: "INVOICE_NUMBER_CONFLICT",
-      });
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await supabase("billing_invoices", { method: "POST", body: [invoiceRow], prefer: "return=minimal" });
+      break;
+    } catch (error) {
+      const conflict = (error as { supabaseStatus?: number })?.supabaseStatus === 409;
+      // Auto-numbered: a 409 means another invoice (or a Stripe import) claimed
+      // this number between our read and write - recompute and retry a few times.
+      if (conflict && autoNumber && attempt < 5) {
+        invoiceNumber = (await nextInvoiceNumber(accountId, body?.invoicePrefix)).invoiceNumber;
+        invoiceRow.invoice_number = invoiceNumber;
+        continue;
+      }
+      if (conflict) {
+        throw Object.assign(new Error(`Invoice number ${invoiceNumber} is already in use.`), {
+          status: 409,
+          code: "INVOICE_NUMBER_CONFLICT",
+        });
+      }
+      throw error;
     }
-    throw error;
   }
 
   const itemRows = items.map((item) => ({ ...item, invoice_id: invoiceId, account_id: accountId, created_at: nowIso() }));
@@ -1630,6 +1684,11 @@ export default async function handler(req: Request) {
 
     if (action === "invoices" && req.method === "GET") return json(await listInvoices(accountId, url));
     if (action === "invoices" && req.method === "POST") return json(await createInvoice(accountId, await parseBody(req)), 201);
+    // The next number in the series (continues the imported Stripe numbering).
+    // Must precede the generic invoices/:id GET, which would treat it as an id.
+    if (action === "invoices/next-number" && req.method === "GET") {
+      return json(await nextInvoiceNumber(accountId, url.searchParams.get("prefix")));
+    }
     // Sub-actions (.../send, .../pdf) must be matched before the generic
     // invoices/:id handlers, which would otherwise treat "id/send" as the id.
     if (action.startsWith("invoices/") && action.endsWith("/send") && req.method === "POST") {
