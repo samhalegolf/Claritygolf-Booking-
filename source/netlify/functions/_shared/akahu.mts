@@ -359,3 +359,188 @@ export async function ignoreBankExpenseCandidate(accountId: string, txnId: strin
   });
   return { ok: true, txnId };
 }
+
+// --- Phase 3: native payment reconciliation (money-in → invoices) ------------
+// Matches incoming bank credits to open invoices and marks them paid *locally*
+// only — nothing is ever pushed back to Stripe. The Stripe invoice sync honours
+// the reconciled_locally flag (see stripe-billing.mts) so it can't undo this.
+
+type ReconcileInvoice = {
+  id: string;
+  invoice_number: string;
+  customer_name: string | null;
+  total: number | string;
+  amount_paid: number | string;
+  status: string;
+  issue_date: string;
+};
+
+function creditReferenceText(txn: Record<string, any>) {
+  return [txn.meta_particulars, txn.meta_code, txn.meta_reference, txn.description]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+type ScoredMatch = {
+  invoice: ReconcileInvoice;
+  score: number;
+  refMatch: boolean;
+  amountMatch: boolean;
+  outstanding: number;
+};
+
+/** Rank open invoices against one credit. Reference (invoice number in the bank
+ *  particulars/code/reference) is the strongest signal; exact amount is next. */
+function scoreCreditMatches(txn: Record<string, any>, invoices: ReconcileInvoice[]): ScoredMatch[] {
+  const amount = round2(Math.abs(Number(txn.amount) || 0));
+  const refText = creditReferenceText(txn);
+  const scored: ScoredMatch[] = [];
+  for (const inv of invoices) {
+    const number = String(inv.invoice_number || "").toLowerCase();
+    const total = round2(Number(inv.total) || 0);
+    const outstanding = round2(total - (Number(inv.amount_paid) || 0));
+    const refMatch = number.length >= 4 && refText.includes(number);
+    const amountMatch = (Math.abs(amount - outstanding) < 0.01 && outstanding > 0) || Math.abs(amount - total) < 0.01;
+    if (!refMatch && !amountMatch) continue;
+    let score = 0;
+    if (refMatch) score += 100;
+    if (amountMatch) score += 50;
+    scored.push({ invoice: inv, score, refMatch, amountMatch, outstanding });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
+}
+
+/** Auto-apply only when a single unambiguous invoice matches: one reference
+ *  hit (invoice numbers are unique), else one and only one exact-amount hit. */
+function pickAutoMatch(scored: ScoredMatch[]): ScoredMatch | null {
+  const refMatches = scored.filter((s) => s.refMatch);
+  if (refMatches.length === 1) return refMatches[0];
+  if (refMatches.length === 0) {
+    const amountMatches = scored.filter((s) => s.amountMatch);
+    if (amountMatches.length === 1) return amountMatches[0];
+  }
+  return null;
+}
+
+async function fetchReconcileInputs(accountId: string) {
+  const [credits, invoices] = await Promise.all([
+    supabase("bank_transactions", {
+      query: `select=id,date,amount,description,merchant_name,meta_particulars,meta_code,meta_reference,akahu_account_id&account_id=eq.${encodeFilter(accountId)}&direction=eq.in&status=eq.unreviewed&order=date.desc&limit=200`,
+    }),
+    supabase("billing_invoices", {
+      query: `select=id,invoice_number,customer_name,total,amount_paid,status,issue_date&account_id=eq.${encodeFilter(accountId)}&status=in.(draft,sent,overdue)&reconciled_locally=eq.false&order=issue_date.desc&limit=500`,
+    }),
+  ]);
+  return {
+    credits: (Array.isArray(credits) ? credits : []) as Record<string, any>[],
+    invoices: (Array.isArray(invoices) ? invoices : []) as ReconcileInvoice[],
+  };
+}
+
+/** Unreviewed credits with their suggested invoice match(es). autoInvoiceId is
+ *  set when the match is unambiguous enough to apply without asking. */
+export async function listReconcileCandidates(accountId: string) {
+  const { credits, invoices } = await fetchReconcileInputs(accountId);
+  let accMap: Record<string, { name: string | null }> = {};
+  try {
+    accMap = await getAkahuAccountMap();
+  } catch {
+    accMap = {};
+  }
+  return credits.map((txn) => {
+    const scored = scoreCreditMatches(txn, invoices);
+    const auto = pickAutoMatch(scored);
+    return {
+      id: txn.id,
+      date: txn.date,
+      amount: round2(Math.abs(Number(txn.amount) || 0)),
+      description: txn.description,
+      account: accMap[txn.akahu_account_id]?.name || null,
+      reference: [txn.meta_particulars, txn.meta_code, txn.meta_reference].filter(Boolean).join(" ") || null,
+      autoInvoiceId: auto?.invoice.id || null,
+      suggestions: scored.slice(0, 4).map((s) => ({
+        invoiceId: s.invoice.id,
+        invoiceNumber: s.invoice.invoice_number,
+        customer: s.invoice.customer_name,
+        total: round2(Number(s.invoice.total) || 0),
+        outstanding: s.outstanding,
+        refMatch: s.refMatch,
+        amountMatch: s.amountMatch,
+      })),
+    };
+  });
+}
+
+/** Mark an invoice paid from a bank credit — NATIVE ONLY, never touches Stripe.
+ *  Sets reconciled_locally so the Stripe sync won't revert it. */
+export async function applyReconciliation(accountId: string, txnId: string, invoiceId: string) {
+  const [txnRows, invRows] = await Promise.all([
+    supabase("bank_transactions", {
+      query: `select=*&id=eq.${encodeFilter(txnId)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+    }),
+    supabase("billing_invoices", {
+      query: `select=*&id=eq.${encodeFilter(invoiceId)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+    }),
+  ]);
+  const txn = Array.isArray(txnRows) ? txnRows[0] : null;
+  const invoice = Array.isArray(invRows) ? invRows[0] : null;
+  if (!txn) throw Object.assign(new Error("Bank transaction not found."), { status: 404 });
+  if (txn.direction !== "in") {
+    throw Object.assign(new Error("Only money-in transactions reconcile to invoices."), { status: 400 });
+  }
+  if (!invoice) throw Object.assign(new Error("Invoice not found."), { status: 404 });
+
+  const credit = round2(Math.abs(Number(txn.amount) || 0));
+  const total = round2(Number(invoice.total) || 0);
+  const newPaid = round2(Math.min(total, (Number(invoice.amount_paid) || 0) + credit));
+  const paidAt = txn.posted_at || (txn.date ? new Date(`${txn.date}T00:00:00Z`).toISOString() : nowIso());
+  const nowPaid = newPaid + 0.01 >= total;
+
+  await supabase("billing_invoices", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(invoiceId)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: {
+      amount_paid: newPaid,
+      status: nowPaid ? "paid" : invoice.status,
+      paid_at: nowPaid ? paidAt : invoice.paid_at,
+      reconciled_locally: true,
+      reconciled_bank_txn_id: txnId,
+      updated_at: nowIso(),
+    },
+  });
+  await supabase("bank_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(txnId)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: { status: "reconciled", matched_invoice_id: invoiceId, updated_at: nowIso() },
+  });
+  return { ok: true, txnId, invoiceId, invoiceNumber: invoice.invoice_number, amountPaid: newPaid, paid: nowPaid };
+}
+
+/** Dismiss a credit that isn't a customer payment (an internal transfer, etc). */
+export async function ignoreReconcileCandidate(accountId: string, txnId: string) {
+  await supabase("bank_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(txnId)}&account_id=eq.${encodeFilter(accountId)}&status=eq.unreviewed`,
+    body: { status: "ignored", updated_at: nowIso() },
+  });
+  return { ok: true, txnId };
+}
+
+/** Auto-apply every unambiguous match (user chose "auto everything", guarded to
+ *  single-candidate matches so it never guesses between two invoices). */
+export async function autoReconcileCredits(accountId: string) {
+  const candidates = await listReconcileCandidates(accountId);
+  let autoApplied = 0;
+  for (const candidate of candidates) {
+    if (!candidate.autoInvoiceId) continue;
+    try {
+      await applyReconciliation(accountId, candidate.id, candidate.autoInvoiceId);
+      autoApplied += 1;
+    } catch (error) {
+      console.error("auto_reconcile_failed", candidate.id, error instanceof Error ? error.message : error);
+    }
+  }
+  return { ok: true, candidates: candidates.length, autoApplied, remaining: candidates.length - autoApplied };
+}
