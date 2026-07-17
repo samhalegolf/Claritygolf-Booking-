@@ -119,25 +119,56 @@ function accountHasPublicBooking(account: any) {
   return ["solo", "studio", "academy", "enterprise", "founder"].includes(account?.planKey || "solo");
 }
 
-function pad(value: number) {
-  return String(value).padStart(2, "0");
-}
-
 function slotDate(week = 0, day = 0) {
   const date = new Date(baseWeekStart);
   date.setUTCDate(baseWeekStart.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
   return date;
 }
 
-function formatLocalDateTime(week = 0, day = 0, minutes = 0) {
-  const date = slotDate(week, day);
-  const hour = Math.floor(Number(minutes || 0) / 60);
-  const minute = Number(minutes || 0) % 60;
-  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}T${pad(hour)}${pad(minute)}00`;
-}
-
 function formatUtcStamp(date = new Date()) {
   return date.toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+}
+
+// Convert a slot's wall-clock time in the workspace's timezone to a real UTC
+// instant. The previous ICS emitted `DTSTART;TZID=Pacific/Auckland:<floating>`
+// with no VTIMEZONE component — RFC 5545 requires one for every TZID, and
+// clients that don't carry their own IANA database (notably classic Outlook)
+// fell back to reading the floating time as UTC or local, landing the event
+// hours off. Emitting UTC instants (`...Z`) is unambiguous everywhere.
+function zonedSlotToUtc(week = 0, day = 0, minutes = 0, timeZone = "Pacific/Auckland") {
+  const date = slotDate(week, day);
+  const guess = Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    Math.floor(Number(minutes || 0) / 60),
+    Number(minutes || 0) % 60,
+  );
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  } catch {
+    return new Date(guess);
+  }
+  // Two passes so a DST transition between the guess and the corrected instant
+  // still resolves to the right offset.
+  let corrected = guess;
+  for (let i = 0; i < 2; i += 1) {
+    const parts = formatter.formatToParts(new Date(corrected));
+    const value = (type: string) => Number(parts.find((part) => part.type === type)?.value || 0);
+    const asUtc = Date.UTC(value("year"), value("month") - 1, value("day"), value("hour") % 24, value("minute"), value("second"));
+    corrected = guess - (asUtc - corrected);
+  }
+  return new Date(corrected);
 }
 
 function escapeIcs(value: unknown) {
@@ -201,8 +232,8 @@ function generateInvite(appointment: any, settings: any) {
     "BEGIN:VEVENT",
     `UID:${escapeIcs(appointment.id)}@claritygolf.app`,
     `DTSTAMP:${formatUtcStamp()}`,
-    `DTSTART;TZID=${escapeIcs(settings.timezone)}:${formatLocalDateTime(appointment.week, appointment.day, appointment.start)}`,
-    `DTEND;TZID=${escapeIcs(settings.timezone)}:${formatLocalDateTime(appointment.week, appointment.day, Number(appointment.start || 0) + Number(appointment.duration || 0))}`,
+    `DTSTART:${formatUtcStamp(zonedSlotToUtc(appointment.week, appointment.day, appointment.start, settings.timezone))}`,
+    `DTEND:${formatUtcStamp(zonedSlotToUtc(appointment.week, appointment.day, Number(appointment.start || 0) + Number(appointment.duration || 0), settings.timezone))}`,
     `SUMMARY:${escapeIcs(`${serviceName} with ${settings.coachName || settings.businessName}`)}`,
     `DESCRIPTION:${escapeIcs(description)}`,
     `LOCATION:${escapeIcs(bookingLocationDisplay(location))}`,

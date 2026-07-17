@@ -252,11 +252,15 @@ function slotDate(week = 0, day = 0) {
 }
 
 function slotDateLabel(week = 0, day = 0) {
+  // The slot date is a UTC-midnight instant; format it as UTC so the label is
+  // the same calendar day regardless of the runtime's local timezone (Netlify
+  // is UTC, but the local dev server is not).
   return slotDate(week, day).toLocaleDateString(activeLocale(), {
     weekday: "long",
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -449,6 +453,23 @@ async function recordNotification(row: any) {
   }
 }
 
+// Resend allows 2 requests/second. A booking fires client + coach + admin
+// emails back-to-back, which is exactly how the notification_history rows with
+// error "resend_failed" (HTTP 429) happened. Space consecutive sends out and
+// retry once on a 429 instead of dropping the email.
+const SEND_MIN_INTERVAL_MS = 600;
+let lastSendAt = 0;
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function throttleSend() {
+  const elapsed = Date.now() - lastSendAt;
+  if (elapsed < SEND_MIN_INTERVAL_MS) await wait(SEND_MIN_INTERVAL_MS - elapsed);
+  lastSendAt = Date.now();
+}
+
 async function sendEmail(message: { to: string; subject: string; html: string; text: string; replyTo?: string; idempotencyKey: string }) {
   const apiKey = env("RESEND_API_KEY");
   if (!apiKey) return { sent: false, reason: "missing_resend_key" };
@@ -462,27 +483,36 @@ async function sendEmail(message: { to: string; subject: string; html: string; t
     cleanEmail(rawFromHeader, env("CLARITY_NOTIFICATION_EMAIL", "")),
     rawFromHeader,
   );
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": message.idempotencyKey,
-    },
-    body: JSON.stringify({
-      from,
-      to: [message.to],
-      subject: message.subject,
-      html: message.html,
-      text: message.text,
-      ...(message.replyTo ? { reply_to: message.replyTo } : {}),
-    }),
+  const payload = JSON.stringify({
+    from,
+    to: [message.to],
+    subject: message.subject,
+    html: message.html,
+    text: message.text,
+    ...(message.replyTo ? { reply_to: message.replyTo } : {}),
   });
+  const attempt = async () => {
+    await throttleSend();
+    return fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": message.idempotencyKey,
+      },
+      body: payload,
+    });
+  };
+  let response = await attempt();
+  if (response.status === 429) {
+    await wait(1200);
+    response = await attempt();
+  }
   const responseText = await response.text().catch(() => "");
   if (!response.ok) {
     return {
       sent: false,
-      reason: "resend_failed",
+      reason: `resend_failed_${response.status}`,
       error: responseText.slice(0, 1000),
       status: response.status,
     };
@@ -696,7 +726,9 @@ export async function notifyBookingEvent(input: NotifyInput) {
     const status = result.sent ? "sent" : "failed";
     const output = { channel, recipient, subject, kind, status, ...result };
     results.push(output);
-    await recordNotification({ personKey, calendarItemId: appt.id, recipient, subject, kind, status, provider: "resend", providerId: result.id || "", error: result.reason || result.error || "" });
+    // Record the provider's actual response body alongside the reason code —
+    // "resend_failed" alone made the 429 rate-limit failures undiagnosable.
+    await recordNotification({ personKey, calendarItemId: appt.id, recipient, subject, kind, status, provider: "resend", providerId: result.id || "", error: [result.reason, result.error].filter(Boolean).join(": ") });
     console.log(
       "notification_engine:result",
       JSON.stringify({ action, channel, recipient, status, reason: result.reason || "", providerId: result.id || "" }),
@@ -725,7 +757,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
     });
     const status = result.sent ? "sent" : "failed";
     results.push({ channel: "custom_group_invite", recipient, subject: invite.subject, kind, status, ...result });
-    await recordNotification({ personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status, provider: "resend", providerId: result.id || "", error: result.reason || result.error || "" });
+    await recordNotification({ personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status, provider: "resend", providerId: result.id || "", error: [result.reason, result.error].filter(Boolean).join(": ") });
   }
 
   if (action === "test") {

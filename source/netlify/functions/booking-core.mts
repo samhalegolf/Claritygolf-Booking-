@@ -4921,6 +4921,18 @@ function isSlotInPast(week, day, start, timeZone = accountTimeZone()) {
   return Number(start ?? 0) <= now.minutes;
 }
 
+// Minutes since the appointment's wall-clock end in the workspace's timezone.
+// Negative while the lesson is still in the future. Used by the debounce flush
+// to distinguish "flushed a bit late" (still send) from "genuinely stale" (drop).
+function appointmentMinutesSinceEnd(item, timeZone = accountTimeZone()) {
+  const slot = slotDateParts(Number(item?.week ?? 0), Number(item?.day ?? 0));
+  const now = nowInTimeZoneParts(timeZone);
+  const dayDiff =
+    (Date.UTC(now.year, now.month - 1, now.day) - Date.UTC(slot.year, slot.month - 1, slot.day)) / 86400000;
+  const end = Number(item?.start ?? 0) + Number(item?.duration ?? 0);
+  return dayDiff * 1440 + (now.minutes - end);
+}
+
 function isAppointmentInPast(item, timeZone = accountTimeZone()) {
   if (!item || item.kind !== "appointment") return false;
   const slotDate = slotDateParts(Number(item.week ?? 0), Number(item.day ?? 0));
@@ -4949,6 +4961,7 @@ function cleanPendingAdminNotification(value) {
     targetSignature: cleanString(value?.targetSignature, "", 1600),
     appointment: value.appointment,
     previousAppointment: value.previousAppointment || null,
+    deferrals: Math.max(0, Math.min(10, Math.round(Number(value?.deferrals) || 0))),
   };
 }
 
@@ -5014,6 +5027,7 @@ async function processAdminNotificationDebounce(
           targetSignature: appointmentNotificationSignature(next),
           appointment: next,
           previousAppointment: null,
+          deferrals: 0,
         });
         queueChanged = true;
         continue;
@@ -5047,6 +5061,7 @@ async function processAdminNotificationDebounce(
           targetSignature: appointmentNotificationSignature(next),
           appointment: next,
           previousAppointment: originalPrevious,
+          deferrals: 0,
         });
         queueChanged = true;
         continue;
@@ -5087,9 +5102,37 @@ async function processAdminNotificationDebounce(
     const current = nextById.get(id);
     queueById.delete(id);
     queueChanged = true;
-    if (!current) continue;
-    if (isAppointmentInPast(current, timeZone)) continue;
-    if (appointmentNotificationSignature(current) !== pending.targetSignature) continue;
+    if (!current) {
+      console.warn("admin_notification_debounce:dropped", { calendarItemId: id, action: pending.action, reason: "item_deleted" });
+      continue;
+    }
+    // A late flush must not swallow the notification just because the lesson's
+    // (new) start time has since passed — the client still needs to hear about a
+    // reschedule that fired an hour late. Only genuinely stale entries (the
+    // lesson ended more than a day ago) are dropped, and the drop is logged.
+    if (appointmentMinutesSinceEnd(current, timeZone) > 24 * 60) {
+      console.warn("admin_notification_debounce:dropped", { calendarItemId: id, action: pending.action, reason: "ended_over_24h_ago" });
+      continue;
+    }
+    if (appointmentNotificationSignature(current) !== pending.targetSignature) {
+      // The appointment changed again after this entry was queued (a price tweak,
+      // a status change — anything outside inferBookingAction's diff). Dropping
+      // here silently was how admin reschedule emails went missing. Instead,
+      // re-queue against the current state so the email sends once editing
+      // settles; after a few deferrals send anyway rather than defer forever.
+      const deferrals = Number(pending.deferrals ?? 0);
+      if (deferrals < 5) {
+        queueById.set(id, {
+          ...pending,
+          deferrals: deferrals + 1,
+          fireAfter: new Date(now + ADMIN_NOTIFICATION_DEBOUNCE_MS).toISOString(),
+          targetSignature: appointmentNotificationSignature(current),
+          appointment: current,
+        });
+        continue;
+      }
+      console.warn("admin_notification_debounce:deferral_limit_reached_sending_anyway", { calendarItemId: id, action: pending.action });
+    }
     if (
       pending.originalPositionSignature &&
       appointmentPositionSignature(current) === pending.originalPositionSignature
@@ -5109,6 +5152,23 @@ async function processAdminNotificationDebounce(
 
   if (queueChanged) await writePendingAdminNotifications([...queueById.values()]);
   return results;
+}
+
+// Flush the admin notification debounce queue without queueing new diffs.
+// Called by the scheduled function (admin-notification-flush.mts) so queued
+// booking/reschedule emails send even when no admin browser tab is open to
+// fire the client-side setTimeout flush — previously the only trigger, which
+// is why admin reschedule emails went missing whenever the tab closed within
+// the 30-second debounce window.
+export async function flushAdminNotificationQueue() {
+  const pending = await readPendingAdminNotifications();
+  if (!pending.length) return { pending: 0, results: [] };
+  const state = await readCalendarState();
+  const results = await processAdminNotificationDebounce(state.items, state.items, {
+    queueDiffs: false,
+    timeZone: state.account?.timezone,
+  });
+  return { pending: pending.length, results };
 }
 
 async function verifyAdminPassword(email, password) {
