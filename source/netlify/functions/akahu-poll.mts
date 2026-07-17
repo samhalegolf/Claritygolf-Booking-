@@ -22,6 +22,8 @@ export default async function handler() {
 }
 
 export const config: Config = {
-  // ~03:00 NZ (15:00 UTC) daily.
-  schedule: "0 15 * * *",
+  // Hourly. Akahu personal apps can't self-configure a real-time webhook, so a
+  // frequent poll is how the feed stays effectively live (payments reconcile
+  // within the hour). The 10-day re-sync window makes each run self-healing.
+  schedule: "0 * * * *",
 };
