@@ -74,7 +74,8 @@ export default async function handler(req: Request) {
     }
     if (action === "sync") {
       const since = typeof body?.since === "string" && body.since.trim() ? body.since.trim() : undefined;
-      return json({ transactions: await syncAkahuTransactions(accountId, since) });
+      const until = typeof body?.until === "string" && body.until.trim() ? body.until.trim() : undefined;
+      return json({ transactions: await syncAkahuTransactions(accountId, since, until) });
     }
 
     return json({ error: "unknown_action", message: "Unknown Akahu sync action." }, 400);

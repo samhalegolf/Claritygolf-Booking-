@@ -222,9 +222,10 @@ async function upsertTransactions(rows: Record<string, any>[]) {
  * upsert them into bank_transactions. `sinceIso` is an ISO date-time (exclusive
  * start); omit it for all available history.
  */
-export async function syncAkahuTransactions(accountId: string, sinceIso?: string) {
+export async function syncAkahuTransactions(accountId: string, sinceIso?: string, untilIso?: string) {
   const params: Record<string, unknown> = {};
   if (sinceIso) params.start = sinceIso;
+  if (untilIso) params.end = untilIso;
   const transactions = await akahuPageAll("/transactions", params);
   const rows = transactions.map((txn) => mapAkahuTransaction(txn, accountId)).filter((row) => row.id);
   await upsertTransactions(rows);

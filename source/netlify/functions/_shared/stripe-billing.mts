@@ -272,8 +272,11 @@ export async function deleteStripeInvoice(invoiceId: string) {
 }
 
 /** Backfill all Stripe invoices created at/after sinceEpoch. */
-export async function syncInvoicesSince(sinceEpoch: number, accountId: string) {
-  const invoices = await stripePageAll("/v1/invoices", { "created[gte]": sinceEpoch });
+export async function syncInvoicesSince(sinceEpoch: number, accountId: string, untilEpoch?: number) {
+  const invoices = await stripePageAll("/v1/invoices", {
+    "created[gte]": sinceEpoch,
+    ...(untilEpoch ? { "created[lte]": untilEpoch } : {}),
+  });
   let synced = 0;
   let itemsSynced = 0;
   const failures: { invoiceId: string; number: string | null; error: string }[] = [];
@@ -420,8 +423,11 @@ export async function syncStripeCharge(charge: Record<string, any>, accountId: s
 }
 
 /** Backfill all succeeded, unlinked Stripe charges created at/after sinceEpoch. */
-export async function syncChargesSince(sinceEpoch: number, accountId: string) {
-  const charges = await stripePageAll("/v1/charges", { "created[gte]": sinceEpoch });
+export async function syncChargesSince(sinceEpoch: number, accountId: string, untilEpoch?: number) {
+  const charges = await stripePageAll("/v1/charges", {
+    "created[gte]": sinceEpoch,
+    ...(untilEpoch ? { "created[lte]": untilEpoch } : {}),
+  });
   let synced = 0;
   let skipped = 0;
   const failures: { chargeId: string; error: string }[] = [];
