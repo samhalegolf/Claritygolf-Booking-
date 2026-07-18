@@ -284,7 +284,7 @@ export async function getAkahuAccountMap() {
  * they do.
  */
 export async function listBankExpenseCandidates(accountId: string, opts: { limit?: number } = {}) {
-  const limit = Math.max(1, Math.min(300, Number(opts.limit) || 150));
+  const limit = Math.max(1, Math.min(1000, Number(opts.limit) || 150));
   const rows = await supabase("bank_transactions", {
     query: `select=id,date,amount,description,merchant_name,category_name,type,akahu_account_id&account_id=eq.${encodeFilter(accountId)}&direction=eq.out&status=eq.unreviewed&order=date.desc&limit=${limit}`,
   });

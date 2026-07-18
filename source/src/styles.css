@@ -668,12 +668,22 @@ button {
 /* Bank expense review: older-period backfill presets and the bulk action bar
    that appears once transactions are ticked. */
 .bank-backfill-row,
-.bank-bulk-actions {
+.bank-bulk-actions,
+.bank-loadmore-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   margin: 0 0 12px;
+}
+
+.bank-backfill-note {
+  margin: -4px 0 12px;
+}
+
+.bank-loadmore-row {
+  justify-content: center;
+  margin: 12px 0 0;
 }
 
 .bank-bulk-actions {

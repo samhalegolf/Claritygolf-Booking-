@@ -4481,6 +4481,11 @@ function App() {
   const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
   const [bankBulkBusy, setBankBulkBusy] = useState(false);
   const [bankBackfillBusy, setBankBackfillBusy] = useState<number | null>(null);
+  // How many candidates the list requests. Starts at the newest 150; "Load
+  // older" pages up to the server cap (1000). A backfill jumps straight to the
+  // cap so freshly-pulled older transactions are actually visible.
+  const [bankListLimit, setBankListLimit] = useState(150);
+  const [bankListBusy, setBankListBusy] = useState(false);
   // Akahu payment reconciliation: money-in transactions matched to invoices.
   const [reconcileCandidates, setReconcileCandidates] = useState<ReconcileCandidate[]>([]);
   const [reconcileLoadState, setReconcileLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -12358,7 +12363,7 @@ function App() {
 
   // Akahu bank feed → expense review. Money-out transactions the coach hasn't
   // actioned yet; approving one creates a billing_expenses row, dismissing hides it.
-  async function fetchBankCandidates() {
+  async function fetchBankCandidates(limit = bankListLimit): Promise<BankExpenseCandidate[] | null> {
     setBankCandidatesLoadState("loading");
     try {
       const response = await fetch("/api/akahu-expenses", {
@@ -12366,19 +12371,37 @@ function App() {
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
         cache: "no-store",
-        body: JSON.stringify({ action: "list" }),
+        body: JSON.stringify({ action: "list", limit }),
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        return;
+        return null;
       }
       if (!response.ok) throw new Error(await readApiFailure(response, "Could not load the bank feed."));
       const data = (await response.json()) as { candidates?: BankExpenseCandidate[] };
-      setBankCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+      setBankCandidates(candidates);
       setBankCandidatesLoadState("ready");
+      return candidates;
     } catch (error) {
       console.error("fetchBankCandidates failed", error);
       setBankCandidatesLoadState("error");
+      return null;
+    }
+  }
+
+  // Page in older candidates: bump the requested limit toward the server cap
+  // (1000) and refetch. The list is newest-first, so this reveals rows below
+  // the current window without pulling anything new from Akahu.
+  const bankListMax = 1000;
+  async function loadMoreBankCandidates() {
+    const next = Math.min(bankListMax, bankListLimit + 150);
+    setBankListLimit(next);
+    setBankListBusy(true);
+    try {
+      await fetchBankCandidates(next);
+    } finally {
+      setBankListBusy(false);
     }
   }
 
@@ -12462,27 +12485,59 @@ function App() {
     }
   }
 
-  // Pull older money-out transactions from Akahu (last N months), then reload
-  // the review list so anything newly synced shows up for approval.
+  // Pull older money-out transactions from Akahu (last N months). Akahu only
+  // holds ~12 months of history and each sync must fit the ~26s function
+  // timeout, so we walk backwards in 3-month windows; windows past Akahu's
+  // history limit error out and are skipped, not fatal. Afterwards we reload at
+  // the full cap so freshly-pulled older rows are actually visible, and report
+  // the resulting review total (not the raw fetched count, which double-counts
+  // transactions already imported).
   async function backfillBankTransactions(months: number) {
     setBankBackfillBusy(months);
     try {
-      const since = new Date();
-      since.setMonth(since.getMonth() - months);
-      since.setHours(0, 0, 0, 0);
-      const response = await fetch("/api/akahu-sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ action: "sync", since: since.toISOString() }),
-      });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not pull older transactions."));
-      const data = (await response.json()) as { transactions?: { moneyOut?: number } };
-      const moneyOut = data.transactions?.moneyOut ?? 0;
-      setToast({
-        message: `Pulled ${moneyOut} money-out transaction${moneyOut === 1 ? "" : "s"} from the last ${months} months.`,
-      });
-      await fetchBankCandidates();
+      const now = new Date();
+      const windowMonths = 3;
+      let syncedOut = 0;
+      let skippedWindows = 0;
+      for (let startAgo = months; startAgo > 0; startAgo -= windowMonths) {
+        const endAgo = Math.max(0, startAgo - windowMonths);
+        const since = new Date(now);
+        since.setMonth(since.getMonth() - startAgo);
+        since.setHours(0, 0, 0, 0);
+        const until = new Date(now);
+        until.setMonth(until.getMonth() - endAgo);
+        until.setHours(0, 0, 0, 0);
+        try {
+          const response = await fetch("/api/akahu-sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              action: "sync",
+              since: since.toISOString(),
+              ...(endAgo > 0 ? { until: until.toISOString() } : {}),
+            }),
+          });
+          if (!response.ok) throw new Error(await readApiFailure(response, "Window failed."));
+          const data = (await response.json()) as { transactions?: { moneyOut?: number } };
+          syncedOut += data.transactions?.moneyOut ?? 0;
+        } catch (windowError) {
+          console.error("backfill window failed", windowError);
+          skippedWindows += 1;
+        }
+      }
+      // Reload at the cap so the just-pulled older transactions are visible and
+      // counted, not hidden below the newest-150 window.
+      setBankListLimit(bankListMax);
+      const after = await fetchBankCandidates(bankListMax);
+      const parts: string[] = [`Pulled ${syncedOut} money-out transaction${syncedOut === 1 ? "" : "s"} from the bank.`];
+      if (Array.isArray(after)) {
+        parts.push(`${after.length} now waiting for review.`);
+      }
+      if (skippedWindows) {
+        parts.push("Some older windows are past Akahu's ~12-month history — use CSV import for those.");
+      }
+      setToast({ message: parts.join(" ") });
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Could not pull older transactions." });
     } finally {
@@ -20900,6 +20955,10 @@ function App() {
                       </button>
                     ))}
                   </div>
+                  <p className="field-help bank-backfill-note">
+                    The bank feed only reaches back ~12 months (Akahu's history limit). For older expenses, use the
+                    CSV import below.
+                  </p>
                   {bankCandidatesLoadState === "loading" && !bankCandidates.length ? (
                     <p>Loading bank transactions...</p>
                   ) : bankCandidatesLoadState === "error" ? (
@@ -21015,6 +21074,19 @@ function App() {
                       ) : (
                         <p>All transactions are hidden by the classification filter above.</p>
                       )}
+                      {bankCandidates.length >= bankListLimit && bankListLimit < bankListMax ? (
+                        <div className="bank-loadmore-row">
+                          <button
+                            className="outline-button"
+                            type="button"
+                            disabled={bankListBusy}
+                            onClick={() => void loadMoreBankCandidates()}
+                          >
+                            {bankListBusy ? "Loading…" : "Load older"}
+                          </button>
+                          <span className="field-help">Showing the newest {bankCandidates.length}.</span>
+                        </div>
+                      ) : null}
                     </>
                   ) : (
                     <p>
