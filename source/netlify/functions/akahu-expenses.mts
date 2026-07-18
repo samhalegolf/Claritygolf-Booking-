@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { defaultAccountId } from "./_shared/account.mts";
 import {
   approveBankExpenseCandidate,
+  approveManyBankExpenseCandidates,
   ignoreBankExpenseCandidate,
+  ignoreManyBankExpenseCandidates,
   listBankExpenseCandidates,
 } from "./_shared/akahu.mts";
 
@@ -16,6 +18,8 @@ import {
 //   { action: "list" }
 //   { action: "approve", id, categoryId?, categoryName?, description?, vendor? }
 //   { action: "ignore", id }
+//   { action: "approveMany", ids, categoryId?, categoryName? }
+//   { action: "ignoreMany", ids }
 
 const sessionCookieName = "clarity_session";
 
@@ -96,6 +100,18 @@ export default async function handler(req: Request) {
       const id = cleanId(body?.id);
       if (!id) return json({ error: "bad_request", message: "Missing transaction id." }, 400);
       return json(await ignoreBankExpenseCandidate(accountId, id));
+    }
+    if (action === "approveMany" || action === "ignoreMany") {
+      const ids = Array.isArray(body?.ids) ? body.ids.map(cleanId).filter(Boolean) : [];
+      if (!ids.length) return json({ error: "bad_request", message: "No transaction ids supplied." }, 400);
+      if (ids.length > 500) return json({ error: "bad_request", message: "Too many transactions in one request." }, 400);
+      if (action === "ignoreMany") return json(await ignoreManyBankExpenseCandidates(accountId, ids));
+      return json(
+        await approveManyBankExpenseCandidates(accountId, ids, {
+          categoryId: typeof body?.categoryId === "string" ? body.categoryId : undefined,
+          categoryName: typeof body?.categoryName === "string" ? body.categoryName : undefined,
+        }),
+      );
     }
 
     return json({ error: "unknown_action", message: "Unknown bank-expense action." }, 400);

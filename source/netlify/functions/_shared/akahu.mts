@@ -361,6 +361,42 @@ export async function ignoreBankExpenseCandidate(accountId: string, txnId: strin
   return { ok: true, txnId };
 }
 
+/** Dismiss many candidates in one PATCH. Only unreviewed money-out rows for this
+ *  account are touched, so already-actioned ids are silently skipped. */
+export async function ignoreManyBankExpenseCandidates(accountId: string, txnIds: string[]) {
+  const ids = Array.from(new Set(txnIds.filter(Boolean).map((id) => String(id))));
+  if (!ids.length) return { ok: true, dismissed: 0 };
+  const inList = ids.map((id) => encodeFilter(id)).join(",");
+  await supabase("bank_transactions", {
+    method: "PATCH",
+    query: `id=in.(${inList})&account_id=eq.${encodeFilter(accountId)}&direction=eq.out&status=eq.unreviewed`,
+    body: { status: "ignored", updated_at: nowIso() },
+  });
+  return { ok: true, dismissed: ids.length };
+}
+
+/** Approve many candidates → one billing_expenses row each. Runs sequentially so
+ *  a single bad id can't abort the batch; per-id failures are collected and
+ *  returned rather than thrown. */
+export async function approveManyBankExpenseCandidates(
+  accountId: string,
+  txnIds: string[],
+  overrides: { categoryId?: string; categoryName?: string } = {},
+) {
+  const ids = Array.from(new Set(txnIds.filter(Boolean).map((id) => String(id))));
+  const failed: { id: string; message: string }[] = [];
+  let approved = 0;
+  for (const id of ids) {
+    try {
+      await approveBankExpenseCandidate(accountId, id, overrides);
+      approved += 1;
+    } catch (error) {
+      failed.push({ id, message: error instanceof Error ? error.message : "Failed." });
+    }
+  }
+  return { ok: failed.length === 0, approved, failed };
+}
+
 // --- Phase 3: native payment reconciliation (money-in → invoices) ------------
 // Matches incoming bank credits to open invoices and marks them paid *locally*
 // only — nothing is ever pushed back to Stripe. The Stripe invoice sync honours

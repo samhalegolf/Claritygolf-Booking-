@@ -921,6 +921,12 @@ function reconcileTypeLabel(type: string | null | undefined): string {
     .join(" ");
 }
 
+// Normalise a suggested expense classification (Akahu category enrichment) into
+// a filter label. Transactions with no enrichment collapse to "Uncategorised".
+function expenseCategoryLabel(category: string | null | undefined): string {
+  return (category || "").trim() || "Uncategorised";
+}
+
 type SettingsTab =
   | "none"
   | "services"
@@ -4469,6 +4475,12 @@ function App() {
   const [bankCandidates, setBankCandidates] = useState<BankExpenseCandidate[]>([]);
   const [bankCandidatesLoadState, setBankCandidatesLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [bankCandidateBusy, setBankCandidateBusy] = useState<string | null>(null);
+  // Classification filter (hidden category labels), tick-box selection, and
+  // busy flags for the bulk approve/dismiss and the older-period backfill.
+  const [bankHiddenCategories, setBankHiddenCategories] = useState<Set<string>>(() => new Set());
+  const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
+  const [bankBulkBusy, setBankBulkBusy] = useState(false);
+  const [bankBackfillBusy, setBankBackfillBusy] = useState<number | null>(null);
   // Akahu payment reconciliation: money-in transactions matched to invoices.
   const [reconcileCandidates, setReconcileCandidates] = useState<ReconcileCandidate[]>([]);
   const [reconcileLoadState, setReconcileLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -12394,6 +12406,99 @@ function App() {
     }
   }
 
+  // Bulk approve/dismiss every ticked candidate in a single request, then drop
+  // the actioned rows. A partial approve keeps the failed ids so they can be
+  // retried; a dismiss removes all sent ids.
+  async function actionBankSelected(action: "approve" | "ignore") {
+    const ids = bankCandidates.filter((row) => selectedBankIds.has(row.id)).map((row) => row.id);
+    if (!ids.length) return;
+    setBankBulkBusy(true);
+    try {
+      const response = await fetch("/api/akahu-expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: action === "approve" ? "approveMany" : "ignoreMany", ids }),
+      });
+      if (!response.ok) {
+        throw new Error(
+          await readApiFailure(
+            response,
+            action === "approve" ? "Could not add the expenses." : "Could not dismiss the transactions.",
+          ),
+        );
+      }
+      const result = (await response.json()) as {
+        approved?: number;
+        dismissed?: number;
+        failed?: { id?: string }[];
+      };
+      const failedIds = new Set(
+        Array.isArray(result.failed) ? result.failed.map((row) => String(row?.id || "")).filter(Boolean) : [],
+      );
+      const removeIds = new Set(ids.filter((id) => !failedIds.has(id)));
+      setBankCandidates((prev) => prev.filter((row) => !removeIds.has(row.id)));
+      setSelectedBankIds((prev) => {
+        const next = new Set(prev);
+        removeIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      if (action === "approve") {
+        const added = typeof result.approved === "number" ? result.approved : removeIds.size;
+        setToast({
+          message: failedIds.size
+            ? `Added ${added} expense${added === 1 ? "" : "s"}; ${failedIds.size} couldn't be added.`
+            : `Added ${added} expense${added === 1 ? "" : "s"}.`,
+        });
+        void fetchExpenses();
+      } else {
+        const dismissed = typeof result.dismissed === "number" ? result.dismissed : removeIds.size;
+        setToast({ message: `Dismissed ${dismissed} transaction${dismissed === 1 ? "" : "s"}.` });
+      }
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+    } finally {
+      setBankBulkBusy(false);
+    }
+  }
+
+  // Pull older money-out transactions from Akahu (last N months), then reload
+  // the review list so anything newly synced shows up for approval.
+  async function backfillBankTransactions(months: number) {
+    setBankBackfillBusy(months);
+    try {
+      const since = new Date();
+      since.setMonth(since.getMonth() - months);
+      since.setHours(0, 0, 0, 0);
+      const response = await fetch("/api/akahu-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "sync", since: since.toISOString() }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not pull older transactions."));
+      const data = (await response.json()) as { transactions?: { moneyOut?: number } };
+      const moneyOut = data.transactions?.moneyOut ?? 0;
+      setToast({
+        message: `Pulled ${moneyOut} money-out transaction${moneyOut === 1 ? "" : "s"} from the last ${months} months.`,
+      });
+      await fetchBankCandidates();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not pull older transactions." });
+    } finally {
+      setBankBackfillBusy(null);
+    }
+  }
+
+  function toggleBankSelection(id: string) {
+    setSelectedBankIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   // Akahu payment reconciliation. Incoming bank credits matched to open invoices;
   // confirming marks the invoice paid locally (never touches Stripe).
   async function fetchReconcileCandidates() {
@@ -12729,6 +12834,45 @@ function App() {
       const next = new Set(current);
       if (next.has(label)) next.delete(label);
       else next.add(label);
+      return next;
+    });
+  }
+
+  // Expense classification filter: the distinct suggested-category labels present
+  // in the bank candidates (most-common first) and the candidates left after
+  // hiding toggled-off classifications. Tick-box selection is scoped to what's
+  // visible, so a hidden row can never be bulk-actioned by mistake.
+  const bankCategoryCounts = bankCandidates.reduce<Record<string, number>>((counts, candidate) => {
+    const label = expenseCategoryLabel(candidate.suggestedCategory);
+    counts[label] = (counts[label] || 0) + 1;
+    return counts;
+  }, {});
+  const bankCategoryOptions = Object.keys(bankCategoryCounts).sort(
+    (a, b) => bankCategoryCounts[b] - bankCategoryCounts[a] || a.localeCompare(b),
+  );
+  const visibleBankCandidates = bankCandidates.filter(
+    (candidate) => !bankHiddenCategories.has(expenseCategoryLabel(candidate.suggestedCategory)),
+  );
+  const selectedVisibleBankCount = visibleBankCandidates.filter((candidate) =>
+    selectedBankIds.has(candidate.id),
+  ).length;
+  const allVisibleBankSelected =
+    visibleBankCandidates.length > 0 && selectedVisibleBankCount === visibleBankCandidates.length;
+  function toggleBankCategory(label: string) {
+    setBankHiddenCategories((current) => {
+      const next = new Set(current);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
+  function toggleSelectAllVisibleBank() {
+    setSelectedBankIds((current) => {
+      const next = new Set(current);
+      const visibleIds = visibleBankCandidates.map((candidate) => candidate.id);
+      const everyVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => next.has(id));
+      if (everyVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
       return next;
     });
   }
@@ -20742,6 +20886,20 @@ function App() {
                     Money-out transactions from your connected bank accounts (Akahu). Approve the business ones to add
                     them to your expenses, or dismiss the rest. Approved items can't be imported twice.
                   </p>
+                  <div className="bank-backfill-row">
+                    <span className="field-help">Pull older:</span>
+                    {[3, 6, 12].map((months) => (
+                      <button
+                        key={months}
+                        className="outline-button"
+                        type="button"
+                        disabled={bankBackfillBusy !== null}
+                        onClick={() => void backfillBankTransactions(months)}
+                      >
+                        {bankBackfillBusy === months ? "Pulling…" : `Last ${months} months`}
+                      </button>
+                    ))}
+                  </div>
                   {bankCandidatesLoadState === "loading" && !bankCandidates.length ? (
                     <p>Loading bank transactions...</p>
                   ) : bankCandidatesLoadState === "error" ? (
@@ -20752,50 +20910,112 @@ function App() {
                       </button>
                     </p>
                   ) : bankCandidates.length ? (
-                    <table className="recent-invoices-table">
-                      <thead>
-                        <tr>
-                          <th>Date</th>
-                          <th>Account</th>
-                          <th>Description</th>
-                          <th>Amount</th>
-                          <th aria-label="Actions" />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {bankCandidates.map((candidate) => (
-                          <tr key={candidate.id}>
-                            <td>{candidate.date}</td>
-                            <td>{candidate.account || "—"}</td>
-                            <td>
-                              {candidate.description || candidate.merchant || "—"}
-                              {candidate.suggestedCategory ? (
-                                <span className="field-help"> · {candidate.suggestedCategory}</span>
-                              ) : null}
-                            </td>
-                            <td>{formatMoney(candidate.amount, "NZD")}</td>
-                            <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                    <>
+                      {bankCategoryOptions.length > 1 && (
+                        <div className="reconcile-type-filter" role="group" aria-label="Filter by classification">
+                          <span className="field-help">Show:</span>
+                          {bankCategoryOptions.map((label) => {
+                            const shown = !bankHiddenCategories.has(label);
+                            return (
                               <button
-                                className="outline-button"
+                                key={label}
                                 type="button"
-                                disabled={bankCandidateBusy === candidate.id}
-                                onClick={() => void actionBankCandidate(candidate, "approve")}
+                                className={`reconcile-type-chip${shown ? " active" : ""}`}
+                                aria-pressed={shown}
+                                onClick={() => toggleBankCategory(label)}
                               >
-                                Approve
-                              </button>{" "}
-                              <button
-                                className="outline-button"
-                                type="button"
-                                disabled={bankCandidateBusy === candidate.id}
-                                onClick={() => void actionBankCandidate(candidate, "ignore")}
-                              >
-                                Dismiss
+                                {label} ({bankCategoryCounts[label]})
                               </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {selectedVisibleBankCount > 0 && (
+                        <div className="bank-bulk-actions" role="group" aria-label="Bulk actions">
+                          <span className="field-help">{selectedVisibleBankCount} selected</span>
+                          <button
+                            className="outline-button"
+                            type="button"
+                            disabled={bankBulkBusy}
+                            onClick={() => void actionBankSelected("approve")}
+                          >
+                            {bankBulkBusy ? "Working…" : "Approve selected"}
+                          </button>
+                          <button
+                            className="outline-button"
+                            type="button"
+                            disabled={bankBulkBusy}
+                            onClick={() => void actionBankSelected("ignore")}
+                          >
+                            {bankBulkBusy ? "Working…" : "Dismiss selected"}
+                          </button>
+                        </div>
+                      )}
+                      {visibleBankCandidates.length ? (
+                        <table className="recent-invoices-table">
+                          <thead>
+                            <tr>
+                              <th className="bank-select-cell">
+                                <input
+                                  type="checkbox"
+                                  aria-label="Select all shown"
+                                  checked={allVisibleBankSelected}
+                                  onChange={() => toggleSelectAllVisibleBank()}
+                                />
+                              </th>
+                              <th>Date</th>
+                              <th>Account</th>
+                              <th>Description</th>
+                              <th>Amount</th>
+                              <th aria-label="Actions" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visibleBankCandidates.map((candidate) => (
+                              <tr key={candidate.id}>
+                                <td className="bank-select-cell">
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select ${candidate.description || candidate.merchant || "transaction"}`}
+                                    checked={selectedBankIds.has(candidate.id)}
+                                    onChange={() => toggleBankSelection(candidate.id)}
+                                  />
+                                </td>
+                                <td>{candidate.date}</td>
+                                <td>{candidate.account || "—"}</td>
+                                <td>
+                                  {candidate.description || candidate.merchant || "—"}
+                                  {candidate.suggestedCategory ? (
+                                    <span className="field-help"> · {candidate.suggestedCategory}</span>
+                                  ) : null}
+                                </td>
+                                <td>{formatMoney(candidate.amount, "NZD")}</td>
+                                <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                                  <button
+                                    className="outline-button"
+                                    type="button"
+                                    disabled={bankCandidateBusy === candidate.id || bankBulkBusy}
+                                    onClick={() => void actionBankCandidate(candidate, "approve")}
+                                  >
+                                    Approve
+                                  </button>{" "}
+                                  <button
+                                    className="outline-button"
+                                    type="button"
+                                    disabled={bankCandidateBusy === candidate.id || bankBulkBusy}
+                                    onClick={() => void actionBankCandidate(candidate, "ignore")}
+                                  >
+                                    Dismiss
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <p>All transactions are hidden by the classification filter above.</p>
+                      )}
+                    </>
                   ) : (
                     <p>
                       No bank transactions waiting for review.{" "}
