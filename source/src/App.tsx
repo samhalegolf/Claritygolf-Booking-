@@ -128,6 +128,7 @@ import type {
   BillingInvoiceRecord,
   BillingRevenueBucket,
   BillingRevenueReport,
+  BillingReportSummary,
   BillingDiscountType,
   BillingDiscount,
   BillingExpenseCategory,
@@ -139,6 +140,7 @@ import {
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
+import { presetRange, buildReportCsv, type ReportRangePreset } from "./modules/billing/reportsMath";
 import {
   parseExpenseCsv,
   inferExpenseCsvField,
@@ -4429,6 +4431,15 @@ function App() {
   const [revenuePeriod, setRevenuePeriod] = useState<"week" | "month" | "year">("month");
   const [revenueReport, setRevenueReport] = useState<BillingRevenueReport | null>(null);
   const [revenueLoadState, setRevenueLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  // Billing > Reports tab: full P&L / GST / aging summary over a date range.
+  const [reportPreset, setReportPreset] = useState<ReportRangePreset>("this-financial-year");
+  const [reportRange, setReportRange] = useState<{ start: string; end: string }>(
+    () => presetRange("this-financial-year", new Date()) ?? { start: "", end: "" },
+  );
+  const [reportCustomStart, setReportCustomStart] = useState("");
+  const [reportCustomEnd, setReportCustomEnd] = useState("");
+  const [reportSummary, setReportSummary] = useState<BillingReportSummary | null>(null);
+  const [reportLoadState, setReportLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [discountPresets, setDiscountPresets] = useState<BillingDiscount[]>([]);
   const [discountEditor, setDiscountEditor] = useState<{ id: string; name: string; discountType: BillingDiscountType; value: number; couponCode: string }>({
     id: "",
@@ -12589,6 +12600,77 @@ function App() {
     void fetchExpenses(expenseRangeFrom, expenseRangeTo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEmbedMode, authStatus, billingWorkspaceEnabled, expenseRangeFrom, expenseRangeTo]);
+
+  async function fetchReportSummary(start: string, end: string) {
+    if (!start || !end) return;
+    setReportLoadState("loading");
+    try {
+      const response = await fetch(
+        `/api/billing/reports/summary?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+        { credentials: "same-origin", cache: "no-store" },
+      );
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load reports."));
+      setReportSummary((await response.json()) as BillingReportSummary);
+      setReportLoadState("loaded");
+    } catch (error) {
+      setReportLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load reports." });
+    }
+  }
+
+  // Load (or reload) the report whenever the Reports tab is open and the
+  // effective range changes. Other tabs don't pay for the fetch.
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (billingSection !== "reports") return;
+    void fetchReportSummary(reportRange.start, reportRange.end);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, billingSection, reportRange.start, reportRange.end]);
+
+  // Preset click resolves to a concrete range immediately; "custom" waits for
+  // the coach to pick dates and press Apply (handleApplyReportCustomRange).
+  function handleSelectReportPreset(preset: ReportRangePreset) {
+    setReportPreset(preset);
+    if (preset === "custom") {
+      if (!reportCustomStart) setReportCustomStart(reportRange.start);
+      if (!reportCustomEnd) setReportCustomEnd(reportRange.end);
+      return;
+    }
+    const range = presetRange(preset, new Date());
+    if (range) setReportRange(range);
+  }
+
+  function handleApplyReportCustomRange() {
+    if (!reportCustomStart || !reportCustomEnd) return;
+    const [start, end] =
+      reportCustomStart <= reportCustomEnd ? [reportCustomStart, reportCustomEnd] : [reportCustomEnd, reportCustomStart];
+    setReportRange({ start, end });
+  }
+
+  function handleExportReportCsv() {
+    if (!reportSummary) return;
+    const csv = buildReportCsv(reportSummary);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `financial-report-${reportSummary.rangeStart}-to-${reportSummary.rangeEnd}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleDownloadReportPdf() {
+    if (!reportRange.start || !reportRange.end) return;
+    window.open(
+      `/api/billing/reports/summary/pdf?start=${encodeURIComponent(reportRange.start)}&end=${encodeURIComponent(reportRange.end)}`,
+      "_blank",
+      "noopener",
+    );
+  }
 
   const revenueMaxBucketTotal = Math.max(1, ...(revenueReport?.buckets.map((bucket) => bucket.total) ?? [0]));
   const revenueYoyDeltaPct =
@@ -21027,10 +21109,19 @@ function App() {
 
             {billingSection === "reports" && (
               <BillingReportsPanel
-                lessonTypeCount={services.filter((service) => service.lessonFormat !== "package").length}
-                packageTypeCount={packageServices.length}
-                productCount={catalogItems.length}
-                completedUninvoicedCount={completedUninvoicedCount}
+                summary={reportSummary}
+                loadState={reportLoadState}
+                preset={reportPreset}
+                onSelectPreset={handleSelectReportPreset}
+                customStart={reportCustomStart}
+                customEnd={reportCustomEnd}
+                onCustomStartChange={setReportCustomStart}
+                onCustomEndChange={setReportCustomEnd}
+                onApplyCustom={handleApplyReportCustomRange}
+                onExportCsv={handleExportReportCsv}
+                onDownloadPdf={handleDownloadReportPdf}
+                onRetry={() => void fetchReportSummary(reportRange.start, reportRange.end)}
+                formatMoney={formatMoney}
               />
             )}
 

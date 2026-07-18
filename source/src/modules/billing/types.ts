@@ -138,6 +138,53 @@ export type BillingRevenueReport = {
   buckets: BillingRevenueBucket[];
 };
 
+// Shape returned by GET /api/billing/reports/summary - the Reports tab's
+// full P&L / GST / aging payload. Backend-owned (billing-api.mts
+// buildReportSummary); the frontend only reads it.
+export type BillingReportAgingBucket = "current" | "d1_30" | "d31_60" | "d61_90" | "d90plus";
+
+export type BillingReportAgingInvoice = {
+  invoiceNumber: string;
+  customerName: string;
+  dueDate: string;
+  daysOverdue: number;
+  outstanding: number;
+  bucket: BillingReportAgingBucket;
+};
+
+export type BillingReportSummary = {
+  currency: string;
+  taxName: string;
+  taxRate: number;
+  rangeStart: string;
+  rangeEnd: string;
+  generatedAt: string;
+  income: {
+    total: number;
+    invoiceCount: number;
+    byStatus: { sent: number; paid: number; overdue: number };
+  };
+  expenses: {
+    total: number;
+    count: number;
+    byCategory: Array<{ categoryId: string; categoryName: string; total: number; count: number }>;
+  };
+  netProfit: number;
+  gst: { collected: number; onExpenses: number; net: number };
+  months: Array<{ label: string; monthStart: string; income: number; expenses: number; net: number }>;
+  topCustomers: Array<{ customerName: string; total: number; invoiceCount: number }>;
+  aging: {
+    asOf: string;
+    current: number;
+    d1_30: number;
+    d31_60: number;
+    d61_90: number;
+    d90plus: number;
+    total: number;
+    invoices: BillingReportAgingInvoice[];
+  };
+};
+
 // Shape returned by /api/billing/discounts. Presets only - applying one to an
 // invoice just fills invoiceDraft.discountLabel/discountAmount, it does not
 // change how the invoice itself stores its discount.

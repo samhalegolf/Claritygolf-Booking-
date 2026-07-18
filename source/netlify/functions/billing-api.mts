@@ -1104,6 +1104,209 @@ async function revenueReport(accountId: string, url: URL) {
   };
 }
 
+// --- Financial reports (P&L, GST, A/R aging) ---------------------------------
+// One date-range summary the Reports tab renders: income vs expenses, net
+// profit, GST collected/owed, a month-by-month series, top customers, and
+// accounts-receivable aging. Read-only - it aggregates billing_invoices +
+// billing_expenses exactly the way the invoice list / expense list already do,
+// and never writes. buildReportSummary is shared by the JSON and PDF routes.
+
+// Outstanding = committed but not fully paid. Drafts/void never count as owed.
+const AGING_STATUSES = ["sent", "overdue"];
+
+async function resolveReportTaxConfig() {
+  const rows = await supabase("settings", {
+    query: `select=value&key=eq.${encodeFilter("accountInvoiceSettingsJson")}&limit=1`,
+  });
+  try {
+    const parsed = rows[0]?.value ? JSON.parse(rows[0].value) : {};
+    const rate = Number(parsed?.taxRate);
+    return {
+      currency: cleanString(parsed?.currency, "NZD", 10),
+      taxRate: Number.isFinite(rate) ? Math.max(0, Math.min(100, rate)) : 15,
+      taxName: cleanString(parsed?.taxName, "GST", 40),
+    };
+  } catch {
+    return { currency: "NZD", taxRate: 15, taxName: "GST" };
+  }
+}
+
+// Whole calendar months overlapping [start, end], for the income/expense
+// time series. Capped so a multi-year custom range can't produce 100 bars.
+function monthsBetween(start: Date, end: Date) {
+  const months: Array<{ label: string; start: string; end: string }> = [];
+  let year = start.getUTCFullYear();
+  let month = start.getUTCMonth();
+  const endYear = end.getUTCFullYear();
+  const endMonth = end.getUTCMonth();
+  while ((year < endYear || (year === endYear && month <= endMonth)) && months.length < 36) {
+    months.push({
+      label: `${MONTH_LABELS[month]} ${String(year).slice(2)}`,
+      start: formatDateOnly(new Date(Date.UTC(year, month, 1))),
+      end: formatDateOnly(new Date(Date.UTC(year, month + 1, 0))),
+    });
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+  return months;
+}
+
+type ReportInvoiceRow = { issue_date: string; total: unknown; tax_total: unknown; amount_paid: unknown; status: string; customer_name: string };
+type ReportExpenseRow = { expense_date: string; amount: unknown; category_id: string | null; category_name_snapshot: string | null };
+type ReportAgingRow = { invoice_number: string; customer_name: string; issue_date: string; due_date: string | null; total: unknown; amount_paid: unknown };
+
+async function buildReportSummary(accountId: string, url: URL) {
+  const today = parseDateOnly(formatDateOnly(new Date())) || new Date();
+  const startParam = parseDateOnly(url.searchParams.get("start")) || startOfMonthUTC(today);
+  const endParam = parseDateOnly(url.searchParams.get("end")) || endOfMonthUTC(today);
+  // Tolerate a reversed range instead of returning nothing.
+  const [rangeStartDate, rangeEndDate] =
+    startParam.getTime() <= endParam.getTime() ? [startParam, endParam] : [endParam, startParam];
+  const rangeStart = formatDateOnly(rangeStartDate);
+  const rangeEnd = formatDateOnly(rangeEndDate);
+
+  const tax = await resolveReportTaxConfig();
+
+  const [invoiceRows, expenseRows, outstandingRows] = (await Promise.all([
+    supabase("billing_invoices", {
+      query: `select=issue_date,total,tax_total,amount_paid,status,customer_name&account_id=eq.${encodeFilter(accountId)}&status=in.(${REVENUE_STATUSES.join(",")})&issue_date=gte.${encodeFilter(rangeStart)}&issue_date=lte.${encodeFilter(rangeEnd)}`,
+    }),
+    supabase("billing_expenses", {
+      query: `select=expense_date,amount,category_id,category_name_snapshot&account_id=eq.${encodeFilter(accountId)}&voided=is.false&expense_date=gte.${encodeFilter(rangeStart)}&expense_date=lte.${encodeFilter(rangeEnd)}`,
+    }),
+    supabase("billing_invoices", {
+      query: `select=invoice_number,customer_name,issue_date,due_date,total,amount_paid&account_id=eq.${encodeFilter(accountId)}&status=in.(${AGING_STATUSES.join(",")})`,
+    }),
+  ])) as [ReportInvoiceRow[], ReportExpenseRow[], ReportAgingRow[]];
+
+  // Income (by status) + GST collected.
+  const incomeByStatus = { sent: 0, paid: 0, overdue: 0 };
+  let incomeTotal = 0;
+  let taxCollected = 0;
+  for (const row of invoiceRows) {
+    const total = Number(row.total) || 0;
+    incomeTotal += total;
+    taxCollected += Number(row.tax_total) || 0;
+    if (row.status === "sent" || row.status === "paid" || row.status === "overdue") {
+      incomeByStatus[row.status] += total;
+    }
+  }
+
+  // Expenses (total + by category).
+  const expenseTotal = expenseRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+  const categoryMap = new Map<string, { categoryId: string; categoryName: string; total: number; count: number }>();
+  for (const row of expenseRows) {
+    const id = row.category_id || "uncategorised";
+    const bucket = categoryMap.get(id) || {
+      categoryId: id,
+      categoryName: row.category_name_snapshot || "Uncategorised",
+      total: 0,
+      count: 0,
+    };
+    bucket.total += Number(row.amount) || 0;
+    bucket.count += 1;
+    categoryMap.set(id, bucket);
+  }
+  const byCategory = [...categoryMap.values()]
+    .map((bucket) => ({ ...bucket, total: round2(bucket.total) }))
+    .sort((a, b) => b.total - a.total);
+
+  // GST: collected on income invoices vs the GST content of GST-inclusive
+  // expenses (amount * rate/(100+rate)). Expenses aren't tagged taxable/exempt,
+  // so onExpenses treats every expense as GST-inclusive - an estimate, not a
+  // filed figure.
+  const gstCollected = round2(taxCollected);
+  const gstOnExpenses = tax.taxRate > 0 ? round2(expenseTotal * (tax.taxRate / (100 + tax.taxRate))) : 0;
+
+  // Month-by-month income vs expenses.
+  const months = monthsBetween(rangeStartDate, rangeEndDate).map((month) => {
+    const income = invoiceRows
+      .filter((row) => row.issue_date >= month.start && row.issue_date <= month.end)
+      .reduce((sum, row) => sum + (Number(row.total) || 0), 0);
+    const expenses = expenseRows
+      .filter((row) => row.expense_date >= month.start && row.expense_date <= month.end)
+      .reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+    return { label: month.label, monthStart: month.start, income: round2(income), expenses: round2(expenses), net: round2(income - expenses) };
+  });
+
+  // Top customers by income in range.
+  const customerMap = new Map<string, { customerName: string; total: number; invoiceCount: number }>();
+  for (const row of invoiceRows) {
+    const name = (row.customer_name || "").trim() || "Unknown";
+    const bucket = customerMap.get(name) || { customerName: name, total: 0, invoiceCount: 0 };
+    bucket.total += Number(row.total) || 0;
+    bucket.invoiceCount += 1;
+    customerMap.set(name, bucket);
+  }
+  const topCustomers = [...customerMap.values()]
+    .map((bucket) => ({ ...bucket, total: round2(bucket.total) }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+
+  // A/R aging as of today. Outstanding = total - amount_paid, bucketed by days
+  // past due (due_date, falling back to issue_date). Point-in-time, so it's NOT
+  // bounded by the report date range - it's everything still owed right now.
+  const aging = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90plus: 0, total: 0 };
+  const agingInvoices: Array<{
+    invoiceNumber: string;
+    customerName: string;
+    dueDate: string;
+    daysOverdue: number;
+    outstanding: number;
+    bucket: keyof typeof aging;
+  }> = [];
+  for (const row of outstandingRows) {
+    const outstanding = round2((Number(row.total) || 0) - (Number(row.amount_paid) || 0));
+    if (outstanding <= 0) continue;
+    const dueStr = row.due_date || row.issue_date;
+    const dueDate = parseDateOnly(dueStr) || today;
+    const daysOverdue = Math.round((today.getTime() - dueDate.getTime()) / 86400000);
+    const bucket: keyof typeof aging =
+      daysOverdue <= 0 ? "current" : daysOverdue <= 30 ? "d1_30" : daysOverdue <= 60 ? "d31_60" : daysOverdue <= 90 ? "d61_90" : "d90plus";
+    aging[bucket] += outstanding;
+    aging.total += outstanding;
+    agingInvoices.push({
+      invoiceNumber: row.invoice_number,
+      customerName: (row.customer_name || "").trim() || "Unknown",
+      dueDate: dueStr,
+      daysOverdue: Math.max(0, daysOverdue),
+      outstanding,
+      bucket,
+    });
+  }
+  for (const key of Object.keys(aging) as Array<keyof typeof aging>) aging[key] = round2(aging[key]);
+  agingInvoices.sort((a, b) => b.daysOverdue - a.daysOverdue || b.outstanding - a.outstanding);
+
+  return {
+    currency: tax.currency,
+    taxName: tax.taxName,
+    taxRate: tax.taxRate,
+    rangeStart,
+    rangeEnd,
+    generatedAt: nowIso(),
+    income: {
+      total: round2(incomeTotal),
+      invoiceCount: invoiceRows.length,
+      byStatus: {
+        sent: round2(incomeByStatus.sent),
+        paid: round2(incomeByStatus.paid),
+        overdue: round2(incomeByStatus.overdue),
+      },
+    },
+    expenses: { total: round2(expenseTotal), count: expenseRows.length, byCategory },
+    netProfit: round2(incomeTotal - expenseTotal),
+    gst: { collected: gstCollected, onExpenses: gstOnExpenses, net: round2(gstCollected - gstOnExpenses) },
+    months,
+    topCustomers,
+    aging: { asOf: formatDateOnly(today), ...aging, invoices: agingInvoices.slice(0, 60) },
+  };
+}
+
+type ReportSummary = Awaited<ReturnType<typeof buildReportSummary>>;
+
 // --- Invoice branding + PDF + send -------------------------------------------
 // Reads the same settings keys booking-core.mts writes when the coach saves
 // their account/invoice settings (accountInvoiceSettingsJson + business name,
@@ -1676,6 +1879,158 @@ async function invoicePdfResponse(accountId: string, id: string) {
   });
 }
 
+// Accountant-facing PDF of the financial summary. Uses the same branding +
+// pdf-lib helpers as the invoice PDF so it looks like it came from the same
+// business, but lays out summary tables instead of line items.
+async function renderReportPdf(summary: ReportSummary, branding: InvoiceBranding): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const margin = 50;
+  const contentRight = pageWidth - margin;
+  const currency = summary.currency || branding.currency;
+  const money = (value: number) => formatMoney(value, currency);
+
+  const ink = rgb(0.11, 0.13, 0.16);
+  const muted = rgb(0.42, 0.45, 0.5);
+  const hair = rgb(0.82, 0.84, 0.87);
+  const brandReadable = colorLuminance(branding.primaryColor) < 0.72;
+  const brand = brandReadable ? hexToRgb(branding.primaryColor) : hexToRgb(branding.accentColor);
+
+  const logo = await embedLogo(pdf, branding.logoDataUrl);
+  let logoW = 0;
+  let logoH = 0;
+  if (logo) {
+    const scale = Math.min(44 / logo.height, 150 / logo.width, 1);
+    logoW = logo.width * scale;
+    logoH = logo.height * scale;
+  }
+
+  let page = pdf.addPage([pageWidth, pageHeight]);
+  let y = pageHeight - margin;
+
+  const text = (value: unknown, x: number, yy: number, opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb> } = {}) => {
+    page.drawText(String(value ?? ""), { x, y: yy, size: opts.size ?? 10, font: opts.bold ? bold : font, color: opts.color ?? ink });
+  };
+  const textRight = (value: string, xRight: number, yy: number, opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb> } = {}) => {
+    const size = opts.size ?? 10;
+    const usedFont = opts.bold ? bold : font;
+    text(value, xRight - usedFont.widthOfTextAtSize(String(value ?? ""), size), yy, opts);
+  };
+  const hrule = (yy: number) => {
+    page.drawLine({ start: { x: margin, y: yy }, end: { x: contentRight, y: yy }, thickness: 1, color: hair });
+  };
+  const ensureSpace = (needed: number) => {
+    if (y - needed >= margin) return;
+    page = pdf.addPage([pageWidth, pageHeight]);
+    y = pageHeight - margin;
+  };
+  // Section heading + two-column key/value rows shared by every block below.
+  const heading = (label: string) => {
+    ensureSpace(40);
+    y -= 6;
+    text(label.toUpperCase(), margin, y, { size: 9, bold: true, color: muted });
+    y -= 8;
+    hrule(y);
+    y -= 16;
+  };
+  const row = (label: string, value: string, opts: { bold?: boolean; color?: ReturnType<typeof rgb> } = {}) => {
+    ensureSpace(16);
+    text(label, margin, y, { size: 10, bold: opts.bold, color: opts.color });
+    textRight(value, contentRight, y, { size: 10, bold: opts.bold, color: opts.color });
+    y -= 16;
+  };
+
+  // Header.
+  const headerTop = y;
+  if (logo) page.drawImage(logo, { x: margin, y: headerTop - logoH, width: logoW, height: logoH });
+  const nameX = logo ? margin + logoW + 12 : margin;
+  const nameY = logo ? headerTop - logoH / 2 - 6 : headerTop - 4;
+  text(branding.businessName, nameX, nameY, { size: 16, bold: true });
+  textRight("FINANCIAL REPORT", contentRight, headerTop - 4, { size: 15, bold: true, color: brand });
+  y = headerTop - Math.max(logoH, 22) - 8;
+  textRight(`${summary.rangeStart} to ${summary.rangeEnd}`, contentRight, y, { size: 9, color: muted });
+  if (branding.taxNumber) text(`${branding.taxName} No: ${branding.taxNumber}`, margin, y, { size: 9, color: muted });
+  y -= 13;
+  textRight(`Generated ${String(summary.generatedAt).slice(0, 10)}`, contentRight, y, { size: 9, color: muted });
+  y -= 10;
+  page.drawLine({ start: { x: margin, y }, end: { x: contentRight, y }, thickness: 1.6, color: brand });
+  y -= 20;
+
+  // Profit & loss.
+  heading("Profit & Loss");
+  row("Income", money(summary.income.total));
+  row("Expenses", `- ${money(summary.expenses.total)}`);
+  hrule(y + 6);
+  row("Net profit", money(summary.netProfit), { bold: true, color: summary.netProfit < 0 ? rgb(0.72, 0.13, 0.13) : brand });
+  y -= 6;
+
+  // GST.
+  heading(`${summary.taxName} summary (${summary.taxRate}%)`);
+  row(`${summary.taxName} collected on income`, money(summary.gst.collected));
+  row(`${summary.taxName} on expenses (est.)`, `- ${money(summary.gst.onExpenses)}`);
+  hrule(y + 6);
+  row(`Net ${summary.taxName} ${summary.gst.net >= 0 ? "payable" : "refund"}`, money(Math.abs(summary.gst.net)), { bold: true });
+  y -= 6;
+
+  // Income by status.
+  heading("Income by status");
+  row("Paid", money(summary.income.byStatus.paid));
+  row("Sent (awaiting payment)", money(summary.income.byStatus.sent));
+  row("Overdue", money(summary.income.byStatus.overdue));
+
+  // Expenses by category.
+  if (summary.expenses.byCategory.length) {
+    heading("Expenses by category");
+    for (const category of summary.expenses.byCategory) {
+      row(`${category.categoryName} (${category.count})`, money(category.total));
+    }
+  }
+
+  // Top customers.
+  if (summary.topCustomers.length) {
+    heading("Top customers");
+    for (const customer of summary.topCustomers) {
+      row(`${customer.customerName} (${customer.invoiceCount})`, money(customer.total));
+    }
+  }
+
+  // A/R aging.
+  heading(`Accounts receivable (as of ${summary.aging.asOf})`);
+  row("Current / not yet due", money(summary.aging.current));
+  row("1-30 days overdue", money(summary.aging.d1_30));
+  row("31-60 days overdue", money(summary.aging.d31_60));
+  row("61-90 days overdue", money(summary.aging.d61_90));
+  row("90+ days overdue", money(summary.aging.d90plus));
+  hrule(y + 6);
+  row("Total outstanding", money(summary.aging.total), { bold: true });
+
+  if (branding.footerText) {
+    ensureSpace(24);
+    y -= 8;
+    text(branding.footerText, margin, y, { size: 8, color: muted });
+  }
+
+  return pdf.save();
+}
+
+async function reportPdfResponse(accountId: string, url: URL) {
+  const summary = await buildReportSummary(accountId, url);
+  const branding = await resolveInvoiceBranding();
+  const pdf = await renderReportPdf(summary, branding);
+  return new Response(Buffer.from(pdf), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `attachment; filename="financial-report-${summary.rangeStart}-to-${summary.rangeEnd}.pdf"`,
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 // --- Router ------------------------------------------------------------------
 
 export default async function handler(req: Request) {
@@ -1758,6 +2113,8 @@ export default async function handler(req: Request) {
     }
 
     if (action === "reports/revenue" && req.method === "GET") return json(await revenueReport(accountId, url));
+    if (action === "reports/summary" && req.method === "GET") return json(await buildReportSummary(accountId, url));
+    if (action === "reports/summary/pdf" && req.method === "GET") return reportPdfResponse(accountId, url);
 
     return json({ error: "not_found", message: "Billing route not found." }, 404);
   } catch (error) {

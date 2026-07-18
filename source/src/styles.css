@@ -7489,6 +7489,234 @@ button {
   font-size: 13px;
 }
 
+/* Billing > Reports ------------------------------------------------------- */
+.billing-reports {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.report-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.report-actions .outline-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.report-preset-toggle {
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.report-custom-range {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.report-range-caption {
+  margin: 10px 0 0;
+}
+
+.report-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+}
+
+.report-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.report-stat > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.report-stat > strong {
+  font-size: 22px;
+}
+
+.report-stat > small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.report-positive {
+  color: var(--primary);
+}
+
+.report-negative {
+  color: #c02121;
+}
+
+.report-legend {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.report-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.report-legend span::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.report-legend-income::before {
+  background: var(--primary);
+}
+
+.report-legend-expense::before {
+  background: var(--muted);
+}
+
+.report-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 140px;
+  padding-top: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.report-chart-track {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.report-chart-bars {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+}
+
+.report-chart-bar {
+  width: 100%;
+  max-width: 18px;
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+}
+
+.report-chart-bar-income {
+  background: var(--primary);
+}
+
+.report-chart-bar-expense {
+  background: var(--muted);
+}
+
+.report-chart-track span {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.report-breakdown {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.report-breakdown li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.report-breakdown li:last-child {
+  border-bottom: none;
+}
+
+.report-breakdown li span small {
+  color: var(--muted);
+}
+
+.report-aging-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.report-aging-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.report-aging-cell span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.report-aging-danger {
+  border-color: #e6b0b0;
+  background: #fbeaea;
+}
+
+.report-aging-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.report-aging-table th,
+.report-aging-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.report-aging-table th {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.report-aging-table .report-num {
+  text-align: right;
+  white-space: nowrap;
+}
+
 .ready-to-pull-range {
   display: flex;
   align-items: flex-end;
