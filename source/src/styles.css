@@ -7579,6 +7579,55 @@ button {
   margin-top: 12px;
 }
 
+/* Section + expense-category toggles reuse the date-range pill look so the
+   whole Reports header reads as one consistent control system. */
+.report-section-toggle,
+.report-category-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.report-section-toggle {
+  margin-top: 12px;
+}
+
+.report-category-toggle {
+  margin: 0 0 12px;
+}
+
+.report-toggle-label {
+  font-weight: 800;
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+.report-section-toggle button,
+.report-category-toggle button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.report-section-toggle button.active,
+.report-category-toggle button.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.report-category-subtotal {
+  margin: 10px 0 0;
+}
+
 .report-custom-range {
   display: flex;
   align-items: flex-end;

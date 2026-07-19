@@ -95,3 +95,10 @@ test("CSV with no sections still carries the header", () => {
   assert.match(csv, /Financial report/);
   assert.doesNotMatch(csv, /Profit & loss/);
 });
+
+test("CSV drops excluded expense categories from the by-category block", () => {
+  const csv = buildReportCsv(summary(), ["expensesByCategory"], ["c1"]);
+  // Header stays; the excluded category row is gone.
+  assert.match(csv, /Expenses by category/);
+  assert.doesNotMatch(csv, /"Travel, gear"/);
+});

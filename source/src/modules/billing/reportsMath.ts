@@ -110,9 +110,11 @@ function csvRow(cells: Array<string | number>): string {
 export function buildReportCsv(
   summary: BillingReportSummary,
   sections: readonly ReportSectionKey[] = ALL_REPORT_SECTIONS,
+  excludedCategoryIds: readonly string[] = [],
 ): string {
   const money = (value: number) => value.toFixed(2);
   const shown = new Set(sections);
+  const excludedCategories = new Set(excludedCategoryIds);
   const lines: string[] = [];
 
   lines.push(csvRow(["Financial report"]));
@@ -146,6 +148,7 @@ export function buildReportCsv(
   if (shown.has("expensesByCategory")) {
     lines.push(csvRow(["Expenses by category", "Count", "Amount"]));
     for (const category of summary.expenses.byCategory) {
+      if (excludedCategories.has(category.categoryId)) continue;
       lines.push(csvRow([category.categoryName, category.count, money(category.total)]));
     }
     lines.push("");

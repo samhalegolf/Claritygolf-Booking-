@@ -45,6 +45,8 @@ export type BillingReportsPanelProps = {
   onRetry: () => void;
   enabledSections: readonly ReportSectionKey[];
   onToggleSection: (key: ReportSectionKey) => void;
+  excludedCategories: readonly string[];
+  onToggleCategory: (categoryId: string) => void;
   formatMoney: (amount: number, currency: string) => string;
 };
 
@@ -63,6 +65,8 @@ export function BillingReportsPanel({
   onRetry,
   enabledSections,
   onToggleSection,
+  excludedCategories,
+  onToggleCategory,
   formatMoney,
 }: BillingReportsPanelProps) {
   const currency = summary?.currency ?? "NZD";
@@ -74,6 +78,16 @@ export function BillingReportsPanel({
   const sectionLabel = (key: ReportSectionKey, fallback: string) =>
     key === "gst" && summary ? `${summary.taxName} summary` : fallback;
   const showStatGrid = shown.has("pl") || shown.has("gst");
+  // Expense-category filter (in the by-category section): excluded ids drop out
+  // of the breakdown list + exports; the headline Expenses total stays the true
+  // total, and a subtotal line makes the filtered view explicit.
+  const excludedCategorySet = new Set(excludedCategories);
+  const shownExpenseCategories = summary
+    ? summary.expenses.byCategory.filter((category) => !excludedCategorySet.has(category.categoryId))
+    : [];
+  const shownExpenseCategoryTotal = shownExpenseCategories.reduce((sum, category) => sum + category.total, 0);
+  const expenseCategoriesFiltered =
+    !!summary && shownExpenseCategories.length !== summary.expenses.byCategory.length;
 
   return (
     <div className="billing-reports">
@@ -128,14 +142,14 @@ export function BillingReportsPanel({
         )}
         {summary && (
           <div className="report-section-toggle" role="group" aria-label="Include sections">
-            <span className="field-help">Include:</span>
+            <span className="report-toggle-label">Include:</span>
             {REPORT_SECTIONS.map((section) => {
               const on = shown.has(section.key);
               return (
                 <button
                   key={section.key}
                   type="button"
-                  className={`reconcile-type-chip${on ? " active" : ""}`}
+                  className={on ? "active" : ""}
                   aria-pressed={on}
                   onClick={() => onToggleSection(section.key)}
                 >
@@ -232,14 +246,44 @@ export function BillingReportsPanel({
                 </div>
               </div>
               {summary.expenses.byCategory.length ? (
-                <ul className="report-breakdown">
-                  {summary.expenses.byCategory.map((category) => (
-                    <li key={category.categoryId}>
-                      <span>{category.categoryName}</span>
-                      <strong>{money(category.total)}</strong>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  {summary.expenses.byCategory.length > 1 && (
+                    <div className="report-category-toggle" role="group" aria-label="Include expense categories">
+                      <span className="report-toggle-label">Categories:</span>
+                      {summary.expenses.byCategory.map((category) => {
+                        const on = !excludedCategorySet.has(category.categoryId);
+                        return (
+                          <button
+                            key={category.categoryId}
+                            type="button"
+                            className={on ? "active" : ""}
+                            aria-pressed={on}
+                            onClick={() => onToggleCategory(category.categoryId)}
+                          >
+                            {category.categoryName}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {shownExpenseCategories.length ? (
+                    <ul className="report-breakdown">
+                      {shownExpenseCategories.map((category) => (
+                        <li key={category.categoryId}>
+                          <span>{category.categoryName}</span>
+                          <strong>{money(category.total)}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="field-help">No categories selected.</p>
+                  )}
+                  {expenseCategoriesFiltered && shownExpenseCategories.length > 0 && (
+                    <p className="field-help report-category-subtotal">
+                      Shown: {money(shownExpenseCategoryTotal)} of {money(summary.expenses.total)} total expenses
+                    </p>
+                  )}
+                </>
               ) : (
                 <p className="field-help">No expenses logged in this range.</p>
               )}

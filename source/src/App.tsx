@@ -4454,6 +4454,8 @@ function App() {
   const [reportLoadState, setReportLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   // Which report sections are included in the live display + CSV/PDF exports.
   const [reportSections, setReportSections] = useState<ReportSectionKey[]>(() => [...ALL_REPORT_SECTIONS]);
+  // Expense category ids excluded from the by-category breakdown (+ exports).
+  const [reportExcludedCategories, setReportExcludedCategories] = useState<string[]>([]);
   const [discountPresets, setDiscountPresets] = useState<BillingDiscount[]>([]);
   const [discountEditor, setDiscountEditor] = useState<{ id: string; name: string; discountType: BillingDiscountType; value: number; couponCode: string }>({
     id: "",
@@ -12830,9 +12832,16 @@ function App() {
     );
   }
 
+  // Toggle an expense category in/out of the by-category breakdown.
+  function handleToggleReportCategory(categoryId: string) {
+    setReportExcludedCategories((current) =>
+      current.includes(categoryId) ? current.filter((id) => id !== categoryId) : [...current, categoryId],
+    );
+  }
+
   function handleExportReportCsv() {
     if (!reportSummary) return;
-    const csv = buildReportCsv(reportSummary, reportSections);
+    const csv = buildReportCsv(reportSummary, reportSections, reportExcludedCategories);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -12845,8 +12854,11 @@ function App() {
   function handleDownloadReportPdf() {
     if (!reportRange.start || !reportRange.end) return;
     const sectionsParam = reportSections.length ? `&sections=${encodeURIComponent(reportSections.join(","))}` : "&sections=none";
+    const excludeParam = reportExcludedCategories.length
+      ? `&excludeCategories=${encodeURIComponent(reportExcludedCategories.join(","))}`
+      : "";
     window.open(
-      `/api/billing/reports/summary/pdf?start=${encodeURIComponent(reportRange.start)}&end=${encodeURIComponent(reportRange.end)}${sectionsParam}`,
+      `/api/billing/reports/summary/pdf?start=${encodeURIComponent(reportRange.start)}&end=${encodeURIComponent(reportRange.end)}${sectionsParam}${excludeParam}`,
       "_blank",
       "noopener",
     );
@@ -21437,6 +21449,8 @@ function App() {
                 onRetry={() => void fetchReportSummary(reportRange.start, reportRange.end)}
                 enabledSections={reportSections}
                 onToggleSection={handleToggleReportSection}
+                excludedCategories={reportExcludedCategories}
+                onToggleCategory={handleToggleReportCategory}
                 formatMoney={formatMoney}
               />
             )}

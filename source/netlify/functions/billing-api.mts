@@ -1895,10 +1895,17 @@ function parseReportSections(url: URL): Set<ReportSectionKey> {
   return new Set(raw.split(",").map((key) => key.trim()).filter((key) => valid.has(key)) as ReportSectionKey[]);
 }
 
+function parseExcludedCategories(url: URL): Set<string> {
+  const raw = url.searchParams.get("excludeCategories");
+  if (!raw) return new Set();
+  return new Set(raw.split(",").map((id) => id.trim()).filter(Boolean));
+}
+
 async function renderReportPdf(
   summary: ReportSummary,
   branding: InvoiceBranding,
   sections: Set<ReportSectionKey> = new Set(ALL_REPORT_SECTIONS),
+  excludedCategories: Set<string> = new Set(),
 ): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -2004,9 +2011,14 @@ async function renderReportPdf(
 
   // Expenses by category.
   if (sections.has("expensesByCategory") && summary.expenses.byCategory.length) {
-    heading("Expenses by category");
-    for (const category of summary.expenses.byCategory) {
-      row(`${category.categoryName} (${category.count})`, money(category.total));
+    const shownCategories = summary.expenses.byCategory.filter(
+      (category) => !excludedCategories.has(category.categoryId),
+    );
+    if (shownCategories.length) {
+      heading("Expenses by category");
+      for (const category of shownCategories) {
+        row(`${category.categoryName} (${category.count})`, money(category.total));
+      }
     }
   }
 
@@ -2042,7 +2054,7 @@ async function renderReportPdf(
 async function reportPdfResponse(accountId: string, url: URL) {
   const summary = await buildReportSummary(accountId, url);
   const branding = await resolveInvoiceBranding();
-  const pdf = await renderReportPdf(summary, branding, parseReportSections(url));
+  const pdf = await renderReportPdf(summary, branding, parseReportSections(url), parseExcludedCategories(url));
   return new Response(Buffer.from(pdf), {
     status: 200,
     headers: {
