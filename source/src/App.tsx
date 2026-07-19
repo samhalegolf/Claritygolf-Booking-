@@ -4477,7 +4477,8 @@ function App() {
   const [bankCandidateBusy, setBankCandidateBusy] = useState<string | null>(null);
   // Classification filter (hidden category labels), tick-box selection, and
   // busy flags for the bulk approve/dismiss and the older-period backfill.
-  const [bankHiddenCategories, setBankHiddenCategories] = useState<Set<string>>(() => new Set());
+  // Active category filter: "" = show all; otherwise isolate one classification.
+  const [bankCategoryFilter, setBankCategoryFilter] = useState("");
   const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
   const [bankBulkBusy, setBankBulkBusy] = useState(false);
   const [bankBackfillBusy, setBankBackfillBusy] = useState<number | null>(null);
@@ -12894,9 +12895,9 @@ function App() {
   }
 
   // Expense classification filter: the distinct suggested-category labels present
-  // in the bank candidates (most-common first) and the candidates left after
-  // hiding toggled-off classifications. Tick-box selection is scoped to what's
-  // visible, so a hidden row can never be bulk-actioned by mistake.
+  // in the bank candidates (most-common first) drive the Filter dropdown; picking
+  // one isolates that classification. Tick-box selection is scoped to what's
+  // visible, so a filtered-out row can never be bulk-actioned by mistake.
   const bankCategoryCounts = bankCandidates.reduce<Record<string, number>>((counts, candidate) => {
     const label = expenseCategoryLabel(candidate.suggestedCategory);
     counts[label] = (counts[label] || 0) + 1;
@@ -12906,21 +12907,13 @@ function App() {
     (a, b) => bankCategoryCounts[b] - bankCategoryCounts[a] || a.localeCompare(b),
   );
   const visibleBankCandidates = bankCandidates.filter(
-    (candidate) => !bankHiddenCategories.has(expenseCategoryLabel(candidate.suggestedCategory)),
+    (candidate) => !bankCategoryFilter || expenseCategoryLabel(candidate.suggestedCategory) === bankCategoryFilter,
   );
   const selectedVisibleBankCount = visibleBankCandidates.filter((candidate) =>
     selectedBankIds.has(candidate.id),
   ).length;
   const allVisibleBankSelected =
     visibleBankCandidates.length > 0 && selectedVisibleBankCount === visibleBankCandidates.length;
-  function toggleBankCategory(label: string) {
-    setBankHiddenCategories((current) => {
-      const next = new Set(current);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
-      return next;
-    });
-  }
   function toggleSelectAllVisibleBank() {
     setSelectedBankIds((current) => {
       const next = new Set(current);
@@ -20970,32 +20963,36 @@ function App() {
                     </p>
                   ) : bankCandidates.length ? (
                     <>
-                      {bankCategoryOptions.length > 1 && (
-                        <div className="reconcile-type-filter" role="group" aria-label="Filter by classification">
-                          <span className="field-help">Show:</span>
-                          {bankCategoryOptions.map((label) => {
-                            const shown = !bankHiddenCategories.has(label);
-                            return (
-                              <button
-                                key={label}
-                                type="button"
-                                className={`reconcile-type-chip${shown ? " active" : ""}`}
-                                aria-pressed={shown}
-                                onClick={() => toggleBankCategory(label)}
-                              >
-                                {label} ({bankCategoryCounts[label]})
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {selectedVisibleBankCount > 0 && (
+                      <div className="bank-toolbar">
+                        {bankCategoryOptions.length > 1 && (
+                          <label className="bank-filter">
+                            <span className="field-help">Filter</span>
+                            <select
+                              value={bankCategoryFilter}
+                              onChange={(event) => {
+                                setBankCategoryFilter(event.target.value);
+                                setSelectedBankIds(new Set());
+                              }}
+                            >
+                              <option value="">All categories ({bankCandidates.length})</option>
+                              {bankCategoryOptions.map((label) => (
+                                <option key={label} value={label}>
+                                  {label} ({bankCategoryCounts[label]})
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                         <div className="bank-bulk-actions" role="group" aria-label="Bulk actions">
-                          <span className="field-help">{selectedVisibleBankCount} selected</span>
+                          <span className="field-help">
+                            {selectedVisibleBankCount
+                              ? `${selectedVisibleBankCount} selected`
+                              : "Tick rows to select"}
+                          </span>
                           <button
-                            className="outline-button"
+                            className="primary-button"
                             type="button"
-                            disabled={bankBulkBusy}
+                            disabled={bankBulkBusy || !selectedVisibleBankCount}
                             onClick={() => void actionBankSelected("approve")}
                           >
                             {bankBulkBusy ? "Working…" : "Approve selected"}
@@ -21003,13 +21000,13 @@ function App() {
                           <button
                             className="outline-button"
                             type="button"
-                            disabled={bankBulkBusy}
+                            disabled={bankBulkBusy || !selectedVisibleBankCount}
                             onClick={() => void actionBankSelected("ignore")}
                           >
                             {bankBulkBusy ? "Working…" : "Dismiss selected"}
                           </button>
                         </div>
-                      )}
+                      </div>
                       {visibleBankCandidates.length ? (
                         <table className="recent-invoices-table">
                           <thead>
@@ -21018,6 +21015,7 @@ function App() {
                                 <input
                                   type="checkbox"
                                   aria-label="Select all shown"
+                                  title="Select all"
                                   checked={allVisibleBankSelected}
                                   onChange={() => toggleSelectAllVisibleBank()}
                                 />
@@ -21072,7 +21070,12 @@ function App() {
                           </tbody>
                         </table>
                       ) : (
-                        <p>All transactions are hidden by the classification filter above.</p>
+                        <p>
+                          No transactions in this category.{" "}
+                          <button className="outline-button" type="button" onClick={() => setBankCategoryFilter("")}>
+                            Show all
+                          </button>
+                        </p>
                       )}
                       {bankCandidates.length >= bankListLimit && bankListLimit < bankListMax ? (
                         <div className="bank-loadmore-row">

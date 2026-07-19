@@ -665,10 +665,9 @@ button {
   text-decoration: line-through;
 }
 
-/* Bank expense review: older-period backfill presets and the bulk action bar
-   that appears once transactions are ticked. */
+/* Bank expense review: older-period backfill presets, the filter+bulk toolbar,
+   and the load-older row. */
 .bank-backfill-row,
-.bank-bulk-actions,
 .bank-loadmore-row {
   display: flex;
   flex-wrap: wrap;
@@ -686,11 +685,40 @@ button {
   margin: 12px 0 0;
 }
 
-.bank-bulk-actions {
+/* Filter dropdown + bulk-action buttons on one bar above the review table. */
+.bank-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
   padding: 8px 12px;
   border: 1px solid #d4d8cf;
   border-radius: 10px;
   background: #f5f7f2;
+}
+
+.bank-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bank-filter select {
+  padding: 6px 10px;
+  border: 1px solid #d4d8cf;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.bank-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Tight checkbox column in the review table. */
