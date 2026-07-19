@@ -102,3 +102,10 @@ test("CSV drops excluded expense categories from the by-category block", () => {
   assert.match(csv, /Expenses by category/);
   assert.doesNotMatch(csv, /"Travel, gear"/);
 });
+
+test("CSV annotates the filtered categories when the summary names them", () => {
+  const filtered = summary();
+  filtered.expenses.excludedCategoryNames = ["Personal", "Drawings"];
+  const csv = buildReportCsv(filtered);
+  assert.match(csv, /Filtered,Expenses exclude: Personal; Drawings/);
+});

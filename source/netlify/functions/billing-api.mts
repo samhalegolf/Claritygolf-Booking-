@@ -1195,8 +1195,16 @@ async function buildReportSummary(accountId: string, url: URL) {
     }
   }
 
-  // Expenses (total + by category).
-  const expenseTotal = expenseRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+  // Expenses. `excludeCategories` (whole-report filter) drops the excluded
+  // category rows from every expense-derived figure — total, GST-on-expenses,
+  // net profit, and the monthly series. byCategory keeps the FULL category list
+  // (with each row's own total) so the client can still list every category as a
+  // toggle; the display/export just hide the excluded rows.
+  const excludedCategories = parseExcludedCategories(url);
+  const includedExpenseRows = excludedCategories.size
+    ? expenseRows.filter((row) => !excludedCategories.has(row.category_id || "uncategorised"))
+    : expenseRows;
+  const expenseTotal = includedExpenseRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
   const categoryMap = new Map<string, { categoryId: string; categoryName: string; total: number; count: number }>();
   for (const row of expenseRows) {
     const id = row.category_id || "uncategorised";
@@ -1213,6 +1221,11 @@ async function buildReportSummary(accountId: string, url: URL) {
   const byCategory = [...categoryMap.values()]
     .map((bucket) => ({ ...bucket, total: round2(bucket.total) }))
     .sort((a, b) => b.total - a.total);
+  // Names of the excluded categories present in this range, for the "Filtered —
+  // excludes: …" annotation on the report and its exports.
+  const excludedCategoryNames = byCategory
+    .filter((category) => excludedCategories.has(category.categoryId))
+    .map((category) => category.categoryName);
 
   // GST: collected on income invoices vs the GST content of GST-inclusive
   // expenses (amount * rate/(100+rate)). Expenses aren't tagged taxable/exempt,
@@ -1226,7 +1239,7 @@ async function buildReportSummary(accountId: string, url: URL) {
     const income = invoiceRows
       .filter((row) => row.issue_date >= month.start && row.issue_date <= month.end)
       .reduce((sum, row) => sum + (Number(row.total) || 0), 0);
-    const expenses = expenseRows
+    const expenses = includedExpenseRows
       .filter((row) => row.expense_date >= month.start && row.expense_date <= month.end)
       .reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
     return { label: month.label, monthStart: month.start, income: round2(income), expenses: round2(expenses), net: round2(income - expenses) };
@@ -1296,7 +1309,13 @@ async function buildReportSummary(accountId: string, url: URL) {
         overdue: round2(incomeByStatus.overdue),
       },
     },
-    expenses: { total: round2(expenseTotal), count: expenseRows.length, byCategory },
+    expenses: {
+      total: round2(expenseTotal),
+      count: includedExpenseRows.length,
+      byCategory,
+      excludedCategoryIds: [...excludedCategories],
+      excludedCategoryNames,
+    },
     netProfit: round2(incomeTotal - expenseTotal),
     gst: { collected: gstCollected, onExpenses: gstOnExpenses, net: round2(gstCollected - gstOnExpenses) },
     months,
@@ -1983,6 +2002,18 @@ async function renderReportPdf(
   y -= 10;
   page.drawLine({ start: { x: margin, y }, end: { x: contentRight, y }, thickness: 1.6, color: brand });
   y -= 20;
+
+  // Filtered-report annotation, so an exported PDF is never mistaken for the
+  // full picture when expense categories have been excluded.
+  if (summary.expenses.excludedCategoryNames.length) {
+    ensureSpace(20);
+    text(`Filtered — expenses exclude: ${summary.expenses.excludedCategoryNames.join(", ")}`, margin, y, {
+      size: 9,
+      bold: true,
+      color: rgb(0.72, 0.13, 0.13),
+    });
+    y -= 18;
+  }
 
   // Profit & loss + income by status.
   if (sections.has("pl")) {

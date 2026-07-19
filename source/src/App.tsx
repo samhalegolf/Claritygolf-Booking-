@@ -12772,12 +12772,13 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEmbedMode, authStatus, billingWorkspaceEnabled, expenseRangeFrom, expenseRangeTo]);
 
-  async function fetchReportSummary(start: string, end: string) {
+  async function fetchReportSummary(start: string, end: string, excluded: readonly string[] = reportExcludedCategories) {
     if (!start || !end) return;
     setReportLoadState("loading");
     try {
+      const excludeParam = excluded.length ? `&excludeCategories=${encodeURIComponent(excluded.join(","))}` : "";
       const response = await fetch(
-        `/api/billing/reports/summary?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+        `/api/billing/reports/summary?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}${excludeParam}`,
         { credentials: "same-origin", cache: "no-store" },
       );
       if (response.status === 401) {
@@ -12798,9 +12799,23 @@ function App() {
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
     if (billingSection !== "reports") return;
-    void fetchReportSummary(reportRange.start, reportRange.end);
+    // Debounced so toggling several categories (each a whole-report refetch)
+    // coalesces into one request instead of firing per click.
+    const timer = setTimeout(
+      () => void fetchReportSummary(reportRange.start, reportRange.end, reportExcludedCategories),
+      250,
+    );
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, billingSection, reportRange.start, reportRange.end]);
+  }, [
+    isEmbedMode,
+    authStatus,
+    billingWorkspaceEnabled,
+    billingSection,
+    reportRange.start,
+    reportRange.end,
+    reportExcludedCategories,
+  ]);
 
   // Preset click resolves to a concrete range immediately; "custom" waits for
   // the coach to pick dates and press Apply (handleApplyReportCustomRange).
@@ -21451,6 +21466,7 @@ function App() {
                 onToggleSection={handleToggleReportSection}
                 excludedCategories={reportExcludedCategories}
                 onToggleCategory={handleToggleReportCategory}
+                onClearCategories={() => setReportExcludedCategories([])}
                 formatMoney={formatMoney}
               />
             )}

@@ -168,6 +168,10 @@ export type BillingReportSummary = {
     total: number;
     count: number;
     byCategory: Array<{ categoryId: string; categoryName: string; total: number; count: number }>;
+    // Whole-report category filter: totals above already exclude these; the
+    // names drive the "Filtered — excludes: …" banner + export annotation.
+    excludedCategoryIds?: string[];
+    excludedCategoryNames?: string[];
   };
   netProfit: number;
   gst: { collected: number; onExpenses: number; net: number };

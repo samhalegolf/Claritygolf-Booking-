@@ -121,6 +121,11 @@ export function buildReportCsv(
   lines.push(csvRow(["Range", `${summary.rangeStart} to ${summary.rangeEnd}`]));
   lines.push(csvRow(["Currency", summary.currency]));
   lines.push(csvRow(["Generated", summary.generatedAt]));
+  // Whole-report filter annotation so an exported CSV is never mistaken for the
+  // full picture. Totals here already exclude these categories.
+  if (summary.expenses.excludedCategoryNames && summary.expenses.excludedCategoryNames.length) {
+    lines.push(csvRow(["Filtered", `Expenses exclude: ${summary.expenses.excludedCategoryNames.join("; ")}`]));
+  }
   lines.push("");
 
   if (shown.has("pl")) {

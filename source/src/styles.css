@@ -7628,6 +7628,28 @@ button {
   margin: 10px 0 0;
 }
 
+/* Prominent notice that the report's expense figures are filtered, so an
+   on-screen or exported P&L is never mistaken for the full picture. */
+.report-filter-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid #e6b800;
+  border-left: 4px solid #e6b800;
+  border-radius: 10px;
+  background: #fff9e6;
+  color: #5c4a00;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.report-filter-banner .outline-button {
+  flex-shrink: 0;
+}
+
 .report-custom-range {
   display: flex;
   align-items: flex-end;

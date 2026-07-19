@@ -47,6 +47,7 @@ export type BillingReportsPanelProps = {
   onToggleSection: (key: ReportSectionKey) => void;
   excludedCategories: readonly string[];
   onToggleCategory: (categoryId: string) => void;
+  onClearCategories: () => void;
   formatMoney: (amount: number, currency: string) => string;
 };
 
@@ -67,6 +68,7 @@ export function BillingReportsPanel({
   onToggleSection,
   excludedCategories,
   onToggleCategory,
+  onClearCategories,
   formatMoney,
 }: BillingReportsPanelProps) {
   const currency = summary?.currency ?? "NZD";
@@ -85,9 +87,6 @@ export function BillingReportsPanel({
   const shownExpenseCategories = summary
     ? summary.expenses.byCategory.filter((category) => !excludedCategorySet.has(category.categoryId))
     : [];
-  const shownExpenseCategoryTotal = shownExpenseCategories.reduce((sum, category) => sum + category.total, 0);
-  const expenseCategoriesFiltered =
-    !!summary && shownExpenseCategories.length !== summary.expenses.byCategory.length;
 
   return (
     <div className="billing-reports">
@@ -174,6 +173,17 @@ export function BillingReportsPanel({
         </article>
       ) : summary ? (
         <>
+          {summary.expenses.excludedCategoryNames && summary.expenses.excludedCategoryNames.length > 0 && (
+            <div className="report-filter-banner" role="status">
+              <span>
+                <strong>Filtered report</strong> — expense figures (total, net profit, {summary.taxName}, chart) exclude:{" "}
+                {summary.expenses.excludedCategoryNames.join(", ")}. Income, top customers and A/R are unaffected.
+              </span>
+              <button className="outline-button" type="button" onClick={onClearCategories}>
+                Show all categories
+              </button>
+            </div>
+          )}
           {showStatGrid && (
             <div className="report-stat-grid">
               {shown.has("pl") && (
@@ -277,11 +287,6 @@ export function BillingReportsPanel({
                     </ul>
                   ) : (
                     <p className="field-help">No categories selected.</p>
-                  )}
-                  {expenseCategoriesFiltered && shownExpenseCategories.length > 0 && (
-                    <p className="field-help report-category-subtotal">
-                      Shown: {money(shownExpenseCategoryTotal)} of {money(summary.expenses.total)} total expenses
-                    </p>
                   )}
                 </>
               ) : (
