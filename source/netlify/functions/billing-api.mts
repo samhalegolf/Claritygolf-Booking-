@@ -1882,7 +1882,24 @@ async function invoicePdfResponse(accountId: string, id: string) {
 // Accountant-facing PDF of the financial summary. Uses the same branding +
 // pdf-lib helpers as the invoice PDF so it looks like it came from the same
 // business, but lays out summary tables instead of line items.
-async function renderReportPdf(summary: ReportSummary, branding: InvoiceBranding): Promise<Uint8Array> {
+// Section keys shared with the frontend (reportsMath ReportSectionKey). The
+// query passes the ones to include; absent = all, "none" = empty.
+const ALL_REPORT_SECTIONS = ["pl", "gst", "chart", "expensesByCategory", "topCustomers", "aging"] as const;
+type ReportSectionKey = (typeof ALL_REPORT_SECTIONS)[number];
+
+function parseReportSections(url: URL): Set<ReportSectionKey> {
+  const raw = url.searchParams.get("sections");
+  if (raw === null) return new Set(ALL_REPORT_SECTIONS);
+  if (raw === "none" || raw.trim() === "") return new Set();
+  const valid = new Set<string>(ALL_REPORT_SECTIONS);
+  return new Set(raw.split(",").map((key) => key.trim()).filter((key) => valid.has(key)) as ReportSectionKey[]);
+}
+
+async function renderReportPdf(
+  summary: ReportSummary,
+  branding: InvoiceBranding,
+  sections: Set<ReportSectionKey> = new Set(ALL_REPORT_SECTIONS),
+): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -1960,30 +1977,33 @@ async function renderReportPdf(summary: ReportSummary, branding: InvoiceBranding
   page.drawLine({ start: { x: margin, y }, end: { x: contentRight, y }, thickness: 1.6, color: brand });
   y -= 20;
 
-  // Profit & loss.
-  heading("Profit & Loss");
-  row("Income", money(summary.income.total));
-  row("Expenses", `- ${money(summary.expenses.total)}`);
-  hrule(y + 6);
-  row("Net profit", money(summary.netProfit), { bold: true, color: summary.netProfit < 0 ? rgb(0.72, 0.13, 0.13) : brand });
-  y -= 6;
+  // Profit & loss + income by status.
+  if (sections.has("pl")) {
+    heading("Profit & Loss");
+    row("Income", money(summary.income.total));
+    row("Expenses", `- ${money(summary.expenses.total)}`);
+    hrule(y + 6);
+    row("Net profit", money(summary.netProfit), { bold: true, color: summary.netProfit < 0 ? rgb(0.72, 0.13, 0.13) : brand });
+    y -= 6;
+
+    heading("Income by status");
+    row("Paid", money(summary.income.byStatus.paid));
+    row("Sent (awaiting payment)", money(summary.income.byStatus.sent));
+    row("Overdue", money(summary.income.byStatus.overdue));
+  }
 
   // GST.
-  heading(`${summary.taxName} summary (${summary.taxRate}%)`);
-  row(`${summary.taxName} collected on income`, money(summary.gst.collected));
-  row(`${summary.taxName} on expenses (est.)`, `- ${money(summary.gst.onExpenses)}`);
-  hrule(y + 6);
-  row(`Net ${summary.taxName} ${summary.gst.net >= 0 ? "payable" : "refund"}`, money(Math.abs(summary.gst.net)), { bold: true });
-  y -= 6;
-
-  // Income by status.
-  heading("Income by status");
-  row("Paid", money(summary.income.byStatus.paid));
-  row("Sent (awaiting payment)", money(summary.income.byStatus.sent));
-  row("Overdue", money(summary.income.byStatus.overdue));
+  if (sections.has("gst")) {
+    heading(`${summary.taxName} summary (${summary.taxRate}%)`);
+    row(`${summary.taxName} collected on income`, money(summary.gst.collected));
+    row(`${summary.taxName} on expenses (est.)`, `- ${money(summary.gst.onExpenses)}`);
+    hrule(y + 6);
+    row(`Net ${summary.taxName} ${summary.gst.net >= 0 ? "payable" : "refund"}`, money(Math.abs(summary.gst.net)), { bold: true });
+    y -= 6;
+  }
 
   // Expenses by category.
-  if (summary.expenses.byCategory.length) {
+  if (sections.has("expensesByCategory") && summary.expenses.byCategory.length) {
     heading("Expenses by category");
     for (const category of summary.expenses.byCategory) {
       row(`${category.categoryName} (${category.count})`, money(category.total));
@@ -1991,7 +2011,7 @@ async function renderReportPdf(summary: ReportSummary, branding: InvoiceBranding
   }
 
   // Top customers.
-  if (summary.topCustomers.length) {
+  if (sections.has("topCustomers") && summary.topCustomers.length) {
     heading("Top customers");
     for (const customer of summary.topCustomers) {
       row(`${customer.customerName} (${customer.invoiceCount})`, money(customer.total));
@@ -1999,14 +2019,16 @@ async function renderReportPdf(summary: ReportSummary, branding: InvoiceBranding
   }
 
   // A/R aging.
-  heading(`Accounts receivable (as of ${summary.aging.asOf})`);
-  row("Current / not yet due", money(summary.aging.current));
-  row("1-30 days overdue", money(summary.aging.d1_30));
-  row("31-60 days overdue", money(summary.aging.d31_60));
-  row("61-90 days overdue", money(summary.aging.d61_90));
-  row("90+ days overdue", money(summary.aging.d90plus));
-  hrule(y + 6);
-  row("Total outstanding", money(summary.aging.total), { bold: true });
+  if (sections.has("aging")) {
+    heading(`Accounts receivable (as of ${summary.aging.asOf})`);
+    row("Current / not yet due", money(summary.aging.current));
+    row("1-30 days overdue", money(summary.aging.d1_30));
+    row("31-60 days overdue", money(summary.aging.d31_60));
+    row("61-90 days overdue", money(summary.aging.d61_90));
+    row("90+ days overdue", money(summary.aging.d90plus));
+    hrule(y + 6);
+    row("Total outstanding", money(summary.aging.total), { bold: true });
+  }
 
   if (branding.footerText) {
     ensureSpace(24);
@@ -2020,7 +2042,7 @@ async function renderReportPdf(summary: ReportSummary, branding: InvoiceBranding
 async function reportPdfResponse(accountId: string, url: URL) {
   const summary = await buildReportSummary(accountId, url);
   const branding = await resolveInvoiceBranding();
-  const pdf = await renderReportPdf(summary, branding);
+  const pdf = await renderReportPdf(summary, branding, parseReportSections(url));
   return new Response(Buffer.from(pdf), {
     status: 200,
     headers: {

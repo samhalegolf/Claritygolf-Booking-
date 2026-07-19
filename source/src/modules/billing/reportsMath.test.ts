@@ -78,3 +78,20 @@ test("CSV includes every section and quotes cells with commas", () => {
   assert.match(csv, /"Travel, gear",2,230\.00/);
   assert.match(csv, /SHG-0401,Golf HQ,2026-06-20,28,100\.00/);
 });
+
+test("CSV only emits the selected sections", () => {
+  const csv = buildReportCsv(summary(), ["pl", "aging"]);
+  // Selected sections present...
+  assert.match(csv, /Profit & loss/);
+  assert.match(csv, /Total outstanding,100\.00/);
+  // ...unselected ones omitted entirely.
+  assert.doesNotMatch(csv, /GST summary/);
+  assert.doesNotMatch(csv, /Top customers/);
+  assert.doesNotMatch(csv, /Expenses by category/);
+});
+
+test("CSV with no sections still carries the header", () => {
+  const csv = buildReportCsv(summary(), []);
+  assert.match(csv, /Financial report/);
+  assert.doesNotMatch(csv, /Profit & loss/);
+});

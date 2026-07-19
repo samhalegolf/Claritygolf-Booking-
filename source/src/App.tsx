@@ -140,7 +140,13 @@ import {
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
-import { presetRange, buildReportCsv, type ReportRangePreset } from "./modules/billing/reportsMath";
+import {
+  presetRange,
+  buildReportCsv,
+  ALL_REPORT_SECTIONS,
+  type ReportRangePreset,
+  type ReportSectionKey,
+} from "./modules/billing/reportsMath";
 import {
   parseExpenseCsv,
   inferExpenseCsvField,
@@ -4446,6 +4452,8 @@ function App() {
   const [reportCustomEnd, setReportCustomEnd] = useState("");
   const [reportSummary, setReportSummary] = useState<BillingReportSummary | null>(null);
   const [reportLoadState, setReportLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  // Which report sections are included in the live display + CSV/PDF exports.
+  const [reportSections, setReportSections] = useState<ReportSectionKey[]>(() => [...ALL_REPORT_SECTIONS]);
   const [discountPresets, setDiscountPresets] = useState<BillingDiscount[]>([]);
   const [discountEditor, setDiscountEditor] = useState<{ id: string; name: string; discountType: BillingDiscountType; value: number; couponCode: string }>({
     id: "",
@@ -12812,9 +12820,19 @@ function App() {
     setReportRange({ start, end });
   }
 
+  // Toggle a section in/out of the report. Preserves the canonical section
+  // order so the display and exports stay consistent regardless of click order.
+  function handleToggleReportSection(key: ReportSectionKey) {
+    setReportSections((current) =>
+      current.includes(key)
+        ? current.filter((section) => section !== key)
+        : ALL_REPORT_SECTIONS.filter((section) => section === key || current.includes(section)),
+    );
+  }
+
   function handleExportReportCsv() {
     if (!reportSummary) return;
-    const csv = buildReportCsv(reportSummary);
+    const csv = buildReportCsv(reportSummary, reportSections);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -12826,8 +12844,9 @@ function App() {
 
   function handleDownloadReportPdf() {
     if (!reportRange.start || !reportRange.end) return;
+    const sectionsParam = reportSections.length ? `&sections=${encodeURIComponent(reportSections.join(","))}` : "&sections=none";
     window.open(
-      `/api/billing/reports/summary/pdf?start=${encodeURIComponent(reportRange.start)}&end=${encodeURIComponent(reportRange.end)}`,
+      `/api/billing/reports/summary/pdf?start=${encodeURIComponent(reportRange.start)}&end=${encodeURIComponent(reportRange.end)}${sectionsParam}`,
       "_blank",
       "noopener",
     );
@@ -21416,6 +21435,8 @@ function App() {
                 onExportCsv={handleExportReportCsv}
                 onDownloadPdf={handleDownloadReportPdf}
                 onRetry={() => void fetchReportSummary(reportRange.start, reportRange.end)}
+                enabledSections={reportSections}
+                onToggleSection={handleToggleReportSection}
                 formatMoney={formatMoney}
               />
             )}

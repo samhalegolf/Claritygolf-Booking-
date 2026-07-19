@@ -6,7 +6,12 @@
 
 import { Download, FileText } from "lucide-react";
 import type { BillingReportSummary } from "./types";
-import { REPORT_PRESET_LABELS, type ReportRangePreset } from "./reportsMath";
+import {
+  REPORT_PRESET_LABELS,
+  REPORT_SECTIONS,
+  type ReportRangePreset,
+  type ReportSectionKey,
+} from "./reportsMath";
 
 const PRESET_ORDER: ReportRangePreset[] = [
   "this-month",
@@ -38,6 +43,8 @@ export type BillingReportsPanelProps = {
   onExportCsv: () => void;
   onDownloadPdf: () => void;
   onRetry: () => void;
+  enabledSections: readonly ReportSectionKey[];
+  onToggleSection: (key: ReportSectionKey) => void;
   formatMoney: (amount: number, currency: string) => string;
 };
 
@@ -54,6 +61,8 @@ export function BillingReportsPanel({
   onExportCsv,
   onDownloadPdf,
   onRetry,
+  enabledSections,
+  onToggleSection,
   formatMoney,
 }: BillingReportsPanelProps) {
   const currency = summary?.currency ?? "NZD";
@@ -61,6 +70,10 @@ export function BillingReportsPanel({
   const chartMax = Math.max(1, ...(summary?.months.flatMap((month) => [month.income, month.expenses]) ?? [0]));
   const hasActivity =
     !!summary && (summary.income.total !== 0 || summary.expenses.total !== 0 || summary.aging.total !== 0);
+  const shown = new Set(enabledSections);
+  const sectionLabel = (key: ReportSectionKey, fallback: string) =>
+    key === "gst" && summary ? `${summary.taxName} summary` : fallback;
+  const showStatGrid = shown.has("pl") || shown.has("gst");
 
   return (
     <div className="billing-reports">
@@ -113,6 +126,25 @@ export function BillingReportsPanel({
             {summary.rangeStart} to {summary.rangeEnd}
           </p>
         )}
+        {summary && (
+          <div className="report-section-toggle" role="group" aria-label="Include sections">
+            <span className="field-help">Include:</span>
+            {REPORT_SECTIONS.map((section) => {
+              const on = shown.has(section.key);
+              return (
+                <button
+                  key={section.key}
+                  type="button"
+                  className={`reconcile-type-chip${on ? " active" : ""}`}
+                  aria-pressed={on}
+                  onClick={() => onToggleSection(section.key)}
+                >
+                  {sectionLabel(section.key, section.label)}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </article>
 
       {loadState === "error" ? (
@@ -128,29 +160,38 @@ export function BillingReportsPanel({
         </article>
       ) : summary ? (
         <>
-          <div className="report-stat-grid">
-            <article className="data-card report-stat">
-              <span>Income</span>
-              <strong>{money(summary.income.total)}</strong>
-              <small>{summary.income.invoiceCount} invoice{summary.income.invoiceCount === 1 ? "" : "s"}</small>
-            </article>
-            <article className="data-card report-stat">
-              <span>Expenses</span>
-              <strong>{money(summary.expenses.total)}</strong>
-              <small>{summary.expenses.count} logged</small>
-            </article>
-            <article className="data-card report-stat">
-              <span>Net profit</span>
-              <strong className={summary.netProfit < 0 ? "report-negative" : "report-positive"}>{money(summary.netProfit)}</strong>
-              <small>income minus expenses</small>
-            </article>
-            <article className="data-card report-stat">
-              <span>Net {summary.taxName}</span>
-              <strong>{money(Math.abs(summary.gst.net))}</strong>
-              <small>{summary.gst.net >= 0 ? "payable" : "refund"} · {summary.taxRate}%</small>
-            </article>
-          </div>
+          {showStatGrid && (
+            <div className="report-stat-grid">
+              {shown.has("pl") && (
+                <>
+                  <article className="data-card report-stat">
+                    <span>Income</span>
+                    <strong>{money(summary.income.total)}</strong>
+                    <small>{summary.income.invoiceCount} invoice{summary.income.invoiceCount === 1 ? "" : "s"}</small>
+                  </article>
+                  <article className="data-card report-stat">
+                    <span>Expenses</span>
+                    <strong>{money(summary.expenses.total)}</strong>
+                    <small>{summary.expenses.count} logged</small>
+                  </article>
+                  <article className="data-card report-stat">
+                    <span>Net profit</span>
+                    <strong className={summary.netProfit < 0 ? "report-negative" : "report-positive"}>{money(summary.netProfit)}</strong>
+                    <small>income minus expenses</small>
+                  </article>
+                </>
+              )}
+              {shown.has("gst") && (
+                <article className="data-card report-stat">
+                  <span>Net {summary.taxName}</span>
+                  <strong>{money(Math.abs(summary.gst.net))}</strong>
+                  <small>{summary.gst.net >= 0 ? "payable" : "refund"} · {summary.taxRate}%</small>
+                </article>
+              )}
+            </div>
+          )}
 
+          {shown.has("chart") && (
           <article className="data-card">
             <div className="data-card-header">
               <div>
@@ -178,8 +219,11 @@ export function BillingReportsPanel({
               <p className="field-help">No activity in this range.</p>
             )}
           </article>
+          )}
 
+          {(shown.has("expensesByCategory") || shown.has("topCustomers")) && (
           <div className="billing-dashboard-grid">
+            {shown.has("expensesByCategory") && (
             <article className="data-card">
               <div className="data-card-header">
                 <div>
@@ -200,7 +244,9 @@ export function BillingReportsPanel({
                 <p className="field-help">No expenses logged in this range.</p>
               )}
             </article>
+            )}
 
+            {shown.has("topCustomers") && (
             <article className="data-card">
               <div className="data-card-header">
                 <div>
@@ -224,8 +270,11 @@ export function BillingReportsPanel({
                 <p className="field-help">No income in this range.</p>
               )}
             </article>
+            )}
           </div>
+          )}
 
+          {shown.has("aging") && (
           <article className="data-card">
             <div className="data-card-header">
               <div>
@@ -267,8 +316,12 @@ export function BillingReportsPanel({
               </table>
             )}
           </article>
+          )}
 
-          {!hasActivity && (
+          {enabledSections.length === 0 && (
+            <p className="field-help">No sections selected. Use the “Include” buttons above to add sections to the report.</p>
+          )}
+          {!hasActivity && enabledSections.length > 0 && (
             <p className="field-help">No invoices or expenses fall in this range yet. Pick a wider period or issue an invoice to see figures here.</p>
           )}
         </>
