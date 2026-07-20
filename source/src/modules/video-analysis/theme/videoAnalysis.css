@@ -14,6 +14,13 @@
 .video-analysis-shell {
   max-width: 1200px;
   margin: 0 auto;
+  /* Ceiling for the video box so it always fits the browser window.
+     The subtraction leaves room for the page header, toolbar and timeline. */
+  --va-video-max-height: max(240px, calc(100svh - 300px));
+}
+
+.comparison-layout.is-compare {
+  --va-video-max-height: max(220px, calc(100svh - 340px));
 }
 
 .video-analysis-shell h1 {
@@ -315,7 +322,7 @@
 }
 
 .video-intake-panel .comparison-video-panel {
-  min-height: 520px;
+  min-height: min(520px, var(--va-video-max-height, 520px));
 }
 
 .video-intake-actions {
@@ -397,13 +404,15 @@
   border-radius: 16px;
   overflow: hidden;
   position: relative;
-  min-height: 420px;
+  /* Small floor only, so the shell hugs the video instead of padding it with
+     black once the clip's real height is known. */
+  min-height: 180px;
 }
 
 .video-upload-card {
   appearance: none;
   width: 100%;
-  min-height: 420px;
+  min-height: min(420px, var(--va-video-max-height, 420px));
   border: 1px dashed rgba(148, 169, 222, 0.36);
   border-radius: 16px;
   background: #05070d;
@@ -420,7 +429,7 @@
 }
 
 .video-upload-card.is-primary {
-  min-height: 460px;
+  min-height: min(460px, var(--va-video-max-height, 460px));
 }
 
 .video-upload-card:hover,
@@ -582,12 +591,18 @@
   background: #000;
   border-radius: 12px;
   overflow: hidden;
-  min-height: 420px;
+  /* Hug the video exactly: the drawing overlay is measured from this box,
+     so any letterboxing here would throw the annotations out of alignment. */
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
 }
 
 .video-frame video {
-  width: 100%;
+  width: auto;
   height: auto;
+  max-width: 100%;
+  max-height: var(--va-video-max-height, calc(100svh - 300px));
   display: block;
   background: #000;
 }
