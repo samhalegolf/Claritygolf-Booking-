@@ -6,7 +6,10 @@ import {
 } from "./VideoWorkspace";
 import "./theme/videoAnalysis.css";
 import type { VideoAnalysisPersistenceLayer } from "./utils/localPersistence";
-import type { SavedVideoLibraryStore } from "./utils/savedVideoLibrary";
+import {
+  saveSavedVideoToCloud,
+  type SavedVideoLibraryStore,
+} from "./utils/savedVideoLibrary";
 
 export interface VideoAnalysisPageProps {
   playerId?: string;
@@ -24,5 +27,25 @@ export interface VideoAnalysisPageProps {
 }
 
 export function VideoAnalysisPage(props: VideoAnalysisPageProps) {
-  return <VideoWorkspace {...props} />;
+  const defaultSaveAndSend = React.useCallback(
+    async (result: VideoWorkspaceSaveResult) => {
+      if (!props.savedVideoLibrary) {
+        throw new Error("Clarity Cloud video storage is unavailable.");
+      }
+
+      for (const item of result.savedItems) {
+        await saveSavedVideoToCloud(item.savedVideoId, props.savedVideoLibrary);
+      }
+    },
+    [props.savedVideoLibrary]
+  );
+
+  return (
+    <VideoWorkspace
+      {...props}
+      onSaveAndSend={
+        props.onSaveAndSend || (props.savedVideoLibrary ? defaultSaveAndSend : undefined)
+      }
+    />
+  );
 }
