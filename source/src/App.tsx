@@ -15401,65 +15401,23 @@ function App() {
           },
         );
       }
-      trackDiagnosticEvent({
-        system: "save",
-        action: "BOOKING_DELETE_VERIFY_STARTED",
-        phase: "verify",
-        status: "started",
-        route: "GET /api/calendar-state",
-        functionName: "removeSelected",
-        expectedAccountId: activeAccountId,
-        objectType: selected.kind === "block" ? "calendarBlock" : "booking",
-        objectId: calendarItemId,
-        details: {
-          targetedDelete: true,
-          accountId: selected.accountId || activeAccountId,
-          operationOwner: "calendar_reload_verify",
-          deleteHttpStatus: response.status,
-        },
-      });
-      const verifyResponse = await fetch("/api/calendar-state", {
-        credentials: "same-origin",
-        cache: "no-store",
-        headers: { Accept: "application/json" },
-      });
-      const verifyData = (await verifyResponse.json().catch(() => ({}))) as CalendarStateSaveResponse;
-      if (verifyResponse.status === 401) {
-        setAuthStatus("guest");
-        throw Object.assign(new Error(verifyData.message || "Admin login expired during delete verification."), {
-          code: "AUTH_SESSION_MISSING",
-          httpStatus: verifyResponse.status,
-          operationOwner: "calendar_reload_verify",
-          failureRoute: "GET /api/calendar-state",
-        });
-      }
-      if (!verifyResponse.ok) {
-        throw Object.assign(
-          new Error(verifyData.detail || verifyData.message || verifyData.error || `Delete verification failed (${verifyResponse.status} ${verifyResponse.statusText})`),
-          {
-            code: verifyData.error || verifyData.diagnostics?.code || "BOOKING_DELETE_RELOAD_FAILED",
-            diagnostics: verifyData.diagnostics,
-            httpStatus: verifyResponse.status,
-            operationOwner: verifyData.diagnostics?.operationOwner || "calendar_reload",
-            failureRoute: verifyData.diagnostics?.route || "GET /api/calendar-state",
-          },
-        );
-      }
+      const verifyData = data;
+      const verifyHttpStatus = response.status;
       if (!Array.isArray(verifyData.items)) {
         throw Object.assign(new Error("Calendar reload did not return booking items for delete verification."), {
           code: "BOOKING_DELETE_RELOAD_FAILED",
-          httpStatus: verifyResponse.status,
+          httpStatus: verifyHttpStatus,
           operationOwner: "calendar_reload",
-          failureRoute: "GET /api/calendar-state",
+          failureRoute: "DELETE /api/calendar-state",
         });
       }
       const deletedStillReturned = verifyData.items.some((item) => item.id === calendarItemId);
       if (deletedStillReturned) {
         throw Object.assign(new Error("Deleted booking was returned by the backend refetch."), {
           code: "BOOKING_DELETE_VERIFY_FAILED",
-          httpStatus: verifyResponse.status,
+          httpStatus: verifyHttpStatus,
           operationOwner: "calendar_reload_verify",
-          failureRoute: "GET /api/calendar-state",
+          failureRoute: "DELETE /api/calendar-state",
         });
       }
       const persistedItems = verifyData.items.map((item) => ({ ...item, accountId: item.accountId || activeAccountId }));
@@ -15489,14 +15447,14 @@ function App() {
         }, 1800);
       }
       finishDiagnosticTimer(timer, "verified", {
-        httpStatus: verifyResponse.status,
+        httpStatus: verifyHttpStatus,
         errorCode: "BOOKING_DELETE_VERIFY_COMPLETED",
         details: {
           targetedDelete: true,
           operationOwner: "calendar_reload_verify",
           deleteHttpStatus: response.status,
-          verifyHttpStatus: verifyResponse.status,
-          verificationRoute: "GET /api/calendar-state",
+          verifyHttpStatus,
+          verificationRoute: "DELETE /api/calendar-state",
           verificationResult: "not_found",
           returnedItemCount: persistedItems.length,
           backendDiagnostics: Boolean(data.diagnostics || verifyData.diagnostics),
@@ -15516,7 +15474,7 @@ function App() {
           targetedDelete: true,
           operationOwner: "calendar_reload_verify",
           deleteHttpStatus: response.status,
-          verifyHttpStatus: verifyResponse.status,
+          verifyHttpStatus,
           verificationResult: "not_found",
         },
       });

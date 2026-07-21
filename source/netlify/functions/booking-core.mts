@@ -4636,7 +4636,17 @@ async function deleteCalendarItemById(id, context = null) {
 
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  const googleCalendarSync = await syncGoogleCalendarWithinBudget();
+  const googleCalendarSyncTask = syncGoogleCalendarIfEnabled()
+    .then((result) => console.info("calendar_state:google_sync_completed_after_response", { ok: result?.ok !== false }))
+    .catch((error) => console.error("calendar_state:google_sync_failed_after_response", error));
+  if (context && typeof context.waitUntil === "function") {
+    context.waitUntil(googleCalendarSyncTask);
+  }
+  const googleCalendarSync = {
+    ok: true,
+    skipped: false,
+    pending: true,
+  };
   let nextState = null;
   try {
     nextState = await readCalendarState();
@@ -4661,6 +4671,20 @@ async function deleteCalendarItemById(id, context = null) {
     updatedAt,
     googleCalendarSync,
   };
+}
+
+function scheduleAdminDeleteSideEffects(context, previousItems, nextItems, timeZone) {
+  const task = (async () => {
+    try {
+      await processAdminNotificationDebounce(previousItems, nextItems, { timeZone });
+    } catch (error) {
+      console.error("calendar_state:notification_failed", error);
+    }
+  })().catch((error) => console.error("calendar_state:delete_side_effects_failed", error));
+
+  if (context && typeof context.waitUntil === "function") {
+    context.waitUntil(task);
+  }
 }
 
 async function writePublicBookingState(currentState, items) {
@@ -7514,19 +7538,21 @@ async function cancelPublicBooking(payload) {
     state.items.filter((item) => item.id !== appointment.id),
   );
 
-  let notifications = [];
-  try {
-    notifications = await notifyBookingEvent({
-      action: "cancelled",
-      appointment,
-      previousAppointment: appointment,
-      source: "public-cancel",
-    });
-  } catch (error) {
+  const notificationsTask = notifyBookingEvent({
+    action: "cancelled",
+    appointment,
+    previousAppointment: appointment,
+    source: "public-cancel",
+  }).catch((error) => {
     console.error("public_cancel:notification_failed", error);
+    return [];
+  });
+
+  if (payload?.context && typeof payload.context.waitUntil === "function") {
+    payload.context.waitUntil(notificationsTask);
   }
 
-  return { appointment, notifications, state: nextState };
+  return { appointment, notifications: [], state: nextState };
 }
 
 export async function handlePublicRescheduleLookupRequest(req) {
@@ -7580,12 +7606,12 @@ export async function handlePublicRescheduleRequest(req, context = null) {
   }
 }
 
-export async function handlePublicCancelRequest(req) {
+export async function handlePublicCancelRequest(req, context = null) {
   try {
     if (req.method !== "POST") {
       return json({ error: "method_not_allowed" }, 405);
     }
-    const result = await cancelPublicBooking(await parseBody(req));
+    const result = await cancelPublicBooking({ ...(await parseBody(req)), context });
     return json({
       ok: true,
       appointment: {
@@ -7989,7 +8015,7 @@ export async function handleBookingApiRoute(
     }
 
     if (req.method === "POST" && pathname === "/api/public-cancel") {
-      return handlePublicCancelRequest(req);
+      return handlePublicCancelRequest(req, context);
     }
 
     if (req.method === "GET" && pathname === "/api/public-diagnostics") {
@@ -8299,31 +8325,14 @@ export async function handleBookingApiRoute(
           durationMs,
           verificationResult,
         });
-        let notificationResults = [];
-        let notificationWarning = "";
-        try {
-          notificationResults = await processAdminNotificationDebounce(
-            current.items,
-            nextState.items,
-            { timeZone: nextState.account?.timezone },
-          );
-        } catch (error) {
-          notificationWarning =
-            "Calendar saved, but booking alerts could not be processed.";
-          console.error("calendar_state:notification_failed", error);
-        }
-        const existingWarnings = Array.isArray(nextState.warnings)
-          ? nextState.warnings
-          : [];
+        scheduleAdminDeleteSideEffects(context, current.items, nextState.items, nextState.account?.timezone);
+        const notificationResults = [];
         return json({
           ...publicCalendarState({
             ...nextState,
-            notifications: await readNotificationHistory(),
+            notifications: nextState.notifications,
           }),
           notificationResults,
-          ...(notificationWarning
-            ? { warnings: [...new Set([...existingWarnings, notificationWarning])] }
-            : {}),
           diagnostics: {
             code: "BOOKING_DELETE_VERIFY_COMPLETED",
             ...baseDetails,
@@ -8332,6 +8341,7 @@ export async function handleBookingApiRoute(
             httpStatus: 200,
             durationMs,
             verificationResult,
+            sideEffectsPending: true,
           },
         });
       } catch (error) {

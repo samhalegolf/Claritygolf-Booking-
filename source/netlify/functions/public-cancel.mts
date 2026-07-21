@@ -1,4 +1,4 @@
-import type { Config } from "@netlify/functions";
+import type { Config, Context } from "@netlify/functions";
 
 import { syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
 import { notifyBookingEvent } from "./notification-engine.mts";
@@ -218,22 +218,6 @@ async function cancelPublicBooking(payload: any) {
     body: [{ key: "updatedAt", value: nowIso(), updated_at: nowIso() }],
   }).catch((error) => console.error("public_cancel:updated_at_failed", error));
 
-  await syncGoogleCalendarIfEnabled().catch((error) =>
-    console.error("public_cancel:google_calendar_sync_failed", error),
-  );
-
-  let notifications: any[] = [];
-  try {
-    notifications = await notifyBookingEvent({
-      action: "cancelled",
-      appointment,
-      previousAppointment: appointment,
-      source: "public-cancel",
-    });
-  } catch (error) {
-    console.error("public_cancel:notification_failed", error);
-  }
-
   let stateItems: any[] | null = null;
   try {
     const remainingRead = await readRemainingRowsForWeek(account.id, appointment.week);
@@ -257,16 +241,40 @@ async function cancelPublicBooking(payload: any) {
     console.error("public_cancel:state_refresh_failed", error);
   }
 
-  return { appointment, notifications, stateItems };
+  return { appointment, stateItems };
 }
 
-export default async function handler(req: Request) {
+function schedulePublicCancelSideEffects(context: Context | undefined, appointment: any) {
+  const task = (async () => {
+    await syncGoogleCalendarIfEnabled().catch((error) =>
+      console.error("public_cancel:google_calendar_sync_failed", error),
+    );
+
+    try {
+      await notifyBookingEvent({
+        action: "cancelled",
+        appointment,
+        previousAppointment: appointment,
+        source: "public-cancel",
+      });
+    } catch (error) {
+      console.error("public_cancel:notification_failed", error);
+    }
+  })().catch((error) => console.error("public_cancel:side_effects_failed", appointment?.id, error));
+
+  if (context && typeof context.waitUntil === "function") {
+    context.waitUntil(task);
+  }
+}
+
+export default async function handler(req: Request, context: Context) {
   try {
     if (req.method !== "POST") {
       return json({ error: "method_not_allowed" }, 405);
     }
 
     const result = await cancelPublicBooking(await parseBody(req));
+    schedulePublicCancelSideEffects(context, result.appointment);
     return json({
       ok: true,
       appointment: {
@@ -277,7 +285,8 @@ export default async function handler(req: Request) {
         duration: result.appointment.duration,
       },
       ...(result.stateItems ? { state: { items: result.stateItems } } : {}),
-      notifications: result.notifications.filter((notification: any) => notification?.channel === "client"),
+      notifications: [],
+      notificationStatus: "queued",
     });
   } catch (error: any) {
     console.error("public_cancel:failed", error);
