@@ -4505,7 +4505,8 @@ function App() {
   // Active category filter: "" = show all; otherwise isolate one classification.
   const [bankCategoryFilter, setBankCategoryFilter] = useState("");
   const [bankSearch, setBankSearch] = useState("");
-  const [bankDateFilter, setBankDateFilter] = useState("");
+  const [bankDateFromFilter, setBankDateFromFilter] = useState("");
+  const [bankDateToFilter, setBankDateToFilter] = useState("");
   const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
   const [bankBulkBusy, setBankBulkBusy] = useState(false);
   const [bankBackfillBusy, setBankBackfillBusy] = useState<number | null>(null);
@@ -12972,11 +12973,12 @@ function App() {
   const bankSearchQuery = bankSearch.trim().toLowerCase();
   const visibleBankCandidates = bankCandidates.filter((candidate) => {
     if (bankCategoryFilter && expenseCategoryLabel(candidate.suggestedCategory) !== bankCategoryFilter) return false;
-    if (bankDateFilter && candidate.date !== bankDateFilter) return false;
+    if (bankDateFromFilter && candidate.date < bankDateFromFilter) return false;
+    if (bankDateToFilter && candidate.date > bankDateToFilter) return false;
     if (bankSearchQuery && !bankCandidateSearchText(candidate).includes(bankSearchQuery)) return false;
     return true;
   });
-  const hasBankFilters = Boolean(bankCategoryFilter || bankDateFilter || bankSearchQuery);
+  const hasBankFilters = Boolean(bankCategoryFilter || bankDateFromFilter || bankDateToFilter || bankSearchQuery);
   const selectedVisibleBankCount = visibleBankCandidates.filter((candidate) =>
     selectedBankIds.has(candidate.id),
   ).length;
@@ -21005,15 +21007,27 @@ function App() {
                             />
                           </label>
                           <label className="bank-filter">
-                            <span className="field-help">Date</span>
+                            <span className="field-help">From</span>
                             <input
                               type="date"
-                              value={bankDateFilter}
+                              value={bankDateFromFilter}
                               onChange={(event) => {
-                                setBankDateFilter(event.target.value);
+                                setBankDateFromFilter(event.target.value);
                                 setSelectedBankIds(new Set());
                               }}
-                              aria-label="Show bank expenses for a specific date"
+                              aria-label="Show bank expenses from this date"
+                            />
+                          </label>
+                          <label className="bank-filter">
+                            <span className="field-help">To</span>
+                            <input
+                              type="date"
+                              value={bankDateToFilter}
+                              onChange={(event) => {
+                                setBankDateToFilter(event.target.value);
+                                setSelectedBankIds(new Set());
+                              }}
+                              aria-label="Show bank expenses up to this date"
                             />
                           </label>
                           {bankCategoryOptions.length > 1 && (
@@ -21041,7 +21055,8 @@ function App() {
                               type="button"
                               onClick={() => {
                                 setBankSearch("");
-                                setBankDateFilter("");
+                                setBankDateFromFilter("");
+                                setBankDateToFilter("");
                                 setBankCategoryFilter("");
                                 setSelectedBankIds(new Set());
                               }}
@@ -21149,7 +21164,8 @@ function App() {
                             type="button"
                             onClick={() => {
                               setBankSearch("");
-                              setBankDateFilter("");
+                              setBankDateFromFilter("");
+                              setBankDateToFilter("");
                               setBankCategoryFilter("");
                               setSelectedBankIds(new Set());
                             }}
