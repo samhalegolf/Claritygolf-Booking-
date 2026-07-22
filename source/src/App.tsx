@@ -933,6 +933,21 @@ function expenseCategoryLabel(category: string | null | undefined): string {
   return (category || "").trim() || "Uncategorised";
 }
 
+function bankCandidateSearchText(candidate: BankExpenseCandidate) {
+  return [
+    candidate.date,
+    candidate.account,
+    candidate.description,
+    candidate.merchant,
+    candidate.suggestedCategory,
+    candidate.type,
+    String(candidate.amount || ""),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 type SettingsTab =
   | "none"
   | "services"
@@ -4489,6 +4504,8 @@ function App() {
   // busy flags for the bulk approve/dismiss and the older-period backfill.
   // Active category filter: "" = show all; otherwise isolate one classification.
   const [bankCategoryFilter, setBankCategoryFilter] = useState("");
+  const [bankSearch, setBankSearch] = useState("");
+  const [bankDateFilter, setBankDateFilter] = useState("");
   const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
   const [bankBulkBusy, setBankBulkBusy] = useState(false);
   const [bankBackfillBusy, setBankBackfillBusy] = useState<number | null>(null);
@@ -12444,7 +12461,7 @@ function App() {
   // the actioned rows. A partial approve keeps the failed ids so they can be
   // retried; a dismiss removes all sent ids.
   async function actionBankSelected(action: "approve" | "ignore") {
-    const ids = bankCandidates.filter((row) => selectedBankIds.has(row.id)).map((row) => row.id);
+    const ids = visibleBankCandidates.filter((row) => selectedBankIds.has(row.id)).map((row) => row.id);
     if (!ids.length) return;
     setBankBulkBusy(true);
     try {
@@ -12952,9 +12969,14 @@ function App() {
   const bankCategoryOptions = Object.keys(bankCategoryCounts).sort(
     (a, b) => bankCategoryCounts[b] - bankCategoryCounts[a] || a.localeCompare(b),
   );
-  const visibleBankCandidates = bankCandidates.filter(
-    (candidate) => !bankCategoryFilter || expenseCategoryLabel(candidate.suggestedCategory) === bankCategoryFilter,
-  );
+  const bankSearchQuery = bankSearch.trim().toLowerCase();
+  const visibleBankCandidates = bankCandidates.filter((candidate) => {
+    if (bankCategoryFilter && expenseCategoryLabel(candidate.suggestedCategory) !== bankCategoryFilter) return false;
+    if (bankDateFilter && candidate.date !== bankDateFilter) return false;
+    if (bankSearchQuery && !bankCandidateSearchText(candidate).includes(bankSearchQuery)) return false;
+    return true;
+  });
+  const hasBankFilters = Boolean(bankCategoryFilter || bankDateFilter || bankSearchQuery);
   const selectedVisibleBankCount = visibleBankCandidates.filter((candidate) =>
     selectedBankIds.has(candidate.id),
   ).length;
@@ -20968,31 +20990,77 @@ function App() {
                   ) : bankCandidates.length ? (
                     <>
                       <div className="bank-toolbar">
-                        {bankCategoryOptions.length > 1 && (
-                          <label className="bank-filter">
-                            <span className="field-help">Filter</span>
-                            <select
-                              value={bankCategoryFilter}
+                        <div className="bank-filter bank-filter-group">
+                          <label className="bank-search-field">
+                            <Search size={15} aria-hidden="true" />
+                            <input
+                              type="search"
+                              value={bankSearch}
                               onChange={(event) => {
-                                setBankCategoryFilter(event.target.value);
+                                setBankSearch(event.target.value);
+                                setSelectedBankIds(new Set());
+                              }}
+                              placeholder="Search expenses"
+                              aria-label="Search bank expense approvals"
+                            />
+                          </label>
+                          <label className="bank-filter">
+                            <span className="field-help">Date</span>
+                            <input
+                              type="date"
+                              value={bankDateFilter}
+                              onChange={(event) => {
+                                setBankDateFilter(event.target.value);
+                                setSelectedBankIds(new Set());
+                              }}
+                              aria-label="Show bank expenses for a specific date"
+                            />
+                          </label>
+                          {bankCategoryOptions.length > 1 && (
+                            <label className="bank-filter">
+                              <span className="field-help">Category</span>
+                              <select
+                                value={bankCategoryFilter}
+                                onChange={(event) => {
+                                  setBankCategoryFilter(event.target.value);
+                                  setSelectedBankIds(new Set());
+                                }}
+                              >
+                                <option value="">All categories ({bankCandidates.length})</option>
+                                {bankCategoryOptions.map((label) => (
+                                  <option key={label} value={label}>
+                                    {label} ({bankCategoryCounts[label]})
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                          {hasBankFilters && (
+                            <button
+                              className="invoice-inline-edit"
+                              type="button"
+                              onClick={() => {
+                                setBankSearch("");
+                                setBankDateFilter("");
+                                setBankCategoryFilter("");
                                 setSelectedBankIds(new Set());
                               }}
                             >
-                              <option value="">All categories ({bankCandidates.length})</option>
-                              {bankCategoryOptions.map((label) => (
-                                <option key={label} value={label}>
-                                  {label} ({bankCategoryCounts[label]})
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        )}
+                              Clear
+                            </button>
+                          )}
+                        </div>
                         <div className="bank-bulk-actions" role="group" aria-label="Bulk actions">
                           <span className="field-help">
-                            {selectedVisibleBankCount
-                              ? `${selectedVisibleBankCount} selected`
-                              : "Tick rows to select"}
+                            {hasBankFilters
+                              ? `${visibleBankCandidates.length} of ${bankCandidates.length} shown`
+                              : selectedVisibleBankCount
+                                ? `${selectedVisibleBankCount} selected`
+                                : "Tick rows to select"}
                           </span>
+                          {hasBankFilters && selectedVisibleBankCount > 0 && (
+                            <span className="field-help">{selectedVisibleBankCount} selected</span>
+                          )}
                           <button
                             className="primary-button"
                             type="button"
@@ -21075,9 +21143,18 @@ function App() {
                         </table>
                       ) : (
                         <p>
-                          No transactions in this category.{" "}
-                          <button className="outline-button" type="button" onClick={() => setBankCategoryFilter("")}>
-                            Show all
+                          No transactions match those filters.{" "}
+                          <button
+                            className="outline-button"
+                            type="button"
+                            onClick={() => {
+                              setBankSearch("");
+                              setBankDateFilter("");
+                              setBankCategoryFilter("");
+                              setSelectedBankIds(new Set());
+                            }}
+                          >
+                            Clear filters
                           </button>
                         </p>
                       )}

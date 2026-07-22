@@ -705,13 +705,39 @@ button {
   gap: 8px;
 }
 
-.bank-filter select {
+.bank-filter-group {
+  flex: 1 1 420px;
+  flex-wrap: wrap;
+}
+
+.bank-filter select,
+.bank-filter input {
   padding: 6px 10px;
   border: 1px solid #d4d8cf;
   border-radius: 8px;
   background: #fff;
   font-size: 14px;
   font-weight: 600;
+}
+
+.bank-search-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: min(100%, 220px);
+  padding: 0 10px;
+  border: 1px solid #d4d8cf;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+}
+
+.bank-search-field input {
+  width: 180px;
+  min-width: 0;
+  padding: 6px 0;
+  border: 0;
+  outline: 0;
 }
 
 .bank-bulk-actions {
