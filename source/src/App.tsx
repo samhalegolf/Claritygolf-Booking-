@@ -889,6 +889,9 @@ type BankExpenseCandidate = {
   accountId: string | null;
   account: string | null;
 };
+type BankExpenseSortKey = "date" | "account" | "description" | "amount";
+type BankExpenseSortDirection = "asc" | "desc";
+type BankExpenseSort = { key: BankExpenseSortKey; direction: BankExpenseSortDirection };
 // A money-in bank transaction awaiting reconciliation against an invoice.
 type ReconcileSuggestion = {
   invoiceId: string;
@@ -946,6 +949,10 @@ function bankCandidateSearchText(candidate: BankExpenseCandidate) {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+function bankCandidateSortText(value: string | null | undefined) {
+  return (value || "").trim().toLowerCase();
 }
 
 type SettingsTab =
@@ -4507,6 +4514,7 @@ function App() {
   const [bankSearch, setBankSearch] = useState("");
   const [bankDateFromFilter, setBankDateFromFilter] = useState("");
   const [bankDateToFilter, setBankDateToFilter] = useState("");
+  const [bankSort, setBankSort] = useState<BankExpenseSort>({ key: "date", direction: "desc" });
   const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
   const [bankBulkBusy, setBankBulkBusy] = useState(false);
   const [bankBackfillBusy, setBankBackfillBusy] = useState<number | null>(null);
@@ -12971,12 +12979,28 @@ function App() {
     (a, b) => bankCategoryCounts[b] - bankCategoryCounts[a] || a.localeCompare(b),
   );
   const bankSearchQuery = bankSearch.trim().toLowerCase();
-  const visibleBankCandidates = bankCandidates.filter((candidate) => {
+  const filteredBankCandidates = bankCandidates.filter((candidate) => {
     if (bankCategoryFilter && expenseCategoryLabel(candidate.suggestedCategory) !== bankCategoryFilter) return false;
     if (bankDateFromFilter && candidate.date < bankDateFromFilter) return false;
     if (bankDateToFilter && candidate.date > bankDateToFilter) return false;
     if (bankSearchQuery && !bankCandidateSearchText(candidate).includes(bankSearchQuery)) return false;
     return true;
+  });
+  const visibleBankCandidates = [...filteredBankCandidates].sort((a, b) => {
+    let result = 0;
+    if (bankSort.key === "amount") {
+      result = a.amount - b.amount;
+    } else if (bankSort.key === "date") {
+      result = a.date.localeCompare(b.date);
+    } else if (bankSort.key === "account") {
+      result = bankCandidateSortText(a.account).localeCompare(bankCandidateSortText(b.account));
+    } else {
+      result = bankCandidateSortText(a.description || a.merchant).localeCompare(
+        bankCandidateSortText(b.description || b.merchant),
+      );
+    }
+    if (result !== 0) return bankSort.direction === "asc" ? result : -result;
+    return b.date.localeCompare(a.date) || bankCandidateSortText(a.id).localeCompare(bankCandidateSortText(b.id));
   });
   const hasBankFilters = Boolean(bankCategoryFilter || bankDateFromFilter || bankDateToFilter || bankSearchQuery);
   const selectedVisibleBankCount = visibleBankCandidates.filter((candidate) =>
@@ -12993,6 +13017,20 @@ function App() {
       else visibleIds.forEach((id) => next.add(id));
       return next;
     });
+  }
+  function toggleBankSort(key: BankExpenseSortKey) {
+    setBankSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  }
+  function bankSortAria(key: BankExpenseSortKey): "ascending" | "descending" | "none" {
+    if (bankSort.key !== key) return "none";
+    return bankSort.direction === "asc" ? "ascending" : "descending";
+  }
+  function bankSortMarker(key: BankExpenseSortKey) {
+    if (bankSort.key !== key) return "";
+    return bankSort.direction === "asc" ? " ↑" : " ↓";
   }
 
   // expenses is already server-filtered to expenseRangeFrom/expenseRangeTo;
@@ -21068,7 +21106,7 @@ function App() {
                         <div className="bank-bulk-actions" role="group" aria-label="Bulk actions">
                           <span className="field-help">
                             {hasBankFilters
-                              ? `${visibleBankCandidates.length} of ${bankCandidates.length} shown`
+                              ? `${visibleBankCandidates.length} matching transaction${visibleBankCandidates.length === 1 ? "" : "s"} (${bankCandidates.length} loaded)`
                               : selectedVisibleBankCount
                                 ? `${selectedVisibleBankCount} selected`
                                 : "Tick rows to select"}
@@ -21107,10 +21145,26 @@ function App() {
                                   onChange={() => toggleSelectAllVisibleBank()}
                                 />
                               </th>
-                              <th>Date</th>
-                              <th>Account</th>
-                              <th>Description</th>
-                              <th>Amount</th>
+                              <th aria-sort={bankSortAria("date")}>
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("date")}>
+                                  Date{bankSortMarker("date")}
+                                </button>
+                              </th>
+                              <th aria-sort={bankSortAria("account")}>
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("account")}>
+                                  Account{bankSortMarker("account")}
+                                </button>
+                              </th>
+                              <th aria-sort={bankSortAria("description")}>
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("description")}>
+                                  Description{bankSortMarker("description")}
+                                </button>
+                              </th>
+                              <th aria-sort={bankSortAria("amount")}>
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("amount")}>
+                                  Amount{bankSortMarker("amount")}
+                                </button>
+                              </th>
                               <th aria-label="Actions" />
                             </tr>
                           </thead>

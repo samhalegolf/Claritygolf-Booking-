@@ -757,6 +757,26 @@ button {
   cursor: pointer;
 }
 
+.bank-sort-button {
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.bank-sort-button:hover,
+.bank-sort-button:focus-visible {
+  color: #101510;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .meta-row {
   display: flex;
   flex-wrap: wrap;
