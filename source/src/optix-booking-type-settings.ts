@@ -73,24 +73,27 @@ function migrateProfiles(services: Service[], saved: SavedState): ResourceProfil
     })).filter((profile) => profile.resourceIds.length);
   }
 
-  const config = saved.config || {};
   const profiles: ResourceProfile[] = [];
+  const config = saved.config || {};
   for (const service of services) {
     const item = config?.[service.id];
     if (item?.enabled !== true) continue;
-    const handedness: Handedness = item.leftHanded === true ? "left" : "standard";
-    const order = handedness === "left" ? item.leftHandedResourceIds : item.preferredResourceIds;
-    const resourceIds = Array.isArray(order)
-      ? order.filter((id: string) => DEFAULT_ORDER.includes(id))
-      : [...DEFAULT_ORDER];
-    const key = `${handedness}:${resourceIds.join(",")}`;
-    const existing = profiles.find((profile) => `${profile.handedness}:${profile.resourceIds.join(",")}` === key);
-    if (existing) existing.serviceIds.push(service.id);
-    else profiles.push({
-      ...makeProfile(handedness === "left" ? "Left-handed lessons" : "Standard lessons", handedness),
-      resourceIds: resourceIds.length ? resourceIds : [...DEFAULT_ORDER],
-      serviceIds: [service.id],
-    });
+    const standardIds = Array.isArray(item.preferredResourceIds)
+      ? item.preferredResourceIds.filter((id: string) => DEFAULT_ORDER.includes(id))
+      : [];
+    const leftIds = Array.isArray(item.leftHandedResourceIds)
+      ? item.leftHandedResourceIds.filter((id: string) => DEFAULT_ORDER.includes(id))
+      : [];
+    if (standardIds.length) {
+      const existing = profiles.find((profile) => profile.handedness === "standard" && profile.resourceIds.join(",") === standardIds.join(","));
+      if (existing) existing.serviceIds.push(service.id);
+      else profiles.push({ ...makeProfile("Standard lessons", "standard"), resourceIds: standardIds, serviceIds: [service.id] });
+    }
+    if (leftIds.length) {
+      const existing = profiles.find((profile) => profile.handedness === "left" && profile.resourceIds.join(",") === leftIds.join(","));
+      if (existing) existing.serviceIds.push(service.id);
+      else profiles.push({ ...makeProfile("Left-handed lessons", "left"), resourceIds: leftIds, serviceIds: [service.id] });
+    }
   }
   return profiles.length ? profiles : [makeProfile("Standard lessons")];
 }
@@ -126,7 +129,6 @@ function installStyles() {
     #optix-resource-modal .service-list label{display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px;background:#142219;font-size:13px}
     #optix-resource-modal .resource-foot{justify-content:flex-end;margin-top:18px}
     #optix-resource-modal .status{font-size:12px;color:#a9b7ac;margin-right:auto}
-    #optix-resource-modal .empty-note{padding:18px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;color:#a9b7ac}
     @media(max-width:720px){#optix-resource-modal .profile-grid{grid-template-columns:1fr}.profile-head{align-items:flex-start!important;flex-wrap:wrap}}
   `;
   document.head.appendChild(style);
@@ -146,7 +148,7 @@ function renderProfile(profile: ResourceProfile, services: Service[]) {
     <div class="profile-grid">
       <div>
         <div class="section-title">Bay order — remove a bay to exclude it completely</div>
-        <div class="bay-list">${profile.resourceIds.map((id, index) => `<div class="bay-row" data-bay-id="${id}"><span>${index + 1}</span><strong>${esc(labelForBay(id))}</strong><div class="bay-actions"><button type="button" class="move-up" aria-label="Move up">↑</button><button type="button" class="move-down" aria-label="Move down">↓</button><button type="button" class="remove-bay">Remove</button></div></div>`).join("")}</div>
+        <div class="bay-list">${profile.resourceIds.map((id, index) => `<div class="bay-row" data-bay-id="${id}"><span>${index + 1}</span><strong>${esc(labelForBay(id))}</strong><div class="bay-actions"><button type="button" class="move-up">↑</button><button type="button" class="move-down">↓</button><button type="button" class="remove-bay">Remove</button></div></div>`).join("")}</div>
         <div class="section-title" style="margin-top:12px">Removed bays</div>
         <div class="removed-bays">${removed.length ? removed.map((id) => `<button type="button" data-add-bay="${id}">+ ${esc(labelForBay(id))}</button>`).join("") : `<span class="resource-subtitle">All bays are available to this profile.</span>`}</div>
       </div>
@@ -166,7 +168,7 @@ async function openEditor() {
   modal.id = "optix-resource-modal";
 
   const render = () => {
-    modal.innerHTML = `<div class="resource-panel"><div class="resource-head"><div><h2>Resources</h2><div class="resource-subtitle">Create a bay order once, choose its player handedness, then apply it to lesson types.</div></div><button class="secondary close-resources">Close</button></div><button class="add-profile" type="button">+ New resource profile</button><div class="profiles">${profiles.length ? profiles.map((profile) => renderProfile(profile, services)).join("") : `<div class="empty-note">No resource profiles yet.</div>`}</div><div class="resource-foot"><span class="status"></span><button class="primary save-resources">Save resources</button></div></div>`;
+    modal.innerHTML = `<div class="resource-panel"><div class="resource-head"><div><h2>Resources</h2><div class="resource-subtitle">A lesson type can use one standard profile and one left-handed profile.</div></div><button class="secondary close-resources">Close</button></div><button class="add-profile" type="button">+ New resource profile</button><div class="profiles">${profiles.map((profile) => renderProfile(profile, services)).join("")}</div><div class="resource-foot"><span class="status"></span><button class="primary save-resources">Save resources</button></div></div>`;
   };
 
   const syncFromDom = () => {
@@ -184,23 +186,18 @@ async function openEditor() {
 
   modal.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
-    if (target === modal || target.closest(".close-resources")) {
-      modal.remove();
-      return;
-    }
+    if (target === modal || target.closest(".close-resources")) return modal.remove();
     if (target.closest(".add-profile")) {
       syncFromDom();
       profiles.push(makeProfile(`Resource profile ${profiles.length + 1}`));
-      render();
-      return;
+      return render();
     }
     const card = target.closest<HTMLElement>(".profile-card");
     if (!card) return;
     if (target.closest(".delete-profile")) {
       syncFromDom();
       profiles = profiles.filter((profile) => profile.id !== card.dataset.profileId);
-      render();
-      return;
+      return render();
     }
     const row = target.closest<HTMLElement>(".bay-row");
     if (row && (target.closest(".move-up") || target.closest(".move-down") || target.closest(".remove-bay"))) {
@@ -211,8 +208,7 @@ async function openEditor() {
       if (target.closest(".remove-bay") && index >= 0) profile.resourceIds.splice(index, 1);
       if (target.closest(".move-up") && index > 0) [profile.resourceIds[index - 1], profile.resourceIds[index]] = [profile.resourceIds[index], profile.resourceIds[index - 1]];
       if (target.closest(".move-down") && index >= 0 && index < profile.resourceIds.length - 1) [profile.resourceIds[index + 1], profile.resourceIds[index]] = [profile.resourceIds[index], profile.resourceIds[index + 1]];
-      render();
-      return;
+      return render();
     }
     const addBay = target.closest<HTMLButtonElement>("[data-add-bay]");
     if (addBay) {
@@ -233,24 +229,25 @@ async function openEditor() {
       if (status) status.textContent = "Every profile needs at least one bay.";
       return;
     }
-    const assigned = new Map<string, string>();
+    const assigned = new Set<string>();
     for (const profile of profiles) {
       for (const serviceId of profile.serviceIds) {
-        if (assigned.has(serviceId)) {
-          if (status) status.textContent = "A lesson type can only belong to one resource profile.";
+        const key = `${profile.handedness}:${serviceId}`;
+        if (assigned.has(key)) {
+          if (status) status.textContent = `A lesson type can only belong to one ${profile.handedness === "left" ? "left-handed" : "standard"} profile.`;
           return;
         }
-        assigned.set(serviceId, profile.id);
+        assigned.add(key);
       }
     }
     const config = Object.fromEntries(services.map((service) => {
-      const profile = profiles.find((item) => item.serviceIds.includes(service.id));
-      const isLeft = profile?.handedness === "left";
+      const standardProfile = profiles.find((item) => item.handedness === "standard" && item.serviceIds.includes(service.id));
+      const leftProfile = profiles.find((item) => item.handedness === "left" && item.serviceIds.includes(service.id));
       return [service.id, {
-        enabled: Boolean(profile),
-        leftHanded: isLeft,
-        preferredResourceIds: profile && !isLeft ? profile.resourceIds : [],
-        leftHandedResourceIds: profile && isLeft ? profile.resourceIds : [],
+        enabled: Boolean(standardProfile || leftProfile),
+        leftHanded: false,
+        preferredResourceIds: standardProfile?.resourceIds || [],
+        leftHandedResourceIds: leftProfile?.resourceIds || [],
       }];
     }));
     if (status) status.textContent = "Saving…";
@@ -266,14 +263,9 @@ async function openEditor() {
 
 function addResourcesMenuItem() {
   if (document.getElementById("clarity-resources-menu-item")) return;
-  const settingsButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
-    .find((button) => button.textContent?.trim() === "Settings");
-  if (!settingsButton) return;
-
   const locations = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
     .find((button) => button.textContent?.trim() === "Locations" && button.offsetParent !== null);
   if (!locations?.parentElement) return;
-
   const button = locations.cloneNode(true) as HTMLButtonElement;
   button.id = "clarity-resources-menu-item";
   button.type = "button";
