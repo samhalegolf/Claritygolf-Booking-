@@ -42,6 +42,7 @@ export const config: Config = {
     "/api/locations",
     "/api/notes",
     "/api/notification-history",
+    "/api/optix-booking-type-settings",
     "/api/people",
     "/api/people/import",
     "/api/people/import-lite",

@@ -2,6 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import PlayerPortal, { isPlayerPortalMode, isBookingHandoff } from "./modules/player-portal/PlayerPortal";
+import { installOptixBookingTypeSettings } from "./optix-booking-type-settings";
+import { installOptixBookingFeedback } from "./optix-booking-feedback";
 import "./styles.css";
 
 // The player portal is a separate app personality (players.claritygolf.app or
@@ -20,3 +22,8 @@ function selectRoot() {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>{selectRoot()}</StrictMode>,
 );
+
+if (!isPlayerPortalMode() && !isBookingHandoff()) {
+  installOptixBookingTypeSettings();
+  installOptixBookingFeedback();
+}
