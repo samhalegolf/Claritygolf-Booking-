@@ -1,13 +1,12 @@
 import { getDatabase } from "@netlify/database";
 
 import {
-  buildOptixAppointmentInput,
   optixAppointmentFingerprint,
   readOptixReconcileConfig,
-  reconcileOneOptixAppointment,
   type ClarityOptixAppointment,
   type OptixSyncRecord,
 } from "./_shared/optix-reconcile.mts";
+import { reconcileOptixAppointmentWithAutoSelect } from "./_shared/optix-auto-select.mts";
 import { syncOptixBooking } from "./_shared/optix-client.mts";
 
 function env(name: string): string {
@@ -119,6 +118,23 @@ async function readSyncRecords() {
   return rows.map(rowToSyncRecord);
 }
 
+async function readBookingTypeConfig(): Promise<Record<string, any>> {
+  const rows = await db().sql`
+    SELECT value
+    FROM settings
+    WHERE key = 'optixBookingTypeConfigJson'
+    LIMIT 1
+  `;
+  try {
+    const parsed = JSON.parse(rows[0]?.value || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 async function saveSyncRecord(record: OptixSyncRecord) {
   const lastSyncedAt = ["synced", "cancelled"].includes(record.syncStatus)
     ? new Date().toISOString()
@@ -220,9 +236,10 @@ async function cancelDeletedAppointment(
 export async function reconcileOptixBookings() {
   await ensureOptixSyncTable();
   const config = readOptixReconcileConfig(env);
-  const [appointments, records] = await Promise.all([
+  const [appointments, records, bookingTypes] = await Promise.all([
     readAppointments(),
     readSyncRecords(),
+    readBookingTypeConfig(),
   ]);
   const recordById = new Map(
     records.map((record) => [record.calendarItemId, record]),
@@ -232,10 +249,14 @@ export async function reconcileOptixBookings() {
 
   for (const appointment of appointments) {
     const existing = recordById.get(appointment.id) || null;
-    const next = await reconcileOneOptixAppointment({
+    const serviceId = String(
+      appointment.serviceId || appointment.service_id || "",
+    );
+    const next = await reconcileOptixAppointmentWithAutoSelect({
       appointment,
       existing,
       config,
+      bookingType: bookingTypes[serviceId] || null,
     });
     await saveSyncRecord(next);
     results.push(next);
