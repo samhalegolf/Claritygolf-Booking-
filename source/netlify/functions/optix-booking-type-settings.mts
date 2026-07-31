@@ -76,12 +76,11 @@ function cleanConfig(value: unknown) {
       .map(([serviceId, raw]) => {
         const id = String(serviceId || "").trim().slice(0, 120);
         if (!id) return null;
-        const leftHanded = raw?.leftHanded === true;
         return [id, {
           enabled: raw?.enabled === true,
-          leftHanded,
-          preferredResourceIds: leftHanded ? [] : cleanIds(raw?.preferredResourceIds),
-          leftHandedResourceIds: leftHanded ? cleanIds(raw?.leftHandedResourceIds) : [],
+          leftHanded: raw?.leftHanded === true,
+          preferredResourceIds: cleanIds(raw?.preferredResourceIds),
+          leftHandedResourceIds: cleanIds(raw?.leftHandedResourceIds),
         }];
       })
       .filter(Boolean) as Array<[string, unknown]>,
