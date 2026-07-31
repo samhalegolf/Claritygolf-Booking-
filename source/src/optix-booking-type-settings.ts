@@ -1,7 +1,9 @@
 type Service = { id: string; name?: string };
+type Handedness = "standard" | "left";
 type ResourceProfile = {
   id: string;
   name: string;
+  handedness: Handedness;
   resourceIds: string[];
   serviceIds: string[];
 };
@@ -35,10 +37,11 @@ function labelForBay(id: string) {
   return BAYS.find(([candidate]) => candidate === id)?.[1] || id;
 }
 
-function makeProfile(name = "New resource profile"): ResourceProfile {
+function makeProfile(name = "New resource profile", handedness: Handedness = "standard"): ResourceProfile {
   return {
     id: `resource-profile-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name,
+    handedness,
     resourceIds: [...DEFAULT_ORDER],
     serviceIds: [],
   };
@@ -62,33 +65,34 @@ function migrateProfiles(services: Service[], saved: SavedState): ResourceProfil
     return saved.profiles.map((profile) => ({
       id: String(profile.id || makeProfile().id),
       name: String(profile.name || "Resource profile"),
-      resourceIds: Array.isArray(profile.resourceIds) ? profile.resourceIds.filter((id) => DEFAULT_ORDER.includes(id)) : [],
+      handedness: profile.handedness === "left" ? "left" : "standard",
+      resourceIds: Array.isArray(profile.resourceIds)
+        ? profile.resourceIds.filter((id) => DEFAULT_ORDER.includes(id))
+        : [],
       serviceIds: Array.isArray(profile.serviceIds) ? profile.serviceIds.map(String) : [],
     })).filter((profile) => profile.resourceIds.length);
   }
 
   const config = saved.config || {};
-  const enabled = services.filter((service) => config?.[service.id]?.enabled === true);
-  if (!enabled.length) return [makeProfile("Standard lessons")];
-
-  const groups = new Map<string, ResourceProfile>();
-  for (const service of enabled) {
-    const order = Array.isArray(config?.[service.id]?.preferredResourceIds)
-      ? config[service.id].preferredResourceIds.filter((id: string) => DEFAULT_ORDER.includes(id))
+  const profiles: ResourceProfile[] = [];
+  for (const service of services) {
+    const item = config?.[service.id];
+    if (item?.enabled !== true) continue;
+    const handedness: Handedness = item.leftHanded === true ? "left" : "standard";
+    const order = handedness === "left" ? item.leftHandedResourceIds : item.preferredResourceIds;
+    const resourceIds = Array.isArray(order)
+      ? order.filter((id: string) => DEFAULT_ORDER.includes(id))
       : [...DEFAULT_ORDER];
-    const key = order.join(",");
-    const existing = groups.get(key);
-    if (existing) {
-      existing.serviceIds.push(service.id);
-    } else {
-      groups.set(key, {
-        ...makeProfile(groups.size ? `Resource profile ${groups.size + 1}` : "Standard lessons"),
-        resourceIds: order.length ? order : [...DEFAULT_ORDER],
-        serviceIds: [service.id],
-      });
-    }
+    const key = `${handedness}:${resourceIds.join(",")}`;
+    const existing = profiles.find((profile) => `${profile.handedness}:${profile.resourceIds.join(",")}` === key);
+    if (existing) existing.serviceIds.push(service.id);
+    else profiles.push({
+      ...makeProfile(handedness === "left" ? "Left-handed lessons" : "Standard lessons", handedness),
+      resourceIds: resourceIds.length ? resourceIds : [...DEFAULT_ORDER],
+      serviceIds: [service.id],
+    });
   }
-  return [...groups.values()];
+  return profiles.length ? profiles : [makeProfile("Standard lessons")];
 }
 
 function installStyles() {
@@ -100,23 +104,30 @@ function installStyles() {
     #optix-resource-modal{position:fixed;inset:0;z-index:10030;background:rgba(0,0,0,.62);display:grid;place-items:center;padding:20px;font-family:system-ui;color:#eef7ef}
     #optix-resource-modal .resource-panel{width:min(920px,100%);max-height:90vh;overflow:auto;background:#0b160f;border:1px solid rgba(255,255,255,.14);border-radius:18px;padding:20px;box-shadow:0 24px 80px rgba(0,0,0,.45)}
     #optix-resource-modal .resource-head,#optix-resource-modal .resource-foot,#optix-resource-modal .profile-head{display:flex;justify-content:space-between;align-items:center;gap:14px}
-    #optix-resource-modal h2{font-size:21px;margin:0} #optix-resource-modal h3{font-size:16px;margin:0}
+    #optix-resource-modal h2{font-size:21px;margin:0}
     #optix-resource-modal .resource-subtitle{font-size:12px;color:#9cad9f;margin-top:4px}
     #optix-resource-modal button{border:0;border-radius:9px;padding:9px 12px;cursor:pointer;font-weight:700}
-    #optix-resource-modal .secondary{background:#243129;color:#fff} #optix-resource-modal .primary{background:#27d66f;color:#061008}
-    #optix-resource-modal .danger{background:#4b2020;color:#ffd8d8} #optix-resource-modal .add-profile{margin:16px 0;background:#243129;color:#fff}
+    #optix-resource-modal .secondary{background:#243129;color:#fff}
+    #optix-resource-modal .primary{background:#27d66f;color:#061008}
+    #optix-resource-modal .danger{background:#4b2020;color:#ffd8d8}
+    #optix-resource-modal .add-profile{margin:16px 0;background:#243129;color:#fff}
     #optix-resource-modal .profile-card{border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:15px;margin:12px 0;background:rgba(255,255,255,.025)}
-    #optix-resource-modal .profile-name{width:min(420px,70vw);background:#142219;color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:9px;font-weight:700}
+    #optix-resource-modal .profile-name{width:min(360px,58vw);background:#142219;color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:9px;font-weight:700}
+    #optix-resource-modal .handedness{background:#142219;color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:9px}
     #optix-resource-modal .profile-grid{display:grid;grid-template-columns:minmax(250px,.9fr) minmax(280px,1.1fr);gap:18px;margin-top:14px}
     #optix-resource-modal .section-title{font-size:12px;color:#a9b7ac;margin-bottom:8px}
     #optix-resource-modal .bay-row{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:8px;padding:7px 8px;margin:5px 0;border-radius:9px;background:#142219}
-    #optix-resource-modal .bay-actions{display:flex;gap:5px} #optix-resource-modal .bay-actions button{padding:5px 8px;background:#26382c;color:#fff}
+    #optix-resource-modal .bay-actions{display:flex;gap:5px}
+    #optix-resource-modal .bay-actions button{padding:5px 8px;background:#26382c;color:#fff}
     #optix-resource-modal .bay-actions .remove-bay{background:#4b2020;color:#ffd8d8}
-    #optix-resource-modal .removed-bays{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px} #optix-resource-modal .removed-bays button{background:#26382c;color:#fff;padding:7px 9px}
-    #optix-resource-modal .service-list{display:grid;gap:7px} #optix-resource-modal .service-list label{display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px;background:#142219;font-size:13px}
-    #optix-resource-modal .resource-foot{justify-content:flex-end;margin-top:18px} #optix-resource-modal .status{font-size:12px;color:#a9b7ac;margin-right:auto}
+    #optix-resource-modal .removed-bays{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+    #optix-resource-modal .removed-bays button{background:#26382c;color:#fff;padding:7px 9px}
+    #optix-resource-modal .service-list{display:grid;gap:7px}
+    #optix-resource-modal .service-list label{display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px;background:#142219;font-size:13px}
+    #optix-resource-modal .resource-foot{justify-content:flex-end;margin-top:18px}
+    #optix-resource-modal .status{font-size:12px;color:#a9b7ac;margin-right:auto}
     #optix-resource-modal .empty-note{padding:18px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;color:#a9b7ac}
-    @media(max-width:720px){#optix-resource-modal .profile-grid{grid-template-columns:1fr}}
+    @media(max-width:720px){#optix-resource-modal .profile-grid{grid-template-columns:1fr}.profile-head{align-items:flex-start!important;flex-wrap:wrap}}
   `;
   document.head.appendChild(style);
 }
@@ -126,6 +137,10 @@ function renderProfile(profile: ResourceProfile, services: Service[]) {
   return `<section class="profile-card" data-profile-id="${esc(profile.id)}">
     <div class="profile-head">
       <input class="profile-name" value="${esc(profile.name)}" aria-label="Profile name">
+      <select class="handedness" aria-label="Player handedness">
+        <option value="standard"${profile.handedness === "standard" ? " selected" : ""}>Standard / any player</option>
+        <option value="left"${profile.handedness === "left" ? " selected" : ""}>Left-handed players</option>
+      </select>
       <button class="danger delete-profile" type="button">Delete profile</button>
     </div>
     <div class="profile-grid">
@@ -136,7 +151,7 @@ function renderProfile(profile: ResourceProfile, services: Service[]) {
         <div class="removed-bays">${removed.length ? removed.map((id) => `<button type="button" data-add-bay="${id}">+ ${esc(labelForBay(id))}</button>`).join("") : `<span class="resource-subtitle">All bays are available to this profile.</span>`}</div>
       </div>
       <div>
-        <div class="section-title">Apply this order to lesson types</div>
+        <div class="section-title">Apply this profile to lesson types</div>
         <div class="service-list">${services.map((service) => `<label><input type="checkbox" data-service-id="${esc(service.id)}"${profile.serviceIds.includes(service.id) ? " checked" : ""}> ${esc(service.name || service.id)}</label>`).join("")}</div>
       </div>
     </div>
@@ -151,13 +166,14 @@ async function openEditor() {
   modal.id = "optix-resource-modal";
 
   const render = () => {
-    modal.innerHTML = `<div class="resource-panel"><div class="resource-head"><div><h2>Resources</h2><div class="resource-subtitle">Create a bay order once, then apply it to the relevant lesson types.</div></div><button class="secondary close-resources">Close</button></div><button class="add-profile" type="button">+ New resource profile</button><div class="profiles">${profiles.length ? profiles.map((profile) => renderProfile(profile, services)).join("") : `<div class="empty-note">No resource profiles yet.</div>`}</div><div class="resource-foot"><span class="status"></span><button class="primary save-resources">Save resources</button></div></div>`;
+    modal.innerHTML = `<div class="resource-panel"><div class="resource-head"><div><h2>Resources</h2><div class="resource-subtitle">Create a bay order once, choose its player handedness, then apply it to lesson types.</div></div><button class="secondary close-resources">Close</button></div><button class="add-profile" type="button">+ New resource profile</button><div class="profiles">${profiles.length ? profiles.map((profile) => renderProfile(profile, services)).join("") : `<div class="empty-note">No resource profiles yet.</div>`}</div><div class="resource-foot"><span class="status"></span><button class="primary save-resources">Save resources</button></div></div>`;
   };
 
   const syncFromDom = () => {
     profiles = Array.from(modal.querySelectorAll<HTMLElement>(".profile-card")).map((card) => ({
       id: card.dataset.profileId || makeProfile().id,
       name: card.querySelector<HTMLInputElement>(".profile-name")?.value.trim() || "Resource profile",
+      handedness: card.querySelector<HTMLSelectElement>(".handedness")?.value === "left" ? "left" : "standard",
       resourceIds: Array.from(card.querySelectorAll<HTMLElement>(".bay-row")).map((row) => row.dataset.bayId || "").filter(Boolean),
       serviceIds: Array.from(card.querySelectorAll<HTMLInputElement>("[data-service-id]:checked")).map((input) => input.dataset.serviceId || "").filter(Boolean),
     }));
@@ -166,7 +182,7 @@ async function openEditor() {
   render();
   document.body.appendChild(modal);
 
-  modal.addEventListener("click", async (event) => {
+  modal.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     if (target === modal || target.closest(".close-resources")) {
       modal.remove();
@@ -192,7 +208,7 @@ async function openEditor() {
       const profile = profiles.find((item) => item.id === card.dataset.profileId);
       if (!profile) return;
       const index = profile.resourceIds.indexOf(row.dataset.bayId || "");
-      if (target.closest(".remove-bay")) profile.resourceIds.splice(index, 1);
+      if (target.closest(".remove-bay") && index >= 0) profile.resourceIds.splice(index, 1);
       if (target.closest(".move-up") && index > 0) [profile.resourceIds[index - 1], profile.resourceIds[index]] = [profile.resourceIds[index], profile.resourceIds[index - 1]];
       if (target.closest(".move-down") && index >= 0 && index < profile.resourceIds.length - 1) [profile.resourceIds[index + 1], profile.resourceIds[index]] = [profile.resourceIds[index], profile.resourceIds[index + 1]];
       render();
@@ -202,7 +218,8 @@ async function openEditor() {
     if (addBay) {
       syncFromDom();
       const profile = profiles.find((item) => item.id === card.dataset.profileId);
-      if (profile && !profile.resourceIds.includes(addBay.dataset.addBay || "")) profile.resourceIds.push(addBay.dataset.addBay || "");
+      const id = addBay.dataset.addBay || "";
+      if (profile && id && !profile.resourceIds.includes(id)) profile.resourceIds.push(id);
       render();
     }
   });
@@ -228,11 +245,12 @@ async function openEditor() {
     }
     const config = Object.fromEntries(services.map((service) => {
       const profile = profiles.find((item) => item.serviceIds.includes(service.id));
+      const isLeft = profile?.handedness === "left";
       return [service.id, {
         enabled: Boolean(profile),
-        leftHanded: false,
-        preferredResourceIds: profile?.resourceIds || [],
-        leftHandedResourceIds: [],
+        leftHanded: isLeft,
+        preferredResourceIds: profile && !isLeft ? profile.resourceIds : [],
+        leftHandedResourceIds: profile && isLeft ? profile.resourceIds : [],
       }];
     }));
     if (status) status.textContent = "Saving…";
@@ -248,11 +266,12 @@ async function openEditor() {
 
 function addResourcesMenuItem() {
   if (document.getElementById("clarity-resources-menu-item")) return;
-  const settingsButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === "Settings");
+  const settingsButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+    .find((button) => button.textContent?.trim() === "Settings");
   if (!settingsButton) return;
 
-  const candidateButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
-  const locations = candidateButtons.find((button) => button.textContent?.trim() === "Locations" && button.offsetParent !== null);
+  const locations = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+    .find((button) => button.textContent?.trim() === "Locations" && button.offsetParent !== null);
   if (!locations?.parentElement) return;
 
   const button = locations.cloneNode(true) as HTMLButtonElement;
