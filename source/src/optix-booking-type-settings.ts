@@ -1,9 +1,14 @@
 type Service = { id: string; name?: string };
-type ServiceConfig = {
-  enabled: boolean;
-  leftHanded: boolean;
-  preferredResourceIds: string[];
-  leftHandedResourceIds: string[];
+type ResourceProfile = {
+  id: string;
+  name: string;
+  resourceIds: string[];
+  serviceIds: string[];
+};
+
+type SavedState = {
+  config?: Record<string, any>;
+  profiles?: ResourceProfile[];
 };
 
 const BAYS = [
@@ -17,7 +22,6 @@ const BAYS = [
 ] as const;
 
 const DEFAULT_ORDER = BAYS.map(([id]) => id);
-const LEFT_HANDED_ORDER = ["600009", "600004", "600005", "600006", "600007", "600008", "600010"];
 
 function esc(value: unknown) {
   return String(value ?? "")
@@ -27,28 +31,17 @@ function esc(value: unknown) {
     .replaceAll('"', "&quot;");
 }
 
-function normaliseConfig(value: any): ServiceConfig {
-  return {
-    enabled: value?.enabled === true,
-    leftHanded: value?.leftHanded === true,
-    preferredResourceIds: Array.isArray(value?.preferredResourceIds) && value.preferredResourceIds.length
-      ? value.preferredResourceIds
-      : [...DEFAULT_ORDER],
-    leftHandedResourceIds: Array.isArray(value?.leftHandedResourceIds) && value.leftHandedResourceIds.length
-      ? value.leftHandedResourceIds
-      : [...LEFT_HANDED_ORDER],
-  };
+function labelForBay(id: string) {
+  return BAYS.find(([candidate]) => candidate === id)?.[1] || id;
 }
 
-function orderSelect(name: string, selected: string[]) {
-  const ordered = [...selected, ...DEFAULT_ORDER.filter((id) => !selected.includes(id))];
-  return `<div class="optix-order" data-order="${name}">${ordered.map((id, index) => {
-    const label = BAYS.find(([candidate]) => candidate === id)?.[1] || id;
-    return `<label><span>${index + 1}</span><select data-index="${index}">${DEFAULT_ORDER.map((candidate) => {
-      const candidateLabel = BAYS.find(([bayId]) => bayId === candidate)?.[1] || candidate;
-      return `<option value="${candidate}"${candidate === id ? " selected" : ""}>${candidateLabel}</option>`;
-    }).join("")}</select></label>`;
-  }).join("")}</div>`;
+function makeProfile(name = "New resource profile"): ResourceProfile {
+  return {
+    id: `resource-profile-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name,
+    resourceIds: [...DEFAULT_ORDER],
+    serviceIds: [],
+  };
 }
 
 async function loadServices(): Promise<Service[]> {
@@ -58,63 +51,188 @@ async function loadServices(): Promise<Service[]> {
   return Array.isArray(payload?.services) ? payload.services : [];
 }
 
-async function loadConfig() {
+async function loadState(): Promise<SavedState> {
   const response = await fetch("/api/optix-booking-type-settings", { credentials: "same-origin" });
   if (!response.ok) return {};
-  const payload = await response.json();
-  return payload?.config && typeof payload.config === "object" ? payload.config : {};
+  return response.json();
 }
 
-function collectOrder(card: HTMLElement, key: string) {
-  return Array.from(card.querySelectorAll<HTMLSelectElement>(`.optix-order[data-order="${key}"] select`))
-    .map((select) => select.value)
-    .filter((id, index, values) => id && values.indexOf(id) === index);
+function migrateProfiles(services: Service[], saved: SavedState): ResourceProfile[] {
+  if (Array.isArray(saved.profiles) && saved.profiles.length) {
+    return saved.profiles.map((profile) => ({
+      id: String(profile.id || makeProfile().id),
+      name: String(profile.name || "Resource profile"),
+      resourceIds: Array.isArray(profile.resourceIds) ? profile.resourceIds.filter((id) => DEFAULT_ORDER.includes(id)) : [],
+      serviceIds: Array.isArray(profile.serviceIds) ? profile.serviceIds.map(String) : [],
+    })).filter((profile) => profile.resourceIds.length);
+  }
+
+  const config = saved.config || {};
+  const enabled = services.filter((service) => config?.[service.id]?.enabled === true);
+  if (!enabled.length) return [makeProfile("Standard lessons")];
+
+  const groups = new Map<string, ResourceProfile>();
+  for (const service of enabled) {
+    const order = Array.isArray(config?.[service.id]?.preferredResourceIds)
+      ? config[service.id].preferredResourceIds.filter((id: string) => DEFAULT_ORDER.includes(id))
+      : [...DEFAULT_ORDER];
+    const key = order.join(",");
+    const existing = groups.get(key);
+    if (existing) {
+      existing.serviceIds.push(service.id);
+    } else {
+      groups.set(key, {
+        ...makeProfile(groups.size ? `Resource profile ${groups.size + 1}` : "Standard lessons"),
+        resourceIds: order.length ? order : [...DEFAULT_ORDER],
+        serviceIds: [service.id],
+      });
+    }
+  }
+  return [...groups.values()];
 }
 
 function installStyles() {
-  if (document.getElementById("optix-booking-type-styles")) return;
+  if (document.getElementById("optix-resource-styles")) return;
   const style = document.createElement("style");
-  style.id = "optix-booking-type-styles";
+  style.id = "optix-resource-styles";
   style.textContent = `
-    #optix-booking-type-button{position:fixed;right:22px;bottom:22px;z-index:10020;border:1px solid rgba(255,255,255,.18);border-radius:999px;padding:10px 14px;background:#102117;color:#fff;font:600 13px/1 system-ui;box-shadow:0 10px 30px rgba(0,0,0,.28);cursor:pointer}
-    #optix-booking-type-modal{position:fixed;inset:0;z-index:10030;background:rgba(0,0,0,.65);display:grid;place-items:center;padding:20px;font-family:system-ui;color:#eef7ef}
-    #optix-booking-type-modal .optix-panel{width:min(760px,100%);max-height:88vh;overflow:auto;background:#0b160f;border:1px solid rgba(255,255,255,.14);border-radius:18px;padding:20px;box-shadow:0 24px 80px rgba(0,0,0,.45)}
-    #optix-booking-type-modal .optix-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:14px}
-    #optix-booking-type-modal h2{font-size:20px;margin:0} #optix-booking-type-modal h3{font-size:15px;margin:0 0 12px}
-    #optix-booking-type-modal button{border:0;border-radius:9px;padding:9px 12px;cursor:pointer;font-weight:700}
-    #optix-booking-type-modal .optix-close{background:#243129;color:#fff} #optix-booking-type-modal .optix-save{background:#27d66f;color:#061008}
-    #optix-booking-type-modal .optix-card{border:1px solid rgba(255,255,255,.12);border-radius:13px;padding:14px;margin:10px 0;background:rgba(255,255,255,.025)}
-    #optix-booking-type-modal .optix-switches{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px} #optix-booking-type-modal .optix-switches label{display:flex;gap:8px;align-items:center;font-size:13px}
-    #optix-booking-type-modal .optix-columns{display:grid;grid-template-columns:1fr 1fr;gap:14px} #optix-booking-type-modal .optix-column-title{font-size:12px;color:#a9b7ac;margin-bottom:7px}
-    #optix-booking-type-modal .optix-order label{display:flex;align-items:center;gap:7px;margin:5px 0} #optix-booking-type-modal .optix-order span{width:18px;color:#8fa096;font-size:11px}
-    #optix-booking-type-modal select{width:100%;background:#142219;color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:7px}
-    #optix-booking-type-modal .optix-foot{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:16px} #optix-booking-type-modal .optix-status{font-size:12px;color:#a9b7ac}
-    @media(max-width:640px){#optix-booking-type-modal .optix-columns{grid-template-columns:1fr}}
+    #clarity-resources-menu-item{font:inherit}
+    #optix-resource-modal{position:fixed;inset:0;z-index:10030;background:rgba(0,0,0,.62);display:grid;place-items:center;padding:20px;font-family:system-ui;color:#eef7ef}
+    #optix-resource-modal .resource-panel{width:min(920px,100%);max-height:90vh;overflow:auto;background:#0b160f;border:1px solid rgba(255,255,255,.14);border-radius:18px;padding:20px;box-shadow:0 24px 80px rgba(0,0,0,.45)}
+    #optix-resource-modal .resource-head,#optix-resource-modal .resource-foot,#optix-resource-modal .profile-head{display:flex;justify-content:space-between;align-items:center;gap:14px}
+    #optix-resource-modal h2{font-size:21px;margin:0} #optix-resource-modal h3{font-size:16px;margin:0}
+    #optix-resource-modal .resource-subtitle{font-size:12px;color:#9cad9f;margin-top:4px}
+    #optix-resource-modal button{border:0;border-radius:9px;padding:9px 12px;cursor:pointer;font-weight:700}
+    #optix-resource-modal .secondary{background:#243129;color:#fff} #optix-resource-modal .primary{background:#27d66f;color:#061008}
+    #optix-resource-modal .danger{background:#4b2020;color:#ffd8d8} #optix-resource-modal .add-profile{margin:16px 0;background:#243129;color:#fff}
+    #optix-resource-modal .profile-card{border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:15px;margin:12px 0;background:rgba(255,255,255,.025)}
+    #optix-resource-modal .profile-name{width:min(420px,70vw);background:#142219;color:#fff;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:9px;font-weight:700}
+    #optix-resource-modal .profile-grid{display:grid;grid-template-columns:minmax(250px,.9fr) minmax(280px,1.1fr);gap:18px;margin-top:14px}
+    #optix-resource-modal .section-title{font-size:12px;color:#a9b7ac;margin-bottom:8px}
+    #optix-resource-modal .bay-row{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:8px;padding:7px 8px;margin:5px 0;border-radius:9px;background:#142219}
+    #optix-resource-modal .bay-actions{display:flex;gap:5px} #optix-resource-modal .bay-actions button{padding:5px 8px;background:#26382c;color:#fff}
+    #optix-resource-modal .bay-actions .remove-bay{background:#4b2020;color:#ffd8d8}
+    #optix-resource-modal .removed-bays{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px} #optix-resource-modal .removed-bays button{background:#26382c;color:#fff;padding:7px 9px}
+    #optix-resource-modal .service-list{display:grid;gap:7px} #optix-resource-modal .service-list label{display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px;background:#142219;font-size:13px}
+    #optix-resource-modal .resource-foot{justify-content:flex-end;margin-top:18px} #optix-resource-modal .status{font-size:12px;color:#a9b7ac;margin-right:auto}
+    #optix-resource-modal .empty-note{padding:18px;border:1px dashed rgba(255,255,255,.18);border-radius:12px;color:#a9b7ac}
+    @media(max-width:720px){#optix-resource-modal .profile-grid{grid-template-columns:1fr}}
   `;
   document.head.appendChild(style);
 }
 
+function renderProfile(profile: ResourceProfile, services: Service[]) {
+  const removed = DEFAULT_ORDER.filter((id) => !profile.resourceIds.includes(id));
+  return `<section class="profile-card" data-profile-id="${esc(profile.id)}">
+    <div class="profile-head">
+      <input class="profile-name" value="${esc(profile.name)}" aria-label="Profile name">
+      <button class="danger delete-profile" type="button">Delete profile</button>
+    </div>
+    <div class="profile-grid">
+      <div>
+        <div class="section-title">Bay order — remove a bay to exclude it completely</div>
+        <div class="bay-list">${profile.resourceIds.map((id, index) => `<div class="bay-row" data-bay-id="${id}"><span>${index + 1}</span><strong>${esc(labelForBay(id))}</strong><div class="bay-actions"><button type="button" class="move-up" aria-label="Move up">↑</button><button type="button" class="move-down" aria-label="Move down">↓</button><button type="button" class="remove-bay">Remove</button></div></div>`).join("")}</div>
+        <div class="section-title" style="margin-top:12px">Removed bays</div>
+        <div class="removed-bays">${removed.length ? removed.map((id) => `<button type="button" data-add-bay="${id}">+ ${esc(labelForBay(id))}</button>`).join("") : `<span class="resource-subtitle">All bays are available to this profile.</span>`}</div>
+      </div>
+      <div>
+        <div class="section-title">Apply this order to lesson types</div>
+        <div class="service-list">${services.map((service) => `<label><input type="checkbox" data-service-id="${esc(service.id)}"${profile.serviceIds.includes(service.id) ? " checked" : ""}> ${esc(service.name || service.id)}</label>`).join("")}</div>
+      </div>
+    </div>
+  </section>`;
+}
+
 async function openEditor() {
-  if (document.getElementById("optix-booking-type-modal")) return;
-  const [services, saved] = await Promise.all([loadServices(), loadConfig()]);
+  if (document.getElementById("optix-resource-modal")) return;
+  const [services, saved] = await Promise.all([loadServices(), loadState()]);
+  let profiles = migrateProfiles(services, saved);
   const modal = document.createElement("div");
-  modal.id = "optix-booking-type-modal";
-  modal.innerHTML = `<div class="optix-panel"><div class="optix-head"><div><h2>Optix bay preferences</h2><div style="font-size:12px;color:#9cad9f;margin-top:4px">Booking type settings</div></div><button class="optix-close">Close</button></div>${services.map((service) => {
-    const config = normaliseConfig(saved?.[service.id]);
-    return `<section class="optix-card" data-service-id="${esc(service.id)}"><h3>${esc(service.name || service.id)}</h3><div class="optix-switches"><label><input type="checkbox" data-field="enabled"${config.enabled ? " checked" : ""}> Book an Optix bay</label><label><input type="checkbox" data-field="leftHanded"${config.leftHanded ? " checked" : ""}> Left-handed booking type</label></div><div class="optix-columns"><div><div class="optix-column-title">Preferred bay order</div>${orderSelect("preferredResourceIds", config.preferredResourceIds)}</div><div><div class="optix-column-title">Left-handed bay order</div>${orderSelect("leftHandedResourceIds", config.leftHandedResourceIds)}</div></div></section>`;
-  }).join("")}<div class="optix-foot"><span class="optix-status"></span><button class="optix-save">Save bay preferences</button></div></div>`;
+  modal.id = "optix-resource-modal";
+
+  const render = () => {
+    modal.innerHTML = `<div class="resource-panel"><div class="resource-head"><div><h2>Resources</h2><div class="resource-subtitle">Create a bay order once, then apply it to the relevant lesson types.</div></div><button class="secondary close-resources">Close</button></div><button class="add-profile" type="button">+ New resource profile</button><div class="profiles">${profiles.length ? profiles.map((profile) => renderProfile(profile, services)).join("") : `<div class="empty-note">No resource profiles yet.</div>`}</div><div class="resource-foot"><span class="status"></span><button class="primary save-resources">Save resources</button></div></div>`;
+  };
+
+  const syncFromDom = () => {
+    profiles = Array.from(modal.querySelectorAll<HTMLElement>(".profile-card")).map((card) => ({
+      id: card.dataset.profileId || makeProfile().id,
+      name: card.querySelector<HTMLInputElement>(".profile-name")?.value.trim() || "Resource profile",
+      resourceIds: Array.from(card.querySelectorAll<HTMLElement>(".bay-row")).map((row) => row.dataset.bayId || "").filter(Boolean),
+      serviceIds: Array.from(card.querySelectorAll<HTMLInputElement>("[data-service-id]:checked")).map((input) => input.dataset.serviceId || "").filter(Boolean),
+    }));
+  };
+
+  render();
   document.body.appendChild(modal);
-  modal.querySelector<HTMLButtonElement>(".optix-close")?.addEventListener("click", () => modal.remove());
-  modal.addEventListener("click", (event) => { if (event.target === modal) modal.remove(); });
-  modal.querySelector<HTMLButtonElement>(".optix-save")?.addEventListener("click", async () => {
-    const status = modal.querySelector<HTMLElement>(".optix-status");
-    const config = Object.fromEntries(Array.from(modal.querySelectorAll<HTMLElement>(".optix-card")).map((card) => {
-      const serviceId = card.dataset.serviceId || "";
-      return [serviceId, {
-        enabled: card.querySelector<HTMLInputElement>('[data-field="enabled"]')?.checked === true,
-        leftHanded: card.querySelector<HTMLInputElement>('[data-field="leftHanded"]')?.checked === true,
-        preferredResourceIds: collectOrder(card, "preferredResourceIds"),
-        leftHandedResourceIds: collectOrder(card, "leftHandedResourceIds"),
+
+  modal.addEventListener("click", async (event) => {
+    const target = event.target as HTMLElement;
+    if (target === modal || target.closest(".close-resources")) {
+      modal.remove();
+      return;
+    }
+    if (target.closest(".add-profile")) {
+      syncFromDom();
+      profiles.push(makeProfile(`Resource profile ${profiles.length + 1}`));
+      render();
+      return;
+    }
+    const card = target.closest<HTMLElement>(".profile-card");
+    if (!card) return;
+    if (target.closest(".delete-profile")) {
+      syncFromDom();
+      profiles = profiles.filter((profile) => profile.id !== card.dataset.profileId);
+      render();
+      return;
+    }
+    const row = target.closest<HTMLElement>(".bay-row");
+    if (row && (target.closest(".move-up") || target.closest(".move-down") || target.closest(".remove-bay"))) {
+      syncFromDom();
+      const profile = profiles.find((item) => item.id === card.dataset.profileId);
+      if (!profile) return;
+      const index = profile.resourceIds.indexOf(row.dataset.bayId || "");
+      if (target.closest(".remove-bay")) profile.resourceIds.splice(index, 1);
+      if (target.closest(".move-up") && index > 0) [profile.resourceIds[index - 1], profile.resourceIds[index]] = [profile.resourceIds[index], profile.resourceIds[index - 1]];
+      if (target.closest(".move-down") && index >= 0 && index < profile.resourceIds.length - 1) [profile.resourceIds[index + 1], profile.resourceIds[index]] = [profile.resourceIds[index], profile.resourceIds[index + 1]];
+      render();
+      return;
+    }
+    const addBay = target.closest<HTMLButtonElement>("[data-add-bay]");
+    if (addBay) {
+      syncFromDom();
+      const profile = profiles.find((item) => item.id === card.dataset.profileId);
+      if (profile && !profile.resourceIds.includes(addBay.dataset.addBay || "")) profile.resourceIds.push(addBay.dataset.addBay || "");
+      render();
+    }
+  });
+
+  modal.addEventListener("click", async (event) => {
+    const target = event.target as HTMLElement;
+    if (!target.closest(".save-resources")) return;
+    syncFromDom();
+    const status = modal.querySelector<HTMLElement>(".status");
+    if (profiles.some((profile) => !profile.resourceIds.length)) {
+      if (status) status.textContent = "Every profile needs at least one bay.";
+      return;
+    }
+    const assigned = new Map<string, string>();
+    for (const profile of profiles) {
+      for (const serviceId of profile.serviceIds) {
+        if (assigned.has(serviceId)) {
+          if (status) status.textContent = "A lesson type can only belong to one resource profile.";
+          return;
+        }
+        assigned.set(serviceId, profile.id);
+      }
+    }
+    const config = Object.fromEntries(services.map((service) => {
+      const profile = profiles.find((item) => item.serviceIds.includes(service.id));
+      return [service.id, {
+        enabled: Boolean(profile),
+        leftHanded: false,
+        preferredResourceIds: profile?.resourceIds || [],
+        leftHandedResourceIds: [],
       }];
     }));
     if (status) status.textContent = "Saving…";
@@ -122,19 +240,34 @@ async function openEditor() {
       method: "PUT",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ config }),
+      body: JSON.stringify({ profiles, config }),
     });
     if (status) status.textContent = response.ok ? "Saved" : "Could not save";
   });
 }
 
+function addResourcesMenuItem() {
+  if (document.getElementById("clarity-resources-menu-item")) return;
+  const settingsButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === "Settings");
+  if (!settingsButton) return;
+
+  const candidateButtons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+  const locations = candidateButtons.find((button) => button.textContent?.trim() === "Locations" && button.offsetParent !== null);
+  if (!locations?.parentElement) return;
+
+  const button = locations.cloneNode(true) as HTMLButtonElement;
+  button.id = "clarity-resources-menu-item";
+  button.type = "button";
+  button.textContent = "Resources";
+  button.removeAttribute("aria-current");
+  button.addEventListener("click", openEditor);
+  locations.insertAdjacentElement("afterend", button);
+}
+
 export function installOptixBookingTypeSettings() {
   if (typeof window === "undefined") return;
   installStyles();
-  const button = document.createElement("button");
-  button.id = "optix-booking-type-button";
-  button.type = "button";
-  button.textContent = "Optix bays";
-  button.addEventListener("click", openEditor);
-  document.body.appendChild(button);
+  addResourcesMenuItem();
+  const observer = new MutationObserver(addResourcesMenuItem);
+  observer.observe(document.body, { childList: true, subtree: true });
 }
