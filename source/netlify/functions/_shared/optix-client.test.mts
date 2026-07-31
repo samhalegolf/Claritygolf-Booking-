@@ -32,8 +32,9 @@ test("classifies unavailable resources as a booking conflict", () => {
   assert.equal(error.retryable, false);
 });
 
-test("keeps temporary remote failures retryable", () => {
-  const error = classifyOptixFailure({ status: 503, responseText: "Service unavailable" });
+test("keeps generic server failures retryable", () => {
+  const error = classifyOptixFailure({ status: 503, responseText: "Upstream service failed" });
 
-  assert.equal(error.code, "resource_conflict");
+  assert.equal(error.code, "remote_error");
+  assert.equal(error.retryable, true);
 });
