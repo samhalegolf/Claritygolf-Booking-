@@ -2,6 +2,7 @@ import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
 const SETTINGS_KEY = "optixBookingTypeConfigJson";
+const PROFILES_KEY = "optixResourceProfilesJson";
 const SESSION_COOKIE = "clarity_session";
 const KNOWN_RESOURCE_IDS = new Set([
   "600009", // Bay #1
@@ -79,13 +80,25 @@ function cleanConfig(value: unknown) {
         if (!id) return null;
         return [id, {
           enabled: raw?.enabled === true,
-          leftHanded: raw?.leftHanded === true,
+          leftHanded: false,
           preferredResourceIds: cleanIds(raw?.preferredResourceIds),
-          leftHandedResourceIds: cleanIds(raw?.leftHandedResourceIds),
+          leftHandedResourceIds: [],
         }];
       })
       .filter(Boolean) as Array<[string, unknown]>,
   );
+}
+
+function cleanProfiles(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 30).map((raw: any, index) => ({
+    id: String(raw?.id || `profile-${index + 1}`).trim().slice(0, 80),
+    name: String(raw?.name || `Resource profile ${index + 1}`).trim().slice(0, 120),
+    resourceIds: cleanIds(raw?.resourceIds),
+    serviceIds: Array.isArray(raw?.serviceIds)
+      ? Array.from(new Set(raw.serviceIds.map((id: unknown) => String(id || "").trim()).filter(Boolean))).slice(0, 200)
+      : [],
+  })).filter((profile) => profile.id && profile.name && profile.resourceIds.length);
 }
 
 async function ensureSettingsTable() {
@@ -98,27 +111,47 @@ async function ensureSettingsTable() {
   `;
 }
 
-async function readConfig() {
+async function readSetting(key: string) {
   await ensureSettingsTable();
-  const rows = await db().sql`SELECT value FROM settings WHERE key = ${SETTINGS_KEY}`;
-  try {
-    return cleanConfig(JSON.parse(rows[0]?.value || "{}"));
-  } catch {
-    return {};
-  }
+  const rows = await db().sql`SELECT value FROM settings WHERE key = ${key}`;
+  return rows[0]?.value || "";
 }
 
-async function writeConfig(value: unknown) {
-  const config = cleanConfig(value);
+async function readState() {
+  let config = {};
+  let profiles: any[] = [];
+  try {
+    config = cleanConfig(JSON.parse(await readSetting(SETTINGS_KEY) || "{}"));
+  } catch {
+    config = {};
+  }
+  try {
+    profiles = cleanProfiles(JSON.parse(await readSetting(PROFILES_KEY) || "[]"));
+  } catch {
+    profiles = [];
+  }
+  return { config, profiles };
+}
+
+async function writeSetting(key: string, value: unknown) {
   await ensureSettingsTable();
   await db().sql`
     INSERT INTO settings (key, value, updated_at)
-    VALUES (${SETTINGS_KEY}, ${JSON.stringify(config)}, NOW())
+    VALUES (${key}, ${JSON.stringify(value)}, NOW())
     ON CONFLICT (key) DO UPDATE
       SET value = EXCLUDED.value,
           updated_at = EXCLUDED.updated_at
   `;
-  return config;
+}
+
+async function writeState(value: any) {
+  const profiles = cleanProfiles(value?.profiles);
+  const config = cleanConfig(value?.config);
+  await Promise.all([
+    writeSetting(PROFILES_KEY, profiles),
+    writeSetting(SETTINGS_KEY, config),
+  ]);
+  return { config, profiles };
 }
 
 export default async function handler(req: Request) {
@@ -126,11 +159,11 @@ export default async function handler(req: Request) {
     if (!(await requireAdmin(req))) {
       return json({ error: "unauthorized", message: "Admin login required." }, 401);
     }
-    if (req.method === "GET") return json({ config: await readConfig() });
+    if (req.method === "GET") return json(await readState());
     if (req.method === "PUT") {
       const raw = await req.text();
       const body = raw ? JSON.parse(raw) : {};
-      return json({ config: await writeConfig(body?.config || body) });
+      return json(await writeState(body));
     }
     return json({ error: "method_not_allowed" }, 405);
   } catch (error) {
