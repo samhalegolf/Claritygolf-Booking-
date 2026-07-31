@@ -5,13 +5,13 @@ const SETTINGS_KEY = "optixBookingTypeConfigJson";
 const PROFILES_KEY = "optixResourceProfilesJson";
 const SESSION_COOKIE = "clarity_session";
 const KNOWN_RESOURCE_IDS = new Set([
-  "600009", // Bay #1
-  "600004", // Bay #2
-  "600005", // Bay #3
-  "600006", // Bay #4
-  "600007", // Bay #5
-  "600008", // Bay #6
-  "600010", // Bay #7
+  "600009",
+  "600004",
+  "600005",
+  "600006",
+  "600007",
+  "600008",
+  "600010",
 ]);
 
 function db() {
@@ -60,13 +60,11 @@ async function requireAdmin(req: Request) {
 
 function cleanIds(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return Array.from(
-    new Set(
-      value
-        .map((candidate) => String(candidate || "").trim())
-        .filter((candidate) => KNOWN_RESOURCE_IDS.has(candidate)),
-    ),
-  ).slice(0, 7);
+  return Array.from(new Set(
+    value
+      .map((candidate) => String(candidate || "").trim())
+      .filter((candidate) => KNOWN_RESOURCE_IDS.has(candidate)),
+  )).slice(0, 7);
 }
 
 function cleanConfig(value: unknown) {
@@ -78,11 +76,12 @@ function cleanConfig(value: unknown) {
       .map(([serviceId, raw]) => {
         const id = String(serviceId || "").trim().slice(0, 120);
         if (!id) return null;
+        const leftHanded = raw?.leftHanded === true;
         return [id, {
           enabled: raw?.enabled === true,
-          leftHanded: false,
-          preferredResourceIds: cleanIds(raw?.preferredResourceIds),
-          leftHandedResourceIds: [],
+          leftHanded,
+          preferredResourceIds: leftHanded ? [] : cleanIds(raw?.preferredResourceIds),
+          leftHandedResourceIds: leftHanded ? cleanIds(raw?.leftHandedResourceIds) : [],
         }];
       })
       .filter(Boolean) as Array<[string, unknown]>,
@@ -94,9 +93,14 @@ function cleanProfiles(value: unknown) {
   return value.slice(0, 30).map((raw: any, index) => ({
     id: String(raw?.id || `profile-${index + 1}`).trim().slice(0, 80),
     name: String(raw?.name || `Resource profile ${index + 1}`).trim().slice(0, 120),
+    handedness: raw?.handedness === "left" ? "left" : "standard",
     resourceIds: cleanIds(raw?.resourceIds),
     serviceIds: Array.isArray(raw?.serviceIds)
-      ? Array.from(new Set(raw.serviceIds.map((id: unknown) => String(id || "").trim()).filter(Boolean))).slice(0, 200)
+      ? Array.from(new Set(
+          raw.serviceIds
+            .map((id: unknown) => String(id || "").trim())
+            .filter(Boolean),
+        )).slice(0, 200)
       : [],
   })).filter((profile) => profile.id && profile.name && profile.resourceIds.length);
 }
