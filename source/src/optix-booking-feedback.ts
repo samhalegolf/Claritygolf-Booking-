@@ -77,17 +77,51 @@ function scoreRecord(record: OptixStatusRecord, cardText: string) {
   return score;
 }
 
-function findEmailAnchor(card: HTMLElement) {
-  const candidates = Array.from(card.querySelectorAll<HTMLElement>("button,[role='tab'],a"));
-  const emailControls = candidates.filter((node) => /email/i.test(node.textContent || ""));
-  if (!emailControls.length) return null;
-  const last = emailControls[emailControls.length - 1];
-  return last.parentElement || last;
+function findBookingRecordsAnchor(card: HTMLElement) {
+  const candidates = Array.from(card.querySelectorAll<HTMLElement>("button,[role='tab'],a,h1,h2,h3,h4,h5,h6,div,span,p"));
+  const exact = candidates.find((node) => /^booking records$/i.test((node.textContent || "").trim()));
+  if (exact) return exact.parentElement || exact;
+
+  const resend = candidates.find((node) => /^resend confirmation$/i.test((node.textContent || "").trim()));
+  if (resend) return resend.parentElement || resend;
+
+  const empty = candidates.find((node) => /^no email records$/i.test((node.textContent || "").trim()));
+  if (empty) return empty.parentElement || empty;
+
+  return null;
+}
+
+function findBookingCard(anchor: HTMLElement) {
+  const explicit = anchor.closest<HTMLElement>(
+    "[role='dialog'],[aria-modal='true'],.modal,.drawer,.sheet,.appointment-card,.booking-card,aside",
+  );
+  if (explicit) return explicit;
+
+  let node: HTMLElement | null = anchor;
+  while (node && node !== document.body) {
+    const text = node.textContent || "";
+    if (/booking records/i.test(text) && /resend confirmation|no email records/i.test(text)) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function findOpenBookingCards() {
+  const anchors = Array.from(
+    document.querySelectorAll<HTMLElement>("button,[role='tab'],a,h1,h2,h3,h4,h5,h6,div,span,p"),
+  ).filter((node) => /^(booking records|resend confirmation|no email records)$/i.test((node.textContent || "").trim()));
+
+  const cards = new Set<HTMLElement>();
+  for (const anchor of anchors) {
+    const card = findBookingCard(anchor);
+    if (card && findBookingRecordsAnchor(card)) cards.add(card);
+  }
+  return Array.from(cards);
 }
 
 function renderPanel(card: HTMLElement, record: OptixStatusRecord | null) {
   const existing = card.querySelector<HTMLElement>(".optix-booking-feedback");
-  const anchor = findEmailAnchor(card);
+  const anchor = findBookingRecordsAnchor(card);
   if (!anchor) return;
 
   const panel = existing || document.createElement("section");
@@ -132,8 +166,7 @@ async function refreshPanels(runReconcile = false) {
     }).catch(() => null);
   }
   const records = await loadRecords();
-  const cards = Array.from(document.querySelectorAll<HTMLElement>("[role='dialog'],.modal,.appointment-card,.booking-card"))
-    .filter((card) => findEmailAnchor(card));
+  const cards = findOpenBookingCards();
   for (const card of cards) {
     const ranked = records
       .map((record) => ({ record, score: scoreRecord(record, card.textContent || "") }))
