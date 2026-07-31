@@ -4,6 +4,7 @@ import App from "./App";
 import PlayerPortal, { isPlayerPortalMode, isBookingHandoff } from "./modules/player-portal/PlayerPortal";
 import { installOptixBookingTypeSettings } from "./optix-booking-type-settings";
 import { installOptixBookingFeedback } from "./optix-booking-feedback";
+import { installOptixBookingMutationSync } from "./optix-booking-mutation-sync";
 import "./styles.css";
 
 // The player portal is a separate app personality (players.claritygolf.app or
@@ -23,6 +24,14 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>{selectRoot()}</StrictMode>,
 );
 
+// Every App booking surface, including the public/client booking hand-off,
+// triggers Optix immediately after a successful booking mutation. This module
+// adds no UI on the client route.
+if (!isPlayerPortalMode()) {
+  installOptixBookingMutationSync();
+}
+
+// Resource configuration and booking feedback remain admin-only.
 if (!isPlayerPortalMode() && !isBookingHandoff()) {
   installOptixBookingTypeSettings();
   installOptixBookingFeedback();
