@@ -261,9 +261,6 @@ export async function reconcileOptixBookings() {
     await saveSyncRecord(next);
     results.push(next);
 
-    // Once the token is known to be expired, stop hammering Optix for every
-    // remaining appointment. The next scheduled run will retry after the
-    // Netlify environment variable is replaced.
     if (next.syncStatus === "token_expired") break;
   }
 
@@ -317,6 +314,9 @@ export default async function handler(req: Request) {
   }
 }
 
+// Immediate booking mutations are the primary trigger. This slower audit is
+// only a safety net for changes made directly in Optix, such as a resource
+// cancellation or a bay becoming unavailable.
 export const config = {
-  schedule: "* * * * *",
+  schedule: "*/30 * * * *",
 };
