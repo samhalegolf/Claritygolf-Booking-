@@ -62,7 +62,7 @@ async function loadState(): Promise<SavedState> {
 
 function migrateProfiles(services: Service[], saved: SavedState): ResourceProfile[] {
   if (Array.isArray(saved.profiles) && saved.profiles.length) {
-    return saved.profiles.map((profile) => ({
+    return saved.profiles.map((profile): ResourceProfile => ({
       id: String(profile.id || makeProfile().id),
       name: String(profile.name || "Resource profile"),
       handedness: profile.handedness === "left" ? "left" : "standard",
@@ -170,7 +170,7 @@ async function openEditor() {
   };
 
   const syncFromDom = () => {
-    profiles = Array.from(modal.querySelectorAll<HTMLElement>(".profile-card")).map((card) => ({
+    profiles = Array.from(modal.querySelectorAll<HTMLElement>(".profile-card")).map((card): ResourceProfile => ({
       id: card.dataset.profileId || makeProfile().id,
       name: card.querySelector<HTMLInputElement>(".profile-name")?.value.trim() || "Resource profile",
       handedness: card.querySelector<HTMLSelectElement>(".handedness")?.value === "left" ? "left" : "standard",
