@@ -42,6 +42,7 @@ export async function reconcileOptixAppointmentWithAutoSelect(input: {
   existing: OptixSyncRecord | null;
   config: ReconcileConfig;
   bookingType?: BookingTypeConfig | null;
+  forceRetry?: boolean;
 }): Promise<OptixSyncRecord> {
   const bookingType = input.bookingType || {};
   const baseRequest = buildOptixAppointmentInput(input.appointment, input.existing, input.config);
@@ -98,6 +99,17 @@ export async function reconcileOptixAppointmentWithAutoSelect(input: {
     const request = { ...baseRequest, resourceIds: [resourceId] };
     const fingerprint = optixAppointmentFingerprint(request);
     if (input.existing?.syncStatus === "synced" && input.existing.fingerprint === fingerprint) {
+      return input.existing;
+    }
+    // A failed booking with unchanged appointment details must not be retried by
+    // every unrelated booking mutation or the scheduled safety audit. It stays
+    // failed until the appointment/config changes, or the coach explicitly
+    // presses Retry (forceRetry=true).
+    if (
+      !input.forceRetry &&
+      input.existing?.syncStatus === "failed" &&
+      input.existing.fingerprint === fingerprint
+    ) {
       return input.existing;
     }
     try {
