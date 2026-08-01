@@ -14,8 +14,10 @@ type OptixStatusRecord = {
   updatedAt: string | null;
 };
 
+const OPTIX_RECONCILE_EVENT = "clarity:optix-reconcile-complete";
+
 const STATUS_LABELS: Record<string, string> = {
-  pending: "Waiting to sync",
+  pending: "Booking bay…",
   synced: "Booked in Optix",
   failed: "Optix booking failed",
   token_expired: "Optix token expired",
@@ -127,8 +129,8 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord | null) {
   const panel = existing || document.createElement("section");
   panel.className = "optix-booking-feedback";
   const status = record?.syncStatus || "pending";
-  const label = STATUS_LABELS[status] || "Waiting to sync";
-  const bay = record?.bayName || (status === "pending" ? "Bay not assigned yet" : "No bay assigned");
+  const label = STATUS_LABELS[status] || "Booking bay…";
+  const bay = record?.bayName || (status === "pending" ? "Assigning bay" : "No bay assigned");
   const lastChecked = record?.lastSyncedAt || record?.lastAttemptedAt || record?.updatedAt || null;
   const showRetry = status === "failed" || status === "token_expired";
 
@@ -185,6 +187,7 @@ export function installOptixBookingFeedback() {
     if (target.closest("[data-optix-refresh]")) void refreshPanels(false);
     if (target.closest("[data-optix-retry]")) void refreshPanels(true);
   });
+  window.addEventListener(OPTIX_RECONCILE_EVENT, () => void refreshPanels(false));
   window.setInterval(() => void refreshPanels(false), 30000);
   void refreshPanels(false);
 }

@@ -42,6 +42,8 @@ export const config: Config = {
     "/api/locations",
     "/api/notes",
     "/api/notification-history",
+    "/api/optix-booking-reconcile",
+    "/api/optix-booking-status",
     "/api/optix-booking-type-settings",
     "/api/people",
     "/api/people/import",
