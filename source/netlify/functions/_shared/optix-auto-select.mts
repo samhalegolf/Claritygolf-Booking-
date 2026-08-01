@@ -85,6 +85,13 @@ export async function reconcileOptixAppointmentWithAutoSelect(input: {
     }
   }
 
+  // Any failed booking is terminal until a coach explicitly retries this exact
+  // appointment. Appointment edits, scheduled reconciliation, page loads and
+  // unrelated booking saves must never unlock another Optix create request.
+  if (!input.forceRetry && input.existing?.syncStatus === "failed") {
+    return input.existing;
+  }
+
   const candidates = candidateOptixResourceIds({
     bookingType,
     existing: input.existing,
@@ -99,17 +106,6 @@ export async function reconcileOptixAppointmentWithAutoSelect(input: {
     const request = { ...baseRequest, resourceIds: [resourceId] };
     const fingerprint = optixAppointmentFingerprint(request);
     if (input.existing?.syncStatus === "synced" && input.existing.fingerprint === fingerprint) {
-      return input.existing;
-    }
-    // A failed booking with unchanged appointment details must not be retried by
-    // every unrelated booking mutation or the scheduled safety audit. It stays
-    // failed until the appointment/config changes, or the coach explicitly
-    // presses Retry (forceRetry=true).
-    if (
-      !input.forceRetry &&
-      input.existing?.syncStatus === "failed" &&
-      input.existing.fingerprint === fingerprint
-    ) {
       return input.existing;
     }
     try {

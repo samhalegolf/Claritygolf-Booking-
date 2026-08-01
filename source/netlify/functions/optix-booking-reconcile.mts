@@ -206,9 +206,13 @@ async function cancelDeletedAppointment(
   }
 }
 
-export async function reconcileOptixBookings(options: { forceRetry?: boolean } = {}) {
+export async function reconcileOptixBookings(options: {
+  forceRetry?: boolean;
+  calendarItemId?: string;
+} = {}) {
   await ensureOptixSyncTable();
   const config = readOptixReconcileConfig(env);
+  const targetCalendarItemId = String(options.calendarItemId || "").trim();
   const [appointments, records, bookingTypes] = await Promise.all([
     readAppointments(),
     readSyncRecords(),
@@ -219,6 +223,7 @@ export async function reconcileOptixBookings(options: { forceRetry?: boolean } =
   const results: OptixSyncRecord[] = [];
 
   for (const appointment of appointments) {
+    if (targetCalendarItemId && appointment.id !== targetCalendarItemId) continue;
     const existing = recordById.get(appointment.id) || null;
     const serviceId = String(appointment.serviceId || appointment.service_id || "");
     const next = await reconcileOptixAppointmentWithAutoSelect({
@@ -226,14 +231,15 @@ export async function reconcileOptixBookings(options: { forceRetry?: boolean } =
       existing,
       config,
       bookingType: bookingTypes[serviceId] || null,
-      forceRetry: options.forceRetry === true,
+      forceRetry: options.forceRetry === true && appointment.id === targetCalendarItemId,
     });
     await saveSyncRecord(next);
     results.push(next);
     if (next.syncStatus === "token_expired") break;
   }
 
-  if (!results.some((record) => record.syncStatus === "token_expired")) {
+  // A targeted manual retry must not also reconcile or cancel unrelated records.
+  if (!targetCalendarItemId && !results.some((record) => record.syncStatus === "token_expired")) {
     for (const record of records) {
       if (liveIds.has(record.calendarItemId)) continue;
       const next = await cancelDeletedAppointment(record, config);
@@ -262,17 +268,31 @@ export default async function handler(req: Request) {
 
   try {
     let forceRetry = false;
+    let calendarItemId = "";
     if (req.method === "POST") {
       const raw = await req.text();
       if (raw) {
         try {
-          forceRetry = JSON.parse(raw)?.forceRetry === true;
+          const body = JSON.parse(raw);
+          forceRetry = body?.forceRetry === true;
+          calendarItemId = String(body?.calendarItemId || "").trim();
         } catch {
           forceRetry = false;
+          calendarItemId = "";
         }
       }
     }
-    const result = await reconcileOptixBookings({ forceRetry });
+    if (forceRetry && !calendarItemId) {
+      return json(
+        {
+          ok: false,
+          error: "calendar_item_id_required",
+          message: "Manual Optix retry requires one calendarItemId.",
+        },
+        400,
+      );
+    }
+    const result = await reconcileOptixBookings({ forceRetry, calendarItemId });
     return json(result, result.ok ? 200 : 207);
   } catch (error: any) {
     const code = String(error?.code || "optix_reconcile_failed");
