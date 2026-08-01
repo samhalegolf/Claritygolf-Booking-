@@ -61,7 +61,8 @@ export type OptixBookingResult = {
 
 type OptixClientConfig = {
   endpoint: string;
-  personalToken: string;
+  token: string;
+  tokenKind: "organization" | "personal";
 };
 
 const OPTIX_REQUEST_TIMEOUT_MS = 12_000;
@@ -98,16 +99,19 @@ function readEnv(name: string): string {
 
 export function getOptixClientConfig(): OptixClientConfig {
   const endpoint = readEnv("OPTIX_GRAPHQL_ENDPOINT") || "https://api.optixapp.com/graphql";
+  const organizationToken = readEnv("OPTIX_ORGANIZATION_TOKEN");
   const personalToken = readEnv("OPTIX_PERSONAL_TOKEN");
+  const token = organizationToken || personalToken;
+  const tokenKind = organizationToken ? "organization" : "personal";
 
-  if (!personalToken) {
+  if (!token) {
     throw new OptixSyncError(
       "not_configured",
-      "Optix is not configured. Add OPTIX_PERSONAL_TOKEN in the server environment.",
+      "Optix is not configured. Add OPTIX_ORGANIZATION_TOKEN or OPTIX_PERSONAL_TOKEN in the server environment.",
     );
   }
 
-  return { endpoint, personalToken };
+  return { endpoint, token, tokenKind };
 }
 
 function normaliseMessages(errors: OptixGraphQLError[] | undefined): string {
@@ -154,7 +158,7 @@ export function classifyOptixFailure(input: {
   if (tokenExpired) {
     return new OptixSyncError(
       "token_expired",
-      detailed || "The Optix personal token has expired or is no longer valid.",
+      detailed || "The Optix access token has expired or is no longer valid.",
       { status, retryable: true },
     );
   }
@@ -207,7 +211,7 @@ async function optixGraphQL<T>(
     response = await fetch(config.endpoint, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${config.personalToken}`,
+        authorization: `Bearer ${config.token}`,
         "content-type": "application/json",
       },
       body: JSON.stringify({ query, variables }),
