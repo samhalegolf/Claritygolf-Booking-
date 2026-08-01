@@ -195,7 +195,7 @@ async function retryOne(button: HTMLButtonElement) {
       body: JSON.stringify({ forceRetry: true, calendarItemId }),
     });
   } finally {
-    await refreshPanels(false);
+    await refreshPanels();
   }
 }
 
