@@ -53,6 +53,18 @@ function formatTime(value: string | null) {
   }).format(date);
 }
 
+function isRateLimited(record: OptixStatusRecord | null) {
+  if (!record) return false;
+  return record.errorCode === "rate_limited" || /(?:http\s*)?429|too many requests|rate limit/i.test(record.errorMessage || "");
+}
+
+function retryAfterText(record: OptixStatusRecord | null) {
+  const message = record?.errorMessage || "";
+  const match = message.match(/retry[- ]after\s*[:=]?\s*([^;,)]+)/i);
+  if (match?.[1]) return `Try again after ${match[1].trim()}.`;
+  return "Optix did not provide a retry time. Wait before trying again.";
+}
+
 function installStyles() {
   if (document.getElementById("optix-booking-feedback-styles")) return;
   const style = document.createElement("style");
@@ -64,9 +76,11 @@ function installStyles() {
     .optix-booking-feedback__bay{font-size:17px;font-weight:800;margin-top:3px}
     .optix-booking-feedback__status{font-size:13px;margin-top:3px}
     .optix-booking-feedback__message{font-size:12px;line-height:1.4;margin-top:7px;padding:8px 9px;border-radius:8px;background:rgba(180,45,45,.08)}
+    .optix-booking-feedback__rate-limit{font-size:12px;line-height:1.4;margin-top:7px;padding:9px 10px;border-radius:8px;background:rgba(180,120,20,.1)}
     .optix-booking-feedback__meta{font-size:11px;opacity:.65;margin-top:7px}
     .optix-booking-feedback__actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
     .optix-booking-feedback button{border:1px solid rgba(0,0,0,.12);border-radius:8px;padding:7px 9px;background:transparent;font:700 12px/1 inherit;cursor:pointer}
+    .optix-booking-feedback button:disabled{opacity:.55;cursor:wait}
     .optix-booking-feedback details{margin-top:9px;font-size:11px;opacity:.8}
     .optix-booking-feedback pre{white-space:pre-wrap;word-break:break-word;font:inherit}
   `;
@@ -101,9 +115,7 @@ function findBookingRecordsAnchor(card: HTMLElement) {
 }
 
 function findBookingCard(anchor: HTMLElement) {
-  const explicit = anchor.closest<HTMLElement>(
-    "[role='dialog'],[aria-modal='true'],.modal,.drawer,.sheet,.appointment-card,.booking-card,aside",
-  );
+  const explicit = anchor.closest<HTMLElement>("[role='dialog'],[aria-modal='true'],.modal,.drawer,.sheet,.appointment-card,.booking-card,aside");
   if (explicit) return explicit;
   let node: HTMLElement | null = anchor;
   while (node && node !== document.body) {
@@ -115,9 +127,8 @@ function findBookingCard(anchor: HTMLElement) {
 }
 
 function findOpenBookingCards() {
-  const anchors = Array.from(
-    document.querySelectorAll<HTMLElement>("button,[role='tab'],a,h1,h2,h3,h4,h5,h6,div,span,p"),
-  ).filter((node) => /^(booking records|resend confirmation|no email records)$/i.test((node.textContent || "").trim()));
+  const anchors = Array.from(document.querySelectorAll<HTMLElement>("button,[role='tab'],a,h1,h2,h3,h4,h5,h6,div,span,p"))
+    .filter((node) => /^(booking records|resend confirmation|no email records)$/i.test((node.textContent || "").trim()));
   const cards = new Set<HTMLElement>();
   for (const anchor of anchors) {
     const card = findBookingCard(anchor);
@@ -134,9 +145,12 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord | null) {
   const panel = existing || document.createElement("section");
   panel.className = "optix-booking-feedback";
   const status = record?.syncStatus || "pending";
-  const label = record?.errorCode && ERROR_LABELS[record.errorCode]
-    ? ERROR_LABELS[record.errorCode]
-    : STATUS_LABELS[status] || "Contacting Optix…";
+  const rateLimited = isRateLimited(record);
+  const label = rateLimited
+    ? "Rate limited by Optix"
+    : record?.errorCode && ERROR_LABELS[record.errorCode]
+      ? ERROR_LABELS[record.errorCode]
+      : STATUS_LABELS[status] || "Contacting Optix…";
   const bay = record?.bayName || (status === "pending" ? "Assigning bay" : "No bay assigned");
   const lastChecked = record?.lastSyncedAt || record?.lastAttemptedAt || record?.updatedAt || null;
   const showRetry = status === "failed" || status === "token_expired";
@@ -150,11 +164,11 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord | null) {
         <div class="optix-booking-feedback__status">${esc(label)}</div>
       </div>
     </div>
-    ${visibleMessage ? `<div class="optix-booking-feedback__message">${esc(visibleMessage)}</div>` : ""}
+    ${rateLimited ? `<div class="optix-booking-feedback__rate-limit">No further attempt will be made automatically.<br>${esc(retryAfterText(record))}</div>` : visibleMessage ? `<div class="optix-booking-feedback__message">${esc(visibleMessage)}</div>` : ""}
     <div class="optix-booking-feedback__meta">Last checked: ${esc(formatTime(lastChecked))}</div>
     <div class="optix-booking-feedback__actions">
       <button type="button" data-optix-refresh>Refresh status</button>
-      ${showRetry ? '<button type="button" data-optix-retry>Retry</button>' : ""}
+      ${showRetry && record?.calendarItemId ? `<button type="button" data-optix-retry data-calendar-item-id="${esc(record.calendarItemId)}">Retry once</button>` : ""}
     </div>
     <details>
       <summary>Technical details</summary>
@@ -168,14 +182,24 @@ ${esc(record?.errorMessage || "")}</pre>
   if (!existing) anchor.insertAdjacentElement("afterend", panel);
 }
 
-async function refreshPanels(runReconcile = false) {
-  if (runReconcile) {
+async function retryOne(button: HTMLButtonElement) {
+  const calendarItemId = String(button.dataset.calendarItemId || "").trim();
+  if (!calendarItemId || button.disabled) return;
+  button.disabled = true;
+  button.textContent = "Retrying…";
+  try {
     await fetch("/api/optix-booking-reconcile", {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
-    }).catch(() => null);
+      body: JSON.stringify({ forceRetry: true, calendarItemId }),
+    });
+  } finally {
+    await refreshPanels(false);
   }
+}
+
+async function refreshPanels() {
   const records = await loadRecords();
   const cards = findOpenBookingCards();
   for (const card of cards) {
@@ -189,14 +213,15 @@ async function refreshPanels(runReconcile = false) {
 export function installOptixBookingFeedback() {
   if (typeof window === "undefined") return;
   installStyles();
-  const observer = new MutationObserver(() => void refreshPanels(false));
+  const observer = new MutationObserver(() => void refreshPanels());
   observer.observe(document.body, { childList: true, subtree: true });
   document.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
-    if (target.closest("[data-optix-refresh]")) void refreshPanels(false);
-    if (target.closest("[data-optix-retry]")) void refreshPanels(true);
+    if (target.closest("[data-optix-refresh]")) void refreshPanels();
+    const retry = target.closest<HTMLButtonElement>("[data-optix-retry]");
+    if (retry) void retryOne(retry);
   });
-  window.addEventListener(OPTIX_RECONCILE_EVENT, () => void refreshPanels(false));
-  window.setInterval(() => void refreshPanels(false), 30000);
-  void refreshPanels(false);
+  window.addEventListener(OPTIX_RECONCILE_EVENT, () => void refreshPanels());
+  window.setInterval(() => void refreshPanels(), 30000);
+  void refreshPanels();
 }
