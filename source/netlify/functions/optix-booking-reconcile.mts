@@ -1,20 +1,19 @@
+import { createHash } from "node:crypto";
 import { getDatabase } from "@netlify/database";
+import type { Config } from "@netlify/functions";
 
 import {
-  optixAppointmentFingerprint,
   readOptixReconcileConfig,
   type ClarityOptixAppointment,
   type OptixSyncRecord,
 } from "./_shared/optix-reconcile.mts";
 import { reconcileOptixAppointmentWithAutoSelect } from "./_shared/optix-auto-select.mts";
-import { syncOptixBooking } from "./_shared/optix-client.mts";
+
+const SESSION_COOKIE = "clarity_session";
+const OVERALL_TIMEOUT_MS = 25_000;
 
 function env(name: string): string {
-  return (
-    globalThis.Netlify?.env?.get(name) ||
-    process.env[name] ||
-    ""
-  ).trim();
+  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
 }
 
 function db() {
@@ -29,6 +28,35 @@ function json(value: unknown, status = 200) {
       "cache-control": "no-store",
     },
   });
+}
+
+function parseCookies(req: Request) {
+  return Object.fromEntries(
+    (req.headers.get("cookie") || "")
+      .split(";")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const index = part.indexOf("=");
+        return index < 0
+          ? [decodeURIComponent(part), ""]
+          : [decodeURIComponent(part.slice(0, index)), decodeURIComponent(part.slice(index + 1))];
+      }),
+  );
+}
+
+async function requireAdmin(req: Request) {
+  const token = parseCookies(req)[SESSION_COOKIE] || "";
+  if (!token) return false;
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const rows = await db().sql`
+    SELECT id
+    FROM admin_sessions
+    WHERE token_hash = ${tokenHash}
+      AND expires_at > NOW()
+    LIMIT 1
+  `;
+  return rows.length > 0;
 }
 
 async function ensureOptixSyncTable() {
@@ -50,10 +78,6 @@ async function ensureOptixSyncTable() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
-  await db().sql`
-    CREATE INDEX IF NOT EXISTS idx_optix_booking_sync_status
-    ON optix_booking_sync (sync_status, updated_at DESC)
-  `;
 }
 
 function rowToAppointment(row: any): ClarityOptixAppointment {
@@ -69,10 +93,7 @@ function rowToAppointment(row: any): ClarityOptixAppointment {
     note: row.note || "",
     serviceId: row.service_id || "",
     locationId: row.location_id || "",
-    location:
-      row.location && typeof row.location === "object"
-        ? row.location
-        : null,
+    location: row.location && typeof row.location === "object" ? row.location : null,
     status: row.status || "booked",
   };
 }
@@ -94,27 +115,29 @@ function rowToSyncRecord(row: any): OptixSyncRecord {
   } as OptixSyncRecord;
 }
 
-async function readAppointments() {
+async function readAppointment(calendarItemId: string) {
   const rows = await db().sql`
     SELECT id, kind, week, day, start, duration, title, client, note,
            service_id, location_id, location, status
     FROM calendar_items
-    WHERE kind = 'appointment'
-    ORDER BY week, day, start, id
+    WHERE id = ${calendarItemId}
+      AND kind = 'appointment'
+    LIMIT 1
   `;
-  return rows.map(rowToAppointment);
+  return rows[0] ? rowToAppointment(rows[0]) : null;
 }
 
-async function readSyncRecords() {
+async function readSyncRecord(calendarItemId: string) {
   const rows = await db().sql`
     SELECT *
     FROM optix_booking_sync
-    ORDER BY updated_at DESC
+    WHERE calendar_item_id = ${calendarItemId}
+    LIMIT 1
   `;
-  return rows.map(rowToSyncRecord);
+  return rows[0] ? rowToSyncRecord(rows[0]) : null;
 }
 
-async function readBookingTypeConfig(): Promise<Record<string, any>> {
+async function readBookingTypeConfig(serviceId: string): Promise<Record<string, any> | null> {
   const rows = await db().sql`
     SELECT value
     FROM settings
@@ -123,9 +146,11 @@ async function readBookingTypeConfig(): Promise<Record<string, any>> {
   `;
   try {
     const parsed = JSON.parse(rows[0]?.value || "{}");
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed[serviceId] || null
+      : null;
   } catch {
-    return {};
+    return null;
   }
 }
 
@@ -162,137 +187,100 @@ async function saveSyncRecord(record: OptixSyncRecord) {
   `;
 }
 
-async function cancelDeletedAppointment(
-  record: OptixSyncRecord,
-  config: ReturnType<typeof readOptixReconcileConfig>,
-): Promise<OptixSyncRecord> {
-  if (!record.optixBookingId || record.syncStatus === "cancelled") {
-    return { ...record, syncStatus: "cancelled" };
-  }
-  const request = {
-    memberId: config.memberId,
-    ownerUserId: config.ownerUserId,
-    bookingId: record.optixBookingId,
-    bookingSessionId: record.optixBookingSessionId || null,
-    resourceIds: [record.resourceId],
-    startTimestamp: record.startTimestamp,
-    endTimestamp: record.endTimestamp,
-    externalId: `clarity:${record.calendarItemId}`,
-    title: "Cancelled Clarity Booking",
-    notes: `Clarity appointment removed: ${record.calendarItemId}`,
-    source: "Clarity Booking",
-    isCanceled: true,
+function timeoutRecord(
+  appointment: ClarityOptixAppointment,
+  existing: OptixSyncRecord | null,
+): OptixSyncRecord {
+  return {
+    calendarItemId: appointment.id,
+    optixBookingId: existing?.optixBookingId || "",
+    optixBookingSessionId: existing?.optixBookingSessionId || "",
+    resourceId: existing?.resourceId || "",
+    startTimestamp: existing?.startTimestamp || 0,
+    endTimestamp: existing?.endTimestamp || 0,
+    fingerprint: existing?.fingerprint || "manual-timeout",
+    syncStatus: "failed",
+    errorCode: "timeout",
+    errorMessage: "Optix did not finish the resource booking within 25 seconds. Check Optix before pressing Book resource again.",
   };
-
-  try {
-    const result = await syncOptixBooking(request);
-    return {
-      ...record,
-      optixBookingId: result.bookingId || record.optixBookingId,
-      optixBookingSessionId: result.bookingSessionId || record.optixBookingSessionId,
-      fingerprint: optixAppointmentFingerprint(request),
-      syncStatus: "cancelled",
-      errorCode: "",
-      errorMessage: "",
-    };
-  } catch (error: any) {
-    const code = String(error?.code || "remote_error");
-    return {
-      ...record,
-      syncStatus: code === "token_expired" ? "token_expired" : "failed",
-      errorCode: code,
-      errorMessage: error instanceof Error ? error.message : "Optix cancellation failed.",
-    };
-  }
 }
 
-export async function reconcileOptixBookings(options: {
-  forceRetry?: boolean;
-  calendarItemId?: string;
-} = {}) {
+async function bookOneResource(calendarItemId: string) {
   await ensureOptixSyncTable();
+  const appointment = await readAppointment(calendarItemId);
+  if (!appointment) {
+    return { ok: false, error: "appointment_not_found", message: "Clarity appointment not found." };
+  }
+
+  const existing = await readSyncRecord(calendarItemId);
+  if (existing?.syncStatus === "synced" && existing.optixBookingId) {
+    return { ok: true, alreadyBooked: true, result: existing };
+  }
+
   const config = readOptixReconcileConfig(env);
-  const targetCalendarItemId = String(options.calendarItemId || "").trim();
-  const [appointments, records, bookingTypes] = await Promise.all([
-    readAppointments(),
-    readSyncRecords(),
-    readBookingTypeConfig(),
-  ]);
-  const recordById = new Map(records.map((record) => [record.calendarItemId, record]));
-  const liveIds = new Set(appointments.map((appointment) => appointment.id));
-  const results: OptixSyncRecord[] = [];
+  const serviceId = String(appointment.serviceId || appointment.service_id || "");
+  const bookingType = await readBookingTypeConfig(serviceId);
 
-  for (const appointment of appointments) {
-    if (targetCalendarItemId && appointment.id !== targetCalendarItemId) continue;
-    const existing = recordById.get(appointment.id) || null;
-    const serviceId = String(appointment.serviceId || appointment.service_id || "");
-    const next = await reconcileOptixAppointmentWithAutoSelect({
-      appointment,
-      existing,
-      config,
-      bookingType: bookingTypes[serviceId] || null,
-      forceRetry: options.forceRetry === true && appointment.id === targetCalendarItemId,
-    });
-    await saveSyncRecord(next);
-    results.push(next);
-    if (next.syncStatus === "token_expired") break;
+  const operation = reconcileOptixAppointmentWithAutoSelect({
+    appointment,
+    existing,
+    config,
+    bookingType,
+    forceRetry: true,
+  });
+
+  let result: OptixSyncRecord;
+  try {
+    result = await Promise.race([
+      operation,
+      new Promise<OptixSyncRecord>((resolve) => {
+        setTimeout(() => resolve(timeoutRecord(appointment, existing)), OVERALL_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error: any) {
+    result = {
+      ...timeoutRecord(appointment, existing),
+      errorCode: String(error?.code || "remote_error"),
+      errorMessage: error instanceof Error ? error.message : "Optix resource booking failed.",
+    };
   }
 
-  // A targeted manual retry must not also reconcile or cancel unrelated records.
-  if (!targetCalendarItemId && !results.some((record) => record.syncStatus === "token_expired")) {
-    for (const record of records) {
-      if (liveIds.has(record.calendarItemId)) continue;
-      const next = await cancelDeletedAppointment(record, config);
-      await saveSyncRecord(next);
-      results.push(next);
-      if (next.syncStatus === "token_expired") break;
-    }
-  }
-
+  await saveSyncRecord(result);
   return {
-    ok: !results.some((record) => ["failed", "token_expired"].includes(record.syncStatus)),
-    appointmentCount: appointments.length,
-    attempted: results.length,
-    synced: results.filter((record) => record.syncStatus === "synced").length,
-    cancelled: results.filter((record) => record.syncStatus === "cancelled").length,
-    failed: results.filter((record) => record.syncStatus === "failed").length,
-    tokenExpired: results.some((record) => record.syncStatus === "token_expired"),
-    results,
+    ok: result.syncStatus === "synced",
+    attempted: 1,
+    synced: result.syncStatus === "synced" ? 1 : 0,
+    failed: result.syncStatus === "failed" ? 1 : 0,
+    result,
   };
 }
 
 export default async function handler(req: Request) {
-  if (req.method !== "POST" && req.method !== "GET") {
-    return json({ error: "method_not_allowed" }, 405);
+  if (!(await requireAdmin(req))) return json({ error: "unauthorized" }, 401);
+  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+  let body: any = null;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400);
+  }
+
+  const calendarItemId = String(body?.calendarItemId || "").trim();
+  const source = String(body?.source || "").trim();
+  if (!calendarItemId || source !== "manual-book-resource") {
+    return json(
+      {
+        ok: false,
+        error: "manual_booking_required",
+        message: "Optix resource bookings can only be created from the Book resource button on a Clarity booking card.",
+      },
+      400,
+    );
   }
 
   try {
-    let forceRetry = false;
-    let calendarItemId = "";
-    if (req.method === "POST") {
-      const raw = await req.text();
-      if (raw) {
-        try {
-          const body = JSON.parse(raw);
-          forceRetry = body?.forceRetry === true;
-          calendarItemId = String(body?.calendarItemId || "").trim();
-        } catch {
-          forceRetry = false;
-          calendarItemId = "";
-        }
-      }
-    }
-    if (forceRetry && !calendarItemId) {
-      return json(
-        {
-          ok: false,
-          error: "calendar_item_id_required",
-          message: "Manual Optix retry requires one calendarItemId.",
-        },
-        400,
-      );
-    }
-    const result = await reconcileOptixBookings({ forceRetry, calendarItemId });
+    const result = await bookOneResource(calendarItemId);
     return json(result, result.ok ? 200 : 207);
   } catch (error: any) {
     const code = String(error?.code || "optix_reconcile_failed");
@@ -300,14 +288,11 @@ export default async function handler(req: Request) {
       {
         ok: false,
         error: code,
-        message: error instanceof Error ? error.message : "Optix reconciliation failed.",
-        tokenExpired: code === "token_expired",
+        message: error instanceof Error ? error.message : "Optix resource booking failed.",
       },
       code === "not_configured" ? 503 : 500,
     );
   }
 }
 
-export const config = {
-  schedule: "*/30 * * * *",
-};
+export const config: Config = { path: "/api/optix-booking-reconcile" };
