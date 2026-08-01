@@ -1,4 +1,5 @@
 const OPTIX_RECONCILE_PATH = "/api/optix-booking-reconcile";
+const OPTIX_RECONCILE_EVENT = "clarity:optix-reconcile-complete";
 
 const BOOKING_MUTATION_PATHS = [
   /^\/api\/calendar-state(?:\/|$)/,
@@ -35,24 +36,44 @@ function isBookingMutation(input: RequestInfo | URL, init?: RequestInit) {
   return BOOKING_MUTATION_PATHS.some((pattern) => pattern.test(path));
 }
 
-async function triggerOptixSync(nativeFetch: typeof window.fetch) {
+async function readPayload(response: Response) {
   try {
-    await nativeFetch(OPTIX_RECONCILE_PATH, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ source: "booking-mutation" }),
-    });
-  } catch (error) {
-    console.warn("Optix booking sync trigger failed", error);
+    return await response.clone().json();
+  } catch {
+    return null;
   }
 }
 
+async function triggerOptixSync(nativeFetch: typeof window.fetch) {
+  const response = await nativeFetch(OPTIX_RECONCILE_PATH, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ source: "booking-mutation" }),
+  });
+  const payload = await readPayload(response);
+
+  window.dispatchEvent(new CustomEvent(OPTIX_RECONCILE_EVENT, {
+    detail: {
+      ok: response.ok,
+      status: response.status,
+      payload,
+    },
+  }));
+
+  if (!response.ok) {
+    const message = String(payload?.message || payload?.error || `Optix request failed (${response.status})`);
+    throw new Error(message);
+  }
+
+  return payload;
+}
+
 /**
- * Runs Optix reconciliation immediately after a successful booking mutation.
- * This is installed for both the admin calendar and the public/client booking
- * route. It adds no client-facing UI; the result remains visible only in the
- * admin appointment drawer.
+ * Runs the dedicated Optix resource-booking function immediately after a
+ * successful Clarity booking mutation. The booking request is not reported as
+ * complete until Optix has returned success or a concrete failure response.
+ * Scheduled reconciliation remains a background repair mechanism only.
  */
 export function installOptixBookingMutationSync() {
   if (typeof window === "undefined") return;
@@ -65,7 +86,15 @@ export function installOptixBookingMutationSync() {
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const shouldSync = isBookingMutation(input, init);
     const response = await nativeFetch(input, init);
-    if (shouldSync && response.ok) void triggerOptixSync(nativeFetch);
+
+    if (shouldSync && response.ok) {
+      try {
+        await triggerOptixSync(nativeFetch);
+      } catch (error) {
+        console.error("Optix resource booking failed", error);
+      }
+    }
+
     return response;
   };
 }
