@@ -71,9 +71,7 @@ const BOOKINGS_DRAFT = `
   query OptixBookingsDraft($input: BookingSetInput!) {
     bookingsDraft(input: $input) {
       booking_session_id
-      bookings {
-        booking_id
-      }
+      bookings { booking_id }
     }
   }
 `;
@@ -82,19 +80,13 @@ const BOOKINGS_COMMIT = `
   mutation OptixBookingsCommit($input: BookingSetInput!) {
     bookingsCommit(input: $input) {
       booking_session_id
-      bookings {
-        booking_id
-      }
+      bookings { booking_id }
     }
   }
 `;
 
 function readEnv(name: string): string {
-  return (
-    globalThis.Netlify?.env?.get(name) ||
-    process.env[name] ||
-    ""
-  ).trim();
+  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
 }
 
 export function getOptixClientConfig(): OptixClientConfig {
@@ -147,15 +139,14 @@ export function classifyOptixFailure(input: {
   const detailed = [message, suffix ? `(${suffix})` : ""].filter(Boolean).join(" ");
   const lower = message.toLowerCase();
 
-  const tokenExpired =
+  if (
     status === 401 ||
     lower.includes("token expired") ||
     lower.includes("expired token") ||
     lower.includes("invalid token") ||
     lower.includes("access token has expired") ||
-    lower.includes("jwt expired");
-
-  if (tokenExpired) {
+    lower.includes("jwt expired")
+  ) {
     return new OptixSyncError(
       "token_expired",
       detailed || "The Optix access token has expired or is no longer valid.",
@@ -202,11 +193,12 @@ export function classifyOptixFailure(input: {
 async function optixGraphQL<T>(
   query: string,
   variables: Record<string, unknown>,
-  config = getOptixClientConfig(),
+  config: OptixClientConfig,
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OPTIX_REQUEST_TIMEOUT_MS);
   let response: Response;
+
   try {
     response = await fetch(config.endpoint, {
       method: "POST",
@@ -225,10 +217,11 @@ async function optixGraphQL<T>(
         { retryable: true, cause: error },
       );
     }
-    throw new OptixSyncError("remote_error", `Could not reach Optix: ${error instanceof Error ? error.message : "network request failed"}.`, {
-      retryable: true,
-      cause: error,
-    });
+    throw new OptixSyncError(
+      "remote_error",
+      `Could not reach Optix: ${error instanceof Error ? error.message : "network request failed"}.`,
+      { retryable: true, cause: error },
+    );
   } finally {
     clearTimeout(timeout);
   }
@@ -253,7 +246,7 @@ async function optixGraphQL<T>(
   return payload.data;
 }
 
-function buildBookingSetInput(input: OptixBookingInput) {
+function buildBookingSetInput(input: OptixBookingInput, tokenKind: OptixClientConfig["tokenKind"]) {
   if (!input.externalId.trim()) {
     throw new OptixSyncError("validation_failed", "An Optix external ID is required.");
   }
@@ -267,7 +260,7 @@ function buildBookingSetInput(input: OptixBookingInput) {
   return {
     ...(input.bookingSessionId ? { booking_session_id: input.bookingSessionId } : {}),
     account: { member_id: input.memberId },
-    owner_user_id: input.ownerUserId,
+    ...(tokenKind === "personal" ? { owner_user_id: input.ownerUserId } : {}),
     source: input.source || "Clarity Booking",
     title: input.title || "Clarity Booking",
     notes: input.notes || undefined,
@@ -294,16 +287,18 @@ function readBookingResult(payload: any): OptixBookingResult {
 }
 
 export async function draftOptixBooking(input: OptixBookingInput): Promise<OptixBookingResult> {
+  const config = getOptixClientConfig();
   const data = await optixGraphQL<any>(BOOKINGS_DRAFT, {
-    input: buildBookingSetInput(input),
-  });
+    input: buildBookingSetInput(input, config.tokenKind),
+  }, config);
   return readBookingResult(data);
 }
 
 export async function commitOptixBooking(input: OptixBookingInput): Promise<OptixBookingResult> {
+  const config = getOptixClientConfig();
   const data = await optixGraphQL<any>(BOOKINGS_COMMIT, {
-    input: buildBookingSetInput(input),
-  });
+    input: buildBookingSetInput(input, config.tokenKind),
+  }, config);
   return readBookingResult(data);
 }
 
