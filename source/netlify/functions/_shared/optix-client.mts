@@ -147,19 +147,11 @@ export function classifyOptixFailure(input: {
     lower.includes("access token has expired") ||
     lower.includes("jwt expired")
   ) {
-    return new OptixSyncError(
-      "token_expired",
-      detailed || "The Optix access token has expired or is no longer valid.",
-      { status, retryable: true },
-    );
+    return new OptixSyncError("token_expired", detailed || "The Optix access token has expired or is no longer valid.", { status, retryable: true });
   }
 
   if (status === 403 || lower.includes("unauthorized") || lower.includes("not authorised") || lower.includes("forbidden")) {
-    return new OptixSyncError(
-      "unauthorized",
-      detailed || "Optix rejected this account or booking action.",
-      { status, retryable: false },
-    );
+    return new OptixSyncError("unauthorized", detailed || "Optix rejected this account or booking action.", { status, retryable: false });
   }
 
   if (
@@ -168,26 +160,17 @@ export function classifyOptixFailure(input: {
     lower.includes("conflict") ||
     lower.includes("overlap")
   ) {
-    return new OptixSyncError(
-      "resource_conflict",
-      detailed || "The Optix resource is no longer available for this time.",
-      { status, retryable: false },
-    );
+    return new OptixSyncError("resource_conflict", detailed || "The Optix resource is no longer available for this time.", { status, retryable: false });
   }
 
   if (status === 400 || lower.includes("validation") || lower.includes("invalid input")) {
-    return new OptixSyncError(
-      "validation_failed",
-      detailed || "Optix rejected the booking input.",
-      { status, retryable: false },
-    );
+    return new OptixSyncError("validation_failed", detailed || "Optix rejected the booking input.", { status, retryable: false });
   }
 
-  return new OptixSyncError(
-    "remote_error",
-    detailed || "Optix returned an empty or unrecognised response.",
-    { status, retryable: status === null || status >= 500 },
-  );
+  return new OptixSyncError("remote_error", detailed || "Optix returned an empty or unrecognised response.", {
+    status,
+    retryable: status === null || status >= 500,
+  });
 }
 
 async function optixGraphQL<T>(
@@ -257,13 +240,16 @@ function buildBookingSetInput(input: OptixBookingInput, tokenKind: OptixClientCo
     throw new OptixSyncError("validation_failed", "The Optix booking end time must be after its start time.");
   }
 
+  const title = input.title || "Clarity Booking";
   return {
     ...(input.bookingSessionId ? { booking_session_id: input.bookingSessionId } : {}),
     account: { member_id: input.memberId },
-    owner_user_id: input.ownerUserId,
+    ...(tokenKind === "personal" ? { owner_user_id: input.ownerUserId } : {}),
     source: input.source || "Clarity Booking",
-    title: input.title || "Clarity Booking",
-    notes: input.notes || undefined,
+    title,
+    // Keep the Optix note intentionally simple: only the person on the
+    // corresponding Clarity booking.
+    notes: title,
     bookings: [
       {
         ...(input.bookingId ? { booking_id: input.bookingId } : {}),
