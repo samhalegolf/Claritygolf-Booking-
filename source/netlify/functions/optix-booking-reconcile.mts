@@ -81,16 +81,12 @@ function rowToSyncRecord(row: any): OptixSyncRecord {
   return {
     calendarItemId: String(row.calendar_item_id || ""),
     optixBookingId: String(row.optix_booking_id || ""),
-    optixBookingSessionId: String(
-      row.optix_booking_session_id || "",
-    ),
+    optixBookingSessionId: String(row.optix_booking_session_id || ""),
     resourceId: String(row.resource_id || ""),
     startTimestamp: Number(row.start_timestamp || 0),
     endTimestamp: Number(row.end_timestamp || 0),
     fingerprint: String(row.fingerprint || ""),
-    syncStatus: ["synced", "failed", "token_expired", "cancelled"].includes(
-      row.sync_status,
-    )
+    syncStatus: ["synced", "failed", "token_expired", "cancelled"].includes(row.sync_status)
       ? row.sync_status
       : "failed",
     errorCode: String(row.error_code || ""),
@@ -127,9 +123,7 @@ async function readBookingTypeConfig(): Promise<Record<string, any>> {
   `;
   try {
     const parsed = JSON.parse(rows[0]?.value || "{}");
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed
-      : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
@@ -141,35 +135,16 @@ async function saveSyncRecord(record: OptixSyncRecord) {
     : null;
   await db().sql`
     INSERT INTO optix_booking_sync (
-      calendar_item_id,
-      optix_booking_id,
-      optix_booking_session_id,
-      resource_id,
-      start_timestamp,
-      end_timestamp,
-      fingerprint,
-      sync_status,
-      error_code,
-      error_message,
-      last_attempted_at,
-      last_synced_at,
-      created_at,
-      updated_at
+      calendar_item_id, optix_booking_id, optix_booking_session_id,
+      resource_id, start_timestamp, end_timestamp, fingerprint,
+      sync_status, error_code, error_message, last_attempted_at,
+      last_synced_at, created_at, updated_at
     ) VALUES (
-      ${record.calendarItemId},
-      ${record.optixBookingId},
-      ${record.optixBookingSessionId},
-      ${record.resourceId},
-      ${record.startTimestamp},
-      ${record.endTimestamp},
-      ${record.fingerprint},
-      ${record.syncStatus},
-      ${record.errorCode},
-      ${record.errorMessage},
-      NOW(),
-      ${lastSyncedAt},
-      NOW(),
-      NOW()
+      ${record.calendarItemId}, ${record.optixBookingId},
+      ${record.optixBookingSessionId}, ${record.resourceId},
+      ${record.startTimestamp}, ${record.endTimestamp}, ${record.fingerprint},
+      ${record.syncStatus}, ${record.errorCode}, ${record.errorMessage},
+      NOW(), ${lastSyncedAt}, NOW(), NOW()
     )
     ON CONFLICT (calendar_item_id) DO UPDATE SET
       optix_booking_id = EXCLUDED.optix_booking_id,
@@ -214,8 +189,7 @@ async function cancelDeletedAppointment(
     return {
       ...record,
       optixBookingId: result.bookingId || record.optixBookingId,
-      optixBookingSessionId:
-        result.bookingSessionId || record.optixBookingSessionId,
+      optixBookingSessionId: result.bookingSessionId || record.optixBookingSessionId,
       fingerprint: optixAppointmentFingerprint(request),
       syncStatus: "cancelled",
       errorCode: "",
@@ -227,13 +201,12 @@ async function cancelDeletedAppointment(
       ...record,
       syncStatus: code === "token_expired" ? "token_expired" : "failed",
       errorCode: code,
-      errorMessage:
-        error instanceof Error ? error.message : "Optix cancellation failed.",
+      errorMessage: error instanceof Error ? error.message : "Optix cancellation failed.",
     };
   }
 }
 
-export async function reconcileOptixBookings() {
+export async function reconcileOptixBookings(options: { forceRetry?: boolean } = {}) {
   await ensureOptixSyncTable();
   const config = readOptixReconcileConfig(env);
   const [appointments, records, bookingTypes] = await Promise.all([
@@ -241,26 +214,22 @@ export async function reconcileOptixBookings() {
     readSyncRecords(),
     readBookingTypeConfig(),
   ]);
-  const recordById = new Map(
-    records.map((record) => [record.calendarItemId, record]),
-  );
+  const recordById = new Map(records.map((record) => [record.calendarItemId, record]));
   const liveIds = new Set(appointments.map((appointment) => appointment.id));
   const results: OptixSyncRecord[] = [];
 
   for (const appointment of appointments) {
     const existing = recordById.get(appointment.id) || null;
-    const serviceId = String(
-      appointment.serviceId || appointment.service_id || "",
-    );
+    const serviceId = String(appointment.serviceId || appointment.service_id || "");
     const next = await reconcileOptixAppointmentWithAutoSelect({
       appointment,
       existing,
       config,
       bookingType: bookingTypes[serviceId] || null,
+      forceRetry: options.forceRetry === true,
     });
     await saveSyncRecord(next);
     results.push(next);
-
     if (next.syncStatus === "token_expired") break;
   }
 
@@ -275,18 +244,13 @@ export async function reconcileOptixBookings() {
   }
 
   return {
-    ok: !results.some((record) =>
-      ["failed", "token_expired"].includes(record.syncStatus),
-    ),
+    ok: !results.some((record) => ["failed", "token_expired"].includes(record.syncStatus)),
     appointmentCount: appointments.length,
     attempted: results.length,
     synced: results.filter((record) => record.syncStatus === "synced").length,
-    cancelled: results.filter((record) => record.syncStatus === "cancelled")
-      .length,
+    cancelled: results.filter((record) => record.syncStatus === "cancelled").length,
     failed: results.filter((record) => record.syncStatus === "failed").length,
-    tokenExpired: results.some(
-      (record) => record.syncStatus === "token_expired",
-    ),
+    tokenExpired: results.some((record) => record.syncStatus === "token_expired"),
     results,
   };
 }
@@ -297,7 +261,18 @@ export default async function handler(req: Request) {
   }
 
   try {
-    const result = await reconcileOptixBookings();
+    let forceRetry = false;
+    if (req.method === "POST") {
+      const raw = await req.text();
+      if (raw) {
+        try {
+          forceRetry = JSON.parse(raw)?.forceRetry === true;
+        } catch {
+          forceRetry = false;
+        }
+      }
+    }
+    const result = await reconcileOptixBookings({ forceRetry });
     return json(result, result.ok ? 200 : 207);
   } catch (error: any) {
     const code = String(error?.code || "optix_reconcile_failed");
@@ -305,8 +280,7 @@ export default async function handler(req: Request) {
       {
         ok: false,
         error: code,
-        message:
-          error instanceof Error ? error.message : "Optix reconciliation failed.",
+        message: error instanceof Error ? error.message : "Optix reconciliation failed.",
         tokenExpired: code === "token_expired",
       },
       code === "not_configured" ? 503 : 500,
@@ -314,9 +288,6 @@ export default async function handler(req: Request) {
   }
 }
 
-// Immediate booking mutations are the primary trigger. This slower audit is
-// only a safety net for changes made directly in Optix, such as a resource
-// cancellation or a bay becoming unavailable.
 export const config = {
   schedule: "*/30 * * * *",
 };
