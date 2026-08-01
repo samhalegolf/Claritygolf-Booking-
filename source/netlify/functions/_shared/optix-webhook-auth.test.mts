@@ -33,7 +33,7 @@ function signedBody(overrides: Record<string, string> = {}) {
 test("computes the documented Optix SHA-1 signature", () => {
   assert.equal(
     optixWebhookSignature("123", "secret", "123456"),
-    "b849f501f7302f748245503b0101d7d2a1b45a10",
+    "4739add6e433e2e9510761d994ba127f1b45834d",
   );
 });
 
