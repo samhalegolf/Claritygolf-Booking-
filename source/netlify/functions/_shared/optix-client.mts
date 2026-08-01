@@ -260,7 +260,7 @@ function buildBookingSetInput(input: OptixBookingInput, tokenKind: OptixClientCo
   return {
     ...(input.bookingSessionId ? { booking_session_id: input.bookingSessionId } : {}),
     account: { member_id: input.memberId },
-    ...(tokenKind === "personal" ? { owner_user_id: input.ownerUserId } : {}),
+    owner_user_id: input.ownerUserId,
     source: input.source || "Clarity Booking",
     title: input.title || "Clarity Booking",
     notes: input.notes || undefined,
