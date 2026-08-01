@@ -17,7 +17,7 @@ type OptixStatusRecord = {
 const OPTIX_RECONCILE_EVENT = "clarity:optix-reconcile-complete";
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: "Contacting Optix…",
+  pending: "Not booked in Optix",
   synced: "Booked in Optix",
   failed: "Optix booking failed",
   token_expired: "Optix token expired",
@@ -42,27 +42,15 @@ function esc(value: unknown) {
 }
 
 function formatTime(value: string | null) {
-  if (!value) return "Not checked yet";
+  if (!value) return "Not booked yet";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not checked yet";
+  if (Number.isNaN(date.getTime())) return "Not booked yet";
   return new Intl.DateTimeFormat(undefined, {
     hour: "numeric",
     minute: "2-digit",
     day: "numeric",
     month: "short",
   }).format(date);
-}
-
-function isRateLimited(record: OptixStatusRecord | null) {
-  if (!record) return false;
-  return record.errorCode === "rate_limited" || /(?:http\s*)?429|too many requests|rate limit/i.test(record.errorMessage || "");
-}
-
-function retryAfterText(record: OptixStatusRecord | null) {
-  const message = record?.errorMessage || "";
-  const match = message.match(/retry[- ]after\s*[:=]?\s*([^;,)]+)/i);
-  if (match?.[1]) return `Try again after ${match[1].trim()}.`;
-  return "Optix did not provide a retry time. Wait before trying again.";
 }
 
 function installStyles() {
@@ -76,10 +64,10 @@ function installStyles() {
     .optix-booking-feedback__bay{font-size:17px;font-weight:800;margin-top:3px}
     .optix-booking-feedback__status{font-size:13px;margin-top:3px}
     .optix-booking-feedback__message{font-size:12px;line-height:1.4;margin-top:7px;padding:8px 9px;border-radius:8px;background:rgba(180,45,45,.08)}
-    .optix-booking-feedback__rate-limit{font-size:12px;line-height:1.4;margin-top:7px;padding:9px 10px;border-radius:8px;background:rgba(180,120,20,.1)}
     .optix-booking-feedback__meta{font-size:11px;opacity:.65;margin-top:7px}
     .optix-booking-feedback__actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
     .optix-booking-feedback button{border:1px solid rgba(0,0,0,.12);border-radius:8px;padding:7px 9px;background:transparent;font:700 12px/1 inherit;cursor:pointer}
+    .optix-booking-feedback button[data-optix-book]{background:#102d20;color:#fff;border-color:#102d20}
     .optix-booking-feedback button:disabled{opacity:.55;cursor:wait}
     .optix-booking-feedback details{margin-top:9px;font-size:11px;opacity:.8}
     .optix-booking-feedback pre{white-space:pre-wrap;word-break:break-word;font:inherit}
@@ -145,16 +133,13 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord | null) {
   const panel = existing || document.createElement("section");
   panel.className = "optix-booking-feedback";
   const status = record?.syncStatus || "pending";
-  const rateLimited = isRateLimited(record);
-  const label = rateLimited
-    ? "Rate limited by Optix"
-    : record?.errorCode && ERROR_LABELS[record.errorCode]
-      ? ERROR_LABELS[record.errorCode]
-      : STATUS_LABELS[status] || "Contacting Optix…";
-  const bay = record?.bayName || (status === "pending" ? "Assigning bay" : "No bay assigned");
+  const label = record?.errorCode && ERROR_LABELS[record.errorCode]
+    ? ERROR_LABELS[record.errorCode]
+    : STATUS_LABELS[status] || "Not booked in Optix";
+  const bay = record?.bayName || (status === "synced" ? "Resource booked" : "Resource booking");
   const lastChecked = record?.lastSyncedAt || record?.lastAttemptedAt || record?.updatedAt || null;
-  const showRetry = status === "failed" || status === "token_expired";
-  const visibleMessage = showRetry && record?.errorMessage ? record.errorMessage : "";
+  const canBook = Boolean(record?.calendarItemId) && status !== "synced" && status !== "cancelled";
+  const visibleMessage = status === "failed" || status === "token_expired" ? record?.errorMessage || "" : "";
 
   panel.innerHTML = `
     <div class="optix-booking-feedback__head">
@@ -164,11 +149,11 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord | null) {
         <div class="optix-booking-feedback__status">${esc(label)}</div>
       </div>
     </div>
-    ${rateLimited ? `<div class="optix-booking-feedback__rate-limit">No further attempt will be made automatically.<br>${esc(retryAfterText(record))}</div>` : visibleMessage ? `<div class="optix-booking-feedback__message">${esc(visibleMessage)}</div>` : ""}
+    ${visibleMessage ? `<div class="optix-booking-feedback__message">${esc(visibleMessage)}</div>` : ""}
     <div class="optix-booking-feedback__meta">Last checked: ${esc(formatTime(lastChecked))}</div>
     <div class="optix-booking-feedback__actions">
+      ${canBook ? `<button type="button" data-optix-book data-calendar-item-id="${esc(record?.calendarItemId || "")}">Book resource</button>` : ""}
       <button type="button" data-optix-refresh>Refresh status</button>
-      ${showRetry && record?.calendarItemId ? `<button type="button" data-optix-retry data-calendar-item-id="${esc(record.calendarItemId)}">Retry once</button>` : ""}
     </div>
     <details>
       <summary>Technical details</summary>
@@ -182,17 +167,17 @@ ${esc(record?.errorMessage || "")}</pre>
   if (!existing) anchor.insertAdjacentElement("afterend", panel);
 }
 
-async function retryOne(button: HTMLButtonElement) {
+async function bookResource(button: HTMLButtonElement) {
   const calendarItemId = String(button.dataset.calendarItemId || "").trim();
   if (!calendarItemId || button.disabled) return;
   button.disabled = true;
-  button.textContent = "Retrying…";
+  button.textContent = "Booking…";
   try {
     await fetch("/api/optix-booking-reconcile", {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ forceRetry: true, calendarItemId }),
+      body: JSON.stringify({ forceRetry: true, calendarItemId, source: "manual-book-resource" }),
     });
   } finally {
     await refreshPanels();
@@ -218,10 +203,9 @@ export function installOptixBookingFeedback() {
   document.addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
     if (target.closest("[data-optix-refresh]")) void refreshPanels();
-    const retry = target.closest<HTMLButtonElement>("[data-optix-retry]");
-    if (retry) void retryOne(retry);
+    const book = target.closest<HTMLButtonElement>("[data-optix-book]");
+    if (book) void bookResource(book);
   });
   window.addEventListener(OPTIX_RECONCILE_EVENT, () => void refreshPanels());
-  window.setInterval(() => void refreshPanels(), 30000);
   void refreshPanels();
 }
