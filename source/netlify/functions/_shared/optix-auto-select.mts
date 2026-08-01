@@ -15,10 +15,32 @@ type BookingTypeConfig = {
 
 type ReconcileConfig = Parameters<typeof buildOptixAppointmentInput>[2];
 
+const OPTIX_OVERALL_TIMEOUT_MS = 25_000;
+
 function uniqueIds(values: unknown[]): string[] {
   return Array.from(new Set(values.flatMap((value) => Array.isArray(value) ? value : [value])
     .map((value) => String(value || "").trim())
     .filter(Boolean)));
+}
+
+async function withOverallTimeout<T>(operation: () => Promise<T>, stage: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation(),
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new OptixSyncError(
+            "timeout",
+            `Optix ${stage} did not complete within ${Math.round(OPTIX_OVERALL_TIMEOUT_MS / 1000)} seconds. The result is unknown; check Optix before retrying.`,
+            { retryable: false },
+          ));
+        }, OPTIX_OVERALL_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 export function candidateOptixResourceIds(input: {
@@ -64,7 +86,7 @@ export async function reconcileOptixAppointmentWithAutoSelect(input: {
     }
     const cancelRequest = { ...baseRequest, resourceIds: [input.existing.resourceId], isCanceled: true };
     try {
-      const result = await syncOptixBooking(cancelRequest);
+      const result = await withOverallTimeout(() => syncOptixBooking(cancelRequest), "cancellation");
       return {
         ...input.existing,
         optixBookingId: result.bookingId || input.existing.optixBookingId,
@@ -109,7 +131,7 @@ export async function reconcileOptixAppointmentWithAutoSelect(input: {
       return input.existing;
     }
     try {
-      const result = await syncOptixBooking(request);
+      const result = await withOverallTimeout(() => syncOptixBooking(request), `booking for resource ${resourceId}`);
       return {
         calendarItemId: input.appointment.id,
         optixBookingId: result.bookingId || input.existing?.optixBookingId || "",
