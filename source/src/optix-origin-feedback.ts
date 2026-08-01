@@ -11,7 +11,11 @@ type OptixOriginRecord = {
 };
 
 function esc(value: unknown) {
-  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 function installStyles() {
@@ -29,7 +33,10 @@ function installStyles() {
 }
 
 async function loadRecords(): Promise<OptixOriginRecord[]> {
-  const response = await fetch("/api/optix-origin-status", { credentials: "same-origin", cache: "no-store" });
+  const response = await fetch("/api/optix-origin-status", {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
   if (!response.ok) return [];
   const payload = await response.json();
   return Array.isArray(payload?.records) ? payload.records : [];
@@ -45,38 +52,58 @@ function score(record: OptixOriginRecord, text: string) {
 }
 
 function candidates() {
-  return Array.from(document.querySelectorAll<HTMLElement>("[role='dialog'],[aria-modal='true'],.modal,.drawer,.sheet,.appointment-card,.booking-card,[data-calendar-item-id]"));
+  return Array.from(
+    document.querySelectorAll<HTMLElement>(
+      "[role='dialog'],[aria-modal='true'],.modal,.drawer,.sheet,.appointment-card,.booking-card,[data-calendar-item-id]",
+    ),
+  );
 }
 
 function decorate(node: HTMLElement, record: OptixOriginRecord) {
   node.dataset.optixOrigin = "true";
   if (!node.querySelector(".optix-origin-badge")) {
-    const heading = node.querySelector<HTMLElement>("h1,h2,h3,h4,h5,h6,strong") || node.firstElementChild as HTMLElement | null;
-    heading?.insertAdjacentHTML("beforeend", '<span class="optix-origin-badge">OPTIX</span>');
+    const heading =
+      node.querySelector<HTMLElement>("h1,h2,h3,h4,h5,h6,strong") ||
+      (node.firstElementChild as HTMLElement | null);
+    heading?.insertAdjacentHTML(
+      "beforeend",
+      '<span class="optix-origin-badge">OPTIX</span>',
+    );
   }
-  if (!node.querySelector(".optix-origin-card") && /booking records|resend confirmation|no email records/i.test(node.textContent || "")) {
+  if (
+    !node.querySelector(".optix-origin-card") &&
+    /booking records|resend confirmation|no email records/i.test(node.textContent || "")
+  ) {
     const card = document.createElement("section");
     card.className = "optix-origin-card";
     card.innerHTML = `<strong>Optix-origin booking</strong><div>Resource: ${esc(record.external_resource_id || "Not supplied")}</div><div>Sync state: ${esc(record.external_sync_state || record.status || "synced")}</div><div>Optix controls the customer, time, bay and cancellation state. Use Optix for those changes.</div><details><summary>Source details</summary><div>Booking ID: ${esc(record.external_booking_id)}</div><div>Session ID: ${esc(record.external_booking_session_id || "Not supplied")}</div></details>`;
     node.appendChild(card);
   }
-  node.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input,select,textarea").forEach((field) => {
-    const label = `${field.name} ${field.id} ${field.getAttribute("aria-label") || ""}`.toLowerCase();
-    if (/client|customer|start|time|date|duration|location|resource|bay/.test(label)) {
-      field.disabled = true;
-      field.classList.add("optix-origin-locked");
-      field.title = "This field is owned by Optix. Edit it in Optix.";
-    }
-  });
-  node.querySelectorAll<HTMLElement>(".optix-booking-feedback,[data-optix-book]").forEach((element) => element.remove());
+  node
+    .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
+      "input,select,textarea",
+    )
+    .forEach((field) => {
+      const label = `${field.name} ${field.id} ${field.getAttribute("aria-label") || ""}`.toLowerCase();
+      if (/client|customer|start|time|date|duration|location|resource|bay/.test(label)) {
+        field.disabled = true;
+        field.classList.add("optix-origin-locked");
+        field.title = "This field is owned by Optix. Edit it in Optix.";
+      }
+    });
+  node
+    .querySelectorAll<HTMLElement>(".optix-booking-feedback,[data-optix-book]")
+    .forEach((element) => element.remove());
 }
 
 async function refresh() {
   const records = await loadRecords();
   if (!records.length) return;
   for (const node of candidates()) {
-    const ranked = records.map((record) => ({ record, score: score(record, node.textContent || "") })).sort((a, b) => b.score - a.score);
-    if ((ranked[0]?.score || 0) >= 8) decorate(node, ranked[0].record);
+    const best = records
+      .map((record) => ({ record, score: score(record, node.textContent || "") }))
+      .sort((a, b) => b.score - a.score)[0];
+    if (best && best.score >= 8) decorate(node, best.record);
   }
 }
 
@@ -87,8 +114,14 @@ export function installOptixOriginFeedback() {
   const schedule = () => {
     if (queued) return;
     queued = true;
-    queueMicrotask(() => { queued = false; void refresh(); });
+    queueMicrotask(() => {
+      queued = false;
+      void refresh();
+    });
   };
-  new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver(schedule).observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
   schedule();
 }
