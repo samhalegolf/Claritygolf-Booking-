@@ -17,11 +17,20 @@ type OptixStatusRecord = {
 const OPTIX_RECONCILE_EVENT = "clarity:optix-reconcile-complete";
 
 const STATUS_LABELS: Record<string, string> = {
-  pending: "Booking bay…",
+  pending: "Contacting Optix…",
   synced: "Booked in Optix",
   failed: "Optix booking failed",
   token_expired: "Optix token expired",
   cancelled: "Cancelled in Optix",
+};
+
+const ERROR_LABELS: Record<string, string> = {
+  timeout: "Optix did not respond",
+  resource_conflict: "No configured bay is available",
+  validation_failed: "Optix rejected the booking details",
+  unauthorized: "Optix access was rejected",
+  remote_error: "Optix returned an error",
+  not_configured: "Optix setup is incomplete",
 };
 
 function esc(value: unknown) {
@@ -54,6 +63,7 @@ function installStyles() {
     .optix-booking-feedback__eyebrow{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;opacity:.62}
     .optix-booking-feedback__bay{font-size:17px;font-weight:800;margin-top:3px}
     .optix-booking-feedback__status{font-size:13px;margin-top:3px}
+    .optix-booking-feedback__message{font-size:12px;line-height:1.4;margin-top:7px;padding:8px 9px;border-radius:8px;background:rgba(180,45,45,.08)}
     .optix-booking-feedback__meta{font-size:11px;opacity:.65;margin-top:7px}
     .optix-booking-feedback__actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
     .optix-booking-feedback button{border:1px solid rgba(0,0,0,.12);border-radius:8px;padding:7px 9px;background:transparent;font:700 12px/1 inherit;cursor:pointer}
@@ -83,13 +93,10 @@ function findBookingRecordsAnchor(card: HTMLElement) {
   const candidates = Array.from(card.querySelectorAll<HTMLElement>("button,[role='tab'],a,h1,h2,h3,h4,h5,h6,div,span,p"));
   const exact = candidates.find((node) => /^booking records$/i.test((node.textContent || "").trim()));
   if (exact) return exact.parentElement || exact;
-
   const resend = candidates.find((node) => /^resend confirmation$/i.test((node.textContent || "").trim()));
   if (resend) return resend.parentElement || resend;
-
   const empty = candidates.find((node) => /^no email records$/i.test((node.textContent || "").trim()));
   if (empty) return empty.parentElement || empty;
-
   return null;
 }
 
@@ -98,7 +105,6 @@ function findBookingCard(anchor: HTMLElement) {
     "[role='dialog'],[aria-modal='true'],.modal,.drawer,.sheet,.appointment-card,.booking-card,aside",
   );
   if (explicit) return explicit;
-
   let node: HTMLElement | null = anchor;
   while (node && node !== document.body) {
     const text = node.textContent || "";
@@ -112,7 +118,6 @@ function findOpenBookingCards() {
   const anchors = Array.from(
     document.querySelectorAll<HTMLElement>("button,[role='tab'],a,h1,h2,h3,h4,h5,h6,div,span,p"),
   ).filter((node) => /^(booking records|resend confirmation|no email records)$/i.test((node.textContent || "").trim()));
-
   const cards = new Set<HTMLElement>();
   for (const anchor of anchors) {
     const card = findBookingCard(anchor);
@@ -129,10 +134,13 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord | null) {
   const panel = existing || document.createElement("section");
   panel.className = "optix-booking-feedback";
   const status = record?.syncStatus || "pending";
-  const label = STATUS_LABELS[status] || "Booking bay…";
+  const label = record?.errorCode && ERROR_LABELS[record.errorCode]
+    ? ERROR_LABELS[record.errorCode]
+    : STATUS_LABELS[status] || "Contacting Optix…";
   const bay = record?.bayName || (status === "pending" ? "Assigning bay" : "No bay assigned");
   const lastChecked = record?.lastSyncedAt || record?.lastAttemptedAt || record?.updatedAt || null;
   const showRetry = status === "failed" || status === "token_expired";
+  const visibleMessage = showRetry && record?.errorMessage ? record.errorMessage : "";
 
   panel.innerHTML = `
     <div class="optix-booking-feedback__head">
@@ -142,6 +150,7 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord | null) {
         <div class="optix-booking-feedback__status">${esc(label)}</div>
       </div>
     </div>
+    ${visibleMessage ? `<div class="optix-booking-feedback__message">${esc(visibleMessage)}</div>` : ""}
     <div class="optix-booking-feedback__meta">Last checked: ${esc(formatTime(lastChecked))}</div>
     <div class="optix-booking-feedback__actions">
       <button type="button" data-optix-refresh>Refresh status</button>
