@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js 24
         uses: actions/setup-node@v4
@@ -25,6 +27,15 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: source/package-lock.json
+
+      - name: Inspect last valid integrations mount
+        shell: bash
+        run: |
+          git show 3ae33c3d38c5189dd2ce377fcdfa6670fb42931e:source/src/App.tsx > /tmp/App.valid.tsx
+          echo "--- integration-related lines ---"
+          grep -n -E 'settingsTab.*integrations|settings-tab-integrations|Integrations|settings-integrations' /tmp/App.valid.tsx | head -120 || true
+          echo "--- React import area ---"
+          sed -n '1,110p' /tmp/App.valid.tsx
 
       - name: Install dependencies
         run: npm ci
