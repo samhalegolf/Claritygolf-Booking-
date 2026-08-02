@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 269834)
-... 30757 bytes omitted ...
-
 import {
   AlertTriangle,
   Archive,
@@ -3138,7 +3135,19563 @@ function resolvedCalendarItemLocationId(
   locations: Location[],
   account: Partial<CoachAccount>,
 ) {
-  return item?.locationId || item?.location?.locationId || service?.locationId || calendarItemLocation(item, servic…212152 tokens truncated…chName", event.target.value)}
+  return item?.locationId || item?.location?.locationId || service?.locationId || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
+}
+
+function calendarItemBelongsToLocation(
+  item: Partial<CalendarItem> | undefined,
+  locationId: string | undefined,
+  service: Partial<Service> | undefined,
+  locations: Location[],
+  account: Partial<CoachAccount>,
+) {
+  if (!locationId) return false;
+  return resolvedCalendarItemLocationId(item, service, locations, account) === locationId;
+}
+
+function calendarItemCoachColumnId(
+  item: Partial<CalendarItem> | undefined,
+  service: Partial<Service> | undefined,
+  coaches: CoachProfile[],
+  account: Partial<CoachAccount>,
+) {
+  return resolvedCalendarItemCoachId(item, service, coaches, account);
+}
+
+function calendarItemLocationLaneId(
+  item: Partial<CalendarItem> | undefined,
+  service: Partial<Service> | undefined,
+  locations: Location[],
+  account: Partial<CoachAccount>,
+) {
+  return resolvedCalendarItemLocationId(item, service, locations, account);
+}
+
+function isLocationOnlyBlock(item: Partial<CalendarItem> | undefined) {
+  return item?.kind === "block" && Boolean(item.locationId || item.location?.locationId) && !item.coachId && !item.coach?.coachId;
+}
+
+function isCoachOnlyBlock(item: Partial<CalendarItem> | undefined) {
+  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && !item.locationId && !item.location?.locationId;
+}
+
+function isCoachLocationBlock(item: Partial<CalendarItem> | undefined) {
+  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && Boolean(item.locationId || item.location?.locationId);
+}
+
+function isInactiveForConflict(item: Partial<CalendarItem> | undefined) {
+  return item?.status === "cancelled" || item?.status === "no_show";
+}
+
+type SchedulingConflictContext = {
+  candidateService?: Partial<Service>;
+  existingService?: Partial<Service>;
+  candidateCoachId?: string;
+  candidateLocationId?: string;
+  coaches: CoachProfile[];
+  locations: Location[];
+  account: Partial<CoachAccount>;
+};
+
+function isCoachConflict(
+  candidate: Partial<CalendarItem>,
+  existing: Partial<CalendarItem>,
+  context: SchedulingConflictContext,
+) {
+  if (isInactiveForConflict(existing)) return false;
+  const candidateCoachId =
+    context.candidateCoachId ??
+    resolvedCalendarItemCoachId(candidate, context.candidateService, context.coaches, context.account);
+  const existingCoachId = resolvedCalendarItemCoachId(existing, context.existingService, context.coaches, context.account);
+  if (!candidateCoachId || !existingCoachId || candidateCoachId !== existingCoachId) return false;
+  if (isLocationOnlyBlock(existing)) return false;
+  return existing.kind === "appointment" || existing.kind === "block";
+}
+
+function isLocationConflict(
+  candidate: Partial<CalendarItem>,
+  existing: Partial<CalendarItem>,
+  context: SchedulingConflictContext,
+) {
+  if (isInactiveForConflict(existing)) return false;
+  const candidateLocationId =
+    context.candidateLocationId ??
+    resolvedCalendarItemLocationId(candidate, context.candidateService, context.locations, context.account);
+  const existingLocationId = resolvedCalendarItemLocationId(existing, context.existingService, context.locations, context.account);
+  if (!candidateLocationId || !existingLocationId || candidateLocationId !== existingLocationId) return false;
+  if (isLocationOnlyBlock(existing)) return true;
+  if (isCoachOnlyBlock(existing)) return false;
+  if (isCoachLocationBlock(existing)) {
+    return isCoachConflict(candidate, existing, context);
+  }
+  return candidate.kind === "block" && isLocationOnlyBlock(candidate);
+}
+
+function isAppointmentConflict(
+  candidate: Partial<CalendarItem>,
+  existing: Partial<CalendarItem>,
+  context: SchedulingConflictContext,
+) {
+  if (isInactiveForConflict(existing)) return false;
+  return isCoachConflict(candidate, existing, context) || isLocationConflict(candidate, existing, context);
+}
+
+function bookingLocationDisplay(location: Partial<BookingLocationSnapshot> | undefined) {
+  return [location?.name, location?.address].filter(Boolean).join(" · ");
+}
+
+function bookingLocationShortDisplay(location: Partial<BookingLocationSnapshot> | undefined) {
+  return location?.shortName || location?.name || "";
+}
+
+function cleanEditableServiceText(value: unknown, fallback: string, maxLength: number) {
+  if (typeof value === "string") return value.trim().slice(0, maxLength);
+  return fallback;
+}
+
+function cleanService(service?: Partial<Service>, index = 0): Service {
+  const fallback = defaultServices[index] ?? defaultServices[0];
+  const descriptionFallback = service ? "" : fallback.description;
+  const locationFallback = service ? "" : fallback.location;
+  const lessonNoteFallback = service ? service.location || "" : fallback.lessonNote || fallback.location || "";
+  const name =
+    typeof service?.name === "string" && service.name.trim()
+      ? service.name.trim().slice(0, 120)
+      : fallback.name;
+  const duration = Number.isFinite(Number(service?.duration)) ? Number(service?.duration) : fallback.duration;
+  const price = Number.isFinite(Number(service?.price)) ? Number(service?.price) : fallback.price;
+  const capacity = Number.isFinite(Number(service?.capacity)) ? Number(service?.capacity) : fallback.capacity || 1;
+  // The chosen lesson format is authoritative. Legacy rows that predate the
+  // lessonFormat field are still detected by their "package-" id prefix, but a
+  // service name is never used to infer the format.
+  const looksLikePackage =
+    service?.lessonFormat === "package" ||
+    (!service?.lessonFormat && String(service?.id || "").startsWith("package-"));
+  const lessonFormat: LessonFormat =
+    looksLikePackage ? "package" : service?.lessonFormat === "group" ? "group" : "private";
+  const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
+  const cleanCapacity = customGroup
+    ? clamp(Math.round(capacity || DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS)
+    : clamp(Math.round(capacity), lessonFormat === "group" ? 2 : 1, 24);
+  const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
+    ? Number(service?.minParticipants)
+    : customGroup
+      ? DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS
+      : lessonFormat === "group"
+      ? Math.min(2, cleanCapacity)
+      : 1;
+  const minParticipants =
+    lessonFormat === "group" ? clamp(Math.round(rawMinParticipants), 2, cleanCapacity) : 1;
+  const baseParticipants = customGroupBaseParticipants({ ...service, capacity: cleanCapacity });
+  const basePrice = customGroupBasePrice(service);
+  const extraPersonPrice = customGroupExtraPersonPrice(service);
+  const priceMode: PriceMode =
+    lessonFormat === "group" && service?.priceMode === "per-person" && !customGroup ? "per-person" : "session";
+  const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
+    ? clamp(Math.round(Number(service?.packageAllowance)), 1, 100)
+    : Math.max(1, fallback.packageAllowance ?? 5);
+  const packageCoverageMode: PackageCoverageMode =
+    service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
+  const groupSchedule = lessonFormat === "group" && !customGroup ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule) : undefined;
+  const bookingScreenIds = normalizeBookingScreenIds(service?.bookingScreenIds);
+  return {
+    id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
+    accountId: cleanSlug(service?.accountId, fallback.accountId || defaultWorkspaceAccountFromCoachAccount().id),
+    coachId: cleanSlug(service?.coachId, defaultCoachProfileFromAccount().id),
+    name,
+    duration: clamp(Math.round(duration), 15, 240),
+    price: Math.max(0, Math.round(price)),
+    description: cleanEditableServiceText(service?.description, descriptionFallback, 240),
+    visibility: lessonFormat === "package" || service?.visibility === "private" ? "private" : "public",
+    active: service?.active !== false,
+    capacity: cleanCapacity,
+    minParticipants,
+    lessonFormat,
+    priceMode,
+    locationId: typeof service?.locationId === "string" ? cleanSlug(service.locationId, "") || undefined : undefined,
+    lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
+    location: cleanEditableServiceText(service?.location, locationFallback, 160),
+    packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
+    packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
+    packageCoversServiceId:
+      lessonFormat === "package" && typeof service?.packageCoversServiceId === "string"
+        ? service.packageCoversServiceId.trim().slice(0, 120)
+        : undefined,
+    groupSchedule,
+    bookingScreenIds,
+    customGroup: customGroup || undefined,
+    customGroupEnabled: customGroup || undefined,
+    baseParticipants: customGroup ? baseParticipants : undefined,
+    basePrice: customGroup ? basePrice : undefined,
+    extraPersonPrice: customGroup ? extraPersonPrice : undefined,
+    archived: service?.archived === true,
+  };
+}
+
+function cleanServices(serviceList?: Partial<Service>[]): Service[] {
+  // Only seed the demo lesson types when there is no services data at all.
+  // An explicit empty list means the coach deleted them and must stay empty.
+  const source = Array.isArray(serviceList) ? serviceList : defaultServices;
+  const seen = new Set<string>();
+  return source.map((service, index) => {
+    const clean = cleanService(service, index);
+    let id = clean.id;
+    let suffix = 2;
+    while (seen.has(id)) {
+      id = `${clean.id}-${suffix}`;
+      suffix += 1;
+    }
+    seen.add(id);
+    return { ...clean, id };
+  });
+}
+
+function calendarItemsFingerprint(itemList?: Partial<CalendarItem>[]) {
+  if (!Array.isArray(itemList)) return "";
+  return JSON.stringify(
+    itemList
+      .map((item) => ({
+        id: item.id || "",
+        kind: item.kind || "",
+        week: Number(item.week ?? 0),
+        day: Number(item.day ?? 0),
+        start: Number(item.start ?? 0),
+        duration: Number(item.duration ?? 0),
+        coachId: item.coachId || "",
+        locationId: item.locationId || "",
+        serviceId: item.serviceId || "",
+        client: item.client || "",
+        title: item.title || "",
+        phone: item.phone || "",
+        email: (item.email || "").toLowerCase(),
+        note: item.note || "",
+        location: item.location || null,
+        coach: item.coach || null,
+        status: item.status || "booked",
+        customGroup: item.customGroup === true,
+        attendees: Array.isArray(item.attendees) ? item.attendees : [],
+        calculatedPrice: Number(item.calculatedPrice ?? 0),
+      }))
+      .sort((first, second) => first.id.localeCompare(second.id)),
+  );
+}
+
+function calendarStateFingerprint(itemList: Partial<CalendarItem>[] | undefined, syncKey: string) {
+  return JSON.stringify({ items: calendarItemsFingerprint(itemList), syncKey });
+}
+
+function calendarItemsEquivalent(first?: Partial<CalendarItem>[], second?: Partial<CalendarItem>[]) {
+  return calendarItemsFingerprint(first) === calendarItemsFingerprint(second);
+}
+
+function calendarItemEquivalent(first?: Partial<CalendarItem>, second?: Partial<CalendarItem>) {
+  if (!first && !second) return true;
+  if (!first || !second) return false;
+  return calendarItemsEquivalent([first], [second]);
+}
+
+function calendarItemsById(itemList: CalendarItem[] = []) {
+  return new Map(itemList.filter((item) => item.id).map((item) => [item.id, item]));
+}
+
+function mergeCalendarItemsAfterConflict(
+  latestItems: CalendarItem[],
+  baselineItems: CalendarItem[],
+  desiredItems: CalendarItem[],
+) {
+  const latestById = calendarItemsById(latestItems);
+  const baselineById = calendarItemsById(baselineItems);
+  const desiredById = calendarItemsById(desiredItems);
+  const candidateIds = new Set([...baselineById.keys(), ...desiredById.keys()]);
+  const changedIds = new Set<string>();
+
+  candidateIds.forEach((id) => {
+    if (!calendarItemEquivalent(baselineById.get(id), desiredById.get(id))) changedIds.add(id);
+  });
+  if (!changedIds.size) return latestItems;
+
+  for (const id of changedIds) {
+    const baselineItem = baselineById.get(id);
+    const latestItem = latestById.get(id);
+    const desiredItem = desiredById.get(id);
+    // The live row already matches what we want (our earlier attempt landed, or the response
+    // was lost to a timeout and we retried). Not a conflict — nothing to resolve.
+    if (calendarItemEquivalent(latestItem, desiredItem)) continue;
+    // We are creating this id and it already exists live. Calendar item ids are client-generated
+    // UUIDs, so this can only be our own write landing before its response reached us — the
+    // server just echoes it back normalised (coach/location snapshots, default status). Keep our
+    // version rather than failing the save and telling the coach nothing was saved.
+    if (!baselineItem && latestItem && desiredItem) continue;
+    if (!baselineItem && latestItem) return null;
+    if (baselineItem && latestItem && !calendarItemEquivalent(latestItem, baselineItem)) return null;
+    if (baselineItem && !latestItem && desiredItem) return null;
+  }
+
+  const merged = latestItems.filter((item) => !changedIds.has(item.id));
+  desiredItems.forEach((item) => {
+    if (changedIds.has(item.id)) merged.push(item);
+  });
+  return merged;
+}
+
+function servicePriceLabel(service?: (Pick<Service, "price" | "priceMode"> & Partial<Service>) | null) {
+  if (!service) return "No charge";
+  if (isCustomGroupService(service)) {
+    return `NZ$${customGroupBasePrice(service)}.00 up to ${customGroupBaseParticipants(service)}`;
+  }
+  return `NZ$${service.price}.00${service.priceMode === "per-person" ? " pp" : ""}`;
+}
+
+function serviceCapacityLabel(service: Pick<Service, "capacity" | "lessonFormat" | "minParticipants">) {
+  if (service.lessonFormat === "package") return "Package";
+  if (isCustomGroupService(service)) return `${service.minParticipants}-${service.capacity} clients`;
+  if (service.lessonFormat === "group") return `${service.minParticipants}-${service.capacity} clients`;
+  return `${service.capacity} client${service.capacity === 1 ? "" : "s"}`;
+}
+
+function notificationKindLabel(kind = "") {
+  if (kind.includes("coach")) return "Coach notification";
+  if (kind.includes("admin")) return "Admin notification";
+  if (kind.includes("client")) return "Client email";
+  if (kind.includes("reschedule")) return "Reschedule email";
+  if (kind.includes("test")) return "Test email";
+  return "Email receipt";
+}
+
+function notificationStatusLabel(notification: Pick<NotificationRecord, "status" | "error">) {
+  if (notification.status === "delivered") return "Delivered";
+  if (notification.status === "opened") return "Opened";
+  if (notification.status === "clicked") return "Clicked";
+  if (notification.status === "sent") return "Sent to provider";
+  if (notification.status === "delayed") return notification.error ? `Delayed · ${notification.error.replaceAll("_", " ")}` : "Delayed";
+  if (notification.status === "bounced") return notification.error ? `Bounced · ${notification.error.replaceAll("_", " ")}` : "Bounced";
+  if (notification.status === "suppressed") return notification.error ? `Suppressed · ${notification.error.replaceAll("_", " ")}` : "Suppressed";
+  if (notification.status === "complained") return notification.error ? `Complained · ${notification.error.replaceAll("_", " ")}` : "Complained";
+  if (notification.status === "skipped") return notification.error ? `Skipped · ${notification.error.replaceAll("_", " ")}` : "Skipped";
+  if (notification.status === "failed") return notification.error ? `Failed · ${notification.error.replaceAll("_", " ")}` : "Failed";
+  return notification.status || "Pending";
+}
+
+function notificationTone(status = "") {
+  if (["delivered", "opened", "clicked"].includes(status)) return "delivered";
+  if (status === "sent") return "sent";
+  if (["bounced", "failed", "complained", "suppressed"].includes(status)) return "failed";
+  if (status === "skipped") return "skipped";
+  if (status === "delayed") return "delayed";
+  return "pending";
+}
+
+function notificationTimeLabel(createdAt = "") {
+  if (!createdAt) return "";
+  const time = new Date(createdAt);
+  return Number.isNaN(time.getTime()) ? "" : time.toLocaleString();
+}
+
+function profileRecordDateLabel(createdAt = "") {
+  if (!createdAt) return "";
+  const time = new Date(createdAt);
+  if (Number.isNaN(time.getTime())) return "";
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(time)
+    .replace(",", "")
+    .replace(/\s(am|pm)$/i, (match) => match.toUpperCase());
+}
+
+function profileRecordTitle(playerName = "", createdAt = "") {
+  const name = safeText(playerName).trim() || "Player";
+  const date = profileRecordDateLabel(createdAt);
+  return date ? `${name} - ${date}` : name;
+}
+
+function formatVideoDurationLabel(seconds?: number) {
+  if (!Number.isFinite(seconds ?? NaN) || !seconds) return "Duration unknown";
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = totalSeconds % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
+  switch (code) {
+    case "CLOUD_OAUTH_NOT_CONFIGURED":
+      return "Clarity Cloud is not configured for this environment.";
+    case "PROVIDER_STORAGE_UNAVAILABLE":
+      return "Clarity Cloud setup is incomplete.";
+    case "DRIVE_API_DISABLED":
+      return "Clarity Cloud is not enabled for this connection.";
+    case "DRIVE_UPLOAD_PROXY_FAILED":
+      return "Clarity Cloud could not complete the upload.";
+    case "DRIVE_UPLOAD_TOO_LARGE":
+      return "This transfer chunk was too large.";
+    case "DRIVE_SCOPE_MISSING":
+      return "Clarity Cloud permission is required.";
+    case "GOOGLE_RECONNECT_REQUIRED":
+      return "Reconnect Clarity Cloud to continue.";
+    case "GOOGLE_TOKEN_REFRESH_FAILED":
+      return "Clarity Cloud could not refresh the Google connection.";
+    case "DRIVE_TRANSFER_FOLDER_FAILED":
+    case "DRIVE_FOLDER_PROVISION_FAILED":
+      return "Clarity Cloud could not prepare the transfer folder.";
+    case "DRIVE_UPLOAD_SESSION_EXPIRED":
+      return "Start a new upload session before retrying.";
+    case "DRIVE_UPLOAD_SESSION_FAILED":
+      return "Clarity Cloud could not start the video upload.";
+    case "DRIVE_TRANSFER_STATE_FAILED":
+      return "Clarity Cloud could not store the upload session.";
+    case "DRIVE_UPLOAD_VERIFY_FAILED":
+      return "Clarity Cloud could not verify the uploaded video.";
+    case "DRIVE_UPLOAD_INTERRUPTED":
+      return "Video upload was interrupted.";
+    case "SAVED_VIDEO_SOURCE_MISSING":
+      return "Source unavailable.";
+    case "CLARITY_CLOUD_IMPORT_NOT_READY":
+      return "This video is not ready to download from Clarity Cloud.";
+    case "CLARITY_CLOUD_IMPORT_VERIFY_FAILED":
+      return "Imported video did not match the Clarity Cloud catalogue.";
+    case "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED":
+      return "Local import was verified, but the receipt could not be recorded.";
+    case "CLARITY_CLOUD_PROVIDER_FAILED":
+      return "Your local video is safe. The cloud transfer service could not be reached.";
+    case "TRANSFER_PAUSED":
+      return "Transfer paused.";
+    default:
+      return fallback && !/[{}<>]|https?:\/\//i.test(fallback) && fallback.length < 140
+        ? fallback
+        : "Clarity Cloud could not complete the upload.";
+  }
+}
+
+function mergeSavedVideoItems(current: SavedVideoItem[], incoming: SavedVideoItem[]) {
+  const byId = new Map(current.map((item) => [item.savedVideoId, item]));
+  incoming.forEach((item) => byId.set(item.savedVideoId, item));
+  return Array.from(byId.values()).sort((left, right) =>
+    String(right.updatedAt || right.createdAt).localeCompare(String(left.updatedAt || left.createdAt))
+  );
+}
+
+function clarityCloudTransferBlockReason(health: ClarityCloudHealth) {
+  if (health.state === "not-connected") return "Connect Clarity Cloud";
+  if (health.state === "reconnect-required") return "Reconnect Clarity Cloud";
+  if (health.state === "permission-required") return "Permission required";
+  if (health.state === "setup-incomplete") {
+    return "safeErrorCode" in health && health.safeErrorCode === "CLOUD_OAUTH_NOT_CONFIGURED"
+      ? "Clarity Cloud is not configured for this environment."
+      : "Setup incomplete";
+  }
+  if (health.state === "temporarily-unavailable" || health.state === "error") {
+    return "Your local video is safe. The cloud transfer service could not be reached.";
+  }
+  if (health.state === "beta") return "Primary computer not configured";
+  return "";
+}
+
+function clarityCloudSafeErrorCode(health: ClarityCloudHealth) {
+  if ("safeErrorCode" in health && health.safeErrorCode) return health.safeErrorCode;
+  if (health.state === "not-connected") return "CLARITY_CLOUD_NOT_CONNECTED";
+  if (health.state === "reconnect-required") return "CLARITY_CLOUD_RECONNECT_REQUIRED";
+  if (health.state === "permission-required") return "CLARITY_CLOUD_PERMISSION_REQUIRED";
+  if (health.state === "setup-incomplete") return "CLARITY_CLOUD_SETUP_INCOMPLETE";
+  if (health.state === "temporarily-unavailable") return "CLARITY_CLOUD_TRANSFER_UNAVAILABLE";
+  if (health.state === "beta") return "PRIMARY_COMPUTER_NOT_CONFIGURED";
+  return "CLARITY_CLOUD_TRANSFER_BLOCKED";
+}
+
+function shouldOpenClarityCloudSettings(health: ClarityCloudHealth) {
+  return "action" in health && health.action !== "retry";
+}
+
+function isClarityCloudOperational(health: ClarityCloudHealth) {
+  return health.state === "ready";
+}
+
+function sourceSideFromSlotKey(slotKey: string): ComparisonSide {
+  return slotKey.endsWith(".right") ? "right" : "left";
+}
+
+const defaultManagedLocalLibraryStatus: ManagedLocalVideoLibraryStatus = {
+  supported: false,
+  configured: false,
+  health: "unsupported",
+  message: "File System Access is unavailable. Working from device cache.",
+};
+
+function createDefaultVideoWorkspaceState(side: ComparisonSide): ComparisonWorkspaceState {
+  return {
+    version: 1,
+    mode: "single",
+    activeSide: side,
+    savedVideoIds: {},
+    linkedPlayback: false,
+    focusWindowOpen: false,
+    focusWindowMode: "area",
+    focusWindowSide: side,
+    focusAreaRect: null,
+  };
+}
+
+function createMigrationAnalysis(video: PlayerVideo): VideoAnalysis {
+  const now = new Date().toISOString();
+  return {
+    id: `analysis-${video.id || now}`,
+    playerId: video.playerId,
+    lessonId: video.lessonId,
+    videoId: video.id,
+    videoMeta: {
+      title: video.title,
+      duration: video.duration,
+      fps: video.fps,
+      width: video.width,
+      height: video.height,
+    },
+    drawings: [],
+    markers: [],
+    notes: [],
+    focusViews: [],
+    focusSnapshots: [],
+    narrationRefs: [],
+    createdAt: video.createdAt || now,
+    updatedAt: now,
+  };
+}
+
+async function readJsonResponse<T>(response: Response, fallbackMessage: string): Promise<T & { message?: string; error?: string }> {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(fallbackMessage);
+  }
+  return (await response.json()) as T & { message?: string; error?: string };
+}
+
+function googleSyncTimeLabel(createdAt = "") {
+  if (!createdAt) return "Not synced yet";
+  const time = new Date(createdAt);
+  return Number.isNaN(time.getTime()) ? "Not synced yet" : time.toLocaleString();
+}
+
+function addDaysInputValue(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return dateInputValue(date);
+}
+
+// "2026-07-15" -> "15 Jul 2026". Parsed as a local date (not UTC) so the day
+// never shifts; falls back to the raw value / em dash if it isn't a plain date.
+function formatDateForDisplay(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+  if (!match) return value || "—";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+// Whole days between two "YYYY-MM-DD" strings, computed via UTC midnight so
+// it isn't affected by daylight saving or the browser's local time zone.
+function isoDateDiffDays(laterIso: string, earlierIso: string) {
+  const toUtcMillis = (iso: string) => {
+    const [year, month, day] = iso.split("-").map(Number);
+    return Date.UTC(year, (month || 1) - 1, day || 1);
+  };
+  return Math.round((toUtcMillis(laterIso) - toUtcMillis(earlierIso)) / 86400000);
+}
+
+// --- Bank CSV import (expenses) ---------------------------------------------
+// Self-contained parser, deliberately similar to csv-import-enhancer.ts's
+// client-import parser (quote-aware, handles escaped "" quotes, mixed line
+// endings, BOM) - that script isn't a module and can't be imported into this
+// component, so the same logic is reimplemented here rather than shared.
+
+// Currency follows the workspace country. It was hardcoded to NZD, which meant
+// a coach in another country was quoted prices in New Zealand dollars.
+function formatMoney(amount: number, currency = activeCurrency()) {
+  return new Intl.NumberFormat(activeLocale(), {
+    style: "currency",
+    currency: currency || activeCurrency(),
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
+
+// The currency's symbol (e.g. "$") for the active/selected currency, used to
+// prefix money inputs in the invoice editor so a raw number never shows without
+// its unit. Falls back to "$" if the locale can't produce one.
+function currencySymbol(currency = activeCurrency()) {
+  try {
+    const parts = new Intl.NumberFormat(activeLocale(), {
+      style: "currency",
+      currency: currency || activeCurrency(),
+      maximumFractionDigits: 0,
+    }).formatToParts(0);
+    return parts.find((part) => part.type === "currency")?.value || "$";
+  } catch {
+    return "$";
+  }
+}
+
+function parseMoneyInput(value: string) {
+  const normalised = value.replace(/,/g, "").replace(/[^0-9.]/g, "");
+  const firstDot = normalised.indexOf(".");
+  const cleaned =
+    firstDot === -1
+      ? normalised
+      : `${normalised.slice(0, firstDot + 1)}${normalised.slice(firstDot + 1).replace(/\./g, "")}`;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseQuantityInput(value: string) {
+  return Math.max(0, Math.round(parseMoneyInput(value)));
+}
+
+function parseDraftNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+type ServiceNumberField =
+  | "duration"
+  | "price"
+  | "packageAllowance"
+  | "baseParticipants"
+  | "basePrice"
+  | "extraPersonPrice";
+
+const SERVICE_NUMBER_LIMITS: Record<ServiceNumberField, { min: number; max: number; fallback: number }> = {
+  duration: { min: 15, max: 240, fallback: 60 },
+  price: { min: 0, max: 100000, fallback: 0 },
+  packageAllowance: { min: 1, max: 100, fallback: 5 },
+  baseParticipants: {
+    min: DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+    max: DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
+    fallback: DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS,
+  },
+  basePrice: { min: 0, max: 100000, fallback: DEFAULT_CUSTOM_GROUP_BASE_PRICE },
+  extraPersonPrice: { min: 0, max: 100000, fallback: DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE },
+};
+
+function generateServiceDraftId() {
+  return `service-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function emptyInvoiceDraft(settings = defaultInvoiceSettings, coachId = defaultCoachProfileFromAccount().id): InvoiceDraft {
+  return {
+    coachId,
+    payerName: "",
+    payerEmail: "",
+    payerPhone: "",
+    invoiceDate: dateInputValue(),
+    dueDate: addDaysInputValue(settings.paymentTermsDays),
+    reference: "",
+    discountLabel: "",
+    discountAmount: 0,
+    // Customer note starts empty - not pre-filled from the default-note setting.
+    message: "",
+    lineSearch: "",
+    taxInclusive: false,
+    lines: [],
+  };
+}
+
+function emailResultTone(result?: Pick<EmailSendResult, "sent" | "status" | "reason" | "error"> | null) {
+  if (!result) return "pending";
+  if (result.sent || result.status === "sent") return "sent";
+  if (result.status === "skipped") return "skipped";
+  if (result.status === "failed" || result.reason || result.error) return "failed";
+  return "pending";
+}
+
+function emptyServiceEditor(): ServiceEditor {
+  return {
+    name: "",
+    duration: 60,
+    price: 0,
+    description: "",
+    visibility: "public",
+    active: true,
+    capacity: 1,
+    minParticipants: 1,
+    lessonFormat: "private",
+    priceMode: "session",
+    locationId: "",
+    lessonNote: "",
+    location: "",
+    groupSchedule: defaultGroupSchedule(),
+    packageAllowance: 5,
+    packageCoverageMode: "upfront",
+    packageCoversServiceId: "",
+    bookingScreenIds: ["main"],
+    customGroup: false,
+    customGroupEnabled: false,
+    baseParticipants: DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS,
+    basePrice: DEFAULT_CUSTOM_GROUP_BASE_PRICE,
+    extraPersonPrice: DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE,
+  };
+}
+
+function cleanAvailability(availability?: AvailabilityWindow[][], fallbackCoachId = defaultCoachProfileFromAccount().id): AvailabilityWindow[][] {
+  const source = Array.isArray(availability) ? availability : defaultAvailability;
+  return Array.from({ length: DAY_COUNT }, (_, day) => {
+    const windows = Array.isArray(source[day]) ? source[day] : [];
+    return windows
+      .map<AvailabilityWindow | null>((window) => {
+        const rawStart = Number.isFinite(Number(window?.start)) ? Number(window?.start) : DEFAULT_CALENDAR_START_MINUTES;
+        const rawEnd = Number.isFinite(Number(window?.end)) ? Number(window?.end) : rawStart + 60;
+        const start = snap(clamp(rawStart, DAY_START_MINUTES, LAST_TIME_SLOT_MINUTES));
+        const end = snap(clamp(rawEnd, start + SNAP_MINUTES, LAST_TIME_SLOT_MINUTES));
+        const coachId = cleanSlug(window?.coachId, fallbackCoachId);
+        const accountId = cleanSlug(window?.accountId, defaultWorkspaceAccountFromCoachAccount().id);
+        return end > start ? { start, end, coachId, accountId } : null;
+      })
+      .filter((window): window is AvailabilityWindow => Boolean(window))
+      .sort((a, b) => (a.coachId || "").localeCompare(b.coachId || "") || a.start - b.start)
+      .reduce<AvailabilityWindow[]>((merged, window) => {
+        const previous = merged.at(-1);
+        if (previous && previous.coachId === window.coachId && window.start < previous.end) {
+          previous.end = Math.max(previous.end, window.end);
+        } else {
+          merged.push({ ...window });
+        }
+        return merged;
+      }, []);
+  });
+}
+
+function emptyAvailability(): AvailabilityWindow[][] {
+  return Array.from({ length: DAY_COUNT }, () => []);
+}
+
+function availabilityForCoach(availability: AvailabilityWindow[][], coachId: string, fallbackCoachId: string) {
+  return availability.map((dayWindows) =>
+    dayWindows.filter((window) => (window.coachId || fallbackCoachId) === coachId),
+  );
+}
+
+function isCancelledGroupSessionItem(item: CalendarItem) {
+  return (
+    item.kind === "block" &&
+    Boolean(item.serviceId) &&
+    (item.note === CANCELLED_GROUP_SESSION_NOTE || item.title === CANCELLED_GROUP_SESSION_TITLE)
+  );
+}
+
+function isCancelledGroupSessionMatch(item: CalendarItem, serviceId: string, week: number, day: number, start: number) {
+  return (
+    isCancelledGroupSessionItem(item) &&
+    item.serviceId === serviceId &&
+    itemWeek(item) === week &&
+    item.day === day &&
+    item.start === start
+  );
+}
+
+function getStoredCoachAccount(): CoachAccount {
+  if (typeof window === "undefined") return defaultCoachAccount;
+  try {
+    const stored = window.localStorage.getItem(COACH_ACCOUNT_STORAGE_KEY);
+    return stored ? cleanCoachAccount(JSON.parse(stored) as Partial<CoachAccount>) : defaultCoachAccount;
+  } catch {
+    return defaultCoachAccount;
+  }
+}
+
+function cleanBrandSettings(settings?: Partial<BrandSettings>): BrandSettings {
+  return {
+    coachName: typeof settings?.coachName === "string" && settings.coachName.trim()
+      ? settings.coachName.trim().slice(0, 80)
+      : defaultBrandSettings.coachName,
+    logoName: typeof settings?.logoName === "string" ? settings.logoName.trim().slice(0, 120) : "",
+    logoPreview:
+      typeof settings?.logoPreview === "string" && settings.logoPreview.startsWith("data:image/")
+        ? settings.logoPreview
+        : "",
+    showLogo: settings?.showLogo === true,
+    neutral: cleanHexColor(settings?.neutral, defaultBrandSettings.neutral),
+    primary: cleanHexColor(settings?.primary, defaultBrandSettings.primary),
+    secondary: cleanHexColor(settings?.secondary, defaultBrandSettings.secondary),
+    accent: cleanHexColor(settings?.accent, defaultBrandSettings.accent),
+    bookingTheme: settings?.bookingTheme === "light" ? "light" : "dark",
+  };
+}
+
+function getStoredTheme(): ThemeMode {
+  if (typeof window === "undefined") return "light";
+  return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
+}
+
+function getStoredBrandSettings(): BrandSettings {
+  if (typeof window === "undefined") return defaultBrandSettings;
+  try {
+    const stored = window.localStorage.getItem(BRAND_STORAGE_KEY);
+    return stored ? cleanBrandSettings(JSON.parse(stored) as Partial<BrandSettings>) : defaultBrandSettings;
+  } catch {
+    return defaultBrandSettings;
+  }
+}
+
+function colorDistance(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }) {
+  return Math.hypot(a.r - b.r, a.g - b.g, a.b - b.b);
+}
+
+function rgbToHex(r: number, g: number, b: number) {
+  return `#${[r, g, b].map((value) => clamp(Math.round(value), 0, 255).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function rgbStats(r: number, g: number, b: number) {
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  const lightness = (max + min) / 2;
+  const saturation = max === min ? 0 : (max - min) / (1 - Math.abs(2 * lightness - 1));
+  return { lightness, saturation };
+}
+
+function swatchStyle(hex: string): CSSProperties {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+  if (!match) return { background: hex };
+  const r = Number.parseInt(match[1], 16);
+  const g = Number.parseInt(match[2], 16);
+  const b = Number.parseInt(match[3], 16);
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return {
+    background: hex,
+    color: luminance > 0.64 ? "#08100b" : "#ffffff",
+    textShadow: luminance > 0.64 ? "none" : undefined,
+  };
+}
+
+function loadImage(url: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not read that logo image."));
+    image.src = url;
+  });
+}
+
+const DIAGNOSTIC_EVENT_LIMIT = 150;
+
+function createDiagnosticId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `diag-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function sanitizeDiagnosticDetails(details?: Record<string, unknown>): Record<string, string | number | boolean> | undefined {
+  if (!details) return undefined;
+  const sanitized: Record<string, string | number | boolean> = {};
+  Object.entries(details).forEach(([key, value]) => {
+    const lowerKey = key.toLowerCase();
+    if (
+      lowerKey.includes("token") ||
+      lowerKey.includes("secret") ||
+      lowerKey.includes("authorization") ||
+      lowerKey.includes("password") ||
+      lowerKey.includes("emailbody") ||
+      lowerKey.includes("body")
+    ) {
+      return;
+    }
+    if (typeof value === "string") sanitized[key] = value.slice(0, 160);
+    if (typeof value === "number" && Number.isFinite(value)) sanitized[key] = value;
+    if (typeof value === "boolean") sanitized[key] = value;
+  });
+  return Object.keys(sanitized).length ? sanitized : undefined;
+}
+
+function diagnosticDurationBand(event: Pick<DiagnosticEvent, "details" | "durationMs">) {
+  const durationMs = event.durationMs;
+  if (typeof durationMs !== "number") return "";
+  if (event.details?.blockingCalendar === false || event.details?.backgroundRefresh === true) {
+    return durationMs < 1000 ? "Okay" : "Background";
+  }
+  if (durationMs < 300) return "Fast";
+  if (durationMs < 1000) return "Okay";
+  if (durationMs < 3000) return "Slow";
+  return "Problem";
+}
+
+async function analyzeLogoFile(file: File): Promise<BrandSettings> {
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const image = await loadImage(objectUrl);
+    const sampleCanvas = document.createElement("canvas");
+    const sampleSize = 96;
+    const scale = Math.min(sampleSize / image.naturalWidth, sampleSize / image.naturalHeight, 1);
+    sampleCanvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    sampleCanvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const sampleContext = sampleCanvas.getContext("2d", { willReadFrequently: true });
+    if (!sampleContext) throw new Error("Logo colour extraction is not available in this browser.");
+    sampleContext.drawImage(image, 0, 0, sampleCanvas.width, sampleCanvas.height);
+
+    const buckets = new Map<
+      string,
+      { r: number; g: number; b: number; count: number; lightness: number; saturation: number }
+    >();
+    const neutralBuckets = new Map<
+      string,
+      { r: number; g: number; b: number; count: number; lightness: number; saturation: number }
+    >();
+    const pixels = sampleContext.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height).data;
+
+    for (let index = 0; index < pixels.length; index += 4) {
+      const alpha = pixels[index + 3];
+      if (alpha < 120) continue;
+      const rawR = pixels[index];
+      const rawG = pixels[index + 1];
+      const rawB = pixels[index + 2];
+      const { lightness, saturation } = rgbStats(rawR, rawG, rawB);
+
+      const r = clamp(Math.round(rawR / 24) * 24, 0, 255);
+      const g = clamp(Math.round(rawG / 24) * 24, 0, 255);
+      const b = clamp(Math.round(rawB / 24) * 24, 0, 255);
+      const key = `${r},${g},${b}`;
+      if (saturation < 0.14 && (lightness > 0.64 || lightness < 0.28)) {
+        const existingNeutral = neutralBuckets.get(key);
+        if (existingNeutral) {
+          existingNeutral.count += 1;
+        } else {
+          neutralBuckets.set(key, { r, g, b, count: 1, ...rgbStats(r, g, b) });
+        }
+      }
+
+      if (lightness > 0.96 && saturation < 0.08) continue;
+
+      const existing = buckets.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        buckets.set(key, { r, g, b, count: 1, ...rgbStats(r, g, b) });
+      }
+    }
+
+    const colours = Array.from(buckets.values()).sort((a, b) => {
+      const aScore = a.count * (0.4 + a.saturation) * (a.lightness > 0.1 && a.lightness < 0.9 ? 1.15 : 0.75);
+      const bScore = b.count * (0.4 + b.saturation) * (b.lightness > 0.1 && b.lightness < 0.9 ? 1.15 : 0.75);
+      return bScore - aScore;
+    });
+
+    const primary =
+      colours.find((colour) => colour.saturation > 0.18 && colour.lightness > 0.12 && colour.lightness < 0.88) ??
+      colours[0];
+    const secondary =
+      colours.find((colour) => primary && colorDistance(colour, primary) > 72 && colour.lightness < 0.92) ??
+      colours[1] ??
+      primary;
+    const accent =
+      colours
+        .slice()
+      .sort((a, b) => b.count - a.count)
+      .find((colour) => colour.lightness < 0.28 && colorDistance(colour, primary ?? colour) > 24) ??
+      colours.find((colour) => colour.lightness < 0.4) ??
+      null;
+    const neutral =
+      Array.from(neutralBuckets.values()).sort((a, b) => {
+        const aScore = a.count * (a.lightness > 0.62 ? 1.35 : 1);
+        const bScore = b.count * (b.lightness > 0.62 ? 1.35 : 1);
+        return bScore - aScore;
+      })[0] ?? null;
+
+    const previewCanvas = document.createElement("canvas");
+    const previewMax = 360;
+    const previewScale = Math.min(previewMax / image.naturalWidth, previewMax / image.naturalHeight, 1);
+    previewCanvas.width = Math.max(1, Math.round(image.naturalWidth * previewScale));
+    previewCanvas.height = Math.max(1, Math.round(image.naturalHeight * previewScale));
+    const previewContext = previewCanvas.getContext("2d");
+    if (!previewContext) throw new Error("Logo preview is not available in this browser.");
+    previewContext.drawImage(image, 0, 0, previewCanvas.width, previewCanvas.height);
+
+    return cleanBrandSettings({
+      ...defaultBrandSettings,
+      logoName: file.name,
+      logoPreview: previewCanvas.toDataURL("image/png"),
+      showLogo: true,
+      neutral: neutral ? rgbToHex(neutral.r, neutral.g, neutral.b) : defaultBrandSettings.neutral,
+      primary: primary ? rgbToHex(primary.r, primary.g, primary.b) : defaultBrandSettings.primary,
+      secondary: secondary ? rgbToHex(secondary.r, secondary.g, secondary.b) : defaultBrandSettings.secondary,
+      accent: accent ? rgbToHex(accent.r, accent.g, accent.b) : defaultBrandSettings.accent,
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+const defaultNotificationSettings: NotificationSettings = {
+  emailNotificationsEnabled: true,
+  notificationEmail: "",
+  notificationSubjectLine: "",
+  notificationFromName: "",
+  googleReviewUrl: "",
+  configuredSenderEmailAddress: "",
+  coachEmail: "",
+  replyToEmail: "",
+  notificationDelaySeconds: 30,
+  sendClientEmail: true,
+  sendCoachEmail: true,
+  sendAdminEmail: true,
+  clientEmailSubject: "Your {{service}} is confirmed",
+  clientEmailIntro: "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
+  clientEmailFooter: "We look forward to seeing you.",
+  adminEmailSubject: "New booking: {{client}}",
+  adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
+  minBookingNoticeMinutes: DEFAULT_MIN_BOOKING_NOTICE_MINUTES,
+  smsProviderName: "",
+  smsWebhookUrl: "",
+  smsFromNumber: "",
+  sendClientSms: false,
+  sendAdminSms: false,
+};
+
+const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
+  configured: false,
+  connected: false,
+  calendarId: "primary",
+  autoSync: false,
+  accountEmail: "",
+  lastSyncAt: "",
+  lastSyncStatus: "",
+  lastSyncError: "",
+  connectedAt: "",
+  redirectUri: "",
+  scope: "",
+};
+
+const defaultGoogleDriveTransferStatus: GoogleDriveTransferStatus = {
+  configured: false,
+  connected: false,
+  state: "not_connected",
+  calendarConnected: false,
+  driveScopeGranted: false,
+  accountEmail: "",
+  redirectUri: "",
+  scope: "https://www.googleapis.com/auth/drive.file",
+  requestedScopes: "",
+  rootFolderId: "",
+  inboxFolderId: "",
+  importedFolderId: "",
+  failedFolderId: "",
+  tokenEncryptionConfigured: false,
+  providerStorageConfigured: false,
+  blocker: "",
+  message: "Clarity Cloud status has not loaded.",
+  uploadRouteReady: true,
+  chunkedTransportReady: true,
+  incomingImportReady: false,
+};
+
+const emptyClientEditor: ClientEditor = {
+  id: "",
+  name: "",
+  email: "",
+  phone: "",
+  notes: "",
+  caddyProfileId: "",
+  caddyProfileUrl: "",
+};
+
+function App() {
+  const isEmbedMode = isPublicBookingMode();
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
+  const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
+  // Contact matching and phone formatting resolve bare national numbers against
+  // the workspace's country. The server does the same, from the same setting —
+  // if these two ever disagree, the client and server disagree about whether
+  // two numbers belong to the same person, which is what produced duplicate
+  // contacts and the failed saves.
+  useEffect(() => {
+    setActivePhoneCountry(coachAccount.country);
+  }, [coachAccount.country]);
+  const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>(() =>
+    cleanWorkspaceAccounts(undefined, getStoredCoachAccount()),
+  );
+  const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [coachProfiles, setCoachProfiles] = useState<CoachProfile[]>(() => cleanCoachProfiles(undefined, getStoredCoachAccount()));
+  const [currentAppUser, setCurrentAppUser] = useState<AppUser>(() => defaultAppUserFromCoachAccount(getStoredCoachAccount()));
+  const [brandSettings, setBrandSettings] = useState<BrandSettings>(getStoredBrandSettings);
+  const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(isEmbedMode ? "authenticated" : "checking");
+  const [authMode, setAuthMode] = useState<AuthMode>(() => (getInitialResetToken() ? "reset" : "login"));
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [loginState, setLoginState] = useState<"idle" | "signing-in">("idle");
+  const [adminWorkspaceLoadStatus, setAdminWorkspaceLoadStatus] =
+    useState<AdminWorkspaceLoadStatus>(isEmbedMode ? "loaded" : "idle");
+  const [adminWorkspaceLoadError, setAdminWorkspaceLoadError] = useState("");
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotState, setForgotState] = useState<"idle" | "sending" | "sent">("idle");
+  const [forgotMessage, setForgotMessage] = useState("");
+  const [resetToken] = useState(getInitialResetToken);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetState, setResetState] = useState<"idle" | "saving">("idle");
+  const [passwordChangeForm, setPasswordChangeForm] = useState<PasswordChangeForm>({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
+  const [passwordChangeState, setPasswordChangeState] = useState<"idle" | "saving" | "saved">("idle");
+  const [passwordChangeMessage, setPasswordChangeMessage] = useState("");
+  const [items, setItems] = useState<CalendarItem[]>(initialItems);
+  const [services, setServices] = useState<Service[]>(() => (isEmbedMode ? [] : cleanServices(defaultServices)));
+  const [locations, setLocations] = useState<Location[]>(() => (isEmbedMode ? [] : cleanLocations(undefined, getStoredCoachAccount())));
+  const [locationEditor, setLocationEditor] = useState<Location>(() => defaultLocationFromCoachAccount(getStoredCoachAccount()));
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  const [showLocationEditor, setShowLocationEditor] = useState(false);
+  const [locationSaveState, setLocationSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [locationEditorError, setLocationEditorError] = useState("");
+  const [coachEditor, setCoachEditor] = useState<CoachProfile>(() => defaultCoachProfileFromAccount(getStoredCoachAccount()));
+  const [editingCoachId, setEditingCoachId] = useState<string | null>(null);
+  const [showCoachEditor, setShowCoachEditor] = useState(false);
+  const [coachSaveState, setCoachSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [coachEditorError, setCoachEditorError] = useState("");
+  const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
+  const [showServiceEditor, setShowServiceEditor] = useState(false);
+  const [serviceListTab, setServiceListTab] = useState<ServiceListTab>("active");
+  const [pendingServiceAction, setPendingServiceAction] = useState<PendingServiceAction>(null);
+  const [serviceSaveState, setServiceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [groupOccurrenceInput, setGroupOccurrenceInput] = useState("");
+  const [groupMinimumInput, setGroupMinimumInput] = useState("");
+  const [groupMaximumInput, setGroupMaximumInput] = useState("");
+  const [serviceNumberDrafts, setServiceNumberDrafts] = useState<Partial<Record<ServiceNumberField, string>>>({});
+  const [availability, setAvailability] = useState<AvailabilityWindow[][]>(() => (isEmbedMode ? emptyAvailability() : defaultAvailability));
+  const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
+  const [people, setPeople] = useState<Person[]>([]);
+  const [lessonNotes, setLessonNotes] = useState<LessonNote[]>([]);
+  const [lessonNoteSaveState, setLessonNoteSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [peopleImportText, setPeopleImportText] = useState("");
+  const [peopleImportState, setPeopleImportState] = useState<"idle" | "importing" | "imported">("idle");
+  const [peopleImportDiagnostic, setPeopleImportDiagnostic] = useState<PeopleImportDiagnostic | null>(null);
+  const [clientSearch, setClientSearch] = useState("");
+  const [showClientImport, setShowClientImport] = useState(false);
+  const [isAddingClient, setIsAddingClient] = useState(false);
+  const [selectedClientId, setSelectedClientId] = useState("");
+  const [clientEditMode, setClientEditMode] = useState(false);
+  const [clientEditor, setClientEditor] = useState<ClientEditor>(emptyClientEditor);
+  const [clientSaveState, setClientSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [clientProfileTab, setClientProfileTab] = useState<ClientProfileTab>("bookings");
+  const [notesContext, setNotesContext] = useState<{ playerId: string; playerName: string } | null>(null);
+  const [playerProfileTool, setPlayerProfileTool] = useState<PlayerProfileTool>("recent");
+  const [playerToolExpanded, setPlayerToolExpanded] = useState(true);
+  const [selectedId, setSelectedId] = useState("");
+  const [clientReassignOpen, setClientReassignOpen] = useState(false);
+  const [clientReassignSearch, setClientReassignSearch] = useState("");
+  const [clientMergeMode, setClientMergeMode] = useState(false);
+  const [clientMergeSelection, setClientMergeSelection] = useState<string[]>([]);
+  const [clientMergeReview, setClientMergeReview] = useState<ClientMergeReview | null>(null);
+  const [clientMergeSaving, setClientMergeSaving] = useState(false);
+  const [clientMergeError, setClientMergeError] = useState("");
+  const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
+  const [activeView, setActiveView] = useState<View>(getInitialView);
+  const [videoContext, setVideoContext] = useState<{ playerId: string; playerName: string; savedVideoId?: string } | null>(null);
+  const [playerProfilesLocal, setPlayerProfilesLocal] = useState<PlayerProfilesLocalState>(() => ({
+    manualIds: [],
+    notesStamps: {},
+    createdStamps: {},
+  }));
+  // Player Profiles promotes a client when a lesson note, saved video, or cloud
+  // import references them -- but those four sources load independently and at
+  // different speeds (two network fetches, an IndexedDB read, and a chained
+  // Drive-status-then-cloud-catalogue fetch). Track when each has settled at
+  // least once so the page can show a loading state instead of a misleading
+  // "No player profiles yet" while some of them are still in flight.
+  const [playerProfilesSourcesReady, setPlayerProfilesSourcesReady] = useState({
+    people: false,
+    notes: false,
+    videos: false,
+    cloudImports: false,
+  });
+  const markPlayerProfilesSourceReady = useCallback((source: keyof typeof playerProfilesSourcesReady) => {
+    setPlayerProfilesSourcesReady((current) => (current[source] ? current : { ...current, [source]: true }));
+  }, []);
+  const playerProfilesDataReady =
+    playerProfilesSourcesReady.people &&
+    playerProfilesSourcesReady.notes &&
+    playerProfilesSourcesReady.videos &&
+    playerProfilesSourcesReady.cloudImports;
+  const [savedVideoItems, setSavedVideoItems] = useState<SavedVideoItem[]>([]);
+  const [legacyVideoRecords, setLegacyVideoRecords] = useState<StoredVideoRecord[]>([]);
+  const [uploadingSavedVideoIds, setUploadingSavedVideoIds] = useState<Set<string>>(() => new Set());
+  const [openSavedVideoMenuId, setOpenSavedVideoMenuId] = useState<string | null>(null);
+  const [managedLocalLibraryStatus, setManagedLocalLibraryStatus] =
+    useState<ManagedLocalVideoLibraryStatus>(defaultManagedLocalLibraryStatus);
+  const [showPlayerAddDialog, setShowPlayerAddDialog] = useState(false);
+  const [playerAddSearch, setPlayerAddSearch] = useState("");
+  const [playerAddNew, setPlayerAddNew] = useState({ name: "", email: "", phone: "" });
+  const [playerAddSaving, setPlayerAddSaving] = useState(false);
+  const videoStoreRef = useRef<VideoBlobStore | null>(null);
+  if (videoStoreRef.current === null) {
+    videoStoreRef.current = createIndexedDbVideoStore();
+  }
+  const savedVideoLibraryRef = useRef<SavedVideoLibraryStore | null>(null);
+  if (savedVideoLibraryRef.current === null) {
+    savedVideoLibraryRef.current = createIndexedDbSavedVideoLibrary();
+  }
+
+  useEffect(() => {
+    setPlayerProfilesLocal(loadPlayerProfilesState());
+  }, []);
+
+  const refreshSavedVideoLibrary = useCallback(() => {
+    const savedStore = savedVideoLibraryRef.current;
+    const transientStore = videoStoreRef.current;
+    void getManagedLocalVideoLibraryStatus()
+      .then((status) => setManagedLocalLibraryStatus(status))
+      .catch(() => setManagedLocalLibraryStatus(defaultManagedLocalLibraryStatus));
+    const savedItemsLoaded = savedStore
+      ?.listItems()
+      .then((items) => setSavedVideoItems(items))
+      .catch(() => {
+        // Ignore; an empty list simply hides saved-library profile activity.
+      });
+    const legacyRecordsLoaded = transientStore
+      ?.listVideoRecords()
+      .then((records) => setLegacyVideoRecords(records))
+      .catch(() => {
+        // Ignore; legacy recovery records are best-effort migration helpers.
+      });
+    void Promise.allSettled([savedItemsLoaded, legacyRecordsLoaded]).then(() =>
+      markPlayerProfilesSourceReady("videos"),
+    );
+  }, [markPlayerProfilesSourceReady]);
+
+  useEffect(() => {
+    refreshSavedVideoLibrary();
+  }, [refreshSavedVideoLibrary]);
+
+  // Refresh player-profile derived data whenever the view opens, so uploads
+  // and lesson notes made during this session show up without a reload.
+  useEffect(() => {
+    if (activeView === "players") {
+      refreshSavedVideoLibrary();
+      void refreshLessonNotes();
+    }
+  }, [activeView, refreshSavedVideoLibrary]);
+
+  // The client list is lazy-loaded (peopleDeferred on the initial workspace load),
+  // so it may not be in memory when the invoice editor opens. Ensure it's fetched
+  // when Billing is active so the customer search can suggest existing clients.
+  useEffect(() => {
+    if (activeView === "billing" && authStatus === "authenticated" && !people.length) {
+      void refreshPeopleList();
+    }
+  }, [activeView, authStatus, people.length]);
+
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
+  const [billingSection, setBillingSection] = useState<BillingSection>("dashboard");
+  const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
+    emptyInvoiceDraft(getStoredCoachAccount().invoiceSettings),
+  );
+  const [invoiceCustomerSearch, setInvoiceCustomerSearch] = useState("");
+  const [showInvoiceLinePicker, setShowInvoiceLinePicker] = useState(false);
+  // Invoice editor lifecycle. invoiceEditing = fields editable (new invoices start
+  // editable, saved ones open read-only). openedInvoiceStatus/SentAt describe the
+  // saved invoice currently open (draft | sent | paid | overdue | void; sentAt set
+  // once emailed - status "sent" without it = Published). reviseSourceId is set
+  // when editing a published invoice: saving issues a fresh-numbered invoice and
+  // voids this source id.
+  const [invoiceEditing, setInvoiceEditing] = useState(true);
+  const [openedInvoiceStatus, setOpenedInvoiceStatus] = useState<"" | BillingInvoiceStatus>("");
+  const [openedInvoiceSentAt, setOpenedInvoiceSentAt] = useState("");
+  const [reviseSourceId, setReviseSourceId] = useState("");
+
+  useEffect(() => {
+    if (serviceEditor.lessonFormat !== "group") {
+      setGroupOccurrenceInput("");
+      setGroupMinimumInput("");
+      // Private lessons still show the capacity box, so it must stay populated.
+      setGroupMaximumInput(
+        serviceEditor.lessonFormat === "package"
+          ? ""
+          : String(clamp(Math.round(Number(serviceEditor.capacity) || 1), 1, 24)),
+      );
+      return;
+    }
+
+    const baseSchedule = serviceEditor.groupSchedule ?? defaultGroupSchedule();
+    const normalizedCapacity = hasCustomGroupFlag(serviceEditor)
+      ? customGroupMaxParticipants(serviceEditor)
+      : clamp(Math.round(serviceEditor.capacity), 2, 24);
+    const normalizedMinimum = clamp(Math.round(serviceEditor.minParticipants), 2, normalizedCapacity);
+
+    setGroupOccurrenceInput(
+      String(clamp(Math.round(baseSchedule.occurrenceCount), 1, MAX_GROUP_OCCURRENCE_COUNT)),
+    );
+    setGroupMaximumInput(String(normalizedCapacity));
+    setGroupMinimumInput(String(normalizedMinimum));
+  }, [serviceEditor.id, serviceEditor.lessonFormat, serviceEditor.customGroup, serviceEditor.customGroupEnabled]);
+
+  // Products/services and invoices are backend-persisted (billing-api.mts,
+  // billing_products_services / billing_invoices tables) rather than local
+  // state. They start empty and are populated by loadBillingWorkspace().
+  const [catalogItems, setCatalogItems] = useState<BillingCatalogItem[]>([]);
+  const [catalogEditor, setCatalogEditor] = useState<BillingCatalogItem>({
+    id: "",
+    kind: "service",
+    name: "",
+    description: "",
+    price: 0,
+    taxRate: defaultInvoiceSettings.taxRate,
+  });
+  const [catalogSaveState, setCatalogSaveState] = useState<"idle" | "saving">("idle");
+  const [billingDataLoadState, setBillingDataLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [activeInvoiceId, setActiveInvoiceId] = useState("");
+  // The number of the invoice currently open/saved (blank for a brand-new one,
+  // where the next-number preview is shown instead).
+  const [editingInvoiceNumber, setEditingInvoiceNumber] = useState("");
+  // Server-suggested next number in the series, continuing the Stripe-imported
+  // invoices (e.g. SHG-0415). Derived from the highest existing invoice, so it
+  // stays aligned as more Stripe invoices import. Falls back to the local
+  // prefix+counter derivation if the lookup hasn't loaded.
+  const [suggestedInvoiceNumber, setSuggestedInvoiceNumber] = useState("");
+  const [invoiceIssueState, setInvoiceIssueState] = useState<"idle" | "saving">("idle");
+  const [invoiceSendState, setInvoiceSendState] = useState<"idle" | "sending">("idle");
+  const [clarityPayState, setClarityPayState] = useState<"idle" | "loading">("idle");
+  const [recentInvoices, setRecentInvoices] = useState<BillingInvoiceRecord[]>([]);
+  // The full invoice list backs the dedicated Invoices tab (loaded lazily when
+  // that tab opens); the Dashboard keeps showing recentInvoices unchanged.
+  const [allInvoices, setAllInvoices] = useState<BillingInvoiceRecord[]>([]);
+  const [allInvoicesLoadState, setAllInvoicesLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [revenuePeriod, setRevenuePeriod] = useState<"week" | "month" | "year">("month");
+  const [revenueReport, setRevenueReport] = useState<BillingRevenueReport | null>(null);
+  const [revenueLoadState, setRevenueLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  // Billing > Reports tab: full P&L / GST / aging summary over a date range.
+  const [reportPreset, setReportPreset] = useState<ReportRangePreset>("this-financial-year");
+  const [reportRange, setReportRange] = useState<{ start: string; end: string }>(
+    () => presetRange("this-financial-year", new Date()) ?? { start: "", end: "" },
+  );
+  const [reportCustomStart, setReportCustomStart] = useState("");
+  const [reportCustomEnd, setReportCustomEnd] = useState("");
+  const [reportSummary, setReportSummary] = useState<BillingReportSummary | null>(null);
+  const [reportLoadState, setReportLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  // Which report sections are included in the live display + CSV/PDF exports.
+  const [reportSections, setReportSections] = useState<ReportSectionKey[]>(() => [...ALL_REPORT_SECTIONS]);
+  // Expense category ids excluded from the by-category breakdown (+ exports).
+  const [reportExcludedCategories, setReportExcludedCategories] = useState<string[]>([]);
+  const [discountPresets, setDiscountPresets] = useState<BillingDiscount[]>([]);
+  const [discountEditor, setDiscountEditor] = useState<{ id: string; name: string; discountType: BillingDiscountType; value: number; couponCode: string }>({
+    id: "",
+    name: "",
+    discountType: "percentage",
+    value: 10,
+    couponCode: "",
+  });
+  const [discountSaveState, setDiscountSaveState] = useState<"idle" | "saving">("idle");
+  const [selectedDiscountPresetId, setSelectedDiscountPresetId] = useState("");
+  // A set discount collapses to a plain line; this reopens the editable controls.
+  const [discountEditing, setDiscountEditing] = useState(false);
+  // Invoice/due dates default from settings and show as plain text; the edit
+  // marker flips them to editable date inputs.
+  const [datesEditing, setDatesEditing] = useState(false);
+  // When non-null, the invoice customer picker is showing the "new customer"
+  // form. Creating one adds a real client to the people list (not an invoice-only
+  // record), then selects it as the payer.
+  const [newInvoiceCustomer, setNewInvoiceCustomer] = useState<{ name: string; email: string; phone: string } | null>(null);
+  const [newInvoiceCustomerSaving, setNewInvoiceCustomerSaving] = useState(false);
+  const [expenseCategories, setExpenseCategories] = useState<BillingExpenseCategory[]>([]);
+  const [expenseCategoryEditor, setExpenseCategoryEditor] = useState<{ id: string; name: string }>({ id: "", name: "" });
+  const [expenseCategorySaveState, setExpenseCategorySaveState] = useState<"idle" | "saving">("idle");
+  const [expenses, setExpenses] = useState<BillingExpense[]>([]);
+  const [expenseLoadState, setExpenseLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  // Akahu bank feed: money-out transactions awaiting review as expenses.
+  const [bankCandidates, setBankCandidates] = useState<BankExpenseCandidate[]>([]);
+  const [bankCandidatesLoadState, setBankCandidatesLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [bankCandidateBusy, setBankCandidateBusy] = useState<string | null>(null);
+  // Classification filter (hidden category labels), tick-box selection, and
+  // busy flags for the bulk approve/dismiss and the older-period backfill.
+  // Active category filter: "" = show all; otherwise isolate one classification.
+  const [bankCategoryFilter, setBankCategoryFilter] = useState("");
+  const [bankSearch, setBankSearch] = useState("");
+  const [bankDateFromFilter, setBankDateFromFilter] = useState("");
+  const [bankDateToFilter, setBankDateToFilter] = useState("");
+  const [bankSort, setBankSort] = useState<BankExpenseSort>({ key: "date", direction: "desc" });
+  const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(() => new Set());
+  const [bankBulkBusy, setBankBulkBusy] = useState(false);
+  const [bankBackfillBusy, setBankBackfillBusy] = useState<number | null>(null);
+  // How many candidates the list requests. Starts at the newest 150; "Load
+  // older" pages up to the server cap (1000). A backfill jumps straight to the
+  // cap so freshly-pulled older transactions are actually visible.
+  const [bankListLimit, setBankListLimit] = useState(150);
+  const [bankListBusy, setBankListBusy] = useState(false);
+  // Akahu payment reconciliation: money-in transactions matched to invoices.
+  const [reconcileCandidates, setReconcileCandidates] = useState<ReconcileCandidate[]>([]);
+  const [reconcileLoadState, setReconcileLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [reconcileBusy, setReconcileBusy] = useState<string | null>(null);
+  // Transaction-type labels hidden from the reconcile list. Internal transfers
+  // are hidden by default since they're never customer payments; the filter
+  // chips let the coach show them (or hide other types) again.
+  const [reconcileHiddenTypes, setReconcileHiddenTypes] = useState<Set<string>>(() => new Set(["Transfer"]));
+  const [expenseRangeFrom, setExpenseRangeFrom] = useState("");
+  const [expenseRangeTo, setExpenseRangeTo] = useState("");
+  const [expenseDraft, setExpenseDraft] = useState<{
+    id: string;
+    description: string;
+    vendor: string;
+    amount: number;
+    expenseDate: string;
+    categoryId: string;
+    note: string;
+  }>({ id: "", description: "", vendor: "", amount: 0, expenseDate: dateInputValue(), categoryId: "", note: "" });
+  const [expenseSaveState, setExpenseSaveState] = useState<"idle" | "saving">("idle");
+  const [expenseImportFileName, setExpenseImportFileName] = useState("");
+  const [expenseImportHasHeader, setExpenseImportHasHeader] = useState(true);
+  const [expenseImportHeaders, setExpenseImportHeaders] = useState<string[]>([]);
+  const [expenseImportRows, setExpenseImportRows] = useState<string[][]>([]);
+  const [expenseImportMapping, setExpenseImportMapping] = useState<Record<number, ExpenseCsvField>>({});
+  const [expenseImportExcluded, setExpenseImportExcluded] = useState<Record<number, boolean>>({});
+  const [expenseImportCategoryId, setExpenseImportCategoryId] = useState("");
+  const [expenseImportState, setExpenseImportState] = useState<"idle" | "importing">("idle");
+  const [expenseImportResult, setExpenseImportResult] = useState<{
+    imported: number;
+    duplicate: number;
+    skipped: number;
+    failed: number;
+  } | null>(null);
+  const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, string>>({});
+  // Ready to Pull date range. Empty string on either side means "no bound" -
+  // i.e. defaults to showing everything, same as before this filter existed.
+  const [pullRangeFrom, setPullRangeFrom] = useState("");
+  const [pullRangeTo, setPullRangeTo] = useState("");
+  // The pull range defaults smartly (last invoiced lesson -> today) and shows as
+  // plain text; this flips it to editable date inputs.
+  const [pullRangeEditing, setPullRangeEditing] = useState(false);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [pointerSession, setPointerSession] = useState<PointerSession>(null);
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [quickCreate, setQuickCreate] = useState<QuickCreateState | null>(null);
+  const [quickClientSearch, setQuickClientSearch] = useState("");
+  const [quickMatchField, setQuickMatchField] = useState<"name" | "phone" | "email" | "">("");
+  const [dockBookings, setDockBookings] = useState<PendingBooking[]>([]);
+  const [flyingBooking, setFlyingBooking] = useState<DockFlight | null>(null);
+  const [activeDockBookingId, setActiveDockBookingId] = useState("");
+  const [placementAnimation, setPlacementAnimation] = useState<PlacementAnimation | null>(null);
+  const [floatingDrag, setFloatingDrag] = useState<FloatingDrag | null>(null);
+  const [calendarHover, setCalendarHover] = useState<CalendarHoverPreview | null>(null);
+  const [activeWeek, setActiveWeek] = useState(getCurrentWeekOffset);
+  const [edgeCue, setEdgeCue] = useState<null | "prev" | "next">(null);
+  const [bookingServiceId, setBookingServiceId] = useState("");
+  const [bookingDay, setBookingDay] = useState(0);
+  const [bookingDaySelected, setBookingDaySelected] = useState(false);
+  const [bookingStart, setBookingStart] = useState<number | null>(null);
+  const [openPublicBookingSection, setOpenPublicBookingSection] = useState<PublicBookingSection>("appointment");
+  const [bookingForm, setBookingForm] = useState<BookingForm>(
+    () => getInitialBookingLogin() ?? { firstName: "", lastName: "", phone: "", email: "" },
+  );
+  const [customGroupAttendees, setCustomGroupAttendees] = useState<CustomGroupAttendee[]>([]);
+  const [customGroupAttendeeDraft, setCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
+  const [selectedCustomGroupAttendeeDraft, setSelectedCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
+  const [bookingMode, setBookingMode] = useState<BookingMode>("book");
+  const [rescheduleForm, setRescheduleForm] = useState<RescheduleForm>({ email: "", phone: "" });
+  const [rescheduleMatches, setRescheduleMatches] = useState<PublicRescheduleMatch[]>([]);
+  const [selectedRescheduleId, setSelectedRescheduleId] = useState("");
+  const [rescheduleState, setRescheduleState] = useState<"idle" | "checking" | "saving">("idle");
+  const [forceRescheduleLogin, setForceRescheduleLogin] = useState(false);
+  const [bookingSubmitState, setBookingSubmitState] = useState<"idle" | "saving">("idle");
+  const [bookingSubmitError, setBookingSubmitError] = useState("");
+  const [bookingConfirmation, setBookingConfirmation] = useState<BookingConfirmation | null>(null);
+  const [copiedEmbed, setCopiedEmbed] = useState(false);
+  const [selectedBookingScreenId, setSelectedBookingScreenId] = useState(BOOKING_SCREEN_PATHS[0]?.id || "main");
+  const [bookingScreenNames, setBookingScreenNames] = useState<Record<string, string>>(
+    () =>
+      BOOKING_SCREEN_PATHS.reduce<Record<string, string>>((acc, screen) => {
+        acc[screen.id] = screen.label;
+        return acc;
+      }, {}),
+  );
+  const [copiedBookingScreenLinkId, setCopiedBookingScreenLinkId] = useState<string | null>(null);
+  const [copiedBookingScreenIframeId, setCopiedBookingScreenIframeId] = useState<string | null>(null);
+  const [syncBaseUrl, setSyncBaseUrl] = useState(getDefaultSyncBaseUrl);
+  const [calendarSyncKey, setCalendarSyncKey] = useState(generateSyncKey);
+  const [copiedSync, setCopiedSync] = useState<"url" | "key" | null>(null);
+  const [calendarFeedStatus, setCalendarFeedStatus] = useState<CalendarFeedStatus>("checking");
+  const [publicBookingStateStatus, setPublicBookingStateStatus] = useState<PublicBookingStateStatus>(
+    isEmbedMode ? "loading" : "loaded",
+  );
+  const [publicBookingSlots, setPublicBookingSlots] = useState<Record<string, BookingSlot[]>>({});
+  const [publicBookingSlotStatuses, setPublicBookingSlotStatuses] = useState<Record<string, PublicBookingSlotStatus>>({});
+  const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
+  const [calendarSaveError, setCalendarSaveError] = useState("");
+  const [deleteInFlightId, setDeleteInFlightId] = useState("");
+  const [resendConfirmationState, setResendConfirmationState] = useState<Record<string, "sending" | "sent" | "failed">>({});
+  const [calendarStateVersion, setCalendarStateVersion] = useState("");
+  const [diagnosticEvents, setDiagnosticEvents] = useState<DiagnosticEvent[]>([]);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [diagnosticsTab, setDiagnosticsTab] = useState<DiagnosticTab>("overview");
+  const [storageDiagnosticsOpen, setStorageDiagnosticsOpen] = useState(false);
+  const [pendingLessonCompleteId, setPendingLessonCompleteId] = useState("");
+  const [lessonCompleteErrors, setLessonCompleteErrors] = useState<LessonCompleteErrorMap>({});
+  const [calendarDetailMode, setCalendarDetailMode] = useState(false);
+  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
+  const [calendarPerspective, setCalendarPerspective] = useState<CalendarPerspective>("all");
+  const [calendarCoachFilterId, setCalendarCoachFilterId] = useState("");
+  const [calendarLocationFilterId, setCalendarLocationFilterId] = useState("");
+  const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarSyncStatus>(defaultGoogleCalendarStatus);
+  const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
+  const [googleDriveTransfer, setGoogleDriveTransfer] = useState<GoogleDriveTransferStatus>(defaultGoogleDriveTransferStatus);
+  const [googleDriveAction, setGoogleDriveAction] = useState<GoogleDriveActionState>("idle");
+  const [clarityCloudImports, setClarityCloudImports] = useState<ClarityCloudImportTransfer[]>([]);
+  const [clarityCloudImportActionIds, setClarityCloudImportActionIds] = useState<Set<string>>(() => new Set());
+  const autoCloudUploadKeyRef = useRef("");
+  const [notificationSettings, setNotificationSettings] =
+    useState<NotificationSettings>(defaultNotificationSettings);
+  const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [settingsSaveError, setSettingsSaveError] = useState("");
+  const [testEmailAddress, setTestEmailAddress] = useState("");
+  const [testEmailState, setTestEmailState] = useState<"idle" | "sending" | "sent">("idle");
+  const [emailNoticeVisible, setEmailNoticeVisible] = useState(false);
+  const emailNoticeToastKeyRef = useRef("");
+  const [hasMoved, setHasMoved] = useState(false);
+  const initialRescheduleLoginRef = useRef<SavedRescheduleLogin | null>(getInitialRescheduleLogin());
+  const activeAccountId = defaultAccountId(workspaceAccounts);
+  const activeAccount =
+    accountById(workspaceAccounts, activeAccountId) ?? defaultWorkspaceAccountFromCoachAccount(coachAccount);
+  const isAdminUser = currentAppUser.role === "admin" || currentAppUser.role === "account_admin" || currentAppUser.role === "platform_admin";
+  const coachAccountEditor = useEditableBlock<CoachAccount>({
+    value: coachAccount,
+    onSave: saveCoachAccount,
+  });
+  const billingSettingsEditor = useEditableBlock<CoachAccount>({
+    value: coachAccount,
+    onSave: saveCoachAccount,
+  });
+  const emailNotificationsEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: saveNotificationSettings,
+  });
+  const textMachineEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: saveNotificationSettings,
+  });
+  const emailTemplateEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: saveNotificationSettings,
+  });
+  const bookingNoticeEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: saveNotificationSettings,
+  });
+  const bookingScreenNameEditor = useEditableBlock<Record<string, string>>({
+    value: bookingScreenNames,
+    onSave: async (draft) => {
+      setBookingScreenNames(draft);
+      setToast({ message: "Booking screen names saved for this browser." });
+      return draft;
+    },
+  });
+  const editableBlocks = useMemo(
+    () => [
+      { id: "coach-account", title: "Coach Account", editor: coachAccountEditor },
+      { id: "billing-settings", title: "Billing Settings", editor: billingSettingsEditor },
+      { id: "email-notifications", title: "Email Notifications", editor: emailNotificationsEditor },
+      { id: "text-machine", title: "Text Machine", editor: textMachineEditor },
+      { id: "email-template", title: "Email Template", editor: emailTemplateEditor },
+      { id: "booking-page-notice", title: "Booking Page notice", editor: bookingNoticeEditor },
+      { id: "booking-screen-name", title: "Booking Page screen name", editor: bookingScreenNameEditor },
+    ],
+    [
+      coachAccountEditor,
+      billingSettingsEditor,
+      emailNotificationsEditor,
+      textMachineEditor,
+      emailTemplateEditor,
+      bookingNoticeEditor,
+      bookingScreenNameEditor,
+    ],
+  );
+  const [activeEditableBlockId, setActiveEditableBlockId] = useState<string | null>(null);
+  const activeEditableBlock = editableBlocks.find((block) => block.id === activeEditableBlockId) ?? null;
+  const dirtyEditableBlock = editableBlocks.find((block) => block.editor.dirty) ?? null;
+
+  function confirmDiscardEditableBlock(blockTitle: string) {
+    return window.confirm(`You have unsaved changes in ${blockTitle}.\n\nDiscard changes and continue?`);
+  }
+
+  function startEditableBlock(id: string) {
+    const nextBlock = editableBlocks.find((block) => block.id === id);
+    if (!nextBlock) return;
+    if (activeEditableBlock && activeEditableBlock.id !== id) {
+      if (activeEditableBlock.editor.dirty && !confirmDiscardEditableBlock(activeEditableBlock.title)) return;
+      activeEditableBlock.editor.cancel();
+    }
+    setActiveEditableBlockId(id);
+    nextBlock.editor.edit();
+  }
+
+  function cancelEditableBlock(id: string) {
+    const block = editableBlocks.find((candidate) => candidate.id === id);
+    if (!block) return;
+    if (block.editor.dirty && !confirmDiscardEditableBlock(block.title)) return;
+    block.editor.cancel();
+    if (activeEditableBlockId === id) setActiveEditableBlockId(null);
+  }
+
+  async function saveEditableBlock(id: string) {
+    const block = editableBlocks.find((candidate) => candidate.id === id);
+    if (!block) return;
+    const saved = await block.editor.save();
+    if (saved) setActiveEditableBlockId(null);
+  }
+
+  function switchSettingsTab(nextTab: SettingsTab) {
+    if (settingsTab === nextTab) return;
+    if (dirtyEditableBlock && !confirmDiscardEditableBlock(dirtyEditableBlock.title)) return;
+    if (activeEditableBlock) activeEditableBlock.editor.cancel();
+    setActiveEditableBlockId(null);
+    setSettingsTab(nextTab);
+  }
+
+  const coachAccountDraft = coachAccountEditor.draftValue;
+  const coachAccountIsLocked = coachAccountEditor.status !== "editing" && coachAccountEditor.status !== "error";
+  const billingAccountDraft = billingSettingsEditor.draftValue;
+  const invoiceSettingsDraft = billingAccountDraft.invoiceSettings;
+  const billingSettingsIsLocked = billingSettingsEditor.status !== "editing" && billingSettingsEditor.status !== "error";
+  const emailNotificationsDraft = emailNotificationsEditor.draftValue;
+  const emailNotificationsIsLocked = emailNotificationsEditor.status !== "editing" && emailNotificationsEditor.status !== "error";
+  const textMachineDraft = textMachineEditor.draftValue;
+  const textMachineIsLocked = textMachineEditor.status !== "editing" && textMachineEditor.status !== "error";
+  const emailTemplateDraft = emailTemplateEditor.draftValue;
+  const emailTemplateIsLocked = emailTemplateEditor.status !== "editing" && emailTemplateEditor.status !== "error";
+  const bookingNoticeDraft = bookingNoticeEditor.draftValue;
+  const bookingNoticeIsLocked = bookingNoticeEditor.status !== "editing" && bookingNoticeEditor.status !== "error";
+  const bookingScreenNameDraft = bookingScreenNameEditor.draftValue;
+  const bookingScreenNameIsLocked = bookingScreenNameEditor.status !== "editing" && bookingScreenNameEditor.status !== "error";
+
+  function updateCoachAccountBlockDraft<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
+    coachAccountEditor.setDraftValue((current) => cleanCoachAccount({ ...current, [field]: value }));
+  }
+
+  function updateBillingAccountDraft<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
+    if ((field === "enabled" || field === "showBillingWorkspace") && value === true && !canUseFeature(activeAccount, "invoicing")) {
+      setToast({ message: featureUnavailableMessage("invoicing") });
+      return;
+    }
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          [field]: value,
+        },
+      }),
+    );
+  }
+
+  function updateBillingCustomFieldDraft<K extends keyof InvoiceCustomField>(id: string, field: K, value: InvoiceCustomField[K]) {
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: current.invoiceSettings.customFields.map((customField) =>
+            customField.id === id ? { ...customField, [field]: value } : customField,
+          ),
+        },
+      }),
+    );
+  }
+
+  function addBillingCustomFieldDraft() {
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: [
+            ...current.invoiceSettings.customFields,
+            { id: `field-${Date.now()}`, label: "", value: "", placement: "footer" },
+          ],
+        },
+      }),
+    );
+  }
+
+  function removeBillingCustomFieldDraft(id: string) {
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: current.invoiceSettings.customFields.filter((field) => field.id !== id),
+        },
+      }),
+    );
+  }
+
+  function updateNotificationBlockDraft(
+    editor: typeof emailNotificationsEditor,
+    field: keyof NotificationSettings,
+    value: NotificationSettings[keyof NotificationSettings],
+  ) {
+    editor.setDraftValue((current) => ({ ...current, [field]: value }));
+  }
+
+  useEffect(() => {
+    if (!dirtyEditableBlock) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirtyEditableBlock]);
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !activeEditableBlock) return;
+      event.preventDefault();
+      cancelEditableBlock(activeEditableBlock.id);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [activeEditableBlock]);
+
+  useEffect(() => {
+    if (isAdminUser) return;
+    if (["coaches", "locations", "email", "experience", "account", "branding", "integrations", "data"].includes(settingsTab)) {
+      setSettingsTab("services");
+    }
+  }, [isAdminUser, settingsTab]);
+
+  useEffect(() => {
+    // Fire both in parallel rather than waiting for the Drive status check to
+    // resolve before even starting the cloud-imports fetch -- the two used to
+    // be sequential (this effect used to only kick off refreshGoogleDriveTransferStatus,
+    // with a second effect gated on its result calling refreshClarityCloudImports
+    // afterwards), which stacked a full extra round trip onto how long it took
+    // a cloud-only saved video to become eligible for a player profile.
+    if ((activeView === "settings" && settingsTab === "integrations") || activeView === "players") {
+      void refreshGoogleDriveTransferStatus();
+      void refreshClarityCloudImports();
+    }
+  }, [activeView, settingsTab, googleDriveTransfer.connected, googleDriveTransfer.incomingImportReady]);
+  const attemptedSavedRescheduleRef = useRef(false);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const dockRef = useRef<HTMLDivElement | null>(null);
+  const draftRef = useRef<Draft | null>(null);
+  const pointerSessionRef = useRef<PointerSession>(null);
+  const hasMovedRef = useRef(false);
+  const suppressItemClickRef = useRef(false);
+  const suppressItemClickUntilRef = useRef(0);
+  const activeWeekRef = useRef(activeWeek);
+  const hasLoadedCalendarApiRef = useRef(false);
+  const adminHydrationRunIdRef = useRef(0);
+  const clickPlaceRef = useRef<null | { bookingId: string; candidate: SlotCandidate }>(null);
+  const pointerClientRef = useRef({ x: 0, y: 0 });
+  const pointerStartRef = useRef({ x: 0, y: 0 });
+  const pointerTrailRef = useRef<{ x: number; y: number; t: number }[]>([]);
+  const pointerKindRef = useRef<globalThis.PointerEvent["pointerType"]>("mouse");
+  const dragPreviewMetaRef = useRef<null | { width: number; height: number; offsetX: number; offsetY: number }>(null);
+  const lastEdgeNavRef = useRef(0);
+  const lastCalendarTapRef = useRef(0);
+  const suppressBlankGestureUntilRef = useRef(0);
+  const edgeCueTimerRef = useRef<number | null>(null);
+  const gestureCleanupRef = useRef<null | (() => void)>(null);
+  const brandSaveVersionRef = useRef(0);
+  const serviceSaveVersionRef = useRef(0);
+  const calendarSaveVersionRef = useRef(0);
+  const locationSaveVersionRef = useRef(0);
+  const coachSaveVersionRef = useRef(0);
+  const settingsSaveVersionRef = useRef(0);
+  const notificationSettingsDraftVersionRef = useRef(0);
+  const lastPersistedCalendarFingerprintRef = useRef("");
+  const lastPersistedCalendarItemsRef = useRef<CalendarItem[]>([]);
+  const pendingLessonCompleteIdRef = useRef("");
+  const activeAdminSaveOwnersRef = useRef<Map<AdminSaveOwner, number>>(new Map());
+  const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
+  const publicBookingSlotRequestsRef = useRef<Set<string>>(new Set());
+  const pendingQuickCreateRef = useRef<QuickCreateState | null>(null);
+  const adminBootStartedAtRef = useRef(typeof performance !== "undefined" ? performance.now() : Date.now());
+  const adminShellRenderedRef = useRef(false);
+  const calendarFrameRenderedRef = useRef(false);
+  const bookingCardsFirstRenderedRef = useRef(false);
+  const bookingCardsHydratedRef = useRef(false);
+  const adminWorkspaceDetailRefreshRunIdRef = useRef(0);
+
+  const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
+  const selectedService = selected ? itemService(selected, services) : null;
+  const selectedCoachSnapshot = selected ? calendarItemCoach(selected, coachProfiles, coachAccount) : null;
+  const selectedLocationSnapshot = selected
+    ? calendarItemLocation(selected, selectedService ?? undefined, locations, coachAccount)
+    : null;
+
+  function hasActiveAdminSave(owner?: AdminSaveOwner) {
+    if (owner) return (activeAdminSaveOwnersRef.current.get(owner) ?? 0) > 0;
+    return Array.from(activeAdminSaveOwnersRef.current.values()).some((count) => count > 0);
+  }
+
+  function beginAdminSave(owner: AdminSaveOwner) {
+    activeAdminSaveOwnersRef.current.set(owner, (activeAdminSaveOwnersRef.current.get(owner) ?? 0) + 1);
+    adminHydrationRunIdRef.current += 1;
+    return ++calendarSaveVersionRef.current;
+  }
+
+  function endAdminSave(owner: AdminSaveOwner) {
+    const nextCount = (activeAdminSaveOwnersRef.current.get(owner) ?? 0) - 1;
+    if (nextCount > 0) {
+      activeAdminSaveOwnersRef.current.set(owner, nextCount);
+    } else {
+      activeAdminSaveOwnersRef.current.delete(owner);
+    }
+  }
+
+  function trackDiagnosticEvent(event: DiagnosticEventInput) {
+    if (isEmbedMode) return;
+    const next: DiagnosticEvent = {
+      ...event,
+      id: event.id || createDiagnosticId(),
+      timestamp: event.timestamp || new Date().toISOString(),
+      details: sanitizeDiagnosticDetails(event.details),
+    };
+    setDiagnosticEvents((current) => [next, ...current].slice(0, DIAGNOSTIC_EVENT_LIMIT));
+  }
+
+  function startDiagnosticTimer(input: DiagnosticTimerInput): DiagnosticTimer {
+    const timer: DiagnosticTimer = {
+      ...input,
+      id: createDiagnosticId(),
+      phase: input.phase || "request",
+      startedAt: performance.now(),
+    };
+    trackDiagnosticEvent({
+      ...timer,
+      phase: timer.phase || "request",
+      status: "started",
+    });
+    return timer;
+  }
+
+  function finishDiagnosticTimer(
+    timer: DiagnosticTimer,
+    status: DiagnosticStatus,
+    extra: Partial<DiagnosticEventInput> = {},
+  ) {
+    trackDiagnosticEvent({
+      system: timer.system,
+      action: timer.action,
+      phase: extra.phase || timer.phase || "request",
+      status,
+      route: extra.route || timer.route,
+      functionName: extra.functionName || timer.functionName,
+      errorCode: extra.errorCode,
+      humanMessage: extra.humanMessage,
+      httpStatus: extra.httpStatus,
+      expectedAccountId: extra.expectedAccountId || timer.expectedAccountId,
+      returnedAccountId: extra.returnedAccountId,
+      objectType: extra.objectType || timer.objectType,
+      objectId: extra.objectId || timer.objectId,
+      durationMs: Math.max(0, Math.round(performance.now() - timer.startedAt)),
+      details: { ...(timer.details ?? {}), ...(extra.details ?? {}) },
+    });
+  }
+
+  function trackDiagnosticError(
+    input: DiagnosticTimerInput & {
+      errorCode: string;
+      humanMessage: string;
+      httpStatus?: number;
+      returnedAccountId?: string;
+    },
+  ) {
+    trackDiagnosticEvent({
+      system: input.system,
+      action: input.action,
+      phase: input.phase || "request",
+      status: "failed",
+      route: input.route,
+      functionName: input.functionName,
+      errorCode: input.errorCode,
+      humanMessage: input.humanMessage,
+      httpStatus: input.httpStatus,
+      expectedAccountId: input.expectedAccountId,
+      returnedAccountId: input.returnedAccountId,
+      objectType: input.objectType,
+      objectId: input.objectId,
+      details: input.details,
+    });
+  }
+
+  function trackDiagnosticMilestone(input: DiagnosticEventInput & { startedAt?: number }) {
+    const { startedAt, ...event } = input;
+    trackDiagnosticEvent({
+      ...event,
+      durationMs:
+        typeof startedAt === "number"
+          ? Math.max(0, Math.round(performance.now() - startedAt))
+          : input.durationMs,
+    });
+  }
+  const selectedLessonNote = selectedService?.lessonNote || selectedService?.location || "";
+  const selectedGroupSessionService = selectedGroupSession
+    ? services.find((service) => service.id === selectedGroupSession.serviceId) ?? null
+    : null;
+  const selectedGroupSessionAttendees = useMemo(() => {
+    if (!selectedGroupSession || !selectedGroupSessionService) return [];
+    const candidate = {
+      week: selectedGroupSession.week,
+      day: selectedGroupSession.day,
+      start: selectedGroupSession.start,
+      duration: selectedGroupSession.duration,
+    };
+    return items
+      .filter(
+        (item) =>
+          item.kind === "appointment" &&
+          item.serviceId === selectedGroupSessionService.id &&
+          overlaps(itemSlot(item), candidate),
+      )
+      .sort((a, b) => (a.client ?? "").localeCompare(b.client ?? ""));
+  }, [items, selectedGroupSession, selectedGroupSessionService]);
+  const selectedGroupSessionBookedCount = selectedGroupSessionAttendees.filter((appointment) =>
+    isActiveGroupBooking(appointment.status),
+  ).length;
+  const selectedGroupSessionCapacity = selectedGroupSessionService?.capacity ?? 0;
+  const selectedGroupSessionRemainingSlots = Math.max(0, selectedGroupSessionCapacity - selectedGroupSessionBookedCount);
+  const selectedGroupSessionIsFull = selectedGroupSessionCapacity > 0 && selectedGroupSessionBookedCount >= selectedGroupSessionCapacity;
+  const selectedGroupSessionDate = selectedGroupSession
+    ? dateForSlot(selectedGroupSession.week, selectedGroupSession.day)
+    : null;
+  const selectedGroupSessionLabel = selectedGroupSessionDate
+    ? selectedGroupSessionDate.toLocaleDateString(activeLocale(), {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      })
+    : "";
+  const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek]);
+  const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
+  const accountItems = useMemo(() => filterRecordsForAccount(items, activeAccountId), [activeAccountId, items]);
+  const accountCoachProfiles = useMemo(() => filterRecordsForAccount(coachProfiles, activeAccountId), [activeAccountId, coachProfiles]);
+  const accountLocations = useMemo(() => filterRecordsForAccount(locations, activeAccountId), [activeAccountId, locations]);
+  const weekItems = useMemo(() => accountItems.filter((item) => itemWeek(item) === activeWeek), [activeWeek, accountItems]);
+  const activeCoachId = currentAppUser.coachId || defaultCoachId(accountCoachProfiles);
+  const publicBookingFallbackCoachId = defaultCoachId(accountCoachProfiles);
+  const activeCoachList = accountCoachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
+  const effectiveCalendarPerspective: CalendarPerspective =
+    isAdminUser && (calendarPerspective !== "location" || canUseFeature(activeAccount, "locationCalendar"))
+      ? calendarPerspective
+      : "coach";
+  const selectedCalendarCoachId = calendarCoachFilterId || (isAdminUser ? defaultCoachId(accountCoachProfiles) : activeCoachId);
+  const selectedCalendarLocationId = calendarLocationFilterId || defaultLocationId(accountLocations);
+  const selectedCalendarCoach = bookingCoachSnapshotFor(selectedCalendarCoachId, accountCoachProfiles, coachAccount);
+  const visibleWeekItems = useMemo(
+    () =>
+      weekItems.filter((item) => {
+        if (isCancelledGroupSessionItem(item)) return false;
+        const service = itemService(item, services);
+        if (effectiveCalendarPerspective === "coach") {
+          return resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount) === selectedCalendarCoachId;
+        }
+        if (effectiveCalendarPerspective === "location") {
+          return resolvedCalendarItemLocationId(item, service, locations, coachAccount) === selectedCalendarLocationId;
+        }
+        return true;
+      }),
+    [
+      effectiveCalendarPerspective,
+      coachAccount,
+      coachProfiles,
+      locations,
+      selectedCalendarCoachId,
+      selectedCalendarLocationId,
+      services,
+      weekItems,
+    ],
+  );
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || adminShellRenderedRef.current) return;
+    adminShellRenderedRef.current = true;
+    trackDiagnosticMilestone({
+      system: "ui",
+      action: "ADMIN_SHELL_RENDERED",
+      phase: "render",
+      status: "success",
+      functionName: "App",
+      startedAt: adminBootStartedAtRef.current,
+    });
+  }, [authStatus, isEmbedMode]);
+  useEffect(() => {
+    if (
+      isEmbedMode ||
+      authStatus !== "authenticated" ||
+      adminWorkspaceLoadStatus !== "loaded" ||
+      activeView !== "calendar" ||
+      calendarFrameRenderedRef.current
+    ) {
+      return;
+    }
+    calendarFrameRenderedRef.current = true;
+    trackDiagnosticMilestone({
+      system: "calendar",
+      action: "CALENDAR_FRAME_RENDERED",
+      phase: "render",
+      status: "success",
+      functionName: "App",
+      startedAt: adminBootStartedAtRef.current,
+      details: {
+        visibleWeek: activeWeek,
+        renderedFrom: "calendar_shell_state",
+        deferredDataBlocksCalendar: false,
+      },
+    });
+    const runId = adminHydrationRunIdRef.current;
+    if (adminWorkspaceDetailRefreshRunIdRef.current !== runId) {
+      adminWorkspaceDetailRefreshRunIdRef.current = runId;
+      window.setTimeout(() => refreshAdminWorkspaceDetails(runId, coachAccount), 0);
+    }
+  }, [activeView, activeWeek, adminWorkspaceLoadStatus, authStatus, coachAccount, isEmbedMode]);
+  useEffect(() => {
+    if (
+      isEmbedMode ||
+      authStatus !== "authenticated" ||
+      activeView !== "calendar" ||
+      bookingCardsFirstRenderedRef.current ||
+      visibleWeekItems.length === 0
+    ) {
+      return;
+    }
+    bookingCardsFirstRenderedRef.current = true;
+    trackDiagnosticMilestone({
+      system: "calendar",
+      action: "BOOKING_CARDS_FIRST_RENDERED",
+      phase: "render",
+      status: "success",
+      functionName: "App",
+      startedAt: adminBootStartedAtRef.current,
+      details: {
+        visibleWeek: activeWeek,
+        visibleCards: visibleWeekItems.length,
+        renderedFrom: hasLoadedCalendarApiRef.current ? "calendar_shell_state" : "visible_calendar_data",
+        deferredDataBlocksCards: false,
+      },
+    });
+  }, [activeView, activeWeek, authStatus, isEmbedMode, visibleWeekItems]);
+  useEffect(() => {
+    if (
+      isEmbedMode ||
+      authStatus !== "authenticated" ||
+      adminWorkspaceLoadStatus !== "loaded" ||
+      activeView !== "calendar" ||
+      bookingCardsHydratedRef.current ||
+      visibleWeekItems.length === 0
+    ) {
+      return;
+    }
+    const hasSetupData = services.length > 0 && coachProfiles.length > 0 && locations.length > 0;
+    if (!hasSetupData) return;
+    bookingCardsHydratedRef.current = true;
+    trackDiagnosticMilestone({
+      system: "calendar",
+      action: "BOOKING_CARDS_HYDRATED",
+      phase: "hydrate",
+      status: "success",
+      functionName: "App",
+      startedAt: adminBootStartedAtRef.current,
+      details: {
+        visibleCards: visibleWeekItems.length,
+        services: services.length,
+        coaches: coachProfiles.length,
+        locations: locations.length,
+        renderedFrom: "calendar_shell_state",
+        deferredDataBlocksCards: false,
+      },
+    });
+  }, [activeView, adminWorkspaceLoadStatus, authStatus, coachProfiles.length, isEmbedMode, locations.length, services.length, visibleWeekItems]);
+  const locationCalendarCoachGroups = useMemo(() => {
+    if (effectiveCalendarPerspective !== "location") return [];
+    const coachIds = new Set(
+      activeCoachList
+        .filter((coach) => (coach.assignedLocationIds ?? []).includes(selectedCalendarLocationId))
+        .map((coach) => coach.id),
+    );
+    visibleWeekItems.forEach((item) =>
+      coachIds.add(
+        resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
+      ),
+    );
+    return Array.from(coachIds)
+      .map((coachId) => bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount))
+      .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
+  }, [activeCoachList, effectiveCalendarPerspective, selectedCalendarLocationId, coachAccount, coachProfiles, services, visibleWeekItems]);
+  const locationCalendarHasAppointments = visibleWeekItems.some((item) => item.kind === "appointment");
+  const locationCalendarCoachItemCount = (coachId?: string) => {
+    if (!coachId) return 0;
+    return visibleWeekItems.filter((item) => {
+      if (item.kind !== "appointment") return false;
+      return calendarItemCoachColumnId(item, itemService(item, services), coachProfiles, coachAccount) === coachId;
+    }).length;
+  };
+  const appointments = weekItems.filter((item) => item.kind === "appointment").length;
+  const blocks = weekItems.filter((item) => item.kind === "block").length;
+  const accountAvailability = useMemo(
+    () => availability.map((dayWindows) => dayWindows.filter((window) => recordBelongsToAccount(window, activeAccountId))),
+    [activeAccountId, availability],
+  );
+  const calendarAvailability = useMemo(
+    () =>
+      effectiveCalendarPerspective === "coach"
+        ? availabilityForCoach(accountAvailability, selectedCalendarCoachId, activeCoachId)
+        : accountAvailability,
+    [accountAvailability, activeCoachId, effectiveCalendarPerspective, selectedCalendarCoachId],
+  );
+  const calendarDisplayBounds = useMemo(() => {
+    const points = [DEFAULT_CALENDAR_START_MINUTES, DEFAULT_CALENDAR_END_MINUTES];
+    calendarAvailability.forEach((dayWindows) => {
+      dayWindows.forEach((window) => {
+        points.push(window.start, window.end);
+      });
+    });
+    services.forEach((service) => {
+      if (service.active && isScheduledGroupService(service) && service.groupSchedule?.active) {
+        points.push(service.groupSchedule.startMinutes, service.groupSchedule.startMinutes + service.duration);
+      }
+    });
+    visibleWeekItems.forEach((item) => {
+      points.push(item.start, item.start + item.duration);
+    });
+    const earliest = Math.min(...points);
+    const latest = Math.max(...points);
+    const start = clamp(Math.floor(earliest / 60) * 60 - 60, DAY_START_MINUTES, LAST_TIME_SLOT_MINUTES);
+    const end = clamp(
+      Math.ceil(latest / 60) * 60 + 60,
+      Math.max(start + 60, DEFAULT_CALENDAR_END_MINUTES),
+      DAY_END_MINUTES,
+    );
+    return {
+      start,
+      end: Math.max(end, start + 60),
+    };
+  }, [calendarAvailability, services, visibleWeekItems]);
+  const fullCalendarStartMinutes = calendarDisplayBounds.start;
+  const fullCalendarEndMinutes = calendarDisplayBounds.end;
+  const calendarViewBounds = useMemo(() => {
+    if (calendarViewMode === "full") {
+      return {
+        start: fullCalendarStartMinutes,
+        end: fullCalendarEndMinutes,
+        emptyMessage: "",
+      };
+    }
+
+    if (calendarViewMode === "am") {
+      const end = Math.min(fullCalendarEndMinutes, 12 * 60);
+      if (end <= fullCalendarStartMinutes) {
+        return {
+          start: fullCalendarStartMinutes,
+          end: Math.min(DAY_END_MINUTES, fullCalendarStartMinutes + 60),
+          emptyMessage: "No morning hours are available in this view.",
+        };
+      }
+      return {
+        start: fullCalendarStartMinutes,
+        end,
+        emptyMessage: "",
+      };
+    }
+
+    const start = Math.max(fullCalendarStartMinutes, 12 * 60);
+    if (start >= fullCalendarEndMinutes) {
+      return {
+        start: Math.max(DAY_START_MINUTES, fullCalendarEndMinutes - 60),
+        end: fullCalendarEndMinutes,
+        emptyMessage: "No afternoon or evening hours are available in this view.",
+      };
+    }
+    return {
+      start,
+      end: fullCalendarEndMinutes,
+      emptyMessage: "",
+    };
+  }, [calendarViewMode, fullCalendarEndMinutes, fullCalendarStartMinutes]);
+  const calendarStartMinutes = calendarViewBounds.start;
+  const calendarEndMinutes = calendarViewBounds.end;
+  const calendarViewEmptyMessage = calendarViewBounds.emptyMessage;
+  const calendarViewButtonLabel =
+    calendarViewMode === "full" ? "View: Full" : calendarViewMode === "am" ? "View: AM" : "View: PM";
+  const calendarHourMarks = useMemo(() => {
+    const marks: number[] = [];
+    for (let minutes = calendarStartMinutes; minutes <= calendarEndMinutes; minutes += 60) {
+      marks.push(minutes);
+    }
+    return marks;
+  }, [calendarStartMinutes, calendarEndMinutes]);
+  const gridHeight = ((calendarEndMinutes - calendarStartMinutes) / 60) * HOUR_HEIGHT;
+  const calendarMinutesToTop = (minutes: number) => minutesToTop(minutes, calendarStartMinutes);
+  const clipCalendarSegment = (start: number, duration: number) => {
+    const end = start + duration;
+    const visibleStart = Math.max(start, calendarStartMinutes);
+    const visibleEnd = Math.min(end, calendarEndMinutes);
+    if (visibleEnd <= visibleStart) return null;
+    return {
+      start: visibleStart,
+      duration: visibleEnd - visibleStart,
+    };
+  };
+  const activeDockBooking = dockBookings.find((booking) => booking.id === activeDockBookingId) ?? null;
+  const dockFocus =
+    !selected &&
+    (dockBookings.length > 0 ||
+      Boolean(flyingBooking) ||
+      pointerSession?.mode === "place" ||
+      (pointerSession?.mode === "move" && Boolean(floatingDrag)));
+  const serviceScopeCoachId = isAdminUser ? selectedCalendarCoachId || activeCoachId : activeCoachId;
+  const itemInCoachScope = (item: CalendarItem) =>
+    isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount) === serviceScopeCoachId;
+  const serviceVisibleToCurrentUser = (service: Service) =>
+    serviceBelongsToAccount(service, activeAccountId) &&
+    (isAdminUser || (service.coachId || defaultCoachId(accountCoachProfiles)) === serviceScopeCoachId);
+  const accountServices = services.filter((service) => serviceBelongsToAccount(service, activeAccountId));
+  const activeServices = accountServices.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
+  const archivedServices = accountServices.filter((service) => service.archived === true && serviceVisibleToCurrentUser(service));
+  const sortedLocations = [...accountLocations].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
+  const activeLocationList = sortedLocations.filter((location) => location.active && !location.archived);
+  const archivedLocationList = sortedLocations.filter((location) => location.archived || !location.active);
+  const defaultLocation = locationById(accountLocations, defaultLocationId(accountLocations)) ?? defaultLocationFromCoachAccount(coachAccount);
+  const locationUsageCount = (locationId: string) =>
+    accountServices.filter((service) => (service.locationId || defaultLocation.id) === locationId && service.archived !== true).length;
+  const packageServices = activeServices.filter((service) => service.active && service.lessonFormat === "package");
+  const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
+  const appointmentServices = activeServices.filter((service) => service.active && isAppointmentStyleService(service));
+  const publicBookingEnabled = canUseFeature(activeAccount, "publicBooking");
+  const publicServices = publicBookingEnabled ? bookableServices.filter((service) => service.visibility === "public") : [];
+  const currentBookingScreenId = getBookingScreenId(typeof window === "undefined" ? "/" : window.location.pathname);
+  const currentScreenPublicServices = publicServices.filter((service) =>
+    (service.bookingScreenIds ?? ["main"]).includes(currentBookingScreenId),
+  );
+  const currentScreenPublicServiceIds = currentScreenPublicServices.map((service) => service.id).join("|");
+  const quickCreateServices = effectiveCalendarPerspective === "location" ? [] : appointmentServices;
+  const quickCreateService = quickCreate?.serviceId
+    ? quickCreateServices.find((service) => service.id === quickCreate.serviceId) ?? null
+    : null;
+  const selectedRescheduleMatch =
+    rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
+  const selectedRescheduleService = selectedRescheduleMatch
+    ? accountServices.find((service) => service.id === selectedRescheduleMatch.serviceId) ?? null
+    : null;
+  const selectedBookingService =
+    bookingMode === "reschedule"
+      ? selectedRescheduleService
+      : currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
+  const visiblePublicServices = selectedBookingService ? [selectedBookingService] : currentScreenPublicServices;
+  const bookingTargetService = bookingMode === "reschedule" ? selectedRescheduleService : selectedBookingService;
+  const isCustomGroupBooking = bookingMode === "book" && isCustomGroupService(bookingTargetService);
+  const customGroupParticipantCount = isCustomGroupBooking ? 1 + customGroupAttendees.length : 1;
+  const customGroupCalculatedPrice = isCustomGroupBooking
+    ? calculateCustomGroupPrice(bookingTargetService, customGroupParticipantCount)
+    : 0;
+  const customGroupRemainingAttendees = isCustomGroupBooking
+    ? Math.max(0, customGroupMaxParticipants(bookingTargetService) - customGroupParticipantCount)
+    : 0;
+  const bookingScreenEmbeds = useMemo(
+    () =>
+      BOOKING_SCREEN_PATHS.map((screen) => ({
+        ...screen,
+        label: bookingScreenNames[screen.id] || screen.label,
+        publicUrl: getBookingScreenPublicUrl(screen.path, brandSettings.showLogo),
+        iframeCode: getBookingScreenIframeCode(
+          screen.path,
+          coachAccount.businessName,
+          bookingScreenNames[screen.id] || screen.label,
+          brandSettings.showLogo,
+        ),
+      })),
+    [bookingScreenNames, brandSettings.showLogo, coachAccount.businessName],
+  );
+  const selectedBookingScreen = bookingScreenEmbeds.find((bookingScreen) => bookingScreen.id === selectedBookingScreenId) ?? bookingScreenEmbeds[0];
+  const bookingWidgetUrl = useMemo(() => getBookingWidgetUrl(brandSettings.showLogo), [brandSettings.showLogo]);
+  const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
+  const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
+  const caddyWorkspaceUrl = coachAccount.caddyWorkspaceUrl || CADDY_APP_URL;
+  const invoiceSettings = coachAccount.invoiceSettings;
+  // Prefer the server's next-in-series number (aligned with the Stripe imports);
+  // fall back to the local prefix+counter until that lookup resolves.
+  const invoiceNumber =
+    suggestedInvoiceNumber || `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`;
+  const billingWorkspaceEnabled = invoiceSettings.enabled && invoiceSettings.showBillingWorkspace && canUseFeature(activeAccount, "invoicing");
+  const googleCalendarSyncEnabled = canUseFeature(activeAccount, "googleCalendarSync");
+  const localStorageHealth = getLocalStorageHealth(managedLocalLibraryStatus);
+  const clarityCloudHealth = getClarityCloudHealth(googleDriveTransfer);
+  const localStoragePrimaryAction = "action" in localStorageHealth ? localStorageHealth.action : undefined;
+  const clarityCloudPrimaryAction = "action" in clarityCloudHealth ? clarityCloudHealth.action : undefined;
+  const automaticCloudUploadCandidates = useMemo(() => {
+    if (!isClarityCloudOperational(clarityCloudHealth)) return [];
+    return savedVideoItems.filter((item) => {
+      const cloudStatus = item.cloud?.status || "not-uploaded";
+      const waitingFailure =
+        cloudStatus === "failed" &&
+        (item.cloud?.lastUploadErrorCode === "CLOUD_OAUTH_NOT_CONFIGURED" ||
+          item.cloud?.lastUploadErrorCode === "PROVIDER_STORAGE_UNAVAILABLE" ||
+          item.cloud?.lastUploadErrorCode === "DRIVE_NOT_CONNECTED" ||
+          item.cloud?.lastUploadErrorCode === "DRIVE_SCOPE_MISSING" ||
+          item.cloud?.lastUploadErrorCode === "GOOGLE_RECONNECT_REQUIRED");
+      return (
+        item.local.status === "available" &&
+        !uploadingSavedVideoIds.has(item.savedVideoId) &&
+        (cloudStatus === "not-uploaded" || cloudStatus === "cancelled" || cloudStatus === "expired" || waitingFailure)
+      );
+    });
+  }, [clarityCloudHealth, savedVideoItems, uploadingSavedVideoIds]);
+  const hasMissingInvoiceCoachSettings =
+    !invoiceSettings.bankAccount.trim() || !invoiceSettings.taxNumber.trim() || !invoiceSettings.businessAddress.trim();
+  const activeAccountEntitlements = accountEntitlements(activeAccount);
+  const accountUsage = {
+    maxCoaches: activeCoachList.length,
+    maxLocations: activeLocationList.length,
+    maxUsers: userBelongsToAccount(currentAppUser, activeAccountId) ? 1 : 0,
+    maxServices: accountServices.filter((service) => service.archived !== true).length,
+    maxBookingScreens: BOOKING_SCREEN_PATHS.length,
+  };
+  const enabledAccountFeatures = accountFeatureKeys.filter((feature) => activeAccountEntitlements.features[feature]);
+  const bookingBrandName = (brandSettings.coachName || coachAccount.businessName).trim();
+  const bookingBrandWords = bookingBrandName.split(/\s+/);
+  const bookingBrandPrimary = bookingBrandWords.slice(0, -1).join(" ") || bookingBrandName;
+  const bookingBrandSecondary = bookingBrandWords.length > 1 ? bookingBrandWords.at(-1) : "";
+  const showBookingBrandLogo = brandSettings.showLogo && !isBookingLogoHiddenByUrl();
+  const calendarTitle =
+    effectiveCalendarPerspective === "location"
+      ? `Location Calendar · ${locationById(locations, selectedCalendarLocationId)?.shortName || locationById(locations, selectedCalendarLocationId)?.name || defaultLocation.shortName || defaultLocation.name}`
+      : `Coach Calendar · ${selectedCalendarCoach.displayName || selectedCalendarCoach.name}`;
+  const settingsLocationLine = `${coachAccount.venueName} · ${coachAccount.timezone}`;
+  const hasSavedRescheduleLogin = Boolean(rescheduleForm.email.trim() && rescheduleForm.phone.trim());
+  const isEmailLinkReschedule = Boolean(
+    bookingMode === "reschedule" &&
+      initialRescheduleLoginRef.current?.appointmentId &&
+      rescheduleForm.email.trim() &&
+      rescheduleForm.phone.trim(),
+  );
+  const showRescheduleLoginPanel = bookingMode === "reschedule" && (forceRescheduleLogin || !isEmailLinkReschedule);
+  const bookingLoginUrl = bookingConfirmation
+    ? buildRescheduleLink(coachAccount.bookingUrl, {
+        appointmentId: bookingConfirmation.appointmentId,
+        email: bookingConfirmation.email,
+        phone: bookingConfirmation.phone || "",
+      })
+    : "";
+  const brandStyle = useMemo(
+    () =>
+      ({
+        "--coach-neutral": brandSettings.neutral,
+        "--coach-primary": brandSettings.primary,
+        "--coach-secondary": brandSettings.secondary,
+        "--coach-accent": brandSettings.accent,
+      }) as CSSProperties,
+    [brandSettings],
+  );
+  const emailTemplateService = publicServices[0] ?? appointmentServices[0] ?? null;
+  const completedAppointments = useMemo(
+    () =>
+      items
+        .filter((item) => item.kind === "appointment" && item.status === "completed")
+        .filter(itemInCoachScope)
+        .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start),
+    [coachAccount, coachProfiles, isAdminUser, items, services, serviceScopeCoachId],
+  );
+  const uninvoicedCompletedAppointments = useMemo(
+    () => completedAppointments.filter((item) => !invoicedBookingIds[item.id]),
+    [completedAppointments, invoicedBookingIds],
+  );
+  const completedUninvoicedCount = uninvoicedCompletedAppointments.length;
+  // "Ready to Pull" with an adjustable date range, per the billing build plan.
+  // itemDateValue converts a calendar item's week/day slot back into a real
+  // calendar date the same way the rest of the app already does (dateForSlot),
+  // so this stays correct if baseWeekStart or the week numbering ever changes.
+  const itemDateValue = (item: CalendarItem) => dateInputValue(dateForSlot(itemWeek(item), item.day));
+  // Smart default range: start from the most recent already-invoiced lesson (so
+  // each invoice picks up where the last one left off) and run to today. The
+  // user can still override From/To; an empty override falls back to the smart
+  // value, so clearing a field reverts it to auto.
+  const lastInvoicedLessonDate = useMemo(() => {
+    let latest = "";
+    for (const item of completedAppointments) {
+      if (invoicedBookingIds[item.id]) {
+        const value = itemDateValue(item);
+        if (value > latest) latest = value;
+      }
+    }
+    return latest;
+  }, [completedAppointments, invoicedBookingIds]);
+  const smartPullFrom = lastInvoicedLessonDate;
+  const smartPullTo = dateInputValue();
+  const effectivePullFrom = pullRangeFrom || smartPullFrom;
+  const effectivePullTo = pullRangeTo || smartPullTo;
+  const inPullRange = (item: CalendarItem) => {
+    const itemDate = itemDateValue(item);
+    if (effectivePullFrom && itemDate < effectivePullFrom) return false;
+    if (effectivePullTo && itemDate > effectivePullTo) return false;
+    return true;
+  };
+  // Bookings already pulled onto the invoice currently being edited (a
+  // booking_snapshot line). They're "Pulled" - drop them from the pull list so
+  // they can't be added twice; removing the line re-adds them automatically.
+  const draftBookingIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const line of invoiceDraft.lines) {
+      if (line.source === "booking_snapshot" && line.sourceId) ids.add(line.sourceId);
+    }
+    return ids;
+  }, [invoiceDraft.lines]);
+  const pullableCompletedAppointments = useMemo(
+    () => uninvoicedCompletedAppointments.filter((item) => inPullRange(item) && !draftBookingIds.has(item.id)),
+    [uninvoicedCompletedAppointments, effectivePullFrom, effectivePullTo, draftBookingIds],
+  );
+  // When a billing customer is chosen, surface that client's own completed
+  // lessons at the top of the (unpaid) pull list and flag them. Matches on email,
+  // then phone, then exact name - a lesson billed to someone else (e.g. a parent)
+  // simply won't match, since the payer is never inferred from the attendee.
+  const invoicePayerEmailKey = invoiceDraft.payerEmail.trim().toLowerCase();
+  const invoicePayerPhoneKey = invoiceDraft.payerPhone.replace(/\D/g, "");
+  const invoicePayerNameKey = invoiceDraft.payerName.trim().toLowerCase();
+  const invoicePayerBookingIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!invoicePayerEmailKey && !invoicePayerPhoneKey && !invoicePayerNameKey) return ids;
+    for (const item of pullableCompletedAppointments) {
+      const email = (item.email || "").trim().toLowerCase();
+      const phone = (item.phone || "").replace(/\D/g, "");
+      const name = (item.client || "").trim().toLowerCase();
+      if (
+        (invoicePayerEmailKey && email && email === invoicePayerEmailKey) ||
+        (invoicePayerPhoneKey && phone && phone === invoicePayerPhoneKey) ||
+        (invoicePayerNameKey && name && name === invoicePayerNameKey)
+      ) {
+        ids.add(item.id);
+      }
+    }
+    return ids;
+  }, [pullableCompletedAppointments, invoicePayerEmailKey, invoicePayerPhoneKey, invoicePayerNameKey]);
+  const calendarPullRangeSorted = useMemo(() => {
+    if (!invoicePayerBookingIds.size) return pullableCompletedAppointments;
+    const matches: CalendarItem[] = [];
+    const rest: CalendarItem[] = [];
+    for (const item of pullableCompletedAppointments) {
+      (invoicePayerBookingIds.has(item.id) ? matches : rest).push(item);
+    }
+    return [...matches, ...rest];
+  }, [pullableCompletedAppointments, invoicePayerBookingIds]);
+  const {
+    lineSubtotal: invoiceLineSubtotal,
+    discountTotal: invoiceDiscountTotal,
+    taxableSubtotal: invoiceTaxableSubtotal,
+    taxRatePct: invoiceTaxRatePct,
+    taxTotal: invoiceTaxTotal,
+    total: invoiceTotal,
+  } = computeInvoiceTotals(invoiceDraft, invoiceSettings.taxRate);
+  const activeInvoiceNumber = editingInvoiceNumber || invoiceNumber;
+  // Fields render plain (read-only) whenever we're not actively editing - i.e.
+  // viewing/previewing a saved invoice.
+  const invoiceLocked = !invoiceEditing;
+  const isNewInvoice = !activeInvoiceId;
+  const isRevisingInvoice = reviseSourceId !== "";
+  // Editing an existing draft in place (PUT) vs creating a new invoice (POST).
+  const editingExistingDraft = Boolean(activeInvoiceId) && openedInvoiceStatus === "draft" && !isRevisingInvoice;
+  // Label for the invoice's current lifecycle state.
+  const openedInvoiceStateLabel =
+    openedInvoiceStatus === "sent"
+      ? openedInvoiceSentAt
+        ? "Sent"
+        : "Published"
+      : openedInvoiceStatus === "paid"
+        ? "Paid"
+        : openedInvoiceStatus === "overdue"
+          ? "Overdue"
+          : openedInvoiceStatus === "void"
+            ? "Void"
+            : "Draft";
+  const invoiceDiscountLabel = invoiceDraft.discountLabel.trim() || "Discount / coupon";
+  const discountSet = invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim() !== "";
+  const invoiceEmailSubject = `${activeInvoiceNumber} from ${coachAccount.businessName}`;
+  const invoiceEmailBody = [
+    invoiceDraft.message,
+    "",
+    `Invoice: ${activeInvoiceNumber}`,
+    `Total: ${formatMoney(invoiceTotal, invoiceSettings.currency)}`,
+    `Due: ${invoiceDraft.dueDate}`,
+    invoiceSettings.paymentInstructions,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+    invoiceDraft.payerEmail,
+  )}&su=${encodeURIComponent(invoiceEmailSubject)}&body=${encodeURIComponent(invoiceEmailBody)}`;
+  const invoiceSearchTerm = invoiceDraft.lineSearch.trim().toLowerCase();
+  const invoiceCatalogOptions = useMemo(() => {
+    const lessonOptions: BillingCatalogItem[] = services
+      .filter((service) => service.active)
+      .map((service) => ({
+        id: `service-${service.id}`,
+        kind: service.lessonFormat === "package" ? "package" : "lesson-type",
+        name: service.name,
+        description: service.description || service.lessonNote || service.location,
+        price: service.price,
+        taxRate: invoiceSettings.taxRate,
+        sourceServiceId: service.id,
+      }));
+    return [...lessonOptions, ...catalogItems];
+  }, [catalogItems, invoiceSettings.taxRate, services]);
+  const visibleInvoiceCatalogOptions = invoiceCatalogOptions
+    .filter((item) => {
+      if (!invoiceSearchTerm) return false;
+      return [item.name, item.description, item.kind].join(" ").toLowerCase().includes(invoiceSearchTerm);
+    })
+    .slice(0, 8);
+  const hasInvoiceCustomer = Boolean(invoiceDraft.payerName.trim() || invoiceDraft.payerEmail.trim());
+  const invoiceCustomerSearchTerm = invoiceCustomerSearch.trim().toLowerCase();
+  const invoiceCustomerMatches = invoiceCustomerSearchTerm
+    ? people
+        .filter((person) =>
+          [person.name, person.email, person.phone].join(" ").toLowerCase().includes(invoiceCustomerSearchTerm),
+        )
+        .slice(0, 6)
+    : [];
+  const invoiceCustomerCreateLabel = invoiceCustomerSearch.trim();
+  const emailTemplateVariables = {
+    business: coachAccount.businessName,
+    client: "Donna Steele",
+    coach: coachAccount.coachName || coachAccount.businessName,
+    date: "Thursday, Jun 4",
+    duration: emailTemplateService ? `${emailTemplateService.duration} minutes` : "60 minutes",
+    firstName: "Donna",
+    price: servicePriceLabel(emailTemplateService),
+    action: "booking",
+    replyTo: notificationSettings.replyToEmail || coachAccount.contactEmail,
+    service: emailTemplateService?.name ?? "1 Hour Golf Lesson",
+    time: emailTemplateService ? formatRange(14 * 60, emailTemplateService.duration) : "2:00 PM-3:00 PM",
+    venue: coachAccount.venueShortName || coachAccount.venueName,
+  };
+  const emailSubjectTemplatePreview = notificationSettings.notificationSubjectLine.trim()
+    ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)
+    : "";
+  const minBookingNoticeHours = Math.max(0, Math.round((notificationSettings.minBookingNoticeMinutes / 60) * 100) / 100);
+  const minBookingNoticeSummary = formatBookingNoticeLabel(notificationSettings.minBookingNoticeMinutes);
+  const bookingNoticeDraftHours = Math.max(0, Math.round((bookingNoticeDraft.minBookingNoticeMinutes / 60) * 100) / 100);
+  const bookingNoticeDraftSummary = formatBookingNoticeLabel(bookingNoticeDraft.minBookingNoticeMinutes);
+  const emailTemplateExample = {
+    adminIntro: renderTemplate(notificationSettings.adminEmailIntro, emailTemplateVariables),
+    adminSubject: renderTemplate(notificationSettings.adminEmailSubject, emailTemplateVariables),
+    clientFooter: renderTemplate(notificationSettings.clientEmailFooter, emailTemplateVariables),
+    clientIntro: renderTemplate(notificationSettings.clientEmailIntro, emailTemplateVariables),
+    clientSubject: renderTemplate(notificationSettings.clientEmailSubject, emailTemplateVariables),
+  };
+
+  useEffect(() => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    document.documentElement.style.colorScheme = themeMode;
+  }, [themeMode]);
+
+  useEffect(() => {
+    if (!isEmbedMode) return;
+    document.documentElement.classList.add("clarity-embed-mode");
+    document.body.classList.add("clarity-embed-mode");
+    return () => {
+      document.documentElement.classList.remove("clarity-embed-mode");
+      document.body.classList.remove("clarity-embed-mode");
+    };
+  }, [isEmbedMode]);
+
+  useEffect(() => {
+    window.localStorage.setItem(COACH_ACCOUNT_STORAGE_KEY, JSON.stringify(coachAccount));
+  }, [coachAccount]);
+
+  useEffect(() => {
+    const defaultSync = getDefaultSyncBaseUrl();
+    if (syncBaseUrl === defaultSync || syncBaseUrl === defaultCoachAccount.bookingUrl) {
+      setSyncBaseUrl(coachAccount.bookingUrl);
+    }
+  }, [coachAccount.bookingUrl, syncBaseUrl]);
+
+  useEffect(() => {
+    window.localStorage.setItem(BRAND_STORAGE_KEY, JSON.stringify(brandSettings));
+  }, [brandSettings]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const hasCredentials = Boolean(rescheduleForm.email.trim() && rescheduleForm.phone.trim());
+    if (hasCredentials) {
+      const nextSaved: SavedRescheduleLogin = {
+        email: rescheduleForm.email.trim(),
+        phone: rescheduleForm.phone.trim(),
+        appointmentId: selectedRescheduleId || initialRescheduleLoginRef.current?.appointmentId,
+      };
+      window.localStorage.setItem(RESCHEDULE_LOGIN_STORAGE_KEY, JSON.stringify(nextSaved));
+      return;
+    }
+    if (bookingMode === "book" && !selectedRescheduleId) {
+      window.localStorage.removeItem(RESCHEDULE_LOGIN_STORAGE_KEY);
+    }
+  }, [bookingMode, rescheduleForm.email, rescheduleForm.phone, selectedRescheduleId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !isEmbedMode) return;
+    const hasBookingDetails = Boolean(bookingForm.firstName.trim() && bookingForm.lastName.trim() && bookingForm.email.trim());
+    if (!hasBookingDetails) return;
+    window.localStorage.setItem(
+      BOOKING_LOGIN_STORAGE_KEY,
+      JSON.stringify({
+        firstName: bookingForm.firstName.trim(),
+        lastName: bookingForm.lastName.trim(),
+        phone: bookingForm.phone.trim(),
+        email: bookingForm.email.trim(),
+      }),
+    );
+  }, [bookingForm.email, bookingForm.firstName, bookingForm.lastName, bookingForm.phone, isEmbedMode]);
+
+  useEffect(() => {
+    if (!isEmbedMode || !bookingConfirmation?.appointmentId) return;
+    if (bookingConfirmation.notifications.some((result) => result.channel === "client" && result.sent)) {
+      setEmailNoticeVisible(true);
+      return;
+    }
+    // A cancelled booking has already been removed from the public calendar,
+    // so it cannot be looked up again by the generic notification retry route.
+    // Cancellation sends are completed synchronously by /api/public-cancel.
+    if (bookingConfirmation.kind === "cancelled") return;
+
+    let cancelled = false;
+    let attempts = 0;
+    let timer: number | null = null;
+    const triggerKey = `${bookingConfirmation.kind}:${bookingConfirmation.appointmentId}`;
+
+    const mergeNotificationResults = (results: EmailSendResult[]) => {
+      if (!results.length || cancelled) return;
+      setBookingConfirmation((current) => {
+        if (!current || current.appointmentId !== bookingConfirmation.appointmentId) return current;
+        const seen = new Set(current.notifications.map((result) => `${result.kind || result.channel}:${result.recipient || ""}:${result.status || result.sent}`));
+        const additions = results.filter((result) => {
+          const key = `${result.kind || result.channel}:${result.recipient || ""}:${result.status || result.sent}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return additions.length ? { ...current, notifications: [...additions, ...current.notifications] } : current;
+      });
+      if (results.some((result) => result.channel === "client" && result.sent)) setEmailNoticeVisible(true);
+    };
+
+    const triggerEmailSend = async () => {
+      if (publicNotificationTriggerRef.current.has(triggerKey)) return;
+      publicNotificationTriggerRef.current.add(triggerKey);
+      try {
+        const response = await fetch("/api/public-booking-notifications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            appointmentId: bookingConfirmation.appointmentId,
+            email: bookingConfirmation.email,
+            phone: bookingConfirmation.phone || "",
+            kind: bookingConfirmation.kind,
+          }),
+        });
+        const data = (await response.json().catch(() => ({}))) as {
+          results?: EmailSendResult[];
+          notifications?: NotificationRecord[];
+        };
+        if (Array.isArray(data.notifications)) setNotifications(data.notifications);
+        if (Array.isArray(data.results)) mergeNotificationResults(data.results);
+      } catch {
+        // The booking is confirmed already; polling below can still pick up a background receipt.
+      }
+    };
+
+    const poll = async () => {
+      attempts += 1;
+      try {
+        const params = new URLSearchParams({
+          appointment: bookingConfirmation.appointmentId || "",
+          email: bookingConfirmation.email,
+          phone: bookingConfirmation.phone || "",
+        });
+        const response = await fetch(`/api/public-notification-status?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+        });
+        const data = (await response.json()) as { sent?: boolean; notification?: EmailSendResult | null };
+        if (!cancelled && response.ok && data.notification) {
+          mergeNotificationResults([data.notification]);
+          if (data.sent) return;
+        }
+      } catch {
+        // The booking is already confirmed; email status is a secondary receipt.
+      }
+      if (!cancelled && attempts < 36) timer = window.setTimeout(poll, 5000);
+    };
+
+    void triggerEmailSend().finally(() => {
+      if (!cancelled) timer = window.setTimeout(poll, 1200);
+    });
+
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [bookingConfirmation?.appointmentId, bookingConfirmation?.email, bookingConfirmation?.kind, bookingConfirmation?.phone, isEmbedMode]);
+
+  useEffect(() => {
+    if (!isEmbedMode || !emailNoticeVisible || !bookingConfirmation?.appointmentId) return;
+    const noticeKey = `${bookingConfirmation.kind}:${bookingConfirmation.appointmentId}`;
+    if (emailNoticeToastKeyRef.current === noticeKey) return;
+    emailNoticeToastKeyRef.current = noticeKey;
+    setToast({ message: "Email Sent" });
+  }, [bookingConfirmation?.appointmentId, bookingConfirmation?.kind, emailNoticeVisible, isEmbedMode]);
+
+  useEffect(() => {
+    if (activeDockBookingId && !dockBookings.some((booking) => booking.id === activeDockBookingId)) {
+      setActiveDockBookingId("");
+    }
+  }, [activeDockBookingId, dockBookings]);
+
+  useEffect(() => {
+    if (pointerSession) setCalendarHover(null);
+  }, [pointerSession]);
+
+  useEffect(() => {
+    if (bookingMode !== "reschedule" && bookingServiceId && !currentScreenPublicServices.some((service) => service.id === bookingServiceId)) {
+      setBookingServiceId("");
+      setBookingDaySelected(false);
+      setBookingStart(null);
+      setOpenPublicBookingSection("appointment");
+    }
+  }, [bookingMode, bookingServiceId, currentScreenPublicServices]);
+
+  useEffect(() => {
+    if (!isEmbedMode || publicBookingStateStatus !== "loaded" || bookingMode !== "book") return;
+    currentScreenPublicServices.forEach((service) => {
+      const key = publicBookingSlotCacheKey(service.id, activeWeek);
+      const status = publicBookingSlotStatuses[key] ?? "idle";
+      if (status === "idle" || status === "error") {
+        void loadPublicBookingSlots(service.id, activeWeek);
+      }
+    });
+  }, [activeWeek, bookingMode, currentScreenPublicServiceIds, isEmbedMode, publicBookingStateStatus]);
+
+  useEffect(() => {
+    if (!isEmbedMode || publicBookingStateStatus !== "loaded" || bookingMode !== "reschedule" || !bookingTargetService || !selectedRescheduleMatch) {
+      return;
+    }
+    const key = publicBookingSlotCacheKey(bookingTargetService.id, activeWeek, selectedRescheduleMatch.id);
+    const status = publicBookingSlotStatuses[key] ?? "idle";
+    if (status === "idle" || status === "error") {
+      void loadPublicBookingSlots(bookingTargetService.id, activeWeek, selectedRescheduleMatch.id);
+    }
+  }, [
+    activeWeek,
+    bookingMode,
+    bookingTargetService?.id,
+    isEmbedMode,
+    publicBookingStateStatus,
+    selectedRescheduleMatch?.id,
+  ]);
+
+  useEffect(() => {
+    if (!quickCreate) setQuickClientSearch("");
+  }, [quickCreate]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitialState() {
+      try {
+        if (isEmbedMode) {
+          setPublicBookingStateStatus("loading");
+          await loadPublicBookingCatalog();
+          if (!cancelled) {
+            setCalendarFeedStatus("connected");
+            setPublicBookingStateStatus("loaded");
+          }
+          return;
+        }
+
+        const sessionController = new AbortController();
+        const sessionTimeout = window.setTimeout(() => sessionController.abort(), 8000);
+        let sessionResponse: Response;
+        const sessionTimer = startDiagnosticTimer({
+          system: "auth",
+          action: "admin_session_load",
+          route: "GET /api/auth/session",
+          functionName: "loadInitialState",
+        });
+        try {
+          sessionResponse = await fetch("/api/auth/session", {
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: { Accept: "application/json" },
+            signal: sessionController.signal,
+          });
+          finishDiagnosticTimer(sessionTimer, sessionResponse.ok ? "success" : "failed", {
+            httpStatus: sessionResponse.status,
+            errorCode: sessionResponse.ok ? undefined : "AUTH_SESSION_MISSING",
+            humanMessage: sessionResponse.ok ? undefined : "Admin session could not be loaded.",
+          });
+        } finally {
+          window.clearTimeout(sessionTimeout);
+        }
+        if (!sessionResponse.ok) throw new Error("Session API unavailable");
+        const session = (await sessionResponse.json()) as { authenticated?: boolean; email?: string };
+        if (cancelled) return;
+
+        if (!session.authenticated) {
+          trackDiagnosticEvent({
+            system: "auth",
+            action: "admin_session_load",
+            phase: "session",
+            status: "warning",
+            route: "GET /api/auth/session",
+            errorCode: "AUTH_SESSION_MISSING",
+            humanMessage: "No authenticated admin session.",
+          });
+          setAuthStatus("guest");
+          setCalendarFeedStatus("offline");
+          setAdminWorkspaceLoadStatus("idle");
+          setAdminWorkspaceLoadError("");
+          return;
+        }
+
+        if (session.email) setAdminEmail(session.email);
+        setAuthStatus("authenticated");
+        void startAdminWorkspaceHydration();
+      } catch {
+        if (!cancelled) {
+          trackDiagnosticError({
+            system: "auth",
+            action: "admin_session_load",
+            phase: "request",
+            route: "GET /api/auth/session",
+            functionName: "loadInitialState",
+            errorCode: "AUTH_SESSION_MISSING",
+            humanMessage: "Admin session load failed.",
+          });
+          hasLoadedCalendarApiRef.current = false;
+          setCalendarFeedStatus("offline");
+          if (isEmbedMode) setPublicBookingStateStatus("error");
+          setAdminWorkspaceLoadStatus("idle");
+          setAdminWorkspaceLoadError("");
+          if (!isEmbedMode) setAuthStatus("guest");
+        }
+      }
+    }
+
+    void loadInitialState();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEmbedMode]);
+
+  async function refreshNotificationHistory() {
+    if (isEmbedMode || authStatus !== "authenticated") return;
+    try {
+      const response = await fetch("/api/notification-history", { headers: { Accept: "application/json" } });
+      if (!response.ok) return;
+      const data = (await response.json()) as { notifications?: NotificationRecord[] };
+      if (Array.isArray(data.notifications)) setNotifications(data.notifications);
+    } catch {
+      // Email receipts are secondary; keep the calendar usable if polling fails.
+    }
+  }
+
+  async function refreshPeopleList(runId?: number) {
+    if (isEmbedMode || authStatus !== "authenticated") return;
+    try {
+      const response = await fetch("/api/people", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (runId !== undefined && !shouldApplyAdminWorkspaceDetail(runId)) return;
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => ({}))) as { people?: Person[] };
+      if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
+    } catch {
+      // Client profiles are secondary to the calendar frame.
+    } finally {
+      markPlayerProfilesSourceReady("people");
+    }
+  }
+
+  async function refreshLessonNotes(runId?: number) {
+    if (isEmbedMode || authStatus !== "authenticated") return;
+    try {
+      const response = await fetch("/api/notes", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (runId !== undefined && !shouldApplyAdminWorkspaceDetail(runId)) return;
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => ({}))) as NotesResult;
+      if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
+    } catch {
+      // Lesson notes are secondary to the calendar frame.
+    } finally {
+      markPlayerProfilesSourceReady("notes");
+    }
+  }
+
+  async function processPendingAdminNotifications() {
+    if (isEmbedMode || authStatus !== "authenticated") return;
+    try {
+      const response = await fetch("/api/admin-notification-debounce", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => ({}))) as {
+        notifications?: NotificationRecord[];
+      };
+      if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+    } catch {
+      console.warn("admin_notification_debounce:flush_failed");
+    }
+  }
+
+  function scheduleAdminNotificationDebounceFlush() {
+    window.setTimeout(() => void processPendingAdminNotifications(), 32000);
+    window.setTimeout(() => void refreshNotificationHistory(), 35000);
+  }
+
+  useEffect(() => {
+    if (!isEmbedMode || attemptedSavedRescheduleRef.current) return;
+    const saved = initialRescheduleLoginRef.current;
+    if (!saved?.email || !saved?.phone) return;
+    attemptedSavedRescheduleRef.current = true;
+    setBookingMode("reschedule");
+    setRescheduleForm({ email: saved.email, phone: saved.phone });
+    setSelectedRescheduleId(saved.appointmentId || "");
+    window.setTimeout(() => {
+      void lookupPublicReschedule(true, saved);
+    }, 0);
+  }, [isEmbedMode]);
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
+    if (hasActiveAdminSave()) return;
+    const requestedFingerprint = calendarStateFingerprint(items, calendarSyncKey);
+    if (requestedFingerprint === lastPersistedCalendarFingerprintRef.current) return;
+    const saveVersion = ++calendarSaveVersionRef.current;
+    const desiredItems = items;
+    const baselineItems = lastPersistedCalendarItemsRef.current;
+    let saveReachedServer = false;
+    let sessionExpired = false;
+    const timer = startDiagnosticTimer({
+      system: "save",
+      action: "save_booking_calendar",
+      route: "PUT /api/calendar-state",
+      functionName: "calendar autosave",
+      expectedAccountId: activeAccountId,
+      objectType: "calendarState",
+      details: { itemCount: items.length },
+    });
+    setCalendarSaveStatus("saving");
+    setCalendarSaveError("");
+
+    const saveTimer = window.setTimeout(() => {
+      const saveRequest = (
+        requestItems = desiredItems,
+        requestSyncKey = calendarSyncKey,
+        requestUpdatedAt = calendarStateVersion,
+      ) =>
+        fetch("/api/calendar-state", {
+          method: "PUT",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            items: requestItems,
+            replaceItems: true,
+            syncKey: requestSyncKey,
+            updatedAt: requestUpdatedAt,
+          }),
+        });
+      const readLiveState = () =>
+        fetch("/api/calendar-state", {
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+      const retryDelay = (delay = 700) => new Promise((resolve) => window.setTimeout(resolve, delay));
+      const saveWithRetries = async (
+        requestItems = desiredItems,
+        requestSyncKey = calendarSyncKey,
+        requestUpdatedAt = calendarStateVersion,
+      ) => {
+        let lastError: unknown;
+        for (const delay of [0, 700, 1400, 2600]) {
+          if (delay) await retryDelay(delay);
+          try {
+            return await saveRequest(requestItems, requestSyncKey, requestUpdatedAt);
+          } catch (error) {
+            lastError = error;
+          }
+        }
+        throw lastError instanceof Error ? lastError : new Error("Calendar save failed.");
+      };
+
+      void (async () => {
+        let response: Response;
+        let submittedItems = desiredItems;
+        let submittedSyncKey = calendarSyncKey;
+        let submittedUpdatedAt = calendarStateVersion;
+        let recoveredData: CalendarStateSaveResponse | null = null;
+        let recoveredFromConflict = false;
+        try {
+          response = await saveWithRetries();
+        } catch (networkError) {
+          const liveResponse = await readLiveState().catch(() => null);
+          if (!liveResponse?.ok) throw networkError;
+          recoveredData = (await liveResponse.json().catch(() => ({}))) as CalendarStateSaveResponse;
+          if (calendarItemsEquivalent(recoveredData.items, desiredItems)) {
+            response = liveResponse;
+          } else {
+            recoveredData = null;
+            response = await saveWithRetries();
+          }
+        }
+        if (calendarSaveVersionRef.current !== saveVersion) return;
+        let data = (recoveredData ?? (await response.json().catch(() => ({})))) as CalendarStateSaveResponse;
+        // A conflict can recur: our own merged save bumps updatedAt, and a concurrent writer
+        // (public booking, Google sync, notification engine) can land again while we retry.
+        // Resolving only once meant the second conflict fell straight through to a hard failure.
+        for (let conflictAttempt = 0; response.status === 409 && conflictAttempt < 3; conflictAttempt += 1) {
+          const liveResponse = await readLiveState();
+          const latestData = (await liveResponse.json().catch(() => ({}))) as CalendarStateSaveResponse;
+          if (liveResponse.status === 401) {
+            sessionExpired = true;
+            setAuthStatus("guest");
+            throw new Error(latestData.message || "Admin login expired. Sign in again before editing the calendar.");
+          }
+          if (!liveResponse.ok || !Array.isArray(latestData.items)) {
+            throw new Error(data.message || data.error || "Calendar save failed because the live calendar could not be reloaded.");
+          }
+          const mergedItems = mergeCalendarItemsAfterConflict(latestData.items, baselineItems, desiredItems);
+          if (!mergedItems) {
+            throw new Error(data.message || "Calendar changed elsewhere. Reload before saving so you do not overwrite live bookings.");
+          }
+          recoveredFromConflict = true;
+          submittedItems = mergedItems;
+          submittedSyncKey = typeof latestData.syncKey === "string" ? latestData.syncKey : calendarSyncKey;
+          submittedUpdatedAt = typeof latestData.updatedAt === "string" ? latestData.updatedAt : "";
+          response = await saveWithRetries(
+            mergedItems,
+            submittedSyncKey,
+            submittedUpdatedAt,
+          );
+          if (calendarSaveVersionRef.current !== saveVersion) return;
+          data = (await response.json().catch(() => ({}))) as CalendarStateSaveResponse;
+        }
+        if (!response.ok && response.status >= 500) {
+          await retryDelay(900);
+          response = await saveWithRetries(submittedItems, submittedSyncKey, submittedUpdatedAt);
+          if (calendarSaveVersionRef.current !== saveVersion) return;
+          data = (await response.json().catch(() => ({}))) as typeof data;
+        }
+        if (response.status === 401) {
+          sessionExpired = true;
+          setAuthStatus("guest");
+          throw new Error(data.message || "Admin login expired. Sign in again before editing the calendar.");
+        }
+        if (!response.ok) throw new Error(data.message || data.error || "Calendar save failed.");
+        saveReachedServer = true;
+        setCalendarFeedStatus("connected");
+        setCalendarSaveStatus("saved");
+        setCalendarSaveError("");
+        if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+        const persistedSyncKey = typeof data.syncKey === "string" ? data.syncKey : calendarSyncKey;
+        const persistedItems = Array.isArray(data.items) ? data.items : submittedItems;
+        lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
+        lastPersistedCalendarItemsRef.current = persistedItems;
+        if (recoveredFromConflict && !calendarItemsEquivalent(persistedItems, desiredItems)) setItems(persistedItems);
+        if (typeof data.syncKey === "string" && data.syncKey !== calendarSyncKey) setCalendarSyncKey(data.syncKey);
+        if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+        const clientSyncWarning = Array.isArray(data.warnings)
+          ? data.warnings.find((warning) => typeof warning === "string" && warning.trim())
+          : "";
+        if (clientSyncWarning) setToast({ message: clientSyncWarning });
+        applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar);
+        finishDiagnosticTimer(timer, "verified", {
+          httpStatus: response.status,
+          details: {
+            persistedItemCount: persistedItems.length,
+            notificationCount: Array.isArray(data.notifications) ? data.notifications.length : 0,
+          },
+        });
+        if (data.googleCalendarSync && data.googleCalendarSync.ok === false && data.googleCalendarSync.error) {
+          setToast({ message: `Saved booking calendar, but Google Calendar did not sync: ${data.googleCalendarSync.error}` });
+        }
+        window.setTimeout(() => {
+          if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
+        }, 1800);
+        window.setTimeout(() => void refreshNotificationHistory(), 1500);
+        window.setTimeout(() => void refreshNotificationHistory(), 8000);
+        scheduleAdminNotificationDebounceFlush();
+      })().catch((error) => {
+        if (calendarSaveVersionRef.current === saveVersion) {
+          const message = error instanceof Error ? error.message : "Calendar save failed.";
+          if (saveReachedServer) {
+            setCalendarFeedStatus("connected");
+            setCalendarSaveStatus("saved");
+            setCalendarSaveError("");
+            finishDiagnosticTimer(timer, "warning", {
+              errorCode: "BOOKING_UPDATE_VERIFY_MISSING",
+              humanMessage: `Calendar saved, but refresh details failed: ${message}`,
+            });
+            setToast({ message: `Calendar saved, but the page could not refresh all save details: ${message}` });
+            window.setTimeout(() => {
+              if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
+            }, 1800);
+            return;
+          }
+          const calmMessage = sessionExpired
+            ? message || "Admin login expired. Sign in again before editing the calendar."
+            : message || "Your latest calendar change was not saved. Please try again.";
+          setCalendarFeedStatus(sessionExpired ? "offline" : "connected");
+          setCalendarSaveStatus("failed");
+          setCalendarSaveError(calmMessage);
+          finishDiagnosticTimer(timer, "failed", {
+            errorCode: sessionExpired ? "AUTH_SESSION_MISSING" : "BOOKING_UPDATE_FAILED",
+            humanMessage: calmMessage,
+          });
+          setToast({ message: calmMessage });
+        }
+      });
+
+    }, 650);
+
+    return () => window.clearTimeout(saveTimer);
+  }, [authStatus, calendarSyncKey, isEmbedMode, items]);
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || activeView !== "calendar") return;
+    const timer = window.setInterval(() => void refreshNotificationHistory(), 15000);
+    return () => window.clearInterval(timer);
+  }, [activeView, authStatus, isEmbedMode]);
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || activeView !== "settings") return;
+    void refreshGoogleCalendarStatus();
+  }, [activeView, authStatus, isEmbedMode]);
+
+  function applyNotificationSettings(settings?: Partial<NotificationSettings>) {
+    const delaySeconds = Number(settings?.notificationDelaySeconds ?? defaultNotificationSettings.notificationDelaySeconds);
+    const minBookingNoticeMinutes = Number(settings?.minBookingNoticeMinutes ?? defaultNotificationSettings.minBookingNoticeMinutes);
+    setNotificationSettings({
+      ...defaultNotificationSettings,
+      ...(settings ?? {}),
+      notificationDelaySeconds: Number.isFinite(delaySeconds) ? clamp(delaySeconds, 30, 3600) : 30,
+      minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(minBookingNoticeMinutes),
+      googleReviewUrl: cleanUrl(settings?.googleReviewUrl, ""),
+    });
+  }
+
+  function applyCoachAccount(account?: Partial<CoachAccount>) {
+    setCoachAccount(cleanCoachAccount(account));
+  }
+
+  function applyBrandSettings(settings?: Partial<BrandSettings>) {
+    setBrandSettings(cleanBrandSettings(settings));
+  }
+
+  function applyGoogleCalendarStatus(status?: Partial<GoogleCalendarSyncStatus>) {
+    setGoogleCalendar({
+      ...defaultGoogleCalendarStatus,
+      ...(status ?? {}),
+      calendarId: typeof status?.calendarId === "string" && status.calendarId.trim() ? status.calendarId : "primary",
+      autoSync: status?.autoSync === true,
+    });
+  }
+
+  function applyGoogleDriveTransferStatus(status?: Partial<GoogleDriveTransferStatus>) {
+    setGoogleDriveTransfer({
+      ...defaultGoogleDriveTransferStatus,
+      ...(status ?? {}),
+      state: status?.state || defaultGoogleDriveTransferStatus.state,
+      message: status?.message || status?.blocker || defaultGoogleDriveTransferStatus.message,
+    });
+  }
+
+
+  function workspaceDiagnosticValue(value: unknown) {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "string") return value.trim();
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  async function readApiFailureDetail(response: Response, fallback: string): Promise<WorkspaceApiFailureDetail> {
+    const statusText = `${response.status} ${response.statusText}`.trim();
+    try {
+      const contentType = response.headers.get("Content-Type") || "";
+      if (contentType.includes("application/json")) {
+        const data = (await response.json()) as {
+          message?: unknown;
+          error?: unknown;
+          details?: unknown;
+          failed?: Array<{ name?: unknown; message?: unknown }>;
+        };
+        const firstFailed = Array.isArray(data.failed) && data.failed[0]
+          ? [workspaceDiagnosticValue(data.failed[0].name), workspaceDiagnosticValue(data.failed[0].message)]
+              .filter(Boolean)
+              .join(": ")
+          : "";
+        return {
+          message: workspaceDiagnosticValue(data.message),
+          failed: firstFailed,
+          error: workspaceDiagnosticValue(data.error),
+          details: workspaceDiagnosticValue(data.details),
+          statusText,
+        };
+      }
+      const text = await response.text();
+      return { message: text ? text.slice(0, 280) : fallback, statusText };
+    } catch {
+      return { message: fallback, statusText };
+    }
+  }
+
+  function summarizeApiFailureDetail(detail: WorkspaceApiFailureDetail) {
+    return [detail.message, detail.failed, detail.error, detail.details, detail.text, detail.statusText].filter(Boolean).join(" · ");
+  }
+
+  async function readApiFailure(response: Response, fallback: string) {
+    return summarizeApiFailureDetail(await readApiFailureDetail(response, fallback)) || fallback;
+  }
+
+  type PublicBookingSubmitResponse = {
+    message?: string;
+    error?: string;
+    code?: string;
+    reason?: string;
+    fallback?: boolean;
+    state?: { items?: CalendarItem[] };
+    appointment?: { id?: string; location?: BookingLocationSnapshot; locationId?: string; coach?: BookingCoachSnapshot };
+    notifications?: EmailSendResult[];
+  };
+
+  async function readPublicBookingSubmitResponse(response: Response): Promise<PublicBookingSubmitResponse> {
+    try {
+      return (await response.json()) as PublicBookingSubmitResponse;
+    } catch {
+      return {};
+    }
+  }
+
+  function isSelectedSlotUnavailableResponse(response: Response, data: PublicBookingSubmitResponse) {
+    const detail = [data.code, data.error, data.reason, data.message].filter(Boolean).join(" ").toLowerCase();
+    if (!detail) return false;
+    if (detail.includes("slot") && (detail.includes("unavailable") || detail.includes("stale") || detail.includes("taken"))) return true;
+    if (detail.includes("time") && (detail.includes("unavailable") || detail.includes("stale") || detail.includes("taken"))) return true;
+    return response.status === 409 && (detail.includes("no longer available") || detail.includes("has just been taken"));
+  }
+
+  function workspaceRecordName(record: WorkspaceConfigRecord) {
+    return record.displayName || record.name || record.id || "unnamed";
+  }
+
+  function summarizeWorkspaceRecordIds(records?: WorkspaceConfigRecord[]) {
+    if (!Array.isArray(records)) return "not returned";
+    if (!records.length) return "none";
+    return records.map((record) => record.id || "missing-id").join(", ");
+  }
+
+  function summarizeWorkspaceAccountIds(records?: WorkspaceConfigRecord[]) {
+    if (!Array.isArray(records)) return "not returned";
+    if (!records.length) return "none";
+    return Array.from(new Set(records.map((record) => record.accountId || "missing-account"))).join(", ");
+  }
+
+  function workspaceRouteStatus(routeLabel: string, diagnostic: WorkspaceConfigDiagnostic) {
+    if (routeLabel.startsWith("PUT ")) return diagnostic.putStatus;
+    if (routeLabel === "GET /api/calendar-state") return diagnostic.calendarStatus;
+    if (routeLabel.startsWith("GET ")) return diagnostic.getStatus;
+    return diagnostic.getStatus ?? diagnostic.putStatus ?? diagnostic.calendarStatus;
+  }
+
+  function workspaceRouteRecords(routeLabel: string, diagnostic: WorkspaceConfigDiagnostic) {
+    if (routeLabel.startsWith("PUT ")) return diagnostic.putRecords;
+    if (routeLabel === "GET /api/calendar-state") return diagnostic.calendarRecords;
+    if (routeLabel.startsWith("GET ")) return diagnostic.getRecords;
+    return diagnostic.getRecords ?? diagnostic.putRecords ?? diagnostic.calendarRecords;
+  }
+
+  function normalizeWorkspaceFailureDetail(detail: WorkspaceApiFailureDetail | string): WorkspaceApiFailureDetail {
+    return typeof detail === "string" ? { message: detail } : detail;
+  }
+
+  function formatWorkspaceSaveFailure(
+    label: "Location" | "Coach",
+    routeLabel: string,
+    stage: string,
+    diagnostic: WorkspaceConfigDiagnostic,
+    detail: WorkspaceApiFailureDetail | string,
+  ) {
+    const normalizedDetail = normalizeWorkspaceFailureDetail(detail);
+    const routeRecords = workspaceRouteRecords(routeLabel, diagnostic);
+    const routeStatus = workspaceRouteStatus(routeLabel, diagnostic);
+    const expectedIds = diagnostic.expected.map((record) => record.id).join(", ") || "none";
+    return [
+      `${label} save failed`,
+      `Code: ${stage}`,
+      `Route: ${routeLabel}`,
+      `HTTP: ${routeStatus ?? "not available"}`,
+      normalizedDetail.error ? `Backend error: ${normalizedDetail.error}` : "",
+      normalizedDetail.message || normalizedDetail.text || normalizedDetail.statusText
+        ? `Message: ${normalizedDetail.message || normalizedDetail.text || normalizedDetail.statusText}`
+        : "",
+      normalizedDetail.details ? `Details: ${normalizedDetail.details}` : "",
+      normalizedDetail.failed ? `Backend failed: ${normalizedDetail.failed}` : "",
+      `Expected: ${expectedIds}`,
+      `Returned: ${summarizeWorkspaceRecordIds(routeRecords)}`,
+      `Active account: ${diagnostic.activeAccountId || "missing"}`,
+      `Returned accountIds: ${summarizeWorkspaceAccountIds(routeRecords)}`,
+    ].filter(Boolean).join("\n");
+  }
+
+  function workspaceDiagnosticErrorCode(label: "Location" | "Coach", stage: string) {
+    if (stage.includes("unauthorized")) return "AUTH_SESSION_MISSING";
+    if (stage.includes("account_mismatch")) return label === "Location" ? "LOCATION_SCOPE_MISMATCH" : "COACH_SCOPE_MISMATCH";
+    if (stage.includes("missing_expected_id")) {
+      return label === "Location" ? "LOCATION_SAVE_VERIFY_MISSING" : "COACH_SAVE_VERIFY_MISSING";
+    }
+    return label === "Location" ? "LOCATION_SAVE_FAILED" : "COACH_SAVE_FAILED";
+  }
+
+  function throwWorkspaceSaveFailure(
+    label: "Location" | "Coach",
+    routeLabel: string,
+    stage: string,
+    diagnostic: WorkspaceConfigDiagnostic,
+    detail: WorkspaceApiFailureDetail | string,
+  ): never {
+    throw new Error(formatWorkspaceSaveFailure(label, routeLabel, stage, diagnostic, detail));
+  }
+
+  function workspaceSaveFailureMessage(
+    error: unknown,
+    label: "Location" | "Coach",
+    routeLabel: string,
+    stage: string,
+    diagnostic: WorkspaceConfigDiagnostic,
+    fallback: string,
+  ) {
+    if (error instanceof Error && error.message.includes("\nCode: ")) return error.message;
+    const message = error instanceof Error && error.message ? error.message : fallback;
+    return formatWorkspaceSaveFailure(label, routeLabel, stage, diagnostic, { message });
+  }
+
+  function assertExpectedWorkspaceRecords(
+    records: WorkspaceConfigRecord[] | undefined,
+    label: "Location" | "Coach",
+    routeLabel: string,
+    missingStage: string,
+    mismatchStage: string,
+    diagnostic: WorkspaceConfigDiagnostic,
+  ) {
+    const source = Array.isArray(records) ? records : [];
+    for (const expected of diagnostic.expected) {
+      const match = source.find((record) => record.id === expected.id);
+      if (!match) {
+        throwWorkspaceSaveFailure(
+          label,
+          routeLabel,
+          missingStage,
+          diagnostic,
+          `${expected.name} (${expected.id}) was missing from the response.`,
+        );
+      }
+      if (match.accountId !== diagnostic.activeAccountId) {
+        throwWorkspaceSaveFailure(
+          label,
+          routeLabel,
+          mismatchStage,
+          diagnostic,
+          `saved record accountId was ${match.accountId || "missing"}, activeAccountId was ${diagnostic.activeAccountId || "missing"}.`,
+        );
+      }
+    }
+  }
+
+  async function readWorkspaceSaveJson<T>(
+    response: Response,
+    label: "Location" | "Coach",
+    routeLabel: string,
+    stage: string,
+    diagnostic: WorkspaceConfigDiagnostic,
+  ) {
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throwWorkspaceSaveFailure(
+        label,
+        routeLabel,
+        stage,
+        diagnostic,
+        `expected JSON but received ${response.headers.get("Content-Type") || "unknown content type"}.`,
+      );
+    }
+  }
+
+  async function fetchDatabaseHealthSummary() {
+    try {
+      const response = await fetch("/api/database-health", { headers: { Accept: "application/json" } });
+      if (!response.ok) return "";
+      const data = (await response.json()) as { ok?: boolean; failed?: Array<{ name?: string; message?: string }> };
+      if (data.ok) return "Database health passed, but calendar state still failed.";
+      const firstFailed = Array.isArray(data.failed) && data.failed[0] ? data.failed[0] : null;
+      return firstFailed ? `Database health failed at ${firstFailed.name}: ${firstFailed.message}` : "Database health failed.";
+    } catch {
+      return "";
+    }
+  }
+
+  function adminWorkspaceLoadMessage(error: unknown) {
+    if (error instanceof Error && error.message) return error.message;
+    return "Calendar bookings could not be loaded.";
+  }
+
+  async function startAdminWorkspaceHydration() {
+    if (isEmbedMode || hasActiveAdminSave()) return;
+    const runId = ++adminHydrationRunIdRef.current;
+    adminBootStartedAtRef.current = performance.now();
+    calendarFrameRenderedRef.current = false;
+    bookingCardsFirstRenderedRef.current = false;
+    bookingCardsHydratedRef.current = false;
+    const timer = startDiagnosticTimer({
+      system: "calendar",
+      action: "admin_calendar_shell_load",
+      route: "GET /api/calendar-state",
+      functionName: "startAdminWorkspaceHydration",
+      expectedAccountId: activeAccountId,
+      details: {
+        routeUsed: "shell",
+        waitingFor: "calendar_shell_state",
+      },
+    });
+    trackDiagnosticEvent({
+      system: "reload",
+      action: "ADMIN_CALENDAR_SHELL_RELOAD_STARTED",
+      phase: "admin_workspace",
+      status: "started",
+      route: "GET /api/calendar-state",
+      functionName: "startAdminWorkspaceHydration",
+      expectedAccountId: activeAccountId,
+      details: {
+        routeUsed: "shell",
+        nonCriticalRefreshDeferred: true,
+      },
+    });
+    hasLoadedCalendarApiRef.current = false;
+    setAdminWorkspaceLoadStatus("loading");
+    setAdminWorkspaceLoadError("");
+    setCalendarFeedStatus("checking");
+    setCalendarSaveStatus("idle");
+    setCalendarSaveError("");
+    try {
+      const applied = await loadAdminCalendarState(runId);
+      if (!applied || adminHydrationRunIdRef.current !== runId) return;
+      setAdminWorkspaceLoadStatus("loaded");
+      setAdminWorkspaceLoadError("");
+      setCalendarFeedStatus("connected");
+      trackDiagnosticEvent({
+        system: "reload",
+        action: "ADMIN_CALENDAR_SHELL_RELOAD_COMPLETED",
+        phase: "admin_workspace",
+        status: "success",
+        route: "GET /api/calendar-state",
+        functionName: "startAdminWorkspaceHydration",
+        expectedAccountId: activeAccountId,
+        details: {
+          routeUsed: "shell",
+          nonCriticalRefreshDeferred: true,
+        },
+      });
+      finishDiagnosticTimer(timer, "success", {
+        details: {
+          routeUsed: "shell",
+          calendarShellApplied: true,
+          nonCriticalRefreshDeferred: true,
+        },
+      });
+    } catch (error) {
+      if (adminHydrationRunIdRef.current !== runId) return;
+      finishDiagnosticTimer(timer, "failed", {
+        errorCode: "SUPABASE_READ_FAILED",
+        humanMessage: adminWorkspaceLoadMessage(error),
+      });
+      trackDiagnosticEvent({
+        system: "reload",
+        action: "ADMIN_CALENDAR_SHELL_RELOAD_COMPLETED",
+        phase: "admin_workspace",
+        status: "failed",
+        route: "GET /api/calendar-state",
+        functionName: "startAdminWorkspaceHydration",
+        expectedAccountId: activeAccountId,
+        errorCode: "SUPABASE_READ_FAILED",
+        humanMessage: adminWorkspaceLoadMessage(error),
+      });
+      hasLoadedCalendarApiRef.current = false;
+      setAdminWorkspaceLoadStatus("error");
+      setAdminWorkspaceLoadError(adminWorkspaceLoadMessage(error));
+      setCalendarFeedStatus("offline");
+    }
+  }
+
+  async function loadAdminCalendarState(runId = ++adminHydrationRunIdRef.current) {
+    const isCurrentRun = () => adminHydrationRunIdRef.current === runId;
+    const timer = startDiagnosticTimer({
+      system: "supabase",
+      action: "calendar_bookings_load",
+      route: "GET /api/calendar-state",
+      functionName: "loadAdminCalendarState",
+      expectedAccountId: activeAccountId,
+    });
+    hasLoadedCalendarApiRef.current = false;
+    setCalendarFeedStatus("checking");
+    setCalendarSaveStatus("idle");
+    setCalendarSaveError("");
+    if (!isCurrentRun() || hasActiveAdminSave()) return false;
+    const visibleRangeStartedAt = performance.now();
+    trackDiagnosticEvent({
+      system: "calendar",
+      action: "CALENDAR_VISIBLE_RANGE_LOAD_STARTED",
+      phase: "request",
+      status: "started",
+      route: "GET /api/calendar-state",
+      functionName: "loadAdminCalendarState",
+      expectedAccountId: activeAccountId,
+      details: {
+        activeWeek,
+        waitingFor: "calendar_items",
+      },
+    });
+    let response: Response;
+    try {
+      trackDiagnosticEvent({
+        system: "calendar",
+        action: "CALENDAR_SHELL_STATE_LOAD_STARTED",
+        phase: "request",
+        status: "started",
+        route: "GET /api/calendar-state",
+        functionName: "loadAdminCalendarState",
+        expectedAccountId: activeAccountId,
+        details: {
+          routeUsed: "shell",
+          waitingFor: "calendar_shell_state",
+        },
+      });
+      response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
+    } catch {
+      finishDiagnosticTimer(timer, "failed", {
+        errorCode: "SUPABASE_READ_FAILED",
+        humanMessage: "Calendar API unavailable.",
+      });
+      const healthMessage = await fetchDatabaseHealthSummary();
+      if (!isCurrentRun()) return false;
+      throw new Error(["Calendar API unavailable", healthMessage].filter(Boolean).join(" · "));
+    }
+    if (response.status === 401) {
+      finishDiagnosticTimer(timer, "failed", {
+        httpStatus: response.status,
+        errorCode: "AUTH_SESSION_MISSING",
+        humanMessage: "Admin login required.",
+      });
+      throw new Error("Admin login required");
+    }
+    if (!response.ok) {
+      const apiMessage = await readApiFailure(response, "Calendar API unavailable");
+      finishDiagnosticTimer(timer, "failed", {
+        httpStatus: response.status,
+        errorCode: "SUPABASE_READ_FAILED",
+        humanMessage: apiMessage,
+      });
+      const healthMessage = await fetchDatabaseHealthSummary();
+      if (!isCurrentRun()) return false;
+      throw new Error([apiMessage, healthMessage].filter(Boolean).join(" · "));
+    }
+    const data = (await response.json()) as {
+      syncKey?: string;
+      items?: CalendarItem[];
+      people?: Person[];
+      notifications?: NotificationRecord[];
+      services?: Service[];
+      locations?: Location[];
+      coaches?: CoachProfile[];
+      workspaceAccounts?: WorkspaceAccount[];
+      currentUser?: AppUser;
+      availability?: AvailabilityWindow[][];
+      settings?: Partial<NotificationSettings>;
+      brand?: Partial<BrandSettings>;
+      account?: Partial<CoachAccount>;
+      googleCalendar?: Partial<GoogleCalendarSyncStatus>;
+      updatedAt?: string;
+      diagnostics?: {
+        calendarState?: {
+          routeUsed?: string;
+          entrypoint?: string;
+          shellLoadDurationMs?: number;
+          itemCount?: number;
+          peopleDeferred?: boolean;
+          notificationsDeferred?: boolean;
+          googleSyncStatusDeferred?: boolean;
+        };
+      };
+    };
+    if (!isCurrentRun() || hasActiveAdminSave()) return false;
+    const loadedItems = Array.isArray(data.items) ? data.items : [];
+    const loadedAccounts = cleanWorkspaceAccounts(data.workspaceAccounts, data.account ?? coachAccount);
+    const loadedAccountId = defaultAccountId(loadedAccounts);
+    const accountItems = loadedItems.map((item) => ({ ...item, accountId: item.accountId || loadedAccountId }));
+    const loadedSyncKey =
+      typeof data.syncKey === "string" && data.syncKey.startsWith("cg_") ? data.syncKey : calendarSyncKey;
+    lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(accountItems, loadedSyncKey);
+    lastPersistedCalendarItemsRef.current = accountItems;
+    if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+    setWorkspaceAccounts(loadedAccounts);
+    if (Array.isArray(data.items)) setItems(accountItems);
+    trackDiagnosticMilestone({
+      system: "calendar",
+      action: "CALENDAR_VISIBLE_RANGE_LOAD_COMPLETED",
+      phase: "request",
+      status: "success",
+      route: "GET /api/calendar-state",
+      functionName: "loadAdminCalendarState",
+      expectedAccountId: activeAccountId,
+      returnedAccountId: loadedAccountId,
+      startedAt: visibleRangeStartedAt,
+      details: {
+        activeWeek,
+        itemCount: accountItems.length,
+        waitingFor: "calendar_items",
+      },
+    });
+    const calendarStateDiagnostics = data.diagnostics?.calendarState;
+    const calendarStateRouteUsed = calendarStateDiagnostics?.routeUsed === "shell" ? "shell" : "full";
+    const peopleDeferred = calendarStateDiagnostics?.peopleDeferred === true;
+    const notificationsDeferred = calendarStateDiagnostics?.notificationsDeferred === true;
+    const googleSyncStatusDeferred = calendarStateDiagnostics?.googleSyncStatusDeferred === true;
+    if (calendarStateRouteUsed === "shell") {
+      trackDiagnosticEvent({
+        system: "calendar",
+        action: "CALENDAR_SHELL_STATE_LOAD_COMPLETED",
+        phase: "request",
+        status: "success",
+        route: "GET /api/calendar-state",
+        functionName: "loadAdminCalendarState",
+        expectedAccountId: activeAccountId,
+        returnedAccountId: loadedAccountId,
+        details: {
+          routeUsed: calendarStateRouteUsed,
+          entrypoint: calendarStateDiagnostics?.entrypoint || "",
+          shellLoadDurationMs: calendarStateDiagnostics?.shellLoadDurationMs ?? 0,
+          itemCount: calendarStateDiagnostics?.itemCount ?? accountItems.length,
+          peopleDeferred,
+          notificationsDeferred,
+          googleSyncStatusDeferred,
+        },
+      });
+      trackDiagnosticEvent({
+        system: "cache",
+        action: "NON_CRITICAL_DATA_DEFERRED",
+        phase: "admin_workspace",
+        status: "success",
+        route: "GET /api/calendar-state",
+        functionName: "loadAdminCalendarState",
+        details: {
+          routeUsed: calendarStateRouteUsed,
+          peopleDeferred,
+          notificationsDeferred,
+          googleSyncStatusDeferred,
+          blockingCalendar: false,
+        },
+      });
+      if (peopleDeferred) {
+        trackDiagnosticEvent({
+          system: "cache",
+          action: "PEOPLE_LOAD_DEFERRED",
+          phase: "admin_workspace",
+          status: "success",
+          route: "GET /api/calendar-state",
+          functionName: "loadAdminCalendarState",
+          details: { routeUsed: calendarStateRouteUsed, blockingCalendar: false },
+        });
+      }
+      if (notificationsDeferred) {
+        trackDiagnosticEvent({
+          system: "cache",
+          action: "NOTIFICATION_HISTORY_DEFERRED",
+          phase: "admin_workspace",
+          status: "success",
+          route: "GET /api/calendar-state",
+          functionName: "loadAdminCalendarState",
+          details: { routeUsed: calendarStateRouteUsed, blockingCalendar: false },
+        });
+      }
+      if (googleSyncStatusDeferred) {
+        trackDiagnosticEvent({
+          system: "cache",
+          action: "GOOGLE_SYNC_STATUS_DEFERRED",
+          phase: "admin_workspace",
+          status: "success",
+          route: "GET /api/calendar-state",
+          functionName: "loadAdminCalendarState",
+          details: { routeUsed: calendarStateRouteUsed, blockingCalendar: false },
+        });
+      }
+    }
+    if (Array.isArray(data.people) && !peopleDeferred) setPeople(cleanPeople(data.people));
+    if (Array.isArray(data.notifications) && !notificationsDeferred) setNotifications(cleanNotificationRecords(data.notifications));
+    if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
+    const fallbackAccount = data.account ?? coachAccount;
+    if (Array.isArray(data.locations) && data.locations.length) {
+      setLocations(cleanLocations(data.locations, fallbackAccount));
+    }
+    if (Array.isArray(data.coaches) && data.coaches.length) {
+      setCoachProfiles(cleanCoachProfiles(data.coaches, fallbackAccount));
+    }
+    if (data.currentUser) setCurrentAppUser(cleanAppUser(data.currentUser, defaultAppUserFromCoachAccount(data.account ?? coachAccount), loadedAccountId));
+    if (Array.isArray(data.availability)) {
+      setAvailability(cleanAvailability(data.availability).map((day) => day.map((window) => ({ ...window, accountId: window.accountId || loadedAccountId }))));
+    }
+    if (typeof data.syncKey === "string" && data.syncKey.startsWith("cg_")) {
+      setCalendarSyncKey(data.syncKey);
+    }
+    applyNotificationSettings(data.settings);
+    applyCoachAccount(data.account);
+    applyBrandSettings(data.brand);
+    applyGoogleCalendarStatus(data.googleCalendar);
+    hasLoadedCalendarApiRef.current = true;
+    finishDiagnosticTimer(timer, "success", {
+      httpStatus: response.status,
+      returnedAccountId: loadedAccountId,
+      details: {
+        bookingsLoaded: accountItems.length,
+        peopleLoaded: Array.isArray(data.people) ? data.people.length : 0,
+        servicesLoaded: Array.isArray(data.services) ? data.services.length : 0,
+        locationsLoaded: Array.isArray(data.locations) ? data.locations.length : 0,
+        coachesLoaded: Array.isArray(data.coaches) ? data.coaches.length : 0,
+        availabilityBlocks: Array.isArray(data.availability) ? data.availability.flat().length : 0,
+        routeUsed: calendarStateRouteUsed,
+        entrypoint: calendarStateDiagnostics?.entrypoint || "",
+        shellLoadDurationMs: calendarStateDiagnostics?.shellLoadDurationMs ?? 0,
+        peopleDeferred,
+        notificationsDeferred,
+        googleSyncStatusDeferred,
+      },
+    });
+    return true;
+  }
+
+  function shouldApplyAdminWorkspaceDetail(runId: number) {
+    return adminHydrationRunIdRef.current === runId && !hasActiveAdminSave();
+  }
+
+  function refreshAdminWorkspaceDetails(runId: number, fallbackAccount: Partial<CoachAccount>) {
+    const locationVersion = locationSaveVersionRef.current;
+    const coachVersion = coachSaveVersionRef.current;
+    const settingsSaveVersion = settingsSaveVersionRef.current;
+    const settingsDraftVersion = notificationSettingsDraftVersionRef.current;
+    const calendarWasRendered = calendarFrameRenderedRef.current;
+    trackDiagnosticEvent({
+      system: "cache",
+      action: "NON_CRITICAL_DATA_DEFERRED",
+      phase: "admin_workspace",
+      status: "success",
+      functionName: "refreshAdminWorkspaceDetails",
+      details: {
+        locations: true,
+        coaches: true,
+        settings: true,
+        people: true,
+        notifications: true,
+        googleSyncStatus: true,
+        backgroundRefresh: true,
+        blockingCalendar: false,
+        calendarFrameRendered: calendarWasRendered,
+      },
+    });
+    window.setTimeout(() => void refreshPeopleList(runId), 0);
+    window.setTimeout(() => void refreshLessonNotes(runId), 0);
+    window.setTimeout(() => void refreshNotificationHistory(), 0);
+    window.setTimeout(() => void refreshGoogleCalendarStatus(), 0);
+
+    void (async () => {
+      const timer = startDiagnosticTimer({
+        system: "cache",
+        action: "COLD_REFRESH_STARTED",
+        route: "GET /api/locations",
+        functionName: "refreshAdminWorkspaceDetails",
+        objectType: "location",
+        details: {
+          cacheHit: locations.length > 0,
+          backgroundRefresh: true,
+          blockingCalendar: false,
+          calendarFrameRendered: calendarWasRendered,
+        },
+      });
+      try {
+        const response = await fetch("/api/locations", {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!shouldApplyAdminWorkspaceDetail(runId) || locationSaveVersionRef.current !== locationVersion) return;
+        if (!response.ok) {
+          finishDiagnosticTimer(timer, "warning", {
+            httpStatus: response.status,
+            errorCode: "CACHE_REFRESH_FAILED",
+            humanMessage: "Locations background refresh failed.",
+          });
+          console.warn("admin_workspace_detail_load_failed", { detail: "locations", status: response.status });
+          return;
+        }
+        const responseText = await response.text();
+        const data = (responseText ? JSON.parse(responseText) : {}) as { locations?: Location[] };
+        if (Array.isArray(data.locations) && data.locations.length) {
+          setLocations(cleanLocations(data.locations, fallbackAccount));
+        }
+        finishDiagnosticTimer(timer, "success", {
+          httpStatus: response.status,
+          phase: "COLD_REFRESH_COMPLETED",
+          details: {
+            rowsReturned: Array.isArray(data.locations) ? data.locations.length : 0,
+            payloadBytes: responseText.length,
+            cacheHit: locations.length > 0,
+            backgroundRefresh: true,
+            blockingCalendar: false,
+            calendarFrameRendered: calendarWasRendered,
+          },
+        });
+      } catch (error) {
+        finishDiagnosticTimer(timer, "warning", {
+          errorCode: "CACHE_REFRESH_FAILED",
+          humanMessage: "Locations background refresh failed.",
+        });
+        console.warn("admin_workspace_detail_load_failed", { detail: "locations", error });
+      }
+    })();
+
+    void (async () => {
+      const timer = startDiagnosticTimer({
+        system: "cache",
+        action: "COLD_REFRESH_STARTED",
+        route: "GET /api/coaches",
+        functionName: "refreshAdminWorkspaceDetails",
+        objectType: "coach",
+        details: {
+          cacheHit: coachProfiles.length > 0,
+          backgroundRefresh: true,
+          blockingCalendar: false,
+          calendarFrameRendered: calendarWasRendered,
+        },
+      });
+      try {
+        const response = await fetch("/api/coaches", {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!shouldApplyAdminWorkspaceDetail(runId) || coachSaveVersionRef.current !== coachVersion) return;
+        if (!response.ok) {
+          finishDiagnosticTimer(timer, "warning", {
+            httpStatus: response.status,
+            errorCode: "CACHE_REFRESH_FAILED",
+            humanMessage: "Coaches background refresh failed.",
+          });
+          console.warn("admin_workspace_detail_load_failed", { detail: "coaches", status: response.status });
+          return;
+        }
+        const responseText = await response.text();
+        const data = (responseText ? JSON.parse(responseText) : {}) as { coaches?: CoachProfile[] };
+        if (Array.isArray(data.coaches) && data.coaches.length) {
+          setCoachProfiles(cleanCoachProfiles(data.coaches, fallbackAccount));
+        }
+        finishDiagnosticTimer(timer, "success", {
+          httpStatus: response.status,
+          phase: "COLD_REFRESH_COMPLETED",
+          details: {
+            rowsReturned: Array.isArray(data.coaches) ? data.coaches.length : 0,
+            payloadBytes: responseText.length,
+            cacheHit: coachProfiles.length > 0,
+            backgroundRefresh: true,
+            blockingCalendar: false,
+            calendarFrameRendered: calendarWasRendered,
+          },
+        });
+      } catch (error) {
+        finishDiagnosticTimer(timer, "warning", {
+          errorCode: "CACHE_REFRESH_FAILED",
+          humanMessage: "Coaches background refresh failed.",
+        });
+        console.warn("admin_workspace_detail_load_failed", { detail: "coaches", error });
+      }
+    })();
+
+    void (async () => {
+      const timer = startDiagnosticTimer({
+        system: "cache",
+        action: "COLD_REFRESH_STARTED",
+        route: "GET /api/admin-settings",
+        functionName: "refreshAdminWorkspaceDetails",
+        objectType: "settings",
+        details: {
+          cacheHit: true,
+          backgroundRefresh: true,
+          blockingCalendar: false,
+          calendarFrameRendered: calendarWasRendered,
+        },
+      });
+      try {
+        const response = await fetch("/api/admin-settings", { headers: { Accept: "application/json" } });
+        if (
+          !shouldApplyAdminWorkspaceDetail(runId) ||
+          settingsSaveVersionRef.current !== settingsSaveVersion ||
+          notificationSettingsDraftVersionRef.current !== settingsDraftVersion
+        ) {
+          return;
+        }
+        if (!response.ok) {
+          finishDiagnosticTimer(timer, "warning", {
+            httpStatus: response.status,
+            errorCode: "CACHE_REFRESH_FAILED",
+            humanMessage: "Admin settings background refresh failed.",
+          });
+          console.warn("admin_workspace_detail_load_failed", { detail: "admin-settings", status: response.status });
+          return;
+        }
+        const responseText = await response.text();
+        applyNotificationSettings((responseText ? JSON.parse(responseText) : {}) as Partial<NotificationSettings>);
+        finishDiagnosticTimer(timer, "success", {
+          httpStatus: response.status,
+          phase: "COLD_REFRESH_COMPLETED",
+          details: {
+            rowsReturned: 1,
+            payloadBytes: responseText.length,
+            cacheHit: true,
+            backgroundRefresh: true,
+            blockingCalendar: false,
+            calendarFrameRendered: calendarWasRendered,
+          },
+        });
+      } catch (error) {
+        finishDiagnosticTimer(timer, "warning", {
+          errorCode: "CACHE_REFRESH_FAILED",
+          humanMessage: "Admin settings background refresh failed.",
+        });
+        console.warn("admin_workspace_detail_load_failed", { detail: "admin-settings", error });
+      }
+    })();
+  }
+
+  async function loadPublicBookingCatalog() {
+    const timer = startDiagnosticTimer({
+      system: "publicBooking",
+      action: "public_booking_page_load",
+      route: "GET /api/public-booking-catalog",
+      functionName: "loadPublicBookingCatalog",
+    });
+    const response = await fetch("/api/public-booking-catalog", {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) {
+      finishDiagnosticTimer(timer, "failed", {
+        httpStatus: response.status,
+        errorCode: "BOOKING_PAGE_LOAD_FAILED",
+        humanMessage: "Public booking API unavailable.",
+      });
+      throw new Error("Public booking API unavailable");
+    }
+    const data = (await response.json()) as {
+      services?: Service[];
+      locations?: Location[];
+      coaches?: CoachProfile[];
+      workspaceAccounts?: WorkspaceAccount[];
+      brand?: Partial<BrandSettings>;
+      account?: Partial<CoachAccount>;
+      updatedAt?: string;
+    };
+    const loadedAccounts = cleanWorkspaceAccounts(data.workspaceAccounts, data.account ?? coachAccount);
+    const loadedAccountId = defaultAccountId(loadedAccounts);
+    if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+    setWorkspaceAccounts(loadedAccounts);
+    if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
+    if (Array.isArray(data.locations) && data.locations.length) setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
+    setCoachProfiles(cleanCoachProfiles(data.coaches, data.account ?? coachAccount));
+    applyCoachAccount(data.account);
+    applyBrandSettings(data.brand);
+    hasLoadedCalendarApiRef.current = true;
+    finishDiagnosticTimer(timer, "success", {
+      httpStatus: response.status,
+      returnedAccountId: loadedAccountId,
+      details: {
+        servicesFiltered: Array.isArray(data.services) ? data.services.length : 0,
+        locationsLoaded: Array.isArray(data.locations) ? data.locations.length : 0,
+        coachesLoaded: Array.isArray(data.coaches) ? data.coaches.length : 0,
+      },
+    });
+  }
+
+  function publicBookingSlotCacheKey(serviceId: string, week: number, ignoreId = "") {
+    return [serviceId, week, ignoreId].join(":");
+  }
+
+  function clearPublicBookingSlotCache() {
+    publicBookingSlotRequestsRef.current.clear();
+    setPublicBookingSlots({});
+    setPublicBookingSlotStatuses({});
+  }
+
+  async function loadPublicBookingSlots(serviceId: string, week: number, ignoreId = "", options: { force?: boolean } = {}) {
+    if (!serviceId) return;
+    const key = publicBookingSlotCacheKey(serviceId, week, ignoreId);
+    if (!options.force && publicBookingSlotRequestsRef.current.has(key)) {
+      trackDiagnosticEvent({
+        system: "cache",
+        action: "DUPLICATE_REQUEST_DETECTED",
+        phase: "public_booking_slots",
+        status: "skipped",
+        route: "GET /api/public-booking-slots",
+        functionName: "loadPublicBookingSlots",
+        objectType: "service",
+        objectId: serviceId,
+        details: { week, ignoreId: Boolean(ignoreId) },
+      });
+      return;
+    }
+    publicBookingSlotRequestsRef.current.add(key);
+    const timer = startDiagnosticTimer({
+      system: "calendar",
+      action: "public_booking_slots_load",
+      route: "GET /api/public-booking-slots",
+      functionName: "loadPublicBookingSlots",
+      objectType: "service",
+      objectId: serviceId,
+      details: { week, ignoreId: Boolean(ignoreId) },
+    });
+    setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "loading" }));
+    try {
+      const params = new URLSearchParams({ serviceId, week: String(week) });
+      if (ignoreId) params.set("ignoreId", ignoreId);
+      const response = await fetch(`/api/public-booking-slots?${params.toString()}`, {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("Public booking slots unavailable");
+      const data = (await response.json()) as {
+        slots?: BookingSlot[];
+        services?: Record<string, { slots?: BookingSlot[] }>;
+      };
+      const slots = Array.isArray(data.slots)
+        ? data.slots
+        : Array.isArray(data.services?.[serviceId]?.slots)
+          ? data.services?.[serviceId]?.slots ?? []
+          : [];
+      setPublicBookingSlots((current) => ({ ...current, [key]: slots }));
+      setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "loaded" }));
+      finishDiagnosticTimer(timer, "success", {
+        httpStatus: response.status,
+        details: { slotsGenerated: slots.length },
+      });
+    } catch (error) {
+      console.warn("public_booking_slots_load_failed", error);
+      finishDiagnosticTimer(timer, "failed", {
+        errorCode: "PUBLIC_BOOKING_SLOT_LOAD_FAILED",
+        humanMessage: error instanceof Error ? error.message : "Public booking slots unavailable.",
+      });
+      setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "error" }));
+    } finally {
+      publicBookingSlotRequestsRef.current.delete(key);
+    }
+  }
+
+  function requireLiveDatabase(action = "edit the calendar") {
+    if (isEmbedMode) return true;
+    if (authStatus !== "authenticated") {
+      hasLoadedCalendarApiRef.current = false;
+      setCalendarFeedStatus("offline");
+      setAuthStatus("guest");
+      setToast({ message: "Sign in again before editing. The calendar is not connected to the live database." });
+      return false;
+    }
+    if (!hasLoadedCalendarApiRef.current) {
+      setCalendarSaveStatus("failed");
+      setCalendarSaveError("Calendar is not connected to the live database.");
+      setToast({ message: `Cannot ${action}: the live database is not connected. Reload and sign in again.` });
+      return false;
+    }
+    if (calendarFeedStatus !== "connected") {
+      setCalendarFeedStatus("connected");
+    }
+    if (calendarSaveStatus === "failed" && calendarSaveError === "Calendar is not connected to the live database.") {
+      setCalendarSaveStatus("idle");
+      setCalendarSaveError("");
+    }
+    return true;
+  }
+
+  const scheduledGroupSlots = useMemo<CalendarItem[]>(() => {
+    const firstWeek = getCurrentWeekOffset();
+    return services
+      .filter((service) => isScheduledGroupService(service) && service.groupSchedule && service.groupSchedule.active && service.active)
+      .flatMap((service) => {
+        const schedule = service.groupSchedule;
+        if (!schedule) return [];
+        const occurrenceCount = clamp(
+          Math.round(schedule.occurrenceCount),
+          1,
+          MAX_GROUP_OCCURRENCE_COUNT,
+        );
+        if (activeWeek < firstWeek || activeWeek >= firstWeek + occurrenceCount) return [];
+        if (items.some((item) => isCancelledGroupSessionMatch(item, service.id, activeWeek, schedule.dayOfWeek, schedule.startMinutes))) {
+          return [];
+        }
+          return [
+            {
+              id: `group-slot-${service.id}-${activeWeek}`,
+              kind: "block" as const,
+              week: activeWeek,
+              day: schedule.dayOfWeek,
+              start: schedule.startMinutes,
+              duration: service.duration,
+              serviceId: service.id,
+              syntheticGroupSlot: true,
+              readOnly: true,
+              title: `${service.name} (group)`,
+              client: `${service.name} (${service.capacity} places)`,
+            },
+          ];
+      });
+  }, [activeWeek, items, services]);
+
+  const displayItems = useMemo(() => {
+    const floatingItemId = floatingDrag?.itemId ?? "";
+    const baseWeekItems = floatingItemId ? visibleWeekItems.filter((item) => item.id !== floatingItemId) : visibleWeekItems;
+    if (!draft || draft.mode === "block" || draft.mode === "place") {
+      return [...baseWeekItems, ...scheduledGroupSlots];
+    }
+    const withoutMoving = baseWeekItems.filter((item) => item.id !== draft.itemId);
+    const movingItem = items.find((item) => item.id === draft.itemId);
+    if (!movingItem || draft.week !== activeWeek) return [...withoutMoving, ...scheduledGroupSlots];
+    return [
+      ...withoutMoving,
+      ...scheduledGroupSlots,
+      { ...movingItem, week: draft.week, day: draft.day, start: draft.start, duration: draft.duration },
+    ];
+  }, [activeWeek, draft, floatingDrag, items, visibleWeekItems, scheduledGroupSlots]);
+  const floatingItem = floatingDrag ? items.find((item) => item.id === floatingDrag.itemId) : null;
+  const floatingService = floatingItem ? itemService(floatingItem, services) : null;
+
+  const clients = useMemo<ClientSummary[]>(() => {
+    // Grouping keys off personId first — the stable backend link — and only
+    // falls back to the name/email/phone heuristic (clientKey) for legacy
+    // bookings saved before that link existed. Grouping by clientKey alone
+    // used to split one real client across multiple cards whenever a booking
+    // had a different email/phone on file (see clientKey: it keys on email
+    // alone when present, ignoring phone, so a second address for the same
+    // person never lined up with their existing card).
+    const byId = new Map<string, ClientSummary>();
+    const legacyIdByKey = new Map<string, string>();
+
+    filterRecordsForAccount(people, activeAccountId).forEach((person) => {
+      byId.set(person.id, { ...person, count: 0, next: null, last: null });
+      legacyIdByKey.set(clientKey(person.name, person.email, person.phone), person.id);
+    });
+
+    accountItems
+      .filter((item) => item.kind === "appointment")
+      .filter(itemInCoachScope)
+      .forEach((item) => {
+        const name = item.client ?? item.title;
+        const key = clientKey(name, item.email ?? "", item.phone ?? "");
+        const id = (item.personId && byId.has(item.personId) ? item.personId : "") || legacyIdByKey.get(key) || `appointment-${key}`;
+        const existing =
+          byId.get(id) ??
+          ({
+            id,
+            name,
+            email: item.email ?? "",
+            phone: item.phone ?? "",
+            notes: "",
+            source: "appointment",
+            caddyProfileId: "",
+            caddyProfileUrl: "",
+            count: 0,
+            next: null,
+            last: null,
+          } satisfies ClientSummary);
+        const next = !existing.next || itemWeek(item) < itemWeek(existing.next) ? item : existing.next;
+        byId.set(id, {
+          ...existing,
+          name: existing.name || name,
+          email: existing.email || item.email || "",
+          phone: existing.phone || item.phone || "",
+          notes: existing.notes || "",
+          count: existing.count + 1,
+          next,
+          last: item,
+        });
+      });
+
+    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [accountItems, activeAccountId, coachAccount, coachProfiles, isAdminUser, people, services, serviceScopeCoachId]);
+
+  const selectedPerson = useMemo(() => {
+    if (!selected || selected.kind !== "appointment") return null;
+    if (selected.personId) {
+      const linked = clients.find((client) => client.id === selected.personId);
+      if (linked) return linked;
+    }
+    const key = clientKey(selected.client || selected.title, selected.email ?? "", selected.phone ?? "");
+    return clients.find((client) => clientKey(client.name, client.email, client.phone) === key) ?? null;
+  }, [clients, selected]);
+
+  const clientSearchTerm = clientSearch.trim();
+  const filteredClients = useMemo(() => {
+    if (!clientSearchTerm) return clients;
+    return clients.filter((client) => clientMatchesSearchTerm(client, clientSearchTerm));
+  }, [clientSearchTerm, clients]);
+  const clientReassignSearchTerm = clientReassignSearch.trim();
+  const clientReassignMatches = useMemo(() => {
+    if (!clientReassignOpen || !clientReassignSearchTerm) return [];
+    return clients.filter((client) => clientMatchesSearchTerm(client, clientReassignSearchTerm)).slice(0, 6);
+  }, [clientReassignOpen, clientReassignSearchTerm, clients]);
+
+  // ----- Player Profiles derivations -----
+  const savedVideoIds = useMemo(() => {
+    const ids = new Set<string>();
+    savedVideoItems.forEach((video) => ids.add(video.savedVideoId));
+    return ids;
+  }, [savedVideoItems]);
+
+  const videoPlayerIds = useMemo(() => {
+    const ids = new Set<string>();
+    savedVideoItems.forEach((video) => {
+      if (video.playerId) ids.add(video.playerId);
+    });
+    clarityCloudImports.forEach((transfer) => {
+      const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+      if (savedVideoId && !savedVideoIds.has(savedVideoId) && transfer.savedVideo?.playerId) {
+        ids.add(transfer.savedVideo.playerId);
+      }
+    });
+    legacyVideoRecords.forEach((record) => {
+      if (record.video.playerId && !savedVideoIds.has(record.video.id)) ids.add(record.video.playerId);
+    });
+    return ids;
+  }, [clarityCloudImports, legacyVideoRecords, savedVideoIds, savedVideoItems]);
+
+  const lessonNotePlayerIds = useMemo(() => {
+    const ids = new Set<string>();
+    lessonNotes.forEach((note) => {
+      if (note.playerId) ids.add(note.playerId);
+    });
+    return ids;
+  }, [lessonNotes]);
+
+  // A client becomes a player profile when they have a lesson note, a stored
+  // video, or were manually added. Booking notes do not promote profiles.
+  const playerProfiles = useMemo(() => {
+    const manual = new Set(playerProfilesLocal.manualIds);
+    return clients.filter(
+      (client) =>
+        hasAnyProfileId(lessonNotePlayerIds, client) ||
+        hasAnyProfileId(videoPlayerIds, client) ||
+        manual.has(client.id),
+    );
+  }, [clients, lessonNotePlayerIds, playerProfilesLocal.manualIds, videoPlayerIds]);
+
+  const quickClientInput = {
+    name: quickClientSearch,
+    email: quickCreate?.email ?? "",
+    phone: quickCreate?.phone ?? "",
+  };
+  const quickClientHasInput = hasClientMatchInput(quickClientInput);
+  const quickClientSuggestion = useMemo(() => {
+    if (!quickClientHasInput) return null;
+    return findClientMatch(clients, quickClientInput);
+  }, [quickClientHasInput, clients, quickClientSearch, quickCreate?.email, quickCreate?.phone]);
+  const quickClientSuggestionApplied = Boolean(
+    quickClientSuggestion &&
+      normalizeMatchText(quickClientSearch) === normalizeMatchText(quickClientSuggestion.name) &&
+      (!quickClientSuggestion.phone || phoneValuesMatch(quickClientSuggestion.phone, quickCreate?.phone ?? "", true)) &&
+      (!quickClientSuggestion.email ||
+        normalizeMatchText(quickClientSuggestion.email) === normalizeMatchText(quickCreate?.email ?? "")),
+  );
+  const showQuickClientSuggestion = Boolean(
+    quickClientSuggestion && quickClientHasInput && !quickClientSuggestionApplied,
+  );
+  const bookingClientInput = {
+    firstName: bookingForm.firstName,
+    lastName: bookingForm.lastName,
+    email: bookingForm.email,
+    phone: bookingForm.phone,
+  };
+  const bookingClientHasInput = hasClientMatchInput(bookingClientInput);
+  const bookingClientSuggestion = useMemo(() => {
+    if (isEmbedMode || !bookingClientHasInput) return null;
+    return findClientMatch(clients, bookingClientInput);
+  }, [
+    isEmbedMode,
+    bookingClientHasInput,
+    clients,
+    bookingForm.firstName,
+    bookingForm.lastName,
+    bookingForm.email,
+    bookingForm.phone,
+  ]);
+  const bookingClientSuggestionApplied = Boolean(
+    bookingClientSuggestion &&
+      normalizeMatchText(bookingInputName(bookingClientInput)) ===
+        normalizeMatchText(bookingClientSuggestion.name) &&
+      (!bookingClientSuggestion.phone ||
+        phoneValuesMatch(bookingClientSuggestion.phone, bookingForm.phone, true)) &&
+      (!bookingClientSuggestion.email ||
+        normalizeMatchText(bookingClientSuggestion.email) === normalizeMatchText(bookingForm.email)),
+  );
+  const showBookingClientSuggestion = Boolean(
+    bookingClientSuggestion && bookingClientHasInput && !bookingClientSuggestionApplied,
+  );
+
+  const notificationsByAppointment = useMemo(() => {
+    const byAppointment = new Map<string, NotificationRecord[]>();
+    filterRecordsForAccount(notifications, activeAccountId).forEach((notification) => {
+      if (!notification.calendarItemId) return;
+      const appointment = accountItems.find((item) => item.id === notification.calendarItemId);
+      if (appointment && !itemInCoachScope(appointment)) return;
+      const current = byAppointment.get(notification.calendarItemId) ?? [];
+      current.push(notification);
+      byAppointment.set(notification.calendarItemId, current);
+    });
+    byAppointment.forEach((records) => {
+      records.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    });
+    return byAppointment;
+  }, [accountItems, activeAccountId, coachAccount, coachProfiles, isAdminUser, notifications, services, serviceScopeCoachId]);
+
+  const selectedClient =
+    !isAddingClient && selectedClientId ? clients.find((client) => client.id === selectedClientId) ?? null : null;
+  const selectedClientAppointments = useMemo(() => {
+    if (!selectedClient) return [];
+    const key = clientKey(selectedClient.name, selectedClient.email, selectedClient.phone);
+    return items
+      .filter((item) => item.kind === "appointment")
+      .filter(itemInCoachScope)
+      .filter((item) =>
+        item.personId
+          ? item.personId === selectedClient.id
+          : clientKey(item.client || item.title, item.email ?? "", item.phone ?? "") === key,
+      )
+      .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
+  }, [coachAccount, coachProfiles, isAdminUser, items, selectedClient, services, serviceScopeCoachId]);
+  const notesWorkspaceClient = useMemo(() => {
+    if (!notesContext) return null;
+    return (
+      clients.find((client) => profileIdsForClient(client).has(notesContext.playerId)) ??
+      clients.find((client) => client.id === notesContext.playerId) ??
+      null
+    );
+  }, [clients, notesContext]);
+  const notesWorkspaceLessonNotes = useMemo(() => {
+    if (!notesWorkspaceClient) return [];
+    const noteProfileIds = profileIdsForClient(notesWorkspaceClient);
+    return lessonNotes
+      .filter((note) => noteProfileIds.has(note.playerId))
+      .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
+  }, [lessonNotes, notesWorkspaceClient]);
+  const playerToolVideos = useMemo(() => {
+    if (!notesWorkspaceClient) return [];
+    const playerIds = profileIdsForClient(notesWorkspaceClient);
+    return savedVideoItems
+      .filter((video) => playerIds.has(video.playerId))
+      .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
+  }, [notesWorkspaceClient, savedVideoItems]);
+  const playerToolCloudVideos = useMemo(() => {
+    if (!notesWorkspaceClient) return [];
+    const playerIds = profileIdsForClient(notesWorkspaceClient);
+    return clarityCloudImports
+      .filter((transfer) => {
+        const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+        return Boolean(
+          savedVideoId &&
+            !savedVideoIds.has(savedVideoId) &&
+            transfer.savedVideo?.playerId &&
+            playerIds.has(transfer.savedVideo.playerId)
+        );
+      })
+      .sort((a, b) =>
+        String(b.savedVideo?.updatedAt || b.savedVideo?.createdAt || "").localeCompare(
+          String(a.savedVideo?.updatedAt || a.savedVideo?.createdAt || "")
+        )
+      );
+  }, [clarityCloudImports, notesWorkspaceClient, savedVideoIds]);
+  const playerToolLegacyVideoRecords = useMemo(() => {
+    if (!notesWorkspaceClient) return [];
+    const playerIds = profileIdsForClient(notesWorkspaceClient);
+    return legacyVideoRecords
+      .filter((record) => playerIds.has(record.video.playerId))
+      .filter((record) => !savedVideoIds.has(record.video.id))
+      .sort((a, b) => String(b.video.createdAt).localeCompare(String(a.video.createdAt)));
+  }, [legacyVideoRecords, notesWorkspaceClient, savedVideoIds]);
+  const linkedLessonVideoIds = useMemo(() => {
+    const ids = new Set<string>();
+    const noteLessonIds = new Set(notesWorkspaceLessonNotes.map((note) => note.lessonId).filter(Boolean));
+    if (!noteLessonIds.size) return ids;
+    playerToolVideos.forEach((video) => {
+      if (video.lessonId && noteLessonIds.has(video.lessonId)) ids.add(video.savedVideoId);
+    });
+    return ids;
+  }, [notesWorkspaceLessonNotes, playerToolVideos]);
+  const playerToolRecentRecords = useMemo<PlayerToolRecord[]>(() => {
+    const videoLessonIds = new Set(playerToolVideos.map((video) => video.lessonId).filter(Boolean));
+    const noteRecords: PlayerToolRecord[] = notesWorkspaceLessonNotes.map((note) => {
+      const timestamp = note.updatedAt || note.createdAt;
+      const linkedVideo = Boolean(note.lessonId && videoLessonIds.has(note.lessonId));
+      return {
+        id: `note-${note.id}`,
+        kind: "note",
+        title: profileRecordTitle(notesWorkspaceClient?.name, timestamp),
+        subtitle: `${note.title || "Lesson note"} · ${note.source === "voice" ? "Voice note" : "Typed note"}${
+          linkedVideo ? " · Linked lesson video" : ""
+        }`,
+        body: note.body,
+        timestamp,
+        lessonId: note.lessonId || undefined,
+        sourceId: note.id,
+      };
+    });
+    const videoRecords: PlayerToolRecord[] = playerToolVideos.map((video) => ({
+      id: `video-${video.savedVideoId}`,
+      kind: "video",
+      title: profileRecordTitle(notesWorkspaceClient?.name, video.updatedAt || video.createdAt),
+      subtitle: `${video.title || "Video file"}${linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}`,
+      timestamp: video.updatedAt || video.createdAt,
+      lessonId: video.lessonId,
+      sourceId: video.savedVideoId,
+    }));
+    const cloudVideoRecords: PlayerToolRecord[] = playerToolCloudVideos.map((transfer) => {
+      const savedVideo = transfer.savedVideo;
+      const savedVideoId = transfer.savedVideoId || savedVideo?.savedVideoId || transfer.transferId;
+      const timestamp = savedVideo?.updatedAt || savedVideo?.createdAt || transfer.readyToImportAt || "";
+      return {
+        id: `cloud-video-${savedVideoId}`,
+        kind: "video",
+        title: profileRecordTitle(notesWorkspaceClient?.name, timestamp),
+        subtitle: `${savedVideo?.title || "Video file"} · Available in Clarity Cloud`,
+        timestamp,
+        lessonId: savedVideo?.lessonId,
+        sourceId: savedVideoId,
+      };
+    });
+    return [...noteRecords, ...videoRecords, ...cloudVideoRecords]
+      .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
+      .slice(0, 6);
+  }, [linkedLessonVideoIds, notesWorkspaceClient?.name, notesWorkspaceLessonNotes, playerToolCloudVideos, playerToolVideos]);
+  const selectedAppointmentNotifications = useMemo(() => {
+    if (!selected || selected.kind !== "appointment") return [];
+    return notificationsByAppointment.get(selected.id) ?? [];
+  }, [notificationsByAppointment, selected]);
+
+  function showCalendarItemHover(
+    event: ReactPointerEvent<HTMLElement>,
+    item: CalendarItem,
+    service: Service | undefined | null,
+    latestClientEmail?: NotificationRecord,
+    latestCoachEmail?: NotificationRecord,
+    latestAdminEmail?: NotificationRecord,
+  ) {
+    if (isEmbedMode || pointerSessionRef.current) return;
+    if (event.pointerType === "touch") return;
+    const groupSessionContext = getGroupSessionContext(item);
+    if (!groupSessionContext && item.kind !== "appointment" && item.kind !== "block") return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const cardWidth = 304;
+    const gap = 14;
+    const rightX = rect.right + gap;
+    const leftX = rect.left - cardWidth - gap;
+    const x = rightX + cardWidth < window.innerWidth - 16 ? rightX : Math.max(16, leftX);
+    const y = clamp(rect.top - 12, 16, Math.max(16, window.innerHeight - 260));
+    setCalendarHover({
+      itemId: item.id,
+      x,
+      y,
+      kind: groupSessionContext ? "group-session" : item.kind === "appointment" ? "appointment" : "blocked",
+      client: groupSessionContext ? groupSessionContext.service.name : item.client || item.title,
+      service: groupSessionContext
+        ? `Group Session · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
+        : service?.name ?? "Golf lesson",
+      time: `${dateForSlot(itemWeek(item), item.day).toLocaleDateString(activeLocale(), { weekday: "long", month: "short", day: "numeric" })}, ${formatRange(item.start, item.duration)}`,
+      venue: bookingLocationShortDisplay(calendarItemLocation(item, service ?? undefined, locations, coachAccount)) || coachAccount.venueShortName || coachAccount.venueName,
+      phone: groupSessionContext ? "" : item.phone || "",
+      email: groupSessionContext ? "" : item.email || "",
+      clientEmailStatus: latestClientEmail ? notificationStatusLabel(latestClientEmail) : "No client email receipt yet",
+      coachEmailStatus: latestCoachEmail ? notificationStatusLabel(latestCoachEmail) : "No coach receipt yet",
+      adminEmailStatus: latestAdminEmail ? notificationStatusLabel(latestAdminEmail) : "No admin receipt yet",
+    });
+  }
+
+  function hideCalendarItemHover(itemId?: string) {
+    setCalendarHover((current) => (!itemId || current?.itemId === itemId ? null : current));
+  }
+
+  const selectedClientNotifications = useMemo(() => {
+    if (!selectedClient) return [];
+    const keys = clientNotificationKeys(selectedClient.name, selectedClient.email, selectedClient.phone);
+    const appointmentIds = new Set(selectedClientAppointments.map((appointment) => appointment.id));
+    const clientEmail = safeText(selectedClient.email).trim().toLowerCase();
+    return notifications
+      .filter((notification) => {
+        const isClientFacing = notification.kind.includes("client") || Boolean(clientEmail && safeText(notification.recipient).toLowerCase() === clientEmail);
+        if (!isClientFacing || notification.kind.includes("admin")) return false;
+        return (
+          keys.has(notification.personKey) ||
+          appointmentIds.has(notification.calendarItemId) ||
+          Boolean(clientEmail && safeText(notification.recipient).toLowerCase() === clientEmail)
+        );
+      })
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  }, [notifications, selectedClient, selectedClientAppointments]);
+  const hasSelectedClientCaddyProfile = Boolean(
+    safeText(selectedClient?.caddyProfileId).trim() || safeText(selectedClient?.caddyProfileUrl).trim(),
+  );
+  const hasSelectedPersonCaddyProfile = Boolean(
+    safeText(selectedPerson?.caddyProfileId).trim() || safeText(selectedPerson?.caddyProfileUrl).trim(),
+  );
+
+  const peopleImportPreview = useMemo(() => parsePeopleImport(peopleImportText).length, [peopleImportText]);
+
+  function cycleCalendarViewMode() {
+    setCalendarViewMode((current) => (current === "full" ? "am" : current === "am" ? "pm" : "full"));
+  }
+
+  function closeCalendarDetails() {
+    setSelectedId("");
+    setSelectedGroupSession(null);
+    setClientReassignOpen(false);
+    setClientReassignSearch("");
+  }
+
+  function isGroupServiceSlotMatch(service: Service | null | undefined, week: number, day: number, start: number) {
+    if (!service || !isScheduledGroupService(service) || !service.groupSchedule?.active) return false;
+    if (day !== service.groupSchedule.dayOfWeek) return false;
+    if (start !== service.groupSchedule.startMinutes) return false;
+    if (!Number.isInteger(week)) return false;
+    const weekOffset = getCurrentWeekOffset();
+    const occurrenceLimit = clamp(Math.round(service.groupSchedule.occurrenceCount), 1, MAX_GROUP_OCCURRENCE_COUNT);
+    if (week < weekOffset || week >= weekOffset + occurrenceLimit) return false;
+    return true;
+  }
+
+  function openQuickCreateForGroupSlot(item: CalendarItem, anchor: { x: number; y: number }) {
+    const service = services.find((candidate) => candidate.id === item.serviceId);
+    if (!service || !isScheduledGroupService(service)) return;
+    const slotWeek = itemWeek(item);
+    if (!isGroupServiceSlotMatch(service, slotWeek, item.day, item.start)) return;
+    const candidate = {
+      week: slotWeek,
+      day: item.day,
+      start: item.start,
+      duration: service.duration,
+    };
+    closeCalendarDetails();
+    setQuickMatchField("name");
+    setQuickClientSearch("");
+    setQuickCreate({
+      week: slotWeek,
+      day: item.day,
+      start: item.start,
+      x: anchor.x,
+      y: anchor.y,
+      serviceId: service.id,
+      phone: "",
+      email: "",
+      note: "",
+      attendees: [],
+      attendeeName: "",
+      attendeeEmail: "",
+      error: quickCreateAvailabilityError(candidate, service),
+    });
+  }
+
+  function openGroupSessionFromSlot(item: CalendarItem): boolean {
+    const failWith = (reason: string) => {
+      setToast({ message: `Unable to open group session: ${reason}` });
+      return false;
+    };
+
+    const serviceId = item.serviceId;
+    if (!serviceId) return failWith("missing serviceId");
+
+    const service = services.find((candidate) => candidate.id === serviceId);
+    if (!service) return failWith("service not found");
+    if (!isScheduledGroupService(service)) return failWith("service is not scheduled group");
+
+    const week = itemWeek(item);
+    const slotWeek = Number.isInteger(week) ? week : NaN;
+    const slotData = {
+      day: item.day,
+      start: item.start,
+      duration: item.duration,
+    };
+
+    if (item.syntheticGroupSlot || item.groupSlot) {
+      if (!service || !Number.isInteger(slotWeek) || !Number.isInteger(slotData.day) || !Number.isFinite(slotData.start) || !Number.isFinite(slotData.duration)) {
+        return failWith("slot does not match schedule");
+      }
+    } else {
+      if (!service.groupSchedule || !service.groupSchedule.active) return failWith("missing groupSchedule");
+      if (!isGroupServiceSlotMatch(service, slotWeek, slotData.day, slotData.start)) return failWith("slot does not match schedule");
+    }
+
+    const candidateSession: GroupSession = {
+      serviceId,
+      week: slotWeek,
+      day: slotData.day,
+      start: slotData.start,
+      duration: slotData.duration || service.duration,
+    };
+    const sessionService = services.find((candidate) => candidate.id === candidateSession.serviceId);
+    if (!sessionService) return failWith("selectedGroupSessionDetails failed to resolve");
+
+    setSelectedGroupSession(candidateSession);
+    setSelectedId("");
+    setQuickCreate(null);
+    return true;
+  }
+
+  function openGroupSessionForItem(item: CalendarItem) {
+    return openGroupSessionFromSlot(item);
+  }
+
+  function openQuickCreateForGroupSession(anchor: { x: number; y: number }) {
+    if (!selectedGroupSession) return;
+    const service = selectedGroupSessionService;
+    if (!service || !isScheduledGroupService(service)) return;
+    const candidate = {
+      week: selectedGroupSession.week,
+      day: selectedGroupSession.day,
+      start: selectedGroupSession.start,
+      duration: selectedGroupSession.duration,
+    };
+    setQuickMatchField("name");
+    setQuickClientSearch("");
+    setQuickCreate({
+      week: candidate.week,
+      day: candidate.day,
+      start: candidate.start,
+      x: anchor.x,
+      y: anchor.y,
+      serviceId: service.id,
+      phone: "",
+      email: "",
+      note: "",
+      attendees: [],
+      attendeeName: "",
+      attendeeEmail: "",
+      error: quickCreateAvailabilityError(candidate, service),
+    });
+  }
+
+  function cancelSelectedGroupSession() {
+    if (!selectedGroupSession || !selectedGroupSessionService) return;
+    if (!requireLiveDatabase("cancel group sessions")) return;
+    if (selectedGroupSessionBookedCount > 0) {
+      setToast({ message: "This group session has bookings. Cancel or move the bookings before deleting the session." });
+      return;
+    }
+    if (
+      !window.confirm(
+        "Cancel this group lesson session? This only removes this date/time, not the whole lesson type.",
+      )
+    ) {
+      return;
+    }
+    if (
+      items.some((item) =>
+        isCancelledGroupSessionMatch(
+          item,
+          selectedGroupSession.serviceId,
+          selectedGroupSession.week,
+          selectedGroupSession.day,
+          selectedGroupSession.start,
+        ),
+      )
+    ) {
+      closeCalendarDetails();
+      return;
+    }
+    const previous = items;
+    const coachId = selectedGroupSessionService?.coachId || defaultCoachId(coachProfiles);
+    const location = bookingLocationSnapshotFor(selectedGroupSessionService, locations, coachAccount);
+    const cancellationRecord: CalendarItem = {
+      id: `group-session-cancel-${selectedGroupSession.serviceId}-${selectedGroupSession.week}-${selectedGroupSession.day}-${selectedGroupSession.start}`,
+      kind: "block",
+      accountId: activeAccountId,
+      week: selectedGroupSession.week,
+      day: selectedGroupSession.day,
+      start: selectedGroupSession.start,
+      duration: selectedGroupSession.duration,
+      serviceId: selectedGroupSession.serviceId,
+      coachId,
+      locationId: location.locationId,
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
+      location,
+      title: CANCELLED_GROUP_SESSION_TITLE,
+      note: CANCELLED_GROUP_SESSION_NOTE,
+      readOnly: true,
+      groupSlot: true,
+      status: "cancelled",
+    };
+    setItems([...items, cancellationRecord]);
+    closeCalendarDetails();
+    setToast({
+      message: `${selectedGroupSessionService.name} session cancelled.`,
+      undo: () => setItems(previous),
+    });
+  }
+
+  function isScheduledGroupSessionSlot(item: CalendarItem) {
+    if (item.syntheticGroupSlot || item.groupSlot) return true;
+    const service = itemService(item, services);
+    return (
+      item.readOnly &&
+      item.kind === "block" &&
+      isScheduledGroupService(service) &&
+      isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
+    );
+  }
+
+  function isGroupSessionAppointment(item: CalendarItem) {
+    const service = itemService(item, services);
+    return (
+      item.kind === "appointment" &&
+      isScheduledGroupService(service) &&
+      isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
+    );
+  }
+
+  function isGroupSessionItem(item: CalendarItem) {
+    return isScheduledGroupSessionSlot(item) || isGroupSessionAppointment(item);
+  }
+
+  function isActiveGroupBooking(status: BookingStatus | undefined) {
+    if (!status) return true;
+    return status === "booked" || status === "completed";
+  }
+
+  function getGroupSessionContext(item: CalendarItem) {
+    if (!isGroupSessionItem(item)) return null;
+    const service = itemService(item, services);
+    if (!service || !isScheduledGroupService(service)) return null;
+    const week = itemWeek(item);
+    if (!Number.isInteger(week) || !Number.isInteger(item.day) || !Number.isFinite(item.start)) return null;
+    const duration = Number.isFinite(item.duration) && item.duration > 0 ? item.duration : service.duration;
+    if (!isScheduledGroupSessionSlot(item) && !isGroupServiceSlotMatch(service, week, item.day, item.start)) return null;
+    const session: GroupSession = {
+      serviceId: service.id,
+      week,
+      day: item.day,
+      start: item.start,
+      duration,
+    };
+    const candidate = {
+      week: session.week,
+      day: session.day,
+      start: session.start,
+      duration: session.duration,
+    };
+    const attendees = items
+      .filter(
+        (candidateItem) =>
+          candidateItem.kind === "appointment" &&
+          candidateItem.serviceId === service.id &&
+          overlaps(itemSlot(candidateItem), candidate),
+      )
+      .sort((a, b) => (a.client ?? "").localeCompare(b.client ?? ""));
+    const bookedCount = attendees.filter((appointment) => isActiveGroupBooking(appointment.status)).length;
+    return {
+      service,
+      session,
+      attendees,
+      capacity: service.capacity,
+      bookedCount,
+    };
+  }
+
+  function handleCalendarItemClick(
+    event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
+    item: CalendarItem,
+  ) {
+    if (!isGroupSessionItem(item)) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    hideCalendarItemHover();
+    return openGroupSessionForItem(item);
+  }
+
+  const publicBookingSlotIgnoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id ?? "" : "";
+  const publicBookingSlotKey = bookingTargetService
+    ? publicBookingSlotCacheKey(bookingTargetService.id, activeWeek, publicBookingSlotIgnoreId)
+    : "";
+  const publicBookingSlotStatus = publicBookingSlotKey
+    ? publicBookingSlotStatuses[publicBookingSlotKey] ?? "idle"
+    : "idle";
+  const publicBookingNeedsSlots = Boolean(bookingTargetService) && (isScheduledGroupService(bookingTargetService) || bookingDaySelected);
+  const publicBookingSlotsLoading =
+    isEmbedMode &&
+    publicBookingStateStatus === "loaded" &&
+    publicBookingNeedsSlots &&
+    (publicBookingSlotStatus === "idle" || publicBookingSlotStatus === "loading");
+
+  const bookingSlots = useMemo<BookingSlot[]>(() => {
+    if (!bookingTargetService) return [];
+    if (isEmbedMode) {
+      if (publicBookingStateStatus !== "loaded") return [];
+      const cachedSlots = publicBookingSlotKey ? publicBookingSlots[publicBookingSlotKey] ?? [] : [];
+      if (isScheduledGroupService(bookingTargetService)) return cachedSlots;
+      return bookingDaySelected ? cachedSlots.filter((slot) => slot.day === bookingDay) : [];
+    }
+
+    const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
+    const publicBookingServiceCoachId = bookingTargetService.coachId || publicBookingFallbackCoachId;
+
+    if (bookingMode === "book" && isScheduledGroupService(bookingTargetService)) {
+      const schedule = bookingTargetService.groupSchedule;
+      if (!schedule?.active) return [];
+      const candidate = {
+        week: activeWeek,
+        day: schedule.dayOfWeek,
+        start: schedule.startMinutes,
+        duration: bookingTargetService.duration,
+      };
+      if (!isGroupServiceSlotMatch(bookingTargetService, activeWeek, schedule.dayOfWeek, schedule.startMinutes)) return [];
+      if (hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: publicBookingServiceCoachId })) return [];
+      const remainingSpots = getGroupSlotRemainingSpots(candidate, bookingTargetService);
+      if (!remainingSpots) return [];
+      return [
+        {
+          week: candidate.week,
+          day: candidate.day,
+          start: candidate.start,
+          remainingSpots,
+        },
+      ];
+    }
+
+    if (!bookingDaySelected) return [];
+
+    const serviceAvailability = availabilityForCoach(accountAvailability, publicBookingServiceCoachId, publicBookingFallbackCoachId);
+    const windows = serviceAvailability[bookingDay] ?? [];
+    const slots: BookingSlot[] = [];
+    windows.forEach((window) => {
+      for (let start = window.start; start + bookingTargetService.duration <= window.end; start += 30) {
+        const candidate = {
+          week: activeWeek,
+          day: bookingDay,
+          start,
+          duration: bookingTargetService.duration,
+        };
+        if (!hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: publicBookingServiceCoachId })) {
+          slots.push({
+            week: candidate.week,
+            day: candidate.day,
+            start: candidate.start,
+            remainingSpots: 0,
+          });
+        }
+      }
+    });
+    return slots;
+  }, [
+    accountAvailability,
+    activeWeek,
+    bookingDay,
+    bookingDaySelected,
+    bookingMode,
+    bookingTargetService,
+    publicBookingSlotKey,
+    publicBookingSlots,
+    isEmbedMode,
+    items,
+    publicBookingFallbackCoachId,
+    publicBookingStateStatus,
+    selectedRescheduleMatch,
+  ]);
+  const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.start === bookingStart);
+
+  const isAppointmentStepComplete = Boolean(selectedBookingService);
+  const isDateTimeStepComplete = bookingDaySelected && bookingStart !== null;
+  const isBookingCustomerDetailsComplete =
+    bookingForm.firstName.trim() !== "" &&
+    bookingForm.lastName.trim() !== "" &&
+    bookingForm.email.trim() !== "";
+  const isBookingInformationComplete =
+    isBookingCustomerDetailsComplete &&
+    (!isCustomGroupBooking || customGroupAttendees.length >= customGroupMinParticipants(bookingTargetService) - 1);
+  const isInformationStepComplete = isDateTimeStepComplete && isBookingInformationComplete;
+  const showCapturedCustomerDetailsSummary =
+    isBookingCustomerDetailsComplete && (!isCustomGroupBooking || isBookingInformationComplete || !isDateTimeStepComplete);
+  const bookingCustomerSummaryName =
+    [bookingForm.firstName.trim(), bookingForm.lastName.trim()].filter(Boolean).join(" ") || "Information complete";
+  const bookingCustomerSummaryContact =
+    [bookingForm.phone.trim(), bookingForm.email.trim()].filter(Boolean).join(" · ") || "Customer details captured";
+
+  const isAppointmentSectionOpen = openPublicBookingSection === "appointment";
+  const isDateTimeSectionOpen = openPublicBookingSection === "datetime";
+  const isInformationSectionOpen = openPublicBookingSection === "information";
+  const publicBookingStateReady = !isEmbedMode || publicBookingStateStatus === "loaded";
+
+  const appointmentSummaryName = selectedBookingService
+    ? selectedBookingService.name
+    : "Choose an appointment type";
+  const appointmentSummaryDescription = selectedBookingService?.description?.trim() || "";
+  const appointmentSummaryLessonNote = selectedBookingService
+    ? (selectedBookingService.lessonNote || selectedBookingService.location || "").trim()
+    : "";
+  const selectedBookingLocation = selectedBookingService
+    ? bookingLocationSnapshotFor(selectedBookingService, locations, coachAccount)
+    : bookingLocationSnapshotFor(undefined, locations, coachAccount);
+  const appointmentSummaryDuration = selectedBookingService
+    ? `${selectedBookingService.duration} min · ${
+        isCustomGroupService(selectedBookingService)
+          ? `${formatMoney(calculateCustomGroupPrice(selectedBookingService, customGroupMinParticipants(selectedBookingService)))}+`
+          : servicePriceLabel(selectedBookingService)
+      }`
+    : "Select a lesson to continue";
+  const dateTimeSummaryLocation = bookingLocationDisplay(selectedBookingLocation).slice(0, 180);
+  const bookingDaySummary = bookingDaySelected ? weekDays[bookingDay]?.label ?? "" : "No day selected";
+  const dateTimeSummaryLine = isDateTimeStepComplete
+    ? `${bookingDaySummary}, ${formatTime(bookingStart ?? 0)}`
+    : bookingDaySelected
+      ? bookingDaySummary
+      : "Choose a day";
+
+  function slotFromClient(clientX: number, clientY: number) {
+    const grid = gridRef.current;
+    if (!grid) return null;
+    const rect = grid.getBoundingClientRect();
+    const x = clamp(clientX - rect.left, 0, rect.width - 1);
+    const y = clamp(clientY - rect.top, 0, gridHeight - 1);
+    const day = clamp(Math.floor((x / rect.width) * DAY_COUNT), 0, DAY_COUNT - 1);
+    const minutesFromStart = snap((y / HOUR_HEIGHT) * 60);
+    const start = clamp(
+      calendarStartMinutes + minutesFromStart,
+      calendarStartMinutes,
+      Math.max(calendarStartMinutes, calendarEndMinutes - SNAP_MINUTES),
+    );
+    return { day, start, x, y };
+  }
+
+  function coachIdFromLocationCalendarSlot(slot: { day: number; x: number }) {
+    if (effectiveCalendarPerspective !== "location" || !locationCalendarCoachGroups.length) return undefined;
+    const grid = gridRef.current;
+    if (!grid) return undefined;
+    const rect = grid.getBoundingClientRect();
+    const dayWidth = rect.width / DAY_COUNT;
+    const xWithinDay = clamp(slot.x - slot.day * dayWidth, 0, Math.max(0, dayWidth - 1));
+    const coachIndex = clamp(
+      Math.floor((xWithinDay / dayWidth) * locationCalendarCoachGroups.length),
+      0,
+      locationCalendarCoachGroups.length - 1,
+    );
+    return locationCalendarCoachGroups[coachIndex]?.coachId;
+  }
+
+  function isClientInsideGrid(clientX: number, clientY: number) {
+    const grid = gridRef.current;
+    if (!grid) return false;
+    const rect = grid.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  }
+
+  function isClientInsideDock(clientX: number, clientY: number) {
+    const dock = dockRef.current;
+    if (!dock) return false;
+    const rect = dock.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  }
+
+  function dockTileElement(bookingId: string) {
+    const dock = dockRef.current;
+    if (!dock) return null;
+    return (
+      Array.from(dock.querySelectorAll<HTMLElement>("[data-dock-booking-id]")).find(
+        (tile) => tile.dataset.dockBookingId === bookingId,
+      ) ?? null
+    );
+  }
+
+  function buildDockPlacementAnimation(bookingId: string, itemId: string, candidate: SlotCandidate) {
+    const grid = gridRef.current;
+    if (!grid) return null;
+    const tileRect = dockTileElement(bookingId)?.getBoundingClientRect() ?? dockRef.current?.getBoundingClientRect();
+    if (!tileRect) return null;
+
+    const gridRect = grid.getBoundingClientRect();
+    const dayWidth = gridRect.width / DAY_COUNT;
+    const finalWidth = dayWidth - 12;
+    const finalHeight = Math.max(durationToHeight(candidate.duration), 34);
+    const finalCenterX = candidate.day * dayWidth + 6 + finalWidth / 2;
+    const finalCenterY = calendarMinutesToTop(candidate.start) + finalHeight / 2;
+    const tileCenterX = tileRect.left + tileRect.width / 2 - gridRect.left;
+    const tileCenterY = tileRect.top + tileRect.height / 2 - gridRect.top;
+
+    return {
+      itemId,
+      fromX: tileCenterX - finalCenterX,
+      fromY: tileCenterY - finalCenterY,
+    };
+  }
+
+  function slotFromPointer(event: ReactPointerEvent<HTMLElement>) {
+    return slotFromClient(event.clientX, event.clientY);
+  }
+
+  function setDraftState(nextDraft: Draft | null) {
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
+  }
+
+  function setPointerSessionState(nextSession: PointerSession) {
+    pointerSessionRef.current = nextSession;
+    setPointerSession(nextSession);
+  }
+
+  function setMovedState(nextMoved: boolean) {
+    hasMovedRef.current = nextMoved;
+    setHasMoved(nextMoved);
+  }
+
+  function resetPointerTrail(clientX: number, clientY: number) {
+    pointerTrailRef.current = [{ x: clientX, y: clientY, t: performance.now() }];
+  }
+
+  function recordPointerTrail(clientX: number, clientY: number) {
+    const now = performance.now();
+    pointerTrailRef.current = [
+      ...pointerTrailRef.current.filter((sample) => now - sample.t <= 240),
+      { x: clientX, y: clientY, t: now },
+    ].slice(-8);
+  }
+
+  function isFlickTowardDock() {
+    const samples = pointerTrailRef.current;
+    if (samples.length < 2) return false;
+    const latest = samples.at(-1);
+    if (!latest) return false;
+    const previous =
+      samples
+        .slice(0, -1)
+        .reverse()
+        .find((sample) => latest.t - sample.t >= 55) ?? samples[0];
+    const elapsed = Math.max(latest.t - previous.t, 1);
+    const recentDeltaY = latest.y - previous.y;
+    const recentDeltaX = Math.abs(latest.x - previous.x);
+    const totalDeltaY = latest.y - pointerStartRef.current.y;
+    const velocityY = recentDeltaY / elapsed;
+    const dockRect = dockRef.current?.getBoundingClientRect();
+    const nearDock = dockRect ? latest.y <= dockRect.bottom + 180 : latest.y <= pointerStartRef.current.y - 80;
+    return (
+      recentDeltaY < -42 &&
+      totalDeltaY < -76 &&
+      Math.abs(recentDeltaY) > recentDeltaX * 0.72 &&
+      velocityY < -0.42 &&
+      nearDock
+    );
+  }
+
+  async function persistUpsertItem(item: CalendarItem, previousItems: CalendarItem[], optimisticItems: CalendarItem[]) {
+    beginAdminSave("upsert_item");
+    try {
+      const response = await fetch("/api/calendar-state", {
+        method: "PUT",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "upsert_item", item }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data?.message || "Admin login expired. Sign in again before saving calendar changes.");
+      }
+      if (!response.ok || data?.ok === false || !data?.item) {
+        throw new Error(data?.message || "Calendar change could not be saved.");
+      }
+      const persistedItem = { ...item, ...data.item } as CalendarItem;
+      const persistedItems = optimisticItems.map((candidate) => (candidate.id === item.id ? persistedItem : candidate));
+      setItems(persistedItems);
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+      lastPersistedCalendarItemsRef.current = persistedItems;
+      if (typeof data.updatedAt === "string") {
+        setCalendarStateVersion(data.updatedAt);
+      }
+      scheduleAdminNotificationDebounceFlush();
+    } catch (error) {
+      setItems(previousItems);
+      setToast({ message: error instanceof Error ? error.message : "Calendar change could not be saved." });
+    } finally {
+      endAdminSave("upsert_item");
+    }
+  }
+
+  // Undo/rollback only needs to talk to the server if the change it's reverting
+  // already made it past the debounced blob autosave (or a granular save) and is
+  // sitting in the database. If it isn't, the client-side revert alone already
+  // matches what's persisted, and lastPersistedCalendarFingerprintRef is left
+  // untouched on purpose so the whole-array autosave stays the fallback if this
+  // best-effort reconciliation fails.
+  async function reconcileUndoByDelete(itemId: string, previousItems: CalendarItem[]) {
+    if (!lastPersistedCalendarItemsRef.current.some((entry) => entry.id === itemId)) return;
+    beginAdminSave("calendar_delete");
+    try {
+      const response = await fetch(`/api/calendar-state?id=${encodeURIComponent(itemId)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.message || "Could not undo that change.");
+      const persistedItems: CalendarItem[] = Array.isArray(data.items) ? data.items : previousItems;
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+      lastPersistedCalendarItemsRef.current = persistedItems;
+      if (typeof data.updatedAt === "string") {
+        setCalendarStateVersion(data.updatedAt);
+      }
+    } catch (error) {
+      console.error("calendar_state:undo_delete_failed", error);
+    } finally {
+      endAdminSave("calendar_delete");
+    }
+  }
+
+  async function reconcileUndoByUpsert(item: CalendarItem, previousItems: CalendarItem[]) {
+    if (!lastPersistedCalendarItemsRef.current.some((entry) => entry.id === item.id)) return;
+    beginAdminSave("upsert_item");
+    try {
+      const response = await fetch("/api/calendar-state", {
+        method: "PUT",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "upsert_item", item }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data?.ok === false || !data?.item) {
+        throw new Error(data?.message || "Could not undo that change.");
+      }
+      const persistedItem = { ...item, ...data.item } as CalendarItem;
+      const persistedItems = previousItems.map((entry) => (entry.id === item.id ? persistedItem : entry));
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+      lastPersistedCalendarItemsRef.current = persistedItems;
+      if (typeof data.updatedAt === "string") {
+        setCalendarStateVersion(data.updatedAt);
+      }
+    } catch (error) {
+      console.error("calendar_state:undo_upsert_failed", error);
+    } finally {
+      endAdminSave("upsert_item");
+    }
+  }
+
+  function dockAppointmentItem(movedItem: CalendarItem, options: { fromFlick?: boolean } = {}) {
+    if (!requireLiveDatabase("dock appointments")) return false;
+    if (movedItem.kind !== "appointment") return false;
+    const service = itemService(movedItem, services);
+    if (!service) return false;
+
+    const docked: PendingBooking = {
+      id: `dock-${Date.now()}`,
+      sourceItemId: movedItem.id,
+      client: movedItem.client ?? movedItem.title,
+      title: movedItem.title,
+      serviceId: service.id,
+      duration: movedItem.duration,
+      phone: movedItem.phone,
+      email: movedItem.email,
+      note: movedItem.note,
+      customGroup: movedItem.customGroup,
+      attendees: movedItem.attendees,
+      calculatedPrice: movedItem.calculatedPrice,
+    };
+    const dockRect = dockRef.current?.getBoundingClientRect();
+    const meta = dragPreviewMetaRef.current;
+    const startX = pointerClientRef.current.x - (meta?.width ?? 180) / 2;
+    const startY = pointerClientRef.current.y - (meta?.height ?? 42) / 2;
+    const fromX = dockRect ? startX - dockRect.left : undefined;
+    const fromY = dockRect ? startY - dockRect.top : undefined;
+
+    const previousItems = items;
+    setItems(items.filter((item) => item.id !== movedItem.id));
+    setFloatingDrag(null);
+    closeCalendarDetails();
+    setFlyingBooking({ ...docked, fromX, fromY });
+    void (async () => {
+      beginAdminSave("calendar_delete");
+      try {
+        const response = await fetch(`/api/calendar-state?id=${encodeURIComponent(movedItem.id)}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          setAuthStatus("guest");
+          throw new Error(data?.message || "Admin login expired. Sign in again before docking bookings.");
+        }
+        if (!response.ok) {
+          throw new Error(data?.message || "Booking could not be docked.");
+        }
+        const persistedItems: CalendarItem[] = Array.isArray(data.items) ? data.items : previousItems.filter((item) => item.id !== movedItem.id);
+        lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+        lastPersistedCalendarItemsRef.current = persistedItems;
+        if (typeof data.updatedAt === "string") {
+          setCalendarStateVersion(data.updatedAt);
+        }
+        window.setTimeout(() => {
+          setDockBookings((current) => [...current, docked]);
+          setActiveDockBookingId(docked.id);
+          setFlyingBooking((current) => (current?.id === docked.id ? null : current));
+          setToast({
+            message: options.fromFlick
+              ? `${docked.client} flew into the dock.`
+              : `${docked.client} is parked on the shelf.`,
+            undo: () => {
+              setDockBookings((current) => current.filter((booking) => booking.id !== docked.id));
+              setItems((current) => [...current, movedItem]);
+              setActiveDockBookingId("");
+            },
+          });
+        }, 680);
+      } catch (error) {
+        setItems(previousItems);
+        setFlyingBooking(null);
+        setToast({ message: error instanceof Error ? error.message : "Booking could not be docked." });
+      } finally {
+        endAdminSave("calendar_delete");
+      }
+    })();
+    return true;
+  }
+
+  function hasPointerMovedPastThreshold(clientX: number, clientY: number) {
+    const deltaX = clientX - pointerStartRef.current.x;
+    const deltaY = clientY - pointerStartRef.current.y;
+    const threshold = pointerKindRef.current === "touch" ? TOUCH_DRAG_THRESHOLD : MOUSE_DRAG_THRESHOLD;
+    return Math.hypot(deltaX, deltaY) >= threshold;
+  }
+
+  function setFloatingDragFromPointer(itemId: string, clientX: number, clientY: number) {
+    const meta = dragPreviewMetaRef.current;
+    if (!meta) return;
+    setFloatingDrag({
+      itemId,
+      x: clientX - meta.offsetX,
+      y: clientY - meta.offsetY,
+      width: meta.width,
+      height: meta.height,
+    });
+  }
+
+  function setActiveWeekState(nextWeek: number) {
+    activeWeekRef.current = nextWeek;
+    setActiveWeek(nextWeek);
+    closeCalendarDetails();
+    setQuickCreate(null);
+  }
+
+  function toggleCalendarDetailMode() {
+    suppressBlankGestureUntilRef.current = Date.now() + 360;
+    setCalendarDetailMode((current) => !current);
+  }
+
+  function enableCalendarDetailMode() {
+    suppressBlankGestureUntilRef.current = Date.now() + 360;
+    setCalendarDetailMode(true);
+  }
+
+  function handleCalendarTouchStart(event: ReactTouchEvent<HTMLElement>) {
+    const now = Date.now();
+    if (event.touches.length > 1) {
+      enableCalendarDetailMode();
+      return;
+    }
+    if (now - lastCalendarTapRef.current < 320) {
+      event.preventDefault();
+      toggleCalendarDetailMode();
+      lastCalendarTapRef.current = 0;
+      return;
+    }
+    lastCalendarTapRef.current = now;
+  }
+
+  function flashEdgeCue(direction: "prev" | "next") {
+    setEdgeCue(direction);
+    if (edgeCueTimerRef.current) window.clearTimeout(edgeCueTimerRef.current);
+    edgeCueTimerRef.current = window.setTimeout(() => setEdgeCue(null), 550);
+  }
+
+  function handleEdgeNavigation(clientX: number) {
+    const session = pointerSessionRef.current;
+    if (!session || (session.mode !== "move" && session.mode !== "place")) return;
+    const now = Date.now();
+    if (now - lastEdgeNavRef.current < 850) return;
+    if (clientX <= EDGE_NAV_ZONE) {
+      lastEdgeNavRef.current = now;
+      setActiveWeekState(activeWeekRef.current - 1);
+      flashEdgeCue("prev");
+    } else if (clientX >= window.innerWidth - EDGE_NAV_ZONE) {
+      lastEdgeNavRef.current = now;
+      setActiveWeekState(activeWeekRef.current + 1);
+      flashEdgeCue("next");
+    }
+  }
+
+  function clearGesture(options: { preserveQuickCreate?: boolean } = {}) {
+    gestureCleanupRef.current?.();
+    gestureCleanupRef.current = null;
+    clickPlaceRef.current = null;
+    dragPreviewMetaRef.current = null;
+    pendingQuickCreateRef.current = null;
+    setFloatingDrag(null);
+    setDraftState(null);
+    setPointerSessionState(null);
+    setMovedState(false);
+    if (!options.preserveQuickCreate) setQuickCreate(null);
+  }
+
+  function isInsideAvailability(day: number, start: number, duration: number) {
+    const end = start + duration;
+    return availability[day].some((window) => start >= window.start && end <= window.end);
+  }
+
+  // Recurring group sessions are service definitions, not stored calendar items: no row
+  // exists until someone books one. Conflict checks therefore synthesise a hold for every
+  // live occurrence, otherwise a private lesson can be booked on top of an empty group session.
+  function groupSessionHolds(candidate: SlotCandidate, service?: Service): CalendarItem[] {
+    if (!Number.isInteger(candidate.week)) return [];
+    return services
+      .filter(
+        (groupService) =>
+          groupService.id !== service?.id &&
+          groupService.active &&
+          groupService.archived !== true &&
+          isScheduledGroupService(groupService) &&
+          groupService.groupSchedule?.active,
+      )
+      .flatMap((groupService) => {
+        const schedule = groupService.groupSchedule!;
+        const session = {
+          week: candidate.week,
+          day: schedule.dayOfWeek,
+          start: schedule.startMinutes,
+          duration: groupService.duration,
+        };
+        if (!isGroupServiceSlotMatch(groupService, session.week, session.day, session.start)) return [];
+        if (!overlaps(session, candidate)) return [];
+        if (items.some((item) => isCancelledGroupSessionMatch(item, groupService.id, session.week, session.day, session.start))) {
+          return [];
+        }
+        return [
+          {
+            ...session,
+            id: `group-session-hold-${groupService.id}-${session.week}`,
+            kind: "appointment" as const,
+            status: "booked" as BookingStatus,
+            accountId: activeAccountId,
+            serviceId: groupService.id,
+            coachId: groupService.coachId,
+            locationId: serviceLocation(groupService, locations, coachAccount).id,
+            title: `${groupService.name} (group session)`,
+            syntheticGroupSlot: true,
+            readOnly: true,
+          } as CalendarItem,
+        ];
+      });
+  }
+
+  function hasCollision(
+    candidate: SlotCandidate,
+    ignoreId?: string,
+    service?: Service,
+    options: { candidateCoachId?: string; candidateLocationId?: string } = {},
+  ) {
+    const candidateCoachId = options.candidateCoachId || service?.coachId || selectedCalendarCoachId || activeCoachId;
+    const candidateLocationId = options.candidateLocationId || serviceLocation(service, locations, coachAccount).id;
+    const candidateItem: Partial<CalendarItem> = {
+      kind: "appointment",
+      accountId: activeAccountId,
+      coachId: candidateCoachId,
+      locationId: candidateLocationId,
+      ...candidate,
+    };
+    const conflictItems = [...items, ...groupSessionHolds(candidate, service)];
+    const overlappingItems = conflictItems.filter((item) => {
+      if (item.id === ignoreId || itemWeek(item) !== candidate.week || item.day !== candidate.day) return false;
+      return overlaps(itemSlot(item), candidate);
+    });
+    if (!service || !isScheduledGroupService(service)) {
+      return overlappingItems.some((item) =>
+        isAppointmentConflict(candidateItem, item, {
+          candidateService: service,
+          existingService: itemService(item, services),
+          candidateCoachId,
+          candidateLocationId,
+          coaches: coachProfiles,
+          locations,
+          account: coachAccount,
+        }),
+      );
+    }
+    const sameServiceCount = overlappingItems.filter(
+      (item) => item.kind === "appointment" && item.serviceId === service.id && isActiveGroupBooking(item.status),
+    ).length;
+    const collidesWithOtherService = overlappingItems.some(
+      (item) =>
+        (item.kind !== "appointment" || item.serviceId !== service.id) &&
+        isAppointmentConflict(candidateItem, item, {
+          candidateService: service,
+          existingService: itemService(item, services),
+          candidateCoachId,
+          candidateLocationId,
+          coaches: coachProfiles,
+          locations,
+          account: coachAccount,
+        }),
+    );
+    if (collidesWithOtherService) return true;
+    return sameServiceCount >= service.capacity;
+  }
+
+  function getGroupSlotRemainingSpots(candidate: SlotCandidate, service?: Service) {
+    if (!service || !isScheduledGroupService(service)) return 0;
+    const bookedCount = items.filter(
+      (item) =>
+        item.kind === "appointment" &&
+        item.serviceId === service.id &&
+        overlaps(itemSlot(item), candidate) &&
+        isActiveGroupBooking(item.status),
+    ).length;
+    return Math.max(0, service.capacity - bookedCount);
+  }
+
+  function isGroupSlotFull(candidate: SlotCandidate, service?: Service) {
+    if (!service || !isScheduledGroupService(service)) return false;
+    const sameServiceCount = items.filter(
+      (item) =>
+        item.kind === "appointment" &&
+        item.serviceId === service.id &&
+        overlaps(itemSlot(item), candidate) &&
+        isActiveGroupBooking(item.status),
+    ).length;
+    return sameServiceCount >= service.capacity;
+  }
+
+  function quickCreateAvailabilityError(candidate: SlotCandidate, service?: Service) {
+    if (!service) return "That service is no longer available.";
+    if (isGroupSlotFull(candidate, service)) return "Group is full.";
+    if (!isValidAppointmentSlot(candidate, undefined, service)) return "That time is already occupied.";
+    return "";
+  }
+
+  function hasAppointmentCollision(candidate: SlotCandidate, ignoreId?: string) {
+    const fallbackCoachId = selectedCalendarCoachId || activeCoachId;
+    const fallbackLocationId = selectedCalendarLocationId || defaultLocationId(locations);
+    const candidateItem: Partial<CalendarItem> = {
+      kind: "appointment",
+      accountId: activeAccountId,
+      coachId: fallbackCoachId,
+      locationId: fallbackLocationId,
+      ...candidate,
+    };
+    return items.some((item) => {
+      if (
+        item.id === ignoreId ||
+        itemWeek(item) !== candidate.week ||
+        item.day !== candidate.day ||
+        !overlaps(itemSlot(item), candidate)
+      ) {
+        return false;
+      }
+      return isAppointmentConflict(candidateItem, item, {
+        existingService: itemService(item, services),
+        candidateCoachId: fallbackCoachId,
+        candidateLocationId: fallbackLocationId,
+        coaches: coachProfiles,
+        locations,
+        account: coachAccount,
+      });
+    });
+  }
+
+  function isValidAppointmentSlot(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
+    if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
+    if (service) return !hasCollision(candidate, ignoreId, service);
+    if (hasAppointmentCollision(candidate, ignoreId)) return false;
+    return true;
+  }
+
+  function isValidAppointmentSlotForItem(item: CalendarItem, candidate: SlotCandidate) {
+    if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
+    const service = itemService(item, services);
+    if (isScheduledGroupService(service)) return !hasCollision(candidate, item.id, service);
+    const candidateItem: Partial<CalendarItem> = {
+      ...item,
+      week: candidate.week,
+      day: candidate.day,
+      start: candidate.start,
+      duration: candidate.duration,
+    };
+    const candidateCoachId = resolvedCalendarItemCoachId(candidateItem, service, coachProfiles, coachAccount);
+    const candidateLocationId = resolvedCalendarItemLocationId(candidateItem, service, locations, coachAccount);
+    return !items.some((other) => {
+      if (other.id === item.id || itemWeek(other) !== candidate.week || other.day !== candidate.day) return false;
+      if (!overlaps(itemSlot(other), candidate)) return false;
+      return isAppointmentConflict(candidateItem, other, {
+        candidateService: service,
+        existingService: itemService(other, services),
+        candidateCoachId,
+        candidateLocationId,
+        coaches: coachProfiles,
+        locations,
+        account: coachAccount,
+      });
+    });
+  }
+
+  function confirmPastAdminLesson(candidate: SlotCandidate) {
+    return !isSlotInPast(candidate) || window.confirm(PAST_ADMIN_LESSON_WARNING);
+  }
+
+  function isValidBlockSlot(
+    candidate: SlotCandidate,
+    ignoreId?: string,
+    options: { coachId?: string; locationId?: string; locationOnly?: boolean } = {},
+  ) {
+    if (candidate.duration < SNAP_MINUTES) return false;
+    if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
+    const candidateCoachId =
+      options.locationOnly
+        ? undefined
+        : options.coachId ?? (effectiveCalendarPerspective === "location" ? undefined : selectedCalendarCoachId || activeCoachId);
+    const candidateLocationId =
+      options.locationId ?? (effectiveCalendarPerspective === "location" ? selectedCalendarLocationId : defaultLocationId(locations));
+    const candidateItem: Partial<CalendarItem> = {
+      kind: "block",
+      accountId: activeAccountId,
+      coachId: candidateCoachId,
+      locationId: candidateLocationId,
+      ...candidate,
+    };
+    return !items.some((item) => {
+      if (
+        item.id === ignoreId ||
+        itemWeek(item) !== candidate.week ||
+        item.day !== candidate.day ||
+        !overlaps(itemSlot(item), candidate)
+      ) {
+        return false;
+      }
+      return isAppointmentConflict(candidateItem, item, {
+        existingService: itemService(item, services),
+        candidateCoachId,
+        candidateLocationId,
+        coaches: coachProfiles,
+        locations,
+        account: coachAccount,
+      });
+    });
+  }
+
+  function carveBusyBlocksForAppointment(nextItems: CalendarItem[], appointment: SlotCandidate) {
+    const appointmentEnd = appointment.start + appointment.duration;
+    return nextItems.flatMap((item) => {
+      if (item.kind !== "block" || !overlaps(itemSlot(item), appointment)) return [item];
+
+      const blockEnd = item.start + item.duration;
+      const fragments: CalendarItem[] = [];
+      const beforeDuration = appointment.start - item.start;
+      const afterDuration = blockEnd - appointmentEnd;
+
+      if (beforeDuration >= SNAP_MINUTES) {
+        fragments.push({
+          ...item,
+          id: `${item.id}-before-${Date.now()}`,
+          duration: beforeDuration,
+        });
+      }
+
+      if (afterDuration >= SNAP_MINUTES) {
+        fragments.push({
+          ...item,
+          id: `${item.id}-after-${Date.now()}`,
+          start: appointmentEnd,
+          duration: afterDuration,
+        });
+      }
+
+      return fragments;
+    });
+  }
+
+  function isValidForItem(item: CalendarItem, candidate: SlotCandidate) {
+    return item.kind === "block"
+      ? isValidBlockSlot(candidate, item.id, {
+          coachId: resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
+          locationId: resolvedCalendarItemLocationId(item, itemService(item, services), locations, coachAccount),
+          locationOnly: isLocationOnlyBlock(item),
+        })
+      : isValidAppointmentSlotForItem(item, candidate);
+  }
+
+  function settleNearCollisionBoundary(item: CalendarItem, candidate: SlotCandidate) {
+    if (isValidForItem(item, candidate)) return { candidate, valid: true };
+
+    const nearbyStarts = items
+      .filter((other) => other.id !== item.id && itemWeek(other) === candidate.week && other.day === candidate.day)
+      .flatMap((other) => [other.start + other.duration, other.start - candidate.duration])
+      .map((start) => snap(start))
+      .filter((start) => Math.abs(start - candidate.start) <= SNAP_MINUTES * 2)
+      .filter((start) => start >= DAY_START_MINUTES && start + candidate.duration <= DAY_END_MINUTES)
+      .sort((a, b) => Math.abs(a - candidate.start) - Math.abs(b - candidate.start));
+
+    for (const start of nearbyStarts) {
+      const adjusted = { ...candidate, start };
+      if (isValidForItem(item, adjusted)) return { candidate: adjusted, valid: true };
+    }
+
+    return { candidate, valid: false };
+  }
+
+  function attachGestureListeners() {
+    gestureCleanupRef.current?.();
+
+    const movePointer = (event: globalThis.PointerEvent) => {
+      updatePointerAt(event.clientX, event.clientY);
+    };
+    const moveMouse = (event: MouseEvent) => {
+      updatePointerAt(event.clientX, event.clientY);
+    };
+    const finish = (event: globalThis.PointerEvent | MouseEvent) => {
+      pointerClientRef.current = { x: event.clientX, y: event.clientY };
+      gestureCleanupRef.current?.();
+      gestureCleanupRef.current = null;
+      endPointer();
+    };
+
+    window.addEventListener("pointermove", movePointer);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
+    window.addEventListener("mousemove", moveMouse);
+    window.addEventListener("mouseup", finish, { once: true });
+
+    gestureCleanupRef.current = () => {
+      window.removeEventListener("pointermove", movePointer);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("mousemove", moveMouse);
+      window.removeEventListener("mouseup", finish);
+    };
+  }
+
+  function beginMove(event: ReactPointerEvent<HTMLElement>, item: CalendarItem) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!requireLiveDatabase("move appointments")) return;
+    const slot = slotFromPointer(event);
+    if (!slot) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+    pointerClientRef.current = { x: event.clientX, y: event.clientY };
+    resetPointerTrail(event.clientX, event.clientY);
+    pointerKindRef.current = event.pointerType || "mouse";
+    dragPreviewMetaRef.current = {
+      width: rect.width,
+      height: rect.height,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    setFloatingDrag(null);
+    setMovedState(false);
+    setQuickCreate(null);
+    setPointerSessionState({
+      mode: "move",
+      itemId: item.id,
+      offsetMinutes: slot.start - item.start,
+      origin: item,
+    });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    attachGestureListeners();
+  }
+
+  function beginResize(event: ReactPointerEvent<HTMLElement>, item: CalendarItem) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!requireLiveDatabase("resize appointments")) return;
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+    pointerClientRef.current = { x: event.clientX, y: event.clientY };
+    resetPointerTrail(event.clientX, event.clientY);
+    pointerKindRef.current = event.pointerType || "mouse";
+    dragPreviewMetaRef.current = null;
+    setFloatingDrag(null);
+    setMovedState(false);
+    setQuickCreate(null);
+    setPointerSessionState({ mode: "resize", itemId: item.id, origin: item });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    attachGestureListeners();
+  }
+
+  function beginBlankGesture(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    if (Date.now() < suppressBlankGestureUntilRef.current) return;
+    if ((event.target as HTMLElement).closest("[data-calendar-item]")) return;
+    const slot = slotFromPointer(event);
+    if (!slot) return;
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+    pointerClientRef.current = { x: event.clientX, y: event.clientY };
+    resetPointerTrail(event.clientX, event.clientY);
+    pointerKindRef.current = event.pointerType || "mouse";
+    dragPreviewMetaRef.current = null;
+    setFloatingDrag(null);
+    pendingQuickCreateRef.current = {
+      week: activeWeek,
+      day: slot.day,
+      start: slot.start,
+      x: event.clientX,
+      y: event.clientY,
+      coachId: coachIdFromLocationCalendarSlot(slot),
+      locationId: effectiveCalendarPerspective === "location" ? selectedCalendarLocationId : undefined,
+      serviceId: "",
+      phone: "",
+      email: "",
+      note: "",
+      attendees: [],
+      attendeeName: "",
+      attendeeEmail: "",
+      error: "",
+    };
+    clickPlaceRef.current = activeDockBooking
+      ? {
+          bookingId: activeDockBooking.id,
+          candidate: {
+            week: activeWeekRef.current,
+            day: slot.day,
+            start: slot.start,
+            duration: activeDockBooking.duration,
+          },
+        }
+      : null;
+    setMovedState(false);
+    setPointerSessionState(event.pointerType === "touch" ? null : { mode: "block", day: slot.day, start: slot.start });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    attachGestureListeners();
+  }
+
+  function updatePointer(event: ReactPointerEvent<HTMLElement>) {
+    updatePointerAt(event.clientX, event.clientY);
+  }
+
+  function updatePointerAt(clientX: number, clientY: number) {
+    pointerClientRef.current = { x: clientX, y: clientY };
+    recordPointerTrail(clientX, clientY);
+    const session = pointerSessionRef.current;
+    const movedPastThreshold = hasPointerMovedPastThreshold(clientX, clientY);
+    if (!session) {
+      if (pendingQuickCreateRef.current && movedPastThreshold) setMovedState(true);
+      return;
+    }
+    if (!movedPastThreshold) return;
+    pendingQuickCreateRef.current = null;
+    handleEdgeNavigation(clientX);
+    const insideGrid = isClientInsideGrid(clientX, clientY);
+    const slot = insideGrid ? slotFromClient(clientX, clientY) : null;
+    setMovedState(true);
+
+    if (session.mode === "move") {
+      if (!slot) {
+        setDraftState(null);
+        if (session.origin.kind === "appointment") {
+          setFloatingDragFromPointer(session.itemId, clientX, clientY);
+        } else {
+          setFloatingDrag(null);
+        }
+        return;
+      }
+      setFloatingDrag(null);
+      const origin = session.origin;
+      const start = clamp(
+        snap(slot.start - session.offsetMinutes),
+        DAY_START_MINUTES,
+        DAY_END_MINUTES - origin.duration,
+      );
+      const rawCandidate = { week: activeWeekRef.current, day: slot.day, start, duration: origin.duration };
+      const { candidate, valid } = settleNearCollisionBoundary(origin, rawCandidate);
+      setDraftState({
+        mode: "move",
+        itemId: session.itemId,
+        ...candidate,
+        valid,
+      });
+      return;
+    }
+
+    if (session.mode === "resize") {
+      if (!slot) return;
+      const origin = session.origin;
+      const end = clamp(snap(slot.start + SNAP_MINUTES), origin.start + SNAP_MINUTES, DAY_END_MINUTES);
+      const candidate = {
+        week: itemWeek(origin),
+        day: origin.day,
+        start: origin.start,
+        duration: end - origin.start,
+      };
+      setDraftState({
+        mode: "resize",
+        itemId: session.itemId,
+        ...candidate,
+        valid: isValidForItem(origin, candidate),
+      });
+      return;
+    }
+
+    if (session.mode === "place") {
+      if (!slot) {
+        setDraftState(null);
+        return;
+      }
+      const bookingService = services.find((candidate) => candidate.id === session.booking.serviceId);
+      const candidate = {
+        week: activeWeekRef.current,
+        day: slot.day,
+        start: slot.start,
+        duration: session.booking.duration,
+      };
+      setDraftState({
+        mode: "place",
+        ...candidate,
+        valid: isValidAppointmentSlot(candidate, undefined, bookingService),
+      });
+      return;
+    }
+
+    setQuickCreate(null);
+    if (!slot) return;
+    const start = Math.min(session.start, slot.start);
+    const end = Math.max(session.start + SNAP_MINUTES, slot.start + SNAP_MINUTES);
+    const candidate = { week: activeWeekRef.current, day: session.day, start, duration: end - start };
+    setDraftState({ mode: "block", ...candidate, valid: isValidBlockSlot(candidate) });
+  }
+
+  function endPointer() {
+    const session = pointerSessionRef.current;
+    const activeDraft = draftRef.current;
+    const pendingQuickCreate = pendingQuickCreateRef.current;
+    const didMove = hasMovedRef.current || hasPointerMovedPastThreshold(pointerClientRef.current.x, pointerClientRef.current.y);
+
+    if (pendingQuickCreate && (!session || session.mode === "block")) {
+      if (!didMove) {
+        const clickPlace = clickPlaceRef.current;
+        if (clickPlace) {
+          const booking = dockBookings.find((candidate) => candidate.id === clickPlace.bookingId);
+          if (booking) placeDockBookingAtCandidate(booking, clickPlace.candidate, { animateFromDock: true });
+          clearGesture();
+          return;
+        }
+        if (requireLiveDatabase("create calendar items")) {
+          closeCalendarDetails();
+          setQuickCreate(pendingQuickCreate);
+          clearGesture({ preserveQuickCreate: true });
+        } else {
+          clearGesture();
+        }
+        return;
+      }
+      pendingQuickCreateRef.current = null;
+      if (!session) {
+        clearGesture();
+        return;
+      }
+    }
+
+    if (!session) return;
+    if (didMove) {
+      suppressItemClickRef.current = true;
+      suppressItemClickUntilRef.current = Date.now() + 450;
+      window.setTimeout(() => {
+        suppressItemClickRef.current = false;
+      }, 450);
+    }
+
+    if (!didMove) {
+      const clickPlace = clickPlaceRef.current;
+      clickPlaceRef.current = null;
+      if (clickPlace) {
+        const booking = dockBookings.find((candidate) => candidate.id === clickPlace.bookingId);
+        if (booking) placeDockBookingAtCandidate(booking, clickPlace.candidate, { animateFromDock: true });
+      }
+      clearGesture();
+      return;
+    }
+    clickPlaceRef.current = null;
+
+    if (session.mode === "move") {
+      const movedItem = items.find((item) => item.id === session.itemId);
+      const dockByDrop = isClientInsideDock(pointerClientRef.current.x, pointerClientRef.current.y);
+      const dockByFlick = isFlickTowardDock();
+      if (movedItem?.kind === "appointment" && (dockByDrop || dockByFlick)) {
+        dockAppointmentItem(movedItem, { fromFlick: dockByFlick && !dockByDrop });
+        clearGesture();
+        return;
+      }
+    }
+
+    if (!activeDraft || !activeDraft.valid) {
+      setToast({ message: "That spot is not available. The calendar stayed unchanged." });
+      clearGesture();
+      return;
+    }
+
+    if (activeDraft.mode === "block") {
+      if (!requireLiveDatabase("create blocks")) {
+        clearGesture();
+        return;
+      }
+      const previous = items;
+      const blockLocationOnly = effectiveCalendarPerspective === "location";
+      const blockCoachId = blockLocationOnly ? undefined : selectedCalendarCoachId || currentAppUser.coachId || defaultCoachId(coachProfiles);
+      const blockLocationId = blockLocationOnly ? selectedCalendarLocationId : defaultLocationId(locations);
+      const newBlock: CalendarItem = {
+        id: newCalendarItemId("block"),
+        kind: "block",
+      accountId: activeAccountId,
+        week: activeDraft.week,
+        day: activeDraft.day,
+        start: activeDraft.start,
+        duration: activeDraft.duration,
+        coachId: blockCoachId,
+        locationId: blockLocationId,
+        coach: blockCoachId ? bookingCoachSnapshotFor(blockCoachId, coachProfiles, coachAccount) : undefined,
+        location: cleanBookingLocationSnapshot(
+          locationSnapshot(locationById(locations, blockLocationId) ?? defaultLocationFromCoachAccount(coachAccount)),
+        ),
+        title: blockLocationOnly ? "Location unavailable" : "Busy",
+        note: blockLocationOnly ? "Location-wide block from calendar drag" : "Blocked from calendar drag",
+      };
+      setItems([...items, newBlock]);
+      closeCalendarDetails();
+      setToast({
+        message: `Blocked ${weekDays[activeDraft.day].short}, ${formatRange(activeDraft.start, activeDraft.duration)}.`,
+        undo: () => {
+          setItems(previous);
+          closeCalendarDetails();
+          void reconcileUndoByDelete(newBlock.id, previous);
+        },
+      });
+      clearGesture();
+      return;
+    }
+
+    if (activeDraft.mode === "place" && session.mode === "place") {
+      const service = services.find((candidate) => candidate.id === session.booking.serviceId);
+      if (!service) {
+        clearGesture();
+        return;
+      }
+      if (!confirmPastAdminLesson(activeDraft)) {
+        clearGesture();
+        return;
+      }
+      const coachId = service.coachId || selectedCalendarCoachId || defaultCoachId(coachProfiles);
+      const location = bookingLocationSnapshotFor(service, locations, coachAccount);
+      const item: CalendarItem = {
+        id: newCalendarItemId("appt"),
+        kind: "appointment",
+      accountId: activeAccountId,
+        week: activeDraft.week,
+        day: activeDraft.day,
+        start: activeDraft.start,
+        duration: activeDraft.duration,
+        title: session.booking.title,
+        client: session.booking.client,
+        serviceId: session.booking.serviceId,
+        coachId,
+        locationId: location.locationId,
+        coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
+        phone: session.booking.phone,
+        email: session.booking.email,
+        note: session.booking.note ?? "Placed from dock.",
+        location,
+        customGroup: session.booking.customGroup,
+        attendees: session.booking.attendees,
+        calculatedPrice: session.booking.calculatedPrice,
+      };
+      const previousItems = items;
+      const carvedItems = carveBusyBlocksForAppointment([...items, item], itemSlot(item));
+      const previousOtherIds = new Set(previousItems.map((candidate) => candidate.id));
+      const carvedOtherIds = new Set(carvedItems.filter((candidate) => candidate.id !== item.id).map((candidate) => candidate.id));
+      const isSimpleInsert =
+        previousOtherIds.size === carvedOtherIds.size && [...previousOtherIds].every((id) => carvedOtherIds.has(id));
+      setItems(carvedItems);
+      setDockBookings(dockBookings.filter((booking) => booking.id !== session.booking.id));
+      setActiveDockBookingId((current) => (current === session.booking.id ? "" : current));
+      closeCalendarDetails();
+      setToast({ message: `Placed ${session.booking.client} on ${weekDays[item.day].short} at ${formatTime(item.start)}.` });
+      clearGesture();
+      if (isSimpleInsert) {
+        void persistUpsertItem(item, previousItems, carvedItems);
+      }
+      return;
+    }
+
+    if (activeDraft.mode !== "move" && activeDraft.mode !== "resize") {
+      clearGesture();
+      return;
+    }
+
+    const movedItem = items.find((item) => item.id === activeDraft.itemId);
+    if (!movedItem) return;
+
+    if (sameSlot(movedItem, activeDraft)) {
+      clearGesture();
+      return;
+    }
+
+    if (movedItem.kind === "appointment" && !confirmPastAdminLesson(activeDraft)) {
+      clearGesture();
+      return;
+    }
+
+    const movedUpdatedItem: CalendarItem = {
+      ...movedItem,
+      week: activeDraft.week,
+      day: activeDraft.day,
+      start: activeDraft.start,
+      duration: activeDraft.duration,
+    };
+    const nextItems = items.map((item) => (item.id === activeDraft.itemId ? movedUpdatedItem : item));
+    const previousItems = items;
+    const finalItems = movedItem.kind === "appointment" ? carveBusyBlocksForAppointment(nextItems, activeDraft) : nextItems;
+    const previousOtherIds = new Set(previousItems.filter((candidate) => candidate.id !== activeDraft.itemId).map((candidate) => candidate.id));
+    const finalOtherIds = new Set(finalItems.filter((candidate) => candidate.id !== activeDraft.itemId).map((candidate) => candidate.id));
+    const isSimpleUpdate =
+      previousOtherIds.size === finalOtherIds.size && [...previousOtherIds].every((id) => finalOtherIds.has(id));
+    setItems(finalItems);
+    closeCalendarDetails();
+    clearGesture();
+    if (isSimpleUpdate) {
+      void persistUpsertItem(movedUpdatedItem, previousItems, finalItems);
+    }
+  }
+
+  function applyQuickClient(client: ClientSummary) {
+    setQuickClientSearch(client.name);
+    setQuickCreate((current) =>
+      current
+        ? {
+            ...current,
+            phone: client.phone || current.phone,
+            email: client.email || current.email,
+            error: "",
+          }
+        : current,
+    );
+    setQuickMatchField("");
+  }
+
+  function quickClientMatchButton(field: "name" | "phone" | "email") {
+    if (!quickClientSuggestion || !showQuickClientSuggestion || quickMatchField !== field) return null;
+    return (
+      <button
+        className="client-match-prompt quick-field-match"
+        onMouseDown={(event) => event.preventDefault()}
+        onTouchStart={(event) => event.preventDefault()}
+        onClick={() => applyQuickClient(quickClientSuggestion)}
+        type="button"
+      >
+        <User size={15} />
+        <span>
+          <strong>{quickClientSuggestion.name}</strong>
+          <em>{[quickClientSuggestion.phone, quickClientSuggestion.email].filter(Boolean).join(" · ")}</em>
+        </span>
+      </button>
+    );
+  }
+
+  function applyBookingClient(client: ClientSummary) {
+    const { firstName, lastName } = splitClientName(client.name);
+    setBookingSubmitError("");
+    setBookingForm({
+      firstName,
+      lastName,
+      phone: client.phone,
+      email: client.email,
+    });
+  }
+
+  function updateQuickCreateField(field: "phone" | "email" | "note", value: string) {
+    setQuickCreate((current) => (current ? { ...current, [field]: value, error: "" } : current));
+  }
+
+  function updateQuickCreateAttendeeDraft(field: "attendeeName" | "attendeeEmail", value: string) {
+    setQuickCreate((current) => (current ? { ...current, [field]: value, error: "" } : current));
+  }
+
+  function addQuickCreateCustomGroupAttendee() {
+    if (!quickCreate || !quickCreateService || !isCustomGroupService(quickCreateService)) return;
+    if (quickCreate.attendeeEmail.trim() && !quickCreate.attendeeEmail.includes("@")) {
+      setQuickCreate((current) => (current ? { ...current, error: "Enter a valid attendee email or leave it blank." } : current));
+      return;
+    }
+    const attendee = adminCustomGroupAttendee(quickCreate.attendeeName, quickCreate.attendeeEmail);
+    if (!attendee) {
+      setQuickCreate((current) => (current ? { ...current, error: "Add an attendee name first." } : current));
+      return;
+    }
+    const nextCount = 1 + quickCreate.attendees.length + 1;
+    if (nextCount > customGroupMaxParticipants(quickCreateService)) {
+      setQuickCreate((current) => (current ? { ...current, error: "This custom group is already at maximum size." } : current));
+      return;
+    }
+    setQuickCreate((current) =>
+      current
+        ? {
+            ...current,
+            attendees: [...current.attendees, attendee],
+            attendeeName: "",
+            attendeeEmail: "",
+            error: "",
+          }
+        : current,
+    );
+  }
+
+  function removeQuickCreateCustomGroupAttendee(attendeeId: string) {
+    setQuickCreate((current) =>
+      current
+        ? {
+            ...current,
+            attendees: current.attendees.filter((attendee) => attendee.id !== attendeeId),
+            error: "",
+          }
+        : current,
+    );
+  }
+
+  function selectQuickService(serviceId: string) {
+    if (!quickCreate) return;
+    const service = appointmentServices.find((candidate) => candidate.id === serviceId);
+    if (!service) return;
+    const candidate = {
+      week: quickCreate.week,
+      day: quickCreate.day,
+      start: quickCreate.start,
+      duration: service.duration,
+    };
+    setQuickCreate((current) =>
+      current
+        ? {
+            ...current,
+            serviceId,
+            attendees: [],
+            attendeeName: "",
+            attendeeEmail: "",
+            error: quickCreateAvailabilityError(candidate, service),
+          }
+        : current,
+    );
+    setQuickMatchField("name");
+  }
+
+  function backToQuickServiceChoice() {
+    setQuickCreate((current) =>
+      current ? { ...current, serviceId: "", phone: "", email: "", note: "", error: "" } : current,
+    );
+  }
+
+  function confirmQuickAppointment() {
+    if (!quickCreate || !quickCreateService) return;
+    if (!requireLiveDatabase("create appointments")) return;
+    const typedClientName = quickClientSearch.trim();
+    const clientName = typedClientName;
+    if (!clientName) {
+      setQuickCreate((current) => (current ? { ...current, error: "Add a client name." } : current));
+      return;
+    }
+    const quickCreateIsCustomGroup = isCustomGroupService(quickCreateService);
+    if (quickCreateIsCustomGroup && quickCreate.attendees.length < customGroupMinParticipants(quickCreateService) - 1) {
+      setQuickCreate((current) => (current ? { ...current, error: "Add at least one other person." } : current));
+      return;
+    }
+    const candidate = {
+      week: quickCreate.week,
+      day: quickCreate.day,
+      start: quickCreate.start,
+      duration: quickCreateService.duration,
+    };
+    if (!isValidAppointmentSlot(candidate, undefined, quickCreateService)) {
+      setQuickCreate((current) =>
+        current ? { ...current, error: quickCreateAvailabilityError(candidate, quickCreateService) } : current,
+      );
+      return;
+    }
+    if (!confirmPastAdminLesson(candidate)) return;
+    const coachId = quickCreateService.coachId || selectedCalendarCoachId || activeCoachId || defaultCoachId(coachProfiles);
+    const location = bookingLocationSnapshotFor(quickCreateService, locations, coachAccount);
+    const item: CalendarItem = {
+      id: newCalendarItemId("appt"),
+      kind: "appointment",
+      accountId: activeAccountId,
+      title: clientName,
+      client: clientName,
+      serviceId: quickCreateService.id,
+      coachId,
+      locationId: location.locationId,
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
+      ...candidate,
+      phone: quickCreate.phone.trim(),
+      email: quickCreate.email.trim(),
+      note: quickCreate.note.trim(),
+      location,
+      ...(quickCreateIsCustomGroup
+        ? {
+            customGroup: true as const,
+            attendees: [
+              customGroupBookerAttendee(clientName, quickCreate.email),
+              ...quickCreate.attendees,
+            ],
+            calculatedPrice: calculateCustomGroupPrice(quickCreateService, 1 + quickCreate.attendees.length),
+          }
+        : {}),
+    };
+    setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
+    if (
+      !selectedGroupSession ||
+      selectedGroupSession.serviceId !== quickCreateService.id ||
+      selectedGroupSession.week !== quickCreate.week ||
+      selectedGroupSession.day !== quickCreate.day ||
+      selectedGroupSession.start !== quickCreate.start
+    ) {
+      setSelectedId("");
+    }
+    setQuickCreate(null);
+    setQuickClientSearch("");
+  }
+
+  function createBlockFromQuick(scope: "coach-location" | "location" = "coach-location") {
+    if (!quickCreate) return;
+    if (!requireLiveDatabase("create blocks")) return;
+    const locationOnly = effectiveCalendarPerspective === "location" && scope === "location";
+    const blockCoachId =
+      locationOnly
+        ? undefined
+        : quickCreate.coachId || selectedCalendarCoachId || currentAppUser.coachId || defaultCoachId(coachProfiles);
+    const blockLocationId = quickCreate.locationId || selectedCalendarLocationId || defaultLocationId(locations);
+    const candidate = { week: activeWeek, day: quickCreate.day, start: quickCreate.start, duration: 30 };
+    if (!isValidBlockSlot(candidate, undefined, { coachId: blockCoachId, locationId: blockLocationId, locationOnly })) {
+      setToast({ message: "That block would overlap with another calendar item." });
+      return;
+    }
+    const previous = items;
+    const item: CalendarItem = {
+      id: newCalendarItemId("block"),
+      kind: "block",
+      accountId: activeAccountId,
+      title: locationOnly ? "Location unavailable" : "Coach unavailable",
+      coachId: blockCoachId,
+      locationId: blockLocationId,
+      coach: blockCoachId ? bookingCoachSnapshotFor(blockCoachId, coachProfiles, coachAccount) : undefined,
+      location: cleanBookingLocationSnapshot(locationSnapshot(locationById(locations, blockLocationId) ?? defaultLocationFromCoachAccount(coachAccount))),
+      ...candidate,
+      note: locationOnly ? "Location-wide quick block" : "Coach-location quick block",
+    };
+    setItems([...items, item]);
+    closeCalendarDetails();
+    setQuickCreate(null);
+    setToast({
+      message: `Blocked ${weekDays[item.day].short}, ${formatRange(item.start, item.duration)}.`,
+      undo: () => {
+        setItems(previous);
+        void reconcileUndoByDelete(item.id, previous);
+      },
+    });
+  }
+
+  function createAppointmentInsideSelectedBlock(serviceId: string) {
+    if (!selected || selected.kind !== "block") return;
+    const service = appointmentServices.find((candidate) => candidate.id === serviceId);
+    if (!service) return;
+    const candidate = { week: itemWeek(selected), day: selected.day, start: selected.start, duration: service.duration };
+    if (!isValidAppointmentSlot(candidate, undefined, service)) {
+      setToast({ message: "That lesson would overlap another appointment." });
+      return;
+    }
+    if (!confirmPastAdminLesson(candidate)) return;
+    const previous = items;
+    const coachId = service.coachId || selectedCalendarCoachId || activeCoachId || defaultCoachId(coachProfiles);
+    const location = bookingLocationSnapshotFor(service, locations, coachAccount);
+    const item: CalendarItem = {
+      id: newCalendarItemId("appt"),
+      kind: "appointment",
+      accountId: activeAccountId,
+      title: "New client",
+      client: "New client",
+      serviceId,
+      coachId,
+      locationId: location.locationId,
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
+      ...candidate,
+      phone: "",
+      email: "",
+      note: "Admin-created inside blocked time.",
+      location,
+    };
+    setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
+    closeCalendarDetails();
+    setToast({
+      message: `Added ${service.name} inside blocked time at ${formatTime(item.start)}.`,
+      undo: () => {
+        setItems(previous);
+        void reconcileUndoByDelete(item.id, previous);
+      },
+    });
+  }
+
+  function bookNextFromSelected() {
+    if (!selected || selected.kind !== "appointment" || !selected.serviceId) return;
+    const service = selectedService;
+    if (!service) return;
+    const booking: PendingBooking = {
+      id: `dock-${Date.now()}`,
+      client: selected.client ?? selected.title,
+      title: selected.title,
+      serviceId: service.id,
+      duration: service.duration,
+      phone: selected.phone,
+      email: selected.email,
+      note: `Follow-up ${service.name}`,
+    };
+    closeCalendarDetails();
+    setQuickCreate(null);
+    setFlyingBooking(booking);
+    window.setTimeout(() => {
+      setDockBookings((current) => [...current, booking]);
+      setActiveDockBookingId(booking.id);
+      setFlyingBooking(null);
+      setToast({ message: `${booking.client}'s next ${service.name} is waiting on the dock.` });
+    }, 620);
+  }
+
+  function beginDockPlacement(event: ReactPointerEvent<HTMLElement>, booking: PendingBooking) {
+    event.preventDefault();
+    event.stopPropagation();
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+    pointerClientRef.current = { x: event.clientX, y: event.clientY };
+    resetPointerTrail(event.clientX, event.clientY);
+    pointerKindRef.current = event.pointerType || "mouse";
+    dragPreviewMetaRef.current = null;
+    setFloatingDrag(null);
+    setActiveDockBookingId(booking.id);
+    setMovedState(false);
+    closeCalendarDetails();
+    setQuickCreate(null);
+    setPointerSessionState({ mode: "place", booking });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    attachGestureListeners();
+  }
+
+  function placeDockBookingAtCandidate(
+    booking: PendingBooking,
+    candidate: SlotCandidate,
+    options: { animateFromDock?: boolean } = {},
+  ) {
+    setQuickCreate(null);
+    const service = services.find((serviceCandidate) => serviceCandidate.id === booking.serviceId);
+    if (!service) {
+      setToast({ message: "That parked lesson type is no longer available." });
+      return false;
+    }
+    if (!isValidAppointmentSlot(candidate, undefined, service)) {
+      setToast({ message: "That spot is not available. The lesson is still on the shelf." });
+      return false;
+    }
+    if (!confirmPastAdminLesson(candidate)) return false;
+
+    const coachId = service.coachId || defaultCoachId(coachProfiles);
+    const location = bookingLocationSnapshotFor(service, locations, coachAccount);
+    const item: CalendarItem = {
+      id: newCalendarItemId("appt"),
+      kind: "appointment",
+      accountId: activeAccountId,
+      week: candidate.week,
+      day: candidate.day,
+      start: candidate.start,
+      duration: candidate.duration,
+      title: booking.title,
+      client: booking.client,
+      serviceId: booking.serviceId,
+      coachId,
+      locationId: location.locationId,
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
+      phone: booking.phone,
+      email: booking.email,
+      note: booking.note ?? "Placed from dock.",
+      location,
+      customGroup: booking.customGroup,
+      attendees: booking.attendees,
+      calculatedPrice: booking.calculatedPrice,
+    };
+    const animation = options.animateFromDock ? buildDockPlacementAnimation(booking.id, item.id, candidate) : null;
+
+    setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
+    setDockBookings(dockBookings.filter((dockBooking) => dockBooking.id !== booking.id));
+    setActiveDockBookingId("");
+    closeCalendarDetails();
+    setQuickCreate(null);
+    if (animation) {
+      setPlacementAnimation(animation);
+      window.setTimeout(() => {
+        setPlacementAnimation((current) => (current?.itemId === item.id ? null : current));
+      }, 620);
+    }
+    setToast({ message: `Placed ${booking.client} on ${weekDays[item.day].short} at ${formatTime(item.start)}.` });
+    return true;
+  }
+
+  function removeDockBooking(bookingId: string) {
+    const booking = dockBookings.find((candidate) => candidate.id === bookingId);
+    setDockBookings((current) => current.filter((candidate) => candidate.id !== bookingId));
+    setActiveDockBookingId((current) => (current === bookingId ? "" : current));
+    if (booking) setToast({ message: `${booking.client}'s parked lesson was removed.` });
+  }
+
+  function quickCreatePopoverStyle(): CSSProperties {
+    if (!quickCreate) return {};
+    const viewport = window.visualViewport;
+    const viewportWidth = viewport?.width ?? window.innerWidth;
+    const viewportHeight = viewport?.height ?? window.innerHeight;
+    const margin = 12;
+    const compact = viewportWidth <= 680;
+    const availableWidth = Math.max(280, viewportWidth - margin * 2);
+    const availableHeight = Math.max(280, viewportHeight - margin * 2);
+    const popoverWidth = Math.min(compact ? availableWidth : 340, availableWidth);
+    const estimatedHeight = quickCreateService ? (compact ? 620 : 560) : 360;
+    const usableHeight = Math.min(estimatedHeight, availableHeight);
+    const left = compact
+      ? margin
+      : clamp(quickCreate.x + 10, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
+    const top = clamp(quickCreate.y + 10, margin, Math.max(margin, viewportHeight - usableHeight - margin));
+
+    return {
+      left,
+      top,
+      width: popoverWidth,
+      maxHeight: availableHeight,
+      zIndex: selectedGroupSession ? 120 : undefined,
+    };
+  }
+
+  function moveWeek(delta: number) {
+    setActiveWeekState(activeWeekRef.current + delta);
+  }
+
+  function switchView(view: View) {
+    if (isEmbedMode && view !== "booking") return;
+    setActiveView(view);
+    setQuickCreate(null);
+    if (view === "settings") setSettingsTab("services");
+    if (view === "billing") setBillingSection("dashboard");
+    // Opening Video from the nav is the general workspace (no player context).
+    if (view === "video") setVideoContext(null);
+    if (view !== "calendar") closeCalendarDetails();
+  }
+
+  function openVideoAnalysisForClient(client: { id: string; name: string; savedVideoId?: string }) {
+    setVideoContext({ playerId: client.id, playerName: client.name, savedVideoId: client.savedVideoId });
+    setActiveView("video");
+    closeClientModal();
+    setQuickCreate(null);
+    closeCalendarDetails();
+  }
+
+  function returnToPlayerProfileVideos(context: VideoWorkspaceNavigationContext) {
+    setVideoContext(null);
+    setQuickCreate(null);
+    closeClientModal();
+    closeCalendarDetails();
+    if (context.hasPlayerContext && context.playerId) {
+      selectPlayerProfileTool(
+        { id: context.playerId, name: context.playerName || context.playerId },
+        "videos",
+      );
+      setActiveView("players");
+      return;
+    }
+    // eslint-disable-next-line no-console
+    console.warn("video_analysis_navigation_safe_fallback", {
+      reason: context.reason,
+      hasPlayerContext: context.hasPlayerContext,
+    });
+    setActiveView("players");
+  }
+
+  async function handleVideoAnalysisLocalSaveComplete(result: VideoWorkspaceSaveResult) {
+    setSavedVideoItems((current) => mergeSavedVideoItems(current, result.savedItems));
+    refreshSavedVideoLibrary();
+    returnToPlayerProfileVideos(result);
+    if (isClarityCloudOperational(clarityCloudHealth)) {
+      void startSavedVideoCloudTransfers(result.savedItems).catch(() => {
+        // The transfer helper surfaces product-safe feedback and preserves the device copy.
+      });
+      setToast({
+        message:
+          result.reason === "my-library-save"
+            ? "Saved permanently to My Library. Uploading to Clarity Cloud."
+            : "Saved. Uploading to Clarity Cloud.",
+      });
+      return;
+    }
+    setToast({ message: "Saved safely on this device. Clarity will upload it when Cloud is available." });
+  }
+
+  async function renameSavedVideo(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const title = window.prompt("Rename saved video", item.title);
+    if (title === null) return;
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      setToast({ message: "Saved video name cannot be blank." });
+      return;
+    }
+    try {
+      await store.putItem({ ...item, title: nextTitle });
+      refreshSavedVideoLibrary();
+      setToast({ message: "Saved video renamed." });
+    } catch {
+      setToast({ message: "Saved video could not be renamed." });
+    }
+  }
+
+  async function deleteSavedVideo(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const currentlyOpen = videoContext?.savedVideoId === item.savedVideoId;
+    const confirmed = window.confirm(
+      currentlyOpen
+        ? "This saved video is currently open in Video Analysis. Delete the saved library item? The active workspace copy will not be cleared."
+        : "Delete this saved video from the Player Profile library?"
+    );
+    if (!confirmed) return;
+    try {
+      await store.deleteItem(item.savedVideoId);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Saved video deleted." });
+    } catch {
+      setToast({ message: "Saved video could not be deleted." });
+    }
+  }
+
+  async function removeSavedVideoFromDevice(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    if (item.cloud?.status !== "ready" && item.cloud?.status !== "imported") {
+      setToast({ message: "Wait until this video is available in Clarity Cloud before removing the device copy." });
+      return;
+    }
+    try {
+      await store.removeDeviceCopy(item.savedVideoId);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Removed from this device. Clarity Cloud copy kept." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Device copy could not be removed." });
+    }
+  }
+
+  async function startSavedVideoCloudTransfers(
+    itemsToSend: SavedVideoItem[],
+    options: { openSettingsOnConfigurationIssue?: boolean } = {},
+  ) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      throw new Error("Transfer service unavailable");
+    }
+    if (!itemsToSend.length) {
+      setToast({ message: "No saved videos are waiting to upload." });
+      throw new Error("No saved videos are waiting to upload.");
+    }
+
+    const cloudReason = clarityCloudTransferBlockReason(clarityCloudHealth);
+    if (cloudReason) {
+      const safeErrorCode = clarityCloudSafeErrorCode(clarityCloudHealth);
+      setToast({ message: cloudReason });
+      if (options.openSettingsOnConfigurationIssue && shouldOpenClarityCloudSettings(clarityCloudHealth)) {
+        setActiveView("settings");
+        setSettingsTab("integrations");
+      }
+      // eslint-disable-next-line no-console
+      console.warn("clarity_cloud_transfer_blocked", {
+        safeErrorCode,
+        cloudState: clarityCloudHealth.state,
+      });
+      const error = new Error(cloudReason) as Error & { code?: string };
+      error.code = safeErrorCode;
+      throw error;
+    }
+
+    const ids = itemsToSend.map((item) => item.savedVideoId);
+    setUploadingSavedVideoIds((current) => {
+      const next = new Set(current);
+      ids.forEach((id) => next.add(id));
+      return next;
+    });
+    setToast({ message: itemsToSend.length === 1 ? "Preparing Clarity Cloud..." : `Preparing ${itemsToSend.length} Clarity Cloud uploads...` });
+    refreshSavedVideoLibrary();
+
+    void Promise.all(
+      itemsToSend.map((item) =>
+        saveSavedVideoToCloud(item.savedVideoId, store, {
+          onProgress: () => refreshSavedVideoLibrary(),
+        })
+      )
+    )
+      .then(async () => {
+        refreshSavedVideoLibrary();
+        await refreshClarityCloudImports();
+        setToast({ message: itemsToSend.length === 1 ? "Available in Clarity Cloud." : "Videos are available in Clarity Cloud." });
+      })
+      .catch((error) => {
+        refreshSavedVideoLibrary();
+        const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code || "") : "";
+        // eslint-disable-next-line no-console
+        console.warn("clarity_cloud_transfer_failed", {
+          safeErrorCode: code || "CLARITY_CLOUD_TRANSFER_FAILED",
+          savedVideoIds: ids,
+        });
+        setToast({ message: "Upload failed - Retry from the Player Profile card. Your device copy is safe." });
+      })
+      .finally(() => {
+        setUploadingSavedVideoIds((current) => {
+          const next = new Set(current);
+          ids.forEach((id) => next.delete(id));
+          return next;
+        });
+      });
+  }
+
+  async function sendSavedVideoToPrimaryComputer(item: SavedVideoItem) {
+    try {
+      await startSavedVideoCloudTransfers([item], { openSettingsOnConfigurationIssue: true });
+    } catch {
+      // startSavedVideoCloudTransfers already surfaced product-safe feedback.
+    }
+  }
+
+  useEffect(() => {
+    if (!automaticCloudUploadCandidates.length) return;
+    const key = automaticCloudUploadCandidates
+      .map((item) => `${item.savedVideoId}:${item.updatedAt}:${item.cloud?.status || "not-uploaded"}`)
+      .join("|");
+    if (autoCloudUploadKeyRef.current === key) return;
+    autoCloudUploadKeyRef.current = key;
+    void startSavedVideoCloudTransfers(automaticCloudUploadCandidates).catch(() => {
+      // Waiting items remain visible on their Player Profile cards.
+    });
+  }, [automaticCloudUploadCandidates]);
+
+  async function handleVideoAnalysisSaveAndSend(result: VideoWorkspaceSaveResult) {
+    setSavedVideoItems((current) => mergeSavedVideoItems(current, result.savedItems));
+    await startSavedVideoCloudTransfers(result.savedItems, { openSettingsOnConfigurationIssue: false });
+  }
+
+  async function pauseSavedVideoTransfer(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    try {
+      await pauseSavedVideoCloudUpload(item.savedVideoId, store);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Transfer paused." });
+    } catch (error) {
+      const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code || "") : "";
+      setToast({ message: savedVideoCloudErrorLabel(code, error instanceof Error ? error.message : undefined) });
+    } finally {
+      setUploadingSavedVideoIds((current) => {
+        const next = new Set(current);
+        next.delete(item.savedVideoId);
+        return next;
+      });
+    }
+  }
+
+  async function cancelSavedVideoTransfer(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    if (!window.confirm("Cancel this transfer? The local saved video will stay in your library.")) return;
+    try {
+      await cancelSavedVideoCloudUpload(item.savedVideoId, store);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Transfer cancelled. Local video kept." });
+    } catch {
+      setToast({ message: "Transfer could not be cancelled." });
+    } finally {
+      setUploadingSavedVideoIds((current) => {
+        const next = new Set(current);
+        next.delete(item.savedVideoId);
+        return next;
+      });
+    }
+  }
+
+  async function removeSavedVideoTransfer(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    try {
+      await removeSavedVideoCloudTransfer(item.savedVideoId, store);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Cloud transfer removed. Local video kept." });
+    } catch {
+      setToast({ message: "Cloud transfer could not be removed." });
+    } finally {
+      setUploadingSavedVideoIds((current) => {
+        const next = new Set(current);
+        next.delete(item.savedVideoId);
+        return next;
+      });
+    }
+  }
+
+  async function migrateLegacyVideo(record: StoredVideoRecord) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const side = sourceSideFromSlotKey(record.slotKey);
+    try {
+      await store.migrateTransientVideo({
+        storedVideo: record,
+        sourceSide: side,
+        analysisSnapshot: createMigrationAnalysis(record.video),
+        workspaceSnapshot: createDefaultVideoWorkspaceState(side),
+      });
+      refreshSavedVideoLibrary();
+      setToast({ message: "Moved recovery video to Saved Videos. Original recovery copy was kept." });
+    } catch {
+      setToast({ message: "Recovery video could not be moved to Saved Videos." });
+    }
+  }
+
+  async function runManagedLibraryAction(
+    action: "choose" | "reconnect" | "move" | "verify" | "rescan" | "migrate"
+  ) {
+    const store = savedVideoLibraryRef.current;
+    try {
+      if (action === "choose") {
+        await chooseManagedLocalVideoLibrary();
+        if (store) {
+          const result = await migrateSavedVideosToManagedLocalLibrary(store);
+          setToast({ message: result.migrated ? `Moved ${result.migrated} saved videos to My Library.` : "My Library connected." });
+        } else {
+          setToast({ message: "My Library connected." });
+        }
+      } else if (action === "reconnect") {
+        await reconnectManagedLocalVideoLibrary();
+        setToast({ message: "My Library reconnected." });
+      } else if (action === "move") {
+        if (!store) throw new Error("Saved video library is unavailable in this browser.");
+        await moveManagedLocalVideoLibrary(store);
+        setToast({ message: "My Library moved." });
+      } else if (action === "verify" || action === "rescan") {
+        if (!store) throw new Error("Saved video library is unavailable in this browser.");
+        const result = action === "verify"
+          ? await verifyManagedLocalVideoLibrary(store)
+          : await rescanManagedLocalVideoLibrary(store);
+        setToast({ message: `${action === "verify" ? "Verified" : "Rescanned"} ${result.verified} saved videos.` });
+      } else if (action === "migrate") {
+        if (!store) throw new Error("Saved video library is unavailable in this browser.");
+        const result = await migrateSavedVideosToManagedLocalLibrary(store);
+        setToast({ message: result.failed ? `Migrated ${result.migrated}; ${result.failed} need attention.` : `Migrated ${result.migrated} saved videos.` });
+      }
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "My Library action failed." });
+    } finally {
+      refreshSavedVideoLibrary();
+    }
+  }
+
+  async function runLocalStorageHealthAction(action?: LocalStorageAction) {
+    if (!action) return;
+    if (action === "choose-folder") {
+      await runManagedLibraryAction("choose");
+      return;
+    }
+    await runManagedLibraryAction("reconnect");
+  }
+
+  async function runClarityCloudHealthAction(action?: ClarityCloudAction) {
+    if (!action) return;
+    if (action === "connect" || action === "grant-permission" || action === "reconnect") {
+      await connectGoogleDriveTransfer();
+      return;
+    }
+    if (action === "open-setup-details") {
+      setStorageDiagnosticsOpen(true);
+      setToast({ message: "Setup details opened." });
+      return;
+    }
+    if (action === "retry-setup") {
+      await testGoogleDriveTransfer();
+      return;
+    }
+    await refreshGoogleDriveTransferStatus();
+    setToast({ message: "Clarity Cloud status refreshed." });
+  }
+
+  async function importClarityCloudTransfer(transfer: ClarityCloudImportTransfer) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+    if (!savedVideoId) {
+      setToast({ message: "Clarity Cloud transfer metadata is incomplete." });
+      return;
+    }
+    setClarityCloudImportActionIds((current) => new Set(current).add(savedVideoId));
+    try {
+      const imported = await importSavedVideoFromClarityCloud(savedVideoId, store);
+      refreshSavedVideoLibrary();
+      await refreshClarityCloudImports();
+      setToast({ message: `${imported.title || "Video"} is available on this device.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not download from Clarity Cloud." });
+    } finally {
+      setClarityCloudImportActionIds((current) => {
+        const next = new Set(current);
+        next.delete(savedVideoId);
+        return next;
+      });
+    }
+  }
+
+  async function openCloudVideoFromCatalogue(transfer: ClarityCloudImportTransfer, playerName: string) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+    const playerId = transfer.savedVideo?.playerId;
+    if (!savedVideoId || !playerId) {
+      setToast({ message: "Clarity Cloud catalogue metadata is incomplete." });
+      return;
+    }
+    setClarityCloudImportActionIds((current) => new Set(current).add(savedVideoId));
+    try {
+      setToast({ message: "Downloading from Clarity Cloud..." });
+      const imported = await importSavedVideoFromClarityCloud(savedVideoId, store);
+      refreshSavedVideoLibrary();
+      await refreshClarityCloudImports();
+      openVideoAnalysisForClient({
+        id: imported.playerId || playerId,
+        name: playerName,
+        savedVideoId: imported.savedVideoId,
+      });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not download from Clarity Cloud." });
+    } finally {
+      setClarityCloudImportActionIds((current) => {
+        const next = new Set(current);
+        next.delete(savedVideoId);
+        return next;
+      });
+    }
+  }
+
+  async function verifySavedVideoInLibrary(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    try {
+      await store.verifyItem(item.savedVideoId);
+      refreshSavedVideoLibrary();
+      setToast({ message: "Saved video verified." });
+    } catch (error) {
+      refreshSavedVideoLibrary();
+      setToast({ message: error instanceof Error ? error.message : "Saved video needs repair." });
+    }
+  }
+
+  async function showSavedVideoInFinder(item: SavedVideoItem) {
+    if (item.local.managed?.status === "healthy") {
+      setToast({ message: "Saved video is kept in My Library." });
+      return;
+    }
+    if (!managedLocalLibraryStatus.configured) {
+      await runManagedLibraryAction("choose");
+      return;
+    }
+    await runManagedLibraryAction("reconnect");
+  }
+
+  async function revealSavedVideoFile(item: SavedVideoItem) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    try {
+      const blob = await store.getBlob(item.savedVideoId);
+      if (!blob) {
+        setToast({ message: "Saved video file is missing. Reconnect the library or use the cache recovery copy." });
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Saved video file could not be opened." });
+    }
+  }
+
+  function selectPlayerProfileTool(client: Pick<Person, "id" | "name">, tool: PlayerProfileTool = "recent") {
+    setNotesContext({ playerId: client.id, playerName: client.name });
+    setPlayerProfileTool(tool);
+    setPlayerToolExpanded(true);
+  }
+
+  function openNotesForClient(client: Pick<Person, "id" | "name">) {
+    selectPlayerProfileTool(client, "notes");
+    setActiveView("players");
+    closeClientModal();
+    setQuickCreate(null);
+    closeCalendarDetails();
+  }
+
+  function openPlayerAddDialog() {
+    setPlayerAddSearch("");
+    setPlayerAddNew({ name: "", email: "", phone: "" });
+    setShowPlayerAddDialog(true);
+  }
+
+  function promoteExistingPlayer(client: { id: string; name: string }) {
+    setPlayerProfilesLocal((current) => addManualPlayer(current, client.id));
+    setShowPlayerAddDialog(false);
+    setToast({ message: `${client.name} added to player profiles.` });
+  }
+
+  async function createNewPlayer() {
+    const name = playerAddNew.name.trim();
+    const email = playerAddNew.email.trim();
+    if (!name && !email) {
+      setToast({ message: "A player needs a name or email." });
+      return;
+    }
+    setPlayerAddSaving(true);
+    try {
+      const response = await fetch("/api/people", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          person: {
+            name,
+            email,
+            phone: playerAddNew.phone.trim(),
+            notes: "",
+            caddyProfileUrl: "",
+          },
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not add player."));
+      const result = (await response.json()) as PeopleUpdateResult;
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
+      const newId = result.person?.id;
+      if (newId) {
+        setPlayerProfilesLocal((current) => addManualPlayer(current, newId));
+      }
+      setShowPlayerAddDialog(false);
+      setToast({ message: name ? `${name} added to player profiles.` : "Player added." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not add player." });
+    } finally {
+      setPlayerAddSaving(false);
+    }
+  }
+
+  function openInvoiceCoachSettings() {
+    setActiveView("billing");
+    setBillingSection("settings");
+    closeCalendarDetails();
+    setQuickCreate(null);
+  }
+
+  function updateBookingForm(field: keyof BookingForm, value: string) {
+    setBookingConfirmation(null);
+    setBookingSubmitError("");
+    setBookingForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateCustomGroupAttendeeDraft(field: "name" | "email", value: string) {
+    setBookingConfirmation(null);
+    setCustomGroupAttendeeDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function attendeeListWithBooker(item: CalendarItem): CustomGroupAttendee[] {
+    const current = Array.isArray(item.attendees) ? item.attendees : [];
+    const booker =
+      current.find((attendee) => attendee.status === "booker") ??
+      customGroupBookerAttendee(item.client || item.title, item.email || "");
+    const others = current.filter((attendee) => attendee.status !== "booker");
+    return [booker, ...others];
+  }
+
+  function addSelectedCustomGroupAttendee() {
+    if (!selected || selected.kind !== "appointment" || !selectedService || !isCustomGroupService(selectedService)) return;
+    if (selectedCustomGroupAttendeeDraft.email.trim() && !selectedCustomGroupAttendeeDraft.email.includes("@")) {
+      setToast({ message: "Enter a valid attendee email or leave it blank." });
+      return;
+    }
+    const attendee = adminCustomGroupAttendee(selectedCustomGroupAttendeeDraft.name, selectedCustomGroupAttendeeDraft.email);
+    if (!attendee) {
+      setToast({ message: "Add an attendee name first." });
+      return;
+    }
+    const attendees = attendeeListWithBooker(selected);
+    if (attendees.length + 1 > customGroupMaxParticipants(selectedService)) {
+      setToast({ message: "This custom group is already at maximum size." });
+      return;
+    }
+    setItems((current) =>
+      current.map((item) =>
+        item.id === selected.id
+          ? {
+              ...item,
+              customGroup: true as const,
+              attendees: [...attendees, attendee],
+              calculatedPrice: calculateCustomGroupPrice(selectedService, attendees.length + 1),
+            }
+          : item,
+      ),
+    );
+    setSelectedCustomGroupAttendeeDraft({ name: "", email: "" });
+  }
+
+  function removeSelectedCustomGroupAttendee(attendeeId: string) {
+    if (!selected || selected.kind !== "appointment" || !selectedService || !isCustomGroupService(selectedService)) return;
+    const attendees = attendeeListWithBooker(selected);
+    const target = attendees.find((attendee) => attendee.id === attendeeId);
+    if (!target || target.status === "booker" || target.status === "confirmed") return;
+    const nextAttendees = attendees.filter((attendee) => attendee.id !== attendeeId);
+    setItems((current) =>
+      current.map((item) =>
+        item.id === selected.id
+          ? {
+              ...item,
+              customGroup: true as const,
+              attendees: nextAttendees,
+              calculatedPrice: calculateCustomGroupPrice(selectedService, nextAttendees.length),
+            }
+          : item,
+      ),
+    );
+  }
+
+  function addCustomGroupAttendee() {
+    if (!isCustomGroupBooking) return;
+    const name = customGroupAttendeeDraft.name.trim();
+    const email = customGroupAttendeeDraft.email.trim().toLowerCase();
+    if (!name) {
+      setToast({ message: "Add a name for the attendee." });
+      return;
+    }
+    if (email && !email.includes("@")) {
+      setToast({ message: "Enter a valid attendee email or leave it blank." });
+      return;
+    }
+    if (customGroupParticipantCount >= customGroupMaxParticipants(bookingTargetService)) {
+      setToast({ message: "This custom group is already at its maximum size." });
+      return;
+    }
+    setCustomGroupAttendees((current) => [
+      ...current,
+      {
+        id: `attendee-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name,
+        email: email || undefined,
+        status: email ? "invited" : "manual",
+      },
+    ]);
+    setCustomGroupAttendeeDraft({ name: "", email: "" });
+  }
+
+  function removeCustomGroupAttendee(attendeeId: string) {
+    setCustomGroupAttendees((current) => current.filter((attendee) => attendee.id !== attendeeId));
+  }
+
+  function updateRescheduleForm(field: keyof RescheduleForm, value: string) {
+    setBookingConfirmation(null);
+    setRescheduleForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function changeBookingMode(nextMode: BookingMode, showLogin = false) {
+    setBookingMode(nextMode);
+    setBookingConfirmation(null);
+    setBookingSubmitError("");
+    setBookingStart(null);
+    setCustomGroupAttendees([]);
+    setCustomGroupAttendeeDraft({ name: "", email: "" });
+    setBookingDaySelected(nextMode === "book" ? false : bookingDaySelected);
+    setOpenPublicBookingSection("appointment");
+    setForceRescheduleLogin(nextMode === "reschedule" && showLogin);
+    if (nextMode === "book") {
+      setSelectedRescheduleId("");
+    } else if (!rescheduleMatches.length && rescheduleForm.email.trim() && rescheduleForm.phone.trim()) {
+      window.setTimeout(() => {
+        void lookupPublicReschedule(true);
+      }, 0);
+    }
+  }
+
+  function selectRescheduleMatch(match: PublicRescheduleMatch) {
+    setSelectedRescheduleId(match.id);
+    setBookingServiceId(match.serviceId);
+    setActiveWeekState(match.week);
+    setBookingDay(match.day);
+    setBookingDaySelected(true);
+    setOpenPublicBookingSection("datetime");
+    setBookingStart(null);
+  }
+
+  function setPublicBookingSection(section: PublicBookingSection) {
+    setOpenPublicBookingSection(section);
+  }
+
+  function startAnotherPublicBooking() {
+    const hasSelectedPublicService = currentScreenPublicServices.some((service) => service.id === bookingServiceId);
+    setBookingConfirmation(null);
+    setBookingMode("book");
+    setEmailNoticeVisible(false);
+    setBookingSubmitError("");
+    setBookingStart(null);
+    setCustomGroupAttendees([]);
+    setCustomGroupAttendeeDraft({ name: "", email: "" });
+    setOpenPublicBookingSection(hasSelectedPublicService ? "datetime" : "appointment");
+    if (!hasSelectedPublicService) setBookingDaySelected(false);
+  }
+
+  function handlePublicBookingServiceSelect(serviceId: string) {
+    const isCurrent = serviceId === bookingServiceId;
+    setBookingServiceId(isCurrent ? "" : serviceId);
+    setBookingSubmitError("");
+    setCustomGroupAttendees([]);
+    setCustomGroupAttendeeDraft({ name: "", email: "" });
+    setBookingDaySelected(false);
+    setBookingStart(null);
+    setOpenPublicBookingSection(isCurrent ? "appointment" : "datetime");
+  }
+
+  const isGroupBookingTimeSelection =
+    bookingMode === "book" && isScheduledGroupService(bookingTargetService);
+
+  function handlePublicBookingDaySelect(dayIndex: number) {
+    setBookingDay(dayIndex);
+    setBookingDaySelected(true);
+    setBookingSubmitError("");
+    setBookingStart(null);
+    setOpenPublicBookingSection("datetime");
+  }
+
+  function handlePublicBookingTimeSelect(slot: BookingSlot) {
+    const next = bookingStart === slot.start ? null : slot.start;
+    setBookingSubmitError("");
+    if (isScheduledGroupService(bookingTargetService)) {
+      setBookingDay(slot.day);
+      setBookingDaySelected(next !== null);
+    }
+    setBookingStart(next);
+    setOpenPublicBookingSection(next === null ? "datetime" : "information");
+  }
+
+  function describeRescheduleMatch(match: PublicRescheduleMatch) {
+    const days = buildWeekDays(match.week);
+    return `${days[match.day]?.label ?? fullDayNames[match.day]}, ${formatTime(match.start)}`;
+  }
+
+  function googleCalendarUrl(confirmation: BookingConfirmation) {
+    const date = dateForSlot(confirmation.week, confirmation.day);
+    const start = compactDateTime(date, confirmation.start);
+    const end = compactDateTime(date, confirmation.start + confirmation.duration);
+    const location = confirmation.location ?? selectedBookingLocation;
+    const params = new URLSearchParams({
+      action: "TEMPLATE",
+      text: `${confirmation.service} with ${coachAccount.businessName}`,
+      dates: `${start}/${end}`,
+      location: bookingLocationDisplay(location),
+      details: `${confirmation.service} for ${confirmation.client}.`,
+      ctz: location.timezone || coachAccount.timezone,
+    });
+    return `https://calendar.google.com/calendar/render?${params.toString()}`;
+  }
+
+  function downloadAppleCalendarInvite(confirmation: BookingConfirmation) {
+    const date = dateForSlot(confirmation.week, confirmation.day);
+    const start = compactDateTime(date, confirmation.start);
+    const end = compactDateTime(date, confirmation.start + confirmation.duration);
+    const location = confirmation.location ?? selectedBookingLocation;
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Clarity Golf//Booking Confirmation//EN",
+      "BEGIN:VEVENT",
+      `UID:${Date.now()}@clarity-golf-booking`,
+      `DTSTAMP:${compactDateTime(new Date(), new Date().getHours() * 60 + new Date().getMinutes())}`,
+      `DTSTART;TZID=${location.timezone || coachAccount.timezone}:${start}`,
+      `DTEND;TZID=${location.timezone || coachAccount.timezone}:${end}`,
+      `SUMMARY:${escapeIcsText(`${confirmation.service} with ${coachAccount.businessName}`)}`,
+      `LOCATION:${escapeIcsText(bookingLocationDisplay(location))}`,
+      `DESCRIPTION:${escapeIcsText(`${confirmation.service} for ${confirmation.client}.`)}`,
+      "STATUS:CONFIRMED",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+    const blob = new Blob([`${ics}\r\n`], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "clarity-golf-booking.ics";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function lookupPublicReschedule(silent = false, credentials: RescheduleLookupCredentials = rescheduleForm) {
+    const lookupCredentials = {
+      email: credentials.email.trim(),
+      phone: credentials.phone.trim(),
+      appointmentId: credentials.appointmentId,
+    };
+    if (!lookupCredentials.email || !lookupCredentials.phone) {
+      if (!silent) setToast({ message: "Enter the email and phone number used on the booking." });
+      return;
+    }
+    setRescheduleState("checking");
+    setSelectedRescheduleId("");
+    setBookingStart(null);
+    try {
+      const response = await fetch("/api/public-reschedule-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: lookupCredentials.email, phone: lookupCredentials.phone }),
+      });
+      const data = (await response.json()) as { matches?: PublicRescheduleMatch[]; message?: string };
+      if (!response.ok) {
+        if (!silent) setToast({ message: data.message || "Could not find that booking." });
+        setRescheduleMatches([]);
+        return;
+      }
+      const matches = Array.isArray(data.matches) ? data.matches : [];
+      setRescheduleMatches(matches);
+      const preferredId = lookupCredentials.appointmentId || initialRescheduleLoginRef.current?.appointmentId || selectedRescheduleId;
+      const preferredMatch = preferredId ? matches.find((match) => match.id === preferredId) : null;
+      if (preferredMatch) {
+        selectRescheduleMatch(preferredMatch);
+      } else if (matches.length === 1) {
+        selectRescheduleMatch(matches[0]);
+      }
+      if (!matches.length && !silent) setToast({ message: "No booking matched those details." });
+      if (matches.length) {
+        const nextSaved: SavedRescheduleLogin = {
+          email: lookupCredentials.email,
+          phone: lookupCredentials.phone,
+          appointmentId: preferredMatch?.id || matches[0]?.id,
+        };
+        window.localStorage.setItem(RESCHEDULE_LOGIN_STORAGE_KEY, JSON.stringify(nextSaved));
+      }
+    } catch {
+      if (!silent) setToast({ message: "Could not reach the booking server." });
+    } finally {
+      setRescheduleState("idle");
+    }
+  }
+
+  async function confirmPublicReschedule() {
+    if (!selectedRescheduleMatch || !bookingTargetService || bookingStart === null) {
+      setToast({ message: "Choose the booking and the new time." });
+      return;
+    }
+
+    setRescheduleState("saving");
+    try {
+      const response = await fetch("/api/public-reschedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appointmentId: selectedRescheduleMatch.id,
+          email: rescheduleForm.email,
+          phone: rescheduleForm.phone,
+          week: activeWeek,
+          day: bookingDay,
+          start: bookingStart,
+        }),
+      });
+      const data = (await response.json()) as {
+        state?: { items?: CalendarItem[] };
+        message?: string;
+        appointment?: { location?: BookingLocationSnapshot };
+        notifications?: EmailSendResult[];
+      };
+      if (!response.ok) {
+        setToast({ message: data.message || "That time is no longer available." });
+        if (data.state?.items) setItems(data.state.items);
+        clearPublicBookingSlotCache();
+        setBookingStart(null);
+        return;
+      }
+
+      if (data.state?.items) setItems(data.state.items);
+      clearPublicBookingSlotCache();
+      setBookingConfirmation({
+        kind: "reschedule",
+        appointmentId: selectedRescheduleMatch.id,
+        client: selectedRescheduleMatch.client,
+        service: selectedRescheduleMatch.serviceName,
+        week: activeWeek,
+        day: bookingDay,
+        start: bookingStart,
+        duration: selectedRescheduleMatch.duration,
+        dayLabel: weekDays[bookingDay].label,
+        timeLabel: formatTime(bookingStart),
+        email: rescheduleForm.email,
+        phone: rescheduleForm.phone,
+        location:
+          data.appointment?.location ??
+          selectedRescheduleMatch.location ??
+          bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
+        notifications: data.notifications ?? [],
+      });
+      setRescheduleMatches([]);
+      setSelectedRescheduleId("");
+      setBookingStart(null);
+    } catch {
+      setToast({ message: "Could not complete the reschedule. Please try again." });
+    } finally {
+      setRescheduleState("idle");
+    }
+  }
+
+  async function confirmPublicCancellation() {
+    if (!selectedRescheduleMatch) {
+      setToast({ message: "Choose the booking to cancel." });
+      return;
+    }
+    const confirmed = window.confirm(
+      `Cancel ${selectedRescheduleMatch.serviceName} for ${selectedRescheduleMatch.client}?`,
+    );
+    if (!confirmed) return;
+
+    setRescheduleState("saving");
+    try {
+      const response = await fetch("/api/public-cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          appointmentId: selectedRescheduleMatch.id,
+          email: rescheduleForm.email,
+          phone: rescheduleForm.phone,
+        }),
+      });
+      const data = (await response.json()) as {
+        state?: { items?: CalendarItem[] };
+        message?: string;
+        notifications?: EmailSendResult[];
+      };
+      if (!response.ok) {
+        setToast({ message: data.message || "Could not cancel that booking." });
+        return;
+      }
+
+      const original = selectedRescheduleMatch;
+      if (data.state?.items) {
+        setItems(data.state.items);
+      } else {
+        setItems((current) => current.filter((item) => item.id !== original.id));
+      }
+      clearPublicBookingSlotCache();
+      const confirmationNotifications = data.notifications ?? [];
+      const originalWeekDays = buildWeekDays(original.week);
+      setBookingConfirmation({
+        kind: "cancelled",
+        appointmentId: original.id,
+        client: original.client,
+        service: original.serviceName,
+        week: original.week,
+        day: original.day,
+        start: original.start,
+        duration: original.duration,
+        dayLabel: originalWeekDays[original.day]?.label ?? fullDayNames[original.day],
+        timeLabel: formatTime(original.start),
+        email: rescheduleForm.email,
+        phone: rescheduleForm.phone,
+        location:
+          original.location ??
+          bookingLocationSnapshotFor(services.find((service) => service.id === original.serviceId), locations, coachAccount),
+        notifications: confirmationNotifications,
+      });
+      setEmailNoticeVisible(
+        confirmationNotifications.some((result) => result.channel === "client" && result.sent),
+      );
+      setRescheduleMatches([]);
+      setSelectedRescheduleId("");
+      setBookingStart(null);
+    } catch {
+      setToast({ message: "Could not cancel that booking. Please try again." });
+    } finally {
+      setRescheduleState("idle");
+    }
+  }
+
+  function handleBookingMatchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") event.currentTarget.blur();
+  }
+
+  function insertNotificationSubjectToken(token: string) {
+    emailTemplateEditor.setDraftValue((current) => ({
+      ...current,
+      notificationSubjectLine: `${current.notificationSubjectLine ?? ""} ${token}`.trim().slice(0, 180),
+    }));
+  }
+
+  function updateBookingNoticeHours(hours: number) {
+    updateNotificationBlockDraft(bookingNoticeEditor, "minBookingNoticeMinutes", cleanMinBookingNoticeMinutes(hours * 60));
+  }
+
+  function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
+    notificationSettingsDraftVersionRef.current += 1;
+    setSettingsSaveState("idle");
+    setSettingsSaveError("");
+    setNotificationSettings((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateBrandSetting<K extends keyof BrandSettings>(field: K, value: BrandSettings[K]) {
+    setBrandSaveState("idle");
+    setBrandSettings((current) => cleanBrandSettings({ ...current, [field]: value }));
+  }
+
+  function updateCoachAccount<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
+    setCoachAccountSaveState("idle");
+    setCoachAccount((current) => cleanCoachAccount({ ...current, [field]: value }));
+  }
+
+  function updateLocationEditor<K extends keyof Location>(field: K, value: Location[K]) {
+    setLocationSaveState("idle");
+    setLocationEditorError("");
+    setLocationEditor((current) => ({ ...current, [field]: value }));
+  }
+
+  function startNewLocation() {
+    if (!canUseFeature(activeAccount, "multiLocation") && activeLocationList.length >= 1) {
+      setToast({ message: featureUnavailableMessage("multiLocation") });
+      return;
+    }
+    if (!canCreateWithinLimit(activeAccount, activeLocationList.length, "maxLocations")) {
+      setToast({ message: limitReachedMessage("maxLocations", accountLimit(activeAccount, "maxLocations")) });
+      return;
+    }
+    const base = defaultLocationFromCoachAccount(coachAccount);
+    const nextOrder = Math.max(0, ...locations.map((location) => location.sortOrder ?? 0)) + 1;
+    setEditingLocationId(null);
+    setLocationEditor({
+      ...base,
+      id: `location-${Date.now()}`,
+      accountId: activeAccountId,
+      name: "",
+      shortName: "",
+      isDefault: activeLocations(locations).length === 0,
+      sortOrder: nextOrder,
+    });
+    setShowLocationEditor(true);
+    setLocationSaveState("idle");
+    setLocationEditorError("");
+  }
+
+  function editLocation(location: Location) {
+    setEditingLocationId(location.id);
+    setLocationEditor(location);
+    setShowLocationEditor(true);
+    setLocationSaveState("idle");
+    setLocationEditorError("");
+  }
+
+  async function persistLocations(nextLocations: Location[], message = "Locations saved."): Promise<boolean> {
+    const saveVersion = ++locationSaveVersionRef.current;
+    beginAdminSave("locations");
+    const isCurrentSave = () => locationSaveVersionRef.current === saveVersion;
+    const snapshot = locations;
+    const clean = cleanLocations(nextLocations, coachAccount);
+    const diagnostic: WorkspaceConfigDiagnostic = {
+      activeAccountId,
+      expected: clean.map((location) => ({ id: location.id, name: workspaceRecordName(location) })).filter((location) => location.id),
+    };
+    const timer = startDiagnosticTimer({
+      system: "save",
+      action: "save_location",
+      route: "PUT /api/locations",
+      functionName: "persistLocations",
+      expectedAccountId: activeAccountId,
+      objectType: "location",
+      details: { expectedCount: diagnostic.expected.length },
+    });
+    let failureRoute = "PUT /api/locations";
+    let failureStage = "location_put_request_failed";
+    setLocations(clean);
+    setLocationSaveState("saving");
+    setLocationEditorError("");
+    try {
+      failureRoute = "PUT /api/locations";
+      failureStage = "location_put_request_failed";
+      const response = await fetch("/api/locations", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ locations: clean }),
+      });
+      diagnostic.putStatus = response.status;
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throwWorkspaceSaveFailure("Location", "PUT /api/locations", "location_put_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
+      }
+      if (!response.ok) {
+        const detail = await readApiFailureDetail(response, "Location save failed");
+        throwWorkspaceSaveFailure("Location", "PUT /api/locations", "location_put_failed", diagnostic, detail);
+      }
+      failureStage = "location_put_failed";
+      const putLocationsData = await readWorkspaceSaveJson<{ locations?: Location[] }>(
+        response,
+        "Location",
+        "PUT /api/locations",
+        "location_put_failed",
+        diagnostic,
+      );
+      const savedLocationRecords = Array.isArray(putLocationsData.locations) ? putLocationsData.locations : undefined;
+      diagnostic.putRecords = savedLocationRecords;
+      assertExpectedWorkspaceRecords(
+        savedLocationRecords,
+        "Location",
+        "PUT /api/locations",
+        "location_put_missing_expected_id",
+        "location_put_account_mismatch",
+        diagnostic,
+      );
+      failureRoute = "GET /api/locations";
+      failureStage = "location_get_request_failed";
+      const locationsResponse = await fetch("/api/locations", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      diagnostic.getStatus = locationsResponse.status;
+      if (locationsResponse.status === 401) {
+        setAuthStatus("guest");
+        throwWorkspaceSaveFailure("Location", "GET /api/locations", "location_get_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
+      }
+      if (!locationsResponse.ok) {
+        const detail = await readApiFailureDetail(locationsResponse, "Location save failed");
+        throwWorkspaceSaveFailure("Location", "GET /api/locations", "location_get_failed", diagnostic, detail);
+      }
+      failureStage = "location_get_failed";
+      const locationsData = await readWorkspaceSaveJson<{ locations?: Location[] }>(
+        locationsResponse,
+        "Location",
+        "GET /api/locations",
+        "location_get_failed",
+        diagnostic,
+      );
+      const loadedLocationRecords = Array.isArray(locationsData.locations) ? locationsData.locations : undefined;
+      const loadedLocations = cleanLocations(locationsData.locations, coachAccount);
+      diagnostic.getRecords = loadedLocationRecords;
+      assertExpectedWorkspaceRecords(
+        loadedLocationRecords,
+        "Location",
+        "GET /api/locations",
+        "location_get_missing_expected_id",
+        "location_get_account_mismatch",
+        diagnostic,
+      );
+      failureRoute = "GET /api/calendar-state";
+      failureStage = "location_calendar_state_request_failed";
+      const calendarStateResponse = await fetch("/api/calendar-state", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      diagnostic.calendarStatus = calendarStateResponse.status;
+      if (calendarStateResponse.status === 401) {
+        setAuthStatus("guest");
+        throwWorkspaceSaveFailure("Location", "GET /api/calendar-state", "location_calendar_state_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
+      }
+      if (!calendarStateResponse.ok) {
+        const detail = await readApiFailureDetail(calendarStateResponse, "Location save failed");
+        throwWorkspaceSaveFailure("Location", "GET /api/calendar-state", "location_calendar_state_failed", diagnostic, detail);
+      }
+      failureStage = "location_calendar_state_failed";
+      const calendarStateData = await readWorkspaceSaveJson<{ locations?: Location[] }>(
+        calendarStateResponse,
+        "Location",
+        "GET /api/calendar-state",
+        "location_calendar_state_failed",
+        diagnostic,
+      );
+      const calendarLocationRecords = Array.isArray(calendarStateData.locations) ? calendarStateData.locations : undefined;
+      diagnostic.calendarRecords = calendarLocationRecords;
+      assertExpectedWorkspaceRecords(
+        calendarLocationRecords,
+        "Location",
+        "GET /api/calendar-state",
+        "location_calendar_state_missing_expected_id",
+        "location_calendar_state_account_mismatch",
+        diagnostic,
+      );
+      if (!isCurrentSave()) return false;
+      setLocations(loadedLocations);
+      finishDiagnosticTimer(timer, "verified", {
+        route: "GET /api/calendar-state",
+        httpStatus: calendarStateResponse.status,
+        returnedAccountId: summarizeWorkspaceAccountIds(calendarLocationRecords),
+        details: { returnedCount: loadedLocationRecords?.length ?? 0 },
+      });
+      setLocationSaveState("saved");
+      setLocationEditorError("");
+      setToast({ message });
+      window.setTimeout(() => {
+        if (isCurrentSave()) setLocationSaveState("idle");
+      }, 1600);
+      return true;
+    } catch (error) {
+      if (!isCurrentSave()) return false;
+      setLocations(snapshot);
+      setLocationSaveState("error");
+      const errorMessage = workspaceSaveFailureMessage(
+        error,
+        "Location",
+        failureRoute,
+        failureStage,
+        diagnostic,
+        "Could not save locations.",
+      );
+      finishDiagnosticTimer(timer, "failed", {
+        route: failureRoute,
+        httpStatus: workspaceRouteStatus(failureRoute, diagnostic),
+        errorCode: workspaceDiagnosticErrorCode("Location", failureStage),
+        humanMessage: errorMessage,
+        returnedAccountId: summarizeWorkspaceAccountIds(workspaceRouteRecords(failureRoute, diagnostic)),
+      });
+      setLocationEditorError(errorMessage);
+      setToast({ message: errorMessage });
+      return false;
+    } finally {
+      endAdminSave("locations");
+    }
+  }
+
+  async function saveEditedLocation() {
+    if (!locationEditor.name.trim()) {
+      setToast({ message: "Name the location before saving." });
+      return;
+    }
+    const clean = cleanLocation(locationEditor, defaultLocationFromCoachAccount(coachAccount), locations.length);
+    const exists = locations.some((location) => location.id === (editingLocationId || clean.id));
+    if (!exists && !canCreateWithinLimit(activeAccount, activeLocationList.length, "maxLocations")) {
+      setToast({ message: limitReachedMessage("maxLocations", accountLimit(activeAccount, "maxLocations")) });
+      return;
+    }
+    const stableId = editingLocationId || clean.id;
+    const cleanedLocation = { ...clean, id: stableId };
+    const next = exists
+      ? locations.map((location) => (location.id === stableId ? cleanedLocation : location))
+      : [...locations, cleanedLocation];
+    setEditingLocationId(stableId);
+    setLocationEditor(cleanedLocation);
+    const saved = await persistLocations(next, exists ? `${clean.name} updated.` : `${clean.name} added.`);
+    if (saved) setShowLocationEditor(false);
+  }
+
+  function archiveLocation(location: Location) {
+    const activeCount = activeLocations(locations).length;
+    if (location.active && !location.archived && activeCount <= 1) {
+      setToast({ message: "Keep at least one active location." });
+      return;
+    }
+    const next = locations.map((candidate) =>
+      candidate.id === location.id ? { ...candidate, active: false, archived: true, isDefault: false } : candidate,
+    );
+    void persistLocations(next, `${location.name} archived.`);
+  }
+
+  function restoreLocation(location: Location) {
+    const next = locations.map((candidate) =>
+      candidate.id === location.id ? { ...candidate, active: true, archived: false } : candidate,
+    );
+    void persistLocations(next, `${location.name} restored.`);
+  }
+
+  function makeDefaultLocation(location: Location) {
+    if (location.archived || !location.active) {
+      setToast({ message: "Restore the location before making it default." });
+      return;
+    }
+    const next = locations.map((candidate) => ({ ...candidate, isDefault: candidate.id === location.id }));
+    void persistLocations(next, `${location.name} set as default.`);
+  }
+
+  function updateCoachEditor<K extends keyof CoachProfile>(field: K, value: CoachProfile[K]) {
+    setCoachSaveState("idle");
+    setCoachEditorError("");
+    setCoachEditor((current) => ({ ...current, [field]: value }));
+  }
+
+  function startNewCoach() {
+    if (!canUseFeature(activeAccount, "multiCoach") && activeCoachList.length >= 1) {
+      setToast({ message: featureUnavailableMessage("multiCoach") });
+      return;
+    }
+    if (!canCreateWithinLimit(activeAccount, activeCoachList.length, "maxCoaches")) {
+      setToast({ message: limitReachedMessage("maxCoaches", accountLimit(activeAccount, "maxCoaches")) });
+      return;
+    }
+    const fallback = defaultCoachProfileFromAccount(coachAccount);
+    const assignedLocationId = defaultLocationId(locations);
+    setEditingCoachId(null);
+    setCoachEditor({
+      ...fallback,
+      id: `coach-${Date.now()}`,
+      accountId: activeAccountId,
+      name: "",
+      displayName: "",
+      shortName: "",
+      email: "",
+      phone: "",
+      bio: "",
+      photoUrl: "",
+      active: true,
+      archived: false,
+      isDefault: activeCoachList.length === 0,
+      bookable: true,
+      assignedLocationIds: assignedLocationId ? [assignedLocationId] : [],
+      defaultLocationId: assignedLocationId,
+      sortOrder: coachProfiles.length,
+    });
+    setShowCoachEditor(true);
+    setCoachSaveState("idle");
+    setCoachEditorError("");
+  }
+
+  function editCoach(coach: CoachProfile) {
+    setEditingCoachId(coach.id);
+    setCoachEditor(coach);
+    setShowCoachEditor(true);
+    setCoachSaveState("idle");
+    setCoachEditorError("");
+  }
+
+  async function persistCoaches(nextCoaches: CoachProfile[], message = "Coaches saved."): Promise<boolean> {
+    const saveVersion = ++coachSaveVersionRef.current;
+    beginAdminSave("coaches");
+    const isCurrentSave = () => coachSaveVersionRef.current === saveVersion;
+    const snapshot = coachProfiles;
+    const clean = cleanCoachProfiles(nextCoaches, coachAccount);
+    const diagnostic: WorkspaceConfigDiagnostic = {
+      activeAccountId,
+      expected: clean.map((coach) => ({ id: coach.id, name: workspaceRecordName(coach) })).filter((coach) => coach.id),
+    };
+    const timer = startDiagnosticTimer({
+      system: "save",
+      action: "save_coach",
+      route: "PUT /api/coaches",
+      functionName: "persistCoaches",
+      expectedAccountId: activeAccountId,
+      objectType: "coach",
+      details: { expectedCount: diagnostic.expected.length },
+    });
+    let failureRoute = "PUT /api/coaches";
+    let failureStage = "coach_put_request_failed";
+    setCoachProfiles(clean);
+    setCoachSaveState("saving");
+    setCoachEditorError("");
+    try {
+      failureRoute = "PUT /api/coaches";
+      failureStage = "coach_put_request_failed";
+      const response = await fetch("/api/coaches", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ coaches: clean }),
+      });
+      diagnostic.putStatus = response.status;
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throwWorkspaceSaveFailure("Coach", "PUT /api/coaches", "coach_put_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
+      }
+      if (!response.ok) {
+        const detail = await readApiFailureDetail(response, "Coach save failed");
+        throwWorkspaceSaveFailure("Coach", "PUT /api/coaches", "coach_put_failed", diagnostic, detail);
+      }
+      failureStage = "coach_put_failed";
+      const putCoachesData = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
+        response,
+        "Coach",
+        "PUT /api/coaches",
+        "coach_put_failed",
+        diagnostic,
+      );
+      const savedCoachRecords = Array.isArray(putCoachesData.coaches) ? putCoachesData.coaches : undefined;
+      diagnostic.putRecords = savedCoachRecords;
+      assertExpectedWorkspaceRecords(
+        savedCoachRecords,
+        "Coach",
+        "PUT /api/coaches",
+        "coach_put_missing_expected_id",
+        "coach_put_account_mismatch",
+        diagnostic,
+      );
+      failureRoute = "GET /api/coaches";
+      failureStage = "coach_get_request_failed";
+      const coachesResponse = await fetch("/api/coaches", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      diagnostic.getStatus = coachesResponse.status;
+      if (coachesResponse.status === 401) {
+        setAuthStatus("guest");
+        throwWorkspaceSaveFailure("Coach", "GET /api/coaches", "coach_get_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
+      }
+      if (!coachesResponse.ok) {
+        const detail = await readApiFailureDetail(coachesResponse, "Coach save failed");
+        throwWorkspaceSaveFailure("Coach", "GET /api/coaches", "coach_get_failed", diagnostic, detail);
+      }
+      failureStage = "coach_get_failed";
+      const coachesData = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
+        coachesResponse,
+        "Coach",
+        "GET /api/coaches",
+        "coach_get_failed",
+        diagnostic,
+      );
+      const loadedCoachRecords = Array.isArray(coachesData.coaches) ? coachesData.coaches : undefined;
+      const loadedCoaches = cleanCoachProfiles(coachesData.coaches, coachAccount);
+      diagnostic.getRecords = loadedCoachRecords;
+      assertExpectedWorkspaceRecords(
+        loadedCoachRecords,
+        "Coach",
+        "GET /api/coaches",
+        "coach_get_missing_expected_id",
+        "coach_get_account_mismatch",
+        diagnostic,
+      );
+      failureRoute = "GET /api/calendar-state";
+      failureStage = "coach_calendar_state_request_failed";
+      const calendarStateResponse = await fetch("/api/calendar-state", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      diagnostic.calendarStatus = calendarStateResponse.status;
+      if (calendarStateResponse.status === 401) {
+        setAuthStatus("guest");
+        throwWorkspaceSaveFailure("Coach", "GET /api/calendar-state", "coach_calendar_state_unauthorized", diagnostic, {
+          error: "unauthorized",
+          message: "Admin login required",
+        });
+      }
+      if (!calendarStateResponse.ok) {
+        const detail = await readApiFailureDetail(calendarStateResponse, "Coach save failed");
+        throwWorkspaceSaveFailure("Coach", "GET /api/calendar-state", "coach_calendar_state_failed", diagnostic, detail);
+      }
+      failureStage = "coach_calendar_state_failed";
+      const calendarStateData = await readWorkspaceSaveJson<{ coaches?: CoachProfile[] }>(
+        calendarStateResponse,
+        "Coach",
+        "GET /api/calendar-state",
+        "coach_calendar_state_failed",
+        diagnostic,
+      );
+      const calendarCoachRecords = Array.isArray(calendarStateData.coaches) ? calendarStateData.coaches : undefined;
+      diagnostic.calendarRecords = calendarCoachRecords;
+      assertExpectedWorkspaceRecords(
+        calendarCoachRecords,
+        "Coach",
+        "GET /api/calendar-state",
+        "coach_calendar_state_missing_expected_id",
+        "coach_calendar_state_account_mismatch",
+        diagnostic,
+      );
+      if (!isCurrentSave()) return false;
+      setCoachProfiles(loadedCoaches);
+      finishDiagnosticTimer(timer, "verified", {
+        route: "GET /api/calendar-state",
+        httpStatus: calendarStateResponse.status,
+        returnedAccountId: summarizeWorkspaceAccountIds(calendarCoachRecords),
+        details: { returnedCount: loadedCoachRecords?.length ?? 0 },
+      });
+      setCoachSaveState("saved");
+      setCoachEditorError("");
+      setToast({ message });
+      window.setTimeout(() => {
+        if (isCurrentSave()) setCoachSaveState("idle");
+      }, 1600);
+      return true;
+    } catch (error) {
+      if (!isCurrentSave()) return false;
+      setCoachProfiles(snapshot);
+      setCoachSaveState("error");
+      const errorMessage = workspaceSaveFailureMessage(
+        error,
+        "Coach",
+        failureRoute,
+        failureStage,
+        diagnostic,
+        "Could not save coaches.",
+      );
+      finishDiagnosticTimer(timer, "failed", {
+        route: failureRoute,
+        httpStatus: workspaceRouteStatus(failureRoute, diagnostic),
+        errorCode: workspaceDiagnosticErrorCode("Coach", failureStage),
+        humanMessage: errorMessage,
+        returnedAccountId: summarizeWorkspaceAccountIds(workspaceRouteRecords(failureRoute, diagnostic)),
+      });
+      setCoachEditorError(errorMessage);
+      setToast({ message: errorMessage });
+      return false;
+    } finally {
+      endAdminSave("coaches");
+    }
+  }
+
+  async function saveEditedCoach() {
+    if (!coachEditor.name.trim()) {
+      setToast({ message: "Give the coach a name before saving." });
+      return;
+    }
+    const assignedLocationIds = (coachEditor.assignedLocationIds ?? []).filter(Boolean);
+    const defaultAssignedLocationId = assignedLocationIds.includes(coachEditor.defaultLocationId || "")
+      ? coachEditor.defaultLocationId
+      : assignedLocationIds[0] || defaultLocationId(locations);
+    const clean = cleanCoachProfile(
+      {
+        ...coachEditor,
+        accountId: coachEditor.accountId || activeAccountId,
+        displayName: coachEditor.displayName || coachEditor.name,
+        assignedLocationIds: assignedLocationIds.length
+          ? assignedLocationIds
+          : [defaultAssignedLocationId].filter((id): id is string => Boolean(id)),
+        defaultLocationId: defaultAssignedLocationId,
+      },
+      defaultCoachProfileFromAccount(coachAccount),
+      coachProfiles.length,
+    );
+    const exists = coachProfiles.some((coach) => coach.id === (editingCoachId || clean.id));
+    if (!exists && !canCreateWithinLimit(activeAccount, activeCoachList.length, "maxCoaches")) {
+      setToast({ message: limitReachedMessage("maxCoaches", accountLimit(activeAccount, "maxCoaches")) });
+      return;
+    }
+    const stableId = editingCoachId || clean.id;
+    const cleanedCoach = { ...clean, id: stableId };
+    const next = exists
+      ? coachProfiles.map((coach) => (coach.id === stableId ? cleanedCoach : coach))
+      : [...coachProfiles, cleanedCoach];
+    setEditingCoachId(stableId);
+    setCoachEditor(cleanedCoach);
+    const saved = await persistCoaches(next, exists ? `${clean.displayName} updated.` : `${clean.displayName} added.`);
+    if (saved) setShowCoachEditor(false);
+  }
+
+  function archiveCoach(coach: CoachProfile) {
+    const activeCount = coachProfiles.filter((candidate) => candidate.active && !candidate.archived && candidate.bookable).length;
+    if (activeCount <= 1) {
+      setToast({ message: "At least one active coach is required." });
+      return;
+    }
+    const nextDefault = coach.isDefault
+      ? coachProfiles.find((candidate) => candidate.id !== coach.id && candidate.active && !candidate.archived && candidate.bookable)?.id
+      : "";
+    const next = coachProfiles.map((candidate) =>
+      candidate.id === coach.id
+        ? { ...candidate, active: false, archived: true, isDefault: false }
+        : nextDefault && candidate.id === nextDefault
+          ? { ...candidate, isDefault: true }
+          : candidate,
+    );
+    void persistCoaches(next, `${coach.displayName || coach.name} archived.`);
+  }
+
+  function restoreCoach(coach: CoachProfile) {
+    const next = coachProfiles.map((candidate) =>
+      candidate.id === coach.id ? { ...candidate, active: true, archived: false, bookable: true } : candidate,
+    );
+    void persistCoaches(next, `${coach.displayName || coach.name} restored.`);
+  }
+
+  function makeDefaultCoach(coach: CoachProfile) {
+    if (!coach.active || coach.archived) return;
+    const next = coachProfiles.map((candidate) => ({ ...candidate, isDefault: candidate.id === coach.id }));
+    void persistCoaches(next, `${coach.displayName || coach.name} set as default coach.`);
+  }
+
+  function updateInvoiceSettings<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
+    if ((field === "enabled" || field === "showBillingWorkspace") && value === true && !canUseFeature(activeAccount, "invoicing")) {
+      setToast({ message: featureUnavailableMessage("invoicing") });
+      return;
+    }
+    setCoachAccountSaveState("idle");
+    setCoachAccount((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          [field]: value,
+        },
+      }),
+    );
+  }
+
+  function updateInvoiceCustomField<K extends keyof InvoiceCustomField>(id: string, field: K, value: InvoiceCustomField[K]) {
+    setCoachAccountSaveState("idle");
+    setCoachAccount((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: current.invoiceSettings.customFields.map((customField) =>
+            customField.id === id ? { ...customField, [field]: value } : customField,
+          ),
+        },
+      }),
+    );
+  }
+
+  function addInvoiceCustomField() {
+    setCoachAccountSaveState("idle");
+    setCoachAccount((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: [
+            ...current.invoiceSettings.customFields,
+            { id: `field-${Date.now()}`, label: "Reference", value: "", placement: "header" },
+          ],
+        },
+      }),
+    );
+  }
+
+  function removeInvoiceCustomField(id: string) {
+    setCoachAccountSaveState("idle");
+    setCoachAccount((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          customFields: current.invoiceSettings.customFields.filter((field) => field.id !== id),
+        },
+      }),
+    );
+  }
+
+  function updateServiceEditor<K extends keyof ServiceEditor>(field: K, value: ServiceEditor[K]) {
+    setServiceSaveState("idle");
+    const customGroupField = field === "customGroup" || field === "customGroupEnabled";
+    const enablingCustomGroup = customGroupField && value === true;
+    const disablingCustomGroup = customGroupField && value === false;
+    if (enablingCustomGroup) {
+      setGroupMinimumInput(String(DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS));
+      setGroupMaximumInput(String(DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS));
+    }
+    setServiceEditor((current) => {
+      let next = { ...current, [field]: value };
+      if (enablingCustomGroup) {
+        next = {
+          ...next,
+          customGroup: true,
+          customGroupEnabled: true,
+          capacity: DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
+          minParticipants: DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+          baseParticipants: Number.isFinite(Number(next.baseParticipants))
+            ? clamp(Math.round(Number(next.baseParticipants)), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS)
+            : DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS,
+          basePrice: customGroupBasePrice(next),
+          extraPersonPrice: customGroupExtraPersonPrice(next),
+        };
+      } else if (disablingCustomGroup) {
+        next = { ...next, customGroup: false, customGroupEnabled: false };
+      }
+      if (next.lessonFormat === "package") {
+        return {
+          ...next,
+          visibility: "private",
+          groupSchedule: undefined,
+          capacity: 1,
+          minParticipants: 1,
+          priceMode: "session",
+          packageAllowance: clamp(Math.round(Number(next.packageAllowance) || 5), 1, 100),
+          packageCoverageMode: next.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront",
+        };
+      }
+      if (next.lessonFormat === "group") {
+        const customGroup = hasCustomGroupFlag(next);
+        const capacity = customGroup
+          ? clamp(
+              Math.round(Number(next.capacity) || DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS),
+              DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+              DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
+            )
+          : clamp(Math.round(Number(next.capacity) || 2), 2, 24);
+        const minParticipants = customGroup
+          ? clamp(
+              Math.round(Number(next.minParticipants) || DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS),
+              DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+              capacity,
+            )
+          : clamp(Math.round(Number(next.minParticipants) || 2), 2, capacity);
+        return {
+          ...next,
+          customGroup: customGroup || false,
+          customGroupEnabled: customGroup || false,
+          groupSchedule: customGroup ? undefined : cleanGroupSchedule(next.groupSchedule, defaultGroupSchedule()),
+          capacity,
+          minParticipants,
+          priceMode: customGroup ? ("session" as PriceMode) : next.priceMode,
+          baseParticipants: customGroup
+            ? clamp(
+                Math.round(Number(next.baseParticipants) || DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS),
+                DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+                DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
+              )
+            : undefined,
+          basePrice: customGroup ? customGroupBasePrice(next) : undefined,
+          extraPersonPrice: customGroup ? customGroupExtraPersonPrice(next) : undefined,
+        };
+      }
+      return {
+        ...next,
+        groupSchedule: undefined,
+        customGroup: false,
+        customGroupEnabled: false,
+        baseParticipants: undefined,
+        basePrice: undefined,
+        extraPersonPrice: undefined,
+        capacity: clamp(Math.round(Number(next.capacity) || 1), 1, 24),
+        minParticipants: 1,
+        priceMode: "session" as PriceMode,
+      };
+    });
+  }
+
+  function updateServiceEditorFormat(format: ServiceEditorFormat) {
+    setServiceSaveState("idle");
+    const customGroup = format === "custom-group";
+    if (customGroup) {
+      setGroupMinimumInput(String(DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS));
+      setGroupMaximumInput(String(DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS));
+    }
+    setServiceEditor((current) => {
+      if (format === "package") {
+        return {
+          ...current,
+          lessonFormat: "package",
+          visibility: "private",
+          customGroup: false,
+          customGroupEnabled: false,
+          groupSchedule: undefined,
+          capacity: 1,
+          minParticipants: 1,
+          priceMode: "session",
+          baseParticipants: undefined,
+          basePrice: undefined,
+          extraPersonPrice: undefined,
+          packageAllowance: clamp(Math.round(Number(current.packageAllowance) || 5), 1, 100),
+          packageCoverageMode: current.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront",
+        };
+      }
+      if (format === "private") {
+        return {
+          ...current,
+          lessonFormat: "private",
+          customGroup: false,
+          customGroupEnabled: false,
+          groupSchedule: undefined,
+          capacity: clamp(Math.round(Number(current.capacity) || 1), 1, 24),
+          minParticipants: 1,
+          priceMode: "session",
+          baseParticipants: undefined,
+          basePrice: undefined,
+          extraPersonPrice: undefined,
+        };
+      }
+      if (!customGroup) {
+        return {
+          ...current,
+          lessonFormat: "group",
+          customGroup: false,
+          customGroupEnabled: false,
+          groupSchedule: cleanGroupSchedule(current.groupSchedule, defaultGroupSchedule()),
+          capacity: clamp(Math.round(Number(current.capacity) || 2), 2, 24),
+          minParticipants: clamp(Math.round(Number(current.minParticipants) || 2), 2, clamp(Math.round(Number(current.capacity) || 2), 2, 24)),
+          priceMode: current.priceMode === "per-person" ? "per-person" : "session",
+          baseParticipants: undefined,
+          basePrice: undefined,
+          extraPersonPrice: undefined,
+        };
+      }
+
+      return {
+        ...current,
+        lessonFormat: "group",
+        customGroup: true,
+        customGroupEnabled: true,
+        groupSchedule: undefined,
+        capacity: DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
+        minParticipants: DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+        priceMode: "session",
+        baseParticipants: customGroupBaseParticipants({
+          ...current,
+          lessonFormat: "group",
+          customGroup: true,
+          customGroupEnabled: true,
+          capacity: DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
+          minParticipants: DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+        }),
+        basePrice: customGroupBasePrice(current),
+        extraPersonPrice: customGroupExtraPersonPrice(current),
+      };
+    });
+  }
+
+  function updateBookingScreens(screenId: string, checked: boolean) {
+    setServiceSaveState("idle");
+    setServiceEditor((current) => {
+      const currentScreens = Array.isArray(current.bookingScreenIds) ? current.bookingScreenIds : ["main"];
+      const nextScreens = checked
+        ? Array.from(new Set([...currentScreens, screenId]))
+        : currentScreens.filter((candidate) => candidate !== screenId);
+      if (current.visibility === "public" && nextScreens.length === 0) {
+        setToast({ message: "Public lesson types need at least one booking screen." });
+        return current;
+      }
+      return { ...current, bookingScreenIds: nextScreens };
+    });
+  }
+
+  function serviceNumberEditorValue(field: ServiceNumberField, editor: ServiceEditor = serviceEditor) {
+    const limits = SERVICE_NUMBER_LIMITS[field];
+    const raw = Number(editor[field] ?? limits.fallback);
+    return Number.isFinite(raw) ? raw : limits.fallback;
+  }
+
+  function serviceNumberInputValue(field: ServiceNumberField) {
+    const draft = serviceNumberDrafts[field];
+    return draft !== undefined ? draft : String(serviceNumberEditorValue(field));
+  }
+
+  function resolveServiceNumberDraft(field: ServiceNumberField, draft: string, editor: ServiceEditor) {
+    const limits = SERVICE_NUMBER_LIMITS[field];
+    const parsed = parseDraftNumber(draft);
+    // A blank or invalid entry keeps the value the field already had.
+    if (parsed === null) return serviceNumberEditorValue(field, editor);
+    return clamp(Math.round(parsed), limits.min, limits.max);
+  }
+
+  function updateServiceNumberDraft(field: ServiceNumberField, raw: string) {
+    setServiceSaveState("idle");
+    setServiceNumberDrafts((current) => ({ ...current, [field]: raw }));
+  }
+
+  function commitServiceNumberDraft(field: ServiceNumberField) {
+    const draft = serviceNumberDrafts[field];
+    if (draft === undefined) return;
+    const value = resolveServiceNumberDraft(field, draft, serviceEditor);
+    setServiceNumberDrafts((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+    setServiceEditor((current) => ({ ...current, [field]: value }));
+  }
+
+  function applyServiceNumberDrafts(editor: ServiceEditor): ServiceEditor {
+    const entries = Object.entries(serviceNumberDrafts) as [ServiceNumberField, string][];
+    if (!entries.length) return editor;
+    const patch: Record<string, number> = {};
+    for (const [field, draft] of entries) {
+      patch[field] = resolveServiceNumberDraft(field, draft, editor);
+    }
+    setServiceNumberDrafts({});
+    return { ...editor, ...patch } as ServiceEditor;
+  }
+
+  function normalizeGroupDraftInputs(editor: ServiceEditor) {
+    if (editor.lessonFormat === "package") {
+      return editor;
+    }
+
+    if (editor.lessonFormat !== "group") {
+      // Private lessons share the same capacity input, so commit it here too.
+      const capacity = clamp(Math.round(parseDraftNumber(groupMaximumInput) ?? editor.capacity), 1, 24);
+      return { ...editor, capacity, minParticipants: 1 };
+    }
+
+    if (hasCustomGroupFlag(editor)) {
+      const capacity = clamp(Math.round(parseDraftNumber(groupMaximumInput) ?? editor.capacity), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS);
+      const minParticipants = clamp(Math.round(parseDraftNumber(groupMinimumInput) ?? editor.minParticipants), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, capacity);
+      return {
+        ...editor,
+        customGroup: true,
+        customGroupEnabled: true,
+        capacity,
+        minParticipants,
+        priceMode: "session" as PriceMode,
+        groupSchedule: undefined,
+        baseParticipants: clamp(Math.round(Number(editor.baseParticipants) || DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS), minParticipants, capacity),
+        basePrice: customGroupBasePrice(editor),
+        extraPersonPrice: customGroupExtraPersonPrice(editor),
+      };
+    }
+
+    const schedule = editor.groupSchedule ?? defaultGroupSchedule();
+    const occurrenceCount = clamp(
+      Math.round(parseDraftNumber(groupOccurrenceInput) ?? schedule.occurrenceCount),
+      1,
+      MAX_GROUP_OCCURRENCE_COUNT,
+    );
+    const capacity = clamp(Math.round(parseDraftNumber(groupMaximumInput) ?? editor.capacity), 2, 24);
+    const minParticipants = clamp(Math.round(parseDraftNumber(groupMinimumInput) ?? editor.minParticipants), 2, capacity);
+
+    return {
+      ...editor,
+      capacity,
+      minParticipants,
+      groupSchedule: cleanGroupSchedule({ ...schedule, occurrenceCount }, defaultGroupSchedule()),
+    };
+  }
+
+  function applyGroupDraftInputs() {
+    if (serviceEditor.lessonFormat === "package") return serviceEditor;
+    const next = normalizeGroupDraftInputs(serviceEditor);
+    setServiceEditor(next);
+    setGroupMaximumInput(String(next.capacity));
+    if (next.lessonFormat === "group") {
+      const nextSchedule = next.groupSchedule ?? defaultGroupSchedule();
+      setGroupOccurrenceInput(String(nextSchedule.occurrenceCount));
+      setGroupMinimumInput(String(next.minParticipants));
+    }
+    return next;
+  }
+
+  function updateGroupSchedule<K extends keyof GroupServiceSchedule>(field: K, value: GroupServiceSchedule[K]) {
+    setServiceSaveState("idle");
+    setServiceEditor((current) => ({
+      ...current,
+      groupSchedule: cleanGroupSchedule(
+        {
+          ...(current.groupSchedule ?? {}),
+          [field]: value,
+        },
+        defaultGroupSchedule(),
+      ),
+    }));
+  }
+
+  function editService(service: Service) {
+    setEditingServiceId(service.id);
+    setServiceNumberDrafts({});
+    setServiceEditor({
+      ...service,
+      customGroup: isCustomGroupService(service),
+      customGroupEnabled: isCustomGroupService(service),
+      description: service.description ?? "",
+      coachId: service.coachId || serviceScopeCoachId || defaultCoachId(coachProfiles),
+      locationId: service.locationId || defaultLocationId(locations),
+      lessonNote: service.lessonNote || service.location || "",
+      location: service.location ?? "",
+      bookingScreenIds: service.bookingScreenIds ?? ["main"],
+    });
+    setShowServiceEditor(true);
+    setServiceSaveState("idle");
+  }
+
+  function startNewService() {
+    setEditingServiceId(null);
+    setServiceNumberDrafts({});
+    setServiceEditor({
+      ...emptyServiceEditor(),
+      id: generateServiceDraftId(),
+      coachId: serviceScopeCoachId || defaultCoachId(coachProfiles),
+      locationId: defaultLocationId(locations),
+      lessonNote: "",
+      location: "",
+    });
+    setShowServiceEditor(true);
+    setServiceSaveState("idle");
+  }
+
+  async function updateAppointmentStatus(itemId: string, status: BookingStatus) {
+    if (status === "completed") {
+      void completeAppointmentSafely(itemId);
+      return;
+    }
+    const targetItem = items.find((item) => item.id === itemId && item.kind === "appointment");
+    if (!targetItem) return;
+    const previousItems = items;
+    const optimisticAt = new Date().toISOString();
+    const optimisticItem: CalendarItem = { ...targetItem, status, updatedAt: optimisticAt };
+    const optimisticItems = items.map((item) => (item.id === itemId ? optimisticItem : item));
+    setItems(optimisticItems);
+    setLessonCompleteErrors((current) => {
+      if (!current[itemId]) return current;
+      const { [itemId]: _removed, ...next } = current;
+      return next;
+    });
+    beginAdminSave("upsert_item");
+    try {
+      const response = await fetch("/api/calendar-state", {
+        method: "PUT",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ action: "upsert_item", item: optimisticItem }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data?.message || "Admin login expired. Sign in again before updating bookings.");
+      }
+      if (!response.ok || data?.ok === false || !data?.item) {
+        throw new Error(data?.message || "Status update could not be saved.");
+      }
+      const persistedItem = { ...optimisticItem, ...data.item } as CalendarItem;
+      const persistedItems = optimisticItems.map((item) => (item.id === itemId ? persistedItem : item));
+      setItems(persistedItems);
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+      lastPersistedCalendarItemsRef.current = persistedItems;
+      if (typeof data.updatedAt === "string") {
+        setCalendarStateVersion(data.updatedAt);
+      }
+      setToast({
+        message: `Lesson marked ${status.replace("_", "-")}.`,
+        undo: () => {
+          setItems(previousItems);
+          void reconcileUndoByUpsert(targetItem, previousItems);
+        },
+      });
+      scheduleAdminNotificationDebounceFlush();
+    } catch (error) {
+      setItems(previousItems);
+      setToast({
+        message: error instanceof Error ? error.message : "Status update could not be saved.",
+      });
+    } finally {
+      endAdminSave("upsert_item");
+    }
+  }
+
+  function viewSelectedClientProfile() {
+    if (!selectedPerson) return;
+    switchView("clients");
+    openClientProfile(selectedPerson);
+  }
+
+  function openClientReassign() {
+    setClientReassignSearch(selected?.kind === "appointment" ? selected.client ?? "" : "");
+    setClientReassignOpen(true);
+  }
+
+  function closeClientReassign() {
+    setClientReassignOpen(false);
+    setClientReassignSearch("");
+  }
+
+  function reassignSelectedAppointmentClient(client: ClientSummary) {
+    if (!selected || selected.kind !== "appointment") return;
+    const itemId = selected.id;
+    const targetItem = selected;
+    const previous = items;
+    // A synthetic appointment-<key> id (see the `clients` grouping above) is a
+    // display-only stand-in for a booking that was never linked to a real
+    // people row — never persist it as personId. The next save will resolve
+    // and stamp a real one (see personFromAppointment/stampResolvedPersonIds).
+    const linkedId = client.id.startsWith("appointment-") ? "" : client.id;
+    setItems((current) =>
+      current.map((item) =>
+        item.id === itemId && item.kind === "appointment"
+          ? {
+              ...item,
+              personId: linkedId,
+              client: client.name,
+              title: client.name,
+              email: client.email || item.email,
+              phone: client.phone || item.phone,
+            }
+          : item,
+      ),
+    );
+    closeClientReassign();
+    setToast({
+      message: `Linked this booking to ${client.name}.`,
+      undo: () => {
+        setItems(previous);
+        void reconcileUndoByUpsert(targetItem, previous);
+      },
+    });
+  }
+
+  function toggleClientMergeMode() {
+    setClientMergeMode((current) => !current);
+    setClientMergeSelection([]);
+    setClientMergeReview(null);
+    setClientMergeError("");
+  }
+
+  function toggleClientMergeSelection(client: ClientSummary) {
+    if (client.id.startsWith("appointment-")) return;
+    setClientMergeSelection((current) => {
+      if (current.includes(client.id)) return current.filter((id) => id !== client.id);
+      if (current.length >= 2) return current;
+      return [...current, client.id];
+    });
+  }
+
+  function openClientMergeReview() {
+    if (clientMergeSelection.length !== 2) return;
+    const [survivor, loser] = clientMergeSelection
+      .map((id) => clients.find((client) => client.id === id))
+      .filter((client): client is ClientSummary => Boolean(client));
+    if (!survivor || !loser) return;
+    setClientMergeError("");
+    setClientMergeReview({
+      survivor,
+      loser,
+      fields: {
+        name: survivor.name || loser.name,
+        email: survivor.email || loser.email,
+        phone: survivor.phone || loser.phone,
+        notes: survivor.notes || loser.notes,
+      },
+    });
+  }
+
+  function setClientMergeFieldChoice(field: ClientMergeFieldKey, value: string) {
+    setClientMergeReview((current) => (current ? { ...current, fields: { ...current.fields, [field]: value } } : current));
+  }
+
+  function closeClientMergeReview() {
+    setClientMergeReview(null);
+    setClientMergeError("");
+  }
+
+  async function confirmClientMerge() {
+    if (!clientMergeReview || clientMergeSaving) return;
+    const { survivor, loser, fields } = clientMergeReview;
+    setClientMergeSaving(true);
+    setClientMergeError("");
+    try {
+      const response = await fetch("/api/people/merge", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ survivorId: survivor.id, loserId: loser.id, fields }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data?.message || "Admin login expired. Sign in again before merging clients.");
+      }
+      if (!response.ok || data?.ok === false) {
+        throw new Error(data?.message || "Clients could not be merged.");
+      }
+      if (Array.isArray(data.people)) setPeople(data.people);
+      const mergedItemIds: string[] = Array.isArray(data.mergedItemIds) ? data.mergedItemIds : [];
+      if (mergedItemIds.length) {
+        setItems((current) =>
+          current.map((item) => (mergedItemIds.includes(item.id) ? { ...item, personId: survivor.id } : item)),
+        );
+      }
+      setToast({ message: `Merged ${loser.name || loser.email || "that client"} into ${data.person?.name || survivor.name}.` });
+      setClientMergeReview(null);
+      setClientMergeSelection([]);
+      setClientMergeMode(false);
+    } catch (error) {
+      setClientMergeError(error instanceof Error ? error.message : "Clients could not be merged.");
+    } finally {
+      setClientMergeSaving(false);
+    }
+  }
+
+  function logLessonCompleteDiagnostic(
+    label: string,
+    details: {
+      lessonId: string;
+      calendarId: string;
+      expectedStatus?: "completed";
+      expectedRevision?: string;
+      backendRevision?: string;
+      httpStatus?: number;
+      durationMs?: number;
+      stageTimings?: Record<string, number>;
+      conflictSource?: string;
+      backendMessage?: string;
+      backendError?: string;
+      backendDetails?: string;
+    },
+  ) {
+    console.warn("calendar_state:lesson_complete", {
+      action: "lesson_complete",
+      event: label,
+      lessonId: details.lessonId,
+      calendarId: details.calendarId,
+      expectedStatus: details.expectedStatus || "completed",
+      expectedRevision: details.expectedRevision || "",
+      backendRevision: details.backendRevision || "",
+      httpStatus: details.httpStatus || 0,
+      durationMs: details.durationMs || 0,
+      stageTimings: details.stageTimings || {},
+      conflictSource: details.conflictSource || "",
+      backendMessage: details.backendMessage || "",
+      backendError: details.backendError || "",
+      backendDetails: details.backendDetails || "",
+    });
+  }
+
+  function lessonCompleteDiagnosticText(diagnostic: LessonCompleteDiagnostic) {
+    return [
+      diagnostic.message,
+      `action: ${diagnostic.action}`,
+      `item id: ${diagnostic.itemId}`,
+      `expected status: ${diagnostic.expectedStatus}`,
+      `server response status: ${diagnostic.serverStatus || "n/a"}`,
+      diagnostic.backendMessage ? `backend message: ${diagnostic.backendMessage}` : "",
+      diagnostic.backendError ? `backend error: ${diagnostic.backendError}` : "",
+      diagnostic.backendDetails ? `backend details: ${diagnostic.backendDetails}` : "",
+      diagnostic.conflictSource ? `conflict source: ${diagnostic.conflictSource}` : "",
+      diagnostic.expectedRevision ? `expected revision: ${diagnostic.expectedRevision}` : "",
+      diagnostic.backendRevision ? `backend revision: ${diagnostic.backendRevision}` : "",
+    ].filter(Boolean).join(" · ");
+  }
+
+  function normalizeStageTimings(value: unknown): Record<string, number> {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const staged = value as Record<string, unknown>;
+    return Object.entries(staged).reduce<Record<string, number>>((acc, [key, raw]) => {
+      const valueNumber = Number(raw);
+      if (Number.isFinite(valueNumber)) {
+        acc[key] = valueNumber;
+      }
+      return acc;
+    }, {});
+  }
+
+  function lessonCompleteDiagnosticFromResponse(
+    itemId: string,
+    responseStatus: number,
+    data: LessonCompleteResponse,
+    fallbackMessage: string,
+    revisions: { expectedRevision?: string; backendRevision?: string; conflictSource?: string } = {},
+  ): LessonCompleteDiagnostic {
+    const backendMessage = workspaceDiagnosticValue(data.message);
+    const backendError = workspaceDiagnosticValue(data.error);
+    const backendDetails = workspaceDiagnosticValue(data.details || data.backendDetails);
+    return {
+      action: "lesson_complete",
+      itemId,
+      expectedStatus: "completed",
+      serverStatus: responseStatus,
+      message: backendMessage || backendError || fallbackMessage,
+      backendMessage,
+      backendError,
+      backendDetails,
+      conflictSource: revisions.conflictSource || workspaceDiagnosticValue(data.conflictSource),
+      expectedRevision: revisions.expectedRevision,
+      backendRevision: revisions.backendRevision || data.backendUpdatedAt || data.updatedAt || "",
+      durationMs: typeof data.durationMs === "number" && Number.isFinite(data.durationMs) ? data.durationMs : undefined,
+      stageTimings: normalizeStageTimings(data.stageTimings),
+    };
+  }
+
+  function lessonCompleteFailure(diagnostic: LessonCompleteDiagnostic) {
+    const error = new Error(diagnostic.message) as Error & { lessonCompleteDiagnostic?: LessonCompleteDiagnostic };
+    error.lessonCompleteDiagnostic = diagnostic;
+    return error;
+  }
+
+  async function requestCompleteAppointment(itemId: string, expectedRevision: string) {
+    const response = await fetch("/api/calendar-state", {
+      method: "PUT",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        action: "complete_lesson",
+        itemId,
+        updatedAt: expectedRevision,
+      }),
+    });
+    const data = (await response.json().catch(() => ({}))) as LessonCompleteResponse;
+    return { response, data };
+  }
+
+  async function completeAppointmentSafely(itemId: string) {
+    if (pendingLessonCompleteIdRef.current) return;
+    const completeSaveVersion = beginAdminSave("lesson_complete");
+    const timer = startDiagnosticTimer({
+      system: "booking",
+      action: "complete_lesson",
+      route: "PUT /api/calendar-state",
+      functionName: "completeAppointmentSafely",
+      expectedAccountId: activeAccountId,
+      objectType: "booking",
+      objectId: itemId,
+    });
+    const startAt = Date.now();
+    pendingLessonCompleteIdRef.current = itemId;
+    setPendingLessonCompleteId(itemId);
+    setLessonCompleteErrors((current) => {
+      if (!current[itemId]) return current;
+      const { [itemId]: _removed, ...next } = current;
+      return next;
+    });
+    setCalendarSaveStatus("saving");
+    setCalendarSaveError("");
+    const expectedRevision = typeof calendarStateVersion === "string" ? calendarStateVersion : "";
+    const targetItem = items.find((item) => item.id === itemId && item.kind === "appointment");
+    const calendarId = targetItem
+      ? resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles, coachAccount) ||
+        targetItem.locationId ||
+        targetItem.accountId ||
+        "unknown"
+      : "unknown";
+    if (!targetItem) {
+      const missingDiagnostic: LessonCompleteDiagnostic = {
+        action: "lesson_complete",
+        itemId,
+        expectedStatus: "completed",
+        expectedRevision,
+        serverStatus: 404,
+        message: "Lesson was not completed because it could not be found. Reload and try again.",
+        backendError: "missing_lesson",
+      };
+      logLessonCompleteDiagnostic("lesson_missing", {
+        lessonId: itemId,
+        calendarId,
+        expectedStatus: "completed",
+        expectedRevision,
+        httpStatus: 404,
+        conflictSource: "missing_lesson",
+      });
+      throw lessonCompleteFailure(missingDiagnostic);
+    }
+    const optimisticAt = new Date().toISOString();
+  const optimisticItems = items.map((item) =>
+      item.id === itemId && item.kind === "appointment"
+        ? {
+            ...item,
+            status: "completed" as BookingStatus,
+            completedAt: optimisticAt,
+            updatedAt: optimisticAt,
+          }
+        : item,
+    );
+    const previousItems = items;
+    setItems(optimisticItems);
+    logLessonCompleteDiagnostic("lesson_complete_started", {
+      lessonId: itemId,
+      calendarId,
+      expectedStatus: "completed",
+      expectedRevision,
+      httpStatus: 0,
+      backendMessage: "Submitting single-item completion request",
+      stageTimings: {
+        optimisticMs: Date.now() - startAt,
+      },
+    });
+    try {
+      const { response, data } = await requestCompleteAppointment(itemId, expectedRevision);
+      const durationMs = Date.now() - startAt;
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
+      }
+      if (!response.ok) {
+        const diagnostic = lessonCompleteDiagnosticFromResponse(
+          itemId,
+          response.status,
+          data,
+          "Lesson completion failed.",
+          {
+            expectedRevision,
+            backendRevision: data.backendUpdatedAt || data.updatedAt || "",
+            conflictSource: data.conflictSource || data.error,
+          },
+        );
+        logLessonCompleteDiagnostic("lesson_complete_failed", {
+          lessonId: itemId,
+          calendarId,
+          expectedStatus: "completed",
+          expectedRevision,
+          backendRevision: data.updatedAt || data.backendUpdatedAt || "",
+          httpStatus: response.status,
+          conflictSource: data.conflictSource || data.error,
+          backendMessage: diagnostic.backendMessage,
+          backendError: diagnostic.backendError,
+          backendDetails: diagnostic.backendDetails,
+          durationMs,
+          stageTimings: data.stageTimings,
+        });
+        throw lessonCompleteFailure(diagnostic);
+      }
+      if (data?.ok === false) {
+        const diagnostic = lessonCompleteDiagnosticFromResponse(
+          itemId,
+          response.status,
+          data,
+          data.message || "Lesson completion failed.",
+          {
+            expectedRevision,
+            backendRevision: data.updatedAt || data.backendUpdatedAt || "",
+          },
+        );
+        logLessonCompleteDiagnostic("lesson_complete_failed", {
+          lessonId: itemId,
+          calendarId,
+          expectedStatus: "completed",
+          expectedRevision,
+          backendRevision: data.updatedAt || data.backendUpdatedAt || "",
+          backendMessage: diagnostic.backendMessage,
+          backendError: diagnostic.backendError,
+          backendDetails: diagnostic.backendDetails,
+          httpStatus: response.status,
+          durationMs,
+          stageTimings: data.stageTimings,
+        });
+        throw lessonCompleteFailure(diagnostic);
+      }
+      if (!data.item || data.item.id !== itemId) {
+        const diagnostic = lessonCompleteDiagnosticFromResponse(
+          itemId,
+          response.status,
+          data,
+          "Lesson completion response was missing the updated item.",
+          {
+            expectedRevision,
+            backendRevision: data.updatedAt || data.backendUpdatedAt || "",
+          },
+        );
+        throw lessonCompleteFailure(diagnostic);
+      }
+      const persistedItem = {
+        ...targetItem,
+        ...data.item,
+        status: "completed" as BookingStatus,
+      } as CalendarItem;
+      const persistedItems = optimisticItems.map((item) => (item.id === itemId ? persistedItem : item));
+      setItems(persistedItems);
+      lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
+      lastPersistedCalendarItemsRef.current = persistedItems;
+      if (typeof data.updatedAt === "string") {
+        setCalendarStateVersion(data.updatedAt);
+      }
+      setCalendarSaveStatus("saved");
+      setCalendarSaveError("");
+      setCalendarFeedStatus("connected");
+      logLessonCompleteDiagnostic("lesson_complete_saved", {
+        lessonId: itemId,
+        calendarId,
+        expectedStatus: "completed",
+        expectedRevision,
+        backendRevision: data.updatedAt || "",
+        httpStatus: response.status,
+        durationMs,
+        stageTimings: data.stageTimings,
+      });
+      finishDiagnosticTimer(timer, "success", {
+        httpStatus: response.status,
+        details: {
+          action: "lesson_complete",
+          itemId,
+          expectedStatus: "completed",
+          serverStatus: response.status,
+          backendRevision: data.updatedAt || "",
+          stageTimings: data.stageTimings,
+          durationMs,
+        },
+      });
+      setToast({ message: "Lesson marked completed." });
+      window.setTimeout(() => {
+        if (calendarSaveVersionRef.current === completeSaveVersion) {
+          setCalendarSaveStatus((current) => (current === "saved" ? "idle" : current));
+        }
+      }, 1800);
+      window.setTimeout(() => void refreshNotificationHistory(), 1500);
+      scheduleAdminNotificationDebounceFlush();
+    } catch (error) {
+      const errorDiagnostic =
+        error instanceof Error
+          ? (error as Error & { lessonCompleteDiagnostic?: LessonCompleteDiagnostic }).lessonCompleteDiagnostic
+          : undefined;
+      const diagnostic =
+        errorDiagnostic ??
+        ({
+          action: "lesson_complete",
+          itemId,
+          expectedStatus: "completed",
+          expectedRevision,
+          serverStatus: 0,
+          message:
+            error instanceof Error && error.message.includes("Admin login")
+              ? error.message
+              : "Lesson was not completed because calendar data changed. Reload and try again.",
+        } satisfies LessonCompleteDiagnostic);
+      const message = diagnostic.message;
+      setItems(previousItems);
+      if (message.includes("Admin login")) {
+        setCalendarFeedStatus("offline");
+      }
+      finishDiagnosticTimer(timer, "failed", {
+        httpStatus: diagnostic.serverStatus || undefined,
+        errorCode: message.includes("Admin login") ? "AUTH_SESSION_MISSING" : "BOOKING_COMPLETE_FAILED",
+        humanMessage: lessonCompleteDiagnosticText(diagnostic),
+      });
+      setCalendarSaveStatus("failed");
+      setCalendarSaveError(lessonCompleteDiagnosticText(diagnostic));
+      setLessonCompleteErrors((current) => ({ ...current, [itemId]: diagnostic }));
+      setToast({ message });
+    } finally {
+      pendingLessonCompleteIdRef.current = "";
+      setPendingLessonCompleteId("");
+      endAdminSave("lesson_complete");
+    }
+  }
+
+  function cancelGroupSessionAttendee(itemId: string) {
+    if (!window.confirm("Cancel this attendee from the group session?")) return;
+    const appointment = items.find((item) => item.id === itemId && item.kind === "appointment");
+    if (!appointment) {
+      setToast({ message: "Could not find that attendee." });
+      return;
+    }
+    void updateAppointmentStatus(appointment.id, "cancelled");
+  }
+
+  // Editing a committed invoice is now an explicit action (Edit -> revise, which
+  // issues a fresh number and voids the original on save), so field edits no
+  // longer trigger an implicit void.
+  function markInvoiceDraftDirty() {}
+
+  function updateInvoiceDraft<K extends keyof InvoiceDraft>(field: K, value: InvoiceDraft[K]) {
+    if (field !== "lineSearch") markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function selectInvoiceCustomer(customer: Pick<Person, "name" | "email" | "phone">) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      payerName: customer.name,
+      payerEmail: customer.email,
+      payerPhone: customer.phone || "",
+    }));
+    setInvoiceCustomerSearch("");
+    setNewInvoiceCustomer(null);
+  }
+
+  // Open the inline "new customer" form, pre-filling from whatever was typed in
+  // the search box (an email goes in the email field, anything else in name).
+  function openNewInvoiceCustomer() {
+    const value = invoiceCustomerSearch.trim();
+    const isEmail = value.includes("@");
+    setNewInvoiceCustomer({
+      name: isEmail ? "" : value,
+      email: isEmail ? value : "",
+      phone: "",
+    });
+  }
+
+  function updateNewInvoiceCustomer(field: "name" | "email" | "phone", value: string) {
+    setNewInvoiceCustomer((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  // Create a real client in the people list (same endpoint as Clients / player
+  // profiles use), then select it as the invoice payer. No separate customer store.
+  async function saveNewInvoiceCustomer() {
+    if (!newInvoiceCustomer) return;
+    const name = newInvoiceCustomer.name.trim();
+    const email = newInvoiceCustomer.email.trim();
+    const phone = newInvoiceCustomer.phone.trim();
+    if (!name && !email) {
+      setToast({ message: "Add a name or email for the customer." });
+      return;
+    }
+    setNewInvoiceCustomerSaving(true);
+    try {
+      const response = await fetch("/api/people", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person: { name, email, phone, notes: "", caddyProfileUrl: "" } }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not add customer."));
+      const result = (await response.json()) as PeopleUpdateResult;
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
+      const created = result.person;
+      selectInvoiceCustomer({
+        name: created?.name || name,
+        email: created?.email || email,
+        phone: created?.phone || phone,
+      });
+      setToast({ message: `${created?.name || name || "Customer"} added to clients.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not add customer." });
+    } finally {
+      setNewInvoiceCustomerSaving(false);
+    }
+  }
+
+  function clearInvoiceCustomer() {
+    markInvoiceDraftDirty();
+    setInvoiceCustomerSearch(invoiceDraft.payerName || invoiceDraft.payerEmail);
+    setNewInvoiceCustomer(null);
+    setInvoiceDraft((current) => ({
+      ...current,
+      payerName: "",
+      payerEmail: "",
+      payerPhone: "",
+    }));
+  }
+
+  function updateInvoiceLine(id: string, field: keyof InvoiceLine, value: string | number) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lines: current.lines.map((line) => (line.id === id ? { ...line, [field]: value } : line)),
+    }));
+  }
+
+  // Per-line discount picker. `selection` is the dropdown value:
+  //   ""            -> no discount
+  //   "amount"/"percent" -> custom, the coach types the value below
+  //   "preset:<id>" -> a saved discount preset (its %/amount is copied in)
+  function setInvoiceLineDiscount(id: string, selection: string) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lines: current.lines.map((line) => {
+        if (line.id !== id) return line;
+        if (selection.startsWith("preset:")) {
+          const preset = discountPresets.find((candidate) => candidate.id === selection.slice("preset:".length));
+          if (!preset) return line;
+          return {
+            ...line,
+            discountKind: preset.discountType === "percentage" ? "percent" : "amount",
+            discountValue: preset.value,
+            discountPresetId: preset.id,
+          };
+        }
+        const kind: InvoiceLine["discountKind"] = selection === "amount" || selection === "percent" ? selection : "none";
+        return {
+          ...line,
+          discountKind: kind,
+          discountValue: kind === "none" ? 0 : line.discountValue,
+          discountPresetId: undefined,
+        };
+      }),
+    }));
+  }
+
+  // The <select> value that reflects a line's current discount state.
+  function invoiceLineDiscountSelection(line: InvoiceLine): string {
+    if (line.discountPresetId && discountPresets.some((preset) => preset.id === line.discountPresetId)) {
+      return `preset:${line.discountPresetId}`;
+    }
+    return line.discountKind === "amount" || line.discountKind === "percent" ? line.discountKind : "";
+  }
+
+  function addManualInvoiceLine() {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lines: [
+        ...current.lines,
+        {
+          id: `line-${Date.now()}`,
+          source: "manual",
+          description: current.lineSearch.trim(),
+          quantity: 1,
+          unitPrice: 0,
+          taxRate: invoiceSettings.taxRate,
+          discountKind: "none",
+          discountValue: 0,
+          discountAmount: 0,
+        },
+      ],
+      lineSearch: "",
+    }));
+    setShowInvoiceLinePicker(false);
+  }
+
+  function removeInvoiceLine(id: string) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lines: current.lines.filter((line) => line.id !== id),
+    }));
+  }
+
+  function addCatalogInvoiceLine(item: BillingCatalogItem) {
+    markInvoiceDraftDirty();
+    setInvoiceDraft((current) => ({
+      ...current,
+      lineSearch: "",
+      lines: [
+        ...current.lines.filter((line) => line.description.trim() || line.unitPrice > 0),
+        {
+          id: `line-${Date.now()}`,
+          source: item.kind === "package" ? "package_sale" : "catalog",
+          sourceId: item.sourceServiceId || item.id,
+          description: item.name,
+          quantity: 1,
+          unitPrice: item.price,
+          taxRate: item.taxRate,
+          discountKind: "none",
+          discountValue: 0,
+          discountAmount: 0,
+        },
+      ],
+    }));
+    setShowInvoiceLinePicker(false);
+  }
+
+  // --- Billing backend (billing-api.mts) --------------------------------
+  // Products/services, invoices, and booking-invoice dedupe all live behind
+  // /api/billing/*. This section fetches and pushes that state; it does not
+  // touch any booking/calendar endpoint or table.
+
+  async function fetchBillingProducts() {
+    const response = await fetch("/api/billing/products", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load products and services."));
+    const data = (await response.json()) as { products?: BillingCatalogItem[] };
+    setCatalogItems(Array.isArray(data.products) ? data.products : []);
+  }
+
+  async function fetchBillingDiscounts() {
+    const response = await fetch("/api/billing/discounts", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load discount presets."));
+    const data = (await response.json()) as { discounts?: BillingDiscount[] };
+    setDiscountPresets(Array.isArray(data.discounts) ? data.discounts : []);
+  }
+
+  async function fetchExpenseCategories() {
+    const response = await fetch("/api/billing/expense-categories", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load expense categories."));
+    const data = (await response.json()) as { categories?: BillingExpenseCategory[] };
+    setExpenseCategories(Array.isArray(data.categories) ? data.categories : []);
+  }
+
+  async function fetchExpenses(from = expenseRangeFrom, to = expenseRangeTo) {
+    setExpenseLoadState("loading");
+    try {
+      const params = new URLSearchParams();
+      if (from) params.set("from", from);
+      if (to) params.set("to", to);
+      const query = params.toString();
+      const response = await fetch(`/api/billing/expenses${query ? `?${query}` : ""}`, { credentials: "same-origin", cache: "no-store" });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load expenses."));
+      const data = (await response.json()) as { expenses?: BillingExpense[] };
+      setExpenses(Array.isArray(data.expenses) ? data.expenses : []);
+      setExpenseLoadState("loaded");
+    } catch (error) {
+      setExpenseLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load expenses." });
+    }
+  }
+
+  // Akahu bank feed → expense review. Money-out transactions the coach hasn't
+  // actioned yet; approving one creates a billing_expenses row, dismissing hides it.
+  async function fetchBankCandidates(limit = bankListLimit): Promise<BankExpenseCandidate[] | null> {
+    setBankCandidatesLoadState("loading");
+    try {
+      const response = await fetch("/api/akahu-expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ action: "list", limit }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return null;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load the bank feed."));
+      const data = (await response.json()) as { candidates?: BankExpenseCandidate[] };
+      const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+      setBankCandidates(candidates);
+      setBankCandidatesLoadState("ready");
+      return candidates;
+    } catch (error) {
+      console.error("fetchBankCandidates failed", error);
+      setBankCandidatesLoadState("error");
+      return null;
+    }
+  }
+
+  // Page in older candidates: bump the requested limit toward the server cap
+  // (1000) and refetch. The list is newest-first, so this reveals rows below
+  // the current window without pulling anything new from Akahu.
+  const bankListMax = 1000;
+  async function loadMoreBankCandidates() {
+    const next = Math.min(bankListMax, bankListLimit + 150);
+    setBankListLimit(next);
+    setBankListBusy(true);
+    try {
+      await fetchBankCandidates(next);
+    } finally {
+      setBankListBusy(false);
+    }
+  }
+
+  async function actionBankCandidate(candidate: BankExpenseCandidate, action: "approve" | "ignore") {
+    setBankCandidateBusy(candidate.id);
+    try {
+      const response = await fetch("/api/akahu-expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action, id: candidate.id }),
+      });
+      if (!response.ok) {
+        throw new Error(await readApiFailure(response, action === "approve" ? "Could not add the expense." : "Could not dismiss."));
+      }
+      setBankCandidates((prev) => prev.filter((row) => row.id !== candidate.id));
+      if (action === "approve") {
+        setToast({ message: `Added ${formatMoney(candidate.amount, "NZD")} expense.` });
+        void fetchExpenses();
+      }
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+    } finally {
+      setBankCandidateBusy(null);
+    }
+  }
+
+  // Bulk approve/dismiss every ticked candidate in a single request, then drop
+  // the actioned rows. A partial approve keeps the failed ids so they can be
+  // retried; a dismiss removes all sent ids.
+  async function actionBankSelected(action: "approve" | "ignore") {
+    const ids = visibleBankCandidates.filter((row) => selectedBankIds.has(row.id)).map((row) => row.id);
+    if (!ids.length) return;
+    setBankBulkBusy(true);
+    try {
+      const response = await fetch("/api/akahu-expenses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: action === "approve" ? "approveMany" : "ignoreMany", ids }),
+      });
+      if (!response.ok) {
+        throw new Error(
+          await readApiFailure(
+            response,
+            action === "approve" ? "Could not add the expenses." : "Could not dismiss the transactions.",
+          ),
+        );
+      }
+      const result = (await response.json()) as {
+        approved?: number;
+        dismissed?: number;
+        failed?: { id?: string }[];
+      };
+      const failedIds = new Set(
+        Array.isArray(result.failed) ? result.failed.map((row) => String(row?.id || "")).filter(Boolean) : [],
+      );
+      const removeIds = new Set(ids.filter((id) => !failedIds.has(id)));
+      setBankCandidates((prev) => prev.filter((row) => !removeIds.has(row.id)));
+      setSelectedBankIds((prev) => {
+        const next = new Set(prev);
+        removeIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      if (action === "approve") {
+        const added = typeof result.approved === "number" ? result.approved : removeIds.size;
+        setToast({
+          message: failedIds.size
+            ? `Added ${added} expense${added === 1 ? "" : "s"}; ${failedIds.size} couldn't be added.`
+            : `Added ${added} expense${added === 1 ? "" : "s"}.`,
+        });
+        void fetchExpenses();
+      } else {
+        const dismissed = typeof result.dismissed === "number" ? result.dismissed : removeIds.size;
+        setToast({ message: `Dismissed ${dismissed} transaction${dismissed === 1 ? "" : "s"}.` });
+      }
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+    } finally {
+      setBankBulkBusy(false);
+    }
+  }
+
+  // Pull older money-out transactions from Akahu (last N months). Akahu only
+  // holds ~12 months of history and each sync must fit the ~26s function
+  // timeout, so we walk backwards in 3-month windows; windows past Akahu's
+  // history limit error out and are skipped, not fatal. Afterwards we reload at
+  // the full cap so freshly-pulled older rows are actually visible, and report
+  // the resulting review total (not the raw fetched count, which double-counts
+  // transactions already imported).
+  async function backfillBankTransactions(months: number) {
+    setBankBackfillBusy(months);
+    try {
+      const now = new Date();
+      const windowMonths = 3;
+      let syncedOut = 0;
+      let skippedWindows = 0;
+      for (let startAgo = months; startAgo > 0; startAgo -= windowMonths) {
+        const endAgo = Math.max(0, startAgo - windowMonths);
+        const since = new Date(now);
+        since.setMonth(since.getMonth() - startAgo);
+        since.setHours(0, 0, 0, 0);
+        const until = new Date(now);
+        until.setMonth(until.getMonth() - endAgo);
+        until.setHours(0, 0, 0, 0);
+        try {
+          const response = await fetch("/api/akahu-sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              action: "sync",
+              since: since.toISOString(),
+              ...(endAgo > 0 ? { until: until.toISOString() } : {}),
+            }),
+          });
+          if (!response.ok) throw new Error(await readApiFailure(response, "Window failed."));
+          const data = (await response.json()) as { transactions?: { moneyOut?: number } };
+          syncedOut += data.transactions?.moneyOut ?? 0;
+        } catch (windowError) {
+          console.error("backfill window failed", windowError);
+          skippedWindows += 1;
+        }
+      }
+      // Reload at the cap so the just-pulled older transactions are visible and
+      // counted, not hidden below the newest-150 window.
+      setBankListLimit(bankListMax);
+      const after = await fetchBankCandidates(bankListMax);
+      const parts: string[] = [`Pulled ${syncedOut} money-out transaction${syncedOut === 1 ? "" : "s"} from the bank.`];
+      if (Array.isArray(after)) {
+        parts.push(`${after.length} now waiting for review.`);
+      }
+      if (skippedWindows) {
+        parts.push("Some older windows are past Akahu's ~12-month history — use CSV import for those.");
+      }
+      setToast({ message: parts.join(" ") });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not pull older transactions." });
+    } finally {
+      setBankBackfillBusy(null);
+    }
+  }
+
+  function toggleBankSelection(id: string) {
+    setSelectedBankIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Akahu payment reconciliation. Incoming bank credits matched to open invoices;
+  // confirming marks the invoice paid locally (never touches Stripe).
+  async function fetchReconcileCandidates() {
+    setReconcileLoadState("loading");
+    try {
+      const response = await fetch("/api/akahu-reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify({ action: "list" }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load bank payments."));
+      const data = (await response.json()) as { candidates?: ReconcileCandidate[] };
+      setReconcileCandidates(Array.isArray(data.candidates) ? data.candidates : []);
+      setReconcileLoadState("ready");
+    } catch (error) {
+      console.error("fetchReconcileCandidates failed", error);
+      setReconcileLoadState("error");
+    }
+  }
+
+  async function reconcilePayment(candidate: ReconcileCandidate, invoiceId: string) {
+    setReconcileBusy(candidate.id);
+    try {
+      const response = await fetch("/api/akahu-reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "apply", id: candidate.id, invoiceId }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not reconcile the payment."));
+      setReconcileCandidates((prev) => prev.filter((row) => row.id !== candidate.id));
+      setToast({ message: `Marked an invoice paid from ${formatMoney(candidate.amount, "NZD")}.` });
+      void fetchAllInvoices();
+      void fetchRecentInvoices();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+    } finally {
+      setReconcileBusy(null);
+    }
+  }
+
+  async function dismissReconcile(candidate: ReconcileCandidate) {
+    setReconcileBusy(candidate.id);
+    try {
+      const response = await fetch("/api/akahu-reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "ignore", id: candidate.id }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not dismiss."));
+      setReconcileCandidates((prev) => prev.filter((row) => row.id !== candidate.id));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+    } finally {
+      setReconcileBusy(null);
+    }
+  }
+
+  async function autoReconcileAll() {
+    setReconcileLoadState("loading");
+    try {
+      const response = await fetch("/api/akahu-reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "auto" }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not auto-match."));
+      const data = (await response.json()) as { autoApplied?: number };
+      setToast({ message: `Auto-matched ${data.autoApplied ?? 0} payment(s).` });
+      void fetchAllInvoices();
+      void fetchRecentInvoices();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+    } finally {
+      void fetchReconcileCandidates();
+    }
+  }
+
+  async function fetchRecentInvoices() {
+    const response = await fetch("/api/billing/invoices?limit=50", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load invoices."));
+    const data = (await response.json()) as { invoices?: BillingInvoiceRecord[] };
+    setRecentInvoices(Array.isArray(data.invoices) ? data.invoices : []);
+  }
+
+  // Full list for the Invoices tab. Pulls the max the endpoint allows (200),
+  // refetched each time the tab opens; the Dashboard's recentInvoices (50) stays
+  // independent so its "Recent invoices" card is unchanged.
+  async function fetchAllInvoices() {
+    setAllInvoicesLoadState("loading");
+    try {
+      const response = await fetch("/api/billing/invoices?limit=200", { credentials: "same-origin", cache: "no-store" });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load invoices."));
+      const data = (await response.json()) as { invoices?: BillingInvoiceRecord[] };
+      setAllInvoices(Array.isArray(data.invoices) ? data.invoices : []);
+      setAllInvoicesLoadState("ready");
+    } catch (error) {
+      console.error("fetchAllInvoices failed", error);
+      setAllInvoicesLoadState("error");
+    }
+  }
+
+  // Ask the server for the next number in the series. It derives it from the
+  // highest existing invoice for this prefix (including the Stripe imports), so
+  // the New Invoice preview and the number actually assigned on save both
+  // continue the same sequence. Best-effort: on failure the local
+  // prefix+counter fallback in `invoiceNumber` still shows a sensible preview.
+  async function refreshSuggestedInvoiceNumber() {
+    try {
+      const response = await fetch(
+        `/api/billing/invoices/next-number?prefix=${encodeURIComponent(invoiceSettings.prefix)}`,
+        { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } },
+      );
+      if (!response.ok) return;
+      const data = (await response.json().catch(() => null)) as { invoiceNumber?: string } | null;
+      if (data?.invoiceNumber) setSuggestedInvoiceNumber(String(data.invoiceNumber));
+    } catch {
+      /* keep the local fallback preview */
+    }
+  }
+
+  async function fetchInvoicedBookingIds(bookingIds: string[]) {
+    if (!bookingIds.length) {
+      setInvoicedBookingIds({});
+      return;
+    }
+    const response = await fetch(`/api/billing/booking-links?bookingIds=${bookingIds.map(encodeURIComponent).join(",")}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (!response.ok) return;
+    const data = (await response.json()) as { links?: Record<string, string> };
+    setInvoicedBookingIds(data.links || {});
+  }
+
+  async function loadBillingWorkspace() {
+    setBillingDataLoadState("loading");
+    try {
+      await Promise.all([fetchBillingProducts(), fetchRecentInvoices(), fetchBillingDiscounts(), fetchExpenseCategories(), fetchExpenses(), refreshSuggestedInvoiceNumber()]);
+      setBillingDataLoadState("loaded");
+    } catch (error) {
+      setBillingDataLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load billing data." });
+    }
+  }
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (billingDataLoadState !== "idle") return;
+    void loadBillingWorkspace();
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, billingDataLoadState]);
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+    // Only re-check when the set of completed bookings changes; invoice
+    // creation also refreshes this map directly after a successful pull.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, completedAppointments.map((item) => item.id).join(",")]);
+
+  async function fetchRevenueReport(period: "week" | "month" | "year") {
+    setRevenueLoadState("loading");
+    try {
+      const response = await fetch(`/api/billing/reports/revenue?period=${period}`, { credentials: "same-origin", cache: "no-store" });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load revenue."));
+      const data = (await response.json()) as BillingRevenueReport;
+      setRevenueReport(data);
+      setRevenueLoadState("loaded");
+    } catch (error) {
+      setRevenueLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load revenue." });
+    }
+  }
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    void fetchRevenueReport(revenuePeriod);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, revenuePeriod]);
+
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (expenseLoadState === "idle") return; // initial load already covered by loadBillingWorkspace()
+    void fetchExpenses(expenseRangeFrom, expenseRangeTo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, expenseRangeFrom, expenseRangeTo]);
+
+  async function fetchReportSummary(start: string, end: string, excluded: readonly string[] = reportExcludedCategories) {
+    if (!start || !end) return;
+    setReportLoadState("loading");
+    try {
+      const excludeParam = excluded.length ? `&excludeCategories=${encodeURIComponent(excluded.join(","))}` : "";
+      const response = await fetch(
+        `/api/billing/reports/summary?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}${excludeParam}`,
+        { credentials: "same-origin", cache: "no-store" },
+      );
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load reports."));
+      setReportSummary((await response.json()) as BillingReportSummary);
+      setReportLoadState("loaded");
+    } catch (error) {
+      setReportLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load reports." });
+    }
+  }
+
+  // Load (or reload) the report whenever the Reports tab is open and the
+  // effective range changes. Other tabs don't pay for the fetch.
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (billingSection !== "reports") return;
+    // Debounced so toggling several categories (each a whole-report refetch)
+    // coalesces into one request instead of firing per click.
+    const timer = setTimeout(
+      () => void fetchReportSummary(reportRange.start, reportRange.end, reportExcludedCategories),
+      250,
+    );
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isEmbedMode,
+    authStatus,
+    billingWorkspaceEnabled,
+    billingSection,
+    reportRange.start,
+    reportRange.end,
+    reportExcludedCategories,
+  ]);
+
+  // Preset click resolves to a concrete range immediately; "custom" waits for
+  // the coach to pick dates and press Apply (handleApplyReportCustomRange).
+  function handleSelectReportPreset(preset: ReportRangePreset) {
+    setReportPreset(preset);
+    if (preset === "custom") {
+      if (!reportCustomStart) setReportCustomStart(reportRange.start);
+      if (!reportCustomEnd) setReportCustomEnd(reportRange.end);
+      return;
+    }
+    const range = presetRange(preset, new Date());
+    if (range) setReportRange(range);
+  }
+
+  function handleApplyReportCustomRange() {
+    if (!reportCustomStart || !reportCustomEnd) return;
+    const [start, end] =
+      reportCustomStart <= reportCustomEnd ? [reportCustomStart, reportCustomEnd] : [reportCustomEnd, reportCustomStart];
+    setReportRange({ start, end });
+  }
+
+  // Toggle a section in/out of the report. Preserves the canonical section
+  // order so the display and exports stay consistent regardless of click order.
+  function handleToggleReportSection(key: ReportSectionKey) {
+    setReportSections((current) =>
+      current.includes(key)
+        ? current.filter((section) => section !== key)
+        : ALL_REPORT_SECTIONS.filter((section) => section === key || current.includes(section)),
+    );
+  }
+
+  // Toggle an expense category in/out of the by-category breakdown.
+  function handleToggleReportCategory(categoryId: string) {
+    setReportExcludedCategories((current) =>
+      current.includes(categoryId) ? current.filter((id) => id !== categoryId) : [...current, categoryId],
+    );
+  }
+
+  function handleExportReportCsv() {
+    if (!reportSummary) return;
+    const csv = buildReportCsv(reportSummary, reportSections, reportExcludedCategories);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `financial-report-${reportSummary.rangeStart}-to-${reportSummary.rangeEnd}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleDownloadReportPdf() {
+    if (!reportRange.start || !reportRange.end) return;
+    const sectionsParam = reportSections.length ? `&sections=${encodeURIComponent(reportSections.join(","))}` : "&sections=none";
+    const excludeParam = reportExcludedCategories.length
+      ? `&excludeCategories=${encodeURIComponent(reportExcludedCategories.join(","))}`
+      : "";
+    window.open(
+      `/api/billing/reports/summary/pdf?start=${encodeURIComponent(reportRange.start)}&end=${encodeURIComponent(reportRange.end)}${sectionsParam}${excludeParam}`,
+      "_blank",
+      "noopener",
+    );
+  }
+
+  const revenueMaxBucketTotal = Math.max(1, ...(revenueReport?.buckets.map((bucket) => bucket.total) ?? [0]));
+  const revenueYoyDeltaPct =
+    revenueReport && revenueReport.previousYearTotal !== null && revenueReport.previousYearTotal > 0
+      ? Math.round(((revenueReport.total - revenueReport.previousYearTotal) / revenueReport.previousYearTotal) * 100)
+      : null;
+
+  // Unpaid/overdue is derived here rather than trusting invoiceRecord.status
+  // alone: an invoice left as "sent" past its due date is just as overdue as
+  // one someone remembered to flip to "overdue". Draft/paid/void never count.
+  const todayDateValue = dateInputValue();
+  const overdueInvoiceRecords = recentInvoices.filter(
+    (invoiceRecord) =>
+      invoiceRecord.status !== "draft" &&
+      invoiceRecord.status !== "paid" &&
+      invoiceRecord.status !== "void" &&
+      Boolean(invoiceRecord.dueDate) &&
+      (invoiceRecord.dueDate as string) < todayDateValue,
+  );
+  const overdueInvoiceIds = new Set(overdueInvoiceRecords.map((invoiceRecord) => invoiceRecord.id));
+  const overdueTotalOutstanding = overdueInvoiceRecords.reduce(
+    (sum, invoiceRecord) => sum + Math.max(0, invoiceRecord.total - invoiceRecord.amountPaid),
+    0,
+  );
+
+  // The Invoices tab list, filtered client-side by the search box over invoice
+  // number / customer / status.
+  const invoiceSearchQuery = invoiceSearch.trim().toLowerCase();
+  const filteredInvoices = invoiceSearchQuery
+    ? allInvoices.filter((invoiceRecord) =>
+        [invoiceRecord.invoiceNumber, invoiceRecord.customerName, invoiceRecord.status].some((field) =>
+          String(field ?? "").toLowerCase().includes(invoiceSearchQuery),
+        ),
+      )
+    : allInvoices;
+  const overdueOldestDays = overdueInvoiceRecords.length
+    ? Math.max(...overdueInvoiceRecords.map((invoiceRecord) => isoDateDiffDays(todayDateValue, invoiceRecord.dueDate as string)))
+    : 0;
+
+  // Reconcile type filter: the distinct transaction-type labels present, and the
+  // candidates left after hiding the toggled-off types (internal transfers by
+  // default). Order chips by frequency so the common types lead.
+  const reconcileTypeCounts = reconcileCandidates.reduce<Record<string, number>>((counts, candidate) => {
+    const label = reconcileTypeLabel(candidate.type);
+    counts[label] = (counts[label] || 0) + 1;
+    return counts;
+  }, {});
+  const reconcileTypeOptions = Object.keys(reconcileTypeCounts).sort(
+    (a, b) => reconcileTypeCounts[b] - reconcileTypeCounts[a] || a.localeCompare(b),
+  );
+  const visibleReconcileCandidates = reconcileCandidates.filter(
+    (candidate) => !reconcileHiddenTypes.has(reconcileTypeLabel(candidate.type)),
+  );
+  function toggleReconcileType(label: string) {
+    setReconcileHiddenTypes((current) => {
+      const next = new Set(current);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
+
+  // Expense classification filter: the distinct suggested-category labels present
+  // in the bank candidates (most-common first) drive the Filter dropdown; picking
+  // one isolates that classification. Tick-box selection is scoped to what's
+  // visible, so a filtered-out row can never be bulk-actioned by mistake.
+  const bankCategoryCounts = bankCandidates.reduce<Record<string, number>>((counts, candidate) => {
+    const label = expenseCategoryLabel(candidate.suggestedCategory);
+    counts[label] = (counts[label] || 0) + 1;
+    return counts;
+  }, {});
+  const bankCategoryOptions = Object.keys(bankCategoryCounts).sort(
+    (a, b) => bankCategoryCounts[b] - bankCategoryCounts[a] || a.localeCompare(b),
+  );
+  const bankSearchQuery = bankSearch.trim().toLowerCase();
+  const filteredBankCandidates = bankCandidates.filter((candidate) => {
+    if (bankCategoryFilter && expenseCategoryLabel(candidate.suggestedCategory) !== bankCategoryFilter) return false;
+    if (bankDateFromFilter && candidate.date < bankDateFromFilter) return false;
+    if (bankDateToFilter && candidate.date > bankDateToFilter) return false;
+    if (bankSearchQuery && !bankCandidateSearchText(candidate).includes(bankSearchQuery)) return false;
+    return true;
+  });
+  const visibleBankCandidates = [...filteredBankCandidates].sort((a, b) => {
+    let result = 0;
+    if (bankSort.key === "amount") {
+      result = a.amount - b.amount;
+    } else if (bankSort.key === "date") {
+      result = a.date.localeCompare(b.date);
+    } else if (bankSort.key === "account") {
+      result = bankCandidateSortText(a.account).localeCompare(bankCandidateSortText(b.account));
+    } else {
+      result = bankCandidateSortText(a.description || a.merchant).localeCompare(
+        bankCandidateSortText(b.description || b.merchant),
+      );
+    }
+    if (result !== 0) return bankSort.direction === "asc" ? result : -result;
+    return b.date.localeCompare(a.date) || bankCandidateSortText(a.id).localeCompare(bankCandidateSortText(b.id));
+  });
+  const hasBankFilters = Boolean(bankCategoryFilter || bankDateFromFilter || bankDateToFilter || bankSearchQuery);
+  const selectedVisibleBankCount = visibleBankCandidates.filter((candidate) =>
+    selectedBankIds.has(candidate.id),
+  ).length;
+  const allVisibleBankSelected =
+    visibleBankCandidates.length > 0 && selectedVisibleBankCount === visibleBankCandidates.length;
+  function toggleSelectAllVisibleBank() {
+    setSelectedBankIds((current) => {
+      const next = new Set(current);
+      const visibleIds = visibleBankCandidates.map((candidate) => candidate.id);
+      const everyVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => next.has(id));
+      if (everyVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }
+  function toggleBankSort(key: BankExpenseSortKey) {
+    setBankSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+    }));
+  }
+  function bankSortAria(key: BankExpenseSortKey): "ascending" | "descending" | "none" {
+    if (bankSort.key !== key) return "none";
+    return bankSort.direction === "asc" ? "ascending" : "descending";
+  }
+  function bankSortMarker(key: BankExpenseSortKey) {
+    if (bankSort.key !== key) return "";
+    return bankSort.direction === "asc" ? " ↑" : " ↓";
+  }
+
+  // expenses is already server-filtered to expenseRangeFrom/expenseRangeTo;
+  // voided entries stay visible in the list (for the audit trail) but never
+  // count toward the total.
+  const activeExpenses = expenses.filter((expense) => !expense.voided);
+  const expenseTotalForRange = activeExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+
+  const expenseImportMappingByField = useMemo(
+    () => expenseMappingByField(expenseImportMapping),
+    [expenseImportMapping],
+  );
+
+  const expenseImportCandidates = useMemo(
+    () => buildExpenseCandidates(expenseImportRows, expenseImportMappingByField),
+    [expenseImportRows, expenseImportMappingByField],
+  );
+
+  const expenseImportSelectedCandidates = expenseImportCandidates.filter(
+    (candidate) => candidate.valid && !expenseImportExcluded[candidate.index],
+  );
+  const expenseImportSelectedTotal = expenseImportSelectedCandidates.reduce((sum, candidate) => sum + candidate.amount, 0);
+
+  function addCompletedBookingLine(item: CalendarItem) {
+    if (invoicedBookingIds[item.id]) {
+      setToast({ message: "This booking has already been invoiced." });
+      return;
+    }
+    const service = itemService(item, services);
+    markInvoiceDraftDirty();
+    // Pulling a lesson only adds the line item. The billing customer is never
+    // inferred from the lesson attendee - who attended isn't necessarily who pays
+    // (e.g. a junior's lesson billed to a parent), so the payer stays whatever was
+    // explicitly chosen from the client list.
+    setInvoiceDraft((current) => ({
+      ...current,
+      coachId: resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount),
+      lines: [
+        ...current.lines.filter((line) => line.description.trim() || line.unitPrice > 0),
+        {
+          id: `line-${Date.now()}`,
+          source: "booking_snapshot",
+          sourceId: item.id,
+          description: `${service?.name ?? item.title} - ${item.client || item.title}`,
+          quantity: 1,
+          unitPrice: service?.price ?? 0,
+          taxRate: invoiceSettings.taxRate,
+          discountKind: "none",
+          discountValue: 0,
+          discountAmount: 0,
+        },
+      ],
+    }));
+    setShowInvoiceLinePicker(false);
+    setBillingSection("new-invoice");
+  }
+
+  async function addCatalogItem() {
+    const name = catalogEditor.name.trim();
+    if (!name) {
+      setToast({ message: "Name the product or service before adding it." });
+      return;
+    }
+    const payload = {
+      name,
+      kind: catalogEditor.kind,
+      description: catalogEditor.description.trim(),
+      price: Math.max(0, Math.round(Number(catalogEditor.price) || 0)),
+      taxRate: clamp(Number(catalogEditor.taxRate) || 0, 0, 30),
+      active: true,
+    };
+    const isUpdate = Boolean(catalogEditor.id);
+    setCatalogSaveState("saving");
+    try {
+      const response = await fetch(isUpdate ? `/api/billing/products/${encodeURIComponent(catalogEditor.id)}` : "/api/billing/products", {
+        method: isUpdate ? "PUT" : "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not save product or service."));
+      const data = (await response.json()) as { product?: BillingCatalogItem };
+      const saved = data.product;
+      if (!saved) throw new Error("Save response did not return the product.");
+      setCatalogItems((current) =>
+        current.some((candidate) => candidate.id === saved.id)
+          ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
+          : [...current, saved],
+      );
+      setCatalogEditor({ id: "", kind: "service", name: "", description: "", price: 0, taxRate: invoiceSettings.taxRate });
+      setToast({ message: `${saved.name} ${isUpdate ? "updated" : "added"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save product or service." });
+    } finally {
+      setCatalogSaveState("idle");
+    }
+  }
+
+  async function addDiscountPreset() {
+    const name = discountEditor.name.trim();
+    if (!name) {
+      setToast({ message: "Name the discount before saving it." });
+      return;
+    }
+    const payload = {
+      name,
+      discountType: discountEditor.discountType,
+      value: Math.max(0, Number(discountEditor.value) || 0),
+      couponCode: discountEditor.couponCode.trim(),
+      active: true,
+    };
+    const isUpdate = Boolean(discountEditor.id);
+    setDiscountSaveState("saving");
+    try {
+      const response = await fetch(isUpdate ? `/api/billing/discounts/${encodeURIComponent(discountEditor.id)}` : "/api/billing/discounts", {
+        method: isUpdate ? "PUT" : "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { discount?: BillingDiscount; error?: string; message?: string } | null;
+      if (!response.ok) {
+        if (data?.error === "COUPON_CODE_CONFLICT") {
+          throw new Error(data.message || "That coupon code is already in use.");
+        }
+        throw new Error(data?.message || (await readApiFailure(response, "Could not save discount.")));
+      }
+      const saved = data?.discount;
+      if (!saved) throw new Error("Save response did not return the discount.");
+      setDiscountPresets((current) =>
+        current.some((candidate) => candidate.id === saved.id)
+          ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
+          : [...current, saved],
+      );
+      setDiscountEditor({ id: "", name: "", discountType: "percentage", value: 10, couponCode: "" });
+      setToast({ message: `${saved.name} ${isUpdate ? "updated" : "added"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save discount." });
+    } finally {
+      setDiscountSaveState("idle");
+    }
+  }
+
+  async function toggleDiscountActive(discount: BillingDiscount) {
+    try {
+      const response = await fetch(`/api/billing/discounts/${encodeURIComponent(discount.id)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          name: discount.name,
+          discountType: discount.discountType,
+          value: discount.value,
+          couponCode: discount.couponCode,
+          active: !discount.active,
+        }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update discount."));
+      const data = (await response.json()) as { discount?: BillingDiscount };
+      const saved = data.discount;
+      if (!saved) return;
+      setDiscountPresets((current) => current.map((candidate) => (candidate.id === saved.id ? saved : candidate)));
+      if (!saved.active && selectedDiscountPresetId === saved.id) setSelectedDiscountPresetId("");
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update discount." });
+    }
+  }
+
+  function applyDiscountPreset(presetId: string) {
+    setSelectedDiscountPresetId(presetId);
+    if (!presetId) return;
+    const preset = discountPresets.find((candidate) => candidate.id === presetId);
+    if (!preset) return;
+    markInvoiceDraftDirty();
+    const amount =
+      preset.discountType === "percentage"
+        ? Math.round(((invoiceLineSubtotal * preset.value) / 100) * 100) / 100
+        : Math.round(preset.value * 100) / 100;
+    setInvoiceDraft((current) => ({
+      ...current,
+      discountLabel: preset.name,
+      discountAmount: amount,
+    }));
+    // Applying a preset is an atomic "set" - collapse straight to the plain line.
+    setDiscountEditing(false);
+  }
+
+  function clearInvoiceDiscount() {
+    markInvoiceDraftDirty();
+    setSelectedDiscountPresetId("");
+    setDiscountEditing(false);
+    setInvoiceDraft((current) => ({ ...current, discountLabel: "", discountAmount: 0 }));
+  }
+
+  async function addExpenseCategory() {
+    const name = expenseCategoryEditor.name.trim();
+    if (!name) {
+      setToast({ message: "Name the category before saving it." });
+      return;
+    }
+    const isUpdate = Boolean(expenseCategoryEditor.id);
+    setExpenseCategorySaveState("saving");
+    try {
+      const response = await fetch(
+        isUpdate ? `/api/billing/expense-categories/${encodeURIComponent(expenseCategoryEditor.id)}` : "/api/billing/expense-categories",
+        {
+          method: isUpdate ? "PUT" : "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ name, active: true }),
+        },
+      );
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { category?: BillingExpenseCategory; error?: string; message?: string } | null;
+      if (!response.ok) {
+        if (data?.error === "CATEGORY_NAME_CONFLICT") throw new Error(data.message || "That category name is already in use.");
+        throw new Error(data?.message || (await readApiFailure(response, "Could not save category.")));
+      }
+      const saved = data?.category;
+      if (!saved) throw new Error("Save response did not return the category.");
+      setExpenseCategories((current) =>
+        current.some((candidate) => candidate.id === saved.id)
+          ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
+          : [...current, saved],
+      );
+      setExpenseCategoryEditor({ id: "", name: "" });
+      setToast({ message: `${saved.name} ${isUpdate ? "updated" : "added"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save category." });
+    } finally {
+      setExpenseCategorySaveState("idle");
+    }
+  }
+
+  async function toggleExpenseCategoryActive(category: BillingExpenseCategory) {
+    try {
+      const response = await fetch(`/api/billing/expense-categories/${encodeURIComponent(category.id)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ name: category.name, active: !category.active }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update category."));
+      const data = (await response.json()) as { category?: BillingExpenseCategory };
+      const saved = data.category;
+      if (!saved) return;
+      setExpenseCategories((current) => current.map((candidate) => (candidate.id === saved.id ? saved : candidate)));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update category." });
+    }
+  }
+
+  function resetExpenseDraft() {
+    setExpenseDraft({ id: "", description: "", vendor: "", amount: 0, expenseDate: dateInputValue(), categoryId: "", note: "" });
+  }
+
+  async function handleExpenseCsvFile(file: File) {
+    const text = await file.text();
+    const parsedRows = parseExpenseCsv(text);
+    if (!parsedRows.length) {
+      setToast({ message: "That file doesn't look like a CSV." });
+      return;
+    }
+    const headers = expenseImportHasHeader ? parsedRows[0] : parsedRows[0].map((_, index) => `Column ${index + 1}`);
+    const bodyRows = expenseImportHasHeader ? parsedRows.slice(1) : parsedRows;
+    const mapping: Record<number, ExpenseCsvField> = {};
+    headers.forEach((header, index) => {
+      mapping[index] = expenseImportHasHeader ? inferExpenseCsvField(header) : "";
+    });
+    setExpenseImportFileName(file.name);
+    setExpenseImportHeaders(headers);
+    setExpenseImportRows(bodyRows);
+    setExpenseImportMapping(mapping);
+    setExpenseImportExcluded({});
+    setExpenseImportResult(null);
+  }
+
+  function resetExpenseCsvImport() {
+    setExpenseImportFileName("");
+    setExpenseImportHeaders([]);
+    setExpenseImportRows([]);
+    setExpenseImportMapping({});
+    setExpenseImportExcluded({});
+    setExpenseImportResult(null);
+  }
+
+  async function submitExpenseCsvImport() {
+    const rows = expenseImportSelectedCandidates.map((candidate) => ({
+      description: candidate.description,
+      amount: candidate.amount,
+      expenseDate: candidate.date,
+      categoryId: expenseImportCategoryId || undefined,
+      reference: candidate.reference || undefined,
+    }));
+    if (!rows.length) {
+      setToast({ message: "No valid rows to import - check your column mapping." });
+      return;
+    }
+    setExpenseImportState("importing");
+    try {
+      const response = await fetch("/api/billing/expenses/import", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ expenses: rows }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not import expenses."));
+      const data = (await response.json()) as { imported: number; duplicate: number; skipped: number; failed: number };
+      setExpenseImportResult(data);
+      setToast({
+        message: `${data.imported} imported, ${data.duplicate} already imported${data.failed ? `, ${data.failed} failed` : ""}.`,
+      });
+      await fetchExpenses();
+      if (data.imported > 0) {
+        setExpenseImportHeaders([]);
+        setExpenseImportRows([]);
+        setExpenseImportFileName("");
+      }
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not import expenses." });
+    } finally {
+      setExpenseImportState("idle");
+    }
+  }
+
+  async function saveExpenseDraft() {
+    const description = expenseDraft.description.trim();
+    if (!description) {
+      setToast({ message: "Describe the expense before saving it." });
+      return;
+    }
+    const isUpdate = Boolean(expenseDraft.id);
+    setExpenseSaveState("saving");
+    try {
+      const response = await fetch(isUpdate ? `/api/billing/expenses/${encodeURIComponent(expenseDraft.id)}` : "/api/billing/expenses", {
+        method: isUpdate ? "PUT" : "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          description,
+          vendor: expenseDraft.vendor.trim(),
+          amount: Math.max(0, Number(expenseDraft.amount) || 0),
+          expenseDate: expenseDraft.expenseDate,
+          categoryId: expenseDraft.categoryId || null,
+          note: expenseDraft.note.trim(),
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { expense?: BillingExpense; message?: string } | null;
+      if (!response.ok) throw new Error(data?.message || (await readApiFailure(response, "Could not save expense.")));
+      const saved = data?.expense;
+      if (!saved) throw new Error("Save response did not return the expense.");
+      setExpenses((current) =>
+        current.some((candidate) => candidate.id === saved.id)
+          ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
+          : [saved, ...current],
+      );
+      resetExpenseDraft();
+      setToast({ message: `Expense ${isUpdate ? "updated" : "logged"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save expense." });
+    } finally {
+      setExpenseSaveState("idle");
+    }
+  }
+
+  function editExpense(expense: BillingExpense) {
+    setExpenseDraft({
+      id: expense.id,
+      description: expense.description,
+      vendor: expense.vendor,
+      amount: expense.amount,
+      expenseDate: expense.expenseDate,
+      categoryId: expense.categoryId,
+      note: expense.note,
+    });
+  }
+
+  async function toggleExpenseVoided(expense: BillingExpense) {
+    try {
+      const response = await fetch(`/api/billing/expenses/${encodeURIComponent(expense.id)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          description: expense.description,
+          vendor: expense.vendor,
+          amount: expense.amount,
+          expenseDate: expense.expenseDate,
+          categoryId: expense.categoryId || null,
+          note: expense.note,
+          voided: !expense.voided,
+        }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update expense."));
+      const data = (await response.json()) as { expense?: BillingExpense };
+      const saved = data.expense;
+      if (!saved) return;
+      setExpenses((current) => current.map((candidate) => (candidate.id === saved.id ? saved : candidate)));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update expense." });
+    }
+  }
+
+  function openPullRangeEdit() {
+    // Seed the inputs with the current effective (smart) values so editing starts
+    // from those rather than blank date fields.
+    if (!pullRangeFrom) setPullRangeFrom(effectivePullFrom);
+    if (!pullRangeTo) setPullRangeTo(effectivePullTo);
+    setPullRangeEditing(true);
+  }
+
+  function resetPullRange() {
+    setPullRangeFrom("");
+    setPullRangeTo("");
+    setPullRangeEditing(false);
+  }
+
+  // Open the invoice editor on a fresh, blank invoice.
+  function startNewInvoice() {
+    resetInvoiceDraft();
+    setBillingSection("new-invoice");
+  }
+
+  // Start a fresh, editable invoice.
+  function resetInvoiceDraft() {
+    setInvoiceDraft(emptyInvoiceDraft(invoiceSettings, activeCoachId));
+    setInvoiceCustomerSearch("");
+    setShowInvoiceLinePicker(false);
+    setActiveInvoiceId("");
+    setEditingInvoiceNumber("");
+    setOpenedInvoiceStatus("");
+    setOpenedInvoiceSentAt("");
+    setReviseSourceId("");
+    setInvoiceEditing(true);
+    setSelectedDiscountPresetId("");
+    setDiscountEditing(false);
+    setDatesEditing(false);
+    setNewInvoiceCustomer(null);
+  }
+
+  function billingSourceType(source: InvoiceLineSource): "booking" | "product" | "manual" {
+    if (source === "booking_snapshot") return "booking";
+    if (source === "catalog" || source === "package_sale") return "product";
+    return "manual";
+  }
+
+  // Reverse of billingSourceType, for loading a saved invoice back into the editor.
+  function lineSourceFromServer(sourceType: unknown): InvoiceLineSource {
+    if (sourceType === "booking") return "booking_snapshot";
+    if (sourceType === "product") return "catalog";
+    return "manual";
+  }
+
+  // Maps a persisted invoice (GET /api/billing/invoices/:id) back into the
+  // editor's in-progress draft shape so a saved draft can be re-opened and edited.
+  function invoiceRecordToDraft(invoice: {
+    customerName?: string;
+    customerEmail?: string;
+    customerPhone?: string;
+    issueDate?: string;
+    dueDate?: string | null;
+    reference?: string;
+    discountLabel?: string;
+    discountTotal?: number;
+    customerNote?: string;
+    items?: Array<Record<string, unknown>>;
+  }): InvoiceDraft {
+    return {
+      ...emptyInvoiceDraft(invoiceSettings, activeCoachId),
+      payerName: invoice.customerName || "",
+      payerEmail: invoice.customerEmail || "",
+      payerPhone: invoice.customerPhone || "",
+      invoiceDate: invoice.issueDate || dateInputValue(),
+      dueDate: invoice.dueDate || "",
+      reference: invoice.reference || "",
+      discountLabel: invoice.discountLabel || "",
+      discountAmount: Number(invoice.discountTotal) || 0,
+      message: invoice.customerNote || "",
+      lineSearch: "",
+      taxInclusive: Boolean((invoice as { taxInclusive?: boolean }).taxInclusive),
+      lines: (invoice.items || []).map((item) => ({
+        id: String(item.id || `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+        source: lineSourceFromServer(item.sourceType),
+        sourceId: item.sourceId ? String(item.sourceId) : undefined,
+        description: String(item.description || ""),
+        quantity: Number(item.quantity) || 0,
+        unitPrice: Number(item.unitPrice) || 0,
+        taxRate: Number(item.taxRate) || 0,
+        // The backend only stores the resolved amount; a re-opened invoice shows
+        // it as a fixed amount discount (the % it may have started as is lost).
+        discountKind: (Number(item.discountAmount) || 0) > 0 ? "amount" : "none",
+        discountValue: Number(item.discountAmount) || 0,
+        discountAmount: Number(item.discountAmount) || 0,
+      })),
+    };
+  }
+
+  // Open an invoice from the Recent invoices list. Drafts open editable (PUT on
+  // save); already-issued invoices open in the confirmed/send state (read + Send/
+  // Download/Mark paid), since their contents are committed.
+  async function openInvoiceForEdit(record: BillingInvoiceRecord) {
+    try {
+      const response = await fetch(`/api/billing/invoices/${encodeURIComponent(record.id)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { invoice?: Record<string, unknown> } | null;
+      if (!response.ok || !data?.invoice) {
+        throw new Error(await readApiFailure(response, "Could not open invoice."));
+      }
+      const invoice = data.invoice as Record<string, unknown>;
+      setInvoiceDraft(invoiceRecordToDraft(invoice));
+      setInvoiceCustomerSearch("");
+      setShowInvoiceLinePicker(false);
+      setSelectedDiscountPresetId("");
+      setDiscountEditing(false);
+      setDatesEditing(false);
+      setNewInvoiceCustomer(null);
+      setReviseSourceId("");
+      setActiveInvoiceId(String(invoice.id || record.id));
+      setEditingInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
+      setOpenedInvoiceStatus((invoice.status as BillingInvoiceStatus) || "draft");
+      setOpenedInvoiceSentAt(typeof invoice.sentAt === "string" ? invoice.sentAt : "");
+      // Open read-only (a view for drafts, a preview for committed invoices); the
+      // Edit button unlocks it.
+      setInvoiceEditing(false);
+      setBillingSection("new-invoice");
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not open invoice." });
+    }
+  }
+
+  // Shared request body for create/update from the current draft.
+  function invoiceApiBody() {
+    const billableLines = invoiceDraft.lines.filter((line) => line.description.trim() && Number(line.unitPrice) > 0);
+    return {
+      hasLines: billableLines.length > 0,
+      body: {
+        customerName: invoiceDraft.payerName.trim(),
+        customerEmail: invoiceDraft.payerEmail.trim(),
+        customerPhone: invoiceDraft.payerPhone.trim(),
+        issueDate: invoiceDraft.invoiceDate,
+        dueDate: invoiceDraft.dueDate,
+        currency: invoiceSettings.currency,
+        reference: invoiceDraft.reference,
+        customerNote: invoiceDraft.message,
+        discountLabel: invoiceDraft.discountLabel,
+        discountAmount: invoiceDraft.discountAmount,
+        taxInclusive: invoiceDraft.taxInclusive,
+        items: billableLines.map((line) => ({
+          sourceType: billingSourceType(line.source),
+          sourceId: line.sourceId,
+          description: line.description,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          taxRate: line.taxRate,
+          // Resolve percent/preset discounts to a currency amount for storage.
+          discountAmount: lineDiscountAmount(line),
+        })),
+      },
+    };
+  }
+
+  async function patchInvoiceStatus(id: string, status: BillingInvoiceStatus, extra: Record<string, unknown> = {}) {
+    const response = await fetch(`/api/billing/invoices/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ status, ...extra }),
+    });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      throw new Error("Admin login required");
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, `Could not mark invoice ${status}.`));
+  }
+
+  async function sendInvoiceById(id: string) {
+    const response = await fetch(`/api/billing/invoices/${encodeURIComponent(id)}/send`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({}),
+    });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      throw new Error("Admin login required");
+    }
+    const data = (await response.json().catch(() => null)) as { recipient?: string; message?: string } | null;
+    if (!response.ok) throw new Error(data?.message || (await readApiFailure(response, "Could not send invoice.")));
+    return data?.recipient || "";
+  }
+
+  // Save the current invoice. "draft" keeps it a draft; "publish" commits it
+  // (status sent, not emailed); "publish-send" also emails the PDF. An existing
+  // draft is updated in place; a new invoice or a revision creates a fresh one
+  // (and, when revising a committed invoice, voids the original).
+  async function commitInvoice(mode: "draft" | "publish" | "publish-send") {
+    if (!invoiceDraft.payerName.trim()) {
+      setToast({ message: "Choose or enter a payer first." });
+      return;
+    }
+    const { hasLines, body } = invoiceApiBody();
+    if (!hasLines) {
+      setToast({ message: "Add at least one invoice line first." });
+      return;
+    }
+    if (mode === "publish-send" && !invoiceDraft.payerEmail.trim()) {
+      setToast({ message: "Add a customer email to send the invoice." });
+      return;
+    }
+    setInvoiceIssueState("saving");
+    try {
+      let id = activeInvoiceId;
+      let number = editingInvoiceNumber || invoiceNumber;
+      if (editingExistingDraft) {
+        const response = await fetch(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}`, {
+          method: "PUT",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify(body),
+        });
+        if (response.status === 401) {
+          setAuthStatus("guest");
+          throw new Error("Admin login required");
+        }
+        const data = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
+        if (!response.ok) {
+          if (data?.error === "BOOKING_ALREADY_INVOICED") void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+          throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
+        }
+      } else {
+        number = invoiceNumber;
+        const response = await fetch("/api/billing/invoices", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          // autoNumber: the server assigns the real next-in-series number
+          // atomically at insert time (so two quick saves, or a Stripe import
+          // landing between preview and save, can't collide). invoiceNumber is
+          // still sent as the preview/fallback.
+          body: JSON.stringify({
+            autoNumber: true,
+            invoicePrefix: invoiceSettings.prefix,
+            invoiceNumber: number,
+            status: "draft",
+            ...body,
+          }),
+        });
+        if (response.status === 401) {
+          setAuthStatus("guest");
+          throw new Error("Admin login required");
+        }
+        const data = (await response.json().catch(() => null)) as { id?: string; invoiceNumber?: string; error?: string; message?: string } | null;
+        if (!response.ok) {
+          if (data?.error === "BOOKING_ALREADY_INVOICED") void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+          throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
+        }
+        id = data?.id || "";
+        // Use the number the server actually assigned (headings/toasts/PDF all
+        // key off `number`), then refresh the preview for the next new invoice.
+        if (data?.invoiceNumber) number = String(data.invoiceNumber);
+        void refreshSuggestedInvoiceNumber();
+        if (reviseSourceId) await patchInvoiceStatus(reviseSourceId, "void").catch(() => {});
+      }
+      if (!id) throw new Error("Could not save invoice.");
+
+      if (mode !== "draft") await patchInvoiceStatus(id, "sent");
+      let sentAt = "";
+      let recipient = "";
+      if (mode === "publish-send") {
+        recipient = await sendInvoiceById(id);
+        sentAt = new Date().toISOString();
+      }
+
+      setActiveInvoiceId(id);
+      setEditingInvoiceNumber(number);
+      setOpenedInvoiceStatus(mode === "draft" ? "draft" : "sent");
+      setOpenedInvoiceSentAt(sentAt);
+      setReviseSourceId("");
+      setInvoiceEditing(false);
+      setToast({
+        message:
+          mode === "draft"
+            ? `${number} saved as a draft.`
+            : mode === "publish"
+              ? `${number} published.`
+              : `${number} published and emailed${recipient ? ` to ${recipient}` : ""}.`,
+      });
+      void fetchRecentInvoices();
+      void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save invoice." });
+    } finally {
+      setInvoiceIssueState("idle");
+    }
+  }
+
+  // View -> edit. A draft edits in place; a committed invoice is revised: its
+  // content loads into a fresh-numbered invoice and the original is voided on save.
+  function editOpenedInvoice() {
+    if (openedInvoiceStatus === "draft") {
+      setInvoiceEditing(true);
+      return;
+    }
+    setReviseSourceId(activeInvoiceId);
+    setActiveInvoiceId("");
+    setEditingInvoiceNumber(invoiceNumber);
+    setOpenedInvoiceStatus("");
+    setOpenedInvoiceSentAt("");
+    setInvoiceEditing(true);
+    setToast({ message: `Editing as a new invoice (${invoiceNumber}); the original is voided when you save.` });
+  }
+
+  // Email a committed invoice's PDF from the preview.
+  async function sendOpenedInvoice() {
+    if (!activeInvoiceId) {
+      setToast({ message: "Save the invoice before sending." });
+      return;
+    }
+    if (!invoiceDraft.payerEmail.trim()) {
+      setToast({ message: "Add a customer email before sending." });
+      return;
+    }
+    setInvoiceSendState("sending");
+    try {
+      const recipient = await sendInvoiceById(activeInvoiceId);
+      setOpenedInvoiceStatus("sent");
+      setOpenedInvoiceSentAt(new Date().toISOString());
+      setToast({ message: `${activeInvoiceNumber} emailed${recipient ? ` to ${recipient}` : ""}.` });
+      void fetchRecentInvoices();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not send invoice." });
+    } finally {
+      setInvoiceSendState("idle");
+    }
+  }
+
+  // Clarity Pay: open a Stripe-hosted checkout for this invoice's total. The
+  // server creates the session; we open the returned pay page in a new tab.
+  async function startClarityPay() {
+    if (!activeInvoiceId) {
+      setToast({ message: "Save the invoice before taking a payment." });
+      return;
+    }
+    setClarityPayState("loading");
+    try {
+      const response = await fetch(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}/checkout`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({}),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as { url?: string; message?: string } | null;
+      if (!response.ok || !data?.url) {
+        throw new Error(data?.message || (await readApiFailure(response, "Could not start Clarity Pay.")));
+      }
+      window.open(data.url, "_blank", "noopener");
+      setToast({ message: `Clarity Pay opened for ${activeInvoiceNumber}. Mark it paid once payment clears.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not start Clarity Pay." });
+    } finally {
+      setClarityPayState("idle");
+    }
+  }
+
+  // Download the server-rendered PDF (opens the attachment endpoint in a new tab;
+  // the admin session cookie rides along on the same-origin request).
+  function downloadInvoicePdf() {
+    if (!activeInvoiceId) {
+      setToast({ message: "Save the invoice before downloading a PDF." });
+      return;
+    }
+    window.open(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}/pdf`, "_blank", "noopener");
+  }
+
+  async function markActiveInvoicePaid() {
+    if (!activeInvoiceId) return;
+    try {
+      await patchInvoiceStatus(activeInvoiceId, "paid");
+      setOpenedInvoiceStatus("paid");
+      setToast({ message: `${activeInvoiceNumber} marked paid.` });
+      void fetchRecentInvoices();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not mark invoice paid." });
+    }
+  }
+
+  // Delete the open invoice. Drafts (and already-voided ones) are hard-deleted;
+  // committed invoices are voided instead so the record survives for accounting.
+  async function deleteOpenedInvoice() {
+    if (!activeInvoiceId) return;
+    const hardDelete = openedInvoiceStatus === "draft" || openedInvoiceStatus === "void" || openedInvoiceStatus === "";
+    const label = activeInvoiceNumber;
+    const confirmed =
+      typeof window === "undefined" ||
+      window.confirm(
+        hardDelete
+          ? `Delete invoice ${label}? This can't be undone.`
+          : `Void invoice ${label}? It stays on record marked void.`,
+      );
+    if (!confirmed) return;
+    try {
+      if (hardDelete) {
+        const response = await fetch(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (response.status === 401) {
+          setAuthStatus("guest");
+          throw new Error("Admin login required");
+        }
+        if (!response.ok) throw new Error(await readApiFailure(response, "Could not delete invoice."));
+        setToast({ message: `${label} deleted.` });
+      } else {
+        await patchInvoiceStatus(activeInvoiceId, "void");
+        setToast({ message: `${label} voided.` });
+      }
+      resetInvoiceDraft();
+      void fetchRecentInvoices();
+      void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not delete invoice." });
+    }
+  }
+
+  async function persistServices(
+    nextServices: Service[],
+    message = "Lesson types saved.",
+    requiredServiceId?: string | null,
+  ) {
+    const payloadServices = nextServices.map((service) => ({ ...service }));
+    const snapshot = services;
+    const saveVersion = ++serviceSaveVersionRef.current;
+    const timer = startDiagnosticTimer({
+      system: "save",
+      action: "save_service",
+      route: "PUT /api/services",
+      functionName: "persistServices",
+      expectedAccountId: activeAccountId,
+      objectType: "service",
+      objectId: requiredServiceId || payloadServices.at(-1)?.id || "",
+      details: { expectedCount: payloadServices.length },
+    });
+    setServices(cleanServices(payloadServices));
+    setServiceSaveState("saving");
+    try {
+      const response = await fetch("/api/services", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          services: payloadServices,
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      const data = (await response.json().catch(() => null)) as {
+        services?: Service[];
+        message?: string;
+        error?: string;
+        notifications?: NotificationRecord[];
+        warnings?: string[];
+        updatedAt?: string;
+      };
+      if (!response.ok) {
+        const detail = data?.message || data?.error;
+        throw new Error(detail || `Services save failed (${response.status} ${response.statusText})`);
+      }
+      if (!Array.isArray(data?.services)) {
+        finishDiagnosticTimer(timer, "failed", {
+          httpStatus: response.status,
+          errorCode: "SERVICE_SAVE_VERIFY_MISSING",
+          humanMessage: "Services save response did not return services.",
+        });
+        throw new Error("Services save response did not return services.");
+      }
+      const persistedServices = cleanServices(data.services);
+      const expectedServiceId = requiredServiceId === undefined ? payloadServices.at(-1)?.id : requiredServiceId;
+      const persistedServiceIds = new Set(persistedServices.map((service) => service.id));
+      if (expectedServiceId && !persistedServiceIds.has(expectedServiceId)) {
+        finishDiagnosticTimer(timer, "failed", {
+          httpStatus: response.status,
+          errorCode: "SERVICE_SAVE_VERIFY_MISSING",
+          humanMessage: "Service did not persist. Reload and try again.",
+          objectId: expectedServiceId,
+        });
+        throw new Error("Service did not persist. Reload and try again.");
+      }
+      const expectedService = expectedServiceId
+        ? payloadServices.find((service) => service.id === expectedServiceId)
+        : null;
+      const persistedService = expectedServiceId
+        ? persistedServices.find((service) => service.id === expectedServiceId)
+        : null;
+      if (expectedService && isCustomGroupService(expectedService) && !isCustomGroupService(persistedService)) {
+        finishDiagnosticTimer(timer, "failed", {
+          httpStatus: response.status,
+          errorCode: "SERVICE_SAVE_VERIFY_MISSING",
+          humanMessage: "Custom group lesson settings did not persist.",
+          objectId: expectedServiceId || "",
+        });
+        throw new Error("Custom group lesson settings did not persist. Reload and try again.");
+      }
+      if (serviceSaveVersionRef.current !== saveVersion) return;
+      setServices(persistedServices);
+      if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+      if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+      if (Array.isArray(data.warnings) && data.warnings.length) {
+        const warning = data.warnings.find((candidate) => typeof candidate === "string" && candidate.trim()) ?? "";
+        if (warning) setToast({ message: warning });
+      }
+      setServiceSaveState("saved");
+      finishDiagnosticTimer(timer, "verified", {
+        httpStatus: response.status,
+        details: { returnedCount: persistedServices.length },
+      });
+      setToast({ message });
+      window.setTimeout(() => setServiceSaveState("idle"), 1600);
+    } catch (error) {
+      if (serviceSaveVersionRef.current !== saveVersion) return;
+      setServiceSaveState("error");
+      const reason = error instanceof Error ? error.message : "Could not save lesson types.";
+      finishDiagnosticTimer(timer, "failed", {
+        errorCode: reason.includes("Admin login") ? "AUTH_SESSION_MISSING" : "SERVICE_SAVE_FAILED",
+        humanMessage: reason,
+      });
+      setToast({ message: reason });
+      setServices(snapshot);
+    }
+  }
+
+  function serviceHasRealBookings(service: Service) {
+    return items.some((item) =>
+      item.kind === "appointment" &&
+      item.serviceId === service.id &&
+      !item.syntheticGroupSlot &&
+      !item.groupSlot &&
+      !item.readOnly &&
+      Boolean((item.client || item.email || item.phone || "").trim()),
+    );
+  }
+
+  function canPermanentlyDeleteService(service: Service) {
+    return !serviceHasRealBookings(service);
+  }
+
+  function saveEditedService() {
+    if (!serviceEditor.name.trim()) {
+      setToast({ message: "Give the lesson type a name before saving." });
+      return;
+    }
+    const normalizedEditor = applyServiceNumberDrafts(applyGroupDraftInputs());
+    const editableEditor = {
+      ...normalizedEditor,
+      accountId: normalizedEditor.accountId || activeAccountId,
+      description: typeof normalizedEditor.description === "string" ? normalizedEditor.description : "",
+      coachId:
+        typeof normalizedEditor.coachId === "string" && normalizedEditor.coachId
+          ? normalizedEditor.coachId
+          : serviceScopeCoachId || defaultCoachId(coachProfiles),
+      locationId:
+        typeof normalizedEditor.locationId === "string" && normalizedEditor.locationId
+          ? normalizedEditor.locationId
+          : defaultLocationId(locations),
+      lessonNote:
+        typeof normalizedEditor.lessonNote === "string"
+          ? normalizedEditor.lessonNote
+          : typeof normalizedEditor.location === "string"
+            ? normalizedEditor.location
+            : "",
+      location:
+        typeof normalizedEditor.lessonNote === "string"
+          ? normalizedEditor.lessonNote
+          : typeof normalizedEditor.location === "string"
+            ? normalizedEditor.location
+            : "",
+    };
+    const hasPublicScreen = (editableEditor.bookingScreenIds ?? []).length > 0;
+    if (editableEditor.visibility === "public" && !hasPublicScreen) {
+      setToast({ message: "Public lesson types must be assigned to at least one booking screen." });
+      return;
+    }
+    const stableServiceId = editingServiceId || editableEditor.id || generateServiceDraftId();
+    const clean = cleanService(
+      {
+        ...editableEditor,
+        id: stableServiceId,
+      },
+      services.length,
+    );
+    const exists = services.some((service) => service.id === clean.id);
+    if (!exists && !canCreateWithinLimit(activeAccount, accountServices.filter((service) => service.archived !== true).length, "maxServices")) {
+      setToast({ message: limitReachedMessage("maxServices", accountLimit(activeAccount, "maxServices")) });
+      return;
+    }
+    const nextServices = exists
+      ? services.map((service) => (service.id === clean.id ? clean : service))
+      : [...services, clean];
+    setEditingServiceId(clean.id);
+    setServiceEditor(clean);
+    setShowServiceEditor(false);
+    void persistServices(
+      nextServices,
+      exists ? `${clean.name} updated.` : `${clean.name} added.`,
+      clean.id,
+    );
+  }
+
+  function deleteService(service: Service) {
+    const hasRealBookings = serviceHasRealBookings(service);
+    if (hasRealBookings) {
+      setPendingServiceAction(null);
+      setToast({ message: "This lesson type has existing bookings. Remove or reassign those bookings before deleting it." });
+      return;
+    }
+
+    const packageReferenceCount = services.filter(
+      (candidate) => candidate.lessonFormat === "package" && candidate.packageCoversServiceId === service.id,
+    ).length;
+    const nextServices = services
+      .filter((candidate) => candidate.id !== service.id)
+      .map((candidate) =>
+        candidate.lessonFormat === "package" && candidate.packageCoversServiceId === service.id
+          ? { ...candidate, packageCoversServiceId: undefined }
+          : candidate,
+      );
+    if (editingServiceId === service.id) {
+      setEditingServiceId(null);
+      setShowServiceEditor(false);
+      setServiceEditor(emptyServiceEditor());
+    }
+    if (bookingServiceId === service.id) {
+      setBookingServiceId("");
+      setBookingDaySelected(false);
+      setBookingStart(null);
+      setOpenPublicBookingSection("appointment");
+    }
+    if (selectedRescheduleMatch?.serviceId === service.id) {
+      setSelectedRescheduleId("");
+    }
+    setPendingServiceAction(null);
+    const packageSuffix =
+      packageReferenceCount > 0
+        ? ` ${packageReferenceCount} package ${packageReferenceCount === 1 ? "reference was" : "references were"} cleared.`
+        : "";
+    void persistServices(
+      nextServices,
+      `${service.name} deleted.${packageSuffix}`,
+      null,
+    );
+  }
+
+  function archiveService(service: Service) {
+    const nextServices = services.map((candidate) =>
+      candidate.id === service.id ? { ...candidate, archived: true } : candidate,
+    );
+    if (editingServiceId === service.id) {
+      setEditingServiceId(null);
+      setShowServiceEditor(false);
+      setServiceEditor(emptyServiceEditor());
+    }
+    if (bookingServiceId === service.id) {
+      setBookingServiceId("");
+      setBookingDaySelected(false);
+      setBookingStart(null);
+      setOpenPublicBookingSection("appointment");
+    }
+    if (selectedRescheduleMatch?.serviceId === service.id) {
+      setSelectedRescheduleId("");
+    }
+    setPendingServiceAction(null);
+    setServiceListTab("archived");
+    void persistServices(nextServices, `${service.name} archived.`, service.id);
+  }
+
+  function restoreService(service: Service) {
+    const nextServices = services.map((candidate) =>
+      candidate.id === service.id ? { ...candidate, archived: false } : candidate,
+    );
+    setServiceListTab("active");
+    void persistServices(nextServices, `${service.name} restored.`, service.id);
+  }
+
+  function requestServiceAction(service: Service, mode: "archive" | "delete") {
+    setPendingServiceAction({ serviceId: service.id, mode });
+  }
+
+  function closeServiceActionModal() {
+    setPendingServiceAction(null);
+  }
+
+  function confirmServiceAction() {
+    const service = services.find((candidate) => candidate.id === pendingServiceAction?.serviceId);
+    if (!service) {
+      setPendingServiceAction(null);
+      return;
+    }
+    if (pendingServiceAction?.mode === "archive") {
+      archiveService(service);
+      return;
+    }
+    deleteService(service);
+  }
+
+  function updateAvailabilityWindow(day: number, index: number, field: keyof AvailabilityWindow, value: number) {
+    setAvailabilitySaveState("idle");
+    setAvailability((current) =>
+      cleanAvailability(
+        current.map((windows, dayIndex) =>
+          dayIndex === day
+            ? windows.map((window, windowIndex) =>
+                windowIndex === index ? { ...window, [field]: value } : window,
+              )
+            : windows,
+        ),
+        activeCoachId,
+      ),
+    );
+  }
+
+  function removeAvailabilityWindow(day: number, index: number) {
+    setAvailabilitySaveState("idle");
+    setEditingAvailabilityWindow((current) => (current === `${day}-${index}` ? "" : current));
+    setAvailability((current) =>
+      cleanAvailability(
+        current.map((windows, dayIndex) =>
+          dayIndex === day ? windows.filter((_, windowIndex) => windowIndex !== index) : windows,
+        ),
+        activeCoachId,
+      ),
+    );
+  }
+
+  function addAvailabilityWindow(day: number) {
+    setAvailabilitySaveState("idle");
+    const existingWindows = availability[day] ?? [];
+    const lastWindow = existingWindows.at(-1);
+    const start = lastWindow
+      ? Math.min(Math.max(lastWindow.end, timeToMinutes(9, 0)), LAST_TIME_SLOT_MINUTES - SNAP_MINUTES * 2)
+      : timeToMinutes(9, 0);
+    const end = Math.min(Math.max(start + SNAP_MINUTES * 2, start + SNAP_MINUTES), LAST_TIME_SLOT_MINUTES);
+    setEditingAvailabilityWindow(`${day}-${existingWindows.length}`);
+    setAvailability((current) =>
+      cleanAvailability(
+        current.map((windows, dayIndex) => (dayIndex === day ? [...windows, { start, end, coachId: activeCoachId }] : windows)),
+        activeCoachId,
+      ),
+    );
+  }
+
+  function toggleAvailabilityDay(day: number) {
+    setAvailabilitySaveState("idle");
+    setEditingAvailabilityWindow("");
+    setAvailability((current) =>
+      cleanAvailability(
+        current.map((windows, dayIndex) =>
+          dayIndex === day
+            ? windows.length
+              ? []
+              : [{ start: timeToMinutes(9, 0), end: timeToMinutes(17, 0), coachId: activeCoachId }]
+            : windows,
+        ),
+        activeCoachId,
+      ),
+    );
+  }
+
+  async function saveAvailability() {
+    const clean = cleanAvailability(availability, activeCoachId);
+    setEditingAvailabilityWindow("");
+    setAvailability(clean);
+    setAvailabilitySaveState("saving");
+    try {
+      const response = await fetch("/api/availability", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ availability: clean }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Availability save failed"));
+      const data = (await response.json()) as { availability?: AvailabilityWindow[][] };
+      if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
+      setAvailabilitySaveState("saved");
+      setToast({ message: "Availability saved." });
+      window.setTimeout(() => setAvailabilitySaveState("idle"), 1600);
+    } catch (error) {
+      setAvailabilitySaveState("idle");
+      setToast({ message: error instanceof Error ? error.message : "Could not save availability." });
+    }
+  }
+
+  async function saveCoachAccount(draft = coachAccount): Promise<CoachAccount> {
+    const clean = cleanCoachAccount(draft);
+    setCoachAccount(clean);
+    setCoachAccountSaveState("saving");
+    try {
+      const response = await fetch("/api/coach-account", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(clean),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Coach account save failed"));
+      const saved = (await response.json()) as Partial<CoachAccount>;
+      applyCoachAccount(saved);
+      setCoachAccountSaveState("saved");
+      setToast({ message: "Coach account saved." });
+      window.setTimeout(() => setCoachAccountSaveState("idle"), 1600);
+      return cleanCoachAccount(saved);
+    } catch (error) {
+      setCoachAccount(draft);
+      setCoachAccountSaveState("idle");
+      const message = error instanceof Error ? error.message : "Could not save coach account.";
+      setToast({ message });
+      throw new Error(message);
+    }
+  }
+
+  async function handleAdminLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthError("");
+    setLoginState("signing-in");
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+      });
+      const data = (await response.json()) as { authenticated?: boolean; message?: string; email?: string };
+      if (!response.ok || !data.authenticated) {
+        setAuthError(data.message || "Login failed.");
+        setAdminWorkspaceLoadStatus("idle");
+        setAdminWorkspaceLoadError("");
+        return;
+      }
+      if (data.email) setAdminEmail(data.email);
+      setAuthStatus("authenticated");
+      setAdminPassword("");
+      setAuthError("");
+      void startAdminWorkspaceHydration();
+    } catch {
+      hasLoadedCalendarApiRef.current = false;
+      setAuthStatus("guest");
+      setAuthError("Could not reach the booking server.");
+      setCalendarFeedStatus("offline");
+      setAdminWorkspaceLoadStatus("idle");
+      setAdminWorkspaceLoadError("");
+    } finally {
+      setLoginState("idle");
+    }
+  }
+
+  async function handleForgotPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthError("");
+    setForgotMessage("");
+    setForgotState("sending");
+    try {
+      const response = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotEmail }),
+      });
+      const data = (await response.json()) as { ok?: boolean; message?: string };
+      if (!response.ok || !data.ok) {
+        setAuthError(data.message || "Could not send the reset email.");
+        setForgotState("idle");
+        return;
+      }
+      setForgotState("sent");
+      setForgotMessage(data.message || "If that email matches an admin account, a reset link has been sent.");
+    } catch {
+      setForgotState("idle");
+      setAuthError("Could not reach the booking server.");
+    }
+  }
+
+  async function handleResetPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthError("");
+    if (!resetToken) {
+      setAuthError("This reset link is missing its token.");
+      return;
+    }
+    if (resetPassword.length < 8) {
+      setAuthError("Use at least 8 characters.");
+      return;
+    }
+    if (resetPassword !== resetConfirmPassword) {
+      setAuthError("Those passwords do not match.");
+      return;
+    }
+
+    setResetState("saving");
+    try {
+      const response = await fetch("/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: resetToken, password: resetPassword }),
+      });
+      const data = (await response.json()) as { authenticated?: boolean; message?: string; email?: string };
+      if (!response.ok || !data.authenticated) {
+        setAuthError(data.message || "Could not reset password.");
+        setResetState("idle");
+        return;
+      }
+      setAuthStatus("authenticated");
+      setResetPassword("");
+      setResetConfirmPassword("");
+      setResetState("idle");
+      if (data.email) setAdminEmail(data.email);
+      if (typeof window !== "undefined") window.history.replaceState(null, "", window.location.pathname);
+      setAuthError("");
+      void startAdminWorkspaceHydration();
+    } catch {
+      setResetState("idle");
+      setAuthError("Could not reach the booking server.");
+      setCalendarFeedStatus("offline");
+      setAdminWorkspaceLoadStatus("idle");
+      setAdminWorkspaceLoadError("");
+    }
+  }
+
+  function updatePasswordChangeForm<K extends keyof PasswordChangeForm>(field: K, value: PasswordChangeForm[K]) {
+    setPasswordChangeState("idle");
+    setPasswordChangeMessage("");
+    setPasswordChangeForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleChangePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPasswordChangeMessage("");
+    if (passwordChangeForm.newPassword.length < 8) {
+      setPasswordChangeMessage("Use at least 8 characters.");
+      return;
+    }
+    if (passwordChangeForm.newPassword !== passwordChangeForm.confirmPassword) {
+      setPasswordChangeMessage("Those passwords do not match.");
+      return;
+    }
+
+    setPasswordChangeState("saving");
+    try {
+      const response = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentPassword: passwordChangeForm.currentPassword,
+          newPassword: passwordChangeForm.newPassword,
+        }),
+      });
+      const data = (await response.json()) as { authenticated?: boolean; message?: string; email?: string };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data.message || "Admin login required.");
+      }
+      if (!response.ok || !data.authenticated) {
+        setPasswordChangeState("idle");
+        setPasswordChangeMessage(data.message || "Could not change password.");
+        return;
+      }
+      if (data.email) setAdminEmail(data.email);
+      setPasswordChangeForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setPasswordChangeState("saved");
+      setPasswordChangeMessage("Password changed.");
+    } catch (error) {
+      setPasswordChangeState("idle");
+      setPasswordChangeMessage(error instanceof Error ? error.message : "Could not reach the booking server.");
+    }
+  }
+
+  async function handleAdminLogout() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    adminHydrationRunIdRef.current += 1;
+    hasLoadedCalendarApiRef.current = false;
+    setAuthStatus("guest");
+    setAdminWorkspaceLoadStatus("idle");
+    setAdminWorkspaceLoadError("");
+    closeCalendarDetails();
+    setCalendarFeedStatus("offline");
+    setCalendarSaveStatus("idle");
+    setCalendarSaveError("");
+  }
+
+  async function saveNotificationSettings(draft = notificationSettings): Promise<NotificationSettings> {
+    const saveVersion = ++settingsSaveVersionRef.current;
+    beginAdminSave("settings");
+    const isCurrentSave = () => settingsSaveVersionRef.current === saveVersion;
+    setSettingsSaveState("saving");
+    setSettingsSaveError("");
+    try {
+      const response = await fetch("/api/admin-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Settings save failed"));
+      const settings = (await response.json()) as NotificationSettings;
+      if (!isCurrentSave()) return draft;
+      applyNotificationSettings(settings);
+      setSettingsSaveState("saved");
+      setToast({ message: "Notification and text settings saved." });
+      window.setTimeout(() => {
+        if (isCurrentSave()) setSettingsSaveState("idle");
+      }, 1600);
+      return settings;
+    } catch (error) {
+      if (!isCurrentSave()) return draft;
+      const message = error instanceof Error ? error.message : "Could not save notification settings.";
+      setSettingsSaveState("idle");
+      setSettingsSaveError(message);
+      setToast({ message });
+      throw new Error(message);
+    } finally {
+      endAdminSave("settings");
+    }
+  }
+
+  function settingsSaveErrorNotice() {
+    return settingsSaveError ? (
+      <p className="workspace-save-error" role="alert">
+        {settingsSaveError}
+      </p>
+    ) : null;
+  }
+
+  async function refreshGoogleCalendarStatus() {
+    try {
+      const response = await fetch("/api/google-calendar/status", { headers: { Accept: "application/json" } });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) return;
+      applyGoogleCalendarStatus((await response.json()) as Partial<GoogleCalendarSyncStatus>);
+    } catch {
+      // Google Calendar sync is optional; keep the booking calendar usable.
+    }
+  }
+
+  async function refreshGoogleDriveTransferStatus() {
+    try {
+      const response = await fetch("/api/google-drive/status", { headers: { Accept: "application/json" } });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok && response.status !== 409 && response.status !== 412) return;
+      applyGoogleDriveTransferStatus(await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive status did not return JSON."));
+    } catch {
+      // Google Drive transfer is optional; keep the rest of Settings usable.
+    }
+  }
+
+  async function refreshClarityCloudImports() {
+    // Deliberately does not wait on googleDriveTransfer.connected first --
+    // this used to only fire from an effect gated on that flag, chaining
+    // behind the Drive status round trip before even starting. The server
+    // route already handles "not connected" by failing this fetch (caught
+    // below), so it's safe to run in parallel with the Drive status check
+    // instead of waiting for it to resolve.
+    try {
+      setClarityCloudImports(await listClarityCloudImportTransfers());
+    } catch {
+      // Not connected yet, or the import inbox is temporarily unavailable;
+      // the status cards elsewhere show provider health separately.
+      setClarityCloudImports([]);
+    } finally {
+      markPlayerProfilesSourceReady("cloudImports");
+    }
+  }
+
+  async function connectGoogleCalendar() {
+    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
+      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
+      return;
+    }
+    setGoogleCalendarAction("connecting");
+    try {
+      const response = await fetch("/api/google-calendar/connect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json()) as { authUrl?: string; message?: string };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok || !data.authUrl) throw new Error(data.message || "Google Calendar connection is not ready.");
+      window.location.assign(data.authUrl);
+    } catch (error) {
+      setGoogleCalendarAction("idle");
+      setToast({ message: error instanceof Error ? error.message : "Could not start Google Calendar connection." });
+    }
+  }
+
+  async function saveGoogleCalendarSettings(next?: Partial<GoogleCalendarSyncStatus>) {
+    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
+      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
+      return;
+    }
+    const nextStatus = { ...googleCalendar, ...(next ?? {}) };
+    setGoogleCalendar(nextStatus);
+    setGoogleCalendarAction("saving");
+    try {
+      const response = await fetch("/api/google-calendar/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ calendarId: nextStatus.calendarId, autoSync: nextStatus.autoSync }),
+      });
+      const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & { message?: string };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(data.message || "Google Calendar settings did not save.");
+      applyGoogleCalendarStatus(data);
+      setToast({ message: "Google Calendar sync settings saved." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save Google Calendar settings." });
+      void refreshGoogleCalendarStatus();
+    } finally {
+      setGoogleCalendarAction("idle");
+    }
+  }
+
+  async function syncGoogleCalendarNow() {
+    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
+      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
+      return;
+    }
+    setGoogleCalendarAction("syncing");
+    try {
+      const response = await fetch("/api/google-calendar/sync", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & {
+        ok?: boolean;
+        upserted?: number;
+        deleted?: number;
+        message?: string;
+      };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok || data.ok === false) throw new Error(data.message || data.lastSyncError || "Google Calendar sync failed.");
+      applyGoogleCalendarStatus(data);
+      setToast({ message: `Google Calendar synced${typeof data.upserted === "number" ? ` (${data.upserted} upserted, ${data.deleted ?? 0} deleted)` : ""}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Google Calendar sync failed." });
+      void refreshGoogleCalendarStatus();
+    } finally {
+      setGoogleCalendarAction("idle");
+    }
+  }
+
+  async function migrateGoogleCalendarProviderToken() {
+    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
+      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
+      return;
+    }
+    setGoogleCalendarAction("migrating");
+    try {
+      const response = await fetch("/api/google-calendar/migrate-provider-token", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        migrated?: boolean;
+        message?: string;
+        status?: Partial<GoogleCalendarSyncStatus>;
+      };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok || data.ok === false) throw new Error(data.message || "Google Calendar token migration failed.");
+      applyGoogleCalendarStatus(data.status);
+      setToast({ message: data.migrated ? "Google Calendar token migrated securely." : "Google Calendar token storage is already secure." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Google Calendar token migration failed." });
+      void refreshGoogleCalendarStatus();
+    } finally {
+      setGoogleCalendarAction("idle");
+    }
+  }
+
+  async function disconnectGoogleCalendar() {
+    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
+      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
+      return;
+    }
+    setGoogleCalendarAction("disconnecting");
+    try {
+      const response = await fetch("/api/google-calendar/disconnect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & { message?: string };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(data.message || "Google Calendar did not disconnect.");
+      applyGoogleCalendarStatus(data);
+      setToast({ message: "Google Calendar disconnected." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not disconnect Google Calendar." });
+    } finally {
+      setGoogleCalendarAction("idle");
+    }
+  }
+
+  async function connectGoogleDriveTransfer() {
+    setGoogleDriveAction("connecting");
+    try {
+      const response = await fetch("/api/google-drive/connect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = await readJsonResponse<Partial<GoogleDriveTransferStatus> & { authUrl?: string }>(
+        response,
+        "Google Drive connection did not return JSON.",
+      );
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      applyGoogleDriveTransferStatus(data);
+      if (!response.ok || !data.authUrl) throw new Error(data.message || "Clarity Cloud is not ready to connect.");
+      window.location.assign(data.authUrl);
+    } catch (error) {
+      setGoogleDriveAction("idle");
+      setToast({ message: error instanceof Error ? error.message : "Could not start Clarity Cloud connection." });
+    }
+  }
+
+  async function testGoogleDriveTransfer() {
+    setGoogleDriveAction("testing");
+    try {
+      const response = await fetch("/api/google-drive/test", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive test did not return JSON.");
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      applyGoogleDriveTransferStatus(data);
+      if (!response.ok || data.ok === false) throw new Error(data.message || "Clarity Cloud is not connected.");
+      setToast({ message: data.message || "Clarity Cloud tested." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Clarity Cloud test failed." });
+    } finally {
+      setGoogleDriveAction("idle");
+    }
+  }
+
+  async function disconnectGoogleDriveTransfer() {
+    setGoogleDriveAction("disconnecting");
+    try {
+      const response = await fetch("/api/google-drive/disconnect", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+      });
+      const data = await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive disconnect did not return JSON.");
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      applyGoogleDriveTransferStatus(data);
+      if (!response.ok || data.ok === false) throw new Error(data.message || "Clarity Cloud did not disconnect.");
+      setToast({ message: "Clarity Cloud disconnected." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not disconnect Clarity Cloud." });
+    } finally {
+      setGoogleDriveAction("idle");
+    }
+  }
+
+  async function saveBrandSettings(nextBrand = brandSettings, options: { silent?: boolean } = {}) {
+    const cleanBrand = cleanBrandSettings(nextBrand);
+    const saveVersion = ++brandSaveVersionRef.current;
+    setBrandSaveState("saving");
+    setBrandSettings(cleanBrand);
+    try {
+      const response = await fetch("/api/brand-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cleanBrand),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Brand save failed"));
+      const saved = (await response.json()) as Partial<BrandSettings>;
+      if (brandSaveVersionRef.current !== saveVersion) return;
+      applyBrandSettings(saved);
+      setBrandSaveState("saved");
+      if (!options.silent) setToast({ message: "Coach logo colours applied to the booking UI." });
+      window.setTimeout(() => {
+        if (brandSaveVersionRef.current === saveVersion) setBrandSaveState("idle");
+      }, 1600);
+    } catch (error) {
+      if (brandSaveVersionRef.current !== saveVersion) return;
+      setBrandSaveState("idle");
+      if (!options.silent) setToast({ message: error instanceof Error ? error.message : "Brand colours applied locally. The backend did not save them yet." });
+    }
+  }
+
+  function setBookingCardTheme(nextTheme: ThemeMode) {
+    const nextBrand = cleanBrandSettings({ ...brandSettings, bookingTheme: nextTheme });
+    setBrandSaveState("idle");
+    setBrandSettings(nextBrand);
+    if (!isEmbedMode && authStatus === "authenticated") {
+      void saveBrandSettings(nextBrand, { silent: true });
+    }
+  }
+
+  function setBookingLogoVisible(showLogo: boolean) {
+    const nextBrand = cleanBrandSettings({ ...brandSettings, showLogo });
+    setBrandSaveState("idle");
+    setBrandSettings(nextBrand);
+    if (!isEmbedMode && authStatus === "authenticated") {
+      void saveBrandSettings(nextBrand, { silent: true });
+    }
+  }
+
+  async function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setToast({ message: "Choose an image file for the coach logo." });
+      return;
+    }
+    try {
+      const nextBrand = await analyzeLogoFile(file);
+      await saveBrandSettings({ ...brandSettings, ...nextBrand, bookingTheme: brandSettings.bookingTheme });
+    } catch {
+      setToast({ message: "Could not read that logo. Try a PNG, JPG, or SVG export." });
+    }
+  }
+
+  function resetBrandSettings() {
+    void saveBrandSettings(defaultBrandSettings);
+  }
+
+  async function handlePeopleImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const text = await file.text();
+    setPeopleImportState("idle");
+    setPeopleImportDiagnostic(null);
+    setPeopleImportText(text);
+    setShowClientImport(true);
+  }
+
+  async function importPeopleFromText() {
+    const parsedPeople = parsePeopleImport(peopleImportText);
+    if (!parsedPeople.length) {
+      setToast({ message: "Paste at least one person with a name or email." });
+      return;
+    }
+
+    setPeopleImportState("importing");
+    setPeopleImportDiagnostic(null);
+    try {
+      const response = await fetch(PEOPLE_IMPORT_ENDPOINT, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ people: parsedPeople }),
+      });
+      const text = await response.text().catch(() => "");
+      let result: PeopleImportResult = {};
+      try {
+        result = text ? JSON.parse(text) as PeopleImportResult : {};
+      } catch {
+        result = { errors: [{ message: text.slice(0, 280) || response.statusText }] };
+      }
+      const diagnostic = buildPeopleImportDiagnostic(
+        PEOPLE_IMPORT_ENDPOINT,
+        response.status,
+        response.ok && result.ok !== false,
+        result,
+        "People import failed",
+      );
+      setPeopleImportDiagnostic(diagnostic);
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok || result.ok === false) throw new Error(diagnostic.message);
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
+      setPeopleImportText("");
+      setShowClientImport(false);
+      setPeopleImportState("imported");
+      setToast({
+        message: diagnostic.message,
+      });
+      window.setTimeout(() => setPeopleImportState("idle"), 1600);
+    } catch (error) {
+      setPeopleImportState("idle");
+      setToast({ message: error instanceof Error ? error.message : "Could not import people." });
+    }
+  }
+
+  function openClientProfile(client: ClientSummary) {
+    setIsAddingClient(false);
+    setSelectedClientId(client.id);
+    setClientEditor(editorFromClient(client));
+    setClientEditMode(false);
+    setClientSaveState("idle");
+  }
+
+  function openNewClient() {
+    setIsAddingClient(true);
+    setSelectedClientId("");
+    setClientEditor(emptyClientEditor);
+    setClientEditMode(true);
+    setClientSaveState("idle");
+  }
+
+  function closeClientModal() {
+    setIsAddingClient(false);
+    setSelectedClientId("");
+    setClientEditMode(false);
+    setClientEditor(emptyClientEditor);
+    setClientSaveState("idle");
+  }
+
+  function startClientEdit() {
+    if (selectedClient) setClientEditor(editorFromClient(selectedClient));
+    setClientEditMode(true);
+    setClientSaveState("idle");
+  }
+
+  async function sendTestEmail() {
+    const email = testEmailAddress.trim() || notificationSettings.notificationEmail || coachAccount.contactEmail;
+    if (!email) {
+      setToast({ message: "Enter an email address for the test." });
+      return;
+    }
+    setTestEmailState("sending");
+    try {
+      const response = await fetch("/api/test-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await response.json()) as { message?: string };
+      if (!response.ok) {
+        setToast({ message: data.message || "Could not send test email." });
+        setTestEmailState("idle");
+        return;
+      }
+      setTestEmailState("sent");
+      setToast({ message: data.message || "Test email sent." });
+      trackDiagnosticEvent({
+        system: "reload",
+        action: "TARGETED_REFRESH_STARTED",
+        phase: "notification_history",
+        status: "started",
+        route: "GET /api/notification-history",
+        functionName: "sendTestEmail",
+      });
+      void refreshNotificationHistory().then(() =>
+        trackDiagnosticEvent({
+          system: "reload",
+          action: "TARGETED_REFRESH_COMPLETED",
+          phase: "notification_history",
+          status: "success",
+          route: "GET /api/notification-history",
+          functionName: "sendTestEmail",
+        }),
+      );
+      window.setTimeout(() => setTestEmailState("idle"), 1600);
+    } catch {
+      setToast({ message: "Could not reach the email sender." });
+      setTestEmailState("idle");
+    }
+  }
+
+  async function resendBookingConfirmation(appointment: CalendarItem) {
+    if (appointment.kind !== "appointment") return;
+    if (!appointment.email?.trim()) {
+      setToast({ message: "This booking does not have a customer email address." });
+      return;
+    }
+    setResendConfirmationState((current) => ({ ...current, [appointment.id]: "sending" }));
+    try {
+      const response = await fetch("/api/booking-confirmation-resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ appointmentId: appointment.id }),
+      });
+      const data = (await response.json().catch(() => ({}))) as BookingConfirmationResendResponse;
+      if (!response.ok || data.ok === false) {
+        setResendConfirmationState((current) => ({ ...current, [appointment.id]: "failed" }));
+        setToast({ message: data.message || "Confirmation email could not be sent." });
+        return;
+      }
+      if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
+      setResendConfirmationState((current) => ({ ...current, [appointment.id]: "sent" }));
+      setToast({ message: "Confirmation email sent." });
+      void refreshNotificationHistory();
+      window.setTimeout(() => {
+        setResendConfirmationState((current) => {
+          const { [appointment.id]: _done, ...rest } = current;
+          return rest;
+        });
+      }, 1800);
+    } catch {
+      setResendConfirmationState((current) => ({ ...current, [appointment.id]: "failed" }));
+      setToast({ message: "Could not reach the email sender." });
+    }
+  }
+
+  async function saveClientProfile() {
+    if (!clientEditor.name.trim() && !clientEditor.email.trim()) {
+      setToast({ message: "A client needs a name or email." });
+      return;
+    }
+    setClientSaveState("saving");
+    try {
+      const response = await fetch("/api/people", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person: clientEditor }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Client save failed"));
+      const result = (await response.json()) as PeopleUpdateResult;
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
+      if (result.person?.id) setSelectedClientId(result.person.id);
+      // Stamp a device-local timestamp so notes changes surface in the Player
+      // Profiles activity feed (person records carry no notes-updated time).
+      if (result.person?.id && clientEditor.notes.trim().length > 0) {
+        const savedId = result.person.id;
+        setPlayerProfilesLocal((current) => stampNotesUpdate(current, savedId));
+      }
+      setIsAddingClient(false);
+      setClientEditMode(false);
+      setClientSaveState("saved");
+      setToast({ message: "Client profile saved." });
+      window.setTimeout(() => setClientSaveState("idle"), 1400);
+    } catch (error) {
+      setClientSaveState("idle");
+      setToast({ message: error instanceof Error ? error.message : "Could not save client profile." });
+    }
+  }
+
+  async function saveLessonNoteForClient(
+    client: Pick<Person, "id" | "name"> | null | undefined,
+    text: string,
+    source: LessonNoteSource = "typed",
+  ) {
+    const cleanBody = text.trim();
+    if (!client || !cleanBody) return;
+    setLessonNoteSaveState("saving");
+    try {
+      const response = await fetch("/api/notes", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          note: {
+            playerId: client.id,
+            playerName: client.name,
+            title: source === "voice" ? "Voice lesson note" : "Lesson note",
+            body: cleanBody,
+            source,
+          },
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Lesson note save failed"));
+      const data = (await response.json()) as NotesResult;
+      if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
+      setLessonNoteSaveState("saved");
+      setToast({ message: "Lesson note saved." });
+      window.setTimeout(() => setLessonNoteSaveState("idle"), 1400);
+    } catch (error) {
+      setLessonNoteSaveState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not save lesson note." });
+    }
+  }
+
+  async function deleteLessonNote(noteId: string) {
+    if (!noteId) return;
+    setLessonNoteSaveState("saving");
+    try {
+      const response = await fetch(`/api/notes?id=${encodeURIComponent(noteId)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Lesson note delete failed"));
+      const data = (await response.json()) as NotesResult;
+      if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
+      setLessonNoteSaveState("saved");
+      setToast({ message: "Lesson note deleted." });
+      window.setTimeout(() => setLessonNoteSaveState("idle"), 1400);
+    } catch (error) {
+      setLessonNoteSaveState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not delete lesson note." });
+    }
+  }
+
+  async function confirmPublicBooking() {
+    if (bookingSubmitState === "saving") return;
+    if (!bookingTargetService || bookingStart === null) {
+      const message = "Choose a lesson time before confirming.";
+      setBookingSubmitError(message);
+      setToast({ message });
+      return;
+    }
+    setBookingSubmitError("");
+    // Typed values are authoritative. A saved-client suggestion only changes
+    // the booking after the user explicitly clicks it and fills these fields.
+    const firstName = bookingForm.firstName.trim();
+    const lastName = bookingForm.lastName.trim();
+    const phone = bookingForm.phone.trim();
+    const email = bookingForm.email.trim();
+    const client = [firstName, lastName].filter(Boolean).join(" ").trim();
+
+    if (!firstName || !lastName || !email) {
+      const message = "First name, last name, and email are required.";
+      setBookingSubmitError(message);
+      setToast({ message });
+      return;
+    }
+    if (isCustomGroupBooking && customGroupAttendees.length < customGroupMinParticipants(bookingTargetService) - 1) {
+      const message = "Add at least one other person before confirming.";
+      setBookingSubmitError(message);
+      setToast({ message });
+      return;
+    }
+
+    const selectedBooking = {
+      service: bookingTargetService,
+      week: activeWeek,
+      day: bookingDay,
+      start: bookingStart,
+      duration: bookingTargetService.duration,
+      location: bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
+      coachId: bookingTargetService.coachId || publicBookingFallbackCoachId,
+    };
+    const selectedBookingCoach = bookingCoachSnapshotFor(selectedBooking.coachId, coachProfiles, coachAccount);
+    const fallbackAppointmentId = `fallback-appt-${Date.now()}`;
+    const localFallbackConfirmation = (): BookingConfirmation => ({
+      kind: "booking",
+      appointmentId: fallbackAppointmentId,
+      client,
+      service: selectedBooking.service.name,
+      week: selectedBooking.week,
+      day: selectedBooking.day,
+      start: selectedBooking.start,
+      duration: selectedBooking.duration,
+      dayLabel: weekDays[selectedBooking.day].label,
+      timeLabel: formatTime(selectedBooking.start),
+      email,
+      phone,
+      location: selectedBooking.location,
+      notifications: [],
+    });
+    const confirmWithLocalFallback = () => {
+      setBookingConfirmation(localFallbackConfirmation());
+      setEmailNoticeVisible(false);
+      setBookingSubmitError("");
+      clearPublicBookingSlotCache();
+      setBookingStart(null);
+      setCustomGroupAttendees([]);
+      setCustomGroupAttendeeDraft({ name: "", email: "" });
+    };
+    const candidate = {
+      week: selectedBooking.week,
+      day: selectedBooking.day,
+      start: selectedBooking.start,
+      duration: selectedBooking.duration,
+    };
+    if (hasCollision(candidate, undefined, bookingTargetService, { candidateCoachId: selectedBooking.coachId })) {
+      const message = "That time has just been taken. Pick another slot.";
+      setBookingSubmitError(message);
+      setOpenPublicBookingSection("information");
+      setToast({ message });
+      return;
+    }
+
+    if (isEmbedMode) {
+      setBookingSubmitState("saving");
+      setEmailNoticeVisible(false);
+      const timer = startDiagnosticTimer({
+        system: "publicBooking",
+        action: "public_booking_create",
+        route: "POST /api/public-booking",
+        functionName: "submitBooking",
+        expectedAccountId: activeAccountId,
+        objectType: "booking",
+        objectId: fallbackAppointmentId,
+        details: {
+          serviceId: selectedBooking.service.id,
+          week: selectedBooking.week,
+          day: selectedBooking.day,
+          hasAttendees: isCustomGroupBooking,
+        },
+      });
+      try {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+        const response = await (async () => {
+          try {
+            return await fetch("/api/public-booking", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({
+                serviceId: selectedBooking.service.id,
+                week: selectedBooking.week,
+                day: selectedBooking.day,
+                start: selectedBooking.start,
+                duration: selectedBooking.duration,
+                firstName,
+                lastName,
+                phone,
+                email,
+                coachId: selectedBooking.coachId,
+                locationId: selectedBooking.location.locationId,
+                coach: selectedBookingCoach,
+                location: selectedBooking.location,
+                attendees: isCustomGroupBooking ? customGroupAttendees.map((attendee) => ({
+                  name: attendee.name,
+                  email: attendee.email || "",
+                })) : undefined,
+              }),
+            });
+          } finally {
+            window.clearTimeout(timeoutId);
+          }
+        })();
+        const data = await readPublicBookingSubmitResponse(response);
+        if (data.state?.items && (!data.fallback || data.state.items.length)) setItems(data.state.items);
+        clearPublicBookingSlotCache();
+        const confirmationNotifications = data.notifications ?? [];
+        const confirmation = response.ok && data.appointment?.id
+          ? {
+              kind: "booking" as const,
+              appointmentId: data.appointment.id,
+              client,
+              service: selectedBooking.service.name,
+              week: selectedBooking.week,
+              day: selectedBooking.day,
+              start: selectedBooking.start,
+              duration: selectedBooking.duration,
+              dayLabel: weekDays[selectedBooking.day].label,
+              timeLabel: formatTime(selectedBooking.start),
+              email,
+              phone,
+              location: data.appointment.location ?? selectedBooking.location,
+              notifications: confirmationNotifications,
+            }
+          : localFallbackConfirmation();
+        if (!response.ok || !data.appointment?.id) {
+          console.warn("public_booking_submit_customer_confirmed_after_api_failure", {
+            status: response.status,
+            message: data.message || data.error || "",
+          });
+          finishDiagnosticTimer(timer, "warning", {
+            httpStatus: response.status,
+            errorCode: "BOOKING_CREATE_FAILED",
+            humanMessage: data.message || data.error || "Public booking used local fallback confirmation.",
+          });
+        } else {
+          finishDiagnosticTimer(timer, "verified", {
+            httpStatus: response.status,
+            objectId: data.appointment.id,
+            details: {
+              notificationCount: confirmationNotifications.length,
+              clientEmailRequested: confirmationNotifications.some((result) => result.channel === "client"),
+            },
+          });
+        }
+        setBookingConfirmation(confirmation);
+        setEmailNoticeVisible(confirmationNotifications.some((result) => result.channel === "client" && result.sent));
+        setBookingSubmitError("");
+        setBookingStart(null);
+        setCustomGroupAttendees([]);
+        setCustomGroupAttendeeDraft({ name: "", email: "" });
+      } catch (error) {
+        console.warn("public_booking_submit_customer_confirmed_after_fetch_failure", error);
+        finishDiagnosticTimer(timer, "warning", {
+          errorCode: "BOOKING_CREATE_FAILED",
+          humanMessage: error instanceof Error ? error.message : "Public booking fetch failed; local fallback confirmation shown.",
+        });
+        confirmWithLocalFallback();
+      } finally {
+        setBookingSubmitState("idle");
+      }
+      return;
+    }
+
+    const item: CalendarItem = {
+      id: newCalendarItemId("appt"),
+      kind: "appointment",
+      accountId: activeAccountId,
+      ...candidate,
+      serviceId: selectedBooking.service.id,
+      coachId: selectedBooking.coachId,
+      locationId: selectedBooking.location.locationId,
+      coach: selectedBookingCoach,
+      client,
+      title: client,
+      phone,
+      email,
+      note: "Booked from public booking page.",
+      location: selectedBooking.location,
+      ...(isCustomGroupBooking
+        ? {
+            customGroup: true as const,
+            attendees: [
+              { id: `booker-${Date.now()}`, name: client, email, status: "booker" as const },
+              ...customGroupAttendees,
+            ],
+            calculatedPrice: customGroupCalculatedPrice,
+          }
+        : {}),
+    };
+    setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
+    if (isEmbedMode) {
+      closeCalendarDetails();
+    } else {
+      closeCalendarDetails();
+      setActiveView("calendar");
+    }
+    setBookingStart(null);
+    setCustomGroupAttendees([]);
+    setCustomGroupAttendeeDraft({ name: "", email: "" });
+    setBookingForm({ firstName: "", lastName: "", phone: "", email: "" });
+    setBookingSubmitError("");
+    setToast({
+      message: `${client} booked ${selectedBooking.service.name} on ${weekDays[item.day].short} at ${formatTime(item.start)}.`,
+    });
+  }
+
+  function copyEmbedCode() {
+    if (!navigator.clipboard) {
+      setToast({ message: "Copy is not available in this browser. Select the iframe code manually." });
+      return;
+    }
+    void navigator.clipboard.writeText(iframeCode).then(() => {
+      setCopiedEmbed(true);
+      setToast({ message: "Squarespace iframe code copied." });
+      window.setTimeout(() => setCopiedEmbed(false), 1600);
+    }, () => {
+      setToast({ message: "Copy was blocked by the browser. Select the iframe code manually." });
+    });
+  }
+
+  function copyBookingScreenValue(value: string, kind: "url" | "iframe", screenId: string) {
+    if (!navigator.clipboard) {
+      setToast({ message: "Copy is not available in this browser. Select the value manually." });
+      return;
+    }
+    const key = `${screenId}-${kind}`;
+    void navigator.clipboard.writeText(value).then(() => {
+      const message = kind === "url" ? "Booking page link copied." : "Squarespace iframe code copied.";
+      setToast({ message });
+      if (kind === "url") {
+        setCopiedBookingScreenLinkId(key);
+        window.setTimeout(() => {
+          setCopiedBookingScreenLinkId((current) => (current === key ? null : current));
+        }, 1600);
+      } else {
+        setCopiedBookingScreenIframeId(key);
+        window.setTimeout(() => {
+          setCopiedBookingScreenIframeId((current) => (current === key ? null : current));
+        }, 1600);
+      }
+    }, () => {
+      setToast({ message: "Copy was blocked by the browser. Select the value manually." });
+    });
+  }
+
+  function copySyncText(kind: "url" | "key") {
+    if (!navigator.clipboard) {
+      setToast({ message: "Copy is not available in this browser. Select the sync value manually." });
+      return;
+    }
+    const text = kind === "url" ? calendarFeedUrl : calendarSyncKey;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopiedSync(kind);
+      setToast({ message: kind === "url" ? "Google calendar sync URL copied." : "Private sync key copied." });
+      window.setTimeout(() => setCopiedSync(null), 1600);
+    }, () => {
+      setToast({ message: "Copy was blocked by the browser. Select the sync value manually." });
+    });
+  }
+
+  function updateBookingScreenName(screenId: string, nextValue: string) {
+    setBookingScreenNames((previous) => ({ ...previous, [screenId]: nextValue }));
+  }
+
+  function regenerateSyncKey() {
+    setCalendarSyncKey(generateSyncKey());
+    setCopiedSync(null);
+    setToast({ message: "Calendar sync key regenerated. Update Google Calendar with the new URL." });
+  }
+
+  async function removeSelected() {
+    if (!selected) return;
+    if (!requireLiveDatabase("remove calendar items")) return;
+    const calendarItemId = selected.id;
+    const saveVersion = beginAdminSave("calendar_delete");
+    const timer = startDiagnosticTimer({
+      system: "save",
+      action: "BOOKING_DELETE_STARTED",
+      route: "DELETE /api/calendar-state",
+      functionName: "removeSelected",
+      expectedAccountId: activeAccountId,
+      objectType: selected.kind === "block" ? "calendarBlock" : "booking",
+      objectId: calendarItemId,
+      details: {
+        targetedDelete: true,
+        accountId: selected.accountId || activeAccountId,
+      },
+    });
+    setDeleteInFlightId(calendarItemId);
+    setCalendarSaveStatus("saving");
+    setCalendarSaveError("");
+    try {
+      const response = await fetch(`/api/calendar-state?id=${encodeURIComponent(calendarItemId)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json().catch(() => ({}))) as CalendarStateSaveResponse;
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw Object.assign(new Error(data.message || "Admin login expired. Sign in again before editing the calendar."), {
+          code: "AUTH_SESSION_MISSING",
+          httpStatus: response.status,
+          operationOwner: "calendar_delete",
+          failureRoute: "DELETE /api/calendar-state",
+        });
+      }
+      if (!response.ok) {
+        throw Object.assign(
+          new Error(data.detail || data.message || data.error || `Delete failed (${response.status} ${response.statusText})`),
+          {
+            code: data.error || data.diagnostics?.code || "BOOKING_DELETE_FAILED",
+            diagnostics: data.diagnostics,
+            httpStatus: response.status,
+            operationOwner: data.diagnostics?.operationOwner || "calendar_delete",
+            failureRoute: data.diagnostics?.route || "DELETE /api/calendar-state",
+            personId: data.diagnostics?.personId,
+            email: data.diagnostics?.email,
+          },
+        );
+      }
+      const verifyData = data;
+      const verifyHttpStatus = response.status;
+      if (!Array.isArray(verifyData.items)) {
+        throw Object.assign(new Error("Calendar reload did not return booking items for delete verification."), {
+          code: "BOOKING_DELETE_RELOAD_FAILED",
+          httpStatus: verifyHttpStatus,
+          operationOwner: "calendar_reload",
+          failureRoute: "DELETE /api/calendar-state",
+        });
+      }
+      const deletedStillReturned = verifyData.items.some((item) => item.id === calendarItemId);
+      if (deletedStillReturned) {
+        throw Object.assign(new Error("Deleted booking was returned by the backend refetch."), {
+          code: "BOOKING_DELETE_VERIFY_FAILED",
+          httpStatus: verifyHttpStatus,
+          operationOwner: "calendar_reload_verify",
+          failureRoute: "DELETE /api/calendar-state",
+        });
+      }
+      const persistedItems = verifyData.items.map((item) => ({ ...item, accountId: item.accountId || activeAccountId }));
+      const persistedSyncKey =
+        typeof verifyData.syncKey === "string"
+          ? verifyData.syncKey
+          : typeof data.syncKey === "string"
+            ? data.syncKey
+            : calendarSyncKey;
+      if (calendarSaveVersionRef.current === saveVersion) {
+        lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
+        lastPersistedCalendarItemsRef.current = persistedItems;
+        setItems(persistedItems);
+        if (typeof verifyData.updatedAt === "string") setCalendarStateVersion(verifyData.updatedAt);
+        else if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
+        if (persistedSyncKey && persistedSyncKey !== calendarSyncKey) setCalendarSyncKey(persistedSyncKey);
+        const nextNotifications = Array.isArray(verifyData.notifications) ? verifyData.notifications : data.notifications;
+        if (Array.isArray(nextNotifications)) setNotifications(cleanNotificationRecords(nextNotifications));
+        applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar || verifyData.googleCalendarSync || verifyData.googleCalendar);
+        setCalendarFeedStatus("connected");
+        setCalendarSaveStatus("saved");
+        setCalendarSaveError("");
+        closeCalendarDetails();
+        setToast({ message: `${selected.kind === "block" ? "Block" : "Appointment"} removed.` });
+        window.setTimeout(() => {
+          if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
+        }, 1800);
+      }
+      finishDiagnosticTimer(timer, "verified", {
+        httpStatus: verifyHttpStatus,
+        errorCode: "BOOKING_DELETE_VERIFY_COMPLETED",
+        details: {
+          targetedDelete: true,
+          operationOwner: "calendar_reload_verify",
+          deleteHttpStatus: response.status,
+          verifyHttpStatus,
+          verificationRoute: "DELETE /api/calendar-state",
+          verificationResult: "not_found",
+          returnedItemCount: persistedItems.length,
+          backendDiagnostics: Boolean(data.diagnostics || verifyData.diagnostics),
+        },
+      });
+      trackDiagnosticEvent({
+        system: "save",
+        action: "BOOKING_DELETE_COMPLETED",
+        phase: "request",
+        status: "success",
+        route: "DELETE /api/calendar-state",
+        functionName: "removeSelected",
+        expectedAccountId: activeAccountId,
+        objectType: selected.kind === "block" ? "calendarBlock" : "booking",
+        objectId: calendarItemId,
+        details: {
+          targetedDelete: true,
+          operationOwner: "calendar_reload_verify",
+          deleteHttpStatus: response.status,
+          verifyHttpStatus,
+          verificationResult: "not_found",
+        },
+      });
+      scheduleAdminNotificationDebounceFlush();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The booking could not be deleted.";
+      const errorDetails = error as {
+        code?: string;
+        diagnostics?: BookingDeleteDiagnostics;
+        httpStatus?: number;
+        operationOwner?: string;
+        failureRoute?: string;
+        personId?: string;
+        email?: string;
+      };
+      const code = errorDetails?.code || "BOOKING_DELETE_FAILED";
+      const diagnostics = errorDetails?.diagnostics;
+      const operationOwner =
+        safeText(errorDetails?.operationOwner || diagnostics?.operationOwner) ||
+        (code === "BOOKING_DELETE_VERIFY_FAILED" ? "calendar_reload_verify" : "calendar_delete");
+      const failureRoute = safeText(errorDetails?.failureRoute || diagnostics?.route) || "DELETE /api/calendar-state";
+      const httpStatus =
+        typeof errorDetails?.httpStatus === "number"
+          ? errorDetails.httpStatus
+          : typeof diagnostics?.httpStatus === "number"
+            ? diagnostics.httpStatus
+            : undefined;
+      const personId = safeText(errorDetails?.personId || diagnostics?.personId);
+      const email = safeText(errorDetails?.email || diagnostics?.email);
+      const deleteFailureMessage =
+        operationOwner === "people_patch"
+          ? "Delete attempted an unexpected client save. Check diagnostics before retrying."
+          : code === "BOOKING_DELETE_VERIFY_FAILED"
+            ? "Deleted booking reappeared after backend refetch. Stale cache or persistence verification failed."
+            : code === "BOOKING_DELETE_RELOAD_FAILED"
+              ? "The booking delete could not be verified because the calendar reload failed."
+              : "The booking was not deleted. Please try again.";
+      finishDiagnosticTimer(timer, "failed", {
+        httpStatus,
+        errorCode: code,
+        humanMessage: message,
+        details: {
+          targetedDelete: true,
+          operationOwner,
+          route: failureRoute,
+          personId,
+          email,
+          backendMessage: message,
+        },
+      });
+      const failureAction =
+        operationOwner === "people_patch"
+          ? "BOOKING_DELETE_OWNERSHIP_VIOLATION"
+          : code === "BOOKING_DELETE_VERIFY_FAILED" || code === "BOOKING_DELETE_RELOAD_FAILED"
+            ? code
+            : "BOOKING_DELETE_FAILED";
+      trackDiagnosticEvent({
+        system: "save",
+        action: failureAction,
+        phase: "request",
+        status: "failed",
+        route: failureRoute,
+        functionName: "removeSelected",
+        expectedAccountId: activeAccountId,
+        objectType: selected.kind === "block" ? "calendarBlock" : "booking",
+        objectId: calendarItemId,
+        errorCode: code,
+        humanMessage: message,
+        details: {
+          targetedDelete: true,
+          operationOwner,
+          httpStatus,
+          personId,
+          email,
+          backendMessage: message,
+        },
+      });
+      setCalendarFeedStatus(code === "AUTH_SESSION_MISSING" ? "offline" : "connected");
+      setCalendarSaveStatus("failed");
+      setCalendarSaveError(deleteFailureMessage);
+      setToast({ message: deleteFailureMessage });
+    } finally {
+      endAdminSave("calendar_delete");
+      setDeleteInFlightId((current) => (current === calendarItemId ? "" : current));
+    }
+  }
+
+  const customGroupAttendeePanel = isCustomGroupBooking ? (
+    <div className="custom-group-panel">
+      <div className="custom-group-summary">
+        <span>Attendees</span>
+        <strong>
+          {customGroupParticipantCount} / {customGroupMaxParticipants(bookingTargetService)}
+        </strong>
+        <em>{formatMoney(customGroupCalculatedPrice)}</em>
+      </div>
+      <div className="booking-form custom-group-attendee-form">
+        <input
+          value={customGroupAttendeeDraft.name}
+          onChange={(event) => updateCustomGroupAttendeeDraft("name", event.target.value)}
+          placeholder="Attendee name"
+        />
+        <input
+          value={customGroupAttendeeDraft.email}
+          autoComplete="email"
+          inputMode="email"
+          onChange={(event) => updateCustomGroupAttendeeDraft("email", event.target.value)}
+          placeholder="Email optional"
+          type="email"
+        />
+      </div>
+      <button
+        className="outline-button"
+        disabled={customGroupRemainingAttendees <= 0}
+        onClick={addCustomGroupAttendee}
+        type="button"
+      >
+        <Plus size={16} />
+        Add attendee
+      </button>
+      <div className="custom-group-attendee-list">
+        <div className="custom-group-attendee-row">
+          <span>
+            <strong>{[bookingForm.firstName, bookingForm.lastName].filter(Boolean).join(" ").trim() || "Booker"}</strong>
+            <em>{bookingForm.email || "Email required"}</em>
+          </span>
+          <small>{customGroupStatusLabel("booker")}</small>
+        </div>
+        {customGroupAttendees.map((attendee) => (
+          <div className="custom-group-attendee-row" key={attendee.id}>
+            <span>
+              <strong>{attendee.name}</strong>
+              <em>{attendee.email || "Manual attendee"}</em>
+            </span>
+            <small>{customGroupStatusLabel(attendee.status)}</small>
+            <button
+              className="icon-button small"
+              onClick={() => removeCustomGroupAttendee(attendee.id)}
+              aria-label={`Remove ${attendee.name}`}
+              type="button"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        ))}
+      </div>
+      {customGroupAttendees.length < customGroupMinParticipants(bookingTargetService) - 1 && (
+        <p className="field-help">Add at least one other person before confirming.</p>
+      )}
+    </div>
+  ) : null;
+
+  const servicesSettingsPanel = (
+    <div className="settings-section settings-services">
+      <div className="service-layout">
+        <div className="services-topline">
+          <div>
+            <span>Lesson options</span>
+            <h2>Lesson types</h2>
+          </div>
+          <button className="outline-button" onClick={startNewService}>
+            <Plus size={16} />
+            New
+          </button>
+        </div>
+
+        {showServiceEditor && (
+          <article className="data-card service-editor">
+            <div className="data-card-header">
+              <div>
+                <span>{editingServiceId ? "Edit Lesson Type" : "New Lesson Type"}</span>
+                <h2>{editingServiceId ? serviceEditor.name || "Lesson details" : "Add service"}</h2>
+              </div>
+              <button
+                className="outline-button"
+                onClick={() => {
+                  setShowServiceEditor(false);
+                  setEditingServiceId(null);
+                  setServiceNumberDrafts({});
+                  setServiceEditor(emptyServiceEditor());
+                }}
+              >
+                <X size={16} />
+                Close
+              </button>
+            </div>
+
+            <div className="service-form">
+              <div className="service-form-row">
+                <label className="settings-field">
+                  <span>Lesson format</span>
+                  <select
+                    value={serviceEditorFormat(serviceEditor)}
+                    onChange={(event) => updateServiceEditorFormat(event.target.value as ServiceEditorFormat)}
+                  >
+                    <option value="private">Private lesson</option>
+                    <option value="group">Group lesson</option>
+                    <option value="custom-group">Custom group lesson</option>
+                    <option value="package">Package</option>
+                  </select>
+                </label>
+                <label className="settings-field">
+                  <span>Visibility</span>
+                  <select
+                    value={serviceEditor.visibility}
+                    onChange={(event) =>
+                      updateServiceEditor("visibility", event.target.value === "private" ? "private" : "public")
+                    }
+                  >
+                    <option value="public">Public booking page</option>
+                    <option value="private">Admin only</option>
+                  </select>
+                </label>
+                <label className="settings-field">
+                  <span>Show on booking screens</span>
+                  <div className="service-screen-checkboxes">
+                    {BOOKING_SCREENS.map((screen) => (
+                      <label className="settings-toggle" key={screen.id}>
+                        <input
+                          checked={Boolean((serviceEditor.bookingScreenIds ?? ["main"]).includes(screen.id))}
+                          onChange={(event) => updateBookingScreens(screen.id, event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span>{screen.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {serviceEditor.visibility === "private" && (
+                    <p className="field-help">Admin-only lesson types will not appear publicly until visibility is set to Public.</p>
+                  )}
+                </label>
+              </div>
+              <label className="settings-field">
+                <span>Name</span>
+                <input
+                  value={serviceEditor.name}
+                  onChange={(event) => updateServiceEditor("name", event.target.value)}
+                  placeholder="Lesson name"
+                />
+              </label>
+              <label className="settings-field">
+                <span>Optional description</span>
+                <input
+                  value={serviceEditor.description}
+                  onChange={(event) => updateServiceEditor("description", event.target.value)}
+                  placeholder="Short booking note"
+                />
+              </label>
+              <div className="service-form-row">
+                <label className="settings-field">
+                  <span>Duration</span>
+                  <input
+                    value={serviceNumberInputValue("duration")}
+                    min={15}
+                    max={240}
+                    step={15}
+                    inputMode="numeric"
+                    onChange={(event) => updateServiceNumberDraft("duration", event.target.value)}
+                    onBlur={() => commitServiceNumberDraft("duration")}
+                    type="number"
+                  />
+                </label>
+                <label className="settings-field">
+                  <span>Price NZD</span>
+                  <input
+                    value={serviceNumberInputValue("price")}
+                    min={0}
+                    step={1}
+                    inputMode="decimal"
+                    onChange={(event) => updateServiceNumberDraft("price", event.target.value)}
+                    onBlur={() => commitServiceNumberDraft("price")}
+                    type="number"
+                  />
+                </label>
+                <label className="settings-field">
+                  <span>Pricing</span>
+                  <select
+                    disabled={serviceEditor.lessonFormat !== "group" || hasCustomGroupFlag(serviceEditor)}
+                    value={serviceEditor.priceMode}
+                    onChange={(event) =>
+                      updateServiceEditor("priceMode", event.target.value === "per-person" ? "per-person" : "session")
+                    }
+                  >
+                    <option value="session">Per session</option>
+                    <option value="per-person">Per person</option>
+                  </select>
+                </label>
+              </div>
+              {serviceEditor.lessonFormat === "group" && hasCustomGroupFlag(serviceEditor) && (
+                <div className="service-form-row">
+                  <label className="settings-field">
+                    <span>Base participants</span>
+                    <input
+                      value={serviceNumberInputValue("baseParticipants")}
+                      min={serviceEditor.minParticipants}
+                      max={serviceEditor.capacity}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) => updateServiceNumberDraft("baseParticipants", event.target.value)}
+                      onBlur={() => commitServiceNumberDraft("baseParticipants")}
+                      type="number"
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <span>Base price NZD</span>
+                    <input
+                      value={serviceNumberInputValue("basePrice")}
+                      min={0}
+                      step={1}
+                      inputMode="decimal"
+                      onChange={(event) => updateServiceNumberDraft("basePrice", event.target.value)}
+                      onBlur={() => commitServiceNumberDraft("basePrice")}
+                      type="number"
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <span>Extra person NZD</span>
+                    <input
+                      value={serviceNumberInputValue("extraPersonPrice")}
+                      min={0}
+                      step={1}
+                      inputMode="decimal"
+                      onChange={(event) => updateServiceNumberDraft("extraPersonPrice", event.target.value)}
+                      onBlur={() => commitServiceNumberDraft("extraPersonPrice")}
+                      type="number"
+                    />
+                  </label>
+                </div>
+              )}
+              <div className="service-form-row">
+                {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
+                  <label className="settings-field">
+                    <span>Day of week</span>
+                    <select
+                      value={serviceEditor.groupSchedule?.dayOfWeek ?? 2}
+                      onChange={(event) => updateGroupSchedule("dayOfWeek", Number(event.target.value))}
+                    >
+                      {fullDayNames.map((dayName, index) => (
+                        <option key={dayName} value={index}>
+                          {dayName}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
+                  <label className="settings-field">
+                    <span>Start time</span>
+                    <input
+                      value={minutesToInputTime(serviceEditor.groupSchedule?.startMinutes ?? timeToMinutes(18, 0))}
+                      inputMode="numeric"
+                      onChange={(event) =>
+                        updateGroupSchedule(
+                          "startMinutes",
+                          inputTimeToMinutes(
+                            event.target.value,
+                            serviceEditor.groupSchedule?.startMinutes ?? timeToMinutes(18, 0),
+                          ),
+                        )
+                      }
+                      type="time"
+                      step={SNAP_MINUTES * 60}
+                    />
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
+                  <label className="settings-field">
+                    <span>Generate next</span>
+                    <input
+                      value={groupOccurrenceInput}
+                      min={1}
+                      max={MAX_GROUP_OCCURRENCE_COUNT}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) => setGroupOccurrenceInput(event.target.value)}
+                      onBlur={() => void applyGroupDraftInputs()}
+                      type="number"
+                    />
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && (
+                  <label className="settings-field">
+                    <span>{hasCustomGroupFlag(serviceEditor) ? "Minimum participants" : "Minimum group"}</span>
+                    <input
+                      value={groupMinimumInput}
+                      min={2}
+                      max={Number(groupMaximumInput) || 24}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) => setGroupMinimumInput(event.target.value)}
+                      onBlur={() => void applyGroupDraftInputs()}
+                      type="number"
+                    />
+                  </label>
+                )}
+                {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
+                  <label className="settings-toggle">
+                    <input
+                      checked={serviceEditor.groupSchedule?.active !== false}
+                      onChange={(event) => updateGroupSchedule("active", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>Enable recurring schedule</span>
+                  </label>
+                )}
+                {serviceEditor.lessonFormat !== "package" && (
+                  <label className="settings-field">
+                    <span>
+                      {hasCustomGroupFlag(serviceEditor)
+                        ? "Max participants"
+                        : serviceEditor.lessonFormat === "group"
+                          ? "Maximum group"
+                          : "Capacity"}
+                    </span>
+                    <input
+                      value={groupMaximumInput}
+                      min={serviceEditor.lessonFormat === "group" ? 2 : 1}
+                      max={hasCustomGroupFlag(serviceEditor) ? DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS : 24}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) => setGroupMaximumInput(event.target.value)}
+                      onBlur={() => void applyGroupDraftInputs()}
+                      type="number"
+                    />
+                  </label>
+                )}
+                {(isAdminUser || activeCoachList.length > 1) && (
+                  <label className="settings-field">
+                    <span>Coach</span>
+                    <select
+                      value={serviceEditor.coachId || serviceScopeCoachId || defaultCoachId(coachProfiles)}
+                      onChange={(event) => updateServiceEditor("coachId", event.target.value)}
+                      disabled={!isAdminUser}
+                    >
+                      {activeCoachList.map((coach) => (
+                        <option key={coach.id} value={coach.id}>
+                          {coach.displayName || coach.name}{coach.isDefault ? " (default)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="settings-field">
+                  <span>Booking location</span>
+                  <select
+                    value={serviceEditor.locationId || defaultLocationId(locations)}
+                    onChange={(event) => updateServiceEditor("locationId", event.target.value)}
+                  >
+                    {activeLocationList.map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.name}{location.isDefault ? " (default)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="settings-field">
+                  <span>Lesson note</span>
+                  <input
+                    value={serviceEditor.lessonNote ?? serviceEditor.location ?? ""}
+                    onChange={(event) => updateServiceEditor("lessonNote", event.target.value)}
+                    placeholder="Bay hire included"
+                  />
+                </label>
+              </div>
+              {serviceEditor.lessonFormat === "package" && (
+                <div className="service-form-row">
+                  <label className="settings-field">
+                    <span>Allowance</span>
+                    <input
+                      value={serviceNumberInputValue("packageAllowance")}
+                      min={1}
+                      max={100}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) => updateServiceNumberDraft("packageAllowance", event.target.value)}
+                      onBlur={() => commitServiceNumberDraft("packageAllowance")}
+                      type="number"
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <span>Coverage style</span>
+                    <select
+                      value={serviceEditor.packageCoverageMode ?? "upfront"}
+                      onChange={(event) =>
+                        updateServiceEditor(
+                          "packageCoverageMode",
+                          event.target.value === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront",
+                        )
+                      }
+                    >
+                      <option value="upfront">Paid upfront</option>
+                      <option value="lesson-by-lesson">Lesson-by-lesson</option>
+                    </select>
+                  </label>
+                  <label className="settings-field">
+                    <span>Covers lesson type</span>
+                    <select
+                      value={serviceEditor.packageCoversServiceId ?? ""}
+                      onChange={(event) => updateServiceEditor("packageCoversServiceId", event.target.value)}
+                    >
+                      <option value="">Any matching lesson</option>
+                      {activeServices
+                        .filter((service) => service.lessonFormat !== "package")
+                        .map((service) => (
+                          <option key={service.id} value={service.id}>
+                            {service.name}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+              )}
+              <label className="settings-toggle">
+                <input
+                  checked={serviceEditor.active}
+                  onChange={(event) => updateServiceEditor("active", event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Active and bookable</span>
+              </label>
+            </div>
+
+            <button className="primary-button settings-save" onClick={saveEditedService}>
+              {serviceSaveState === "saving"
+                ? "Saving"
+                : serviceSaveState === "saved"
+                  ? "Saved"
+                  : serviceSaveState === "error"
+                    ? "Not saved"
+                    : "Save Lesson Type"}
+            </button>
+          </article>
+        )}
+
+        <details className="settings-subsection service-list-section">
+          <summary className="settings-subsection-title">
+            <ScissorsLineDashed size={18} />
+            <div>
+              <span>Lesson types</span>
+              <strong>{activeServices.length} active</strong>
+            </div>
+          </summary>
+          <div className="service-list-tabs" role="tablist" aria-label="Lesson type status">
+            <button
+              className={`pill ${serviceListTab === "active" ? "active-pill" : ""}`}
+              onClick={() => setServiceListTab("active")}
+              type="button"
+            >
+              Active
+            </button>
+            <button
+              className={`pill ${serviceListTab === "archived" ? "active-pill" : ""}`}
+              onClick={() => setServiceListTab("archived")}
+              type="button"
+            >
+              Archived
+            </button>
+          </div>
+          <div className="service-list" aria-label="Lesson types">
+            {(serviceListTab === "active" ? activeServices : archivedServices).map((service) => (
+              <article className={`service-row ${service.active ? "" : "is-archived"}`} key={service.id}>
+                <button className="service-row-main" onClick={() => editService(service)} type="button">
+                  <span>
+                    {service.archived ? "Archived" : service.active ? "Active" : "Inactive"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
+                    {serviceFormatLabel(service)} ·{" "}
+                    {formatBookingScreenLabels(service.bookingScreenIds ?? ["main"]).join(", ")}
+                  </span>
+                  <strong>{service.name}</strong>
+                  {service.description && <em>{service.description}</em>}
+                  {(isAdminUser || activeCoachList.length > 1) && (
+                    <em>Coach: {bookingCoachSnapshotFor(service.coachId, coachProfiles, coachAccount).displayName || bookingCoachSnapshotFor(service.coachId, coachProfiles, coachAccount).name}</em>
+                  )}
+                  <em>Booking location: {bookingLocationShortDisplay(bookingLocationSnapshotFor(service, locations, coachAccount))}</em>
+                  {(service.lessonNote || service.location) && <em>Lesson note: {service.lessonNote || service.location}</em>}
+                  {service.lessonFormat === "package" && (
+                    <em>
+                      {service.packageAllowance ?? 5} slots ·{" "}
+                      {service.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "paid upfront"}
+                    </em>
+                  )}
+                </button>
+                <div className="service-row-meta">
+                  <strong>{servicePriceLabel(service)}</strong>
+                  <span>{service.duration} min</span>
+                </div>
+                <div className="service-row-actions">
+                  {service.archived ? (
+                    <>
+                      <button
+                        className="outline-button service-action-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          restoreService(service);
+                        }}
+                        type="button"
+                      >
+                        <RefreshCw size={15} />
+                        <span>Restore</span>
+                      </button>
+                      {canPermanentlyDeleteService(service) ? (
+                        <button
+                          className="danger-button service-action-button service-action-delete"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            requestServiceAction(service, "delete");
+                          }}
+                          type="button"
+                        >
+                          <Trash2 size={15} />
+                          <span>Delete</span>
+                        </button>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="outline-button service-action-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          editService(service);
+                        }}
+                        type="button"
+                      >
+                        <Pencil size={15} />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        className="outline-button service-action-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          requestServiceAction(service, "archive");
+                        }}
+                        type="button"
+                      >
+                        <Archive size={15} />
+                        <span>Archive</span>
+                      </button>
+                      {canPermanentlyDeleteService(service) ? (
+                        <button
+                          className="danger-button service-action-button service-action-delete"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            requestServiceAction(service, "delete");
+                          }}
+                          type="button"
+                        >
+                          <Trash2 size={15} />
+                          <span>Delete</span>
+                        </button>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              </article>
+            ))}
+            {!(serviceListTab === "active" ? activeServices : archivedServices).length && (
+              <p className="service-list-empty">
+                {serviceListTab === "active" ? "No active lesson types yet." : "No archived lesson types yet."}
+              </p>
+            )}
+          </div>
+        </details>
+      </div>
+    </div>
+  );
+
+  const pendingService =
+    pendingServiceAction ? services.find((service) => service.id === pendingServiceAction.serviceId) ?? null : null;
+
+  const locationsSettingsPanel = (
+    <div className="settings-section settings-locations">
+      <div className="data-card wide">
+        <div className="data-card-header">
+          <div>
+            <span>Locations</span>
+            <h2>{activeLocationList.length} active place{activeLocationList.length === 1 ? "" : "s"}</h2>
+          </div>
+          <button className="primary-button" onClick={startNewLocation} type="button">
+            <Plus size={16} />
+            <span>Add location</span>
+          </button>
+        </div>
+        <p className="field-help">
+          Locations are real places customers can travel to. Lesson-specific inclusions like "Bay hire included" belong on the lesson type, not here.
+        </p>
+
+        {showLocationEditor && (
+          <article className="service-editor-card">
+            <div className="data-card-header compact">
+              <div>
+                <span>{editingLocationId ? "Edit location" : "New location"}</span>
+                <h3>{locationEditor.name || "Location details"}</h3>
+              </div>
+              <button
+                className="icon-button"
+                disabled={locationSaveState === "saving"}
+                onClick={() => setShowLocationEditor(false)}
+                type="button"
+                aria-label="Close location editor"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="service-form-grid">
+              <label className="settings-field">
+                <span>Location name</span>
+                <input value={locationEditor.name} onChange={(event) => updateLocationEditor("name", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Short name</span>
+                <input value={locationEditor.shortName} onChange={(event) => updateLocationEditor("shortName", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Address</span>
+                <input value={locationEditor.address} onChange={(event) => updateLocationEditor("address", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Map URL</span>
+                <input value={locationEditor.mapUrl ?? ""} onChange={(event) => updateLocationEditor("mapUrl", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Timezone</span>
+                <input value={locationEditor.timezone} onChange={(event) => updateLocationEditor("timezone", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Sort order</span>
+                <input
+                  value={locationEditor.sortOrder ?? 0}
+                  inputMode="numeric"
+                  onChange={(event) => updateLocationEditor("sortOrder", Number(event.target.value))}
+                  type="text"
+                />
+              </label>
+            </div>
+            <div className="service-form-row">
+              <label className="settings-field">
+                <span>Arrival instructions</span>
+                <textarea
+                  value={locationEditor.arrivalInstructions ?? ""}
+                  onChange={(event) => updateLocationEditor("arrivalInstructions", event.target.value)}
+                  rows={3}
+                />
+              </label>
+              <label className="settings-field">
+                <span>Public notes</span>
+                <textarea
+                  value={locationEditor.publicNotes ?? ""}
+                  onChange={(event) => updateLocationEditor("publicNotes", event.target.value)}
+                  rows={3}
+                />
+              </label>
+            </div>
+            <div className="service-form-row">
+              <label className="settings-toggle">
+                <input
+                  checked={locationEditor.active !== false && locationEditor.archived !== true}
+                  onChange={(event) => {
+                    updateLocationEditor("active", event.target.checked);
+                    updateLocationEditor("archived", !event.target.checked);
+                  }}
+                  type="checkbox"
+                />
+                <span>Active</span>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  checked={locationEditor.isDefault === true}
+                  onChange={(event) => updateLocationEditor("isDefault", event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Default location</span>
+              </label>
+            </div>
+            {locationSaveState === "error" && locationEditorError && (
+              <p className="workspace-save-error" role="alert">
+                {locationEditorError}
+              </p>
+            )}
+            <button className="primary-button settings-save" disabled={locationSaveState === "saving"} onClick={saveEditedLocation} type="button">
+              {locationSaveState === "saving"
+                ? "Saving"
+                : locationSaveState === "saved"
+                  ? "Saved"
+                  : locationSaveState === "error"
+                    ? "Not saved"
+                    : "Save Location"}
+            </button>
+          </article>
+        )}
+
+        <div className="service-list" aria-label="Locations">
+          {[...activeLocationList, ...archivedLocationList].map((location) => (
+            <article className={`service-row ${location.active && !location.archived ? "" : "is-archived"}`} key={location.id}>
+              <button className="service-row-main" onClick={() => editLocation(location)} type="button">
+                <span>
+                  {location.isDefault ? "Default · " : ""}{location.active && !location.archived ? "Active" : "Archived"}
+                </span>
+                <strong>{location.name}</strong>
+                {location.address && <em>{location.address}</em>}
+                <em>Used by {locationUsageCount(location.id)} lesson type{locationUsageCount(location.id) === 1 ? "" : "s"}</em>
+              </button>
+              <div className="service-row-meta">
+                <strong>{location.shortName}</strong>
+                <span>{location.timezone}</span>
+              </div>
+              <div className="service-row-actions">
+                {!location.isDefault && location.active && !location.archived ? (
+                  <button className="outline-button service-action-button" onClick={() => makeDefaultLocation(location)} type="button">
+                    <Check size={15} />
+                    <span>Default</span>
+                  </button>
+                ) : null}
+                {location.archived || !location.active ? (
+                  <button className="outline-button service-action-button" onClick={() => restoreLocation(location)} type="button">
+                    <RefreshCw size={15} />
+                    <span>Restore</span>
+                  </button>
+                ) : (
+                  <button className="outline-button service-action-button" onClick={() => archiveLocation(location)} type="button">
+                    <Archive size={15} />
+                    <span>Archive</span>
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const coachesSettingsPanel = (
+    <div className="settings-section settings-coaches">
+      <div className="data-card wide">
+        <div className="data-card-header">
+          <div>
+            <span>Coaches</span>
+            <h2>{activeCoachList.length} active coach{activeCoachList.length === 1 ? "" : "es"}</h2>
+          </div>
+          <button className="primary-button" onClick={startNewCoach} type="button">
+            <Plus size={16} />
+            <span>Add coach</span>
+          </button>
+        </div>
+        <p className="field-help">
+          Coach profiles are bookable operator identities. Admin users are a permission layer, not the owner of bookings.
+        </p>
+
+        {showCoachEditor && (
+          <article className="service-editor-card">
+            <div className="data-card-header compact">
+              <div>
+                <span>{editingCoachId ? "Edit coach" : "New coach"}</span>
+                <h3>{coachEditor.displayName || coachEditor.name || "Coach details"}</h3>
+              </div>
+              <button
+                className="icon-button"
+                disabled={coachSaveState === "saving"}
+                onClick={() => setShowCoachEditor(false)}
+                type="button"
+                aria-label="Close coach editor"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="service-form-grid">
+              <label className="settings-field">
+                <span>Name</span>
+                <input value={coachEditor.name} onChange={(event) => updateCoachEditor("name", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Public name</span>
+                <input value={coachEditor.displayName} onChange={(event) => updateCoachEditor("displayName", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Short name</span>
+                <input value={coachEditor.shortName ?? ""} onChange={(event) => updateCoachEditor("shortName", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Email</span>
+                <input value={coachEditor.email} onChange={(event) => updateCoachEditor("email", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Phone</span>
+                <input value={coachEditor.phone ?? ""} onChange={(event) => updateCoachEditor("phone", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Photo URL</span>
+                <input value={coachEditor.photoUrl ?? ""} onChange={(event) => updateCoachEditor("photoUrl", event.target.value)} />
+              </label>
+              <label className="settings-field">
+                <span>Default location</span>
+                <select
+                  value={coachEditor.defaultLocationId || defaultLocationId(locations)}
+                  onChange={(event) => updateCoachEditor("defaultLocationId", event.target.value)}
+                >
+                  {activeLocationList.map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.shortName || location.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="settings-field">
+                <span>Sort order</span>
+                <input
+                  value={coachEditor.sortOrder ?? 0}
+                  inputMode="numeric"
+                  onChange={(event) => updateCoachEditor("sortOrder", Number(event.target.value))}
+                  type="text"
+                />
+              </label>
+            </div>
+            <label className="settings-field">
+              <span>Bio</span>
+              <textarea value={coachEditor.bio ?? ""} onChange={(event) => updateCoachEditor("bio", event.target.value)} rows={3} />
+            </label>
+            <div className="service-form-row">
+              <label className="settings-toggle">
+                <input
+                  checked={coachEditor.active !== false && coachEditor.archived !== true}
+                  onChange={(event) => {
+                    updateCoachEditor("active", event.target.checked);
+                    updateCoachEditor("archived", !event.target.checked);
+                  }}
+                  type="checkbox"
+                />
+                <span>Active</span>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  checked={coachEditor.isDefault === true}
+                  onChange={(event) => updateCoachEditor("isDefault", event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Default coach</span>
+              </label>
+            </div>
+            <div className="settings-field">
+              <span>Assigned locations</span>
+              <div className="booking-screen-list">
+                {activeLocationList.map((location) => (
+                  <label key={location.id}>
+                    <input
+                      checked={(coachEditor.assignedLocationIds ?? []).includes(location.id)}
+                      onChange={(event) => {
+                        const current = coachEditor.assignedLocationIds ?? [];
+                        updateCoachEditor(
+                          "assignedLocationIds",
+                          event.target.checked
+                            ? Array.from(new Set([...current, location.id]))
+                            : current.filter((id) => id !== location.id),
+                        );
+                      }}
+                      type="checkbox"
+                    />
+                    <span>{location.shortName || location.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            {coachSaveState === "error" && coachEditorError && (
+              <p className="workspace-save-error" role="alert">
+                {coachEditorError}
+              </p>
+            )}
+            <button className="primary-button settings-save" disabled={coachSaveState === "saving"} onClick={saveEditedCoach} type="button">
+              {coachSaveState === "saving"
+                ? "Saving"
+                : coachSaveState === "saved"
+                  ? "Saved"
+                  : coachSaveState === "error"
+                    ? "Not saved"
+                    : "Save Coach"}
+            </button>
+          </article>
+        )}
+
+        <div className="service-list" aria-label="Coaches">
+          {coachProfiles.map((coach) => (
+            <article className={`service-row ${coach.active && !coach.archived ? "" : "is-archived"}`} key={coach.id}>
+              <button className="service-row-main" onClick={() => editCoach(coach)} type="button">
+                <span>{coach.isDefault ? "Default · " : ""}{coach.active && !coach.archived ? "Active" : "Archived"}</span>
+                <strong>{coach.displayName || coach.name}</strong>
+                {coach.email && <em>{coach.email}</em>}
+                <em>
+                  Assigned to {(coach.assignedLocationIds ?? []).length || 0} location{(coach.assignedLocationIds ?? []).length === 1 ? "" : "s"}
+                </em>
+              </button>
+              <div className="service-row-meta">
+                <strong>{coach.shortName || coach.name}</strong>
+                <span>{coach.phone || "No phone"}</span>
+              </div>
+              <div className="service-row-actions">
+                {!coach.isDefault && coach.active && !coach.archived ? (
+                  <button className="outline-button service-action-button" onClick={() => makeDefaultCoach(coach)} type="button">
+                    <Check size={15} />
+                    <span>Default</span>
+                  </button>
+                ) : null}
+                {coach.archived || !coach.active ? (
+                  <button className="outline-button service-action-button" onClick={() => restoreCoach(coach)} type="button">
+                    <RefreshCw size={15} />
+                    <span>Restore</span>
+                  </button>
+                ) : (
+                  <button className="outline-button service-action-button" onClick={() => archiveCoach(coach)} type="button">
+                    <Archive size={15} />
+                    <span>Archive</span>
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const availabilitySettingsPanel = (
+    <div className="settings-section settings-availability">
+      <div className="availability-layout">
+        <div className="data-card wide">
+          <div className="data-card-header">
+            <div>
+              <span>Availability</span>
+              <h2>{coachAccount.venueName}</h2>
+            </div>
+            <button className="primary-button" onClick={saveAvailability}>
+              {availabilitySaveState === "saving"
+                ? "Saving"
+                : availabilitySaveState === "saved"
+                ? "Saved"
+                : "Save Availability"}
+            </button>
+          </div>
+          <div className="availability-editor">
+            {fullDayNames.map((dayName, dayIndex) => (
+              <details className="settings-subsection availability-edit-row" key={dayName}>
+                <summary className="settings-subsection-title availability-day-title">
+                  <Clock size={18} />
+                  <div>
+                    <span>{dayName}</span>
+                    <strong>
+                      {availability[dayIndex].length
+                        ? availability[dayIndex].map((window) => `${formatTime(window.start)} - ${formatTime(window.end)}`).join(", ")
+                        : "Closed"}
+                    </strong>
+                  </div>
+                </summary>
+                <div className="availability-day-controls">
+                  <button className="outline-button compact-button" onClick={() => toggleAvailabilityDay(dayIndex)}>
+                    {availability[dayIndex].length ? "Closed" : "Open"}
+                  </button>
+                </div>
+                <div className="availability-windows">
+                  {availability[dayIndex].map((window, windowIndex) => {
+                    const windowKey = `${dayIndex}-${windowIndex}`;
+                    const isEditingWindow = editingAvailabilityWindow === windowKey;
+                    return (
+                      <div
+                        className={`availability-window ${isEditingWindow ? "is-editing" : ""}`}
+                        key={`${dayName}-${windowIndex}`}
+                      >
+                        {isEditingWindow ? (
+                          <>
+                            <label>
+                              <span>From</span>
+                              <input
+                                value={minutesToInputTime(window.start)}
+                                onChange={(event) =>
+                                  updateAvailabilityWindow(
+                                    dayIndex,
+                                    windowIndex,
+                                    "start",
+                                    inputTimeToMinutes(event.target.value, window.start),
+                                  )
+                                }
+                                type="time"
+                                step={SNAP_MINUTES * 60}
+                              />
+                            </label>
+                            <label>
+                              <span>To</span>
+                              <input
+                                value={minutesToInputTime(window.end)}
+                                onChange={(event) =>
+                                  updateAvailabilityWindow(
+                                    dayIndex,
+                                    windowIndex,
+                                    "end",
+                                    inputTimeToMinutes(event.target.value, window.end),
+                                  )
+                                }
+                                type="time"
+                                step={SNAP_MINUTES * 60}
+                              />
+                            </label>
+                            <button
+                              className="icon-button small"
+                              aria-label={`Done editing ${dayName} window`}
+                              onClick={() => setEditingAvailabilityWindow("")}
+                            >
+                              <Check size={15} />
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="availability-range-button"
+                            onClick={() => setEditingAvailabilityWindow(windowKey)}
+                            type="button"
+                          >
+                            <Clock size={15} />
+                            {formatTime(window.start)} - {formatTime(window.end)}
+                          </button>
+                        )}
+                        <button
+                          className="icon-button small"
+                          aria-label={`Remove ${dayName} window`}
+                          onClick={() => removeAvailabilityWindow(dayIndex, windowIndex)}
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <button className="outline-button compact-button add-time-button" onClick={() => addAvailabilityWindow(dayIndex)}>
+                    <Plus size={15} />
+                    Add time
+                  </button>
+                </div>
+              </details>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const bookingSettingsPanel = (
+    <article className="data-card settings-section settings-experience settings-branding booking-page-settings">
+      <div className="data-card-header">
+        <div>
+          <span>Booking Page</span>
+          <h2>Public booking surface</h2>
+        </div>
+        <Eye size={24} />
+      </div>
+      <details className="settings-subsection">
+        <summary className="settings-subsection-title">
+          <Eye size={18} />
+          <div>
+            <span>Preview</span>
+            <strong>{brandSettings.bookingTheme === "dark" ? "Dark branded cards" : "Light branded cards"}</strong>
+          </div>
+        </summary>
+        <div className={`public-booking booking-theme-${brandSettings.bookingTheme}`}>
+      <div className={`booking-brand ${showBookingBrandLogo ? "" : "booking-brand-subtle"}`}>
+        {showBookingBrandLogo && brandSettings.logoPreview ? (
+          <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
+        ) : showBookingBrandLogo ? (
+          <>
+            <strong>{bookingBrandPrimary.toUpperCase()}</strong>
+            {bookingBrandSecondary && <span>{bookingBrandSecondary.toUpperCase()}</span>}
+          </>
+        ) : (
+          <strong>{bookingBrandName}</strong>
+        )}
+        <em>{coachAccount.venueShortName}</em>
+      </div>
+
+      <div className="booking-columns booking-progressive-flow">
+        <section className={`booking-progressive-section ${isAppointmentSectionOpen ? "is-open" : ""} ${
+          isAppointmentStepComplete ? "is-complete" : ""
+        }`}>
+          <button
+            className="booking-progressive-title"
+            onClick={() => setPublicBookingSection("appointment")}
+            type="button"
+          >
+            <span className="booking-progressive-title-label">
+              1. Appointment <span className="booking-required-mark" aria-hidden="true">*</span>
+            </span>
+            <span className="booking-progressive-title-state">{isAppointmentStepComplete ? "Done" : "In progress"}</span>
+          </button>
+          {isAppointmentSectionOpen ? (
+            <div className="booking-progressive-body">
+              <div className="service-picker">
+                {visiblePublicServices.length ? (
+                  visiblePublicServices.map((service) => (
+                    <button
+                      className={service.id === bookingServiceId ? "selected-service" : ""}
+                      key={service.id}
+                      onClick={() => handlePublicBookingServiceSelect(service.id)}
+                      type="button"
+                    >
+                      <strong>{service.name}</strong>
+                      <em>
+                        {service.duration} minutes @ {servicePriceLabel(service)}
+                      </em>
+                      {service.description && <small>{service.description}</small>}
+                      {(service.lessonNote || service.location) && <small>{service.lessonNote || service.location}</small>}
+                    </button>
+                  ))
+                ) : (
+                  <p>No public lesson types are active.</p>
+                )}
+              </div>
+            </div>
+          ) : isAppointmentStepComplete ? (
+                    <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("appointment")}
+                      type="button"
+                    >
+                      <strong>{appointmentSummaryName}</strong>
+                      <span>{appointmentSummaryDuration}</span>
+                      {appointmentSummaryDescription ? <small>{appointmentSummaryDescription}</small> : null}
+                      {appointmentSummaryLessonNote ? <small>{appointmentSummaryLessonNote}</small> : null}
+                    </button>
+                  ) : (
+            <button
+              className="booking-progressive-summary booking-progressive-summary-empty"
+              onClick={() => setPublicBookingSection("appointment")}
+              type="button"
+            >
+              <strong>Appointment not selected</strong>
+              <span>Pick a lesson to continue</span>
+            </button>
+          )}
+        </section>
+
+        <section className={`booking-progressive-section ${isDateTimeSectionOpen ? "is-open" : ""} ${
+          isDateTimeStepComplete ? "is-complete" : ""
+        }`}>
+          <button
+            className="booking-progressive-title"
+            onClick={() => setPublicBookingSection("datetime")}
+            type="button"
+            disabled={!isAppointmentStepComplete}
+          >
+            <span className="booking-progressive-title-label">
+              2. Date & Time <span className="booking-required-mark" aria-hidden="true">*</span>
+            </span>
+            <span className="booking-progressive-title-state">{isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}</span>
+          </button>
+          {isDateTimeSectionOpen ? (
+            <div className="booking-progressive-body">
+              <div className="booking-week-controls">
+                <button onClick={() => moveWeek(-1)} type="button">
+                  <ArrowLeft size={15} />
+                  <span>Previous week</span>
+                </button>
+                <strong>{weekTitle}</strong>
+                <button onClick={() => moveWeek(1)} type="button">
+                  <span>Next week</span>
+                  <ArrowRight size={15} />
+                </button>
+              </div>
+              {!isGroupBookingTimeSelection ? (
+                <div className="booking-days-wrap">
+                  <div className="booking-days">
+                    {weekDays.map((day, index) => (
+                      <button
+                        className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
+                        key={day.label}
+                        onClick={() => handlePublicBookingDaySelect(index)}
+                        type="button"
+                      >
+                        <strong>{day.short}</strong>
+                        <em>{day.date}</em>
+                        {day.isToday ? <small className="booking-day-marker">Today</small> : null}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <div className="time-slots">
+                {selectedBookingService ? (
+                  publicBookingSlotsLoading ? (
+                    <p>Loading</p>
+                  ) : bookingSlots.length ? (
+                    visibleBookingSlots.map((slot) => {
+                      const slotLabel = isGroupBookingTimeSelection
+                        ? `${dateForSlot(slot.week, slot.day).toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
+                        : formatTime(slot.start);
+                      return (
+                        <button
+                          className={bookingStart === slot.start ? "selected-time" : ""}
+                          key={`${slot.week}-${slot.day}-${slot.start}`}
+                          onClick={() => handlePublicBookingTimeSelect(slot)}
+                          type="button"
+                        >
+                          {slotLabel}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p>
+                      {isGroupBookingTimeSelection
+                        ? "No upcoming group lesson times are available yet."
+                        : bookingDaySelected
+                          ? "No public times available for this day."
+                          : "Choose a day first."}
+                    </p>
+                  )
+                ) : (
+                  <p>Choose an appointment type first.</p>
+                )}
+              </div>
+            </div>
+          ) : isDateTimeStepComplete ? (
+            <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("datetime")}
+                      type="button"
+                    >
+                      <span>{dateTimeSummaryLine}</span>
+                      {dateTimeSummaryLocation ? <small>{dateTimeSummaryLocation}</small> : null}
+                    </button>
+                  ) : (
+            <button
+              className="booking-progressive-summary booking-progressive-summary-empty"
+              onClick={() => setPublicBookingSection("datetime")}
+              type="button"
+              disabled={!isAppointmentStepComplete}
+            >
+              <strong>{isAppointmentStepComplete ? "Date not selected" : "Select appointment first"}</strong>
+              <span>{isAppointmentStepComplete ? "Choose day and time" : "Complete appointment step"}</span>
+            </button>
+          )}
+        </section>
+
+        <section className={`booking-progressive-section ${isInformationSectionOpen ? "is-open" : ""} ${
+          showCapturedCustomerDetailsSummary ? "is-complete" : ""
+        }`}>
+          <button
+            className="booking-progressive-title"
+            onClick={() => setPublicBookingSection("information")}
+            type="button"
+            disabled={!isDateTimeStepComplete}
+          >
+            <span className="booking-progressive-title-label">3. Your Information</span>
+            <span className="booking-progressive-title-state">
+              {showCapturedCustomerDetailsSummary ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
+            </span>
+          </button>
+          {isInformationSectionOpen ? (
+            <div className="booking-progressive-body">
+              <div className="booking-form">
+                <label className="booking-required-field">
+                  <input
+                    value={bookingForm.firstName}
+                    aria-label="First name required"
+                    aria-required="true"
+                    autoComplete="given-name"
+                    onChange={(event) => updateBookingForm("firstName", event.target.value)}
+                    onKeyDown={handleBookingMatchKeyDown}
+                    placeholder="First name"
+                    required
+                  />
+                  <span className="booking-required-mark" aria-hidden="true">*</span>
+                </label>
+                <label className="booking-required-field">
+                  <input
+                    value={bookingForm.lastName}
+                    aria-label="Last name required"
+                    aria-required="true"
+                    autoComplete="family-name"
+                    onChange={(event) => updateBookingForm("lastName", event.target.value)}
+                    onKeyDown={handleBookingMatchKeyDown}
+                    placeholder="Last name"
+                    required
+                  />
+                  <span className="booking-required-mark" aria-hidden="true">*</span>
+                </label>
+                <input
+                  value={bookingForm.phone}
+                  autoComplete="tel"
+                  inputMode="tel"
+                  onChange={(event) => updateBookingForm("phone", event.target.value)}
+                  onKeyDown={handleBookingMatchKeyDown}
+                  placeholder="Phone"
+                  type="tel"
+                />
+                <label className="booking-required-field">
+                  <input
+                    value={bookingForm.email}
+                    aria-label="Email required"
+                    aria-required="true"
+                    autoComplete="email"
+                    inputMode="email"
+                    onChange={(event) => updateBookingForm("email", event.target.value)}
+                    onKeyDown={handleBookingMatchKeyDown}
+                    placeholder="Email"
+                    required
+                    type="email"
+                  />
+                  <span className="booking-required-mark" aria-hidden="true">*</span>
+                </label>
+              </div>
+              {bookingClientSuggestion && showBookingClientSuggestion && (
+                <button
+                  className="client-match-prompt booking-client-match"
+                  onClick={() => applyBookingClient(bookingClientSuggestion)}
+                  type="button"
+                >
+                  <User size={15} />
+                  <span>
+                    <strong>{bookingClientSuggestion.name}</strong>
+                    <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
+                  </span>
+                </button>
+              )}
+              {customGroupAttendeePanel}
+              {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
+              {bookingSubmitError && (
+                <div className="email-status failed" role="alert">
+                  <X size={17} />
+                  <span>{bookingSubmitError}</span>
+                </div>
+              )}
+              <button
+                className="primary-button confirm-booking"
+                disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving" || !isInformationStepComplete}
+                onClick={confirmPublicBooking}
+                type="button"
+              >
+                {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
+              </button>
+            </div>
+          ) : showCapturedCustomerDetailsSummary ? (
+                    <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("information")}
+                      type="button"
+                      disabled={!isDateTimeStepComplete}
+                    >
+                      <strong>{bookingCustomerSummaryName}</strong>
+                      <span>{bookingCustomerSummaryContact}</span>
+                    </button>
+                  ) : (
+            <button
+              className="booking-progressive-summary booking-progressive-summary-empty"
+              onClick={() => setPublicBookingSection("information")}
+              type="button"
+              disabled={!isDateTimeStepComplete}
+            >
+              <strong>{isDateTimeStepComplete ? "Customer details missing" : "Complete time step first"}</strong>
+              <span>{isDateTimeStepComplete ? "Enter your details to confirm" : "Lock a time first"}</span>
+            </button>
+          )}
+        </section>
+      </div>
+
+        </div>
+      </details>
+      <EditableSettingsBlock
+        id="booking-page-notice-block"
+        title="Booking Page notice"
+        status={bookingNoticeEditor.status}
+        dirty={bookingNoticeEditor.dirty}
+        errorMessage={bookingNoticeEditor.errorMessage}
+        onEdit={() => startEditableBlock("booking-page-notice")}
+        onCancel={() => cancelEditableBlock("booking-page-notice")}
+        onSave={() => void saveEditableBlock("booking-page-notice")}
+      >
+      <details className="settings-subsection">
+        <summary className="settings-subsection-title">
+          <Clock size={18} />
+          <div>
+            <span>Minimum notice before a public booking</span>
+            <strong>{bookingNoticeDraftSummary}</strong>
+          </div>
+        </summary>
+        <label className="settings-field">
+          <span>Minimum notice in hours</span>
+          <input
+            type="number"
+            min={0}
+            max={168}
+            step={0.25}
+            value={bookingNoticeDraftHours}
+            readOnly={bookingNoticeIsLocked}
+            onChange={(event) => updateBookingNoticeHours(Math.max(0, Number(event.target.value || 0)))}
+          />
+        </label>
+        <p className="field-help">Clients can only book or reschedule after that buffer.</p>
+        <div className="minimum-notice-presets" aria-label="Quick notice presets">
+          {MIN_BOOKING_NOTICE_PRESETS_HOURS.map((hours) => (
+            <button
+              className="outline-button"
+              disabled={bookingNoticeIsLocked}
+              key={hours}
+              onClick={() => updateBookingNoticeHours(hours)}
+              type="button"
+            >
+              {hours === 0 ? "No buffer" : `${hours} hour${hours === 1 ? "" : "s"}`}
+            </button>
+          ))}
+        </div>
+        <button className="outline-button" disabled={bookingNoticeIsLocked} onClick={() => updateBookingNoticeHours(0)} type="button">
+          Clear buffer
+        </button>
+      </details>
+      </EditableSettingsBlock>
+      <EditableSettingsBlock
+        id="booking-screen-name-block"
+        title="Booking Page screen name"
+        status={bookingScreenNameEditor.status}
+        dirty={bookingScreenNameEditor.dirty}
+        errorMessage={bookingScreenNameEditor.errorMessage}
+        onEdit={() => startEditableBlock("booking-screen-name")}
+        onCancel={() => cancelEditableBlock("booking-screen-name")}
+        onSave={() => void saveEditableBlock("booking-screen-name")}
+      >
+              <details className="settings-subsection">
+                <summary className="settings-subsection-title">
+                  <Code2 size={18} />
+                  <div>
+                    <span>Booking screen embeds</span>
+                    <strong>Squarespace iframe</strong>
+                  </div>
+                </summary>
+              <div className="embed-panel">
+                <div className="booking-screen-tabs" role="tablist" aria-label="Booking screen embeds">
+                  {bookingScreenEmbeds.map((bookingScreen) => (
+                    <button
+                      className={`booking-screen-tab ${selectedBookingScreenId === bookingScreen.id ? "active" : ""}`}
+                      key={bookingScreen.id}
+                      onClick={() => {
+                        if (bookingScreenNameEditor.dirty && !confirmDiscardEditableBlock("Booking Page screen name")) return;
+                        if (bookingScreenNameEditor.dirty) bookingScreenNameEditor.cancel();
+                        setSelectedBookingScreenId(bookingScreen.id);
+                      }}
+                      type="button"
+                    >
+                      {bookingScreen.label}
+                    </button>
+                  ))}
+                </div>
+                {selectedBookingScreen && (
+                  <div className="booking-screen-embed-card">
+                    <label className="settings-field">
+                      <span>Screen name</span>
+                      <input
+                        value={bookingScreenNameDraft[selectedBookingScreen.id] || selectedBookingScreen.label}
+                        readOnly={bookingScreenNameIsLocked}
+                        onChange={(event) =>
+                          bookingScreenNameEditor.setDraftValue((current) => ({
+                            ...current,
+                            [selectedBookingScreen.id]: event.target.value,
+                          }))
+                        }
+                        type="text"
+                      />
+                    </label>
+                    <div className="settings-field">
+                      <span>Slug</span>
+                      <code className="booking-screen-slug">{selectedBookingScreen.path}</code>
+                    </div>
+                    <div className="settings-field">
+                      <span>Public link</span>
+                      <code className="booking-screen-link">{selectedBookingScreen.publicUrl}</code>
+                    </div>
+                    <div className="embed-actions">
+                      <button
+                        className="outline-button"
+                        onClick={() => copyBookingScreenValue(selectedBookingScreen.publicUrl, "url", selectedBookingScreen.id)}
+                        type="button"
+                      >
+                        {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? <Check size={16} /> : <Copy size={16} />}
+                        {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? "Copied link" : "Copy public link"}
+                      </button>
+                      <a className="outline-button" href={selectedBookingScreen.publicUrl} target="_blank" rel="noreferrer">
+                        <ExternalLink size={16} />
+                        Open widget
+                      </a>
+                    </div>
+                    <div className="settings-field">
+                      <span>Iframe embed</span>
+                      <div className="embed-code booking-screen-iframe">
+                        <Code2 size={18} />
+                        <code>{selectedBookingScreen.iframeCode}</code>
+                      </div>
+                    </div>
+                    <div className="embed-actions">
+                      <button
+                        className="outline-button"
+                        onClick={() => copyBookingScreenValue(selectedBookingScreen.iframeCode, "iframe", selectedBookingScreen.id)}
+                        type="button"
+                      >
+                        {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? (
+                          <Check size={16} />
+                        ) : (
+                          <Copy size={16} />
+                        )}
+                        {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? "Copied iframe" : "Copy iframe"}
+                      </button>
+                    </div>
+                    <div className="booking-screen-preview">
+                      <div className="settings-field">
+                        <span>Preview iframe</span>
+                        <iframe
+                          src={selectedBookingScreen.publicUrl}
+                          title={`${coachAccount.businessName} ${selectedBookingScreen.label} preview`}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+      </details>
+      </EditableSettingsBlock>
+    </article>
+  );
+
+  const quickCreateIsCustomGroup = Boolean(quickCreate && quickCreateService && isCustomGroupService(quickCreateService));
+  const quickCreateCustomGroupParticipantCount = quickCreateIsCustomGroup && quickCreate ? 1 + quickCreate.attendees.length : 1;
+  const quickCreateCustomGroupPrice =
+    quickCreateIsCustomGroup && quickCreateService
+      ? calculateCustomGroupPrice(quickCreateService, quickCreateCustomGroupParticipantCount)
+      : 0;
+  const selectedIsCustomGroupAppointment =
+    selected?.kind === "appointment" && isCustomGroupService(selectedService);
+  const selectedCustomGroupAttendees =
+    selectedIsCustomGroupAppointment && selected ? attendeeListWithBooker(selected) : [];
+  const selectedCustomGroupPrice =
+    selectedIsCustomGroupAppointment && selectedService
+      ? calculateCustomGroupPrice(selectedService, selectedCustomGroupAttendees.length)
+      : Number(selected?.calculatedPrice ?? 0);
+
+  const selectedAppointmentDetails = selected ? (
+    <>
+      <div className="panel-header">
+        <span>{selected.kind === "block" ? "Blocked Time" : "Appointment"}</span>
+        <button className="icon-button small" onClick={closeCalendarDetails} aria-label="Close details">
+          <X size={17} />
+        </button>
+      </div>
+      {selected.kind === "appointment" ? (
+        <div className="booking-client-identity">
+          {selectedPerson ? (
+            <button
+              className="booking-client-name-link"
+              id="appointment-details-title"
+              onClick={viewSelectedClientProfile}
+              type="button"
+            >
+              {selected.client}
+            </button>
+          ) : (
+            <h2 id="appointment-details-title">{selected.client}</h2>
+          )}
+          <button
+            className="icon-button small booking-client-reassign-toggle"
+            onClick={clientReassignOpen ? closeClientReassign : openClientReassign}
+            aria-label="Change linked client"
+            title="Change linked client"
+            type="button"
+          >
+            <Pencil size={13} />
+          </button>
+        </div>
+      ) : (
+        <h2 id="appointment-details-title">{selected.title}</h2>
+      )}
+      {selected.kind === "appointment" && selectedPerson && profileNotesText(selectedPerson) && (
+        <p className="muted booking-client-notes-preview">{profileNotesText(selectedPerson)}</p>
+      )}
+      {selected.kind === "appointment" && selectedPerson && selectedPerson.count > 1 && (
+        <p className="muted booking-client-history">
+          {selectedPerson.count} booking{selectedPerson.count === 1 ? "" : "s"} with this client
+        </p>
+      )}
+      {selected.kind === "appointment" && clientReassignOpen && (
+        <div className="booking-client-reassign-panel">
+          <input
+            autoFocus
+            onChange={(event) => setClientReassignSearch(event.target.value)}
+            placeholder="Search clients by name, email, or phone"
+            value={clientReassignSearch}
+          />
+          <div className="booking-client-reassign-results">
+            {clientReassignMatches.length ? (
+              clientReassignMatches.map((client) => (
+                <button
+                  className="booking-client-reassign-result"
+                  key={client.id}
+                  onClick={() => reassignSelectedAppointmentClient(client)}
+                  type="button"
+                >
+                  <strong>{client.name}</strong>
+                  <span>{[client.phone, client.email].filter(Boolean).join(" · ")}</span>
+                </button>
+              ))
+            ) : clientReassignSearchTerm ? (
+              <p className="muted">No matching client.</p>
+            ) : null}
+          </div>
+        </div>
+      )}
+      <p className="muted">{selectedService?.name ?? selected.note}</p>
+
+      <div className="info-stack">
+        <div>
+          <Clock size={16} />
+          <span>{`${weekDays[selected.day].label}, ${formatRange(selected.start, selected.duration)}`}</span>
+        </div>
+        <div>
+          <MapPin size={16} />
+          <span>{bookingLocationDisplay(selectedLocationSnapshot ?? undefined)}</span>
+        </div>
+        {selectedCoachSnapshot && (
+          <div>
+            <User size={16} />
+            <span>{selectedCoachSnapshot.displayName || selectedCoachSnapshot.name}</span>
+          </div>
+        )}
+        {selected.kind === "appointment" && selectedLessonNote && (
+          <div>
+            <FileText size={16} />
+            <span>{selectedLessonNote}</span>
+          </div>
+        )}
+        {selectedLocationSnapshot?.arrivalInstructions && (
+          <div>
+            <FileText size={16} />
+            <span>{selectedLocationSnapshot.arrivalInstructions}</span>
+          </div>
+        )}
+        {selectedLocationSnapshot?.mapUrl && (
+          <div>
+            <ExternalLink size={16} />
+            <a href={selectedLocationSnapshot.mapUrl} target="_blank" rel="noreferrer">
+              Map
+            </a>
+          </div>
+        )}
+        {selected.phone && (
+          <div>
+            <Phone size={16} />
+            <span>{selected.phone}</span>
+          </div>
+        )}
+        {selected.email && (
+          <div>
+            <Mail size={16} />
+            <span>{selected.email}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="service-summary">
+        <span>Price</span>
+        <strong>{selectedIsCustomGroupAppointment ? formatMoney(selectedCustomGroupPrice) : servicePriceLabel(selectedService)}</strong>
+        <p>{selectedService?.description ?? selected.note}</p>
+      </div>
+
+      {selectedIsCustomGroupAppointment && selectedService && (
+        <div className="lesson-receipts-panel custom-group-admin-panel">
+          <div className="receipt-panel-title">
+            <User size={16} />
+            <span>Custom group attendees</span>
+            <em>{selectedCustomGroupAttendees.length} / {customGroupMaxParticipants(selectedService)}</em>
+          </div>
+          {selectedCustomGroupAttendees.map((attendee) => (
+            <div className="email-receipt-row" key={attendee.id}>
+              <span className={`email-status-dot ${attendee.status === "confirmed" || attendee.status === "booker" || attendee.status === "manual" ? "sent" : "pending"}`} aria-hidden="true" />
+              <div>
+                <strong>{attendee.name}</strong>
+                <span>{attendee.email || "Manual attendee"}</span>
+              </div>
+              <em>{customGroupStatusLabel(attendee.status)}</em>
+              {(attendee.status === "manual" || attendee.status === "invited") && (
+                <button className="icon-button small" onClick={() => removeSelectedCustomGroupAttendee(attendee.id)} aria-label={`Remove ${attendee.name}`}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          ))}
+          <div className="booking-form custom-group-attendee-form">
+            <input
+              value={selectedCustomGroupAttendeeDraft.name}
+              onChange={(event) => setSelectedCustomGroupAttendeeDraft((current) => ({ ...current, name: event.target.value }))}
+              placeholder="Attendee name"
+            />
+            <input
+              value={selectedCustomGroupAttendeeDraft.email}
+              onChange={(event) => setSelectedCustomGroupAttendeeDraft((current) => ({ ...current, email: event.target.value }))}
+              placeholder="Email optional"
+              type="email"
+            />
+            <button
+              className="outline-button"
+              onClick={addSelectedCustomGroupAttendee}
+              disabled={selectedCustomGroupAttendees.length >= customGroupMaxParticipants(selectedService)}
+              type="button"
+            >
+              <Plus size={15} />
+              {selectedCustomGroupAttendeeDraft.email.trim() ? "Send invite" : "Confirm attendee"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {selected.kind === "appointment" && (
+        <div className="lesson-status-panel">
+          <span>Status</span>
+          <div className="lesson-status-options" role="group" aria-label="Lesson status">
+            {(["booked", "completed", "cancelled", "no_show"] as BookingStatus[]).map((status) => (
+              <button
+                className={(selected.status ?? "booked") === status ? "active" : ""}
+                disabled={pendingLessonCompleteId === selected.id || (pendingLessonCompleteId !== "" && status === "completed")}
+                key={status}
+                onClick={() => updateAppointmentStatus(selected.id, status)}
+                type="button"
+              >
+                {status === "completed" && pendingLessonCompleteId === selected.id
+                  ? "Saving..."
+                  : status === "no_show"
+                    ? "No-show"
+                    : status[0].toUpperCase() + status.slice(1)}
+              </button>
+            ))}
+          </div>
+          {lessonCompleteErrors[selected.id] ? (
+            <p className="workspace-save-error" role="alert">
+              {lessonCompleteDiagnosticText(lessonCompleteErrors[selected.id])}
+            </p>
+          ) : null}
+        </div>
+      )}
+
+      {selected.kind === "appointment" && selectedPerson && hasSelectedPersonCaddyProfile && (
+        <div className="linked-profile">
+          <div>
+            <span>Shared profile</span>
+            <strong>{selectedPerson.caddyProfileId || "Clarity Caddy"}</strong>
+          </div>
+          <a
+            className="outline-button"
+            href={caddyProfileUrl(selectedPerson, caddyWorkspaceUrl)}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Link2 size={16} />
+            Caddy
+          </a>
+        </div>
+      )}
+
+      {selected.kind === "appointment" && selectedPerson && !hasSelectedPersonCaddyProfile && (
+        <div className="linked-profile">
+          <div>
+            <span>Shared profile</span>
+            <strong>Not connected</strong>
+          </div>
+          <button className="outline-button" type="button">
+            <Link2 size={16} />
+            Add Clarity Caddy
+          </button>
+        </div>
+      )}
+
+      {selected.kind === "appointment" && (
+        <details className="booking-records-tab">
+          <summary className="booking-records-summary">
+            <Mail size={16} />
+            <span>Booking records</span>
+            <em>{selectedAppointmentNotifications.length ? `${selectedAppointmentNotifications.length} email records` : "No email records"}</em>
+          </summary>
+          <div className="booking-records-body">
+            <button
+              className="outline-button booking-resend-button"
+              disabled={resendConfirmationState[selected.id] === "sending"}
+              onClick={() => resendBookingConfirmation(selected)}
+              type="button"
+            >
+              <Mail size={16} />
+              {resendConfirmationState[selected.id] === "sending"
+                ? "Sending"
+                : resendConfirmationState[selected.id] === "sent"
+                  ? "Sent"
+                  : resendConfirmationState[selected.id] === "failed"
+                    ? "Try again"
+                    : "Resend confirmation"}
+            </button>
+            <div className="booking-email-records">
+              {selectedAppointmentNotifications.length ? (
+                selectedAppointmentNotifications.map((notification) => (
+                  <p className={`booking-email-record ${notificationTone(notification.status)}`} key={notification.id}>
+                    <strong>{notificationKindLabel(notification.kind)}</strong>
+                    {" to "}
+                    <span>{notification.recipient || "No recipient"}</span>
+                    {" - "}
+                    <em>
+                      {notificationStatusLabel(notification)}
+                      {notification.createdAt ? `, ${notificationTimeLabel(notification.createdAt)}` : ""}
+                    </em>
+                  </p>
+                ))
+              ) : (
+                <p className="booking-email-record muted">No email receipts recorded for this lesson yet.</p>
+              )}
+            </div>
+          </div>
+        </details>
+      )}
+
+      {selected.kind === "block" && (
+        <div className="admin-override">
+          <span>Admin override</span>
+          <strong>Add appointment in this blocked time</strong>
+          {quickCreateServices.map((service) => (
+            <button key={service.id} onClick={() => createAppointmentInsideSelectedBlock(service.id)}>
+              <Plus size={16} />
+              {service.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="panel-actions">
+        {selected.kind === "appointment" && (
+          <button className="primary-button" onClick={bookNextFromSelected}>
+            <Plus size={16} />
+            Book Next
+          </button>
+        )}
+        <button className="danger-button" disabled={deleteInFlightId === selected.id} onClick={removeSelected}>
+          {deleteInFlightId === selected.id
+            ? "Removing..."
+            : selected.kind === "appointment"
+              ? "Cancel Lesson"
+              : "Remove Block"}
+        </button>
+      </div>
+    </>
+  ) : null;
+
+  const selectedGroupSessionDetails = selectedGroupSession && selectedGroupSessionService ? (
+    <>
+      <div className="panel-header">
+        <span>Group Session</span>
+        <button className="icon-button small" onClick={closeCalendarDetails} aria-label="Close details">
+          <X size={17} />
+        </button>
+      </div>
+      <h2 id="appointment-details-title">{selectedGroupSessionService.name}</h2>
+      <p className="muted">{selectedGroupSessionLabel}</p>
+
+      <div className="info-stack">
+        <div>
+          <Clock size={16} />
+          <span>{`${selectedGroupSessionLabel}, ${formatRange(
+            selectedGroupSession.start,
+            selectedGroupSession.duration,
+          )}`}</span>
+        </div>
+        <div>
+          <MapPin size={16} />
+          <span>{bookingLocationDisplay(bookingLocationSnapshotFor(selectedGroupSessionService, locations, coachAccount))}</span>
+        </div>
+        <div>
+          <User size={16} />
+          <span>{`${selectedGroupSessionBookedCount} / ${selectedGroupSessionCapacity} booked`}</span>
+        </div>
+        <div>
+          <span>{`Spaces remaining: ${selectedGroupSessionRemainingSlots}`}</span>
+        </div>
+      </div>
+
+      <div className="service-summary">
+        <span>Booked people</span>
+        {selectedGroupSessionAttendees.length === 0 ? (
+          <p>No one is booked yet.</p>
+        ) : (
+          <div className="group-attendee-cards">
+            {selectedGroupSessionAttendees.map((appointment) => (
+              <article
+                key={appointment.id}
+                className="group-attendee-card"
+                style={{
+                  border: "1px solid color-mix(in srgb, var(--muted) 36%, transparent)",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  display: "grid",
+                  gap: 6,
+                  background: "color-mix(in srgb, var(--booking-card) 66%, transparent)",
+                  opacity: isActiveGroupBooking(appointment.status) ? 1 : 0.65,
+                }}
+              >
+                <div className="attendee-card-header" style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                    <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {appointment.client || appointment.title}
+                    </strong>
+                    <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                      {[
+                        appointment.phone,
+                        appointment.email,
+                        appointment.status ? (appointment.status === "no_show" ? "No-show" : appointment.status) : "booked",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    {appointment.note ? (
+                      <span style={{ color: "var(--muted)", fontSize: "0.84rem" }}>Note: {appointment.note}</span>
+                    ) : null}
+                  </div>
+                  <span
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      fontSize: "0.76rem",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.02em",
+                      border: "1px solid color-mix(in srgb, var(--muted) 36%, transparent)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {appointment.status ? (appointment.status === "no_show" ? "No-show" : appointment.status) : "booked"}
+                  </span>
+                </div>
+                {isActiveGroupBooking(appointment.status) ? (
+                  <div style={{ justifySelf: "end" }}>
+                    <button
+                      type="button"
+                      className="small-button"
+                      onClick={() => cancelGroupSessionAttendee(appointment.id)}
+                    >
+                      Cancel attendee
+                    </button>
+                  </div>
+                ) : (
+                  <span className="muted" style={{ fontSize: "0.82rem" }}>
+                    Cancelled attendee retained for history.
+                  </span>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel-actions">
+        <button
+          className="primary-button"
+          disabled={selectedGroupSessionIsFull}
+          onClick={(event) =>
+            openQuickCreateForGroupSession({
+              x: event.clientX,
+              y: event.clientY,
+            })
+          }
+          type="button"
+        >
+          <Plus size={16} />
+          Add person
+        </button>
+        <button className="danger-button" onClick={cancelSelectedGroupSession} type="button">
+          <X size={16} />
+          Cancel session
+        </button>
+        {selectedGroupSessionBookedCount > 0 ? (
+          <p className="muted">Booked group sessions need attendees moved or cancelled before the session can be removed.</p>
+        ) : null}
+        {selectedGroupSessionIsFull ? <p className="muted">Group is full.</p> : null}
+      </div>
+    </>
+  ) : null;
+
+  const selectedDetails = selectedGroupSessionDetails
+    ? selectedGroupSessionDetails
+    : selectedAppointmentDetails;
+  const adminWorkspaceReady = isEmbedMode || adminWorkspaceLoadStatus === "loaded";
+  const adminWorkspaceLoading =
+    !isEmbedMode &&
+    authStatus === "authenticated" &&
+    adminWorkspaceLoadStatus !== "loaded" &&
+    adminWorkspaceLoadStatus !== "error";
+  const adminWorkspaceFailed =
+    !isEmbedMode && authStatus === "authenticated" && adminWorkspaceLoadStatus === "error";
+  const calendarSummaryText = adminWorkspaceLoading
+    ? "Loading calendar bookings"
+    : `${appointments} appointments · ${blocks} blocked ${blocks === 1 ? "time" : "times"}`;
+  const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
+  const latestDiagnosticEvent = diagnosticEvents[0];
+  const latestDiagnosticError = failedDiagnosticEvents[0];
+  const databaseDiagnosticEvents = diagnosticEvents.filter((event) =>
+    ["supabase", "save", "calendar", "auth"].includes(event.system),
+  );
+  const calendarDiagnosticEvents = diagnosticEvents.filter(
+    (event) =>
+      event.system === "calendar" ||
+      event.action.includes("CALENDAR") ||
+      event.action.includes("BOOKING_CARDS") ||
+      event.route?.includes("calendar"),
+  );
+  const cacheDiagnosticEvents = diagnosticEvents.filter((event) =>
+    ["cache", "reload"].includes(event.system),
+  );
+  const diagnosticEventsForActiveTab =
+    diagnosticsTab === "errors"
+      ? failedDiagnosticEvents
+      : diagnosticsTab === "database"
+        ? databaseDiagnosticEvents
+        : diagnosticsTab === "calendar"
+          ? calendarDiagnosticEvents
+          : diagnosticsTab === "cache"
+            ? cacheDiagnosticEvents
+            : diagnosticEvents;
+  const averageDiagnosticDuration = Math.round(
+    diagnosticEvents.reduce((total, event) => total + (event.durationMs ?? 0), 0) /
+      Math.max(1, diagnosticEvents.filter((event) => typeof event.durationMs === "number").length),
+  );
+  const slowestDiagnosticEvent = diagnosticEvents.reduce<DiagnosticEvent | null>((slowest, event) => {
+    if (typeof event.durationMs !== "number") return slowest;
+    if (!slowest || (slowest.durationMs ?? 0) < event.durationMs) return event;
+    return slowest;
+  }, null);
+  const latestReloadEvent = diagnosticEvents.find((event) => event.system === "reload");
+  const diagnosticsBySystem = diagnosticEvents.reduce<Record<string, number>>((counts, event) => {
+    counts[event.system] = (counts[event.system] ?? 0) + 1;
+    return counts;
+  }, {});
+
+  if (!isEmbedMode && authStatus !== "authenticated") {
+    return (
+      <main className={`login-shell theme-${themeMode}`} style={brandStyle}>
+        <form
+          className="login-card"
+          onSubmit={
+            authMode === "forgot"
+              ? handleForgotPassword
+              : authMode === "reset"
+                ? handleResetPassword
+                : handleAdminLogin
+          }
+        >
+          <div className="brand">
+            <div className="brand-mark">
+              <img src="/assets/clarity-golf-logo.png" alt="Clarity Golf" />
+            </div>
+            <div>
+              <strong>Clarity Golf</strong>
+              <span>Booking System</span>
+            </div>
+          </div>
+          <div>
+            <p className="eyebrow">
+              {authMode === "forgot" ? "Password Reset" : authMode === "reset" ? "New Password" : "Admin Login"}
+            </p>
+            <h1>
+              {authStatus === "checking"
+                ? "Checking session"
+                : authMode === "forgot"
+                  ? "Forgot password"
+                  : authMode === "reset"
+                    ? "Reset password"
+                    : "Welcome back"}
+            </h1>
+            <p>
+              {authMode === "forgot"
+                ? "Enter your admin email and we will send a reset link."
+                : authMode === "reset"
+                  ? "Choose a new admin password for Clarity Golf Booking."
+                  : "Sign in to manage bookings, Google Calendar sync, notifications, and text hooks."}
+            </p>
+          </div>
+
+          {authMode === "login" && (
+            <>
+              <label>
+                <span>Email</span>
+                <input value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} type="email" />
+              </label>
+              <label>
+                <span>Password</span>
+                <input
+                  value={adminPassword}
+                  onChange={(event) => setAdminPassword(event.target.value)}
+                  type={showAdminPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                />
+              </label>
+              <label className="show-password-toggle">
+                <input
+                  checked={showAdminPassword}
+                  onChange={(event) => setShowAdminPassword(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Show password</span>
+              </label>
+            </>
+          )}
+
+          {authMode === "forgot" && (
+            <label>
+              <span>Email</span>
+              <input
+                value={forgotEmail}
+                onChange={(event) => {
+                  setForgotEmail(event.target.value);
+                  setForgotState("idle");
+                  setForgotMessage("");
+                  setAuthError("");
+                }}
+                type="email"
+                autoComplete="email"
+              />
+            </label>
+          )}
+
+          {authMode === "reset" && (
+            <>
+              <label>
+                <span>New password</span>
+                <input
+                  value={resetPassword}
+                  onChange={(event) => setResetPassword(event.target.value)}
+                  type={showResetPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                />
+              </label>
+              <label>
+                <span>Confirm password</span>
+                <input
+                  value={resetConfirmPassword}
+                  onChange={(event) => setResetConfirmPassword(event.target.value)}
+                  type={showResetPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                />
+              </label>
+              <label className="show-password-toggle">
+                <input
+                  checked={showResetPassword}
+                  onChange={(event) => setShowResetPassword(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Show password</span>
+              </label>
+            </>
+          )}
+
+          {authError && <div className="auth-error">{authError}</div>}
+          {forgotMessage && <div className="auth-success">{forgotMessage}</div>}
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={
+              authStatus === "checking" ||
+              loginState === "signing-in" ||
+              forgotState === "sending" ||
+              resetState === "saving"
+            }
+          >
+            {authStatus === "checking"
+              ? "Checking"
+              : authMode === "forgot"
+                ? forgotState === "sending"
+                  ? "Sending"
+                  : forgotState === "sent"
+                    ? "Sent"
+                    : "Send Reset Link"
+                : authMode === "reset"
+                  ? resetState === "saving"
+                    ? "Saving"
+                    : "Save New Password"
+                  : loginState === "signing-in"
+                    ? "Signing In"
+                    : "Sign In"}
+          </button>
+          {authMode === "login" ? (
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => {
+                setAuthMode("forgot");
+                setForgotEmail(adminEmail);
+                setAuthError("");
+              }}
+            >
+              Forgot password?
+            </button>
+          ) : (
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => {
+                setAuthMode("login");
+                setAuthError("");
+                setForgotMessage("");
+              }}
+            >
+              Back to sign in
+            </button>
+          )}
+        </form>
+      </main>
+    );
+  }
+
+  return (
+    <div className={`app-shell theme-${themeMode} ${isEmbedMode ? "embed-mode" : ""}`} style={brandStyle}>
+      {!isEmbedMode && (
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">
+            <img src="/assets/clarity-golf-logo.png" alt="Clarity Golf" />
+          </div>
+          <div>
+            <strong>Clarity Golf</strong>
+            <span>Booking System</span>
+          </div>
+        </div>
+
+        <nav className="side-nav" aria-label="Admin sections">
+          <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
+            <CalendarDays size={18} />
+            Calendar
+          </button>
+          <button className={activeView === "clients" ? "active" : ""} onClick={() => switchView("clients")}>
+            <User size={18} />
+            Clients
+          </button>
+          <button className={activeView === "players" ? "active" : ""} onClick={() => switchView("players")}>
+            <Users size={18} />
+            Player Profiles
+          </button>
+          {billingWorkspaceEnabled && (
+            <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
+              <FileText size={18} />
+              Billing
+            </button>
+          )}
+          <button className={activeView === "settings" ? "active" : ""} onClick={() => switchView("settings")}>
+            <Settings size={18} />
+            Settings
+          </button>
+          <button className="nav-logout" onClick={handleAdminLogout}>
+            <LogOut size={18} />
+            Logout
+          </button>
+        </nav>
+      </aside>
+      )}
+
+      <main className="main-panel">
+        {!isEmbedMode && (
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">{activeView === "booking" ? "Public Booking" : activeView}</p>
+            <h1>{activeView === "calendar" ? calendarTitle : sectionTitle(activeView)}</h1>
+            {activeView === "calendar" ? (
+              <span>{calendarSummaryText}</span>
+            ) : (
+              <span>{settingsLocationLine}</span>
+            )}
+          </div>
+          {activeView === "calendar" && (
+            <div className="top-actions">
+              <button className="outline-button" onClick={() => moveWeek(-1)}>
+                <ArrowLeft size={16} />
+                Prev
+              </button>
+              <button className="outline-button" onClick={() => setActiveWeekState(getCurrentWeekOffset())}>
+                Today
+              </button>
+              <button className="outline-button" onClick={() => moveWeek(1)}>
+                Next
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          )}
+        </header>
+        )}
+
+        {!isEmbedMode && (adminWorkspaceLoading || adminWorkspaceFailed) && (
+        <section className="workspace">
+          <div className="empty-panel compact" role={adminWorkspaceFailed ? "alert" : "status"}>
+            <h2>{adminWorkspaceFailed ? "Calendar could not load" : "Loading calendar"}</h2>
+            <p>
+              {adminWorkspaceFailed
+                ? adminWorkspaceLoadError || "Calendar bookings could not be loaded."
+                : "Bookings are loading first. Client profiles, notifications, and integrations will refresh in the background."}
+            </p>
+            {adminWorkspaceFailed ? (
+              <button className="outline-button" type="button" onClick={() => void startAdminWorkspaceHydration()}>
+                Retry
+              </button>
+            ) : null}
+          </div>
+        </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && isAdminUser && (
+        <section className={`developer-diagnostics ${diagnosticsOpen ? "is-open" : ""}`}>
+          <button
+            className="developer-diagnostics-summary"
+            type="button"
+            onClick={() => setDiagnosticsOpen((current) => !current)}
+            aria-expanded={diagnosticsOpen}
+          >
+            <span className="developer-diagnostics-title">
+              <Code2 size={16} />
+              <strong>Developer Diagnostics</strong>
+            </span>
+            <span className="developer-diagnostics-readout">
+              <span>{calendarFeedStatus === "connected" ? "Supabase connected" : "Supabase not connected"}</span>
+              <span>{diagnosticEvents.length} events</span>
+              <span>{failedDiagnosticEvents.length} errors</span>
+            </span>
+          </button>
+          {diagnosticsOpen ? (
+            <div className="developer-diagnostics-body">
+              <div className="developer-diagnostics-tabs" role="tablist" aria-label="Developer diagnostics views">
+                {(["overview", "database", "calendar", "cache", "errors", "raw"] as DiagnosticTab[]).map((tab) => (
+                  <button
+                    key={tab}
+                    className={diagnosticsTab === tab ? "active" : ""}
+                    type="button"
+                    onClick={() => setDiagnosticsTab(tab)}
+                  >
+                    {tab === "raw" ? "Raw Events" : tab === "cache" ? "Cache / Reloads" : tab[0].toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              {diagnosticsTab === "overview" ? (
+                <div className="developer-diagnostics-grid">
+                  <div>
+                    <span>Connection</span>
+                    <strong>{calendarFeedStatus === "connected" ? "Connected" : "Not connected"}</strong>
+                  </div>
+                  <div>
+                    <span>Last event</span>
+                    <strong>{latestDiagnosticEvent ? `${latestDiagnosticEvent.system}:${latestDiagnosticEvent.action}` : "None yet"}</strong>
+                  </div>
+                  <div>
+                    <span>Last error</span>
+                    <strong>{latestDiagnosticError?.errorCode || "None"}</strong>
+                  </div>
+                  <div>
+                    <span>Avg duration</span>
+                    <strong>{averageDiagnosticDuration ? `${averageDiagnosticDuration}ms` : "n/a"}</strong>
+                  </div>
+                  <div>
+                    <span>Slowest recent action</span>
+                    <strong>
+                      {slowestDiagnosticEvent
+                        ? `${slowestDiagnosticEvent.action} - ${slowestDiagnosticEvent.durationMs}ms`
+                        : "None"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Last full reload</span>
+                    <strong>{latestReloadEvent ? `${latestReloadEvent.action} ${latestReloadEvent.status}` : "None"}</strong>
+                  </div>
+                  <div>
+                    <span>Systems firing</span>
+                    <strong>{Object.keys(diagnosticsBySystem).length || 0}</strong>
+                  </div>
+                  <div>
+                    <span>Buffer</span>
+                    <strong>{diagnosticEvents.length}/{DIAGNOSTIC_EVENT_LIMIT}</strong>
+                  </div>
+                </div>
+              ) : null}
+
+              {diagnosticsTab !== "overview" ? (
+                <div className="developer-diagnostics-events">
+                  {diagnosticEventsForActiveTab.length ? (
+                    diagnosticEventsForActiveTab.slice(0, diagnosticsTab === "raw" ? 40 : 16).map((event) => (
+                      <div className={`developer-diagnostics-event ${event.status}`} key={event.id}>
+                        <div>
+                          <strong>{event.action}</strong>
+                          <span>
+                            {event.system} · {event.phase} · {event.status}
+                            {typeof event.durationMs === "number" ? ` · ${event.durationMs}ms` : ""}
+                            {diagnosticDurationBand(event) ? ` · ${diagnosticDurationBand(event)}` : ""}
+                          </span>
+                        </div>
+                        <div>
+                          <code>{event.errorCode || event.route || event.functionName || "OK"}</code>
+                          <span>{new Date(event.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                        </div>
+                        {event.humanMessage ? <p>{event.humanMessage}</p> : null}
+                        {event.details && diagnosticsTab === "raw" ? (
+                          <pre>{JSON.stringify(event.details, null, 2)}</pre>
+                        ) : null}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="developer-diagnostics-empty">No events in this view yet.</p>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && (
+        <div
+          ref={dockRef}
+          className={`appointment-dock ${dockBookings.length || flyingBooking ? "has-tiles" : ""} ${
+            dockFocus ? "is-focus" : ""
+          }`}
+        >
+          <div className="dock-label" aria-hidden="true" />
+          <div
+            className="dock-shelf"
+            aria-label={
+              activeDockBooking
+                ? `${activeDockBooking.client} is armed on the shelf`
+                : "Appointment shelf"
+            }
+          >
+            {flyingBooking && (
+              <div
+                className="dock-tile flying-to-dock"
+                style={
+                  {
+                    "--dock-fly-x": `${flyingBooking.fromX ?? 240}px`,
+                    "--dock-fly-y": `${flyingBooking.fromY ?? 120}px`,
+                  } as CSSProperties
+                }
+              >
+                <GripVertical size={14} />
+                <span>
+                  <strong>{flyingBooking.client}</strong>
+                  <em>{services.find((candidate) => candidate.id === flyingBooking.serviceId)?.name ?? "Lesson"}</em>
+                </span>
+              </div>
+            )}
+            {dockBookings.length === 0 && !flyingBooking ? (
+              <span className="dock-empty" aria-hidden="true" />
+            ) : (
+              dockBookings.map((booking) => {
+                const service = services.find((candidate) => candidate.id === booking.serviceId);
+                return (
+                  <div
+                    className={`dock-tile ${activeDockBookingId === booking.id ? "is-armed" : ""}`}
+                    key={booking.id}
+                    data-dock-booking-id={booking.id}
+                    role="button"
+                    tabIndex={0}
+                    onPointerDown={(event) => beginDockPlacement(event, booking)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setActiveDockBookingId(booking.id);
+                      }
+                    }}
+                  >
+                    <GripVertical size={14} />
+                    <span>
+                      <strong>{booking.client}</strong>
+                      <em>{service?.name ?? "Lesson"}</em>
+                    </span>
+                    <button
+                      className="dock-remove"
+                      aria-label={`Remove ${booking.client} from dock`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removeDockBooking(booking.id);
+                      }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && (
+        <section
+          className={`workspace ${pointerSession?.mode === "place" || activeDockBooking ? "placing-from-dock" : ""}`}
+        >
+          <div
+            className={`calendar-card ${calendarDetailMode ? "calendar-detail-mode" : ""}`}
+            onDoubleClick={toggleCalendarDetailMode}
+            onTouchStart={handleCalendarTouchStart}
+          >
+            <div className="calendar-toolbar">
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button className="outline-button compact-button" onClick={cycleCalendarViewMode} type="button">
+                  {calendarViewButtonLabel}
+                </button>
+                <h2>{weekTitle}</h2>
+                <div className="calendar-scope-controls" aria-label="Calendar scope">
+                  <select
+                    value={effectiveCalendarPerspective}
+                    onChange={(event) => setCalendarPerspective(event.target.value as CalendarPerspective)}
+                    disabled={!isAdminUser}
+                  >
+                    {isAdminUser ? <option value="all">All calendars</option> : null}
+                    <option value="coach">Coach calendar</option>
+                    {isAdminUser && canUseFeature(activeAccount, "locationCalendar") ? <option value="location">Location calendar</option> : null}
+                  </select>
+                  {effectiveCalendarPerspective === "coach" ? (
+                    <select
+                      value={selectedCalendarCoachId}
+                      onChange={(event) => setCalendarCoachFilterId(event.target.value)}
+                      disabled={!isAdminUser}
+                    >
+                      {coachProfiles
+                        .filter((coach) => coach.active && !coach.archived && coach.bookable)
+                        .map((coach) => (
+                          <option key={coach.id} value={coach.id}>
+                            {coach.displayName || coach.name}
+                          </option>
+                        ))}
+                    </select>
+                  ) : null}
+                  {effectiveCalendarPerspective === "location" ? (
+                    <>
+                      <select
+                        value={selectedCalendarLocationId}
+                        onChange={(event) => setCalendarLocationFilterId(event.target.value)}
+                      >
+                        {activeLocations(locations).map((location) => (
+                          <option key={location.id} value={location.id}>
+                            {location.shortName || location.name}
+                          </option>
+                        ))}
+                      </select>
+                      {locationCalendarCoachGroups.length ? (
+                        <span className="calendar-scope-note">
+                          Coaches: {locationCalendarCoachGroups.map((coach) => coach.displayName || coach.name).join(", ")}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
+              </div>
+              <div className={`calendar-save-pill ${calendarSaveStatus}`}>
+                <strong>
+                  {calendarSaveStatus === "saving"
+                    ? "Saving"
+                    : calendarSaveStatus === "saved"
+                      ? "Saved"
+                      : calendarSaveStatus === "failed"
+                        ? "Not saved"
+                        : calendarFeedStatus === "connected"
+                          ? "Live database"
+                          : "Not connected"}
+                </strong>
+                {calendarSaveStatus === "failed" && calendarSaveError ? <span>{calendarSaveError}</span> : null}
+              </div>
+            </div>
+            {calendarSaveStatus === "failed" && (
+              <div className="calendar-save-warning">
+                Your latest change was not saved. Please try again; the app will retry when you make another change.
+              </div>
+            )}
+            {calendarViewEmptyMessage ? (
+              <div className="calendar-save-warning">{calendarViewEmptyMessage}</div>
+            ) : null}
+            {effectiveCalendarPerspective === "location" && !locationCalendarCoachGroups.length ? (
+              <div className="calendar-save-warning">
+                No active coaches are assigned to this location yet.
+              </div>
+            ) : null}
+            {effectiveCalendarPerspective === "location" && locationCalendarCoachGroups.length && !locationCalendarHasAppointments ? (
+              <div className="calendar-save-warning">
+                No appointments at this location for the selected week.
+              </div>
+            ) : null}
+
+            <div className="calendar-header-row">
+              <div className="time-gutter" />
+              {weekDays.map((day) => (
+                <div className={`day-heading ${day.isToday ? "today" : ""}`} key={day.label}>
+                  <span>{day.short}</span>
+                  <strong>{day.date}</strong>
+                  {effectiveCalendarPerspective === "location" && locationCalendarCoachGroups.length ? (
+                    <div className="location-coach-columns" aria-label="Coach columns">
+                      {locationCalendarCoachGroups.map((coach) => (
+                        <em key={coach.coachId || coach.name}>
+                          <span>{coach.displayName || coach.name}</span>
+                          <small>{locationCalendarCoachItemCount(coach.coachId)} appt</small>
+                        </em>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+
+            <div className="calendar-scroll">
+              <div className="time-column" style={{ height: gridHeight }}>
+                {calendarHourMarks.map((hour, index) => {
+                  return (
+                    <div className="time-label" key={hour} style={{ top: index * HOUR_HEIGHT }}>
+                      {hour === 12 * 60 ? "Noon" : formatTime(hour).replace(":00 ", "")}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div
+                ref={gridRef}
+                className={`week-grid ${pointerSession ? "is-grabbing" : ""}`}
+                style={{ height: gridHeight }}
+                onPointerDown={beginBlankGesture}
+                onPointerMove={updatePointer}
+                onPointerUp={(event) => {
+                  pointerClientRef.current = { x: event.clientX, y: event.clientY };
+                  endPointer();
+                }}
+                onPointerCancel={(event) => {
+                  pointerClientRef.current = { x: event.clientX, y: event.clientY };
+                  endPointer();
+                }}
+                onPointerLeave={(event) => {
+                  if (pointerSession) updatePointer(event);
+                }}
+              >
+                {weekDays.map((day, dayIndex) => (
+                  <div className="day-lane" key={day.label} style={{ left: `${(dayIndex / DAY_COUNT) * 100}%` }}>
+                    {calendarAvailability[dayIndex].map((window, index) => {
+                      const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
+                      if (!visibleWindow) return null;
+                      return (
+                        <div
+                          className="available-band"
+                          key={`${day.label}-${index}`}
+                          style={{
+                            top: calendarMinutesToTop(visibleWindow.start),
+                            height: durationToHeight(visibleWindow.duration),
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
+
+                {calendarHourMarks.map((hour, index) => (
+                  <div className="hour-line" key={index} style={{ top: index * HOUR_HEIGHT }} />
+                ))}
+
+                {displayItems.map((item) => {
+                  const visibleItem = clipCalendarSegment(item.start, item.duration);
+                  if (!visibleItem) return null;
+                  const service = itemService(item, services);
+                  const resolvedItemCoachId = resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount);
+                  const activeDraft =
+                    draft && (draft.mode === "move" || draft.mode === "resize") && draft.itemId === item.id
+                      ? draft
+                      : null;
+                  const invalid = activeDraft ? !activeDraft.valid : false;
+                  const top = calendarMinutesToTop(visibleItem.start);
+                  const height = durationToHeight(visibleItem.duration);
+                  const dayWidth = 100 / DAY_COUNT;
+                  const coachColumnCount =
+                    effectiveCalendarPerspective === "location" ? Math.max(1, locationCalendarCoachGroups.length) : 1;
+                  const locationWideBlock = effectiveCalendarPerspective === "location" && isLocationOnlyBlock(item);
+                  const coachColumnIndex =
+                    effectiveCalendarPerspective === "location" && !locationWideBlock
+                      ? Math.max(
+                          0,
+                          locationCalendarCoachGroups.findIndex(
+                            (coach) => coach.coachId === resolvedItemCoachId,
+                          ),
+                        )
+                      : 0;
+                  const width = locationWideBlock ? dayWidth : dayWidth / coachColumnCount;
+                  const left = item.day * dayWidth + coachColumnIndex * width;
+                  const flyAnimation = placementAnimation?.itemId === item.id ? placementAnimation : null;
+                  const itemNotifications = notificationsByAppointment.get(item.id) ?? [];
+                  const latestClientEmail = itemNotifications.find((notification) => notification.kind.includes("client"));
+                  const latestCoachEmail = itemNotifications.find((notification) => notification.kind.includes("coach"));
+                  const latestAdminEmail = itemNotifications.find((notification) => notification.kind.includes("admin"));
+                  const scheduledGroupSession = isScheduledGroupSessionSlot(item);
+                  const groupSessionItem = isGroupSessionItem(item);
+                  const groupSessionContext = getGroupSessionContext(item);
+                  const itemLocationTag =
+                    item.kind === "appointment" || groupSessionContext
+                      ? bookingLocationShortDisplay(calendarItemLocation(item, service, locations, coachAccount))
+                      : "";
+                  const tooltipRows = [
+                    groupSessionContext ? "Group Session" : item.client || item.title,
+                    groupSessionContext
+                      ? `Booked: ${groupSessionContext.bookedCount}/${groupSessionContext.capacity}`
+                      : service?.name ?? (item.kind === "block" ? "Blocked time" : "Lesson"),
+                    formatRange(item.start, item.duration),
+                    latestClientEmail ? `Client email: ${notificationStatusLabel(latestClientEmail)}` : "",
+                    latestCoachEmail ? `Coach email: ${notificationStatusLabel(latestCoachEmail)}` : "",
+                    latestAdminEmail ? `Admin email: ${notificationStatusLabel(latestAdminEmail)}` : "",
+                  ].filter(Boolean);
+                  return (
+                    <article
+                      data-calendar-item
+                      key={item.id}
+                      className={`calendar-item ${item.kind} ${
+                        isLocationOnlyBlock(item) ? "location-wide-block" : ""
+                      } ${isCoachLocationBlock(item) ? "coach-location-block" : ""} ${
+                        isCoachOnlyBlock(item) ? "coach-only-block" : ""
+                      } ${selectedId === item.id ? "selected" : ""} ${
+                        invalid ? "invalid" : ""
+	                      } ${flyAnimation ? "just-placed-from-dock" : ""} ${
+	                        pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
+	                      } ${item.kind === "appointment" && item.status ? `status-${item.status}` : ""}`}
+                      aria-label={tooltipRows.join(", ")}
+                      onPointerEnter={(event) =>
+                        showCalendarItemHover(event, item, service, latestClientEmail, latestCoachEmail, latestAdminEmail)
+                      }
+                      onPointerLeave={() => hideCalendarItemHover(item.id)}
+                      style={{
+                        top,
+                        height: Math.max(height, 34),
+                        left: `calc(${left}% + 6px)`,
+                        width: `calc(${width}% - 12px)`,
+                        ...(scheduledGroupSession ? ({ cursor: "pointer" } as CSSProperties) : {}),
+                        ...(flyAnimation
+                          ? ({
+                              "--dock-fly-x": `${flyAnimation.fromX}px`,
+                              "--dock-fly-y": `${flyAnimation.fromY}px`,
+                            } as CSSProperties)
+                          : {}),
+                      }}
+                      onPointerDown={(event) => {
+                        if (scheduledGroupSession) {
+                          event.stopPropagation();
+                          hideCalendarItemHover();
+                          return;
+                        }
+                        if (item.readOnly || groupSessionItem) return;
+                        hideCalendarItemHover();
+                        beginMove(event, item);
+                      }}
+                      onPointerUp={(event) => {
+                        if (groupSessionItem && !scheduledGroupSession) {
+                          event.preventDefault();
+                          handleCalendarItemClick(event, item);
+                        }
+                      }}
+                      onClick={(event) => {
+                        if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
+                        if (groupSessionItem && !scheduledGroupSession) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleCalendarItemClick(event, item);
+                          return;
+                        }
+                        event.stopPropagation();
+                        setSelectedGroupSession(null);
+                        setSelectedId(item.id);
+                        setQuickCreate(null);
+                        setClientReassignOpen(false);
+                        setClientReassignSearch("");
+                      }}
+                      onKeyDown={(event) => {
+                        if ((event.key === "Enter" || event.key === " ") && groupSessionItem && !scheduledGroupSession) {
+                          handleCalendarItemClick(event, item);
+                        }
+                      }}
+                    >
+                      {item.readOnly ? null : (
+                        <div className="item-grip" aria-hidden="true">
+                          <GripVertical size={14} />
+                        </div>
+                        )}
+                        {scheduledGroupSession ? (
+                          <button
+                            type="button"
+                            className="outline-button"
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              openGroupSessionFromSlot(item);
+                            }}
+                          >
+                            Open session
+                          </button>
+                        ) : null}
+                        <div className="item-content">
+                        <strong>{groupSessionContext ? groupSessionContext.service.name : item.kind === "appointment" ? item.client || item.title : item.title}</strong>
+                        <span>
+                          {groupSessionContext
+                            ? "Group Session"
+                            : item.kind === "block" && isLocationOnlyBlock(item)
+                              ? "Location unavailable"
+                              : item.kind === "block" && isCoachLocationBlock(item)
+                                ? "Coach unavailable"
+                                : service?.name ?? "Busy"}
+                        </span>
+                        <em>
+                          {groupSessionContext
+                            ? `${formatRange(item.start, item.duration)} · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
+                            : formatRange(item.start, item.duration)}
+                        </em>
+                        {itemLocationTag ? <small className="item-location-tag">{itemLocationTag}</small> : null}
+                      </div>
+                      {item.kind === "appointment" && (latestClientEmail || latestCoachEmail || latestAdminEmail) && (
+                        <div className="item-email-indicators" aria-label="Email receipt status">
+                          {latestClientEmail && (
+                            <span
+                              className={`email-status-dot ${notificationTone(latestClientEmail.status)}`}
+                              title={`Client: ${notificationStatusLabel(latestClientEmail)}`}
+                            >
+                              C
+                            </span>
+                          )}
+                          {latestCoachEmail && (
+                            <span
+                              className={`email-status-dot ${notificationTone(latestCoachEmail.status)}`}
+                              title={`Coach: ${notificationStatusLabel(latestCoachEmail)}`}
+                            >
+                              O
+                            </span>
+                          )}
+                          {latestAdminEmail && (
+                            <span
+                              className={`email-status-dot ${notificationTone(latestAdminEmail.status)}`}
+                              title={`Admin: ${notificationStatusLabel(latestAdminEmail)}`}
+                            >
+                              A
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {item.readOnly ? null : (
+                        <button
+                          className="resize-handle"
+                          aria-label="Resize calendar item"
+                          onPointerDown={(event) => beginResize(event, item)}
+                        />
+                      )}
+                    </article>
+                  );
+                })}
+
+                {draft?.mode === "block" && (
+                  (() => {
+                    const visibleDraft = clipCalendarSegment(draft.start, draft.duration);
+                    if (!visibleDraft) return null;
+                    return (
+                      <div
+                        className={`calendar-item block draft-block ${draft.valid ? "" : "invalid"}`}
+                        style={{
+                          top: calendarMinutesToTop(visibleDraft.start),
+                          height: Math.max(durationToHeight(visibleDraft.duration), 24),
+                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
+                          width: `calc(${100 / DAY_COUNT}% - 12px)`,
+                        }}
+                      >
+                        <div className="item-content">
+                          <strong>Busy</strong>
+                          <span>New blocked time</span>
+                          <em>{formatRange(draft.start, draft.duration)}</em>
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
+
+                {draft?.mode === "place" && pointerSession?.mode === "place" && (
+                  (() => {
+                    const visibleDraft = clipCalendarSegment(draft.start, draft.duration);
+                    if (!visibleDraft) return null;
+                    return (
+                      <div
+                        className={`calendar-item appointment draft-place ${draft.valid ? "" : "invalid"}`}
+                        style={{
+                          top: calendarMinutesToTop(visibleDraft.start),
+                          height: Math.max(durationToHeight(visibleDraft.duration), 34),
+                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
+                          width: `calc(${100 / DAY_COUNT}% - 12px)`,
+                        }}
+                      >
+                        <div className="item-grip" aria-hidden="true">
+                          <GripVertical size={14} />
+                        </div>
+                        <div className="item-content">
+                          <strong>{pointerSession.booking.client}</strong>
+                          <span>
+                            {services.find((service) => service.id === pointerSession.booking.serviceId)?.name ?? "Lesson"}
+                          </span>
+                          <em>{formatRange(draft.start, draft.duration)}</em>
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            </div>
+
+            {quickCreate && !hasMoved && (
+              <div
+                className="quick-create"
+                style={quickCreatePopoverStyle()}
+              >
+                <button className="popover-close" aria-label="Close quick create" onClick={() => setQuickCreate(null)}>
+                  <X size={15} />
+                </button>
+                <span>{`${weekDays[quickCreate.day].short}, ${formatTime(quickCreate.start)}`}</span>
+                <strong>Quick create</strong>
+                {!quickCreateService ? (
+                  <>
+                    {quickCreateServices.map((service) => (
+                      <button key={service.id} onClick={() => selectQuickService(service.id)}>
+                        <Plus size={16} />
+                        <span>
+                          <strong>{service.name}</strong>
+                          <em>{`${service.duration} min · NZ$${service.price.toFixed(2)}`}</em>
+                        </span>
+                      </button>
+                    ))}
+                    {effectiveCalendarPerspective === "location" ? (
+                      <>
+                        <button onClick={() => createBlockFromQuick("location")}>
+                          <Clock size={16} />
+                          Block this location
+                        </button>
+                        {quickCreate.coachId ? (
+                          <button onClick={() => createBlockFromQuick("coach-location")}>
+                            <Clock size={16} />
+                            Block this coach
+                          </button>
+                        ) : null}
+                      </>
+                    ) : (
+                      <button onClick={() => createBlockFromQuick("coach-location")}>
+                        <Clock size={16} />
+                        Block 30 minutes
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <div className="quick-create-form">
+                    <button className="quick-service-summary" onClick={backToQuickServiceChoice} type="button">
+                      <span>
+                        <strong>{quickCreateService.name}</strong>
+                        <em>{`${quickCreateService.duration} min · NZ$${quickCreateService.price.toFixed(2)}`}</em>
+                      </span>
+                      <ArrowLeft size={14} />
+                    </button>
+                    <label>
+                      <span>Name</span>
+                      <div className="quick-match-anchor">
+                        <div className="quick-client-search">
+                          <Search size={15} />
+                          <input
+                            value={quickClientSearch}
+                            autoComplete="name"
+                            onBlur={() => setQuickMatchField("")}
+                            onFocus={() => setQuickMatchField("name")}
+                            onChange={(event) => {
+                              setQuickMatchField("name");
+                              setQuickClientSearch(event.target.value);
+                              setQuickCreate((current) => (current ? { ...current, error: "" } : current));
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                confirmQuickAppointment();
+                              }
+                            }}
+                            placeholder="Client name"
+                          />
+                        </div>
+                        {quickClientMatchButton("name")}
+                      </div>
+                    </label>
+                    <label>
+                      <span>Phone</span>
+                      <div className="quick-match-anchor">
+                          <input
+                            value={quickCreate.phone}
+                            autoComplete="tel"
+                            inputMode="tel"
+                            type="tel"
+                            onBlur={() => setQuickMatchField("")}
+                            onFocus={() => setQuickMatchField("phone")}
+                            onChange={(event) => {
+                            setQuickMatchField("phone");
+                            updateQuickCreateField("phone", event.target.value);
+                          }}
+                          placeholder="+64"
+                        />
+                        {quickClientMatchButton("phone")}
+                      </div>
+                    </label>
+                    <label>
+                      <span>Email</span>
+                      <div className="quick-match-anchor">
+                          <input
+                            value={quickCreate.email}
+                            autoComplete="email"
+                            inputMode="email"
+                            onFocus={() => setQuickMatchField("email")}
+                            onBlur={() => setQuickMatchField("")}
+                            onChange={(event) => {
+                            setQuickMatchField("email");
+                            updateQuickCreateField("email", event.target.value);
+                          }}
+                          placeholder="client@email.co.nz"
+                          type="email"
+                        />
+                        {quickClientMatchButton("email")}
+                      </div>
+                    </label>
+                    <label>
+                      <span>Lesson note</span>
+                      <textarea
+                        value={quickCreate.note}
+                        onChange={(event) => updateQuickCreateField("note", event.target.value)}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    {quickCreateIsCustomGroup && quickCreateService && (
+                      <div className="lesson-receipts-panel custom-group-admin-panel">
+                        <div className="receipt-panel-title">
+                          <User size={16} />
+                          <span>Custom group attendees</span>
+                          <em>
+                            {quickCreateCustomGroupParticipantCount} / {customGroupMaxParticipants(quickCreateService)} · {formatMoney(quickCreateCustomGroupPrice)}
+                          </em>
+                        </div>
+                        <div className="email-receipt-row">
+                          <span className="email-status-dot sent" aria-hidden="true" />
+                          <div>
+                            <strong>{quickClientSearch.trim() || "Booker"}</strong>
+                            <span>{quickCreate.email.trim() || "Booker"}</span>
+                          </div>
+                          <em>{customGroupStatusLabel("booker")}</em>
+                        </div>
+                        {quickCreate.attendees.map((attendee) => (
+                          <div className="email-receipt-row" key={attendee.id}>
+                            <span className={`email-status-dot ${attendee.status === "manual" ? "sent" : "pending"}`} aria-hidden="true" />
+                            <div>
+                              <strong>{attendee.name}</strong>
+                              <span>{attendee.email || "Manual attendee"}</span>
+                            </div>
+                            <em>{customGroupStatusLabel(attendee.status)}</em>
+                            <button className="icon-button small" onClick={() => removeQuickCreateCustomGroupAttendee(attendee.id)} aria-label={`Remove ${attendee.name}`}>
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                        <div className="booking-form custom-group-attendee-form">
+                          <input
+                            value={quickCreate.attendeeName}
+                            onChange={(event) => updateQuickCreateAttendeeDraft("attendeeName", event.target.value)}
+                            placeholder="Attendee name"
+                          />
+                          <input
+                            value={quickCreate.attendeeEmail}
+                            onChange={(event) => updateQuickCreateAttendeeDraft("attendeeEmail", event.target.value)}
+                            placeholder="Email optional"
+                            type="email"
+                          />
+                          <button
+                            className="outline-button"
+                            onClick={addQuickCreateCustomGroupAttendee}
+                            disabled={quickCreateCustomGroupParticipantCount >= customGroupMaxParticipants(quickCreateService)}
+                            type="button"
+                          >
+                            <Plus size={15} />
+                            {quickCreate.attendeeEmail.trim() ? "Send invite" : "Confirm attendee"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {quickCreate.error && <p className="quick-create-error">{quickCreate.error}</p>}
+                    <div className="quick-create-actions">
+                      <button className="outline-button" onClick={backToQuickServiceChoice} type="button">
+                        <ArrowLeft size={15} />
+                        Back
+                      </button>
+                      <button
+                        className="primary-button"
+                        onClick={confirmQuickAppointment}
+                        disabled={!quickClientSearch.trim() || Boolean(quickCreate.error)}
+                        type="button"
+                      >
+                        <Check size={15} />
+                        Create
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+        </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && floatingDrag && floatingItem?.kind === "appointment" && (
+          <article
+            className="calendar-item appointment floating-drag-tile"
+            aria-hidden="true"
+            style={{
+              left: floatingDrag.x,
+              top: floatingDrag.y,
+              width: floatingDrag.width,
+              height: Math.max(floatingDrag.height, 34),
+            }}
+          >
+            <div className="item-grip" aria-hidden="true">
+              <GripVertical size={14} />
+            </div>
+            <div className="item-content">
+              <strong>{floatingItem.title}</strong>
+              <span>{floatingService?.name ?? "Lesson"}</span>
+              <em>{formatRange(floatingItem.start, floatingItem.duration)}</em>
+            </div>
+          </article>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && calendarHover && !pointerSession && (
+          <aside
+            className="calendar-hover-card"
+            style={{ left: calendarHover.x, top: calendarHover.y }}
+            aria-hidden="true"
+          >
+            <span className="hover-card-kicker">
+              {calendarHover.kind === "group-session" ? "Group Session" : "Appointment"}
+            </span>
+            <strong>{calendarHover.client}</strong>
+            <em>{calendarHover.service}</em>
+            <div className="hover-card-line">
+              <Clock size={14} />
+              <span>{calendarHover.time}</span>
+            </div>
+            <div className="hover-card-line">
+              <MapPin size={14} />
+              <span>{calendarHover.venue}</span>
+            </div>
+            {calendarHover.phone && (
+              <div className="hover-card-line">
+                <Phone size={14} />
+                <span>{calendarHover.phone}</span>
+              </div>
+            )}
+            {calendarHover.email && (
+              <div className="hover-card-line">
+                <Mail size={14} />
+                <span>{calendarHover.email}</span>
+              </div>
+            )}
+            <div className="hover-card-receipts">
+              <span>{calendarHover.clientEmailStatus}</span>
+              <span>{calendarHover.coachEmailStatus}</span>
+              <span>{calendarHover.adminEmailStatus}</span>
+            </div>
+          </aside>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "clients" && (
+          <section className="module-page clients-page">
+            <div className="client-toolbar">
+              <div className="client-search">
+                <Search size={18} />
+                <input
+                  value={clientSearch}
+                  onChange={(event) => setClientSearch(event.target.value)}
+                  placeholder="Search clients"
+                />
+              </div>
+              <button
+                className={`outline-button import-client-button${showClientImport ? " active" : ""}`}
+                onClick={() => setShowClientImport((current) => !current)}
+                aria-label={showClientImport ? "Hide import clients" : "Import clients"}
+                type="button"
+              >
+                <Upload size={16} />
+                Import
+              </button>
+              <button
+                className={`icon-button merge-clients-button${clientMergeMode ? " active" : ""}`}
+                onClick={toggleClientMergeMode}
+                aria-label={clientMergeMode ? "Cancel merging clients" : "Merge duplicate clients"}
+                title={clientMergeMode ? "Cancel merging clients" : "Merge duplicate clients"}
+                type="button"
+              >
+                <GitMerge size={18} />
+              </button>
+              <button
+                className="icon-button add-client-button"
+                onClick={openNewClient}
+                aria-label="Add client"
+                title="Add client"
+              >
+                <Plus size={18} />
+              </button>
+            </div>
+
+            {clientMergeMode && (
+              <div className="client-merge-bar">
+                <span>
+                  {clientMergeSelection.length === 2
+                    ? "2 clients selected."
+                    : clientMergeSelection.length === 1
+                      ? "Select 1 more client to merge."
+                      : "Select 2 clients to merge."}
+                </span>
+                <button
+                  className="primary-button"
+                  disabled={clientMergeSelection.length !== 2}
+                  onClick={openClientMergeReview}
+                  type="button"
+                >
+                  Review merge
+                </button>
+              </div>
+            )}
+
+            {showClientImport && (
+              <article className="data-card import-card">
+                <div className="data-card-header">
+                  <div>
+                    <span>Import</span>
+                    <h2>Import clients</h2>
+                  </div>
+                  <Upload size={24} />
+                </div>
+	                <textarea
+	                  value={peopleImportText}
+	                  onChange={(event) => {
+	                    setPeopleImportState("idle");
+                      setPeopleImportDiagnostic(null);
+	                    setPeopleImportText(event.target.value);
+	                  }}
+	                  placeholder="name,email,phone,notes,caddyProfileUrl"
+	                />
+	                <div className="import-actions">
+                    <div className="import-action-tools">
+                      <label className="outline-button import-file-button">
+                        <Upload size={16} />
+                        CSV file
+                        <input accept=".csv,text/csv,text/plain" onChange={handlePeopleImportFile} type="file" />
+                      </label>
+	                    <span>{peopleImportPreview} ready</span>
+                    </div>
+	                  <button
+	                    className="primary-button"
+	                    onClick={importPeopleFromText}
+	                    disabled={peopleImportState === "importing" || peopleImportPreview === 0}
+	                  >
+	                    {peopleImportState === "importing" ? "Importing" : peopleImportState === "imported" ? "Imported" : "Import"}
+	                  </button>
+	                </div>
+                  {peopleImportDiagnostic && (
+                    <div className={`import-diagnostics${peopleImportDiagnostic.ok ? "" : " error"}`} role={peopleImportDiagnostic.ok ? "status" : "alert"}>
+                      <strong>{peopleImportDiagnostic.message}</strong>
+                      <span>Endpoint: {peopleImportDiagnostic.endpoint}</span>
+                      <span>HTTP: {peopleImportDiagnostic.status}</span>
+                      <span>
+                        Imported {peopleImportDiagnostic.imported} · Updated {peopleImportDiagnostic.updated} · Skipped {peopleImportDiagnostic.skipped}
+                        {peopleImportDiagnostic.failed ? ` · Failed ${peopleImportDiagnostic.failed}` : ""}
+                      </span>
+                      {peopleImportDiagnostic.errors.map((message) => (
+                        <em key={message}>{message}</em>
+                      ))}
+                    </div>
+                  )}
+	              </article>
+	            )}
+
+            <div className="client-table">
+              {filteredClients.length ? (
+                filteredClients.map((client) => {
+                  const mergeEligible = !client.id.startsWith("appointment-");
+                  const mergeSelected = clientMergeSelection.includes(client.id);
+                  return (
+                    <button
+                      className={`client-row${clientMergeMode ? " merge-mode" : ""}${mergeSelected ? " merge-selected" : ""}`}
+                      key={client.id}
+                      onClick={() => (clientMergeMode ? toggleClientMergeSelection(client) : openClientProfile(client))}
+                      disabled={clientMergeMode && !mergeEligible}
+                      title={clientMergeMode && !mergeEligible ? "Save this client before merging — it isn't linked to a client record yet." : undefined}
+                    >
+                      {clientMergeMode && (
+                        <span className={`merge-row-check${mergeSelected ? " checked" : ""}`} aria-hidden="true">
+                          {mergeSelected ? <Check size={14} /> : null}
+                        </span>
+                      )}
+                      <div className="client-main">
+                        <strong>{client.name}</strong>
+                        <span>{client.email || "No email yet"}</span>
+                      </div>
+                      <span className="client-phone">{client.phone || "No phone"}</span>
+                      <span className="client-booking-count">
+                        {client.count} booking{client.count === 1 ? "" : "s"}
+                        {(client.caddyProfileId || client.caddyProfileUrl) && <em>Linked to Caddy</em>}
+                      </span>
+                      <span className="client-row-arrow">
+                        {clientMergeMode ? null : <ArrowRight size={17} />}
+                      </span>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="empty-panel compact">
+                  <h2>No clients found</h2>
+                  <p>Try a different name, email, or phone number.</p>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "players" && (
+          <section className="module-page player-profiles-page">
+            <div className="player-profiles-toolbar">
+              <div className="player-profiles-heading">
+                <h2>Player Profiles</h2>
+                <p>Clients with lesson notes or video, plus anyone you add.</p>
+              </div>
+              <div className="player-profiles-actions">
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={openPlayerAddDialog}
+                  title="Add player"
+                  aria-label="Add player"
+                >
+                  <Plus size={18} />
+                </button>
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => switchView("video")}
+                  title="Open video analysis"
+                  aria-label="Open video analysis"
+                >
+                  <Video size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="player-profiles-layout">
+              <div className="player-profiles-list">
+                {playerProfiles.length === 0 ? (
+                  <div className="player-profiles-empty">
+                    {playerProfilesDataReady ? (
+                      <>
+                        <h2>No player profiles yet</h2>
+                        <p>Add a lesson note or video to a client, or use + to add one.</p>
+                      </>
+                    ) : (
+                      <>
+                        <h2>Loading player profiles…</h2>
+                        <p>Fetching lesson notes, saved videos, and cloud imports.</p>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  playerProfiles.map((player) => {
+                    const isSelectedPlayer = notesWorkspaceClient?.id === player.id;
+                    return (
+                      <div
+                        className={`player-profile-entry${isSelectedPlayer ? " is-expanded" : ""}${
+                          isSelectedPlayer && !playerToolExpanded ? " is-collapsed" : ""
+                        }`}
+                        key={player.id}
+                      >
+                        <article
+                          className={`player-profile-card${isSelectedPlayer ? " active" : ""}`}
+                          onClick={() => {
+                            if (isSelectedPlayer) {
+                              setPlayerToolExpanded((expanded) => !expanded);
+                            } else {
+                              selectPlayerProfileTool(player);
+                            }
+                          }}
+                        >
+                          <div className="player-profile-avatar">
+                            <User size={18} />
+                          </div>
+                          <div className="player-profile-body">
+                            <h3>{player.name}</h3>
+                            <span>{player.email || player.phone || "No contact yet"}</span>
+                            <div className="player-profile-tags">
+                              {hasAnyProfileId(videoPlayerIds, player) && (
+                                <span className="tag">
+                                  <Video size={12} /> Video
+                                </span>
+                              )}
+                              {hasAnyProfileId(lessonNotePlayerIds, player) && (
+                                <span className="tag">
+                                  <FileText size={12} /> Lesson notes
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="icon-button"
+                            title="Show videos"
+                            aria-label={`Show videos for ${player.name}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              selectPlayerProfileTool(
+                                { id: preferredVideoPlayerId(player, videoPlayerIds), name: player.name },
+                                "videos",
+                              );
+                            }}
+                          >
+                            <Video size={16} />
+                          </button>
+                        </article>
+
+                        {isSelectedPlayer && notesWorkspaceClient ? (
+                          <div className={`player-profile-tool-panel${playerToolExpanded ? "" : " collapsed"}`}>
+                            <div className="player-tool-header">
+                              <div>
+                                <span>Player</span>
+                                <h3>{notesWorkspaceClient.name}</h3>
+                                <p>{notesWorkspaceClient.email || notesWorkspaceClient.phone || "No contact yet"}</p>
+                              </div>
+                            </div>
+
+                            {playerToolExpanded && (
+                              <div className="player-tool-tabs" role="tablist" aria-label="Player profile tools">
+                                <button
+                                  type="button"
+                                  className={playerProfileTool === "recent" ? "active" : ""}
+                                  onClick={() => setPlayerProfileTool("recent")}
+                                  role="tab"
+                                  aria-selected={playerProfileTool === "recent"}
+                                >
+                                  <Clock size={15} />
+                                  Recent
+                                </button>
+                                <button
+                                  type="button"
+                                  className={playerProfileTool === "notes" ? "active" : ""}
+                                  onClick={() => setPlayerProfileTool("notes")}
+                                  role="tab"
+                                  aria-selected={playerProfileTool === "notes"}
+                                >
+                                  <FileText size={15} />
+                                  Notes
+                                </button>
+                                <button
+                                  type="button"
+                                  className={playerProfileTool === "videos" ? "active" : ""}
+                                  onClick={() => setPlayerProfileTool("videos")}
+                                  role="tab"
+                                  aria-selected={playerProfileTool === "videos"}
+                                >
+                                  <Video size={15} />
+                                  Videos
+                                </button>
+                              </div>
+                            )}
+
+                            {playerToolExpanded && playerProfileTool === "recent" ? (
+                              <div className="player-tool-body">
+                                <div className="player-record-list">
+                                  {playerToolRecentRecords.length ? (
+                                    playerToolRecentRecords.map((record) => (
+                                      <article className={`player-record-card ${record.kind}`} key={record.id}>
+                                        <div className="player-record-icon">
+                                          {record.kind === "video" ? <Video size={16} /> : <FileText size={16} />}
+                                        </div>
+                                        <div className="player-record-content">
+                                          <strong>{record.title}</strong>
+                                          <span>{record.subtitle}</span>
+                                          {record.body ? <p>{record.body}</p> : null}
+                                        </div>
+                                        {record.kind === "video" ? (
+                                          <button
+                                            type="button"
+                                            className="outline-button player-record-action"
+                                            onClick={() =>
+                                              openVideoAnalysisForClient({
+                                                id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
+                                                name: notesWorkspaceClient.name,
+                                                savedVideoId: record.sourceId,
+                                              })
+                                            }
+                                          >
+                                            <Video size={14} />
+                                            Open
+                                          </button>
+                                        ) : null}
+                                      </article>
+                                    ))
+                                  ) : (
+                                    <p className="notes-empty">No notes or videos yet.</p>
+                                  )}
+                                </div>
+                              </div>
+                            ) : playerToolExpanded && playerProfileTool === "notes" ? (
+                              <div className="player-tool-body">
+                                <Suspense fallback={<div className="module-loading">Loading voice notes…</div>}>
+                                  <ClarityVoiceTextPanel
+                                    fieldLabel="Lesson note"
+                                    placeholder="Type or dictate the coach lesson note."
+                                    onCommit={(text) => void saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
+                                  />
+                                </Suspense>
+                                <div className="lesson-notes-list">
+                                  {notesWorkspaceLessonNotes.length ? (
+                                    notesWorkspaceLessonNotes.map((note) => (
+                                      <article className="lesson-note-card" key={note.id}>
+                                        <div>
+                                          <strong>{profileRecordTitle(notesWorkspaceClient.name, note.updatedAt || note.createdAt)}</strong>
+                                          <span>
+                                            {note.title || "Lesson note"} · {note.source === "voice" ? "Voice note" : "Typed note"}
+                                            {note.lessonId && playerToolVideos.some((video) => video.lessonId === note.lessonId)
+                                              ? " · Linked lesson video"
+                                              : ""}
+                                          </span>
+                                        </div>
+                                        <p>{note.body}</p>
+                                        <button
+                                          type="button"
+                                          className="outline-button"
+                                          onClick={() => void deleteLessonNote(note.id)}
+                                          disabled={lessonNoteSaveState === "saving"}
+                                        >
+                                          <Trash2 size={14} />
+                                          Delete
+                                        </button>
+                                      </article>
+                                    ))
+                                  ) : (
+                                    <p className="notes-empty">No lesson notes yet.</p>
+                                  )}
+                                </div>
+                              </div>
+                            ) : playerToolExpanded ? (
+                              <div className="player-tool-body">
+                                <div className="player-tool-inline-actions">
+                                  <button
+                                    type="button"
+                                    className="outline-button"
+                                    onClick={() =>
+                                      openVideoAnalysisForClient({
+                                        id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
+                                        name: notesWorkspaceClient.name,
+                                      })
+                                    }
+                                  >
+                                    <Video size={15} />
+                                    Add video
+                                  </button>
+                                </div>
+                                <div className="player-video-list">
+                                  {!managedLocalLibraryStatus.configured ? (
+                                    <article className="player-video-card is-library-status">
+                                      <div className="player-video-thumb is-empty">
+                                        <FolderOpen size={16} />
+                                      </div>
+                                      <div className="player-video-card-body">
+                                        <strong>My Library not connected</strong>
+                                        <span>Videos stay available through device cache. Connect My Library only for permanent local copies.</span>
+                                      </div>
+                                      <div className="player-video-card-actions">
+                                        <button
+                                          type="button"
+                                          className="primary-button"
+                                          disabled={!managedLocalLibraryStatus.supported}
+                                          onClick={() => void runManagedLibraryAction("choose")}
+                                        >
+                                          <FolderOpen size={14} />
+                                          Choose My Library
+                                        </button>
+                                      </div>
+                                    </article>
+                                  ) : managedLocalLibraryStatus.health !== "healthy" ? (
+                                    <article className="player-video-card is-library-status">
+                                      <div className="player-video-thumb is-empty">
+                                        <AlertTriangle size={16} />
+                                      </div>
+                                      <div className="player-video-card-body">
+                                        <strong>{managedLocalLibraryStatus.message}</strong>
+                                        <span>Working from device cache. Reconnect My Library when available.</span>
+                                      </div>
+                                      <div className="player-video-card-actions">
+                                        <button
+                                          type="button"
+                                          className="outline-button"
+                                          onClick={() => void runManagedLibraryAction("reconnect")}
+                                        >
+                                          <RefreshCw size={14} />
+                                          Reconnect folder
+                                        </button>
+                                      </div>
+                                    </article>
+                                  ) : null}
+                                  {playerToolVideos.length || playerToolCloudVideos.length || playerToolLegacyVideoRecords.length ? (
+                                    <>
+                                      {playerToolVideos.map((video) => {
+                                        const cloudOperational = isClarityCloudOperational(clarityCloudHealth);
+                                        const cloudStatus = video.cloud?.status || "not-uploaded";
+                                        const isUploading =
+                                          cloudOperational &&
+                                          (uploadingSavedVideoIds.has(video.savedVideoId) ||
+                                            video.cloud?.status === "preparing" ||
+                                            video.cloud?.status === "session-created" ||
+                                            video.cloud?.status === "uploading" ||
+                                            video.cloud?.status === "verifying");
+                                        const cloudLabel = getSavedVideoCloudStatusLabel(video, {
+                                          isUploading,
+                                          cloudConnected: googleDriveTransfer.connected,
+                                          cloudState: googleDriveTransfer.state,
+                                          cloudHealth: clarityCloudHealth,
+                                        });
+                                        const cloudErrorLabel =
+                                          video.cloud?.status === "failed"
+                                            ? savedVideoCloudErrorLabel(video.cloud.lastUploadErrorCode, video.cloud.errorMessage)
+                                            : "";
+                                        const canRetryCloud =
+                                          video.local.status === "available" &&
+                                          cloudOperational &&
+                                          cloudStatus !== "ready" &&
+                                          cloudStatus !== "imported" &&
+                                          !isUploading;
+                                        const sendLabel =
+                                          cloudStatus === "failed"
+                                            ? "Retry upload"
+                                            : cloudStatus === "paused"
+                                              ? "Resume upload"
+                                              : "Retry upload";
+                                        const canPause =
+                                          cloudOperational &&
+                                          cloudStatus === "uploading" &&
+                                          Number(video.cloud?.acceptedOffsetBytes || 0) > 0;
+                                        const canCancel =
+                                          cloudOperational &&
+                                          (cloudStatus === "preparing" ||
+                                            cloudStatus === "session-created" ||
+                                            cloudStatus === "uploading" ||
+                                            cloudStatus === "paused");
+                                        const canRemoveTransfer = cloudOperational && cloudStatus === "failed";
+                                        const hasDeviceCopy = video.local.status !== "missing";
+                                        const canRemoveFromDevice =
+                                          (cloudStatus === "ready" || cloudStatus === "imported") &&
+                                          hasDeviceCopy;
+                                        const cloudSaved = cloudStatus === "ready" || cloudStatus === "imported";
+                                        const cloudFailed = cloudStatus === "failed" || !cloudOperational;
+                                        const cloudState = isUploading
+                                          ? "uploading"
+                                          : cloudSaved
+                                            ? "saved"
+                                            : cloudFailed
+                                              ? "failed"
+                                              : "pending";
+                                        const cloudBadgeLabel = isUploading
+                                          ? "Uploading to Clarity Cloud"
+                                          : cloudSaved
+                                            ? "Saved in Clarity Cloud"
+                                            : cloudStatus === "failed"
+                                              ? cloudErrorLabel || "Clarity Cloud upload failed"
+                                              : !cloudOperational
+                                                ? cloudLabel
+                                                : "Waiting to upload to Clarity Cloud";
+                                        const videoTitle = profileRecordTitle(
+                                          notesWorkspaceClient.name,
+                                          video.updatedAt || video.createdAt,
+                                        );
+                                        const videoRawTitle = video.title || videoTitle;
+                                        const menuOpen = openSavedVideoMenuId === video.savedVideoId;
+                                        const closeMenu = () => setOpenSavedVideoMenuId(null);
+                                        const playVideo = () =>
+                                          openVideoAnalysisForClient({
+                                            id: video.playerId,
+                                            name: notesWorkspaceClient.name,
+                                            savedVideoId: video.savedVideoId,
+                                          });
+                                        return (
+                                          <article className="player-video-card" key={video.savedVideoId}>
+                                            <button
+                                              type="button"
+                                              className="player-video-thumb-button"
+                                              onClick={playVideo}
+                                              title={`Play ${videoTitle}`}
+                                              aria-label={`Play ${videoTitle}`}
+                                            >
+                                              {video.thumbnailDataUrl ? (
+                                                <img
+                                                  className="player-video-thumb"
+                                                  src={video.thumbnailDataUrl}
+                                                  alt=""
+                                                />
+                                              ) : (
+                                                <div className="player-video-thumb is-empty">
+                                                  <Video size={16} />
+                                                </div>
+                                              )}
+                                              <span className="player-video-thumb-play" aria-hidden="true">
+                                                <Play size={14} />
+                                              </span>
+                                            </button>
+                                            <div className="player-video-card-body">
+                                              <strong title={videoRawTitle !== videoTitle ? videoRawTitle : undefined}>
+                                                {videoTitle}
+                                              </strong>
+                                              {linkedLessonVideoIds.has(video.savedVideoId) ? (
+                                                <span>Linked lesson note</span>
+                                              ) : null}
+                                            </div>
+                                            <div className="player-video-card-actions">
+                                              <span
+                                                className={`player-video-cloud-badge is-${cloudState}`}
+                                                title={cloudBadgeLabel}
+                                                aria-label={cloudBadgeLabel}
+                                                role="img"
+                                              >
+                                                {cloudState === "uploading" ? (
+                                                  <CloudUpload size={16} />
+                                                ) : cloudState === "saved" ? (
+                                                  <Cloud size={16} />
+                                                ) : cloudState === "failed" ? (
+                                                  <CloudOff size={16} />
+                                                ) : (
+                                                  <CloudUpload size={16} />
+                                                )}
+                                              </span>
+                                              <div className="player-video-menu">
+                                                <button
+                                                  type="button"
+                                                  className="icon-button"
+                                                  aria-haspopup="menu"
+                                                  aria-expanded={menuOpen}
+                                                  aria-label="Video options"
+                                                  title="Video options"
+                                                  onClick={() =>
+                                                    setOpenSavedVideoMenuId(menuOpen ? null : video.savedVideoId)
+                                                  }
+                                                >
+                                                  <MoreHorizontal size={16} />
+                                                </button>
+                                                {menuOpen ? (
+                                                  <>
+                                                    <button
+                                                      type="button"
+                                                      className="player-video-menu-scrim"
+                                                      aria-label="Close video options"
+                                                      onClick={closeMenu}
+                                                    />
+                                                    <div className="player-video-menu-panel" role="menu">
+                                                      <button
+                                                        type="button"
+                                                        role="menuitem"
+                                                        onClick={() => {
+                                                          closeMenu();
+                                                          playVideo();
+                                                        }}
+                                                      >
+                                                        <Play size={14} />
+                                                        Play
+                                                      </button>
+                                                      {cloudOperational && canRetryCloud ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void sendSavedVideoToPrimaryComputer(video);
+                                                          }}
+                                                        >
+                                                          <Send size={14} />
+                                                          {sendLabel}
+                                                        </button>
+                                                      ) : null}
+                                                      {canPause ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void pauseSavedVideoTransfer(video);
+                                                          }}
+                                                        >
+                                                          <Pause size={14} />
+                                                          Pause upload
+                                                        </button>
+                                                      ) : null}
+                                                      {canCancel ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void cancelSavedVideoTransfer(video);
+                                                          }}
+                                                        >
+                                                          <X size={14} />
+                                                          Cancel upload
+                                                        </button>
+                                                      ) : null}
+                                                      {canRemoveTransfer ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void removeSavedVideoTransfer(video);
+                                                          }}
+                                                        >
+                                                          <X size={14} />
+                                                          Clear failed upload
+                                                        </button>
+                                                      ) : null}
+                                                      {hasDeviceCopy && video.local.managed?.status !== "healthy" ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void showSavedVideoInFinder(video);
+                                                          }}
+                                                        >
+                                                          <FolderOpen size={14} />
+                                                          Keep a copy in My Library
+                                                        </button>
+                                                      ) : null}
+                                                      {hasDeviceCopy ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void revealSavedVideoFile(video);
+                                                          }}
+                                                        >
+                                                          <ExternalLink size={14} />
+                                                          Open stored file
+                                                        </button>
+                                                      ) : null}
+                                                      {hasDeviceCopy ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void verifySavedVideoInLibrary(video);
+                                                          }}
+                                                        >
+                                                          <Check size={14} />
+                                                          Verify file
+                                                        </button>
+                                                      ) : null}
+                                                      {canRemoveFromDevice ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void removeSavedVideoFromDevice(video);
+                                                          }}
+                                                        >
+                                                          <X size={14} />
+                                                          Free up space on this device
+                                                        </button>
+                                                      ) : null}
+                                                      <button
+                                                        type="button"
+                                                        role="menuitem"
+                                                        onClick={() => {
+                                                          closeMenu();
+                                                          void renameSavedVideo(video);
+                                                        }}
+                                                      >
+                                                        <Pencil size={14} />
+                                                        Rename
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        role="menuitem"
+                                                        className="is-danger"
+                                                        onClick={() => {
+                                                          closeMenu();
+                                                          void deleteSavedVideo(video);
+                                                        }}
+                                                      >
+                                                        <Trash2 size={14} />
+                                                        Delete
+                                                      </button>
+                                                    </div>
+                                                  </>
+                                                ) : null}
+                                              </div>
+                                            </div>
+                                          </article>
+                                        );
+                                      })}
+                                      {playerToolCloudVideos.map((transfer) => {
+                                        const savedVideo = transfer.savedVideo;
+                                        const savedVideoId = transfer.savedVideoId || savedVideo?.savedVideoId || transfer.transferId;
+                                        const timestamp = savedVideo?.updatedAt || savedVideo?.createdAt || transfer.readyToImportAt || "";
+                                        const isDownloading = clarityCloudImportActionIds.has(savedVideoId);
+                                        const cloudVideoTitle = profileRecordTitle(notesWorkspaceClient.name, timestamp);
+                                        const cloudVideoRawTitle = savedVideo?.title || cloudVideoTitle;
+                                        return (
+                                          <article className="player-video-card is-cloud-only" key={savedVideoId}>
+                                            <button
+                                              type="button"
+                                              className="player-video-thumb-button"
+                                              disabled={isDownloading}
+                                              title={isDownloading ? "Downloading from Clarity Cloud" : "Play video"}
+                                              aria-label={isDownloading ? "Downloading from Clarity Cloud" : "Play video"}
+                                              onClick={() => void openCloudVideoFromCatalogue(transfer, notesWorkspaceClient.name)}
+                                            >
+                                              <div className="player-video-thumb is-empty">
+                                                <Video size={16} />
+                                              </div>
+                                              <span className="player-video-thumb-play" aria-hidden="true">
+                                                {isDownloading ? <Download size={14} /> : <Play size={14} />}
+                                              </span>
+                                            </button>
+                                            <div className="player-video-card-body">
+                                              <strong title={cloudVideoRawTitle !== cloudVideoTitle ? cloudVideoRawTitle : undefined}>
+                                                {cloudVideoTitle}
+                                              </strong>
+                                            </div>
+                                            <div className="player-video-card-actions">
+                                              <span
+                                                className="player-video-cloud-badge is-saved"
+                                                title="Saved in Clarity Cloud"
+                                                aria-label="Saved in Clarity Cloud"
+                                                role="img"
+                                              >
+                                                <Cloud size={16} />
+                                              </span>
+                                            </div>
+                                          </article>
+                                        );
+                                      })}
+                                      {playerToolLegacyVideoRecords.map((record) => (
+                                        <article className="player-video-card is-legacy" key={record.slotKey}>
+                                          <div className="player-video-thumb is-empty">
+                                            <Archive size={16} />
+                                          </div>
+                                          <div className="player-video-card-body">
+                                            <strong>Recovery copy - {record.video.title || "Video"}</strong>
+                                            <span>
+                                              Safe to remove after saving · {formatVideoDurationLabel(record.video.duration)} · Move to Saved Videos to keep it in the durable library
+                                            </span>
+                                          </div>
+                                          <div className="player-video-card-actions">
+                                            <button
+                                              type="button"
+                                              className="outline-button"
+                                              onClick={() => void migrateLegacyVideo(record)}
+                                            >
+                                              <Archive size={14} />
+                                              Move to Saved Videos
+                                            </button>
+                                          </div>
+                                        </article>
+                                      ))}
+                                    </>
+                                  ) : (
+                                    <p className="notes-empty">No videos yet.</p>
+                                  )}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && showPlayerAddDialog && (
+          <div
+            className="player-add-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Add player profile"
+            onClick={() => setShowPlayerAddDialog(false)}
+          >
+            <div className="player-add-dialog" onClick={(event) => event.stopPropagation()}>
+              <div className="player-add-header">
+                <h3>Add player profile</h3>
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => setShowPlayerAddDialog(false)}
+                  aria-label="Close"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="player-add-section">
+                <label>Add an existing client</label>
+                <input
+                  value={playerAddSearch}
+                  onChange={(event) => setPlayerAddSearch(event.target.value)}
+                  placeholder="Search clients"
+                />
+                <div className="player-add-results">
+                  {playerAddSearch.trim().length > 0 &&
+                    clients
+                      .filter((client) => clientMatchesSearchTerm(client, playerAddSearch.trim()))
+                      .slice(0, 6)
+                      .map((client) => (
+                        <button
+                          type="button"
+                          key={client.id}
+                          className="player-add-result"
+                          onClick={() =>
+                            promoteExistingPlayer({ id: client.id, name: client.name })
+                          }
+                        >
+                          <span>{client.name}</span>
+                          <span className="muted">{client.email || client.phone}</span>
+                        </button>
+                      ))}
+                </div>
+              </div>
+
+              <div className="player-add-divider">or add someone new</div>
+
+              <div className="player-add-section">
+                <input
+                  value={playerAddNew.name}
+                  onChange={(event) =>
+                    setPlayerAddNew((current) => ({ ...current, name: event.target.value }))
+                  }
+                  placeholder="Name"
+                />
+                <input
+                  value={playerAddNew.email}
+                  onChange={(event) =>
+                    setPlayerAddNew((current) => ({ ...current, email: event.target.value }))
+                  }
+                  placeholder="Email"
+                />
+                <input
+                  value={playerAddNew.phone}
+                  onChange={(event) =>
+                    setPlayerAddNew((current) => ({ ...current, phone: event.target.value }))
+                  }
+                  placeholder="Phone"
+                />
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={playerAddSaving}
+                  onClick={createNewPlayer}
+                >
+                  {playerAddSaving ? "Adding…" : "Add new player"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "video" && (
+          <section className="module-page video-analysis-page-host">
+            <Suspense fallback={<div className="module-loading">Loading video analysis…</div>}>
+              <VideoAnalysisPage
+                playerId={videoContext?.playerId}
+                playerName={videoContext?.playerName}
+                savedVideoId={videoContext?.savedVideoId}
+                savedVideoLibrary={savedVideoLibraryRef.current}
+                onSavedVideoLibraryChange={refreshSavedVideoLibrary}
+                onNavigateBack={returnToPlayerProfileVideos}
+                onLocalSaveComplete={handleVideoAnalysisLocalSaveComplete}
+                onSaveAndSend={handleVideoAnalysisSaveAndSend}
+                onOpenCloudSettings={() => {
+                  setActiveView("settings");
+                  setSettingsTab("integrations");
+                }}
+              />
+            </Suspense>
+          </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "billing" && (
+          <section className="module-page billing-page">
+            <div className="settings-tabs billing-tabs" role="tablist" aria-label="Billing sections">
+              <button
+                className={billingSection === "dashboard" ? "active" : ""}
+                onClick={() => setBillingSection("dashboard")}
+                role="tab"
+                aria-selected={billingSection === "dashboard"}
+                type="button"
+              >
+                <LayoutDashboard size={16} />
+                Dashboard
+              </button>
+              <button
+                className={billingSection === "new-invoice" ? "active" : ""}
+                onClick={startNewInvoice}
+                role="tab"
+                aria-selected={billingSection === "new-invoice"}
+                type="button"
+              >
+                <FileText size={16} />
+                New Invoice
+              </button>
+              <button
+                className={billingSection === "invoices" ? "active" : ""}
+                onClick={() => {
+                  setBillingSection("invoices");
+                  void fetchAllInvoices();
+                  void fetchReconcileCandidates();
+                }}
+                role="tab"
+                aria-selected={billingSection === "invoices"}
+                type="button"
+              >
+                <Files size={16} />
+                Invoices
+              </button>
+              <button
+                className={billingSection === "expenses" ? "active" : ""}
+                onClick={() => {
+                  setBillingSection("expenses");
+                  void fetchBankCandidates();
+                }}
+                role="tab"
+                aria-selected={billingSection === "expenses"}
+                type="button"
+              >
+                <Receipt size={16} />
+                Expenses
+              </button>
+              <button
+                className={billingSection === "reports" ? "active" : ""}
+                onClick={() => setBillingSection("reports")}
+                role="tab"
+                aria-selected={billingSection === "reports"}
+                type="button"
+              >
+                <BarChart3 size={16} />
+                Reports
+              </button>
+              <button
+                className={billingSection === "settings" ? "active" : ""}
+                onClick={() => setBillingSection("settings")}
+                role="tab"
+                aria-selected={billingSection === "settings"}
+                type="button"
+              >
+                <Settings size={16} />
+                Settings
+              </button>
+            </div>
+
+            {billingSection === "dashboard" && (
+              <div className="billing-dashboard">
+                {overdueInvoiceRecords.length > 0 && invoiceSettings.unpaidLoudness >= 2 && (
+                  <article className={`data-card unpaid-banner unpaid-banner-level-${invoiceSettings.unpaidLoudness}`}>
+                    <AlertTriangle size={invoiceSettings.unpaidLoudness === 3 ? 28 : 22} />
+                    <div>
+                      <strong>
+                        {overdueInvoiceRecords.length} unpaid invoice{overdueInvoiceRecords.length === 1 ? "" : "s"} overdue
+                        {invoiceSettings.unpaidLoudness === 3 ? " - follow up now" : ""}
+                      </strong>
+                      <span>
+                        {formatMoney(overdueTotalOutstanding, invoiceSettings.currency)} outstanding - oldest is {overdueOldestDays} day
+                        {overdueOldestDays === 1 ? "" : "s"} overdue
+                      </span>
+                    </div>
+                  </article>
+                )}
+                <article className="data-card revenue-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Revenue</span>
+                      <h2>{formatMoney(revenueReport?.total ?? 0, revenueReport?.currency ?? invoiceSettings.currency)}</h2>
+                    </div>
+                    <div className="revenue-period-toggle" role="tablist" aria-label="Revenue period">
+                      {(["week", "month", "year"] as const).map((period) => (
+                        <button
+                          key={period}
+                          className={revenuePeriod === period ? "active" : ""}
+                          onClick={() => setRevenuePeriod(period)}
+                          role="tab"
+                          aria-selected={revenuePeriod === period}
+                          type="button"
+                        >
+                          {period === "week" ? "Weekly" : period === "month" ? "Monthly" : "Yearly"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {revenueLoadState === "loading" && !revenueReport ? (
+                    <p>Loading revenue...</p>
+                  ) : revenueReport ? (
+                    <>
+                      <div className="revenue-chart" aria-hidden="true">
+                        {revenueReport.buckets.map((bucket) => (
+                          <div key={bucket.rangeStart} className="revenue-chart-bar-track" title={`${bucket.label}: ${formatMoney(bucket.total, revenueReport.currency)}`}>
+                            <div
+                              className="revenue-chart-bar"
+                              style={{ height: `${Math.max(2, Math.round((bucket.total / revenueMaxBucketTotal) * 100))}%` }}
+                            />
+                            <span>{bucket.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="revenue-comparison">
+                        {revenueReport.previousYearTotal === null
+                          ? "No data from the same period last year yet."
+                          : revenueYoyDeltaPct === null
+                            ? `Same period last year: ${formatMoney(revenueReport.previousYearTotal, revenueReport.currency)}`
+                            : `${revenueYoyDeltaPct >= 0 ? "Up" : "Down"} ${Math.abs(revenueYoyDeltaPct)}% vs. same period last year (${formatMoney(revenueReport.previousYearTotal, revenueReport.currency)})`}
+                      </p>
+                    </>
+                  ) : (
+                    <p>No revenue yet. Issue an invoice to see it here.</p>
+                  )}
+                </article>
+                <div className="billing-dashboard-grid">
+                  <article className="data-card">
+                    <div className="data-card-header">
+                      <div>
+                        <span>Invoices</span>
+                        <h2>Draft workspace</h2>
+                      </div>
+                      <FileText size={24} />
+                    </div>
+                    <p>Manual invoice entry is ready, with lesson type, package, product, and completed-booking line sources.</p>
+                    <button className="primary-button" onClick={startNewInvoice} type="button">
+                      <Plus size={16} />
+                      New Invoice
+                    </button>
+                  </article>
+                  <article className="data-card ready-to-pull-card">
+                    <div className="data-card-header">
+                      <div>
+                        <span>Completed Bookings</span>
+                        <h2>Ready to pull</h2>
+                      </div>
+                      <CalendarDays size={24} />
+                    </div>
+                    <div className="ready-to-pull-range">
+                      {pullRangeEditing ? (
+                        <>
+                          <label className="settings-field">
+                            <span>From</span>
+                            <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
+                          </label>
+                          <label className="settings-field">
+                            <span>To</span>
+                            <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
+                          </label>
+                          <div className="pull-range-actions">
+                            <button className="invoice-inline-edit" onClick={resetPullRange} type="button">
+                              Reset to auto
+                            </button>
+                            <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">
+                              Done
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="pull-range-summary">
+                          <span>
+                            {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : "Earliest"} → {formatDateForDisplay(effectivePullTo)}
+                          </span>
+                          <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label="Edit pull range">
+                            <Pencil size={13} />
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="completed-booking-list compact">
+                      {pullableCompletedAppointments.length ? (
+                        pullableCompletedAppointments.slice(0, 6).map((item) => {
+                          const service = itemService(item, services);
+                          const days = buildWeekDays(itemWeek(item));
+                          return (
+                            <button key={item.id} onClick={() => addCompletedBookingLine(item)} type="button">
+                              <span>
+                                <strong>{item.client || item.title}</strong>
+                                <em>
+                                  {service?.name ?? "Lesson"} - {days[item.day].label}, {formatTime(item.start)}
+                                </em>
+                              </span>
+                              <Plus size={16} />
+                            </button>
+                          );
+                        })
+                      ) : uninvoicedCompletedAppointments.length ? (
+                        <p>No completed bookings in this date range.</p>
+                      ) : completedAppointments.length ? (
+                        <p>All completed bookings have already been invoiced.</p>
+                      ) : (
+                        <p>No completed bookings yet. Mark a lesson completed from the appointment details panel.</p>
+                      )}
+                    </div>
+                    {pullableCompletedAppointments.length > 6 && (
+                      <p className="ready-to-pull-overflow">
+                        +{pullableCompletedAppointments.length - 6} more in this range - open New Invoice to see the rest.
+                      </p>
+                    )}
+                  </article>
+                  <article className="data-card">
+                    <div className="data-card-header">
+                      <div>
+                        <span>Products & Services</span>
+                        <h2>{catalogItems.length} invoice-only items</h2>
+                      </div>
+                      <Package size={24} />
+                    </div>
+                    <p>These live in Billing and do not affect the public booking calendar.</p>
+                    <button className="outline-button" onClick={() => setBillingSection("new-invoice")} type="button">
+                      Manage in New Invoice
+                    </button>
+                  </article>
+                </div>
+                <article className="data-card recent-invoices-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Invoices</span>
+                      <h2>
+                        Recent invoices
+                        {overdueInvoiceRecords.length > 0 && invoiceSettings.unpaidLoudness === 1 && (
+                          <span className="unpaid-count-badge">{overdueInvoiceRecords.length} unpaid</span>
+                        )}
+                      </h2>
+                    </div>
+                  </div>
+                  {billingDataLoadState === "loading" && !recentInvoices.length ? (
+                    <p>Loading invoices...</p>
+                  ) : recentInvoices.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Invoice</th>
+                          <th>Customer</th>
+                          <th>Date</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recentInvoices.map((invoiceRecord) => (
+                          <tr
+                            key={invoiceRecord.id}
+                            className={`clickable-invoice-row${invoiceSettings.unpaidLoudness === 3 && overdueInvoiceIds.has(invoiceRecord.id) ? " overdue-row" : ""}`}
+                            style={{ cursor: "pointer" }}
+                            role="button"
+                            tabIndex={0}
+                            title={invoiceRecord.status === "draft" ? "Open draft to edit" : "Open invoice to send or download"}
+                            onClick={() => openInvoiceForEdit(invoiceRecord)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                void openInvoiceForEdit(invoiceRecord);
+                              }
+                            }}
+                          >
+                            <td>{invoiceRecord.invoiceNumber}</td>
+                            <td>{invoiceRecord.customerName}</td>
+                            <td>{invoiceRecord.issueDate}</td>
+                            <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
+                            <td>
+                              <span
+                                className={`invoice-status-pill invoice-status-${
+                                  invoiceRecord.status === "sent" && !invoiceRecord.sentAt ? "published" : invoiceRecord.status
+                                }`}
+                              >
+                                {invoiceRecord.status === "sent" && invoiceRecord.sentAt && <Send size={12} />}
+                                {invoiceRecord.status === "sent"
+                                  ? invoiceRecord.sentAt
+                                    ? "Sent"
+                                    : "Published"
+                                  : invoiceRecord.status.charAt(0).toUpperCase() + invoiceRecord.status.slice(1)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p>No invoices yet. Issue your first invoice to see it here.</p>
+                  )}
+                </article>
+              </div>
+            )}
+
+            {billingSection === "invoices" && (
+              <div className="billing-invoices-panel">
+                <article className="data-card recent-invoices-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Invoices</span>
+                      <h2>All invoices</h2>
+                    </div>
+                    <input
+                      type="search"
+                      className="invoice-search-input"
+                      placeholder="Search number, customer or status…"
+                      value={invoiceSearch}
+                      onChange={(event) => setInvoiceSearch(event.target.value)}
+                      aria-label="Search invoices"
+                    />
+                  </div>
+                  {allInvoicesLoadState === "loading" && !allInvoices.length ? (
+                    <p>Loading invoices...</p>
+                  ) : allInvoicesLoadState === "error" ? (
+                    <p>
+                      Could not load invoices.{" "}
+                      <button className="outline-button" type="button" onClick={() => void fetchAllInvoices()}>
+                        Try again
+                      </button>
+                    </p>
+                  ) : filteredInvoices.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Invoice</th>
+                          <th>Customer</th>
+                          <th>Date</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredInvoices.map((invoiceRecord) => (
+                          <tr
+                            key={invoiceRecord.id}
+                            className={`clickable-invoice-row${invoiceSettings.unpaidLoudness === 3 && overdueInvoiceIds.has(invoiceRecord.id) ? " overdue-row" : ""}`}
+                            style={{ cursor: "pointer" }}
+                            role="button"
+                            tabIndex={0}
+                            title={invoiceRecord.status === "draft" ? "Open draft to edit" : "Open invoice to send or download"}
+                            onClick={() => openInvoiceForEdit(invoiceRecord)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                void openInvoiceForEdit(invoiceRecord);
+                              }
+                            }}
+                          >
+                            <td>{invoiceRecord.invoiceNumber}</td>
+                            <td>{invoiceRecord.customerName}</td>
+                            <td>{invoiceRecord.issueDate}</td>
+                            <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
+                            <td>
+                              <span
+                                className={`invoice-status-pill invoice-status-${
+                                  invoiceRecord.status === "sent" && !invoiceRecord.sentAt ? "published" : invoiceRecord.status
+                                }`}
+                              >
+                                {invoiceRecord.status === "sent" && invoiceRecord.sentAt && <Send size={12} />}
+                                {invoiceRecord.status === "sent"
+                                  ? invoiceRecord.sentAt
+                                    ? "Sent"
+                                    : "Published"
+                                  : invoiceRecord.status.charAt(0).toUpperCase() + invoiceRecord.status.slice(1)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : allInvoices.length ? (
+                    <p>No invoices match "{invoiceSearch}".</p>
+                  ) : (
+                    <p>No invoices yet. Issue your first invoice to see it here.</p>
+                  )}
+                </article>
+                <details className="data-card recent-invoices-card reconcile-card">
+                  <summary className="data-card-header reconcile-summary">
+                    <div>
+                      <span>Bank payments</span>
+                      <h2>
+                        Reconcile from your bank
+                        {reconcileCandidates.length ? (
+                          <span className="unpaid-count-badge">{reconcileCandidates.length}</span>
+                        ) : null}
+                      </h2>
+                    </div>
+                  </summary>
+                  <div className="reconcile-actions-row">
+                    <button className="outline-button" type="button" onClick={() => void autoReconcileAll()}>
+                      Auto-match
+                    </button>
+                  </div>
+                  <p className="field-help">
+                    Money-in from your bank, matched to open invoices (by amount and the invoice number in the payment
+                    reference). Confirm a match to mark the invoice paid — this stays in Clarity and never changes
+                    anything in Stripe.
+                  </p>
+                  {reconcileTypeOptions.length > 1 && (
+                    <div className="reconcile-type-filter" role="group" aria-label="Filter by transaction type">
+                      <span className="field-help">Show:</span>
+                      {reconcileTypeOptions.map((label) => {
+                        const shown = !reconcileHiddenTypes.has(label);
+                        return (
+                          <button
+                            key={label}
+                            type="button"
+                            className={`reconcile-type-chip${shown ? " active" : ""}`}
+                            aria-pressed={shown}
+                            onClick={() => toggleReconcileType(label)}
+                          >
+                            {label} ({reconcileTypeCounts[label]})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {reconcileLoadState === "loading" && !reconcileCandidates.length ? (
+                    <p>Loading bank payments...</p>
+                  ) : reconcileLoadState === "error" ? (
+                    <p>
+                      Couldn't load bank payments.{" "}
+                      <button className="outline-button" type="button" onClick={() => void fetchReconcileCandidates()}>
+                        Try again
+                      </button>
+                    </p>
+                  ) : visibleReconcileCandidates.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Payment</th>
+                          <th>Amount</th>
+                          <th>Match</th>
+                          <th aria-label="Actions" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleReconcileCandidates.map((candidate) => {
+                          const best = candidate.suggestions[0];
+                          return (
+                            <tr key={candidate.id}>
+                              <td>{candidate.date}</td>
+                              <td>
+                                {candidate.description || "—"}
+                                {candidate.type ? (
+                                  <span className="field-help"> · {reconcileTypeLabel(candidate.type)}</span>
+                                ) : null}
+                                {candidate.reference ? (
+                                  <span className="field-help"> · ref: {candidate.reference}</span>
+                                ) : null}
+                              </td>
+                              <td>{formatMoney(candidate.amount, "NZD")}</td>
+                              <td>
+                                {best ? (
+                                  <span>
+                                    {best.invoiceNumber}
+                                    {best.customer ? ` · ${best.customer}` : ""}
+                                    {best.refMatch ? <span className="invoice-status-pill invoice-status-paid"> ref</span> : null}
+                                    {best.amountMatch ? <span className="field-help"> · amount ✓</span> : null}
+                                  </span>
+                                ) : (
+                                  <span className="field-help">No match found</span>
+                                )}
+                              </td>
+                              <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                                {best ? (
+                                  <button
+                                    className="outline-button"
+                                    type="button"
+                                    disabled={reconcileBusy === candidate.id}
+                                    onClick={() => void reconcilePayment(candidate, best.invoiceId)}
+                                  >
+                                    Confirm
+                                  </button>
+                                ) : null}{" "}
+                                <button
+                                  className="outline-button"
+                                  type="button"
+                                  disabled={reconcileBusy === candidate.id}
+                                  onClick={() => void dismissReconcile(candidate)}
+                                >
+                                  Dismiss
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : reconcileCandidates.length ? (
+                    <p>All {reconcileCandidates.length} bank payment{reconcileCandidates.length === 1 ? "" : "s"} are hidden by the type filter above.</p>
+                  ) : (
+                    <p>No bank payments waiting to reconcile.</p>
+                  )}
+                </details>
+              </div>
+            )}
+
+            {billingSection === "new-invoice" && (
+              <div className="billing-builder invoice-builder-layout">
+                <article className="invoice-document-card" aria-label="Invoice editor">
+                  <div className="invoice-document-header">
+                    <div className="invoice-brand-block">
+                      {brandSettings.logoPreview && (
+                        <div className="invoice-logo-mark">
+                          <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
+                        </div>
+                      )}
+                      <div>
+                        <strong>{coachAccount.businessName}</strong>
+                        <span>{coachAccount.contactEmail}</span>
+                        {invoiceSettings.businessAddress && <span>{invoiceSettings.businessAddress}</span>}
+                      </div>
+                    </div>
+                    <div className="invoice-title-block">
+                      <span>Invoice</span>
+                      <h2>{activeInvoiceNumber}</h2>
+                      <em>{invoiceEditing && isNewInvoice ? "Draft" : openedInvoiceStateLabel}</em>
+                    </div>
+                  </div>
+
+
+                  {invoiceSettings.headerText && <p className="invoice-template-note">{invoiceSettings.headerText}</p>}
+
+                  <section className="invoice-section">
+                    <div className="invoice-section-heading">
+                      <span>Customer</span>
+                    </div>
+                    {hasInvoiceCustomer ? (
+                      <div className="invoice-customer-settled">
+                        <div>
+                          <span>Bill to</span>
+                          <strong>{invoiceDraft.payerName || invoiceDraft.payerEmail}</strong>
+                          {invoiceDraft.payerEmail && <em>{invoiceDraft.payerEmail}</em>}
+                          {invoiceDraft.payerPhone && <em>{invoiceDraft.payerPhone}</em>}
+                        </div>
+                        {!invoiceLocked && (
+                          <button className="invoice-inline-edit" onClick={clearInvoiceCustomer} type="button" aria-label="Change customer">
+                            <Pencil size={13} />
+                            Change
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="invoice-customer-search">
+                        {newInvoiceCustomer ? (
+                          <div className="invoice-new-customer">
+                            <label className="settings-field">
+                              <span>Name</span>
+                              <input
+                                value={newInvoiceCustomer.name}
+                                onChange={(event) => updateNewInvoiceCustomer("name", event.target.value)}
+                                placeholder="Customer name"
+                                autoFocus
+                              />
+                            </label>
+                            <label className="settings-field">
+                              <span>Email</span>
+                              <input
+                                value={newInvoiceCustomer.email}
+                                onChange={(event) => updateNewInvoiceCustomer("email", event.target.value)}
+                                placeholder="name@example.com"
+                                type="email"
+                              />
+                            </label>
+                            <label className="settings-field">
+                              <span>Phone</span>
+                              <input
+                                value={newInvoiceCustomer.phone}
+                                onChange={(event) => updateNewInvoiceCustomer("phone", event.target.value)}
+                                placeholder="Optional"
+                              />
+                            </label>
+                            <div className="invoice-new-customer-actions">
+                              <button className="outline-button" onClick={() => setNewInvoiceCustomer(null)} type="button">
+                                Cancel
+                              </button>
+                              <button
+                                className="primary-button"
+                                onClick={saveNewInvoiceCustomer}
+                                disabled={newInvoiceCustomerSaving}
+                                type="button"
+                              >
+                                {newInvoiceCustomerSaving ? "Adding..." : "Add to clients"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <label className="settings-field">
+                              <span>Find or create customer</span>
+                              <input
+                                value={invoiceCustomerSearch}
+                                onChange={(event) => setInvoiceCustomerSearch(event.target.value)}
+                                placeholder="Search name, email, or phone"
+                              />
+                            </label>
+                            {(invoiceCustomerMatches.length > 0 || invoiceCustomerCreateLabel) && (
+                              <div className="invoice-customer-results">
+                                {invoiceCustomerMatches.map((person) => (
+                                  <button key={person.id} onClick={() => selectInvoiceCustomer(person)} type="button">
+                                    <span>
+                                      <strong>{person.name}</strong>
+                                      <em>{person.email || person.phone || "No contact saved"}</em>
+                                    </span>
+                                    <Plus size={16} />
+                                  </button>
+                                ))}
+                                {invoiceCustomerCreateLabel && (
+                                  <button onClick={openNewInvoiceCustomer} type="button">
+                                    <span>
+                                      <strong>Create new customer</strong>
+                                      <em>{invoiceCustomerCreateLabel}</em>
+                                    </span>
+                                    <Plus size={16} />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="invoice-section">
+                    <div className="invoice-section-heading">
+                      <span>Invoice details</span>
+                      {!invoiceLocked && (
+                        <button
+                          className="invoice-inline-edit"
+                          onClick={() => setDatesEditing((current) => !current)}
+                          type="button"
+                        >
+                          {datesEditing ? (
+                            "Done"
+                          ) : (
+                            <>
+                              <Pencil size={13} />
+                              Edit dates
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                    <div className="invoice-form-grid invoice-detail-grid">
+                      <label className="settings-field">
+                        <span>Invoice date</span>
+                        {invoiceLocked || !datesEditing ? (
+                          <p className="settings-static-value">{formatDateForDisplay(invoiceDraft.invoiceDate)}</p>
+                        ) : (
+                          <input
+                            value={invoiceDraft.invoiceDate}
+                            onChange={(event) => updateInvoiceDraft("invoiceDate", event.target.value)}
+                            type="date"
+                          />
+                        )}
+                      </label>
+                      <label className="settings-field">
+                        <span>Due date</span>
+                        {invoiceLocked || !datesEditing ? (
+                          <p className="settings-static-value">{formatDateForDisplay(invoiceDraft.dueDate)}</p>
+                        ) : (
+                          <input
+                            value={invoiceDraft.dueDate}
+                            onChange={(event) => updateInvoiceDraft("dueDate", event.target.value)}
+                            type="date"
+                          />
+                        )}
+                      </label>
+                      {/* Currency is always fixed (read-only), so it's plain text, not a boxed input. */}
+                      <label className="settings-field">
+                        <span>Currency</span>
+                        <p className="settings-static-value">{invoiceSettings.currency}</p>
+                      </label>
+                      <label className="settings-field">
+                        <span>Reference</span>
+                        {invoiceLocked ? (
+                          <p className="settings-static-value">{invoiceDraft.reference || "—"}</p>
+                        ) : (
+                          <input
+                            value={invoiceDraft.reference}
+                            onChange={(event) => updateInvoiceDraft("reference", event.target.value)}
+                            placeholder="Optional"
+                          />
+                        )}
+                      </label>
+                    </div>
+                  </section>
+
+                  <div className="invoice-custom-fields">
+                    {invoiceSettings.customFields
+                      .filter((field) => field.placement === "header" || field.placement === "bill-to")
+                      .map((field) => (
+                        <span key={field.id}>
+                          <strong>{field.label}</strong>
+                          {field.value || "Not set"}
+                        </span>
+                      ))}
+                  </div>
+
+                  <section className="invoice-section invoice-items-section">
+                    <div className="invoice-section-heading invoice-items-heading">
+                      <div>
+                        <span>Items</span>
+                        <strong>
+                          {invoiceDraft.lines.length
+                            ? `${invoiceDraft.lines.length} line item${invoiceDraft.lines.length === 1 ? "" : "s"}`
+                            : "No items yet"}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="invoice-document-lines" aria-label="Invoice lines">
+                      {invoiceDraft.lines.map((line) => {
+                        // The rule: while the invoice is being edited, every
+                        // line shows the boxed form and stays fully editable -
+                        // including its description and unit price - no matter
+                        // where it came from (manual, catalog, package, or pulled
+                        // from a booking). Pulled-in prices are only a starting
+                        // point; the coach can always override them here. A line
+                        // reads as a plain, read-only invoice line only once the
+                        // invoice itself is locked (a saved invoice opened for
+                        // viewing, before entering edit/revise mode).
+                        const lineLocked = invoiceLocked;
+                        const linePlain = lineLocked;
+                        if (linePlain) {
+                          return (
+                            <div className="invoice-plain-line" key={line.id}>
+                              <div className="invoice-plain-line-main">
+                                <span className="invoice-plain-line-desc">{line.description}</span>
+                                <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
+                              </div>
+                              <div className="invoice-plain-line-sub">
+                                <span>
+                                  {line.quantity} × {formatMoney(line.unitPrice, invoiceSettings.currency)}
+                                  {lineDiscountAmount(line) > 0
+                                    ? ` − ${formatMoney(lineDiscountAmount(line), invoiceSettings.currency)}${
+                                        line.discountKind === "percent" ? ` (${line.discountValue}%)` : ""
+                                      } discount`
+                                    : ""}
+                                </span>
+                                {!lineLocked && (
+                                  <button
+                                    className="invoice-plain-line-remove"
+                                    onClick={() => removeInvoiceLine(line.id)}
+                                    aria-label="Remove line item"
+                                    title="Remove line item"
+                                    type="button"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="invoice-document-line-row" key={line.id}>
+                            <label className="settings-field">
+                              <span>Line item</span>
+                              <input
+                                value={line.description}
+                                onChange={(event) => updateInvoiceLine(line.id, "description", event.target.value)}
+                                placeholder="Lesson, package, product, or service"
+                              />
+                            </label>
+                            <label className="settings-field">
+                              <span>Qty</span>
+                              <input
+                                value={line.quantity}
+                                inputMode="numeric"
+                                onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
+                                type="text"
+                              />
+                            </label>
+                            <label className="settings-field">
+                              <span>Unit price</span>
+                              <div className="affixed-field" data-prefix={currencySymbol(invoiceSettings.currency)}>
+                                <input
+                                  value={line.unitPrice}
+                                  inputMode="decimal"
+                                  onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
+                                  type="text"
+                                />
+                              </div>
+                            </label>
+                            <label className="settings-field invoice-line-discount">
+                              <span>Discount</span>
+                              <select
+                                value={invoiceLineDiscountSelection(line)}
+                                onChange={(event) => setInvoiceLineDiscount(line.id, event.target.value)}
+                                title="Optional discount for this line"
+                              >
+                                <option value="">No discount</option>
+                                {discountPresets
+                                  .filter((preset) => preset.active)
+                                  .map((preset) => (
+                                    <option key={preset.id} value={`preset:${preset.id}`}>
+                                      {preset.name} (
+                                      {preset.discountType === "percentage"
+                                        ? `${preset.value}%`
+                                        : formatMoney(preset.value, invoiceSettings.currency)}
+                                      )
+                                    </option>
+                                  ))}
+                                <option value="amount">Custom amount</option>
+                                <option value="percent">Custom %</option>
+                              </select>
+                              {(line.discountKind === "amount" || line.discountKind === "percent") && !line.discountPresetId && (
+                                <div
+                                  className="affixed-field"
+                                  data-prefix={line.discountKind === "amount" ? `-${currencySymbol(invoiceSettings.currency)}` : undefined}
+                                  data-suffix={line.discountKind === "percent" ? "%" : undefined}
+                                >
+                                  <input
+                                    value={line.discountValue || 0}
+                                    inputMode="decimal"
+                                    onChange={(event) => updateInvoiceLine(line.id, "discountValue", parseMoneyInput(event.target.value))}
+                                    type="text"
+                                    aria-label={line.discountKind === "percent" ? "Discount percent" : "Discount amount"}
+                                  />
+                                </div>
+                              )}
+                            </label>
+                            <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
+                            <button
+                              className="invoice-line-delete-tab"
+                              onClick={() => removeInvoiceLine(line.id)}
+                              aria-label="Delete line item"
+                              title="Delete line item"
+                              type="button"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {!invoiceDraft.lines.length && (
+                        <div className="invoice-empty-line">
+                          <span>Use Add line item or pull a completed booking.</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="invoice-add-line">
+                      <button
+                        className="outline-button"
+                        onClick={() => {
+                          updateInvoiceDraft("lineSearch", "");
+                          setShowInvoiceLinePicker((current) => !current);
+                        }}
+                        type="button"
+                      >
+                        <Plus size={16} />
+                        Add line item
+                      </button>
+                    </div>
+
+                    {showInvoiceLinePicker && (
+                      <div className="invoice-line-picker">
+                        <div className="invoice-line-search">
+                          <label className="settings-field">
+                            <span>Find or add item</span>
+                            <input
+                              value={invoiceDraft.lineSearch}
+                              onChange={(event) => updateInvoiceDraft("lineSearch", event.target.value)}
+                              placeholder="Search lesson types, packages, products, services..."
+                              autoFocus
+                            />
+                          </label>
+                          <button className="outline-button" onClick={addManualInvoiceLine} type="button">
+                            <Plus size={16} />
+                            Add Custom
+                          </button>
+                          <button
+                            className="icon-button"
+                            onClick={() => {
+                              updateInvoiceDraft("lineSearch", "");
+                              setShowInvoiceLinePicker(false);
+                            }}
+                            aria-label="Close line item search"
+                            type="button"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+
+                        {visibleInvoiceCatalogOptions.length > 0 && (
+                          <div className="invoice-option-list">
+                            {visibleInvoiceCatalogOptions.map((item) => (
+                              <button key={item.id} onClick={() => addCatalogInvoiceLine(item)} type="button">
+                                <span>
+                                  <strong>{item.name}</strong>
+                                  <em>
+                                    {item.kind.replace("-", " ")} - {formatMoney(item.price, invoiceSettings.currency)}
+                                  </em>
+                                </span>
+                                <Plus size={16} />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="invoice-section invoice-settlement-section">
+                    <div className="invoice-note-block">
+                      <label className="settings-field">
+                        <span>Customer note</span>
+                        {invoiceLocked ? (
+                          <p className="settings-static-value">{invoiceDraft.message || "—"}</p>
+                        ) : (
+                          <textarea
+                            value={invoiceDraft.message}
+                            onChange={(event) => updateInvoiceDraft("message", event.target.value)}
+                            rows={3}
+                          />
+                        )}
+                      </label>
+                      {invoiceSettings.paymentInstructions ||
+                      invoiceSettings.bankAccount ||
+                      invoiceSettings.taxNumber ||
+                      invoiceSettings.customFields.some((field) => field.placement === "payment") ? (
+                        <div className="invoice-payment-block">
+                          <span>Payment</span>
+                          {invoiceSettings.paymentInstructions && <p>{invoiceSettings.paymentInstructions}</p>}
+                          {invoiceSettings.bankAccount && <strong>{invoiceSettings.bankAccount}</strong>}
+                          {invoiceSettings.taxNumber && <em>{invoiceSettings.taxName} No. {invoiceSettings.taxNumber}</em>}
+                          {invoiceSettings.customFields
+                            .filter((field) => field.placement === "payment")
+                            .map((field) => (
+                              <em key={field.id}>
+                                {field.label}: {field.value || "Not set"}
+                              </em>
+                            ))}
+                        </div>
+                      ) : !invoiceLocked ? (
+                        <button className="invoice-add-detail" onClick={openInvoiceCoachSettings} type="button">
+                          <Plus size={15} />
+                          Add payment details
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="invoice-total-box">
+                      {!invoiceLocked &&
+                        (discountSet && !discountEditing ? (
+                          // A set discount is plain text (the amount shows in the
+                          // totals below); the boxed controls only appear while editing.
+                          <div className="invoice-discount-set">
+                            <span>Discount applied</span>
+                            <div className="invoice-discount-set-actions">
+                              <button onClick={() => setDiscountEditing(true)} type="button">
+                                Change
+                              </button>
+                              <button onClick={clearInvoiceDiscount} type="button">
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="invoice-discount-controls">
+                            {discountPresets.some((preset) => preset.active) && (
+                              <label className="settings-field invoice-discount-preset">
+                                <span>Preset discount</span>
+                                <select
+                                  value={selectedDiscountPresetId}
+                                  onChange={(event) => applyDiscountPreset(event.target.value)}
+                                >
+                                  <option value="">None (manual)</option>
+                                  {discountPresets
+                                    .filter((preset) => preset.active)
+                                    .map((preset) => (
+                                      <option key={preset.id} value={preset.id}>
+                                        {preset.name} ({preset.discountType === "percentage" ? `${preset.value}%` : formatMoney(preset.value, invoiceSettings.currency)})
+                                      </option>
+                                    ))}
+                                </select>
+                              </label>
+                            )}
+                            <label className="settings-field">
+                              <span>Discount / coupon</span>
+                              <input
+                                value={invoiceDraft.discountLabel}
+                                onFocus={() => setDiscountEditing(true)}
+                                onChange={(event) => updateInvoiceDraft("discountLabel", event.target.value)}
+                                placeholder="Optional"
+                              />
+                            </label>
+                            <label className="settings-field">
+                              <span>Amount</span>
+                              <div className="affixed-field" data-prefix={`-${currencySymbol(invoiceSettings.currency)}`}>
+                                <input
+                                  value={invoiceDraft.discountAmount}
+                                  inputMode="decimal"
+                                  onFocus={() => setDiscountEditing(true)}
+                                  onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
+                                  type="text"
+                                />
+                              </div>
+                            </label>
+                            {discountSet && (
+                              <button
+                                className="outline-button small-action invoice-discount-done"
+                                onClick={() => setDiscountEditing(false)}
+                                type="button"
+                              >
+                                Done
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      {!invoiceLocked && (
+                        <div className="invoice-tax-toggle" role="group" aria-label={`${invoiceSettings.taxName} handling`}>
+                          <button
+                            className={invoiceDraft.taxInclusive ? "" : "active"}
+                            onClick={() => updateInvoiceDraft("taxInclusive", false)}
+                            type="button"
+                          >
+                            {invoiceSettings.taxName} not included
+                          </button>
+                          <button
+                            className={invoiceDraft.taxInclusive ? "active" : ""}
+                            onClick={() => updateInvoiceDraft("taxInclusive", true)}
+                            type="button"
+                          >
+                            {invoiceSettings.taxName} included
+                          </button>
+                        </div>
+                      )}
+                      <div className="invoice-total-lines">
+                        <span>
+                          <em>Subtotal</em>
+                          <strong>{formatMoney(invoiceLineSubtotal, invoiceSettings.currency)}</strong>
+                        </span>
+                        {(invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim()) && (
+                          <span>
+                            <em>{invoiceDiscountLabel}</em>
+                            <strong>-{formatMoney(invoiceDiscountTotal, invoiceSettings.currency)}</strong>
+                          </span>
+                        )}
+                        <span>
+                          <em>
+                            {invoiceSettings.taxName} ({invoiceSettings.taxRate}%){invoiceDraft.taxInclusive ? " incl" : ""}
+                          </em>
+                          <strong>{formatMoney(invoiceTaxTotal, invoiceSettings.currency)}</strong>
+                        </span>
+                        <span className="invoice-grand-total">
+                          <em>Total</em>
+                          <strong>{formatMoney(invoiceTotal, invoiceSettings.currency)}</strong>
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+
+                  <div className="invoice-custom-fields invoice-footer-fields">
+                    {invoiceSettings.customFields
+                      .filter((field) => field.placement === "footer")
+                      .map((field) => (
+                        <span key={field.id}>
+                          <strong>{field.label}</strong>
+                          {field.value || "Not set"}
+                        </span>
+                      ))}
+                  </div>
+                  <p className="invoice-footer">{invoiceSettings.footerText}</p>
+
+                  <div className="invoice-actions invoice-bottom-actions">
+                    {activeInvoiceId && (
+                      <button className="danger-button" onClick={deleteOpenedInvoice} type="button">
+                        <Trash2 size={16} />
+                        {openedInvoiceStatus === "draft" || openedInvoiceStatus === "void" ? "Delete" : "Void"}
+                      </button>
+                    )}
+                    {invoiceEditing ? (
+                      isRevisingInvoice ? (
+                        <>
+                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
+                            {invoiceIssueState === "saving" ? "Saving..." : "Save"}
+                          </button>
+                          <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
+                            <Send size={16} />
+                            Save + Send
+                          </button>
+                          {activeInvoiceId && (
+                            <button className="outline-button" onClick={downloadInvoicePdf} type="button">
+                              <Download size={16} />
+                              Download PDF
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
+                            {invoiceIssueState === "saving" ? "Saving..." : "Save Draft"}
+                          </button>
+                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">
+                            Publish Invoice
+                          </button>
+                          <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
+                            <Send size={16} />
+                            Publish &amp; Send
+                          </button>
+                        </>
+                      )
+                    ) : openedInvoiceStatus === "draft" ? (
+                      <>
+                        <button className="outline-button" onClick={editOpenedInvoice} type="button">
+                          <Pencil size={16} />
+                          Edit
+                        </button>
+                        <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">
+                          Publish
+                        </button>
+                        <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
+                          <Send size={16} />
+                          Publish &amp; Send
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="outline-button" onClick={editOpenedInvoice} type="button">
+                          <Pencil size={16} />
+                          Edit
+                        </button>
+                        <button
+                          className="primary-button"
+                          disabled={invoiceSendState === "sending"}
+                          onClick={sendOpenedInvoice}
+                          type="button"
+                          title={openedInvoiceSentAt ? "Email this invoice to the customer again" : "Email this invoice to the customer"}
+                        >
+                          <Send size={16} />
+                          {invoiceSendState === "sending" ? "Sending..." : openedInvoiceSentAt ? "Resend" : "Send"}
+                        </button>
+                        <button className="outline-button" onClick={downloadInvoicePdf} type="button">
+                          <Download size={16} />
+                          Download PDF
+                        </button>
+                        {(openedInvoiceStatus === "sent" || openedInvoiceStatus === "overdue") && (
+                          <>
+                            <button
+                              className="outline-button"
+                              disabled={clarityPayState === "loading"}
+                              onClick={startClarityPay}
+                              type="button"
+                            >
+                              <CreditCard size={16} />
+                              {clarityPayState === "loading" ? "Opening..." : "Clarity Pay"}
+                            </button>
+                            <button className="outline-button" onClick={markActiveInvoicePaid} type="button">
+                              Mark Paid
+                            </button>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </article>
+
+                <aside className="invoice-side-panel">
+                  <section className="data-card completed-bookings-card">
+                    <div className="data-card-header">
+                      <div>
+                        <span>Calendar Pull</span>
+                        <h2>Completed bookings</h2>
+                      </div>
+                      <CalendarDays size={24} />
+                    </div>
+                    <div className="ready-to-pull-range">
+                      {pullRangeEditing ? (
+                        <>
+                          <label className="settings-field">
+                            <span>From</span>
+                            <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
+                          </label>
+                          <label className="settings-field">
+                            <span>To</span>
+                            <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
+                          </label>
+                          <div className="pull-range-actions">
+                            <button className="invoice-inline-edit" onClick={resetPullRange} type="button">
+                              Reset to auto
+                            </button>
+                            <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">
+                              Done
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="pull-range-summary">
+                          <span>
+                            {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : "Earliest"} → {formatDateForDisplay(effectivePullTo)}
+                          </span>
+                          <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label="Edit pull range">
+                            <Pencil size={13} />
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="completed-booking-list">
+                      {calendarPullRangeSorted.length ? (
+                        calendarPullRangeSorted.map((item) => {
+                          const service = itemService(item, services);
+                          const days = buildWeekDays(itemWeek(item));
+                          const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
+                          const matchesPayer = invoicePayerBookingIds.has(item.id);
+                          return (
+                            <button
+                              key={item.id}
+                              className={`${alreadyInvoiced ? "already-invoiced" : ""}${matchesPayer ? " for-billing-client" : ""}`.trim()}
+                              disabled={alreadyInvoiced}
+                              onClick={() => addCompletedBookingLine(item)}
+                              type="button"
+                            >
+                              <span>
+                                <strong>
+                                  {item.client || item.title}
+                                  {matchesPayer && <span className="pull-billing-flag">Billing client</span>}
+                                </strong>
+                                <em>
+                                  {service?.name ?? "Lesson"} - {days[item.day].label}, {formatRange(item.start, item.duration)}
+                                </em>
+                              </span>
+                              {alreadyInvoiced ? <em>Already invoiced</em> : <Plus size={16} />}
+                            </button>
+                          );
+                        })
+                      ) : completedAppointments.length ? (
+                        <p>No completed bookings in this date range.</p>
+                      ) : (
+                        <p>Mark bookings completed from the calendar to pull them into invoices.</p>
+                      )}
+                    </div>
+                  </section>
+
+                </aside>
+              </div>
+            )}
+
+            {billingSection === "expenses" && (
+              <div className="billing-dashboard">
+                <article className="data-card recent-invoices-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Bank feed</span>
+                      <h2>
+                        Expenses from your bank
+                        {bankCandidates.length ? <span className="unpaid-count-badge">{bankCandidates.length}</span> : null}
+                      </h2>
+                    </div>
+                    <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>
+                      Refresh
+                    </button>
+                  </div>
+                  <p className="field-help">
+                    Money-out transactions from your connected bank accounts (Akahu). Approve the business ones to add
+                    them to your expenses, or dismiss the rest. Approved items can't be imported twice.
+                  </p>
+                  <div className="bank-backfill-row">
+                    <span className="field-help">Pull older:</span>
+                    {[3, 6, 12].map((months) => (
+                      <button
+                        key={months}
+                        className="outline-button"
+                        type="button"
+                        disabled={bankBackfillBusy !== null}
+                        onClick={() => void backfillBankTransactions(months)}
+                      >
+                        {bankBackfillBusy === months ? "Pulling…" : `Last ${months} months`}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="field-help bank-backfill-note">
+                    The bank feed only reaches back ~12 months (Akahu's history limit). For older expenses, use the
+                    CSV import below.
+                  </p>
+                  {bankCandidatesLoadState === "loading" && !bankCandidates.length ? (
+                    <p>Loading bank transactions...</p>
+                  ) : bankCandidatesLoadState === "error" ? (
+                    <p>
+                      Couldn't load the bank feed.{" "}
+                      <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>
+                        Try again
+                      </button>
+                    </p>
+                  ) : bankCandidates.length ? (
+                    <>
+                      <div className="bank-toolbar">
+                        <div className="bank-filter bank-filter-group">
+                          <label className="bank-search-field">
+                            <Search size={15} aria-hidden="true" />
+                            <input
+                              type="search"
+                              value={bankSearch}
+                              onChange={(event) => {
+                                setBankSearch(event.target.value);
+                                setSelectedBankIds(new Set());
+                              }}
+                              placeholder="Search expenses"
+                              aria-label="Search bank expense approvals"
+                            />
+                          </label>
+                          <label className="bank-filter">
+                            <span className="field-help">From</span>
+                            <input
+                              type="date"
+                              value={bankDateFromFilter}
+                              onChange={(event) => {
+                                setBankDateFromFilter(event.target.value);
+                                setSelectedBankIds(new Set());
+                              }}
+                              aria-label="Show bank expenses from this date"
+                            />
+                          </label>
+                          <label className="bank-filter">
+                            <span className="field-help">To</span>
+                            <input
+                              type="date"
+                              value={bankDateToFilter}
+                              onChange={(event) => {
+                                setBankDateToFilter(event.target.value);
+                                setSelectedBankIds(new Set());
+                              }}
+                              aria-label="Show bank expenses up to this date"
+                            />
+                          </label>
+                          {bankCategoryOptions.length > 1 && (
+                            <label className="bank-filter">
+                              <span className="field-help">Category</span>
+                              <select
+                                value={bankCategoryFilter}
+                                onChange={(event) => {
+                                  setBankCategoryFilter(event.target.value);
+                                  setSelectedBankIds(new Set());
+                                }}
+                              >
+                                <option value="">All categories ({bankCandidates.length})</option>
+                                {bankCategoryOptions.map((label) => (
+                                  <option key={label} value={label}>
+                                    {label} ({bankCategoryCounts[label]})
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
+                          {hasBankFilters && (
+                            <button
+                              className="invoice-inline-edit"
+                              type="button"
+                              onClick={() => {
+                                setBankSearch("");
+                                setBankDateFromFilter("");
+                                setBankDateToFilter("");
+                                setBankCategoryFilter("");
+                                setSelectedBankIds(new Set());
+                              }}
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                        <div className="bank-bulk-actions" role="group" aria-label="Bulk actions">
+                          <span className="field-help">
+                            {hasBankFilters
+                              ? `${visibleBankCandidates.length} matching transaction${visibleBankCandidates.length === 1 ? "" : "s"} (${bankCandidates.length} loaded)`
+                              : selectedVisibleBankCount
+                                ? `${selectedVisibleBankCount} selected`
+                                : "Tick rows to select"}
+                          </span>
+                          {hasBankFilters && selectedVisibleBankCount > 0 && (
+                            <span className="field-help">{selectedVisibleBankCount} selected</span>
+                          )}
+                          <button
+                            className="primary-button"
+                            type="button"
+                            disabled={bankBulkBusy || !selectedVisibleBankCount}
+                            onClick={() => void actionBankSelected("approve")}
+                          >
+                            {bankBulkBusy ? "Working…" : "Approve selected"}
+                          </button>
+                          <button
+                            className="outline-button"
+                            type="button"
+                            disabled={bankBulkBusy || !selectedVisibleBankCount}
+                            onClick={() => void actionBankSelected("ignore")}
+                          >
+                            {bankBulkBusy ? "Working…" : "Dismiss selected"}
+                          </button>
+                        </div>
+                      </div>
+                      {visibleBankCandidates.length ? (
+                        <table className="recent-invoices-table">
+                          <thead>
+                            <tr>
+                              <th className="bank-select-cell">
+                                <input
+                                  type="checkbox"
+                                  aria-label="Select all shown"
+                                  title="Select all"
+                                  checked={allVisibleBankSelected}
+                                  onChange={() => toggleSelectAllVisibleBank()}
+                                />
+                              </th>
+                              <th aria-sort={bankSortAria("date")}>
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("date")}>
+                                  Date{bankSortMarker("date")}
+                                </button>
+                              </th>
+                              <th aria-sort={bankSortAria("account")}>
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("account")}>
+                                  Account{bankSortMarker("account")}
+                                </button>
+                              </th>
+                              <th aria-sort={bankSortAria("description")}>
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("description")}>
+                                  Description{bankSortMarker("description")}
+                                </button>
+                              </th>
+                              <th aria-sort={bankSortAria("amount")}>
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("amount")}>
+                                  Amount{bankSortMarker("amount")}
+                                </button>
+                              </th>
+                              <th aria-label="Actions" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {visibleBankCandidates.map((candidate) => (
+                              <tr key={candidate.id}>
+                                <td className="bank-select-cell">
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select ${candidate.description || candidate.merchant || "transaction"}`}
+                                    checked={selectedBankIds.has(candidate.id)}
+                                    onChange={() => toggleBankSelection(candidate.id)}
+                                  />
+                                </td>
+                                <td>{candidate.date}</td>
+                                <td>{candidate.account || "—"}</td>
+                                <td>
+                                  {candidate.description || candidate.merchant || "—"}
+                                  {candidate.suggestedCategory ? (
+                                    <span className="field-help"> · {candidate.suggestedCategory}</span>
+                                  ) : null}
+                                </td>
+                                <td>{formatMoney(candidate.amount, "NZD")}</td>
+                                <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                                  <button
+                                    className="outline-button"
+                                    type="button"
+                                    disabled={bankCandidateBusy === candidate.id || bankBulkBusy}
+                                    onClick={() => void actionBankCandidate(candidate, "approve")}
+                                  >
+                                    Approve
+                                  </button>{" "}
+                                  <button
+                                    className="outline-button"
+                                    type="button"
+                                    disabled={bankCandidateBusy === candidate.id || bankBulkBusy}
+                                    onClick={() => void actionBankCandidate(candidate, "ignore")}
+                                  >
+                                    Dismiss
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : (
+                        <p>
+                          No transactions match those filters.{" "}
+                          <button
+                            className="outline-button"
+                            type="button"
+                            onClick={() => {
+                              setBankSearch("");
+                              setBankDateFromFilter("");
+                              setBankDateToFilter("");
+                              setBankCategoryFilter("");
+                              setSelectedBankIds(new Set());
+                            }}
+                          >
+                            Clear filters
+                          </button>
+                        </p>
+                      )}
+                      {bankCandidates.length >= bankListLimit && bankListLimit < bankListMax ? (
+                        <div className="bank-loadmore-row">
+                          <button
+                            className="outline-button"
+                            type="button"
+                            disabled={bankListBusy}
+                            onClick={() => void loadMoreBankCandidates()}
+                          >
+                            {bankListBusy ? "Loading…" : "Load older"}
+                          </button>
+                          <span className="field-help">Showing the newest {bankCandidates.length}.</span>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p>
+                      No bank transactions waiting for review.{" "}
+                      <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>
+                        Check for new
+                      </button>
+                    </p>
+                  )}
+                </article>
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Bank export</span>
+                      <h2>Import from bank CSV</h2>
+                    </div>
+                    <Upload size={24} />
+                  </div>
+                  <p className="field-help">
+                    Export transactions from your bank and upload the CSV here. Nothing imports until you confirm
+                    the column mapping below - re-uploading the same file, or an export with overlapping dates,
+                    automatically skips transactions already imported.
+                  </p>
+                  <div className="csv-import-uploader">
+                    <label className="outline-button">
+                      <Upload size={16} />
+                      Choose CSV file
+                      <input
+                        type="file"
+                        accept=".csv,text/csv,text/plain"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = "";
+                          if (file) void handleExpenseCsvFile(file);
+                        }}
+                      />
+                    </label>
+                    <span>{expenseImportFileName || "No file chosen"}</span>
+                    <label className="csv-import-header-toggle">
+                      <input
+                        type="checkbox"
+                        checked={expenseImportHasHeader}
+                        onChange={(event) => {
+                          setExpenseImportHasHeader(event.target.checked);
+                          if (expenseImportFileName) resetExpenseCsvImport();
+                        }}
+                      />
+                      First row is a header
+                    </label>
+                  </div>
+
+                  {expenseImportHeaders.length > 0 && (
+                    <>
+                      <div className="csv-import-mapping-grid">
+                        {expenseImportHeaders.map((header, index) => (
+                          <label key={index} className="settings-field">
+                            <span>{header || `Column ${index + 1}`}</span>
+                            <select
+                              value={expenseImportMapping[index] || ""}
+                              onChange={(event) =>
+                                setExpenseImportMapping((current) => ({ ...current, [index]: event.target.value as ExpenseCsvField }))
+                              }
+                            >
+                              <option value="">Ignore</option>
+                              <option value="date">Date</option>
+                              <option value="description">Description / Payee</option>
+                              <option value="debit">Amount out (debit)</option>
+                              <option value="credit">Amount in (credit)</option>
+                              <option value="reference">Reference / Unique ID</option>
+                            </select>
+                            <em>{expenseImportRows.slice(0, 2).map((row) => row[index]).filter(Boolean).join(" / ") || "No sample"}</em>
+                          </label>
+                        ))}
+                      </div>
+
+                      <div className="service-form-row">
+                        <label className="settings-field">
+                          <span>Apply category to all imported rows</span>
+                          <select value={expenseImportCategoryId} onChange={(event) => setExpenseImportCategoryId(event.target.value)}>
+                            <option value="">Uncategorised</option>
+                            {expenseCategories
+                              .filter((category) => category.active)
+                              .map((category) => (
+                                <option key={category.id} value={category.id}>
+                                  {category.name}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      <p className="field-help">
+                        {expenseImportSelectedCandidates.length} of {expenseImportCandidates.length} rows will import
+                        ({formatMoney(expenseImportSelectedTotal, invoiceSettings.currency)}). Rows without a valid date,
+                        description, or amount-out are skipped automatically; use the checkboxes below to exclude any others.
+                      </p>
+
+                      <div className="csv-import-preview">
+                        {expenseImportCandidates.slice(0, 20).map((candidate) => (
+                          <label
+                            key={candidate.index}
+                            className={`csv-import-preview-row${candidate.valid ? "" : " invalid"}`}
+                          >
+                            <input
+                              type="checkbox"
+                              disabled={!candidate.valid}
+                              checked={candidate.valid && !expenseImportExcluded[candidate.index]}
+                              onChange={(event) =>
+                                setExpenseImportExcluded((current) => ({ ...current, [candidate.index]: !event.target.checked }))
+                              }
+                            />
+                            <span>{candidate.date || "Invalid date"}</span>
+                            <span>{candidate.description || "Missing description"}</span>
+                            <span>{candidate.valid ? formatMoney(candidate.amount, invoiceSettings.currency) : "-"}</span>
+                          </label>
+                        ))}
+                        {expenseImportCandidates.length > 20 && (
+                          <p className="field-help">...and {expenseImportCandidates.length - 20} more rows.</p>
+                        )}
+                      </div>
+
+                      <div className="invoice-actions">
+                        <button
+                          className="primary-button"
+                          disabled={expenseImportState === "importing" || !expenseImportSelectedCandidates.length}
+                          onClick={submitExpenseCsvImport}
+                          type="button"
+                        >
+                          {expenseImportState === "importing"
+                            ? "Importing..."
+                            : `Import ${expenseImportSelectedCandidates.length} transaction${expenseImportSelectedCandidates.length === 1 ? "" : "s"}`}
+                        </button>
+                        <button className="outline-button" onClick={resetExpenseCsvImport} type="button">
+                          Cancel
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {expenseImportResult && (
+                    <p className="field-help">
+                      Last import: {expenseImportResult.imported} added, {expenseImportResult.duplicate} already imported
+                      {expenseImportResult.skipped ? `, ${expenseImportResult.skipped} skipped` : ""}
+                      {expenseImportResult.failed ? `, ${expenseImportResult.failed} failed` : ""}.
+                    </p>
+                  )}
+                </article>
+
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Expenses</span>
+                      <h2>{formatMoney(expenseTotalForRange, invoiceSettings.currency)}</h2>
+                    </div>
+                    <Receipt size={24} />
+                  </div>
+                  <div className="ready-to-pull-range">
+                    <label className="settings-field">
+                      <span>From</span>
+                      <input type="date" value={expenseRangeFrom} onChange={(event) => setExpenseRangeFrom(event.target.value)} />
+                    </label>
+                    <label className="settings-field">
+                      <span>To</span>
+                      <input type="date" value={expenseRangeTo} onChange={(event) => setExpenseRangeTo(event.target.value)} />
+                    </label>
+                    {(expenseRangeFrom || expenseRangeTo) && (
+                      <button
+                        className="outline-button small-action"
+                        onClick={() => {
+                          setExpenseRangeFrom("");
+                          setExpenseRangeTo("");
+                        }}
+                        type="button"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <p className="field-help">
+                    {activeExpenses.length} expense{activeExpenses.length === 1 ? "" : "s"}
+                    {expenseRangeFrom || expenseRangeTo ? " in this range" : " (last 200)"}.
+                  </p>
+                </article>
+
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>{expenseDraft.id ? "Edit" : "Log"}</span>
+                      <h2>{expenseDraft.id ? "Edit expense" : "Log an expense"}</h2>
+                    </div>
+                  </div>
+                  <div className="billing-catalog-editor">
+                    <label className="settings-field">
+                      <span>Description</span>
+                      <input
+                        value={expenseDraft.description}
+                        onChange={(event) => setExpenseDraft((current) => ({ ...current, description: event.target.value }))}
+                        placeholder="What did you pay for?"
+                      />
+                    </label>
+                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Amount</span>
+                        <input
+                          value={expenseDraft.amount}
+                          inputMode="decimal"
+                          onChange={(event) => setExpenseDraft((current) => ({ ...current, amount: parseMoneyInput(event.target.value) }))}
+                          type="text"
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Date</span>
+                        <input
+                          type="date"
+                          value={expenseDraft.expenseDate}
+                          onChange={(event) => setExpenseDraft((current) => ({ ...current, expenseDate: event.target.value }))}
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Category</span>
+                        <select
+                          value={expenseDraft.categoryId}
+                          onChange={(event) => setExpenseDraft((current) => ({ ...current, categoryId: event.target.value }))}
+                        >
+                          <option value="">Uncategorised</option>
+                          {expenseCategories
+                            .filter((category) => category.active || category.id === expenseDraft.categoryId)
+                            .map((category) => (
+                              <option key={category.id} value={category.id}>
+                                {category.name}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label className="settings-field">
+                      <span>Vendor</span>
+                      <input
+                        value={expenseDraft.vendor}
+                        onChange={(event) => setExpenseDraft((current) => ({ ...current, vendor: event.target.value }))}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Note</span>
+                      <textarea
+                        value={expenseDraft.note}
+                        onChange={(event) => setExpenseDraft((current) => ({ ...current, note: event.target.value }))}
+                        rows={2}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <button className="outline-button" disabled={expenseSaveState === "saving"} onClick={saveExpenseDraft} type="button">
+                      <Plus size={16} />
+                      {expenseDraft.id ? (expenseSaveState === "saving" ? "Saving..." : "Save Changes") : expenseSaveState === "saving" ? "Saving..." : "Log Expense"}
+                    </button>
+                    {Boolean(expenseDraft.id) && (
+                      <button className="outline-button" onClick={resetExpenseDraft} type="button">
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                </article>
+
+                <article className="data-card recent-invoices-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>History</span>
+                      <h2>Recent expenses</h2>
+                    </div>
+                  </div>
+                  {expenseLoadState === "loading" && !expenses.length ? (
+                    <p>Loading expenses...</p>
+                  ) : expenses.length ? (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Description</th>
+                          <th>Category</th>
+                          <th>Amount</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {expenses.map((expense) => (
+                          <tr key={expense.id} className={expense.voided ? "voided-row" : ""}>
+                            <td>{expense.expenseDate}</td>
+                            <td>
+                              <button className="text-link-button" onClick={() => editExpense(expense)} type="button">
+                                {expense.description}
+                              </button>
+                              {expense.vendor && <em className="expense-vendor">{expense.vendor}</em>}
+                            </td>
+                            <td>{expense.categoryName || "Uncategorised"}</td>
+                            <td>{formatMoney(expense.amount, invoiceSettings.currency)}</td>
+                            <td>
+                              <button className="text-link-button" onClick={() => toggleExpenseVoided(expense)} type="button">
+                                {expense.voided ? "Restore" : "Void"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p>No expenses logged{expenseRangeFrom || expenseRangeTo ? " in this date range" : " yet"}.</p>
+                  )}
+                </article>
+              </div>
+            )}
+
+            {billingSection === "reports" && (
+              <BillingReportsPanel
+                summary={reportSummary}
+                loadState={reportLoadState}
+                preset={reportPreset}
+                onSelectPreset={handleSelectReportPreset}
+                customStart={reportCustomStart}
+                customEnd={reportCustomEnd}
+                onCustomStartChange={setReportCustomStart}
+                onCustomEndChange={setReportCustomEnd}
+                onApplyCustom={handleApplyReportCustomRange}
+                onExportCsv={handleExportReportCsv}
+                onDownloadPdf={handleDownloadReportPdf}
+                onRetry={() => void fetchReportSummary(reportRange.start, reportRange.end)}
+                enabledSections={reportSections}
+                onToggleSection={handleToggleReportSection}
+                excludedCategories={reportExcludedCategories}
+                onToggleCategory={handleToggleReportCategory}
+                onClearCategories={() => setReportExcludedCategories([])}
+                formatMoney={formatMoney}
+              />
+            )}
+
+            {billingSection === "settings" && (
+              <div className="billing-dashboard">
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Billing Settings</span>
+                      <h2>Defaults for new invoices</h2>
+                    </div>
+                    <Settings size={24} />
+                  </div>
+                  <p className="field-help">
+                    These defaults are used when creating a new invoice and are saved on the Coach Account record.
+                    Current next number: {invoiceNumber}
+                  </p>
+                  <EditableSettingsBlock
+                    id="billing-settings-block"
+                    title="Billing Settings"
+                    status={billingSettingsEditor.status}
+                    dirty={billingSettingsEditor.dirty}
+                    errorMessage={billingSettingsEditor.errorMessage}
+                    onEdit={() => startEditableBlock("billing-settings")}
+                    onCancel={() => cancelEditableBlock("billing-settings")}
+                    onSave={() => void saveEditableBlock("billing-settings")}
+                  >
+                  <div className="service-form-row">
+                    <label className="settings-field">
+                      <span>Currency</span>
+                      <input
+                        value={invoiceSettingsDraft.currency}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("currency", event.target.value)}
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Time zone</span>
+                      <input value={billingAccountDraft.timezone} readOnly={billingSettingsIsLocked} onChange={(event) => billingSettingsEditor.setDraftValue((current) => cleanCoachAccount({ ...current, timezone: event.target.value }))} />
+                    </label>
+                  </div>
+                  <div className="service-form-row">
+                    <label className="settings-field">
+                      <span>Invoice prefix</span>
+                      <input value={invoiceSettingsDraft.prefix} readOnly={billingSettingsIsLocked} onChange={(event) => updateBillingAccountDraft("prefix", event.target.value)} />
+                    </label>
+                    <label className="settings-field">
+                      <span>Start / next number</span>
+                      <input
+                        value={invoiceSettingsDraft.nextNumber || ""}
+                        inputMode="numeric"
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("nextNumber", parseQuantityInput(event.target.value))}
+                        type="text"
+                        placeholder="e.g. 1001"
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Payment terms (days)</span>
+                      <input
+                        value={invoiceSettingsDraft.paymentTermsDays}
+                        inputMode="numeric"
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("paymentTermsDays", parseQuantityInput(event.target.value))}
+                        type="text"
+                      />
+                    </label>
+                  </div>
+                  <div className="service-form-row">
+                    <label className="settings-field">
+                      <span>GST / tax name</span>
+                      <input
+                        value={invoiceSettingsDraft.taxName}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("taxName", event.target.value)}
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Tax number</span>
+                      <input
+                        value={invoiceSettingsDraft.taxNumber}
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("taxNumber", event.target.value)}
+                        placeholder="GST / tax number"
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Tax rate</span>
+                      <input
+                        value={invoiceSettingsDraft.taxRate}
+                        inputMode="decimal"
+                        readOnly={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("taxRate", parseMoneyInput(event.target.value))}
+                        type="text"
+                      />
+                    </label>
+                  </div>
+                  <label className="settings-field">
+                    <span>Unpaid invoice loudness</span>
+                    <select
+                      value={invoiceSettingsDraft.unpaidLoudness}
+                      disabled={billingSettingsIsLocked}
+                      onChange={(event) => updateBillingAccountDraft("unpaidLoudness", Number(event.target.value) as 1 | 2 | 3)}
+                    >
+                      <option value={1}>Level 1 - Subtle (small count only)</option>
+                      <option value={2}>Level 2 - Noticeable (dashboard banner)</option>
+                      <option value={3}>Level 3 - Urgent (banner + highlighted rows)</option>
+                    </select>
+                    <span className="field-help">
+                      Controls how strongly the Dashboard calls out overdue, unpaid invoices. Doesn't change
+                      invoice status or send anything - display only.
+                    </span>
+                  </label>
+                  <label className="settings-field">
+                    <span>Default customer note</span>
+                    <textarea
+                      value={invoiceSettingsDraft.defaultCustomerNote}
+                      readOnly={billingSettingsIsLocked}
+                      onChange={(event) => updateBillingAccountDraft("defaultCustomerNote", event.target.value)}
+                      rows={2}
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <span>Payment instructions</span>
+                    <textarea
+                      value={invoiceSettingsDraft.paymentInstructions}
+                      readOnly={billingSettingsIsLocked}
+                      onChange={(event) => updateBillingAccountDraft("paymentInstructions", event.target.value)}
+                      rows={2}
+                    />
+                  </label>
+                  </EditableSettingsBlock>
+                </article>
+
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Presets</span>
+                      <h2>Discount Settings</h2>
+                    </div>
+                    <Percent size={24} />
+                  </div>
+                  <p className="field-help">
+                    Optional presets for discounts you use often (a percentage off, a flat amount, a named
+                    discount, or a coupon code). These are picked from the invoice's discount field when
+                    needed - creating an invoice never requires one.
+                  </p>
+                  <div className="billing-catalog-editor">
+                    <label className="settings-field">
+                      <span>Name</span>
+                      <input
+                        value={discountEditor.name}
+                        onChange={(event) => setDiscountEditor((current) => ({ ...current, name: event.target.value }))}
+                        placeholder="e.g. Member discount"
+                      />
+                    </label>
+                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Type</span>
+                        <select
+                          value={discountEditor.discountType}
+                          onChange={(event) =>
+                            setDiscountEditor((current) => ({
+                              ...current,
+                              discountType: event.target.value === "fixed" ? "fixed" : "percentage",
+                            }))
+                          }
+                        >
+                          <option value="percentage">Percentage</option>
+                          <option value="fixed">Fixed amount</option>
+                        </select>
+                      </label>
+                      <label className="settings-field">
+                        <span>{discountEditor.discountType === "percentage" ? "Percent off" : "Amount off"}</span>
+                        <input
+                          value={discountEditor.value}
+                          inputMode="decimal"
+                          onChange={(event) =>
+                            setDiscountEditor((current) => ({ ...current, value: parseMoneyInput(event.target.value) }))
+                          }
+                          type="text"
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Coupon code (optional)</span>
+                        <input
+                          value={discountEditor.couponCode}
+                          onChange={(event) => setDiscountEditor((current) => ({ ...current, couponCode: event.target.value }))}
+                          placeholder="Optional"
+                        />
+                      </label>
+                    </div>
+                    <button className="outline-button" disabled={discountSaveState === "saving"} onClick={addDiscountPreset} type="button">
+                      <Plus size={16} />
+                      {discountEditor.id ? (discountSaveState === "saving" ? "Saving..." : "Save Changes") : discountSaveState === "saving" ? "Saving..." : "Add Discount"}
+                    </button>
+                    {Boolean(discountEditor.id) && (
+                      <button
+                        className="outline-button"
+                        onClick={() => setDiscountEditor({ id: "", name: "", discountType: "percentage", value: 10, couponCode: "" })}
+                        type="button"
+                      >
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                  <div className="billing-catalog-list">
+                    {discountPresets.length ? (
+                      discountPresets.map((preset) => (
+                        <div key={preset.id} className={`billing-catalog-list-item${preset.active === false ? " inactive" : ""}`}>
+                          <button onClick={() => setDiscountEditor(preset)} type="button">
+                            <span>
+                              <strong>{preset.name}</strong>
+                              <em>
+                                {preset.discountType === "percentage" ? `${preset.value}% off` : `${formatMoney(preset.value, invoiceSettings.currency)} off`}
+                                {preset.couponCode ? ` - Code: ${preset.couponCode}` : ""}
+                                {preset.active === false ? " - inactive" : ""}
+                              </em>
+                            </span>
+                          </button>
+                          <button className="text-link-button" onClick={() => toggleDiscountActive(preset)} type="button">
+                            {preset.active === false ? "Reactivate" : "Deactivate"}
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p>No discount presets yet.</p>
+                    )}
+                  </div>
+                </article>
+
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Presets</span>
+                      <h2>Expense Categories</h2>
+                    </div>
+                    <Receipt size={24} />
+                  </div>
+                  <p className="field-help">
+                    Optional categories for logging expenses (Range fees, Coaching supplies, Travel, Software,
+                    etc). Every expense can also be left Uncategorised.
+                  </p>
+                  <div className="billing-catalog-editor">
+                    <label className="settings-field">
+                      <span>Name</span>
+                      <input
+                        value={expenseCategoryEditor.name}
+                        onChange={(event) => setExpenseCategoryEditor((current) => ({ ...current, name: event.target.value }))}
+                        placeholder="e.g. Range fees"
+                      />
+                    </label>
+                    <button
+                      className="outline-button"
+                      disabled={expenseCategorySaveState === "saving"}
+                      onClick={addExpenseCategory}
+                      type="button"
+                    >
+                      <Plus size={16} />
+                      {expenseCategoryEditor.id
+                        ? expenseCategorySaveState === "saving"
+                          ? "Saving..."
+                          : "Save Changes"
+                        : expenseCategorySaveState === "saving"
+                          ? "Saving..."
+                          : "Add Category"}
+                    </button>
+                    {Boolean(expenseCategoryEditor.id) && (
+                      <button className="outline-button" onClick={() => setExpenseCategoryEditor({ id: "", name: "" })} type="button">
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                  <div className="billing-catalog-list">
+                    {expenseCategories.length ? (
+                      expenseCategories.map((category) => (
+                        <div key={category.id} className={`billing-catalog-list-item${category.active === false ? " inactive" : ""}`}>
+                          <button onClick={() => setExpenseCategoryEditor(category)} type="button">
+                            <span>
+                              <strong>{category.name}</strong>
+                              {category.active === false && <em>Inactive</em>}
+                            </span>
+                          </button>
+                          <button className="text-link-button" onClick={() => toggleExpenseCategoryActive(category)} type="button">
+                            {category.active === false ? "Reactivate" : "Deactivate"}
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p>No expense categories yet.</p>
+                    )}
+                  </div>
+                </article>
+              </div>
+            )}
+          </section>
+        )}
+
+        {isEmbedMode && activeView === "booking" && (
+          <section className={`public-booking booking-theme-${brandSettings.bookingTheme} module-page`}>
+            <div className={`booking-brand ${showBookingBrandLogo ? "" : "booking-brand-subtle"}`}>
+              {showBookingBrandLogo && brandSettings.logoPreview ? (
+                <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
+              ) : showBookingBrandLogo ? (
+                <>
+                  <strong>{bookingBrandPrimary.toUpperCase()}</strong>
+                  {bookingBrandSecondary && <span>{bookingBrandSecondary.toUpperCase()}</span>}
+                </>
+              ) : (
+                <strong>{bookingBrandName}</strong>
+              )}
+              <em>{coachAccount.venueShortName}</em>
+            </div>
+
+            <div className="booking-toolbar" role="tablist" aria-label="Booking action">
+              <button
+                className={`booking-hero-action ${bookingMode === "book" ? "active" : ""}`}
+                onClick={() => changeBookingMode("book")}
+                type="button"
+              >
+                <CalendarDays size={16} />
+                <span>Book a lesson</span>
+              </button>
+              <button
+                className={`booking-login-trigger ${bookingMode === "reschedule" ? "active" : ""}`}
+                onClick={() => changeBookingMode("reschedule", true)}
+                type="button"
+              >
+                <KeyRound size={14} />
+                <span>Sign in</span>
+              </button>
+            </div>
+
+            {bookingConfirmation ? (
+              <div className="booking-confirmed">
+                <span>
+                  {bookingConfirmation.kind === "booking"
+                    ? "Appointment Confirmed"
+                    : bookingConfirmation.kind === "cancelled"
+                      ? "Booking Cancelled"
+                      : "Appointment Updated"}
+                </span>
+                <h2>
+                  {bookingConfirmation.kind === "booking"
+                    ? "Booking confirmed"
+                    : bookingConfirmation.kind === "cancelled"
+                      ? "Cancellation confirmed"
+                      : "Reschedule confirmed"}
+                </h2>
+                <div className="booking-confirmed-summary">
+                  <strong>{bookingConfirmation.service}</strong>
+                  <em>
+                    {bookingConfirmation.dayLabel}, {bookingConfirmation.timeLabel}
+                  </em>
+                  <p>{bookingLocationDisplay(bookingConfirmation.location ?? selectedBookingLocation)}</p>
+                </div>
+                {bookingConfirmation.notifications.some((result) => result.channel === "client") && (
+                  <div className="email-status-list">
+                    {bookingConfirmation.notifications
+                      .filter((result) => result.channel === "client")
+                      .map((result, index) => {
+                        const tone = emailResultTone(result);
+                        return (
+                          <div className={`email-status ${tone}`} key={`client-${index}`}>
+                            {tone === "sent" ? <Check size={17} /> : tone === "failed" ? <X size={17} /> : <Mail size={17} />}
+                            <span>
+                              Client email: {tone === "sent" ? "Email Sent" : tone}
+                              {result.recipient ? ` to ${result.recipient}` : ""}
+                              {result.reason || result.error ? ` · ${(result.reason || result.error || "").replaceAll("_", " ")}` : ""}
+                            </span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+                {bookingConfirmation.notice && (
+                  <div className="email-status pending">
+                    <Mail size={17} />
+                    <span>{bookingConfirmation.notice}</span>
+                  </div>
+                )}
+                {bookingConfirmation.kind !== "cancelled" && (
+                  <div className="calendar-add-actions">
+                    <a className="outline-button" href={googleCalendarUrl(bookingConfirmation)} target="_blank" rel="noreferrer">
+                      <CalendarDays size={16} />
+                      Google Calendar
+                    </a>
+                    <button className="outline-button" onClick={() => downloadAppleCalendarInvite(bookingConfirmation)} type="button">
+                      <Download size={16} />
+                      Apple Calendar
+                    </button>
+                    {bookingLoginUrl && (
+                      <a className="outline-button" href={bookingLoginUrl}>
+                        <KeyRound size={16} />
+                        Manage / Reschedule
+                      </a>
+                    )}
+                  </div>
+                )}
+                <button
+                  className="primary-button confirm-booking"
+                  onClick={startAnotherPublicBooking}
+                  type="button"
+                >
+                  {bookingConfirmation.kind === "cancelled" ? "Back to booking" : "Book another lesson"}
+                </button>
+              </div>
+            ) : !publicBookingStateReady ? (
+              <div className="booking-columns booking-progressive-flow">
+                <div className="booking-card reschedule-link-state" role={publicBookingStateStatus === "error" ? "alert" : "status"}>
+                  <span>Booking Calendar</span>
+                  <div className="booking-login-copy">
+                    <strong>
+                      {publicBookingStateStatus === "error" ? "Booking unavailable" : "Loading"}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            ) : (
+            <div className="booking-columns booking-progressive-flow">
+              {bookingMode === "book" ? (
+                <>
+                  <section className={`booking-progressive-section ${isAppointmentSectionOpen ? "is-open" : ""} ${
+                    isAppointmentStepComplete ? "is-complete" : ""
+                  }`}>
+                    <button
+                      className="booking-progressive-title"
+                      onClick={() => setPublicBookingSection("appointment")}
+                      type="button"
+                    >
+                      <span className="booking-progressive-title-label">
+                        1. Appointment <span className="booking-required-mark" aria-hidden="true">*</span>
+                      </span>
+                      <span className="booking-progressive-title-state">{isAppointmentStepComplete ? "Done" : "In progress"}</span>
+                    </button>
+                    {isAppointmentSectionOpen ? (
+                      <div className="booking-progressive-body">
+                        <div className="service-picker">
+                          {visiblePublicServices.length ? (
+                            visiblePublicServices.map((service) => (
+                              <button
+                                className={service.id === bookingServiceId ? "selected-service" : ""}
+                                key={service.id}
+                                onClick={() => handlePublicBookingServiceSelect(service.id)}
+                                type="button"
+                              >
+                                <strong>{service.name}</strong>
+                                <em>
+                                  {service.duration} minutes @ {servicePriceLabel(service)}
+                                </em>
+                                {service.description && <small>{service.description}</small>}
+                                {(service.lessonNote || service.location) && <small>{service.lessonNote || service.location}</small>}
+                              </button>
+                            ))
+                          ) : (
+                            <p>{publicBookingEnabled ? "No public lesson types are active." : featureUnavailableMessage("publicBooking")}</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : isAppointmentStepComplete ? (
+                      <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("appointment")}
+                      type="button"
+                    >
+                      <strong>{appointmentSummaryName}</strong>
+                      <span>{appointmentSummaryDuration}</span>
+                      {appointmentSummaryDescription ? <small>{appointmentSummaryDescription}</small> : null}
+                      {appointmentSummaryLessonNote ? <small>{appointmentSummaryLessonNote}</small> : null}
+                    </button>
+                  ) : (
+                      <button
+                        className="booking-progressive-summary booking-progressive-summary-empty"
+                        onClick={() => setPublicBookingSection("appointment")}
+                        type="button"
+                      >
+                        <strong>Appointment not selected</strong>
+                        <span>Pick a lesson to continue</span>
+                      </button>
+                    )}
+                  </section>
+
+                  <section className={`booking-progressive-section ${isDateTimeSectionOpen ? "is-open" : ""} ${
+                    isDateTimeStepComplete ? "is-complete" : ""
+                  }`}>
+                    <button
+                      className="booking-progressive-title"
+                      onClick={() => setPublicBookingSection("datetime")}
+                      type="button"
+                      disabled={!isAppointmentStepComplete}
+                    >
+                      <span className="booking-progressive-title-label">
+                        2. Date & Time <span className="booking-required-mark" aria-hidden="true">*</span>
+                      </span>
+                      <span className="booking-progressive-title-state">
+                        {isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}
+                      </span>
+                    </button>
+                    {isDateTimeSectionOpen ? (
+                      <div className="booking-progressive-body">
+                        <div className="booking-week-controls">
+                          <button onClick={() => moveWeek(-1)} type="button">
+                            <ArrowLeft size={15} />
+                            <span>Previous week</span>
+                          </button>
+                          <strong>{weekTitle}</strong>
+                          <button onClick={() => moveWeek(1)} type="button">
+                            <span>Next week</span>
+                            <ArrowRight size={15} />
+                          </button>
+                        </div>
+                        {!isGroupBookingTimeSelection ? (
+                          <div className="booking-days-wrap">
+                            <div className="booking-days">
+                              {weekDays.map((day, index) => (
+                                <button
+                                  className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
+                                  key={day.label}
+                                  onClick={() => handlePublicBookingDaySelect(index)}
+                                  type="button"
+                                >
+                                  <strong>{day.short}</strong>
+                                  <em>{day.date}</em>
+                                  {day.isToday ? <small className="booking-day-marker">Today</small> : null}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        <div className="time-slots">
+                          {selectedBookingService ? (
+                            publicBookingSlotsLoading ? (
+                              <p>Loading</p>
+                            ) : bookingSlots.length ? (
+                              visibleBookingSlots.map((slot) => {
+                                const slotLabel = isGroupBookingTimeSelection
+                                  ? `${dateForSlot(slot.week, slot.day).toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
+                                  : formatTime(slot.start);
+                                return (
+                                  <button
+                                    className={bookingStart === slot.start ? "selected-time" : ""}
+                                    key={`${slot.week}-${slot.day}-${slot.start}`}
+                                    onClick={() => handlePublicBookingTimeSelect(slot)}
+                                    type="button"
+                                  >
+                                    {slotLabel}
+                                  </button>
+                                );
+                              })
+                            ) : (
+                              <p>
+                                {isGroupBookingTimeSelection
+                                  ? "No upcoming group lesson times are available yet."
+                                  : bookingDaySelected
+                                    ? "No public times available for this day."
+                                    : "Choose a day first."}
+                              </p>
+                            )
+                          ) : (
+                            <p>Choose an appointment type first.</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : isDateTimeStepComplete ? (
+                      <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("datetime")}
+                      type="button"
+                    >
+                      <span>{dateTimeSummaryLine}</span>
+                      {dateTimeSummaryLocation ? <small>{dateTimeSummaryLocation}</small> : null}
+                    </button>
+                  ) : (
+                      <button
+                        className="booking-progressive-summary booking-progressive-summary-empty"
+                        onClick={() => setPublicBookingSection("datetime")}
+                        type="button"
+                        disabled={!isAppointmentStepComplete}
+                      >
+                        <strong>{isAppointmentStepComplete ? "Date not selected" : "Select appointment first"}</strong>
+                        <span>{isAppointmentStepComplete ? "Choose day and time" : "Complete appointment step"}</span>
+                      </button>
+                    )}
+                  </section>
+
+                  <section className={`booking-progressive-section ${isInformationSectionOpen ? "is-open" : ""} ${
+                    showCapturedCustomerDetailsSummary ? "is-complete" : ""
+                  }`}>
+                    <button
+                      className="booking-progressive-title"
+                      onClick={() => setPublicBookingSection("information")}
+                      type="button"
+                      disabled={!isDateTimeStepComplete}
+                    >
+                      <span className="booking-progressive-title-label">3. Your Information</span>
+                      <span className="booking-progressive-title-state">
+              {showCapturedCustomerDetailsSummary ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
+            </span>
+                    </button>
+                    {isInformationSectionOpen ? (
+                      <div className="booking-progressive-body">
+                        <div className="booking-form">
+                          <label className="booking-required-field">
+                            <input
+                              value={bookingForm.firstName}
+                              aria-label="First name required"
+                              aria-required="true"
+                              autoComplete="given-name"
+                              onChange={(event) => updateBookingForm("firstName", event.target.value)}
+                              onKeyDown={handleBookingMatchKeyDown}
+                              placeholder="First name"
+                              required
+                            />
+                            <span className="booking-required-mark" aria-hidden="true">*</span>
+                          </label>
+                          <label className="booking-required-field">
+                            <input
+                              value={bookingForm.lastName}
+                              aria-label="Last name required"
+                              aria-required="true"
+                              autoComplete="family-name"
+                              onChange={(event) => updateBookingForm("lastName", event.target.value)}
+                              onKeyDown={handleBookingMatchKeyDown}
+                              placeholder="Last name"
+                              required
+                            />
+                            <span className="booking-required-mark" aria-hidden="true">*</span>
+                          </label>
+                          <input
+                            value={bookingForm.phone}
+                            autoComplete="tel"
+                            inputMode="tel"
+                            onChange={(event) => updateBookingForm("phone", event.target.value)}
+                            onKeyDown={handleBookingMatchKeyDown}
+                            placeholder="Phone"
+                            type="tel"
+                          />
+                          <label className="booking-required-field">
+                            <input
+                              value={bookingForm.email}
+                              aria-label="Email required"
+                              aria-required="true"
+                              autoComplete="email"
+                              inputMode="email"
+                              onChange={(event) => updateBookingForm("email", event.target.value)}
+                              onKeyDown={handleBookingMatchKeyDown}
+                              placeholder="Email"
+                              required
+                              type="email"
+                            />
+                            <span className="booking-required-mark" aria-hidden="true">*</span>
+                          </label>
+                        </div>
+                        {bookingClientSuggestion && showBookingClientSuggestion && (
+                          <button
+                            className="client-match-prompt booking-client-match"
+                            onClick={() => applyBookingClient(bookingClientSuggestion)}
+                            type="button"
+                          >
+                            <User size={15} />
+                            <span>
+                              <strong>{bookingClientSuggestion.name}</strong>
+                              <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
+                            </span>
+                          </button>
+                        )}
+                        {customGroupAttendeePanel}
+                        {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
+                        {bookingSubmitError && (
+                          <div className="email-status failed" role="alert">
+                            <X size={17} />
+                            <span>{bookingSubmitError}</span>
+                          </div>
+                        )}
+                        <button
+                          className="primary-button confirm-booking"
+                          disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving" || !isInformationStepComplete}
+                          onClick={confirmPublicBooking}
+                          type="button"
+                        >
+                          {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
+                        </button>
+                      </div>
+                    ) : showCapturedCustomerDetailsSummary ? (
+                      <button
+                      className="booking-summary booking-progressive-summary"
+                      onClick={() => setPublicBookingSection("information")}
+                      type="button"
+                      disabled={!isDateTimeStepComplete}
+                    >
+                      <strong>{bookingCustomerSummaryName}</strong>
+                      <span>{bookingCustomerSummaryContact}</span>
+                    </button>
+                  ) : (
+                      <button
+                        className="booking-progressive-summary booking-progressive-summary-empty"
+                        onClick={() => setPublicBookingSection("information")}
+                        type="button"
+                        disabled={!isDateTimeStepComplete}
+                      >
+                        <strong>{isDateTimeStepComplete ? "Customer details missing" : "Complete time step first"}</strong>
+                        <span>{isDateTimeStepComplete ? "Enter your details to confirm" : "Lock a time first"}</span>
+                      </button>
+                    )}
+                  </section>
+                </>
+              ) : (
+                <>
+                  {showRescheduleLoginPanel ? (
+                  <div className="booking-card">
+                    <span>Booking Login</span>
+                    <div className="booking-login-copy">
+                      <strong>Use the link from your email, or enter the original details once.</strong>
+                      <em>Your browser can keep this saved for next time.</em>
+                    </div>
+                    <div className="booking-form">
+                      <input
+                        value={rescheduleForm.email}
+                        autoComplete="email"
+                        inputMode="email"
+                        onChange={(event) => updateRescheduleForm("email", event.target.value)}
+                        placeholder="Email"
+                        type="email"
+                      />
+                      <input
+                        value={rescheduleForm.phone}
+                        autoComplete="tel"
+                        inputMode="tel"
+                        onChange={(event) => updateRescheduleForm("phone", event.target.value)}
+                        placeholder="Phone"
+                        type="tel"
+                      />
+                    </div>
+                    {hasSavedRescheduleLogin && (
+                      <button
+                        className="outline-button booking-login-clear"
+                        onClick={() => {
+                          window.localStorage.removeItem(RESCHEDULE_LOGIN_STORAGE_KEY);
+                          initialRescheduleLoginRef.current = null;
+                          setForceRescheduleLogin(true);
+                          setRescheduleForm({ email: "", phone: "" });
+                          setRescheduleMatches([]);
+                          setSelectedRescheduleId("");
+                          setBookingStart(null);
+                        }}
+                        type="button"
+                      >
+                        Forget saved login
+                      </button>
+                    )}
+                    <button
+                      className="primary-button confirm-booking"
+                      disabled={rescheduleState === "checking"}
+                      onClick={() => {
+                        void lookupPublicReschedule();
+                      }}
+                      type="button"
+                    >
+                      {rescheduleState === "checking" ? "Checking..." : "Find Booking"}
+                    </button>
+                    {rescheduleMatches.length > 0 && (
+                      <div className="service-picker reschedule-list">
+                        {rescheduleMatches.map((match) => (
+                          <button
+                            className={selectedRescheduleId === match.id ? "selected-service" : ""}
+                            key={match.id}
+                            onClick={() => selectRescheduleMatch(match)}
+                            type="button"
+                          >
+                            <strong>{match.serviceName}</strong>
+                            <em>{describeRescheduleMatch(match)}</em>
+                            <small>{match.client}</small>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  ) : (
+                    <div className="booking-card reschedule-link-state">
+                      <span>Manage Booking</span>
+                      <div className="booking-login-copy">
+                        <strong>
+                          {selectedRescheduleMatch
+                            ? selectedRescheduleMatch.client
+                            : rescheduleState === "checking"
+                            ? "Opening your booking..."
+                            : "Booking link opened"}
+                        </strong>
+                        <em>
+                          {selectedRescheduleMatch
+                            ? describeRescheduleMatch(selectedRescheduleMatch)
+                            : "Choose a new time below."}
+                        </em>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="booking-card">
+                    <span>New Date & Time</span>
+                    <div className="booking-week-controls">
+                      <button onClick={() => moveWeek(-1)} type="button">
+                        <ArrowLeft size={15} />
+                        <span>Previous week</span>
+                      </button>
+                      <strong>{weekTitle}</strong>
+                      <button onClick={() => moveWeek(1)} type="button">
+                        <span>Next week</span>
+                        <ArrowRight size={15} />
+                      </button>
+                    </div>
+                    <div className="booking-days">
+                      {weekDays.map((day, index) => (
+                        <button
+                          className={bookingDay === index ? "selected-day" : ""}
+                          disabled={!selectedRescheduleMatch}
+                          key={day.label}
+                          onClick={() => {
+                            setBookingDay(index);
+                            setBookingStart(null);
+                          }}
+                        >
+                          <strong>{day.short}</strong>
+                          <em>{day.date}</em>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="time-slots">
+                      {selectedRescheduleMatch ? (
+                        publicBookingSlotsLoading ? (
+                          <p>Loading</p>
+                        ) : bookingSlots.length ? (
+                          bookingSlots.map((slot) => (
+                            <button
+                              className={bookingStart === slot.start ? "selected-time" : ""}
+                              key={`${slot.week}-${slot.day}-${slot.start}`}
+                              onClick={() => setBookingStart(slot.start)}
+                            >
+                              {formatTime(slot.start)}
+                            </button>
+                          ))
+                        ) : (
+                          <p>No public times available for this day.</p>
+                        )
+                      ) : (
+                        <p>Find your booking first, then choose a new time.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="booking-card">
+                    <span>Confirm Change</span>
+                    <div className="booking-summary">
+                      <strong>{selectedRescheduleMatch?.serviceName ?? "No booking selected"}</strong>
+                      <span>
+                        {selectedRescheduleMatch
+                          ? `Current: ${describeRescheduleMatch(selectedRescheduleMatch)}`
+                          : "Use your original email and phone to find the booking."}
+                      </span>
+                      <span>
+                        {bookingStart === null
+                          ? "Choose a new time"
+                          : `New: ${weekDays[bookingDay].label}, ${formatTime(bookingStart)}`}
+                      </span>
+                    </div>
+                    <button
+                      className="primary-button confirm-booking"
+                      disabled={!selectedRescheduleMatch || bookingStart === null || rescheduleState === "saving"}
+                      onClick={confirmPublicReschedule}
+                      type="button"
+                    >
+                      {rescheduleState === "saving" ? "Moving..." : "Confirm Reschedule"}
+                    </button>
+                    <button
+                      className="danger-button public-cancel-booking"
+                      disabled={!selectedRescheduleMatch || rescheduleState === "saving"}
+                      onClick={confirmPublicCancellation}
+                      type="button"
+                    >
+                      {rescheduleState === "saving" ? "Working..." : "Cancel Booking"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            )}
+
+            {!isEmbedMode && (
+              <div className="embed-panel">
+                <div className="embed-copy">
+                  <div>
+                    <span>Squarespace Embed</span>
+                    <h2>Booking widget iframe</h2>
+                  </div>
+                  <div className="embed-actions">
+                    <button className="outline-button" onClick={copyEmbedCode}>
+                      {copiedEmbed ? <Check size={16} /> : <Copy size={16} />}
+                      {copiedEmbed ? "Copied" : "Copy iframe"}
+                    </button>
+                    <a className="outline-button" href={bookingWidgetUrl} target="_blank" rel="noreferrer">
+                      <ExternalLink size={16} />
+                      Open widget
+                    </a>
+                  </div>
+                </div>
+
+                <div className="embed-code">
+                  <Code2 size={18} />
+                  <code>{iframeCode}</code>
+                </div>
+
+                <div className="widget-preview">
+                  <div className="preview-bar">
+                    <strong>Widget preview</strong>
+                    <span>Same booking page, iframe mode</span>
+                  </div>
+                  <iframe src={bookingWidgetUrl} title={`${coachAccount.businessName} booking widget preview`} />
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
+        {!isEmbedMode && adminWorkspaceReady && activeView === "settings" && (
+          <section className="module-page settings-page">
+            <div className="settings-tabs" role="tablist" aria-label="Settings sections">
+              <button
+                className={settingsTab === "services" ? "active" : ""}
+                onClick={() => switchSettingsTab("services")}
+                role="tab"
+                aria-selected={settingsTab === "services"}
+                type="button"
+              >
+                <ScissorsLineDashed size={16} />
+                Lesson Setup
+              </button>
+              {isAdminUser ? (
+                <button
+                  className={settingsTab === "coaches" ? "active" : ""}
+                  onClick={() => switchSettingsTab("coaches")}
+                  role="tab"
+                  aria-selected={settingsTab === "coaches"}
+                  type="button"
+                >
+                  <User size={16} />
+                  Coaches
+                </button>
+              ) : null}
+              <button
+                className={settingsTab === "availability" ? "active" : ""}
+                onClick={() => switchSettingsTab("availability")}
+                role="tab"
+                aria-selected={settingsTab === "availability"}
+                type="button"
+              >
+                <Clock size={16} />
+                Schedule
+              </button>
+              <button
+                className={settingsTab === "locations" ? "active" : ""}
+                onClick={() => switchSettingsTab("locations")}
+                role="tab"
+                aria-selected={settingsTab === "locations"}
+                type="button"
+              >
+                <MapPin size={16} />
+                Locations
+              </button>
+              {isAdminUser ? (
+                <>
+                  <button
+                    className={settingsTab === "email" ? "active" : ""}
+                    onClick={() => switchSettingsTab("email")}
+                    role="tab"
+                    aria-selected={settingsTab === "email"}
+                    type="button"
+                  >
+                    <Mail size={16} />
+                    Email
+                  </button>
+                  <button
+                    className={settingsTab === "experience" ? "active" : ""}
+                    onClick={() => switchSettingsTab("experience")}
+                    role="tab"
+                    aria-selected={settingsTab === "experience"}
+                    type="button"
+                  >
+                    <Eye size={16} />
+                    Customer Experience
+                  </button>
+                  <button
+                    className={settingsTab === "account" ? "active" : ""}
+                    onClick={() => switchSettingsTab("account")}
+                    role="tab"
+                    aria-selected={settingsTab === "account"}
+                    type="button"
+                  >
+                    <User size={16} />
+                    Coach Account
+                  </button>
+                  <button
+                    className={settingsTab === "branding" ? "active" : ""}
+                    onClick={() => switchSettingsTab("branding")}
+                    role="tab"
+                    aria-selected={settingsTab === "branding"}
+                    type="button"
+                  >
+                    <Palette size={16} />
+                    Coach Branding
+                  </button>
+                  <button
+                    className={settingsTab === "integrations" ? "active" : ""}
+                    onClick={() => switchSettingsTab("integrations")}
+                    role="tab"
+                    aria-selected={settingsTab === "integrations"}
+                    type="button"
+                  >
+                    <KeyRound size={16} />
+                    Integrations
+                  </button>
+                  <button
+                    className={settingsTab === "data" ? "active" : ""}
+                    onClick={() => switchSettingsTab("data")}
+                    role="tab"
+                    aria-selected={settingsTab === "data"}
+                    type="button"
+                  >
+                    <Upload size={16} />
+                    Data
+                  </button>
+                </>
+              ) : null}
+            </div>
+
+            <div className={`settings-grid settings-tab-${settingsTab}`}>
+              {settingsTab === "integrations" ? <OptixIntegrationPanel /> : null}
+              {servicesSettingsPanel}
+              {isAdminUser ? coachesSettingsPanel : null}
+              {isAdminUser ? locationsSettingsPanel : null}
+              {availabilitySettingsPanel}
+              {bookingSettingsPanel}
+              <article className="data-card notification-card account-card settings-section settings-account settings-branding">
+                <div className="data-card-header">
+                  <div>
+                    <span>Coach Account</span>
+                    <h2>{coachAccount.businessName}</h2>
+                  </div>
+                  <User size={24} />
+                </div>
+                <details className="settings-subsection" open>
+                  <summary className="settings-subsection-title">
+                    <KeyRound size={18} />
+                    <div>
+                      <span>Workspace subscription</span>
+                      <strong>{activeAccount.planKey} · {activeAccount.subscriptionStatus}</strong>
+                    </div>
+                  </summary>
+                  <div className="service-form-row">
+                    <label className="settings-field">
+                      <span>Workspace</span>
+                      <input value={activeAccount.name} readOnly />
+                    </label>
+                    <label className="settings-field">
+                      <span>Slug</span>
+                      <input value={activeAccount.slug} readOnly />
+                    </label>
+                  </div>
+                  <div className="service-form-row">
+                    <label className="settings-field">
+                      <span>Billing provider</span>
+                      <input value={activeAccount.billingProvider || "none"} readOnly />
+                    </label>
+                    <label className="settings-field">
+                      <span>Subscription</span>
+                      <input value={isAccountActive(activeAccount) ? "Active" : "Restricted"} readOnly />
+                    </label>
+                  </div>
+                  <div className="location-usage-grid">
+                    {(Object.keys(accountUsage) as Array<keyof AccountLimits>).map((limitName) => (
+                      <span key={limitName}>
+                        <strong>{limitName.replace(/^max/, "")}</strong>
+                        {accountUsage[limitName]} / {activeAccountEntitlements.limits[limitName]}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="service-card-meta">
+                    {enabledAccountFeatures.slice(0, 10).map((feature) => (
+                      <span key={feature}>{feature}</span>
+                    ))}
+                    {enabledAccountFeatures.length > 10 ? <span>+{enabledAccountFeatures.length - 10} more</span> : null}
+                  </div>
+                  <p className="field-help">This is the account wrapper for subscription entitlements. Billing automation and platform admin tools are not implemented here.</p>
+                </details>
+                <div className="account-settings-groups">
+                  <EditableSettingsBlock
+                    id="coach-account-block"
+                    title="Coach Account"
+                    status={coachAccountEditor.status}
+                    dirty={coachAccountEditor.dirty}
+                    errorMessage={coachAccountEditor.errorMessage}
+                    onEdit={() => startEditableBlock("coach-account")}
+                    onCancel={() => cancelEditableBlock("coach-account")}
+                    onSave={() => void saveEditableBlock("coach-account")}
+                  >
+                  <details className="settings-subsection">
+                    <summary className="settings-subsection-title">
+                      <User size={18} />
+                      <div>
+                        <span>Coach</span>
+                        <strong>Profile</strong>
+                      </div>
+                    </summary>
+                    <div className="service-form-row">
+                      <label className="settings-field">
+                        <span>Coach name</span>
+                        <input
+                          value={coachAccountDraft.coachName}
+                          readOnly={coachAccountIsLocked}
+                          onChange={(event) => updateCoachAccountBlockDraft("coachName", event.target.value)}
                         />
                       </label>
                       <label className="settings-field">
