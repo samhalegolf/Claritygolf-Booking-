@@ -32,10 +32,12 @@ jobs:
         shell: bash
         run: |
           git show 3ae33c3d38c5189dd2ce377fcdfa6670fb42931e:source/src/App.tsx > /tmp/App.valid.tsx
-          echo "--- integration-related lines ---"
-          grep -n -E 'settingsTab.*integrations|settings-tab-integrations|Integrations|settings-integrations' /tmp/App.valid.tsx | head -120 || true
-          echo "--- React import area ---"
-          sed -n '1,110p' /tmp/App.valid.tsx
+          echo "--- settings navigation ---"
+          sed -n '22540,22620p' /tmp/App.valid.tsx
+          echo "--- integrations start ---"
+          sed -n '22990,23130p' /tmp/App.valid.tsx
+          echo "--- integrations end ---"
+          sed -n '23640,23740p' /tmp/App.valid.tsx
 
       - name: Install dependencies
         run: npm ci
