@@ -76,24 +76,11 @@ function decorate(node: HTMLElement, record: OptixOriginRecord) {
   ) {
     const card = document.createElement("section");
     card.className = "optix-origin-card";
-    card.innerHTML = `<strong>Optix-origin booking</strong><div>Resource: ${esc(record.external_resource_id || "Not supplied")}</div><div>Sync state: ${esc(record.external_sync_state || record.status || "synced")}</div><div>Optix controls the customer, time, bay and cancellation state. Use Optix for those changes.</div><details><summary>Source details</summary><div>Booking ID: ${esc(record.external_booking_id)}</div><div>Session ID: ${esc(record.external_booking_session_id || "Not supplied")}</div></details>`;
+    card.innerHTML = `<strong>External booking · Optix</strong><div>Bay status: ${esc(record.external_sync_state === "bay_booked" ? "Bay booked" : "Bay assignment required")}</div><div>Customer email: ${esc(record.external_sync_state || "No Clarity email")}</div><details><summary>Source details</summary><div>Inbound lesson booking ID: ${esc(record.external_booking_id)}</div><div>Outbound bay booking is shown separately under Resource booking.</div></details>`;
     node.appendChild(card);
   }
-  node
-    .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-      "input,select,textarea",
-    )
-    .forEach((field) => {
-      const label = `${field.name} ${field.id} ${field.getAttribute("aria-label") || ""}`.toLowerCase();
-      if (/client|customer|start|time|date|duration|location|resource|bay/.test(label)) {
-        field.disabled = true;
-        field.classList.add("optix-origin-locked");
-        field.title = "This field is owned by Optix. Edit it in Optix.";
-      }
-    });
-  node
-    .querySelectorAll<HTMLElement>(".optix-booking-feedback,[data-optix-book]")
-    .forEach((element) => element.remove());
+  // This is a standard editable Clarity appointment. In particular, keep the
+  // existing Book resource panel and action available for manual bay booking.
 }
 
 async function refresh() {

@@ -22,6 +22,10 @@ export type ClarityOptixAppointment = {
   location_id?: string;
   location?: { timezone?: string; locationId?: string } | null;
   status?: string;
+  email?: string;
+  phone?: string;
+  coachId?: string;
+  personId?: string;
 };
 
 export type OptixSyncRecord = {

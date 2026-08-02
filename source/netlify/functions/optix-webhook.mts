@@ -1,6 +1,7 @@
 import type { Config } from "@netlify/functions";
 
-import { storeOptixWebhookEvent, webhookEventKey } from "./_shared/optix-origin.mts";
+import { optixOriginRequest, processStoredOptixEvent, storeOptixWebhookEvent, webhookEventKey } from "./_shared/optix-origin.mts";
+import { notifyBookingEvent } from "./notification-engine.mts";
 import { validateOptixWebhook } from "./_shared/optix-webhook-auth.mts";
 
 function env(name: string) {
@@ -25,7 +26,7 @@ export default async function handler(req: Request) {
     appSecret: env("OPTIX_APP_SECRET"),
   });
 
-  if (!validation.ok) {
+  if (validation.ok === false) {
     const status = validation.error === "webhook_not_configured"
       ? 503
       : validation.error === "unsupported_media_type"
@@ -48,6 +49,26 @@ export default async function handler(req: Request) {
       externalBookingId,
       payload,
     });
+    // Receipt is already durable at this point. Processing is deliberately
+    // isolated so a Clarity failure cannot turn a valid Optix delivery into a
+    // retry-triggering non-2xx response.
+    if (stored.inserted) {
+      try {
+        const processed: any = await processStoredOptixEvent(eventKey, payload);
+        if (processed?.status === "processed" && processed?.mapping?.emailBehaviour === "immediate" && processed?.created) {
+          await notifyBookingEvent({ action: "booking", appointment: processed.item, source: `optix:${eventKey}` });
+          await optixOriginRequest(`external_booking_links?provider=eq.optix&purpose=eq.lesson&external_booking_id=eq.${encodeURIComponent(externalBookingId)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ email_status: "sent", confirmation_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
+          });
+        }
+      } catch (error) {
+        console.error("optix_webhook_processing_failed", {
+          eventKey,
+          code: String((error as any)?.code || "processing_failed"),
+        });
+      }
+    }
     return json({ ok: true, accepted: true, duplicate: !stored.inserted, eventKey }, 200);
   } catch (error: any) {
     return json({

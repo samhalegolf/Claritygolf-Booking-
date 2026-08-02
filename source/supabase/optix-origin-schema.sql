@@ -59,33 +59,13 @@ CREATE INDEX IF NOT EXISTS optix_webhook_events_status_received_idx
 CREATE INDEX IF NOT EXISTS optix_webhook_events_booking_idx
   ON optix_webhook_events (external_booking_id);
 
--- Defence in depth: the manual Clarity -> Optix path writes optix_booking_sync.
--- Reject that write when the linked appointment originated in Optix, even if a
--- caller bypasses the UI and posts directly to the manual endpoint.
-CREATE OR REPLACE FUNCTION reject_optix_origin_resource_booking()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM calendar_items
-    WHERE id = NEW.calendar_item_id
-      AND origin = 'optix'
-  ) THEN
-    RAISE EXCEPTION 'Optix-origin appointments cannot create a second Optix resource booking.'
-      USING ERRCODE = '23514';
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
-DO $$
-BEGIN
+-- Optix-origin Swing Analysis appointments intentionally remain eligible for
+-- the existing manual Book resource flow. Their inbound lesson booking ID is
+-- held by external_booking_links; the separate outbound bay booking ID is held
+-- by optix_booking_sync.
+DO $$ BEGIN
   IF to_regclass('public.optix_booking_sync') IS NOT NULL THEN
     DROP TRIGGER IF EXISTS guard_optix_origin_resource_booking ON optix_booking_sync;
-    CREATE TRIGGER guard_optix_origin_resource_booking
-      BEFORE INSERT OR UPDATE ON optix_booking_sync
-      FOR EACH ROW EXECUTE FUNCTION reject_optix_origin_resource_booking();
   END IF;
-END;
-$$;
+END $$;
+DROP FUNCTION IF EXISTS reject_optix_origin_resource_booking();

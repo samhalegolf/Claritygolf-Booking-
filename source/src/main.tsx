@@ -6,6 +6,7 @@ import { installOptixBookingTypeSettings } from "./optix-booking-type-settings";
 import { installOptixBookingFeedback } from "./optix-booking-feedback";
 import { installOptixBookingMutationSync } from "./optix-booking-mutation-sync";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
+import { installExternalBookings } from "./external-bookings";
 import "./styles.css";
 
 // The player portal is a separate app personality (players.claritygolf.app or
@@ -38,4 +39,5 @@ if (!isPlayerPortalMode() && !isBookingHandoff()) {
   installOptixBookingTypeSettings();
   installOptixBookingFeedback();
   installOptixOriginFeedback();
+  installExternalBookings();
 }

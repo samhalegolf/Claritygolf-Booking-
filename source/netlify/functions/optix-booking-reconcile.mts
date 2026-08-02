@@ -8,6 +8,7 @@ import {
   type OptixSyncRecord,
 } from "./_shared/optix-reconcile.mts";
 import { reconcileOptixAppointmentWithAutoSelect } from "./_shared/optix-auto-select.mts";
+import { notifyBookingEvent } from "./notification-engine.mts";
 
 const SESSION_COOKIE = "clarity_session";
 const OVERALL_TIMEOUT_MS = 25_000;
@@ -95,6 +96,10 @@ function rowToAppointment(row: any): ClarityOptixAppointment {
     locationId: row.location_id || "",
     location: row.location && typeof row.location === "object" ? row.location : null,
     status: row.status || "booked",
+    email: row.email || "",
+    phone: row.phone || "",
+    coachId: row.coach_id || "",
+    personId: row.person_id || "",
   };
 }
 
@@ -118,7 +123,7 @@ function rowToSyncRecord(row: any): OptixSyncRecord {
 async function readAppointment(calendarItemId: string) {
   const rows = await db().sql`
     SELECT id, kind, week, day, start, duration, title, client, note,
-           service_id, location_id, location, status
+           service_id, location_id, location, status, email, phone, coach_id, person_id
     FROM calendar_items
     WHERE id = ${calendarItemId}
       AND kind = 'appointment'
@@ -246,6 +251,45 @@ async function bookOneResource(calendarItemId: string) {
   }
 
   await saveSyncRecord(result);
+  if (result.syncStatus === "synced") {
+    await db().sql`
+      UPDATE calendar_items
+      SET external_sync_state = 'bay_booked', updated_at = NOW()
+      WHERE id = ${appointment.id} AND origin = 'optix'
+    `;
+    const emailRows = await db().sql`
+      SELECT l.external_booking_id, l.email_status, m.email_behaviour
+      FROM external_booking_links l
+      JOIN external_booking_mappings m
+        ON m.provider = l.provider AND m.workspace_id = l.workspace_id
+      WHERE l.clarity_item_id = ${appointment.id}
+        AND l.provider = 'optix' AND l.purpose = 'lesson'
+      LIMIT 1
+    `;
+    const emailLink = emailRows[0];
+    if (emailLink?.email_behaviour === "after_bay" && emailLink?.email_status !== "sent") {
+      try {
+        await notifyBookingEvent({ action: "booking", appointment, source: `optix-after-bay:${emailLink.external_booking_id}` });
+        await db().sql`
+          UPDATE external_booking_links
+          SET processing_status = 'bay_booked', email_status = 'sent', confirmation_sent_at = NOW(), updated_at = NOW()
+          WHERE provider = 'optix' AND purpose = 'lesson' AND external_booking_id = ${emailLink.external_booking_id}
+        `;
+      } catch (error) {
+        await db().sql`
+          UPDATE external_booking_links
+          SET processing_status = 'bay_booked', email_status = 'failed', updated_at = NOW()
+          WHERE provider = 'optix' AND purpose = 'lesson' AND external_booking_id = ${emailLink.external_booking_id}
+        `;
+        console.error("optix_after_bay_email_failed", { calendarItemId: appointment.id });
+      }
+    } else {
+      await db().sql`
+        UPDATE external_booking_links SET processing_status = 'bay_booked', updated_at = NOW()
+        WHERE clarity_item_id = ${appointment.id} AND provider = 'optix' AND purpose = 'lesson'
+      `;
+    }
+  }
   return {
     ok: result.syncStatus === "synced",
     attempted: 1,
