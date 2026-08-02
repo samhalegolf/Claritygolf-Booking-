@@ -19,4 +19,7 @@ jobs:
           path: |
             source/src/App.tsx
             source/src/styles.css
+            source/netlify/functions/calendar-state.mts
+            source/netlify/functions/external-bookings.mts
+            source/netlify/functions/_shared/optix-origin.mts
           if-no-files-found: error
