@@ -1,9 +1,9 @@
 name: Export app source
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/optix-origin-badge-name
+      - main
 
 permissions:
   contents: read
