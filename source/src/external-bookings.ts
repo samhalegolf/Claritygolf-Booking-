@@ -6,11 +6,17 @@ const esc = (value: unknown) => String(value ?? "").replaceAll("&", "&amp;").rep
 let state: State | null = null;
 let activeTab: OptixTab = "setup";
 let busy = false;
+let loadError = "";
 
 async function load() {
   const response = await fetch("/api/external-bookings", { credentials: "same-origin", cache: "no-store" });
-  if (!response.ok) return null;
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    loadError = payload?.message || payload?.error || `Optix data endpoint returned ${response.status}.`;
+    return null;
+  }
   state = await response.json();
+  loadError = "";
   return state;
 }
 
@@ -58,7 +64,12 @@ function diagnosticsView() {
 }
 
 function render(panel: HTMLElement) {
-  if (!state) return;
+  if (!state) {
+    panel.innerHTML = `<div class="optix-title"><div><span class="optix-kicker">Integration</span><h2>Optix</h2><p>Inbound lesson data, bay resources, and processing diagnostics in one place.</p></div><span class="optix-health ${loadError ? "has-errors" : ""}">${loadError ? "Setup required" : "Loading…"}</span></div>
+      <div class="optix-tabs" role="tablist"><button type="button" role="tab" data-optix-tab="diagnostics" class="active">Diagnostics</button></div>
+      <div class="optix-view">${loadError ? `<div class="optix-error"><strong>Optix panel could not load</strong>${esc(loadError)}</div><p class="optix-help">The panel is installed, but its protected data endpoint is not ready. This commonly means the inbound Optix database migration still needs to be applied.</p><button class="primary" type="button" data-optix-refresh>Try again</button>` : `<div class="optix-empty"><strong>Loading Optix</strong><span>Checking the protected event feed and configuration.</span></div>`}</div>`;
+    return;
+  }
   const mapping = state.mappings.find((row) => String(row.workspace_id) === "637949") || {};
   const view = activeTab === "setup" ? setupView(mapping) : activeTab === "feed" ? feedView() : activeTab === "resources" ? resourcesView() : diagnosticsView();
   panel.innerHTML = `<div class="optix-title"><div><span class="optix-kicker">Integration</span><h2>Optix</h2><p>Inbound lesson data, bay resources, and processing diagnostics in one place.</p></div><span class="optix-health ${state.events.some((event) => event.processing_status === "failed") ? "has-errors" : ""}">${state.events.some((event) => event.processing_status === "failed") ? "Needs attention" : "Connected"}</span></div>
@@ -82,9 +93,10 @@ function styles() {
 async function mount() {
   const grid = document.querySelector<HTMLElement>(".settings-grid.settings-tab-integrations");
   if (!grid || grid.querySelector(".optix-integration")) return;
-  if (!(await load()) || !document.body.contains(grid)) return;
   const panel = document.createElement("article"); panel.className = "data-card settings-section settings-integrations optix-integration"; render(panel); grid.prepend(panel);
   panel.addEventListener("click", (event) => { const target = event.target as HTMLElement; const tab = target.closest<HTMLElement>("[data-optix-tab]")?.dataset.optixTab as OptixTab | undefined; if (tab) { activeTab = tab; render(panel); return; } if (target.closest("[data-optix-save]")) void save(panel); if (target.closest("[data-optix-refresh]")) void refresh(panel); if (target.closest("[data-optix-resources]")) void openOptixResourceEditor(); const retryButton = target.closest<HTMLElement>("[data-optix-retry]"); if (retryButton?.dataset.optixRetry) void retry(panel, retryButton.dataset.optixRetry); });
+  await load();
+  if (document.body.contains(panel)) render(panel);
 }
 
 export function installExternalBookings() { if (typeof window === "undefined") return; styles(); let queued = false; const schedule = () => { if (queued) return; queued = true; setTimeout(() => { queued = false; void mount(); }, 100); }; new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true }); schedule(); }
