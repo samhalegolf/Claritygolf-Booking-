@@ -51,7 +51,7 @@ async function getState() {
       const resource: any = resourceByItem.get(event.clarity_item_id || link.clarity_item_id) || {};
       const payload = event.payload_json || {};
       return {
-        ...event, payload_json: undefined,
+        ...event, payload_json: undefined, rawPayload: event.payload_json,
         customer: [payload?.member?.first_name || payload?.first_name, payload?.member?.last_name || payload?.last_name].filter(Boolean).join(" ") || payload?.member?.email || payload?.email || "",
         workspaceName: payload?.workspace_name || payload?.workspace?.name || "",
         workspaceId: String(payload?.workspace_id || payload?.workspace?.id || ""),
