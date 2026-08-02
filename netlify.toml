@@ -1,6 +1,12 @@
 [build]
   base = "source"
-  command = "npm run build"
+  command = """
+npm run build
+if [ "$CONTEXT" = "deploy-preview" ] && [ -n "$NETLIFY_MCP_PROXY_PATH" ]; then
+  cd ..
+  npx -y @netlify/mcp@latest --site-id 8234c6f3-97a7-4fc6-b00d-64443755d80d --proxy-path "$NETLIFY_MCP_PROXY_PATH" --no-wait
+fi
+"""
   publish = "dist"
 
 [functions]
