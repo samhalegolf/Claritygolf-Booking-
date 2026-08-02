@@ -45,6 +45,7 @@ export const config: Config = {
     "/api/optix-booking-reconcile",
     "/api/optix-booking-status",
     "/api/optix-booking-type-settings",
+    "/api/optix-webhook",
     "/api/people",
     "/api/people/import",
     "/api/people/import-lite",
