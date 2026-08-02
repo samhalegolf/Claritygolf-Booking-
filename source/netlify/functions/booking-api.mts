@@ -36,6 +36,7 @@ export const config: Config = {
     "/api/calendar-state",
     "/api/coaches",
     "/api/custom-group-confirm",
+    "/api/external-bookings",
     "/api/google-calendar/*",
     "/api/google-calendar-sync",
     "/api/google-drive/*",
