@@ -2,11 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import PlayerPortal, { isPlayerPortalMode, isBookingHandoff } from "./modules/player-portal/PlayerPortal";
-import { installOptixBookingTypeSettings } from "./optix-booking-type-settings";
 import { installOptixBookingFeedback } from "./optix-booking-feedback";
 import { installOptixBookingMutationSync } from "./optix-booking-mutation-sync";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
-import { installExternalBookings } from "./external-bookings";
 import "./styles.css";
 
 // The player portal is a separate app personality (players.claritygolf.app or
@@ -36,8 +34,6 @@ if (!isPlayerPortalMode()) {
 // Resource configuration, manual booking feedback, and external-origin
 // ownership indicators remain admin-only.
 if (!isPlayerPortalMode() && !isBookingHandoff()) {
-  installOptixBookingTypeSettings();
   installOptixBookingFeedback();
   installOptixOriginFeedback();
-  installExternalBookings();
 }

@@ -57,6 +57,16 @@
   to = "/.netlify/functions/public-booking"
   status = 200
 
+[[redirects]]
+  from = "/api/external-bookings"
+  to = "/.netlify/functions/external-bookings"
+  status = 200
+
+[[redirects]]
+  from = "/api/optix-booking-type-settings"
+  to = "/.netlify/functions/optix-booking-type-settings"
+  status = 200
+
 # Stripe billing sync + webhook. Needed because booking-api owns the /api/*
 # catch-all; without an explicit rewrite these routes fall through to it and
 # 404 (same pattern as the auth/google-calendar routes above).

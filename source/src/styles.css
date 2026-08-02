@@ -524,6 +524,84 @@ button {
   overflow: hidden;
 }
 
+.optix-native-panel {
+  grid-column: 1 / -1;
+  padding: 0;
+  overflow: hidden;
+}
+
+.optix-native-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px 18px;
+  background: linear-gradient(120deg, rgba(39, 214, 111, 0.11), transparent 58%);
+}
+
+.optix-native-header span { color: #187c48; font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.optix-native-header h2 { margin: 3px 0; font-size: 27px; }
+.optix-native-header p { margin: 0; color: #697068; }
+.optix-native-header > strong { height: max-content; padding: 6px 10px; border-radius: 999px; background: #e2f7e9; color: #17753f; font-size: 11px; }
+.optix-native-header > strong.needs-attention { background: #fde8e8; color: #a53535; }
+
+.optix-native-tabs { display: flex; gap: 3px; padding: 0 24px; overflow-x: auto; border-bottom: 1px solid #e1e5dc; }
+.optix-native-tabs button { display: flex; align-items: center; gap: 7px; padding: 12px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #656a63; font-weight: 800; cursor: pointer; }
+.optix-native-tabs button.active { border-color: #1eaf60; color: #111; }
+.optix-native-tabs b { min-width: 18px; padding: 2px 5px; border-radius: 999px; background: #e2f7e9; font-size: 10px; }
+.optix-native-body { padding: 22px 24px 24px; }
+.optix-native-note { display: grid; gap: 3px; padding: 13px 15px; margin-bottom: 16px; border-radius: 9px; background: #eef9f1; }
+.optix-native-note span, .optix-resource-heading p, .optix-feed-toolbar p { color: #697068; font-size: 12px; }
+.optix-native-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 13px; }
+.optix-native-grid label { display: grid; gap: 5px; color: #42473f; font-size: 12px; font-weight: 800; }
+.optix-native-grid label.toggle { display: flex; align-items: center; }
+.optix-native-grid input:not([type="checkbox"]), .optix-native-grid select, .profile-title input, .profile-title select { min-height: 39px; padding: 8px 10px; border: 1px solid #d9ded2; border-radius: 8px; background: #fff; color: #20241f; }
+.optix-native-actions { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
+.optix-native-actions button, .optix-resource-heading button, .optix-feed-toolbar button, .optix-native-event > button { padding: 9px 13px; border: 0; border-radius: 8px; background: #102d20; color: #fff; font-weight: 800; cursor: pointer; }
+.optix-native-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.optix-native-error { display: grid; gap: 3px; margin-bottom: 14px; padding: 11px 13px; border-radius: 8px; background: #fdeaea; color: #a43232; font-size: 12px; }
+
+.optix-resource-heading, .optix-feed-toolbar, .profile-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.optix-resource-heading h3, .optix-resource-heading p, .optix-feed-toolbar h3, .optix-feed-toolbar p { margin: 0; }
+.optix-resource-profile { margin-top: 14px; padding: 15px; border: 1px solid #dde2d8; border-radius: 11px; background: #fbfcfa; }
+.profile-title { justify-content: flex-start; }
+.profile-title input { flex: 1; min-width: 160px; font-weight: 800; }
+.profile-title button, .resource-row button, .removed-resources button { padding: 7px 9px; border: 1px solid #d9ded2; border-radius: 7px; background: #fff; color: #333; font-weight: 700; cursor: pointer; }
+.profile-title button.danger { color: #a43232; }
+.profile-title button:disabled, .resource-row button:disabled { opacity: .35; }
+.profile-columns { display: grid; grid-template-columns: minmax(260px, .9fr) minmax(260px, 1.1fr); gap: 20px; margin-top: 15px; }
+.profile-columns h4 { margin: 0 0 8px; color: #697068; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.resource-row { display: grid; grid-template-columns: 24px 1fr auto auto auto; align-items: center; gap: 6px; margin: 5px 0; padding: 7px 8px; border-radius: 8px; background: #f0f3ed; font-size: 12px; }
+.removed-resources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.resource-services { display: grid; gap: 6px; }
+.resource-services label { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 7px; background: #f0f3ed; font-size: 12px; }
+
+.optix-feed-toolbar { margin-bottom: 12px; }
+.optix-native-event { margin: 8px 0; overflow: hidden; border: 1px solid #dde2d8; border-radius: 9px; }
+.optix-native-event summary { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(120px, 1fr) auto auto; gap: 10px; align-items: center; padding: 11px 13px; cursor: pointer; }
+.optix-native-event summary span, .optix-native-event summary time { color: #697068; font-size: 11px; }
+.optix-native-event summary em { font-size: 10px; font-style: normal; font-weight: 900; text-transform: uppercase; }
+.event-facts { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 13px; background: #f6f8f4; font-size: 11px; }
+.optix-native-event pre { max-height: 360px; margin: 12px 13px; padding: 12px; overflow: auto; border-radius: 8px; background: #0d1711; color: #dce8df; font: 11px/1.5 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
+.optix-native-event > button { margin: 0 13px 13px; }
+.optix-native-empty { padding: 28px; border: 1px dashed #ccd2c8; border-radius: 9px; color: #697068; text-align: center; }
+.optix-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.optix-stat-grid > div { display: grid; gap: 4px; padding: 15px; border-radius: 9px; background: #f3f5f1; }
+.optix-stat-grid span { color: #697068; font-size: 11px; }
+.optix-stat-grid strong { font-size: 22px; }
+.optix-diagnostic-list { margin-top: 16px; }
+.optix-diagnostic-list p { display: flex; justify-content: space-between; gap: 14px; margin: 0; padding: 10px 0; border-bottom: 1px solid #e1e5dc; font-size: 12px; }
+.optix-diagnostic-list code { max-width: 65%; text-align: right; word-break: break-word; }
+
+@media (max-width: 720px) {
+  .optix-native-header, .optix-native-body { padding-left: 16px; padding-right: 16px; }
+  .optix-native-tabs { padding: 0 8px; }
+  .profile-columns { grid-template-columns: 1fr; }
+  .profile-title { align-items: stretch; flex-direction: column; }
+  .optix-native-event summary { grid-template-columns: 1fr auto; }
+  .optix-native-event summary span, .optix-native-event summary time { display: none; }
+  .optix-stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
 .booking-page-settings {
   display: grid;
   gap: 14px;
