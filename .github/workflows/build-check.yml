@@ -1,9 +1,9 @@
 name: Repair and build Optix integration
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/optix-build-errors
+      - main
 
 permissions:
   contents: write
