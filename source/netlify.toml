@@ -7,12 +7,6 @@
   node_bundler = "esbuild"
 
 [[redirects]]
-  from = "/api/optix-webhook"
-  to = "/.netlify/functions/optix-webhook"
-  status = 200
-  force = true
-
-[[redirects]]
   from = "/api/public-booking"
   to = "/.netlify/functions/public-booking"
   status = 200
