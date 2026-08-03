@@ -47,4 +47,4 @@ jobs:
           echo "NETLIFY_AUTH_TOKEN=$token" >> "$GITHUB_ENV"
 
       - name: Deploy current main to production
-        run: npx -y netlify-cli@latest deploy --build --prod --site "$NETLIFY_SITE_ID" --message "Deploy Optix booking button and feedback separation"
+        run: npx -y netlify-cli@latest deploy --build --prod --site "$NETLIFY_SITE_ID" --message "Deploy clarified Optix failed-state UI"
