@@ -20,14 +20,6 @@ type OptixStatusRecord = {
 
 const OPTIX_RECONCILE_EVENT = "clarity:optix-reconcile-complete";
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: "Not booked in Optix",
-  synced: "Booked in Optix",
-  failed: "Optix booking failed",
-  token_expired: "Optix token expired",
-  cancelled: "Cancelled in Optix",
-};
-
 const ERROR_LABELS: Record<string, string> = {
   timeout: "Optix did not respond",
   resource_conflict: "No configured bay is available",
@@ -46,9 +38,9 @@ function esc(value: unknown) {
 }
 
 function formatTime(value: string | null) {
-  if (!value) return "Not booked yet";
+  if (!value) return "Not attempted yet";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not booked yet";
+  if (Number.isNaN(date.getTime())) return "Not attempted yet";
   return new Intl.DateTimeFormat(undefined, {
     hour: "numeric",
     minute: "2-digit",
@@ -62,7 +54,9 @@ function installStyles() {
   const style = document.createElement("style");
   style.id = "optix-booking-feedback-styles";
   style.textContent = `
-    .optix-booking-feedback{margin-top:12px;padding:12px 14px;border:1px solid rgba(0,0,0,.12);border-radius:12px;background:rgba(31,211,109,.055);font-family:inherit}
+    .optix-booking-feedback{margin-top:12px;padding:12px 14px;border:1px solid rgba(0,0,0,.12);border-radius:12px;background:rgba(0,0,0,.025);font-family:inherit}
+    .optix-booking-feedback--synced{background:rgba(31,211,109,.055)}
+    .optix-booking-feedback--failed{background:rgba(196,132,20,.06)}
     .optix-booking-feedback__head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
     .optix-booking-feedback__eyebrow{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;opacity:.62}
     .optix-booking-feedback__bay{font-size:17px;font-weight:800;margin-top:3px}
@@ -159,34 +153,50 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord) {
   if (!anchor) return;
 
   const panel = existing || document.createElement("section");
-  panel.className = "optix-booking-feedback";
   const status = record.syncStatus || "pending";
-  const label = record.errorCode && ERROR_LABELS[record.errorCode]
+  const isSynced = status === "synced";
+  const isCancelled = status === "cancelled";
+  const hasFailed = status === "failed" || status === "token_expired";
+  panel.className = `optix-booking-feedback${isSynced ? " optix-booking-feedback--synced" : hasFailed ? " optix-booking-feedback--failed" : ""}`;
+
+  const heading = isSynced ? record.bayName || "Resource booked" : "Resource not booked";
+  const statusLabel = isSynced
+    ? "Booked in Optix"
+    : isCancelled
+      ? "Cancelled in Optix"
+      : "No active Optix booking";
+  const failureSummary = record.errorCode && ERROR_LABELS[record.errorCode]
     ? ERROR_LABELS[record.errorCode]
-    : STATUS_LABELS[status] || "Not booked in Optix";
-  const bay = record.bayName || (status === "synced" ? "Resource booked" : "Resource booking");
-  const lastChecked = record.lastSyncedAt || record.lastAttemptedAt || record.updatedAt || null;
-  const canBook = Boolean(record.calendarItemId) && status !== "synced" && status !== "cancelled";
-  const visibleMessage = status === "failed" || status === "token_expired" ? record.errorMessage || "" : "";
+    : "Previous booking attempt failed";
+  const visibleMessage = hasFailed
+    ? `${failureSummary}${record.errorMessage ? `: ${record.errorMessage}` : ""}`
+    : "";
+  const lastChecked = isSynced
+    ? record.lastSyncedAt || record.updatedAt || null
+    : record.lastAttemptedAt || record.updatedAt || null;
+  const metaLabel = isSynced ? "Last confirmed" : hasFailed ? "Last attempt" : "Last checked";
+  const canBook = Boolean(record.calendarItemId) && !isSynced && !isCancelled;
+  const bookLabel = hasFailed ? "Retry resource booking" : "Book resource";
 
   panel.innerHTML = `
     <div class="optix-booking-feedback__head">
       <div>
         <div class="optix-booking-feedback__eyebrow">Resource booking</div>
-        <div class="optix-booking-feedback__bay">${esc(bay)}</div>
-        <div class="optix-booking-feedback__status">${esc(label)}</div>
+        <div class="optix-booking-feedback__bay">${esc(heading)}</div>
+        <div class="optix-booking-feedback__status">${esc(statusLabel)}</div>
       </div>
     </div>
     ${visibleMessage ? `<div class="optix-booking-feedback__message">${esc(visibleMessage)}</div>` : ""}
-    <div class="optix-booking-feedback__meta">Last checked: ${esc(formatTime(lastChecked))}</div>
+    <div class="optix-booking-feedback__meta">${esc(metaLabel)}: ${esc(formatTime(lastChecked))}</div>
     <div class="optix-booking-feedback__actions">
-      ${canBook ? `<button type="button" data-optix-book data-calendar-item-id="${esc(record.calendarItemId)}">Book resource</button>` : ""}
-      <button type="button" data-optix-refresh>Refresh status</button>
+      ${canBook ? `<button type="button" data-optix-book data-calendar-item-id="${esc(record.calendarItemId)}">${esc(bookLabel)}</button>` : ""}
+      <button type="button" data-optix-refresh>Reload status</button>
     </div>
     <details>
       <summary>Technical details</summary>
       <pre>Booking ID: ${esc(record.optixBookingId || "Not assigned")}
 Session ID: ${esc(record.optixBookingSessionId || "Not assigned")}
+Previous resource candidate: ${esc(record.bayName || "None")}
 Error code: ${esc(record.errorCode || "None")}
 ${esc(record.errorMessage || "")}</pre>
     </details>
