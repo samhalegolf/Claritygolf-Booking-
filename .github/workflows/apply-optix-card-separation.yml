@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/optix-book-button-feedback-separation
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
