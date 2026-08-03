@@ -12,6 +12,7 @@ import {
   syncGoogleCalendarChangesIfEnabled,
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
+import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
 import {
@@ -4637,6 +4638,9 @@ async function deleteCalendarItemById(id, context = null) {
   const current = await readCalendarState();
   if (context) assertAccountFeature(context.account, "coachCalendar");
   const existingItem = current.items.find((item) => item.id === cleanId);
+  if (existingItem?.kind === "appointment") {
+    await cancelOptixBayForCalendarItem(cleanId);
+  }
   if (context) {
     if (!existingItem) {
       throw Object.assign(new Error("Booking was not found in this workspace."), {
