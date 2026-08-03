@@ -1,0 +1,109 @@
+name: Apply Optix mobile click fix
+
+on:
+  push:
+    branches:
+      - fix/optix-book-button-mobile-click
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/optix-book-button-mobile-click
+
+      - name: Stop self-render loop and capture booking clicks
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('source/src/optix-booking-feedback.ts')
+          text = path.read_text()
+
+          if 'const markup = `' not in text:
+              anchor = '  panel.innerHTML = `'
+              if anchor not in text:
+                  raise SystemExit('panel markup anchor missing')
+              text = text.replace(anchor, '  const markup = `', 1)
+
+              end_anchor = '  `;\n\n  if (!existing) anchor.insertAdjacentElement("afterend", panel);'
+              end_replacement = '  `;\n\n  if (panel.innerHTML !== markup) panel.innerHTML = markup;\n  if (!existing) anchor.insertAdjacentElement("afterend", panel);'
+              if end_anchor not in text:
+                  raise SystemExit('panel markup end anchor missing')
+              text = text.replace(end_anchor, end_replacement, 1)
+
+          old_install = '''  const observer = new MutationObserver(() => void refreshPanels());
+  observer.observe(document.body, { childList: true, subtree: true });
+  document.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-optix-refresh]")) void refreshPanels();
+    const book = target.closest<HTMLButtonElement>("[data-optix-book]");
+    if (book) void bookResource(book);
+  });'''
+          new_install = '''  let refreshScheduled = false;
+  const scheduleRefresh = () => {
+    if (refreshScheduled) return;
+    refreshScheduled = true;
+    window.requestAnimationFrame(() => {
+      refreshScheduled = false;
+      void refreshPanels();
+    });
+  };
+  const observer = new MutationObserver((mutations) => {
+    const externalMutation = mutations.some((mutation) => {
+      const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+      return !target?.closest(".optix-booking-feedback");
+    });
+    if (externalMutation) scheduleRefresh();
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const refresh = target.closest<HTMLElement>("[data-optix-refresh]");
+    if (refresh) {
+      event.preventDefault();
+      event.stopPropagation();
+      void refreshPanels();
+      return;
+    }
+    const book = target.closest<HTMLButtonElement>("[data-optix-book]");
+    if (book) {
+      event.preventDefault();
+      event.stopPropagation();
+      void bookResource(book);
+    }
+  }, true);'''
+          if new_install not in text:
+              if old_install not in text:
+                  raise SystemExit('observer/click handler anchor missing')
+              text = text.replace(old_install, new_install, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Install dependencies
+        working-directory: source
+        run: npm ci
+
+      - name: Build
+        working-directory: source
+        run: npm run build
+
+      - name: Commit validated repair
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Repair already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source/src/optix-booking-feedback.ts
+          git commit -m "Fix Optix booking button on mobile"
+          git push origin HEAD:fix/optix-book-button-mobile-click
