@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/cancel-optix-bay-before-lesson
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
