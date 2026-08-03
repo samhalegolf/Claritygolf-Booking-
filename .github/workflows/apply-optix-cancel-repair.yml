@@ -1,0 +1,78 @@
+name: Apply Optix cancellation repair
+
+on:
+  push:
+    branches:
+      - fix/cancel-optix-bay-before-lesson
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/cancel-optix-bay-before-lesson
+
+      - name: Wire Optix cancellation before lesson deletion
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          booking = Path('source/netlify/functions/booking-core.mts')
+          text = booking.read_text()
+          import_anchor = 'import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";\n'
+          import_line = 'import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";\n'
+          if import_line not in text:
+              if import_anchor not in text:
+                  raise SystemExit('booking-core import anchor missing')
+              text = text.replace(import_anchor, import_anchor + import_line, 1)
+
+          delete_anchor = '''  const existingItem = current.items.find((item) => item.id === cleanId);\n  if (context) {'''
+          delete_replacement = '''  const existingItem = current.items.find((item) => item.id === cleanId);\n  if (existingItem?.kind === "appointment") {\n    await cancelOptixBayForCalendarItem(cleanId);\n  }\n  if (context) {'''
+          if delete_replacement not in text:
+              if delete_anchor not in text:
+                  raise SystemExit('booking-core delete anchor missing')
+              text = text.replace(delete_anchor, delete_replacement, 1)
+          booking.write_text(text)
+
+          public = Path('source/netlify/functions/public-cancel.mts')
+          text = public.read_text()
+          public_import_anchor = 'import { notifyBookingEvent } from "./notification-engine.mts";\n'
+          if import_line not in text:
+              if public_import_anchor not in text:
+                  raise SystemExit('public-cancel import anchor missing')
+              text = text.replace(public_import_anchor, public_import_anchor + import_line, 1)
+
+          cancel_anchor = '''  // The booking deletion is authoritative. Settings, Google Calendar and\n  // notification updates are secondary and must not turn a completed\n  // cancellation into a misleading failure response.\n  await deleteVerifiedAppointment(appointmentId, account.id);'''
+          cancel_replacement = '''  // Release any linked Optix bay before removing the Clarity lesson. A failed\n  // Optix cancellation deliberately leaves the lesson in place for a safe retry.\n  await cancelOptixBayForCalendarItem(appointmentId);\n\n  // The booking deletion is authoritative after linked resources are released.\n  // Settings, Google Calendar and notification updates remain secondary.\n  await deleteVerifiedAppointment(appointmentId, account.id);'''
+          if cancel_replacement not in text:
+              if cancel_anchor not in text:
+                  raise SystemExit('public-cancel cancellation anchor missing')
+              text = text.replace(cancel_anchor, cancel_replacement, 1)
+          public.write_text(text)
+          PY
+
+      - name: Install dependencies
+        working-directory: source
+        run: npm ci
+
+      - name: Build
+        working-directory: source
+        run: npm run build
+
+      - name: Commit validated repair
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Repair already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source/netlify/functions/booking-core.mts source/netlify/functions/public-cancel.mts
+          git commit -m "Cancel Optix bay before deleting lesson"
+          git push origin HEAD:fix/cancel-optix-bay-before-lesson
