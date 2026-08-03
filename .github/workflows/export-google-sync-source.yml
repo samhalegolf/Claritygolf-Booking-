@@ -1,4 +1,4 @@
-name: Export Google sync source
+name: Apply Google Calendar sync repair
 
 on:
   pull_request:
@@ -6,18 +6,29 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  repair:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/upload-artifact@v4
         with:
-          name: google-sync-source
-          path: |
-            source/netlify/functions/google-calendar-sync.mts
-            source/netlify/functions/booking-core.mts
-            source/netlify/functions/public-cancel.mts
-          if-no-files-found: error
+          ref: ${{ github.head_ref }}
+      - name: Apply targeted sync patch
+        run: git apply repair-google-calendar-sync.patch
+      - name: Install dependencies
+        working-directory: source
+        run: npm ci
+      - name: Build
+        working-directory: source
+        run: npm run build
+      - name: Commit validated repair
+        run: |
+          rm repair-google-calendar-sync.patch
+          rm .github/workflows/export-google-sync-source.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source/netlify/functions/google-calendar-sync.mts source/netlify/functions/booking-core.mts source/netlify/functions/public-cancel.mts repair-google-calendar-sync.patch .github/workflows/export-google-sync-source.yml
+          git commit -m "Use targeted Google Calendar sync"
+          git push origin HEAD:${{ github.head_ref }}
