@@ -1,0 +1,74 @@
+name: Apply Optix card separation
+
+on:
+  push:
+    branches:
+      - fix/optix-book-button-feedback-separation
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/optix-book-button-feedback-separation
+
+      - name: Separate booking action from status feedback
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('source/src/optix-booking-feedback.ts')
+          text = path.read_text()
+
+          text = text.replace(
+          '''  serviceId: string;\n  bayName: string;''',
+          '''  serviceId: string;\n  week: number;\n  day: number;\n  start: number;\n  duration: number;\n  bayName: string;''',
+          1,
+          )
+
+          old_score = '''function scoreRecord(record: OptixStatusRecord, cardText: string) {\n  const text = cardText.toLowerCase();\n  let score = 0;\n  if (record.client && text.includes(record.client.toLowerCase())) score += 5;\n  if (record.title && text.includes(record.title.toLowerCase())) score += 3;\n  if (record.serviceId && text.includes(record.serviceId.toLowerCase())) score += 1;\n  return score;\n}\n'''
+          new_score = '''function slotDate(record: OptixStatusRecord) {\n  const date = new Date(Date.UTC(2026, 5, 1));\n  date.setUTCDate(date.getUTCDate() + Number(record.week || 0) * 7 + Number(record.day || 0));\n  return date;\n}\n\nfunction minuteLabel(minutes: number) {\n  const hour24 = Math.floor(Number(minutes || 0) / 60);\n  const minute = Number(minutes || 0) % 60;\n  const suffix = hour24 >= 12 ? "pm" : "am";\n  const hour12 = hour24 % 12 || 12;\n  return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;\n}\n\nfunction scoreRecord(record: OptixStatusRecord, cardText: string) {\n  const text = cardText.toLowerCase().replace(/\\s+/g, " ");\n  let score = 0;\n  if (record.client && text.includes(record.client.toLowerCase())) score += 20;\n  if (record.title && text.includes(record.title.toLowerCase())) score += 8;\n  if (record.serviceId && text.includes(record.serviceId.toLowerCase())) score += 2;\n\n  const date = slotDate(record);\n  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(date).toLowerCase();\n  const monthDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(date).toLowerCase();\n  const start = minuteLabel(record.start);\n  const end = minuteLabel(record.start + record.duration);\n  if (text.includes(weekday)) score += 6;\n  if (text.includes(monthDay)) score += 12;\n  if (text.includes(start)) score += 12;\n  if (text.includes(end)) score += 4;\n  return score;\n}\n'''
+          if old_score not in text:
+              raise SystemExit('scoreRecord anchor missing')
+          text = text.replace(old_score, new_score, 1)
+
+          old_select = '''function selectUnambiguousRecord(records: OptixStatusRecord[], card: HTMLElement) {\n  const ranked = records\n    .map((record) => ({ record, score: scoreRecord(record, card.textContent || "") }))\n    .filter((entry) => entry.score > 0)\n    .sort((a, b) => b.score - a.score);\n  if (!ranked.length) return null;\n  if (ranked.length > 1 && ranked[0].score === ranked[1].score) return null;\n  return ranked[0].record;\n}\n'''
+          new_select = '''function selectUnambiguousRecord(records: OptixStatusRecord[], card: HTMLElement) {\n  const ranked = records\n    .map((record) => ({ record, score: scoreRecord(record, card.textContent || "") }))\n    .filter((entry) => entry.score >= 20)\n    .sort((a, b) => b.score - a.score);\n  if (!ranked.length) return null;\n  if (ranked.length > 1 && ranked[0].score === ranked[1].score) return null;\n  return ranked[0].record;\n}\n'''
+          if old_select not in text:
+              raise SystemExit('record selection anchor missing')
+          text = text.replace(old_select, new_select, 1)
+
+          old_book = '''  try {\n    await fetch("/api/optix-booking-reconcile", {\n      method: "POST",\n      credentials: "same-origin",\n      headers: { "content-type": "application/json" },\n      body: JSON.stringify({ forceRetry: true, calendarItemId, source: "manual-book-resource" }),\n    });\n  } finally {\n    await refreshPanels();\n  }\n'''
+          new_book = '''  try {\n    const response = await fetch("/api/optix-booking-reconcile", {\n      method: "POST",\n      credentials: "same-origin",\n      headers: { "content-type": "application/json" },\n      body: JSON.stringify({ forceRetry: true, calendarItemId, source: "manual-book-resource" }),\n    });\n    if (!response.ok && response.status !== 207) {\n      const payload = await response.json().catch(() => ({}));\n      throw new Error(payload?.message || "Optix resource booking failed.");\n    }\n  } catch (error) {\n    button.disabled = false;\n    button.textContent = error instanceof Error ? error.message : "Booking failed";\n  } finally {\n    await refreshPanels();\n  }\n'''
+          if old_book not in text:
+              raise SystemExit('bookResource anchor missing')
+          text = text.replace(old_book, new_book, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Install dependencies
+        working-directory: source
+        run: npm ci
+
+      - name: Build
+        working-directory: source
+        run: npm run build
+
+      - name: Commit validated repair
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Repair already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source/src/optix-booking-feedback.ts
+          git commit -m "Separate Optix booking action from status feedback"
+          git push origin HEAD:fix/optix-book-button-feedback-separation
