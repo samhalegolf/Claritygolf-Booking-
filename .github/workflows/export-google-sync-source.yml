@@ -1,9 +1,9 @@
 name: Export Google sync source
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/google-calendar-targeted-sync
+      - main
 
 permissions:
   contents: read
