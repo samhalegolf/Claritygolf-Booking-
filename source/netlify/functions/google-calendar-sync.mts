@@ -509,6 +509,29 @@ function googleEventForItem(item: any, settings: Record<string, string>, service
   };
 }
 
+function googleEventFingerprint(event: any) {
+  return createHash("sha256").update(JSON.stringify(event)).digest("hex");
+}
+
+async function createGoogleEvent(accessToken: string, calendarId: string, eventId: string, event: any) {
+  const encodedCalendarId = encodeURIComponent(calendarId);
+  try {
+    return await googleCalendarRequest(accessToken, `/calendars/${encodedCalendarId}/events?sendUpdates=none`, {
+      method: "POST",
+      body: JSON.stringify({ ...event, id: eventId }),
+    });
+  } catch (error: any) {
+    // A previous attempt may have created the deterministic id before its map
+    // was persisted. Recover with one replacement rather than creating a duplicate.
+    if (error?.status !== 409) throw error;
+    return googleCalendarRequest(
+      accessToken,
+      `/calendars/${encodedCalendarId}/events/${encodeURIComponent(eventId)}?sendUpdates=none`,
+      { method: "PUT", body: JSON.stringify(event) },
+    );
+  }
+}
+
 async function googleCalendarRequest(accessToken: string, path: string, options: RequestInit = {}) {
   const response = await fetch(`https://www.googleapis.com/calendar/v3${path}`, {
     ...options,
@@ -529,22 +552,19 @@ async function googleCalendarRequest(accessToken: string, path: string, options:
   return data;
 }
 
-async function upsertGoogleEvent(accessToken: string, calendarId: string, eventId: string, event: any) {
-  const encodedCalendarId = encodeURIComponent(calendarId);
-  const encodedEventId = encodeURIComponent(eventId);
-  try {
-    return await googleCalendarRequest(
-      accessToken,
-      `/calendars/${encodedCalendarId}/events/${encodedEventId}?sendUpdates=none`,
-      { method: "PUT", body: JSON.stringify(event) },
-    );
-  } catch (error: any) {
-    if (error?.status !== 404) throw error;
-    return googleCalendarRequest(accessToken, `/calendars/${encodedCalendarId}/events?sendUpdates=none`, {
-      method: "POST",
-      body: JSON.stringify(event),
-    });
-  }
+async function upsertGoogleEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  event: any,
+  existsInMap: boolean,
+) {
+  if (!existsInMap) return createGoogleEvent(accessToken, calendarId, eventId, event);
+  return googleCalendarRequest(
+    accessToken,
+    `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=none`,
+    { method: "PUT", body: JSON.stringify(event) },
+  );
 }
 
 async function deleteGoogleEvent(accessToken: string, calendarId: string, eventId: string) {
@@ -585,6 +605,7 @@ export async function syncGoogleCalendarNow() {
   const calendarId = cleanCalendarId(settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"));
   const previousMap = parseJson<Record<string, string>>(settings.googleCalendarEventMapJson, {});
   const nextMap: Record<string, string> = {};
+  const nextHashMap: Record<string, string> = {};
   const accessToken = await getGoogleAccessToken(resolveGoogleAccountId(settings), googleScopes);
   let upserted = 0;
   let deleted = 0;
@@ -593,8 +614,9 @@ export async function syncGoogleCalendarNow() {
     for (const item of items) {
       const eventId = previousMap[item.id] || googleEventId(item.id);
       const event = googleEventForItem(item, settings, services, locations, eventId);
-      const result = await upsertGoogleEvent(accessToken, calendarId, eventId, event);
+      const result = await upsertGoogleEvent(accessToken, calendarId, eventId, event, Boolean(previousMap[item.id]));
       nextMap[item.id] = result.id || eventId;
+      nextHashMap[item.id] = googleEventFingerprint(event);
       upserted += 1;
     }
 
@@ -607,6 +629,7 @@ export async function syncGoogleCalendarNow() {
     await setSettings({
       googleCalendarId: calendarId,
       googleCalendarEventMapJson: JSON.stringify(nextMap),
+      googleCalendarEventHashMapJson: JSON.stringify(nextHashMap),
       googleCalendarLastSyncAt: syncedAt,
       googleCalendarLastSyncStatus: "synced",
       googleCalendarLastSyncError: "",
@@ -630,15 +653,113 @@ export async function syncGoogleCalendarNow() {
   }
 }
 
-export async function syncGoogleCalendarIfEnabled() {
-  if (googleCalendarManualSyncOnly) {
-    return { ...(await getGoogleCalendarSyncStatus()), ok: true, skipped: true, reason: "manual_sync_only" };
+type GoogleCalendarChange = { id: string; action?: "upsert" | "delete" };
+let googleCalendarChangeQueue: Promise<unknown> = Promise.resolve();
+
+async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[]) {
+  const normalizedById = new Map<string, { id: string; action: "upsert" | "delete" }>();
+  for (const change of changes) {
+    const id = cleanString(change?.id, "", 140);
+    if (!id) continue;
+    normalizedById.set(id, {
+      id,
+      action: change?.action === "delete" ? "delete" : "upsert",
+    });
   }
+  const normalized = Array.from(normalizedById.values());
+  if (!normalized.length) {
+    return { ...(await getGoogleCalendarSyncStatus()), ok: true, skipped: true, reason: "no_google_relevant_changes" };
+  }
+
   const settings = await readSettings();
   if (settings.googleCalendarAutoSync === "false") {
     return { ...(await getGoogleCalendarSyncStatus()), ok: true, skipped: true, reason: "auto_sync_disabled" };
   }
-  return syncGoogleCalendarNow();
+  const status = await getGoogleCalendarSyncStatus();
+  if (!status.configured) return { ...status, ok: false, skipped: true, reason: "google_oauth_not_configured" };
+  if (status.legacyMigrationRequired) return { ...status, ok: false, skipped: true, reason: "google_calendar_token_migration_required" };
+  if (!status.connected) return { ...status, ok: false, skipped: true, reason: "google_calendar_not_connected" };
+
+  const calendarId = cleanCalendarId(settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"));
+  const eventMap = parseJson<Record<string, string>>(settings.googleCalendarEventMapJson, {});
+  const hashMap = parseJson<Record<string, string>>(settings.googleCalendarEventHashMapJson, {});
+  const services = parseJson(settings.servicesJson, defaultServices);
+  const locations = parseJson(settings.locationsJson, []);
+  const accessToken = await getGoogleAccessToken(resolveGoogleAccountId(settings), googleScopes);
+  let upserted = 0;
+  let deleted = 0;
+  let unchanged = 0;
+
+  try {
+    for (const change of normalized) {
+      let item: any = null;
+      if (change.action !== "delete") {
+        const rows = await supabase("calendar_items", {
+          query: `select=*&id=eq.${encodeURIComponent(change.id)}&limit=1`,
+        });
+        item = rows[0] ? rowToItem(rows[0]) : null;
+      }
+      if (change.action === "delete" || !item || isCancelledGroupSessionItem(item)) {
+        const eventId = eventMap[change.id] || googleEventId(change.id);
+        if (await deleteGoogleEvent(accessToken, calendarId, eventId)) deleted += 1;
+        delete eventMap[change.id];
+        delete hashMap[change.id];
+        continue;
+      }
+
+      const eventId = eventMap[item.id] || googleEventId(item.id);
+      const event = googleEventForItem(item, settings, services, locations, eventId);
+      const fingerprint = googleEventFingerprint(event);
+      if (eventMap[item.id] && hashMap[item.id] === fingerprint) {
+        unchanged += 1;
+        continue;
+      }
+      const result = await upsertGoogleEvent(accessToken, calendarId, eventId, event, Boolean(eventMap[item.id]));
+      eventMap[item.id] = result.id || eventId;
+      hashMap[item.id] = fingerprint;
+      upserted += 1;
+    }
+
+    const syncedAt = nowIso();
+    await setSettings({
+      googleCalendarId: calendarId,
+      googleCalendarEventMapJson: JSON.stringify(eventMap),
+      googleCalendarEventHashMapJson: JSON.stringify(hashMap),
+      googleCalendarLastSyncAt: syncedAt,
+      googleCalendarLastSyncStatus: "synced",
+      googleCalendarLastSyncError: "",
+    });
+    return {
+      ...(await getGoogleCalendarSyncStatus()),
+      ok: true,
+      skipped: upserted === 0 && deleted === 0,
+      reason: upserted === 0 && deleted === 0 ? "unchanged" : undefined,
+      upserted,
+      deleted,
+      unchanged,
+      syncedAt,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Google Calendar sync failed.";
+    await setSettings({
+      googleCalendarLastSyncAt: nowIso(),
+      googleCalendarLastSyncStatus: "failed",
+      googleCalendarLastSyncError: message,
+    });
+    throw error;
+  }
+}
+
+export function syncGoogleCalendarChangesIfEnabled(changes: GoogleCalendarChange[]) {
+  const run = googleCalendarChangeQueue.then(() => syncGoogleCalendarChangesNow(changes));
+  googleCalendarChangeQueue = run.catch(() => undefined);
+  return run;
+}
+
+// Kept for compatibility. Automatic callers should pass explicit item changes;
+// a no-argument call must never fall back to a full-calendar rebuild.
+export async function syncGoogleCalendarIfEnabled() {
+  return { ...(await getGoogleCalendarSyncStatus()), ok: true, skipped: true, reason: "targeted_change_required" };
 }
 
 function json(value: unknown, status = 200) {
@@ -656,7 +777,7 @@ export default async function googleCalendarSyncHandler(req: Request) {
     }
     if (req.method === "POST") {
       if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-      return json(await syncGoogleCalendarIfEnabled());
+      return json(await syncGoogleCalendarNow());
     }
     return json({ error: "method_not_allowed", message: "Use GET for status or POST to sync." }, 405);
   } catch (error: any) {
