@@ -1,6 +1,6 @@
 import type { Config, Context } from "@netlify/functions";
 
-import { syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
+import { syncGoogleCalendarChangesIfEnabled } from "./google-calendar-sync.mts";
 import { notifyBookingEvent } from "./notification-engine.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 
@@ -246,7 +246,7 @@ async function cancelPublicBooking(payload: any) {
 
 function schedulePublicCancelSideEffects(context: Context | undefined, appointment: any) {
   const task = (async () => {
-    await syncGoogleCalendarIfEnabled().catch((error) =>
+    await syncGoogleCalendarChangesIfEnabled([{ id: appointment.id, action: "delete" }]).catch((error) =>
       console.error("public_cancel:google_calendar_sync_failed", error),
     );
 
