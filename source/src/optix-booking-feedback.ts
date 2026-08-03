@@ -125,21 +125,21 @@ function findOpenBookingCards() {
   return Array.from(cards);
 }
 
-function renderPanel(card: HTMLElement, record: OptixStatusRecord | null) {
+function renderPanel(card: HTMLElement, record: OptixStatusRecord) {
   const existing = card.querySelector<HTMLElement>(".optix-booking-feedback");
   const anchor = findBookingRecordsAnchor(card);
   if (!anchor) return;
 
   const panel = existing || document.createElement("section");
   panel.className = "optix-booking-feedback";
-  const status = record?.syncStatus || "pending";
-  const label = record?.errorCode && ERROR_LABELS[record.errorCode]
+  const status = record.syncStatus || "pending";
+  const label = record.errorCode && ERROR_LABELS[record.errorCode]
     ? ERROR_LABELS[record.errorCode]
     : STATUS_LABELS[status] || "Not booked in Optix";
-  const bay = record?.bayName || (status === "synced" ? "Resource booked" : "Resource booking");
-  const lastChecked = record?.lastSyncedAt || record?.lastAttemptedAt || record?.updatedAt || null;
-  const canBook = Boolean(record?.calendarItemId) && status !== "synced" && status !== "cancelled";
-  const visibleMessage = status === "failed" || status === "token_expired" ? record?.errorMessage || "" : "";
+  const bay = record.bayName || (status === "synced" ? "Resource booked" : "Resource booking");
+  const lastChecked = record.lastSyncedAt || record.lastAttemptedAt || record.updatedAt || null;
+  const canBook = Boolean(record.calendarItemId) && status !== "synced" && status !== "cancelled";
+  const visibleMessage = status === "failed" || status === "token_expired" ? record.errorMessage || "" : "";
 
   panel.innerHTML = `
     <div class="optix-booking-feedback__head">
@@ -152,19 +152,33 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord | null) {
     ${visibleMessage ? `<div class="optix-booking-feedback__message">${esc(visibleMessage)}</div>` : ""}
     <div class="optix-booking-feedback__meta">Last checked: ${esc(formatTime(lastChecked))}</div>
     <div class="optix-booking-feedback__actions">
-      ${canBook ? `<button type="button" data-optix-book data-calendar-item-id="${esc(record?.calendarItemId || "")}">Book resource</button>` : ""}
+      ${canBook ? `<button type="button" data-optix-book data-calendar-item-id="${esc(record.calendarItemId)}">Book resource</button>` : ""}
       <button type="button" data-optix-refresh>Refresh status</button>
     </div>
     <details>
       <summary>Technical details</summary>
-      <pre>Booking ID: ${esc(record?.optixBookingId || "Not assigned")}
-Session ID: ${esc(record?.optixBookingSessionId || "Not assigned")}
-Error code: ${esc(record?.errorCode || "None")}
-${esc(record?.errorMessage || "")}</pre>
+      <pre>Booking ID: ${esc(record.optixBookingId || "Not assigned")}
+Session ID: ${esc(record.optixBookingSessionId || "Not assigned")}
+Error code: ${esc(record.errorCode || "None")}
+${esc(record.errorMessage || "")}</pre>
     </details>
   `;
 
   if (!existing) anchor.insertAdjacentElement("afterend", panel);
+}
+
+function clearPanel(card: HTMLElement) {
+  card.querySelector<HTMLElement>(".optix-booking-feedback")?.remove();
+}
+
+function selectUnambiguousRecord(records: OptixStatusRecord[], card: HTMLElement) {
+  const ranked = records
+    .map((record) => ({ record, score: scoreRecord(record, card.textContent || "") }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+  if (!ranked.length) return null;
+  if (ranked.length > 1 && ranked[0].score === ranked[1].score) return null;
+  return ranked[0].record;
 }
 
 async function bookResource(button: HTMLButtonElement) {
@@ -188,10 +202,12 @@ async function refreshPanels() {
   const records = await loadRecords();
   const cards = findOpenBookingCards();
   for (const card of cards) {
-    const ranked = records
-      .map((record) => ({ record, score: scoreRecord(record, card.textContent || "") }))
-      .sort((a, b) => b.score - a.score);
-    renderPanel(card, ranked[0]?.score > 0 ? ranked[0].record : records[0] || null);
+    const record = selectUnambiguousRecord(records, card);
+    if (!record) {
+      clearPanel(card);
+      continue;
+    }
+    renderPanel(card, record);
   }
 }
 
