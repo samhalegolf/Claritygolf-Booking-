@@ -47,4 +47,4 @@ jobs:
           echo "NETLIFY_AUTH_TOKEN=$token" >> "$GITHUB_ENV"
 
       - name: Deploy current main to production
-        run: npx -y netlify-cli@latest deploy --build --prod --site "$NETLIFY_SITE_ID" --message "Deploy native Optix integration settings"
+        run: npx -y netlify-cli@latest deploy --build --prod --site "$NETLIFY_SITE_ID" --message "Deploy targeted Google Calendar sync repair"
