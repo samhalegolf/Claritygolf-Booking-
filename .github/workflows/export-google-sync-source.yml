@@ -1,0 +1,23 @@
+name: Export Google sync source
+
+on:
+  push:
+    branches:
+      - fix/google-calendar-targeted-sync
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: google-sync-source
+          path: |
+            source/netlify/functions/google-calendar-sync.mts
+            source/netlify/functions/booking-core.mts
+            source/netlify/functions/public-cancel.mts
+          if-no-files-found: error
