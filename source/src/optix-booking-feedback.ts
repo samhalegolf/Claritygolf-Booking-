@@ -3,6 +3,10 @@ type OptixStatusRecord = {
   client: string;
   title: string;
   serviceId: string;
+  week: number;
+  day: number;
+  start: number;
+  duration: number;
   bayName: string;
   syncStatus: string;
   errorCode: string;
@@ -82,12 +86,36 @@ async function loadRecords(): Promise<OptixStatusRecord[]> {
   return Array.isArray(payload?.records) ? payload.records : [];
 }
 
+function slotDate(record: OptixStatusRecord) {
+  const date = new Date(Date.UTC(2026, 5, 1));
+  date.setUTCDate(date.getUTCDate() + Number(record.week || 0) * 7 + Number(record.day || 0));
+  return date;
+}
+
+function minuteLabel(minutes: number) {
+  const hour24 = Math.floor(Number(minutes || 0) / 60);
+  const minute = Number(minutes || 0) % 60;
+  const suffix = hour24 >= 12 ? "pm" : "am";
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
+}
+
 function scoreRecord(record: OptixStatusRecord, cardText: string) {
-  const text = cardText.toLowerCase();
+  const text = cardText.toLowerCase().replace(/\s+/g, " ");
   let score = 0;
-  if (record.client && text.includes(record.client.toLowerCase())) score += 5;
-  if (record.title && text.includes(record.title.toLowerCase())) score += 3;
-  if (record.serviceId && text.includes(record.serviceId.toLowerCase())) score += 1;
+  if (record.client && text.includes(record.client.toLowerCase())) score += 20;
+  if (record.title && text.includes(record.title.toLowerCase())) score += 8;
+  if (record.serviceId && text.includes(record.serviceId.toLowerCase())) score += 2;
+
+  const date = slotDate(record);
+  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(date).toLowerCase();
+  const monthDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(date).toLowerCase();
+  const start = minuteLabel(record.start);
+  const end = minuteLabel(record.start + record.duration);
+  if (text.includes(weekday)) score += 6;
+  if (text.includes(monthDay)) score += 12;
+  if (text.includes(start)) score += 12;
+  if (text.includes(end)) score += 4;
   return score;
 }
 
@@ -174,7 +202,7 @@ function clearPanel(card: HTMLElement) {
 function selectUnambiguousRecord(records: OptixStatusRecord[], card: HTMLElement) {
   const ranked = records
     .map((record) => ({ record, score: scoreRecord(record, card.textContent || "") }))
-    .filter((entry) => entry.score > 0)
+    .filter((entry) => entry.score >= 20)
     .sort((a, b) => b.score - a.score);
   if (!ranked.length) return null;
   if (ranked.length > 1 && ranked[0].score === ranked[1].score) return null;
@@ -187,12 +215,19 @@ async function bookResource(button: HTMLButtonElement) {
   button.disabled = true;
   button.textContent = "Booking…";
   try {
-    await fetch("/api/optix-booking-reconcile", {
+    const response = await fetch("/api/optix-booking-reconcile", {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ forceRetry: true, calendarItemId, source: "manual-book-resource" }),
     });
+    if (!response.ok && response.status !== 207) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload?.message || "Optix resource booking failed.");
+    }
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = error instanceof Error ? error.message : "Booking failed";
   } finally {
     await refreshPanels();
   }
