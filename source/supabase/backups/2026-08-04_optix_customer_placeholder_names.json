@@ -1,0 +1,34 @@
+{
+  "reason": "Optix's 'External Calendar' webhook events only send a free-text `title` (e.g. 'Jayden Rollinson - 1 Hour Golf Lesson'), not the member.first_name/member_first_name/member_name fields normalizeOptixLessonEvent() looked for. The name parser found nothing, fell back to the 'Optix customer' placeholder, and wrote calendar_items rows directly under that generic label instead of the real customer name. This was not an overwrite of a pre-existing Clarity lesson (external_booking_links has no link to a non-optix-prefixed calendar_items row) -- the lessons were created wrong from the start by the same bug fixed in commit 562c58e ('Stop Optix from overwriting Clarity lessons').",
+  "fixed_at": "2026-08-04",
+  "table": "calendar_items",
+  "project": "clarity-caddie (zcevluithwoumvafhmct)",
+  "method": "Real names recovered from the untouched raw payload_json.title stored in optix_webhook_events (receipt-only, never mutated by the buggy processor) and written back to calendar_items.client/title.",
+  "rows_restored": [
+    { "id": "optix-1593fca6-3163-4787-b3c3-9def31f28a3e", "external_booking_id": "13295727", "restored_name": "Jayden Rollinson" },
+    { "id": "optix-f4231c28-85d1-4183-bf2d-82ad59467826", "external_booking_id": "13296327", "restored_name": "Carey McGregor" },
+    { "id": "optix-ce7eed5b-0d0c-421d-8db9-c27e6308506d", "external_booking_id": "13296328", "restored_name": "Brian Fox" },
+    { "id": "optix-cf652ac5-6160-4f6d-a1c7-bbabccbcdab9", "external_booking_id": "13296329", "restored_name": "Gurschl" },
+    { "id": "optix-7d8af117-fd4d-4d22-96d0-feec13d241d0", "external_booking_id": "13296330", "restored_name": "Hale" },
+    { "id": "optix-b39b695b-24ca-4bdc-8f50-dc7d53a76bd5", "external_booking_id": "13296331", "restored_name": "Gurschl" },
+    { "id": "optix-d076d8ac-83bc-42f5-84f5-1108af9f38bb", "external_booking_id": "13296333", "restored_name": "Alan and Monique Sutcliffe" },
+    { "id": "optix-8c1f9062-c805-42bd-913c-15aff6397316", "external_booking_id": "13296334", "restored_name": "Liam Hamill" },
+    { "id": "optix-9ecaa95e-c31f-47ed-8f17-7ed17f55ad03", "external_booking_id": "13296335", "restored_name": "Roy Godwin" },
+    { "id": "optix-291d218d-e73f-43c2-a4bc-391e3555c8c9", "external_booking_id": "13296336", "restored_name": "Chi" },
+    { "id": "optix-eead34a8-edca-49b7-a877-93fa448a75b9", "external_booking_id": "13296337", "restored_name": "Dave Fendall" },
+    { "id": "optix-574b88a2-0064-4b30-86e6-5355f16f0ea1", "external_booking_id": "13296338", "restored_name": "Hale" },
+    { "id": "optix-c2e33ea1-32ec-40c0-bbda-55ec332c6bd5", "external_booking_id": "13296339", "restored_name": "Samuel Hale" },
+    { "id": "optix-b3bbfd90-3930-49bb-8f33-48393082dae2", "external_booking_id": "13296340", "restored_name": "Sam Wu" },
+    { "id": "optix-a046ab66-a691-4338-8ffe-37fc135fe255", "external_booking_id": "13296341", "restored_name": "Shaun Kao" },
+    { "id": "optix-0866c1d5-c69f-4713-b79e-621d82864ba1", "external_booking_id": "13296343", "restored_name": "Adam King" },
+    { "id": "optix-b2a790c7-497c-4069-b95c-4f5b3e09755e", "external_booking_id": "13292847", "restored_name": "Carey McGregor" }
+  ],
+  "not_recoverable": [
+    { "id": "optix-dbc5a4e2-2b83-44c5-bd70-fc9d33b29636", "external_booking_id": "13296332", "note": "Optix's own payload title was already 'Optix customer - Swing Analysis'; no real name was ever sent." },
+    { "id": "optix-09405da4-aa3b-43b8-a648-8e5cdf9e0a2b", "external_booking_id": "13296342", "note": "Same as above." }
+  ],
+  "not_touched": {
+    "person_id": "Left every row's existing person_id (mostly the generic 'Optix customer' placeholder person e2d64666-d738-4393-9885-2474c5ed42fa) unchanged. Several recovered names (Shaun Kao, Adam King, Brian Fox, Samuel Hale) already have multiple duplicate rows in `people` from an earlier dedup bug (see 2026-07-14_duplicate_person_65f7b016.json); guessing which duplicate to relink risked compounding that mess. Only calendar_items.client/title were restored."
+  },
+  "restore_sql": "update public.calendar_items as c set client = v.name, title = v.name, updated_at = now() from (values ('optix-1593fca6-3163-4787-b3c3-9def31f28a3e','Jayden Rollinson'), ('optix-f4231c28-85d1-4183-bf2d-82ad59467826','Carey McGregor'), ('optix-ce7eed5b-0d0c-421d-8db9-c27e6308506d','Brian Fox'), ('optix-cf652ac5-6160-4f6d-a1c7-bbabccbcdab9','Gurschl'), ('optix-7d8af117-fd4d-4d22-96d0-feec13d241d0','Hale'), ('optix-b39b695b-24ca-4bdc-8f50-dc7d53a76bd5','Gurschl'), ('optix-d076d8ac-83bc-42f5-84f5-1108af9f38bb','Alan and Monique Sutcliffe'), ('optix-8c1f9062-c805-42bd-913c-15aff6397316','Liam Hamill'), ('optix-9ecaa95e-c31f-47ed-8f17-7ed17f55ad03','Roy Godwin'), ('optix-291d218d-e73f-43c2-a4bc-391e3555c8c9','Chi'), ('optix-eead34a8-edca-49b7-a877-93fa448a75b9','Dave Fendall'), ('optix-574b88a2-0064-4b30-86e6-5355f16f0ea1','Hale'), ('optix-c2e33ea1-32ec-40c0-bbda-55ec332c6bd5','Samuel Hale'), ('optix-b3bbfd90-3930-49bb-8f33-48393082dae2','Sam Wu'), ('optix-a046ab66-a691-4338-8ffe-37fc135fe255','Shaun Kao'), ('optix-0866c1d5-c69f-4713-b79e-621d82864ba1','Adam King'), ('optix-b2a790c7-497c-4069-b95c-4f5b3e09755e','Carey McGregor')) as v(id, name) where c.id = v.id;"
+}
