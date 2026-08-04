@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createCalendarItemFromOptixBooking, normalizeOptixLessonEvent, type OptixLessonMapping } from "./optix-origin.mts";
+import { assertProcessableEvent, createCalendarItemFromOptixBooking, normalizeOptixLessonEvent, type OptixLessonMapping } from "./optix-origin.mts";
 import { buildOptixAppointmentInput } from "./optix-reconcile.mts";
 
 const mapping: OptixLessonMapping = {
@@ -29,6 +29,33 @@ test("workspace 637949 creates the canonical calendar appointment contract", () 
   assert.equal(item.person_id, "person-1");
   assert.equal(item.external_booking_id, "swing-123");
   assert.equal(item.external_sync_state, "bay_required");
+});
+
+test("reads Optix form payload member_name instead of creating an Optix customer placeholder", () => {
+  const event = normalizeOptixLessonEvent({
+    ...payload,
+    member: undefined,
+    member_name: "Samuel",
+    member_last_name: "Hale",
+    member_email: "sam@example.com",
+  });
+  assert.equal(event.firstName, "Samuel");
+  assert.equal(event.lastName, "Hale");
+  const item = createCalendarItemFromOptixBooking(event, mapping, { itemId: "optix-item-2", personId: "person-2" });
+  assert.equal(item.client, "Samuel Hale");
+  assert.notEqual(item.client, "Optix customer");
+});
+
+test("rejects a nameless Optix event rather than pooling it into a fake customer", () => {
+  const event = normalizeOptixLessonEvent({
+    ...payload,
+    member: undefined,
+    member_name: "",
+    member_last_name: "",
+    member_email: "",
+    member_phone: "",
+  });
+  assert.throws(() => assertProcessableEvent(event), (error: any) => error?.code === "missing_customer_identity");
 });
 
 test("generated item is accepted unchanged by the existing Book resource payload builder", () => {
