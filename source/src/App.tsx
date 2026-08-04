@@ -1251,11 +1251,14 @@ type GoogleCalendarDebugEntry = {
   outcome: "success" | "failed" | "skipped";
   reason: string;
   stage: string;
+  mode: "full" | "targeted";
   calendarId: string;
   accountEmail: string;
   itemCount: number;
   upserted: number;
   deleted: number;
+  unchanged: number;
+  changes: Array<{ id: string; action: string }>;
   request: GoogleCalendarDebugRequest | null;
   requestIsSample: boolean;
   error: GoogleCalendarDebugError | null;
@@ -3736,6 +3739,7 @@ const googleCalendarTriggerLabels: Record<string, string> = {
   public_booking_state_write: "Public booking state write",
   public_booking_cancelled: "Public booking cancelled",
   auto_sync: "Automatic sync",
+  legacy_untargeted_call: "Legacy untargeted sync call",
 };
 
 const googleCalendarSkipReasonLabels: Record<string, string> = {
@@ -3744,14 +3748,20 @@ const googleCalendarSkipReasonLabels: Record<string, string> = {
   google_oauth_not_configured: "GOOGLE_CALENDAR_CLIENT_ID / _SECRET are missing from the environment.",
   google_calendar_not_connected: "No connected Google account with calendar scope.",
   google_calendar_token_migration_required: "Legacy plaintext token must be migrated before syncing.",
+  no_google_relevant_changes: "The save touched nothing Google Calendar cares about, so no request was sent.",
+  unchanged: "Every targeted booking already matched Google, so no request was needed.",
+  targeted_change_required:
+    "A caller asked for a sync without naming which bookings changed. Full rebuilds must now be explicit, so nothing was sent.",
 };
 
 const googleCalendarStageLabels: Record<string, string> = {
   preflight: "Before any request",
   access_token: "Refreshing access token",
+  changes: "Resolving changed bookings",
   upsert: "Writing events",
   upsert_update: "PUT event (update)",
-  upsert_insert: "POST event (insert)",
+  create_insert: "POST event (insert)",
+  create_replace: "PUT event (409 recovery)",
   delete: "Deleting event",
   complete: "Finished",
 };
@@ -23534,7 +23544,9 @@ function App() {
                                 ? failureCode
                                 : entry.outcome === "skipped"
                                   ? entry.reason || "skipped"
-                                  : `${entry.upserted} sent · ${entry.deleted} removed`}
+                                  : `${entry.upserted} sent · ${entry.deleted} removed${
+                                      entry.unchanged ? ` · ${entry.unchanged} unchanged` : ""
+                                    }`}
                             </span>
                           </button>
 
@@ -23558,8 +23570,16 @@ function App() {
                                   <code>{entry.accountEmail || "—"}</code>
                                 </div>
                                 <div>
-                                  <span>Bookings in run</span>
+                                  <span>Sync mode</span>
+                                  <code>{entry.mode === "full" ? "Full rebuild" : "Targeted changes"}</code>
+                                </div>
+                                <div>
+                                  <span>{entry.mode === "full" ? "Bookings in run" : "Bookings targeted"}</span>
                                   <code>{entry.itemCount}</code>
+                                </div>
+                                <div>
+                                  <span>Already up to date</span>
+                                  <code>{entry.unchanged || 0}</code>
                                 </div>
                                 <div>
                                   <span>Finished</span>
@@ -23567,9 +23587,19 @@ function App() {
                                 </div>
                               </div>
 
-                              {entry.outcome === "skipped" ? (
+                              {entry.changes?.length ? (
+                                <section className="gcal-debug-block">
+                                  <h4>Bookings this run targeted</h4>
+                                  <pre className="gcal-debug-pre">
+                                    {entry.changes.map((change) => `${change.action.toUpperCase()}  ${change.id}`).join("\n")}
+                                  </pre>
+                                </section>
+                              ) : null}
+
+                              {entry.outcome === "skipped" || (entry.outcome === "success" && entry.reason) ? (
                                 <p className="gcal-debug-note">
-                                  {googleCalendarSkipReasonLabels[entry.reason] || `Skipped: ${entry.reason || "unknown reason"}`}
+                                  {googleCalendarSkipReasonLabels[entry.reason] ||
+                                    `${entry.outcome === "skipped" ? "Skipped" : "Nothing sent"}: ${entry.reason || "unknown reason"}`}
                                 </p>
                               ) : null}
 
