@@ -37,6 +37,14 @@ export type OptixLessonEvent = {
 
 type SupabaseConfig = { url: string; key: string };
 
+type ExistingOptixCalendarItem = {
+  id: string;
+  origin: string;
+  external_provider: string;
+  external_booking_id: string;
+  person_id: string;
+};
+
 function env(name: string) {
   return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
 }
@@ -60,8 +68,8 @@ export async function optixOriginRequest(path: string, init: RequestInit = {}) {
       ...(init.headers || {}),
     },
   });
-  const text = await response.text();
-  const body = text ? JSON.parse(text) : null;
+  const raw = await response.text();
+  const body = raw ? JSON.parse(raw) : null;
   if (!response.ok) {
     const message = body?.message || body?.error || `Supabase request failed (${response.status}).`;
     throw Object.assign(new Error(message), { code: body?.code || "supabase_error", status: response.status });
@@ -104,7 +112,7 @@ export function normalizeOptixLessonEvent(payload: any): OptixLessonEvent {
     startIso,
     endIso,
     timezone: text(pick(payload, "timezone", "time_zone", "booking.timezone")) || "Pacific/Auckland",
-    firstName: text(pick(payload, "member.first_name", "member_first_name", "customer.first_name", "first_name")),
+    firstName: text(pick(payload, "member.first_name", "member_name", "member_first_name", "customer.first_name", "first_name")),
     lastName: text(pick(payload, "member.last_name", "member_last_name", "customer.last_name", "last_name")),
     email: text(pick(payload, "member.email", "member_email", "customer.email", "email")).toLowerCase(),
     phone: text(pick(payload, "member.phone", "member.phone_number", "member_phone", "customer.phone", "phone")),
@@ -120,6 +128,9 @@ export function assertProcessableEvent(event: OptixLessonEvent) {
   if (!event.workspaceId) throw Object.assign(new Error("Optix workspace ID is missing."), { code: "missing_workspace_id" });
   if (event.eventType !== "member_booking_cancelled" && (!event.startIso || !event.endIso)) {
     throw Object.assign(new Error("Optix booking timestamps are invalid."), { code: "invalid_timestamps" });
+  }
+  if (event.eventType !== "member_booking_cancelled" && !event.firstName && !event.lastName && !event.email && !event.phone) {
+    throw Object.assign(new Error("Optix customer identity is missing. The event was not allowed to create or update a lesson."), { code: "missing_customer_identity" });
   }
 }
 
@@ -142,10 +153,15 @@ export function calendarSlot(startIso: string, timezone: string) {
   };
 }
 
+function customerName(event: OptixLessonEvent) {
+  return [event.firstName, event.lastName].filter(Boolean).join(" ").trim() || event.email || event.phone;
+}
+
 export function createCalendarItemFromOptixBooking(event: OptixLessonEvent, mapping: OptixLessonMapping, ids: { itemId: string; personId: string }) {
   const slot = calendarSlot(event.startIso, event.timezone);
   const derivedDuration = Math.max(1, Math.round((Date.parse(event.endIso) - Date.parse(event.startIso)) / 60_000));
-  const client = [event.firstName, event.lastName].filter(Boolean).join(" ").trim() || event.email || "Optix customer";
+  const client = customerName(event);
+  if (!client) throw Object.assign(new Error("Optix customer identity is missing."), { code: "missing_customer_identity" });
   return {
     id: ids.itemId,
     account_id: mapping.accountId,
@@ -182,6 +198,22 @@ export async function findOptixLink(externalBookingId: string, purpose = "lesson
   return Array.isArray(rows) ? rows[0] || null : null;
 }
 
+async function readLinkedCalendarItem(itemId: string): Promise<ExistingOptixCalendarItem | null> {
+  const rows = await optixOriginRequest(`calendar_items?id=eq.${encodeURIComponent(itemId)}&select=id,origin,external_provider,external_booking_id,person_id&limit=1`);
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+async function assertSafeExistingLink(existing: any, event: OptixLessonEvent) {
+  const itemId = text(existing?.clarity_item_id);
+  if (!itemId) throw Object.assign(new Error("The Optix link has no Clarity appointment ID."), { code: "unsafe_existing_link" });
+  const item = await readLinkedCalendarItem(itemId);
+  const ownsItem = item && item.origin === "optix" && item.external_provider === "optix" && item.external_booking_id === event.bookingId;
+  if (!ownsItem) {
+    throw Object.assign(new Error("Blocked an Optix event from overwriting an appointment that Optix does not exclusively own."), { code: "unsafe_existing_link" });
+  }
+  return item;
+}
+
 async function findMapping(event: OptixLessonEvent): Promise<OptixLessonMapping | null> {
   const query = `external_booking_mappings?provider=eq.optix&organisation_id=eq.${encodeURIComponent(event.organisationId)}&workspace_id=eq.${encodeURIComponent(event.workspaceId)}&limit=1`;
   let rows = await optixOriginRequest(query);
@@ -209,9 +241,17 @@ async function findMapping(event: OptixLessonEvent): Promise<OptixLessonMapping 
 }
 
 async function resolvePerson(event: OptixLessonEvent, accountId: string) {
-  const name = [event.firstName, event.lastName].filter(Boolean).join(" ").trim() || event.email || "Optix customer";
-  const rows = await optixOriginRequest(`people?account_id=eq.${encodeURIComponent(accountId)}&name=ilike.${encodeURIComponent(name)}&select=id,name,email,phone&limit=20`);
-  const match = Array.isArray(rows) ? rows.find((row) => (!event.email || String(row.email || "").toLowerCase() === event.email) && (!event.phone || !row.phone || row.phone === event.phone)) : null;
+  const name = customerName(event);
+  if (!name) throw Object.assign(new Error("Optix customer identity is missing."), { code: "missing_customer_identity" });
+  let rows: any[] = [];
+  if (event.email) {
+    rows = await optixOriginRequest(`people?account_id=eq.${encodeURIComponent(accountId)}&email=ilike.${encodeURIComponent(event.email)}&select=id,name,email,phone&limit=5`);
+  } else if (event.phone) {
+    rows = await optixOriginRequest(`people?account_id=eq.${encodeURIComponent(accountId)}&phone=eq.${encodeURIComponent(event.phone)}&select=id,name,email,phone&limit=5`);
+  } else {
+    rows = await optixOriginRequest(`people?account_id=eq.${encodeURIComponent(accountId)}&name=ilike.${encodeURIComponent(name)}&select=id,name,email,phone&limit=5`);
+  }
+  const match = Array.isArray(rows) ? rows[0] : null;
   if (match?.id) return String(match.id);
   const personId = randomUUID();
   await optixOriginRequest("people", { method: "POST", body: JSON.stringify([{ id: personId, account_id: accountId, name, email: event.email || null, phone: event.phone || null, source: "optix" }]) });
@@ -248,6 +288,7 @@ export async function processStoredOptixEvent(eventKey: string, payload: unknown
       await updateEvent(eventKey, { processing_status: "ignored", failure_code: "missing_lesson_link", processed_at: new Date().toISOString() });
       return { status: "ignored", reason: "missing_lesson_link" };
     }
+    const linkedItem = existing ? await assertSafeExistingLink(existing, event) : null;
     const itemId = existing?.clarity_item_id || `optix-${randomUUID()}`;
     if (event.eventType === "member_booking_cancelled" && existing) {
       await optixOriginRequest(`calendar_items?id=eq.${encodeURIComponent(itemId)}`, {
@@ -261,13 +302,13 @@ export async function processStoredOptixEvent(eventKey: string, payload: unknown
       await updateEvent(eventKey, { processing_status: "processed", clarity_item_id: itemId, failure_code: null, error_message: null, processed_at: new Date().toISOString() });
       return { status: "processed", clarityItemId: itemId, created: false, mapping, item: { id: itemId, status: "cancelled" } };
     }
-    const personId = existing?.person_id || await resolvePerson(event, mapping.accountId);
+    const personId = existing?.person_id || linkedItem?.person_id || await resolvePerson(event, mapping.accountId);
     const item = createCalendarItemFromOptixBooking(event, mapping, { itemId, personId });
-    await optixOriginRequest("calendar_items?on_conflict=id", {
-      method: "POST",
-      headers: { prefer: "resolution=merge-duplicates,return=representation" },
-      body: JSON.stringify([item]),
-    });
+    if (existing) {
+      await optixOriginRequest(`calendar_items?id=eq.${encodeURIComponent(itemId)}`, { method: "PATCH", body: JSON.stringify(item) });
+    } else {
+      await optixOriginRequest("calendar_items", { method: "POST", body: JSON.stringify([item]) });
+    }
     await optixOriginRequest("external_booking_links?on_conflict=provider,purpose,external_booking_id", {
       method: "POST",
       headers: { prefer: "resolution=merge-duplicates,return=representation" },
