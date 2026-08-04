@@ -1258,6 +1258,7 @@ type GoogleCalendarDebugEntry = {
   upserted: number;
   deleted: number;
   unchanged: number;
+  retries: number;
   changes: Array<{ id: string; action: string }>;
   request: GoogleCalendarDebugRequest | null;
   requestIsSample: boolean;
@@ -3805,6 +3806,27 @@ function googleCalendarFailureCode(error: GoogleCalendarDebugError | null) {
     !error.httpStatus && !error.googleStatus ? error.providerCode : "",
   ].filter(Boolean);
   return parts.join(" · ") || error.providerCode || "Unknown failure";
+}
+
+/** Plain-English follow-up for the Google failures that have a known cause. */
+function googleCalendarFailureHint(error: GoogleCalendarDebugError | null) {
+  if (!error) return "";
+  if (error.googleReason === "rateLimitExceeded" || error.googleReason === "userRateLimitExceeded") {
+    return "Google throttled the write burst. Clarity now retries these with backoff and skips bookings Google already matches, so a repeat sync should send far fewer requests. If it keeps happening, the calendar is being written to faster than Google allows.";
+  }
+  if (error.googleReason === "quotaExceeded") {
+    return "The daily Google Calendar quota is spent. Retrying will not help until it resets.";
+  }
+  if (error.googleStatus === "PERMISSION_DENIED" || error.httpStatus === 403) {
+    return "The connected Google account is not allowed to write to this calendar. Check the calendar ID and reconnect if the account changed.";
+  }
+  if (error.httpStatus === 401 || error.providerCode === "GOOGLE_TOKEN_REFRESH_FAILED") {
+    return "Google rejected the stored credentials. Disconnect and reconnect the Google account.";
+  }
+  if (error.providerCode === "GOOGLE_SCOPE_MISSING") {
+    return "The connection is missing the calendar scope. Reconnect and accept the calendar permission.";
+  }
+  return "";
 }
 
 function formatDebugJson(value: unknown) {
@@ -23582,6 +23604,10 @@ function App() {
                                   <code>{entry.unchanged || 0}</code>
                                 </div>
                                 <div>
+                                  <span>Rate-limit retries</span>
+                                  <code>{entry.retries || 0}</code>
+                                </div>
+                                <div>
                                   <span>Finished</span>
                                   <code>{googleCalendarDebugTimestamp(entry.finishedAt)}</code>
                                 </div>
@@ -23637,6 +23663,9 @@ function App() {
                                     </div>
                                   </div>
                                   <p className="gcal-debug-message">{entry.error.googleMessage || entry.error.message}</p>
+                                  {googleCalendarFailureHint(entry.error) ? (
+                                    <p className="gcal-debug-note">{googleCalendarFailureHint(entry.error)}</p>
+                                  ) : null}
                                   {entry.error.rawBody ? (
                                     <>
                                       <h5>Raw response body</h5>

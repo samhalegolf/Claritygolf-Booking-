@@ -184,6 +184,7 @@ export type GoogleCalendarDebugEntry = {
   upserted: number;
   deleted: number;
   unchanged: number;
+  retries: number;
   changes: Array<{ id: string; action: string }>;
   request: GoogleCalendarDebugRequest | null;
   requestIsSample: boolean;
@@ -287,6 +288,7 @@ function newDebugEntry(overrides: Partial<Omit<GoogleCalendarDebugEntry, "id">>)
     upserted: 0,
     deleted: 0,
     unchanged: 0,
+    retries: 0,
     changes: [],
     request: null,
     requestIsSample: false,
@@ -753,16 +755,19 @@ async function createGoogleEvent(
   eventId: string,
   event: any,
   debugMeta: { itemId: string; itemLabel: string },
+  budget?: GoogleRetryBudget,
 ) {
   const encodedCalendarId = encodeURIComponent(calendarId);
   const insertPath = `/calendars/${encodedCalendarId}/events?sendUpdates=none`;
   const replacePath = `/calendars/${encodedCalendarId}/events/${encodeURIComponent(eventId)}?sendUpdates=none`;
   const insertBody = { ...event, id: eventId };
   try {
-    return await googleCalendarRequest(accessToken, insertPath, {
-      method: "POST",
-      body: JSON.stringify(insertBody),
-    });
+    return await googleCalendarRequest(
+      accessToken,
+      insertPath,
+      { method: "POST", body: JSON.stringify(insertBody) },
+      budget,
+    );
   } catch (error: any) {
     // A previous attempt may have created the deterministic id before its map
     // was persisted. Recover with one replacement rather than creating a duplicate.
@@ -774,7 +779,12 @@ async function createGoogleEvent(
       );
     }
     try {
-      return await googleCalendarRequest(accessToken, replacePath, { method: "PUT", body: JSON.stringify(event) });
+      return await googleCalendarRequest(
+        accessToken,
+        replacePath,
+        { method: "PUT", body: JSON.stringify(event) },
+        budget,
+      );
     } catch (replaceError: any) {
       throw attachDebugRequest(
         replaceError,
@@ -785,21 +795,68 @@ async function createGoogleEvent(
   }
 }
 
-async function googleCalendarRequest(accessToken: string, path: string, options: RequestInit = {}) {
+// Google throttles bursts of writes to a single calendar and answers with
+// 403 rateLimitExceeded (domain usageLimits) rather than 429. The documented
+// remedy is exponential backoff with jitter, so retry those in place instead
+// of failing the whole run. A daily quotaExceeded is NOT retried -- waiting
+// milliseconds cannot clear a 24h quota.
+const retryableGoogleReasons = new Set(["rateLimitExceeded", "userRateLimitExceeded"]);
+const maxGoogleRetriesPerRequest = 3;
+// Whole-run ceiling on time spent sleeping. Netlify kills the function well
+// before Google stops throttling, so cap the total rather than per request.
+const googleRetryBudgetMs = 8000;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function isRetryableGoogleFailure(status: number, failure: Pick<GoogleCalendarDebugError, "googleReason">) {
+  if (status === 429) return true;
+  if (status >= 500) return true;
+  return status === 403 && retryableGoogleReasons.has(failure.googleReason);
+}
+
+/** Per-run retry accounting, so one slow calendar cannot stall the function. */
+type GoogleRetryBudget = { spentMs: number; retries: number };
+
+async function googleCalendarRequest(
+  accessToken: string,
+  path: string,
+  options: RequestInit = {},
+  budget?: GoogleRetryBudget,
+) {
   const url = `https://www.googleapis.com/calendar/v3${path}`;
   const method = options.method || "GET";
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  const text = await response.text();
-  const data = safeJsonParse(text);
-  if (!response.ok) {
+
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    const text = await response.text();
+    const data = safeJsonParse(text);
+    if (response.ok) return data ?? {};
+
     const failure = describeGoogleFailure(response, text, data);
+    const canRetry =
+      attempt < maxGoogleRetriesPerRequest &&
+      isRetryableGoogleFailure(response.status, failure) &&
+      (!budget || budget.spentMs < googleRetryBudgetMs);
+    if (canRetry) {
+      // 500ms, 1s, 2s, plus jitter so parallel callers do not resynchronise.
+      const delay = Math.min(500 * 2 ** attempt, 4000) + Math.floor(Math.random() * 250);
+      if (budget) {
+        budget.spentMs += delay;
+        budget.retries += 1;
+      }
+      await sleep(delay);
+      continue;
+    }
+
     // Google's own message when it sends JSON, otherwise the status line --
     // a 502 HTML error page used to blow up in JSON.parse and mask the status.
     const message =
@@ -810,9 +867,9 @@ async function googleCalendarRequest(accessToken: string, path: string, options:
       googleError: data,
       googleFailure: failure,
       googleRequest: { method, url },
+      googleRetries: budget?.retries || attempt,
     });
   }
-  return data ?? {};
 }
 
 async function upsertGoogleEvent(
@@ -822,11 +879,12 @@ async function upsertGoogleEvent(
   event: any,
   existsInMap: boolean,
   debugMeta: { itemId: string; itemLabel: string },
+  budget?: GoogleRetryBudget,
 ) {
-  if (!existsInMap) return createGoogleEvent(accessToken, calendarId, eventId, event, debugMeta);
+  if (!existsInMap) return createGoogleEvent(accessToken, calendarId, eventId, event, debugMeta, budget);
   const updatePath = `/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=none`;
   try {
-    return await googleCalendarRequest(accessToken, updatePath, { method: "PUT", body: JSON.stringify(event) });
+    return await googleCalendarRequest(accessToken, updatePath, { method: "PUT", body: JSON.stringify(event) }, budget);
   } catch (error: any) {
     throw attachDebugRequest(
       error,
@@ -836,12 +894,18 @@ async function upsertGoogleEvent(
   }
 }
 
-async function deleteGoogleEvent(accessToken: string, calendarId: string, eventId: string, itemId = "") {
+async function deleteGoogleEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  itemId = "",
+  budget?: GoogleRetryBudget,
+) {
   const encodedCalendarId = encodeURIComponent(calendarId);
   const encodedEventId = encodeURIComponent(eventId);
   const path = `/calendars/${encodedCalendarId}/events/${encodedEventId}?sendUpdates=none`;
   try {
-    await googleCalendarRequest(accessToken, path, { method: "DELETE" });
+    await googleCalendarRequest(accessToken, path, { method: "DELETE" }, budget);
     return true;
   } catch (error: any) {
     if (error?.status === 404 || error?.status === 410) return false;
@@ -900,6 +964,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
   if (!status.connected) return skip("google_calendar_not_connected");
 
   const previousMap = parseJson<Record<string, string>>(settings.googleCalendarEventMapJson, {});
+  const previousHashMap = parseJson<Record<string, string>>(settings.googleCalendarEventHashMapJson, {});
   const nextMap: Record<string, string> = {};
   const nextHashMap: Record<string, string> = {};
   // Even a clean run keeps one representative event body, so you can inspect
@@ -907,7 +972,22 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
   let sampleRequest: GoogleCalendarDebugRequest | null = null;
   let upserted = 0;
   let deleted = 0;
+  let unchanged = 0;
   let stage = "access_token";
+  const retryBudget: GoogleRetryBudget = { spentMs: 0, retries: 0 };
+
+  // Partial progress has to survive a mid-run failure. Without this, events
+  // already created in Google are absent from the stored map, so the next run
+  // POSTs them again, takes a 409, and recovers with a PUT -- two requests per
+  // item instead of none, which makes each retry hit the rate limit sooner
+  // than the last.
+  const persistProgress = async (extra: Record<string, unknown>) =>
+    setSettings({
+      googleCalendarId: calendarId,
+      googleCalendarEventMapJson: JSON.stringify({ ...previousMap, ...nextMap }),
+      googleCalendarEventHashMapJson: JSON.stringify({ ...previousHashMap, ...nextHashMap }),
+      ...extra,
+    });
 
   try {
     const accessToken = await getGoogleAccessToken(resolveGoogleAccountId(settings), googleScopes);
@@ -917,6 +997,16 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
       const eventId = previousMap[item.id] || googleEventId(item.id);
       const event = googleEventForItem(item, settings, services, locations, eventId);
       const exists = Boolean(previousMap[item.id]);
+      const fingerprint = googleEventFingerprint(event);
+      // The targeted path already did this; the full rebuild did not, so
+      // "Sync now" re-sent every booking on every press and burned the
+      // per-calendar write quota even when nothing had changed.
+      if (exists && previousHashMap[item.id] === fingerprint) {
+        nextMap[item.id] = previousMap[item.id];
+        nextHashMap[item.id] = fingerprint;
+        unchanged += 1;
+        continue;
+      }
       if (!sampleRequest) {
         sampleRequest = describeGoogleRequest(
           exists ? "PUT" : "POST",
@@ -929,19 +1019,26 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
           { itemId: item.id, itemLabel: event.summary },
         );
       }
-      const result = await upsertGoogleEvent(accessToken, calendarId, eventId, event, exists, {
-        itemId: item.id,
-        itemLabel: event.summary,
-      });
+      const result = await upsertGoogleEvent(
+        accessToken,
+        calendarId,
+        eventId,
+        event,
+        exists,
+        { itemId: item.id, itemLabel: event.summary },
+        retryBudget,
+      );
       nextMap[item.id] = result.id || eventId;
-      nextHashMap[item.id] = googleEventFingerprint(event);
+      nextHashMap[item.id] = fingerprint;
       upserted += 1;
     }
 
     stage = "delete";
     for (const [itemId, eventId] of Object.entries(previousMap)) {
       if (nextMap[itemId]) continue;
-      if (await deleteGoogleEvent(accessToken, calendarId, eventId, itemId)) deleted += 1;
+      if (await deleteGoogleEvent(accessToken, calendarId, eventId, itemId, retryBudget)) deleted += 1;
+      delete nextMap[itemId];
+      delete nextHashMap[itemId];
     }
 
     const syncedAt = nowIso();
@@ -958,6 +1055,8 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
         stage: "complete",
         upserted,
         deleted,
+        unchanged,
+        retries: retryBudget.retries,
         request: sampleRequest,
         requestIsSample: true,
       }),
@@ -969,11 +1068,12 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
       skipped: false,
       upserted,
       deleted,
+      unchanged,
       syncedAt,
     };
   } catch (error: any) {
     const debugError = debugErrorFromUnknown(error, stage);
-    await setSettings({
+    await persistProgress({
       googleCalendarLastSyncAt: nowIso(),
       googleCalendarLastSyncStatus: "failed",
       googleCalendarLastSyncError: debugError.message,
@@ -983,6 +1083,8 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
         stage: debugError.stage,
         upserted,
         deleted,
+        unchanged,
+        retries: retryBudget.retries,
         // The request that actually failed when we have it; otherwise the
         // first payload of the run (token failures never reach a request).
         request: error?.debugRequest || sampleRequest,
@@ -1069,6 +1171,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
   let deleted = 0;
   let unchanged = 0;
   let stage = "access_token";
+  const retryBudget: GoogleRetryBudget = { spentMs: 0, retries: 0 };
 
   try {
     const accessToken = await getGoogleAccessToken(resolveGoogleAccountId(settings), googleScopes);
@@ -1085,7 +1188,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
       if (change.action === "delete" || !item || isCancelledGroupSessionItem(item)) {
         const eventId = eventMap[change.id] || googleEventId(change.id);
         stage = "delete";
-        if (await deleteGoogleEvent(accessToken, calendarId, eventId, change.id)) deleted += 1;
+        if (await deleteGoogleEvent(accessToken, calendarId, eventId, change.id, retryBudget)) deleted += 1;
         delete eventMap[change.id];
         delete hashMap[change.id];
         continue;
@@ -1112,10 +1215,15 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
         );
       }
       stage = "upsert";
-      const result = await upsertGoogleEvent(accessToken, calendarId, eventId, event, exists, {
-        itemId: item.id,
-        itemLabel: event.summary,
-      });
+      const result = await upsertGoogleEvent(
+        accessToken,
+        calendarId,
+        eventId,
+        event,
+        exists,
+        { itemId: item.id, itemLabel: event.summary },
+        retryBudget,
+      );
       eventMap[item.id] = result.id || eventId;
       hashMap[item.id] = fingerprint;
       upserted += 1;
@@ -1138,6 +1246,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
         upserted,
         deleted,
         unchanged,
+        retries: retryBudget.retries,
         request: sampleRequest,
         requestIsSample: true,
       }),
@@ -1155,7 +1264,12 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
     };
   } catch (error: any) {
     const debugError = debugErrorFromUnknown(error, stage);
+    // eventMap/hashMap are mutated in place as each change succeeds, so saving
+    // them here keeps the work already accepted by Google and stops the next
+    // run from re-creating those events.
     await setSettings({
+      googleCalendarEventMapJson: JSON.stringify(eventMap),
+      googleCalendarEventHashMapJson: JSON.stringify(hashMap),
       googleCalendarLastSyncAt: nowIso(),
       googleCalendarLastSyncStatus: "failed",
       googleCalendarLastSyncError: debugError.message,
@@ -1166,6 +1280,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
         upserted,
         deleted,
         unchanged,
+        retries: retryBudget.retries,
         request: error?.debugRequest || sampleRequest,
         requestIsSample: !error?.debugRequest && Boolean(sampleRequest),
         error: debugError,
