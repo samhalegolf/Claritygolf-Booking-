@@ -8266,3 +8266,299 @@ button {
     align-items: stretch;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Google Calendar sync debug window (Settings -> Integrations)
+   Shows every sync trigger, the payload sent to the Calendar API, and the
+   failure code Google returned.
+--------------------------------------------------------------------------- */
+
+.gcal-debug .gcal-debug-intro {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.gcal-debug-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.gcal-debug-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gcal-debug-toggle input {
+  accent-color: var(--coach-primary, #1f9d55);
+  cursor: pointer;
+}
+
+.gcal-debug-error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gcal-debug-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.gcal-debug-facts > div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.gcal-debug-facts span {
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gcal-debug-facts strong {
+  color: var(--text);
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.gcal-debug-empty {
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.gcal-debug-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gcal-debug-entry {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.gcal-debug-entry.is-failed {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+}
+
+.gcal-debug-entry-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gcal-debug-entry-head:hover {
+  background: var(--panel-soft);
+}
+
+.gcal-debug-badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.gcal-debug-badge.is-success {
+  background: var(--success-soft);
+  color: color-mix(in srgb, var(--coach-primary, #1f9d55) 78%, var(--text));
+}
+
+.gcal-debug-badge.is-failed {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.gcal-debug-badge.is-skipped {
+  background: var(--block-bg);
+  color: var(--block-text);
+}
+
+.gcal-debug-entry-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gcal-debug-entry-main strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.gcal-debug-entry-main em {
+  color: var(--quiet);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.gcal-debug-entry-result {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  text-align: right;
+}
+
+.gcal-debug-entry.is-failed .gcal-debug-entry-result {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.gcal-debug-entry-body {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-soft);
+}
+
+.gcal-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.gcal-debug-grid > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gcal-debug-grid span {
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gcal-debug-grid code {
+  color: var(--text);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.gcal-debug-block {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.gcal-debug-block.is-error {
+  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
+  background: var(--danger-soft);
+}
+
+.gcal-debug-block h4 {
+  margin: 0;
+  color: var(--heading);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.gcal-debug-block h5 {
+  margin: 0;
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.gcal-debug-message {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.gcal-debug-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.gcal-debug-pre {
+  margin: 0;
+  max-height: 320px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--grid-bg);
+  color: var(--text);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.gcal-debug-entry-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 720px) {
+  .gcal-debug-entry-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .gcal-debug-entry-result {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+}

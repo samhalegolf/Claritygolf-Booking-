@@ -2,11 +2,15 @@ import type { Config } from "@netlify/functions";
 import { createHash } from "node:crypto";
 
 import {
+  clearGoogleCalendarDebugLog,
   createGoogleCalendarAuthUrl,
   disconnectGoogleCalendar,
   finishGoogleCalendarOAuth,
+  getGoogleCalendarDebugLog,
   getGoogleCalendarSyncStatus,
+  googleCalendarDebugErrorFromUnknown,
   migrateLegacyGoogleCalendarConnection,
+  setGoogleCalendarDebugEnabled,
   syncGoogleCalendarNow,
   updateGoogleCalendarSyncSettings,
 } from "./google-calendar-sync.mts";
@@ -127,10 +131,19 @@ export default async function handler(req: Request) {
     if (req.method === "GET" && action === "status") return json(await getGoogleCalendarSyncStatus(req));
     if ((req.method === "GET" || req.method === "POST") && action === "connect") return json(await createGoogleCalendarAuthUrl(req));
     if (req.method === "POST" && action === "migrate-provider-token") return json(await migrateLegacyGoogleCalendarConnection(req));
-    if (req.method === "POST" && action === "sync") return json(await syncGoogleCalendarNow());
+    if (req.method === "POST" && action === "sync") return json(await syncGoogleCalendarNow("manual_sync_now"));
     if (req.method === "POST" && action === "disconnect") return json(await disconnectGoogleCalendar(req));
     if ((req.method === "PUT" || req.method === "POST") && action === "settings") {
       return json(await updateGoogleCalendarSyncSettings(await parseBody(req)));
+    }
+
+    // Sync diagnostics: every trigger, the Google failure code, and the event
+    // body that was sent. Read by the Integrations tab debug window.
+    if (req.method === "GET" && action === "debug") return json(await getGoogleCalendarDebugLog());
+    if (req.method === "POST" && action === "debug/clear") return json(await clearGoogleCalendarDebugLog());
+    if (req.method === "POST" && action === "debug/toggle") {
+      const body = await parseBody(req);
+      return json(await setGoogleCalendarDebugEnabled(body?.enabled !== false));
     }
 
     return json({ error: "not_found", message: "Google Calendar route not found." }, 404);
@@ -144,6 +157,8 @@ export default async function handler(req: Request) {
       {
         error: status === 500 ? "google_calendar_error" : "request_error",
         message: error instanceof Error ? error.message : "Google Calendar request failed.",
+        failure: googleCalendarDebugErrorFromUnknown(error, action),
+        request: error?.debugRequest || null,
       },
       status,
     );

@@ -246,7 +246,7 @@ async function cancelPublicBooking(payload: any) {
 
 function schedulePublicCancelSideEffects(context: Context | undefined, appointment: any) {
   const task = (async () => {
-    await syncGoogleCalendarIfEnabled().catch((error) =>
+    await syncGoogleCalendarIfEnabled("public_booking_cancelled").catch((error) =>
       console.error("public_cancel:google_calendar_sync_failed", error),
     );
 

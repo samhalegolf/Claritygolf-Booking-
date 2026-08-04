@@ -127,6 +127,184 @@ function parseJson<T>(value: string | undefined, fallback: T): T {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Google Calendar sync debug log
+//
+// The settings row only ever kept the last error *message*, which loses the
+// thing you actually need when Google rejects a write: the HTTP status, the
+// error.code/status/reason Google returns, and the event body we sent. This
+// ring buffer records every sync trigger (including skipped ones, so you can
+// tell "never fired" apart from "fired and failed") with the failing request
+// payload attached.
+// ---------------------------------------------------------------------------
+
+const debugLogSettingKey = "googleCalendarDebugLogJson";
+const debugEnabledSettingKey = "googleCalendarDebugEnabled";
+const debugLogMaxEntries = 30;
+const debugLogMaxBytes = 220_000;
+
+export type GoogleCalendarDebugRequest = {
+  method: string;
+  url: string;
+  calendarId: string;
+  eventId: string;
+  itemId: string;
+  itemLabel: string;
+  payload: unknown;
+};
+
+export type GoogleCalendarDebugError = {
+  stage: string;
+  message: string;
+  httpStatus: number;
+  httpStatusText: string;
+  googleCode: string;
+  googleStatus: string;
+  googleReason: string;
+  googleDomain: string;
+  googleMessage: string;
+  googleErrors: unknown[];
+  providerCode: string;
+  rawBody: string;
+};
+
+export type GoogleCalendarDebugEntry = {
+  id: string;
+  trigger: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  outcome: "success" | "failed" | "skipped";
+  reason: string;
+  stage: string;
+  calendarId: string;
+  accountEmail: string;
+  itemCount: number;
+  upserted: number;
+  deleted: number;
+  request: GoogleCalendarDebugRequest | null;
+  requestIsSample: boolean;
+  error: GoogleCalendarDebugError | null;
+};
+
+function debugLoggingEnabled(settings?: Record<string, string>) {
+  return settings ? settings[debugEnabledSettingKey] !== "false" : true;
+}
+
+function safeJsonParse(text: string): any {
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pull the parts of a Google API error response that identify *which* failure
+ * it is: `error.code` (numeric), `error.status` (PERMISSION_DENIED,
+ * NOT_FOUND, ...) and `error.errors[0].reason` (invalidSharingRequest,
+ * rateLimitExceeded, forbiddenForServiceAccounts, ...).
+ */
+function describeGoogleFailure(response: Response, text: string, parsed: any): GoogleCalendarDebugError {
+  const googleError = parsed && typeof parsed === "object" ? parsed.error : undefined;
+  const detail = Array.isArray(googleError?.errors) ? googleError.errors[0] : undefined;
+  return {
+    stage: "",
+    message: "",
+    httpStatus: response.status,
+    httpStatusText: response.statusText || "",
+    googleCode: String(googleError?.code ?? response.status),
+    googleStatus: cleanString(googleError?.status, "", 80),
+    googleReason: cleanString(detail?.reason, "", 120),
+    googleDomain: cleanString(detail?.domain, "", 120),
+    googleMessage: cleanString(typeof googleError === "string" ? googleError : googleError?.message, "", 600),
+    googleErrors: Array.isArray(googleError?.errors) ? googleError.errors.slice(0, 5) : [],
+    providerCode: "",
+    rawBody: text.slice(0, 1500),
+  };
+}
+
+export function googleCalendarDebugErrorFromUnknown(error: any, fallbackStage: string) {
+  return debugErrorFromUnknown(error, fallbackStage);
+}
+
+function debugErrorFromUnknown(error: any, fallbackStage: string): GoogleCalendarDebugError {
+  const base: GoogleCalendarDebugError = error?.googleFailure
+    ? { ...error.googleFailure }
+    : {
+        stage: "",
+        message: "",
+        httpStatus: Number(error?.status) || 0,
+        httpStatusText: "",
+        googleCode: "",
+        googleStatus: "",
+        googleReason: "",
+        googleDomain: "",
+        googleMessage: "",
+        googleErrors: [],
+        providerCode: "",
+        rawBody: "",
+      };
+  base.stage = cleanString(error?.debugStage, fallbackStage, 60);
+  base.message = cleanString(error instanceof Error ? error.message : String(error || ""), "Google Calendar sync failed.", 600);
+  // getGoogleAccessToken / the provider store tag their own failures
+  // (GOOGLE_TOKEN_REFRESH_FAILED, GOOGLE_SCOPE_MISSING, ...).
+  base.providerCode = cleanString(error?.code, base.providerCode, 80);
+  return base;
+}
+
+async function readGoogleCalendarDebugEntries(settings?: Record<string, string>): Promise<GoogleCalendarDebugEntry[]> {
+  const map = settings || (await readSettings());
+  const entries = parseJson<GoogleCalendarDebugEntry[]>(map[debugLogSettingKey], []);
+  return Array.isArray(entries) ? entries : [];
+}
+
+function trimDebugEntries(entries: GoogleCalendarDebugEntry[]) {
+  let trimmed = entries.slice(0, debugLogMaxEntries);
+  while (trimmed.length > 1 && JSON.stringify(trimmed).length > debugLogMaxBytes) {
+    trimmed = trimmed.slice(0, trimmed.length - 1);
+  }
+  return trimmed;
+}
+
+async function recordGoogleCalendarDebugEntry(
+  entry: Omit<GoogleCalendarDebugEntry, "id">,
+  settings?: Record<string, string>,
+) {
+  try {
+    if (!debugLoggingEnabled(settings)) return;
+    const existing = await readGoogleCalendarDebugEntries();
+    const next = trimDebugEntries([{ id: randomUUID(), ...entry }, ...existing]);
+    await setSetting(debugLogSettingKey, JSON.stringify(next));
+  } catch (error) {
+    // The debug log must never be the reason a sync fails.
+    console.error("google_calendar_sync:debug_log_write_failed", error);
+  }
+}
+
+export async function getGoogleCalendarDebugLog() {
+  const settings = await readSettings();
+  return {
+    ok: true,
+    enabled: debugLoggingEnabled(settings),
+    maxEntries: debugLogMaxEntries,
+    autoSync: googleCalendarManualSyncOnly ? false : settings.googleCalendarAutoSync !== "false",
+    manualOnly: googleCalendarManualSyncOnly,
+    calendarId: settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"),
+    entries: await readGoogleCalendarDebugEntries(settings),
+  };
+}
+
+export async function clearGoogleCalendarDebugLog() {
+  await setSetting(debugLogSettingKey, "[]");
+  return getGoogleCalendarDebugLog();
+}
+
+export async function setGoogleCalendarDebugEnabled(enabled: boolean) {
+  await setSetting(debugEnabledSettingKey, enabled ? "true" : "false");
+  return getGoogleCalendarDebugLog();
+}
+
 function cleanUrl(value: unknown, fallback = "") {
   if (typeof value !== "string" || !value.trim()) return fallback;
   try {
@@ -510,7 +688,9 @@ function googleEventForItem(item: any, settings: Record<string, string>, service
 }
 
 async function googleCalendarRequest(accessToken: string, path: string, options: RequestInit = {}) {
-  const response = await fetch(`https://www.googleapis.com/calendar/v3${path}`, {
+  const url = `https://www.googleapis.com/calendar/v3${path}`;
+  const method = options.method || "GET";
+  const response = await fetch(url, {
     ...options,
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -519,45 +699,87 @@ async function googleCalendarRequest(accessToken: string, path: string, options:
     },
   });
   const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
+  const data = safeJsonParse(text);
   if (!response.ok) {
-    throw Object.assign(new Error(data.error?.message || data.error || `Google Calendar request failed ${response.status}`), {
+    const failure = describeGoogleFailure(response, text, data);
+    // Google's own message when it sends JSON, otherwise the status line --
+    // a 502 HTML error page used to blow up in JSON.parse and mask the status.
+    const message =
+      failure.googleMessage ||
+      `Google Calendar ${method} failed ${response.status}${failure.httpStatusText ? ` ${failure.httpStatusText}` : ""}`;
+    throw Object.assign(new Error(message), {
       status: response.status,
       googleError: data,
+      googleFailure: failure,
+      googleRequest: { method, url },
     });
   }
-  return data;
+  return data ?? {};
 }
 
-async function upsertGoogleEvent(accessToken: string, calendarId: string, eventId: string, event: any) {
+/** Tag an in-flight error with the request that produced it, for the debug log. */
+function attachDebugRequest(error: any, request: GoogleCalendarDebugRequest, stage: string) {
+  if (error && typeof error === "object") {
+    error.debugRequest = request;
+    error.debugStage = error.debugStage || stage;
+  }
+  return error;
+}
+
+async function upsertGoogleEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  event: any,
+  debugMeta: { itemId: string; itemLabel: string },
+) {
   const encodedCalendarId = encodeURIComponent(calendarId);
   const encodedEventId = encodeURIComponent(eventId);
+  const updatePath = `/calendars/${encodedCalendarId}/events/${encodedEventId}?sendUpdates=none`;
+  const insertPath = `/calendars/${encodedCalendarId}/events?sendUpdates=none`;
+  const describeRequest = (method: string, path: string): GoogleCalendarDebugRequest => ({
+    method,
+    url: `https://www.googleapis.com/calendar/v3${path}`,
+    calendarId,
+    eventId,
+    itemId: debugMeta.itemId,
+    itemLabel: debugMeta.itemLabel,
+    payload: event,
+  });
   try {
-    return await googleCalendarRequest(
-      accessToken,
-      `/calendars/${encodedCalendarId}/events/${encodedEventId}?sendUpdates=none`,
-      { method: "PUT", body: JSON.stringify(event) },
-    );
+    return await googleCalendarRequest(accessToken, updatePath, { method: "PUT", body: JSON.stringify(event) });
   } catch (error: any) {
-    if (error?.status !== 404) throw error;
-    return googleCalendarRequest(accessToken, `/calendars/${encodedCalendarId}/events?sendUpdates=none`, {
-      method: "POST",
-      body: JSON.stringify(event),
-    });
+    if (error?.status !== 404) throw attachDebugRequest(error, describeRequest("PUT", updatePath), "upsert_update");
+    try {
+      return await googleCalendarRequest(accessToken, insertPath, { method: "POST", body: JSON.stringify(event) });
+    } catch (insertError: any) {
+      throw attachDebugRequest(insertError, describeRequest("POST", insertPath), "upsert_insert");
+    }
   }
 }
 
-async function deleteGoogleEvent(accessToken: string, calendarId: string, eventId: string) {
+async function deleteGoogleEvent(accessToken: string, calendarId: string, eventId: string, itemId: string) {
   const encodedCalendarId = encodeURIComponent(calendarId);
   const encodedEventId = encodeURIComponent(eventId);
+  const path = `/calendars/${encodedCalendarId}/events/${encodedEventId}?sendUpdates=none`;
   try {
-    await googleCalendarRequest(accessToken, `/calendars/${encodedCalendarId}/events/${encodedEventId}?sendUpdates=none`, {
-      method: "DELETE",
-    });
+    await googleCalendarRequest(accessToken, path, { method: "DELETE" });
     return true;
   } catch (error: any) {
     if (error?.status === 404 || error?.status === 410) return false;
-    throw error;
+    throw attachDebugRequest(
+      error,
+      {
+        method: "DELETE",
+        url: `https://www.googleapis.com/calendar/v3${path}`,
+        calendarId,
+        eventId,
+        itemId,
+        itemLabel: "Removed booking",
+        payload: null,
+      },
+      "delete",
+    );
   }
 }
 
@@ -575,32 +797,82 @@ async function calendarSyncPayload() {
   };
 }
 
-export async function syncGoogleCalendarNow() {
+export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
+  const startedAtMs = Date.now();
+  const startedAt = nowIso();
   const { settings, items, services, locations } = await calendarSyncPayload();
   const status = await getGoogleCalendarSyncStatus();
-  if (!status.configured) return { ...status, ok: false, skipped: true, reason: "google_oauth_not_configured" };
-  if (status.legacyMigrationRequired) return { ...status, ok: false, skipped: true, reason: "google_calendar_token_migration_required" };
-  if (!status.connected) return { ...status, ok: false, skipped: true, reason: "google_calendar_not_connected" };
-
   const calendarId = cleanCalendarId(settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"));
+
+  const finishEntry = (
+    outcome: GoogleCalendarDebugEntry["outcome"],
+    detail: Partial<Omit<GoogleCalendarDebugEntry, "id">> = {},
+  ) => ({
+    trigger,
+    startedAt,
+    finishedAt: nowIso(),
+    durationMs: Date.now() - startedAtMs,
+    outcome,
+    reason: "",
+    stage: "",
+    calendarId,
+    accountEmail: status.accountEmail || "",
+    itemCount: items.length,
+    upserted: 0,
+    deleted: 0,
+    request: null,
+    requestIsSample: false,
+    error: null,
+    ...detail,
+  });
+
+  const skip = async (reason: string) => {
+    await recordGoogleCalendarDebugEntry(finishEntry("skipped", { reason, stage: "preflight" }), settings);
+    return { ...status, ok: false, skipped: true, reason };
+  };
+  if (!status.configured) return skip("google_oauth_not_configured");
+  if (status.legacyMigrationRequired) return skip("google_calendar_token_migration_required");
+  if (!status.connected) return skip("google_calendar_not_connected");
+
   const previousMap = parseJson<Record<string, string>>(settings.googleCalendarEventMapJson, {});
   const nextMap: Record<string, string> = {};
-  const accessToken = await getGoogleAccessToken(resolveGoogleAccountId(settings), googleScopes);
+  // Even a clean run keeps one representative event body, so you can inspect
+  // what Clarity sends without having to break the sync first.
+  let sampleRequest: GoogleCalendarDebugRequest | null = null;
   let upserted = 0;
   let deleted = 0;
+  let stage = "access_token";
 
   try {
+    const accessToken = await getGoogleAccessToken(resolveGoogleAccountId(settings), googleScopes);
+
+    stage = "upsert";
     for (const item of items) {
       const eventId = previousMap[item.id] || googleEventId(item.id);
       const event = googleEventForItem(item, settings, services, locations, eventId);
-      const result = await upsertGoogleEvent(accessToken, calendarId, eventId, event);
+      if (!sampleRequest) {
+        sampleRequest = {
+          method: "PUT",
+          url: `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=none`,
+          calendarId,
+          eventId,
+          itemId: item.id,
+          itemLabel: event.summary,
+          payload: event,
+        };
+      }
+      const result = await upsertGoogleEvent(accessToken, calendarId, eventId, event, {
+        itemId: item.id,
+        itemLabel: event.summary,
+      });
       nextMap[item.id] = result.id || eventId;
       upserted += 1;
     }
 
+    stage = "delete";
     for (const [itemId, eventId] of Object.entries(previousMap)) {
       if (nextMap[itemId]) continue;
-      if (await deleteGoogleEvent(accessToken, calendarId, eventId)) deleted += 1;
+      if (await deleteGoogleEvent(accessToken, calendarId, eventId, itemId)) deleted += 1;
     }
 
     const syncedAt = nowIso();
@@ -611,6 +883,16 @@ export async function syncGoogleCalendarNow() {
       googleCalendarLastSyncStatus: "synced",
       googleCalendarLastSyncError: "",
     });
+    await recordGoogleCalendarDebugEntry(
+      finishEntry("success", {
+        stage: "complete",
+        upserted,
+        deleted,
+        request: sampleRequest,
+        requestIsSample: true,
+      }),
+      settings,
+    );
     return {
       ...(await getGoogleCalendarSyncStatus()),
       ok: true,
@@ -619,26 +901,82 @@ export async function syncGoogleCalendarNow() {
       deleted,
       syncedAt,
     };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Google Calendar sync failed.";
+  } catch (error: any) {
+    const debugError = debugErrorFromUnknown(error, stage);
+    const message = debugError.message;
     await setSettings({
       googleCalendarLastSyncAt: nowIso(),
       googleCalendarLastSyncStatus: "failed",
       googleCalendarLastSyncError: message,
     });
+    await recordGoogleCalendarDebugEntry(
+      finishEntry("failed", {
+        stage: debugError.stage,
+        upserted,
+        deleted,
+        // The request that actually failed when we have it; otherwise the
+        // first payload of the run (token failures never reach a request).
+        request: error?.debugRequest || sampleRequest,
+        requestIsSample: !error?.debugRequest && Boolean(sampleRequest),
+        error: debugError,
+      }),
+      settings,
+    );
     throw error;
   }
 }
 
-export async function syncGoogleCalendarIfEnabled() {
+export async function syncGoogleCalendarIfEnabled(trigger = "auto_sync") {
   if (googleCalendarManualSyncOnly) {
-    return { ...(await getGoogleCalendarSyncStatus()), ok: true, skipped: true, reason: "manual_sync_only" };
+    const status = await getGoogleCalendarSyncStatus();
+    await recordGoogleCalendarDebugEntry(
+      {
+        trigger,
+        startedAt: nowIso(),
+        finishedAt: nowIso(),
+        durationMs: 0,
+        outcome: "skipped",
+        reason: "manual_sync_only",
+        stage: "preflight",
+        calendarId: status.calendarId,
+        accountEmail: status.accountEmail || "",
+        itemCount: 0,
+        upserted: 0,
+        deleted: 0,
+        request: null,
+        requestIsSample: false,
+        error: null,
+      },
+      await readSettings(),
+    );
+    return { ...status, ok: true, skipped: true, reason: "manual_sync_only" };
   }
   const settings = await readSettings();
   if (settings.googleCalendarAutoSync === "false") {
-    return { ...(await getGoogleCalendarSyncStatus()), ok: true, skipped: true, reason: "auto_sync_disabled" };
+    const status = await getGoogleCalendarSyncStatus();
+    await recordGoogleCalendarDebugEntry(
+      {
+        trigger,
+        startedAt: nowIso(),
+        finishedAt: nowIso(),
+        durationMs: 0,
+        outcome: "skipped",
+        reason: "auto_sync_disabled",
+        stage: "preflight",
+        calendarId: status.calendarId,
+        accountEmail: status.accountEmail || "",
+        itemCount: 0,
+        upserted: 0,
+        deleted: 0,
+        request: null,
+        requestIsSample: false,
+        error: null,
+      },
+      settings,
+    );
+    return { ...status, ok: true, skipped: true, reason: "auto_sync_disabled" };
   }
-  return syncGoogleCalendarNow();
+  return syncGoogleCalendarNow(trigger);
 }
 
 function json(value: unknown, status = 200) {
@@ -656,7 +994,7 @@ export default async function googleCalendarSyncHandler(req: Request) {
     }
     if (req.method === "POST") {
       if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-      return json(await syncGoogleCalendarIfEnabled());
+      return json(await syncGoogleCalendarIfEnabled("api_google_calendar_sync_post"));
     }
     return json({ error: "method_not_allowed", message: "Use GET for status or POST to sync." }, 405);
   } catch (error: any) {
@@ -665,6 +1003,8 @@ export default async function googleCalendarSyncHandler(req: Request) {
       {
         error: "google_calendar_sync_error",
         message: error instanceof Error ? error.message : "Google Calendar sync failed.",
+        failure: debugErrorFromUnknown(error, "sync"),
+        request: error?.debugRequest || null,
       },
       error?.status || 500,
     );

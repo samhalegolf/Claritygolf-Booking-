@@ -1218,6 +1218,55 @@ type GoogleCalendarSyncStatus = {
   ok?: boolean;
   skipped?: boolean;
 };
+type GoogleCalendarDebugRequest = {
+  method: string;
+  url: string;
+  calendarId: string;
+  eventId: string;
+  itemId: string;
+  itemLabel: string;
+  payload: unknown;
+};
+type GoogleCalendarDebugError = {
+  stage: string;
+  message: string;
+  httpStatus: number;
+  httpStatusText: string;
+  googleCode: string;
+  googleStatus: string;
+  googleReason: string;
+  googleDomain: string;
+  googleMessage: string;
+  googleErrors: unknown[];
+  providerCode: string;
+  rawBody: string;
+};
+type GoogleCalendarDebugEntry = {
+  id: string;
+  trigger: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  outcome: "success" | "failed" | "skipped";
+  reason: string;
+  stage: string;
+  calendarId: string;
+  accountEmail: string;
+  itemCount: number;
+  upserted: number;
+  deleted: number;
+  request: GoogleCalendarDebugRequest | null;
+  requestIsSample: boolean;
+  error: GoogleCalendarDebugError | null;
+};
+type GoogleCalendarDebugLog = {
+  enabled: boolean;
+  maxEntries: number;
+  autoSync: boolean;
+  manualOnly: boolean;
+  calendarId: string;
+  entries: GoogleCalendarDebugEntry[];
+};
 type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting" | "migrating";
 type GoogleDriveActionState = "idle" | "connecting" | "testing" | "disconnecting";
 type AuthStatus = "checking" | "authenticated" | "guest";
@@ -3674,6 +3723,87 @@ function googleSyncTimeLabel(createdAt = "") {
   return Number.isNaN(time.getTime()) ? "Not synced yet" : time.toLocaleString();
 }
 
+// Human labels for the Google Calendar debug window. The trigger codes are the
+// literals each server-side sync call site passes to syncGoogleCalendarIfEnabled().
+const googleCalendarTriggerLabels: Record<string, string> = {
+  manual_sync_now: "Sync now (Integrations tab)",
+  api_google_calendar_sync_post: "Sync via /api/google-calendar-sync",
+  admin_calendar_save: "Calendar saved (admin)",
+  admin_item_upsert: "Booking edited / moved (admin)",
+  admin_calendar_delete: "Booking deleted (admin)",
+  public_booking_created: "Public booking created",
+  public_booking_state_write: "Public booking state write",
+  public_booking_cancelled: "Public booking cancelled",
+  auto_sync: "Automatic sync",
+};
+
+const googleCalendarSkipReasonLabels: Record<string, string> = {
+  auto_sync_disabled: "Auto-sync is switched off, so nothing was sent.",
+  manual_sync_only: "Build is pinned to manual-sync-only, so nothing was sent.",
+  google_oauth_not_configured: "GOOGLE_CALENDAR_CLIENT_ID / _SECRET are missing from the environment.",
+  google_calendar_not_connected: "No connected Google account with calendar scope.",
+  google_calendar_token_migration_required: "Legacy plaintext token must be migrated before syncing.",
+};
+
+const googleCalendarStageLabels: Record<string, string> = {
+  preflight: "Before any request",
+  access_token: "Refreshing access token",
+  upsert: "Writing events",
+  upsert_update: "PUT event (update)",
+  upsert_insert: "POST event (insert)",
+  delete: "Deleting event",
+  complete: "Finished",
+};
+
+function googleCalendarTriggerLabel(trigger: string) {
+  return googleCalendarTriggerLabels[trigger] || trigger || "Unknown trigger";
+}
+
+function googleCalendarStageLabel(stage: string) {
+  return googleCalendarStageLabels[stage] || stage || "—";
+}
+
+function googleCalendarDebugTimestamp(value: string) {
+  if (!value) return "—";
+  const time = new Date(value);
+  return Number.isNaN(time.getTime()) ? value : time.toLocaleString();
+}
+
+function relativeTimeLabel(value: string) {
+  const time = new Date(value || "");
+  if (Number.isNaN(time.getTime())) return "";
+  const seconds = Math.round((Date.now() - time.getTime()) / 1000);
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+/**
+ * One-line "what actually went wrong" for a failed run: Google's own error
+ * identifiers first (HTTP status + error.status + errors[0].reason), falling
+ * back to the provider-level code when the failure happened before any
+ * Calendar API call (token refresh, missing scopes).
+ */
+function googleCalendarFailureCode(error: GoogleCalendarDebugError | null) {
+  if (!error) return "";
+  const parts = [
+    error.httpStatus ? `HTTP ${error.httpStatus}` : "",
+    error.googleStatus,
+    error.googleReason,
+    !error.httpStatus && !error.googleStatus ? error.providerCode : "",
+  ].filter(Boolean);
+  return parts.join(" · ") || error.providerCode || "Unknown failure";
+}
+
+function formatDebugJson(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function addDaysInputValue(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -4637,6 +4767,11 @@ function App() {
   const [calendarLocationFilterId, setCalendarLocationFilterId] = useState("");
   const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarSyncStatus>(defaultGoogleCalendarStatus);
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
+  const [googleCalendarDebug, setGoogleCalendarDebug] = useState<GoogleCalendarDebugLog | null>(null);
+  const [googleCalendarDebugOpen, setGoogleCalendarDebugOpen] = useState(false);
+  const [googleCalendarDebugLoading, setGoogleCalendarDebugLoading] = useState(false);
+  const [googleCalendarDebugError, setGoogleCalendarDebugError] = useState("");
+  const [expandedGoogleCalendarDebugId, setExpandedGoogleCalendarDebugId] = useState<string | null>(null);
   const [googleDriveTransfer, setGoogleDriveTransfer] = useState<GoogleDriveTransferStatus>(defaultGoogleDriveTransferStatus);
   const [googleDriveAction, setGoogleDriveAction] = useState<GoogleDriveActionState>("idle");
   const [clarityCloudImports, setClarityCloudImports] = useState<ClarityCloudImportTransfer[]>([]);
@@ -6288,6 +6423,14 @@ function App() {
     if (isEmbedMode || authStatus !== "authenticated" || activeView !== "settings") return;
     void refreshGoogleCalendarStatus();
   }, [activeView, authStatus, isEmbedMode]);
+
+  // The debug log is only fetched while its panel is open -- it carries full
+  // event payloads, so there is no reason to pull it on every Settings visit.
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated") return;
+    if (!googleCalendarDebugOpen || settingsTab !== "integrations") return;
+    void refreshGoogleCalendarDebugLog();
+  }, [authStatus, googleCalendarDebugOpen, isEmbedMode, settingsTab]);
 
   function applyNotificationSettings(settings?: Partial<NotificationSettings>) {
     const delaySeconds = Number(settings?.notificationDelaySeconds ?? defaultNotificationSettings.notificationDelaySeconds);
@@ -14526,6 +14669,86 @@ function App() {
     }
   }
 
+  async function refreshGoogleCalendarDebugLog() {
+    setGoogleCalendarDebugLoading(true);
+    setGoogleCalendarDebugError("");
+    try {
+      const response = await fetch("/api/google-calendar/debug", { headers: { Accept: "application/json" } });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      const data = (await response.json()) as Partial<GoogleCalendarDebugLog> & { message?: string };
+      if (!response.ok) throw new Error(data.message || "Google Calendar debug log could not be read.");
+      setGoogleCalendarDebug({
+        enabled: data.enabled !== false,
+        maxEntries: Number(data.maxEntries) || 30,
+        autoSync: data.autoSync !== false,
+        manualOnly: data.manualOnly === true,
+        calendarId: data.calendarId || "",
+        entries: Array.isArray(data.entries) ? data.entries : [],
+      });
+    } catch (error) {
+      setGoogleCalendarDebugError(error instanceof Error ? error.message : "Google Calendar debug log could not be read.");
+    } finally {
+      setGoogleCalendarDebugLoading(false);
+    }
+  }
+
+  async function postGoogleCalendarDebugAction(path: string, body?: unknown, successMessage?: string) {
+    setGoogleCalendarDebugLoading(true);
+    setGoogleCalendarDebugError("");
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      const data = (await response.json()) as Partial<GoogleCalendarDebugLog> & { message?: string };
+      if (!response.ok) throw new Error(data.message || "Google Calendar debug action failed.");
+      setGoogleCalendarDebug({
+        enabled: data.enabled !== false,
+        maxEntries: Number(data.maxEntries) || 30,
+        autoSync: data.autoSync !== false,
+        manualOnly: data.manualOnly === true,
+        calendarId: data.calendarId || "",
+        entries: Array.isArray(data.entries) ? data.entries : [],
+      });
+      if (successMessage) setToast({ message: successMessage });
+    } catch (error) {
+      setGoogleCalendarDebugError(error instanceof Error ? error.message : "Google Calendar debug action failed.");
+    } finally {
+      setGoogleCalendarDebugLoading(false);
+    }
+  }
+
+  function clearGoogleCalendarDebugLog() {
+    void postGoogleCalendarDebugAction("/api/google-calendar/debug/clear", undefined, "Google Calendar debug log cleared.");
+  }
+
+  function toggleGoogleCalendarDebugLogging(enabled: boolean) {
+    void postGoogleCalendarDebugAction(
+      "/api/google-calendar/debug/toggle",
+      { enabled },
+      enabled ? "Google Calendar debug logging on." : "Google Calendar debug logging off.",
+    );
+  }
+
+  function copyGoogleCalendarDebugEntry(entry: GoogleCalendarDebugEntry) {
+    if (!navigator.clipboard) {
+      setToast({ message: "Copy is not available in this browser. Select the debug JSON manually." });
+      return;
+    }
+    void navigator.clipboard.writeText(JSON.stringify(entry, null, 2)).then(
+      () => setToast({ message: "Debug entry copied as JSON." }),
+      () => setToast({ message: "Copy was blocked by the browser. Select the debug JSON manually." }),
+    );
+  }
+
   async function refreshGoogleDriveTransferStatus() {
     try {
       const response = await fetch("/api/google-drive/status", { headers: { Accept: "application/json" } });
@@ -14628,12 +14851,21 @@ function App() {
         upserted?: number;
         deleted?: number;
         message?: string;
+        reason?: string;
+        failure?: GoogleCalendarDebugError;
       };
       if (response.status === 401) {
         setAuthStatus("guest");
         throw new Error("Admin login required");
       }
-      if (!response.ok || data.ok === false) throw new Error(data.message || data.lastSyncError || "Google Calendar sync failed.");
+      if (!response.ok || data.ok === false) {
+        // Lead with Google's own identifiers when we have them -- "HTTP 403 ·
+        // PERMISSION_DENIED · forbiddenForServiceAccounts" is actionable in a
+        // way that the prose message alone is not.
+        const failureCode = googleCalendarFailureCode(data.failure ?? null);
+        const detail = data.message || data.lastSyncError || googleCalendarSkipReasonLabels[data.reason || ""] || "Google Calendar sync failed.";
+        throw new Error(failureCode ? `${failureCode} — ${detail}` : detail);
+      }
       applyGoogleCalendarStatus(data);
       setToast({ message: `Google Calendar synced${typeof data.upserted === "number" ? ` (${data.upserted} upserted, ${data.deleted ?? 0} deleted)` : ""}.` });
     } catch (error) {
@@ -14641,6 +14873,8 @@ function App() {
       void refreshGoogleCalendarStatus();
     } finally {
       setGoogleCalendarAction("idle");
+      // The run just wrote a debug entry either way; show it without a manual refresh.
+      if (googleCalendarDebugOpen) void refreshGoogleCalendarDebugLog();
     }
   }
 
@@ -23188,6 +23422,250 @@ function App() {
                       </>
                     )}
                   </div>
+                </details>
+
+                <details
+                  className="settings-subsection gcal-debug"
+                  open={googleCalendarDebugOpen}
+                  onToggle={(event) => setGoogleCalendarDebugOpen((event.target as HTMLDetailsElement).open)}
+                >
+                  <summary className="settings-subsection-title">
+                    <Code2 size={18} />
+                    <div>
+                      <span>Sync debug window</span>
+                      <strong>
+                        {googleCalendarDebug
+                          ? `${googleCalendarDebug.entries.length} recent trigger${googleCalendarDebug.entries.length === 1 ? "" : "s"}`
+                          : "Google failure codes, payloads and triggers"}
+                      </strong>
+                    </div>
+                  </summary>
+
+                  <p className="gcal-debug-intro">
+                    Every Google Calendar sync attempt is recorded here — what triggered it, the exact event payload sent to
+                    the Calendar API, and the failure code Google returned.
+                  </p>
+
+                  <div className="gcal-debug-toolbar">
+                    <button
+                      className="outline-button"
+                      disabled={googleCalendarDebugLoading}
+                      onClick={() => void refreshGoogleCalendarDebugLog()}
+                      type="button"
+                    >
+                      <RefreshCw size={16} />
+                      {googleCalendarDebugLoading ? "Loading" : "Refresh"}
+                    </button>
+                    <button
+                      className="outline-button"
+                      disabled={googleCalendarDebugLoading || !googleCalendarDebug?.entries.length}
+                      onClick={clearGoogleCalendarDebugLog}
+                      type="button"
+                    >
+                      <Trash2 size={16} />
+                      Clear log
+                    </button>
+                    <label className="gcal-debug-toggle">
+                      <input
+                        type="checkbox"
+                        checked={googleCalendarDebug?.enabled !== false}
+                        disabled={googleCalendarDebugLoading || !googleCalendarDebug}
+                        onChange={(event) => toggleGoogleCalendarDebugLogging(event.target.checked)}
+                      />
+                      <span>Record sync attempts</span>
+                    </label>
+                  </div>
+
+                  {googleCalendarDebugError ? (
+                    <p className="gcal-debug-error" role="alert">
+                      {googleCalendarDebugError}
+                    </p>
+                  ) : null}
+
+                  {googleCalendarDebug ? (
+                    <div className="gcal-debug-facts">
+                      <div>
+                        <span>Auto-sync</span>
+                        <strong>{googleCalendarDebug.manualOnly ? "Manual only" : googleCalendarDebug.autoSync ? "On" : "Off"}</strong>
+                      </div>
+                      <div>
+                        <span>Target calendar</span>
+                        <strong>{googleCalendarDebug.calendarId || "primary"}</strong>
+                      </div>
+                      <div>
+                        <span>Log capacity</span>
+                        <strong>Last {googleCalendarDebug.maxEntries} runs</strong>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {googleCalendarDebug && !googleCalendarDebug.entries.length ? (
+                    <p className="gcal-debug-empty">
+                      No sync attempts recorded yet. Hit <strong>Sync now</strong> above, or save a booking, then refresh this
+                      panel. If nothing ever appears, the sync is not being triggered at all.
+                    </p>
+                  ) : null}
+
+                  <ol className="gcal-debug-list">
+                    {(googleCalendarDebug?.entries || []).map((entry) => {
+                      const expanded = expandedGoogleCalendarDebugId === entry.id;
+                      const failureCode = googleCalendarFailureCode(entry.error);
+                      return (
+                        <li key={entry.id} className={`gcal-debug-entry is-${entry.outcome}`}>
+                          <button
+                            className="gcal-debug-entry-head"
+                            onClick={() => setExpandedGoogleCalendarDebugId(expanded ? null : entry.id)}
+                            aria-expanded={expanded}
+                            type="button"
+                          >
+                            <span className={`gcal-debug-badge is-${entry.outcome}`}>{entry.outcome}</span>
+                            <span className="gcal-debug-entry-main">
+                              <strong>{googleCalendarTriggerLabel(entry.trigger)}</strong>
+                              <em>
+                                {googleCalendarDebugTimestamp(entry.startedAt)}
+                                {relativeTimeLabel(entry.startedAt) ? ` · ${relativeTimeLabel(entry.startedAt)}` : ""}
+                                {` · ${entry.durationMs}ms`}
+                              </em>
+                            </span>
+                            <span className="gcal-debug-entry-result">
+                              {entry.outcome === "failed"
+                                ? failureCode
+                                : entry.outcome === "skipped"
+                                  ? entry.reason || "skipped"
+                                  : `${entry.upserted} sent · ${entry.deleted} removed`}
+                            </span>
+                          </button>
+
+                          {expanded ? (
+                            <div className="gcal-debug-entry-body">
+                              <div className="gcal-debug-grid">
+                                <div>
+                                  <span>Trigger code</span>
+                                  <code>{entry.trigger}</code>
+                                </div>
+                                <div>
+                                  <span>Stage reached</span>
+                                  <code>{googleCalendarStageLabel(entry.stage)}</code>
+                                </div>
+                                <div>
+                                  <span>Calendar</span>
+                                  <code>{entry.calendarId || "primary"}</code>
+                                </div>
+                                <div>
+                                  <span>Google account</span>
+                                  <code>{entry.accountEmail || "—"}</code>
+                                </div>
+                                <div>
+                                  <span>Bookings in run</span>
+                                  <code>{entry.itemCount}</code>
+                                </div>
+                                <div>
+                                  <span>Finished</span>
+                                  <code>{googleCalendarDebugTimestamp(entry.finishedAt)}</code>
+                                </div>
+                              </div>
+
+                              {entry.outcome === "skipped" ? (
+                                <p className="gcal-debug-note">
+                                  {googleCalendarSkipReasonLabels[entry.reason] || `Skipped: ${entry.reason || "unknown reason"}`}
+                                </p>
+                              ) : null}
+
+                              {entry.error ? (
+                                <section className="gcal-debug-block is-error">
+                                  <h4>Google failure</h4>
+                                  <div className="gcal-debug-grid">
+                                    <div>
+                                      <span>HTTP status</span>
+                                      <code>
+                                        {entry.error.httpStatus
+                                          ? `${entry.error.httpStatus}${entry.error.httpStatusText ? ` ${entry.error.httpStatusText}` : ""}`
+                                          : "— (failed before the request)"}
+                                      </code>
+                                    </div>
+                                    <div>
+                                      <span>error.code</span>
+                                      <code>{entry.error.googleCode || "—"}</code>
+                                    </div>
+                                    <div>
+                                      <span>error.status</span>
+                                      <code>{entry.error.googleStatus || "—"}</code>
+                                    </div>
+                                    <div>
+                                      <span>errors[0].reason</span>
+                                      <code>{entry.error.googleReason || "—"}</code>
+                                    </div>
+                                    <div>
+                                      <span>errors[0].domain</span>
+                                      <code>{entry.error.googleDomain || "—"}</code>
+                                    </div>
+                                    <div>
+                                      <span>Clarity code</span>
+                                      <code>{entry.error.providerCode || "—"}</code>
+                                    </div>
+                                  </div>
+                                  <p className="gcal-debug-message">{entry.error.googleMessage || entry.error.message}</p>
+                                  {entry.error.rawBody ? (
+                                    <>
+                                      <h5>Raw response body</h5>
+                                      <pre className="gcal-debug-pre">{entry.error.rawBody}</pre>
+                                    </>
+                                  ) : null}
+                                </section>
+                              ) : null}
+
+                              {entry.request ? (
+                                <section className="gcal-debug-block">
+                                  <h4>
+                                    {entry.requestIsSample ? "Payload sent (sample from this run)" : "Payload that failed"}
+                                  </h4>
+                                  <div className="gcal-debug-grid">
+                                    <div>
+                                      <span>Method</span>
+                                      <code>{entry.request.method}</code>
+                                    </div>
+                                    <div>
+                                      <span>Booking</span>
+                                      <code>{entry.request.itemLabel || entry.request.itemId || "—"}</code>
+                                    </div>
+                                    <div>
+                                      <span>Event ID</span>
+                                      <code>{entry.request.eventId || "—"}</code>
+                                    </div>
+                                    <div>
+                                      <span>Clarity booking ID</span>
+                                      <code>{entry.request.itemId || "—"}</code>
+                                    </div>
+                                  </div>
+                                  <h5>Endpoint</h5>
+                                  <pre className="gcal-debug-pre">{entry.request.url}</pre>
+                                  {entry.request.payload ? (
+                                    <>
+                                      <h5>Request body</h5>
+                                      <pre className="gcal-debug-pre">{formatDebugJson(entry.request.payload)}</pre>
+                                    </>
+                                  ) : (
+                                    <p className="gcal-debug-note">No request body (DELETE request).</p>
+                                  )}
+                                </section>
+                              ) : entry.outcome !== "skipped" ? (
+                                <p className="gcal-debug-note">
+                                  No payload captured — the run failed before building an event, or there were no bookings to send.
+                                </p>
+                              ) : null}
+
+                              <div className="gcal-debug-entry-actions">
+                                <button className="outline-button" onClick={() => copyGoogleCalendarDebugEntry(entry)} type="button">
+                                  <Copy size={16} />
+                                  Copy entry JSON
+                                </button>
+                              </div>
+                            </div>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ol>
                 </details>
 
                 <section className="settings-subsection video-storage-section" aria-labelledby="video-storage-heading">

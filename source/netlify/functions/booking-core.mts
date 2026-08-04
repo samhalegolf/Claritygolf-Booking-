@@ -4403,8 +4403,8 @@ const GOOGLE_SYNC_RESPONSE_BUDGET_MS = 5000;
 // 409 against its own committed write, and reported "not saved" for a booking that had saved.
 // Time-box the sync: if Google is slow we answer the client now and let the sync finish in the
 // background (it re-runs on the next save or state read anyway).
-async function syncGoogleCalendarWithinBudget(budgetMs = GOOGLE_SYNC_RESPONSE_BUDGET_MS) {
-  const sync = syncGoogleCalendarIfEnabled().then(
+async function syncGoogleCalendarWithinBudget(trigger = "admin_calendar_save", budgetMs = GOOGLE_SYNC_RESPONSE_BUDGET_MS) {
+  const sync = syncGoogleCalendarIfEnabled(trigger).then(
     (result) => result,
     async (error) => ({
       ...(await getGoogleCalendarSyncStatus().catch(() => ({}))),
@@ -4502,7 +4502,7 @@ async function writeCalendarState(nextState, context = null) {
     readAdminSettings(sharedSettingsMap),
     readBrandSettings(sharedSettingsMap),
     readCoachAccount(sharedSettingsMap),
-    syncGoogleCalendarWithinBudget(),
+    syncGoogleCalendarWithinBudget("admin_calendar_save"),
   ]);
   return {
     syncKey,
@@ -4636,7 +4636,7 @@ async function deleteCalendarItemById(id, context = null) {
 
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  const googleCalendarSyncTask = syncGoogleCalendarIfEnabled()
+  const googleCalendarSyncTask = syncGoogleCalendarIfEnabled("admin_calendar_delete")
     .then((result) => console.info("calendar_state:google_sync_completed_after_response", { ok: result?.ok !== false }))
     .catch((error) => console.error("calendar_state:google_sync_failed_after_response", error));
   if (context && typeof context.waitUntil === "function") {
@@ -4694,7 +4694,9 @@ async function writePublicBookingState(currentState, items) {
   const cleanItems = await writeItems(itemsToWrite);
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  await syncGoogleCalendarIfEnabled().catch((error) => console.error("public_booking_state:google_calendar_sync_failed", error));
+  await syncGoogleCalendarIfEnabled("public_booking_state_write").catch((error) =>
+    console.error("public_booking_state:google_calendar_sync_failed", error),
+  );
   return {
     syncKey: currentState.syncKey,
     updatedAt,
@@ -4723,7 +4725,7 @@ function schedulePublicBookingSideEffects(context, appointment) {
     if (stamped.personId && stamped.personId !== appointment.personId) {
       await writeItems([stamped]);
     }
-    await syncGoogleCalendarIfEnabled().catch((error) =>
+    await syncGoogleCalendarIfEnabled("public_booking_created").catch((error) =>
       console.error("public_booking:google_calendar_sync_failed", error),
     );
   })().catch((error) => console.error("public_booking:side_effects_failed", appointment?.id, error));
@@ -8192,7 +8194,7 @@ export async function handleBookingApiRoute(
           // reschedule, edit, lesson-complete). Time-boxed like the other save
           // paths so a slow Google round trip finishes in the background instead
           // of holding this response open.
-          const googleCalendarSync = await syncGoogleCalendarWithinBudget();
+          const googleCalendarSync = await syncGoogleCalendarWithinBudget("admin_item_upsert");
           let notificationResults = [];
           let notificationWarning = "";
           try {
