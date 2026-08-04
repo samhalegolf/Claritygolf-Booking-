@@ -14,6 +14,7 @@ export type OptixSyncFailureCode =
   | "unauthorized"
   | "resource_conflict"
   | "validation_failed"
+  | "timeout"
   | "remote_error";
 
 export class OptixSyncError extends Error {
@@ -60,16 +61,17 @@ export type OptixBookingResult = {
 
 type OptixClientConfig = {
   endpoint: string;
-  personalToken: string;
+  token: string;
+  tokenKind: "organization" | "personal";
 };
+
+const OPTIX_REQUEST_TIMEOUT_MS = 12_000;
 
 const BOOKINGS_DRAFT = `
   query OptixBookingsDraft($input: BookingSetInput!) {
     bookingsDraft(input: $input) {
       booking_session_id
-      bookings {
-        booking_id
-      }
+      bookings { booking_id }
     }
   }
 `;
@@ -78,76 +80,78 @@ const BOOKINGS_COMMIT = `
   mutation OptixBookingsCommit($input: BookingSetInput!) {
     bookingsCommit(input: $input) {
       booking_session_id
-      bookings {
-        booking_id
-      }
+      bookings { booking_id }
     }
   }
 `;
 
 function readEnv(name: string): string {
-  return (
-    globalThis.Netlify?.env?.get(name) ||
-    process.env[name] ||
-    ""
-  ).trim();
+  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
 }
 
 export function getOptixClientConfig(): OptixClientConfig {
   const endpoint = readEnv("OPTIX_GRAPHQL_ENDPOINT") || "https://api.optixapp.com/graphql";
+  const organizationToken = readEnv("OPTIX_ORGANIZATION_TOKEN");
   const personalToken = readEnv("OPTIX_PERSONAL_TOKEN");
+  const token = organizationToken || personalToken;
+  const tokenKind = organizationToken ? "organization" : "personal";
 
-  if (!personalToken) {
+  if (!token) {
     throw new OptixSyncError(
       "not_configured",
-      "Optix is not configured. Add OPTIX_PERSONAL_TOKEN in the server environment.",
+      "Optix is not configured. Add OPTIX_ORGANIZATION_TOKEN or OPTIX_PERSONAL_TOKEN in the server environment.",
     );
   }
 
-  return { endpoint, personalToken };
+  return { endpoint, token, tokenKind };
 }
 
 function normaliseMessages(errors: OptixGraphQLError[] | undefined): string {
   return (errors || [])
-    .map((error) => String(error?.message || "").trim())
+    .map((error) => {
+      const message = String(error?.message || "").trim();
+      const code = String(error?.extensions?.code || error?.extensions?.errorCode || "").trim();
+      return [code, message].filter(Boolean).join(": ");
+    })
     .filter(Boolean)
     .join("; ");
+}
+
+function concise(value: string, max = 1200) {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  return cleaned.length > max ? `${cleaned.slice(0, max)}…` : cleaned;
 }
 
 export function classifyOptixFailure(input: {
   status?: number | null;
   responseText?: string;
   graphQLErrors?: OptixGraphQLError[];
+  requestId?: string;
 }): OptixSyncError {
   const status = input.status ?? null;
-  const message = [input.responseText, normaliseMessages(input.graphQLErrors)]
+  const message = concise([
+    normaliseMessages(input.graphQLErrors),
+    input.responseText,
+  ].filter(Boolean).join("; "));
+  const suffix = [status ? `HTTP ${status}` : "", input.requestId ? `request ${input.requestId}` : ""]
     .filter(Boolean)
-    .join("; ")
-    .trim();
+    .join(", ");
+  const detailed = [message, suffix ? `(${suffix})` : ""].filter(Boolean).join(" ");
   const lower = message.toLowerCase();
 
-  const tokenExpired =
+  if (
     status === 401 ||
     lower.includes("token expired") ||
     lower.includes("expired token") ||
     lower.includes("invalid token") ||
     lower.includes("access token has expired") ||
-    lower.includes("jwt expired");
-
-  if (tokenExpired) {
-    return new OptixSyncError(
-      "token_expired",
-      "The Optix personal token has expired or is no longer valid. Replace OPTIX_PERSONAL_TOKEN and retry the sync.",
-      { status, retryable: true },
-    );
+    lower.includes("jwt expired")
+  ) {
+    return new OptixSyncError("token_expired", detailed || "The Optix access token has expired or is no longer valid.", { status, retryable: true });
   }
 
   if (status === 403 || lower.includes("unauthorized") || lower.includes("not authorised") || lower.includes("forbidden")) {
-    return new OptixSyncError(
-      "unauthorized",
-      "Optix rejected this account or booking action. Check the personal token, member ID and owner user ID.",
-      { status, retryable: false },
-    );
+    return new OptixSyncError("unauthorized", detailed || "Optix rejected this account or booking action.", { status, retryable: false });
   }
 
   if (
@@ -156,48 +160,53 @@ export function classifyOptixFailure(input: {
     lower.includes("conflict") ||
     lower.includes("overlap")
   ) {
-    return new OptixSyncError(
-      "resource_conflict",
-      "The Optix resource is no longer available for this time.",
-      { status, retryable: false },
-    );
+    return new OptixSyncError("resource_conflict", detailed || "The Optix resource is no longer available for this time.", { status, retryable: false });
   }
 
-  if (status === 400 || lower.includes("validation")) {
-    return new OptixSyncError(
-      "validation_failed",
-      message || "Optix rejected the booking input.",
-      { status, retryable: false },
-    );
+  if (status === 400 || lower.includes("validation") || lower.includes("invalid input")) {
+    return new OptixSyncError("validation_failed", detailed || "Optix rejected the booking input.", { status, retryable: false });
   }
 
-  return new OptixSyncError(
-    "remote_error",
-    message || "Optix could not complete the booking request.",
-    { status, retryable: status === null || status >= 500 },
-  );
+  return new OptixSyncError("remote_error", detailed || "Optix returned an empty or unrecognised response.", {
+    status,
+    retryable: status === null || status >= 500,
+  });
 }
 
 async function optixGraphQL<T>(
   query: string,
   variables: Record<string, unknown>,
-  config = getOptixClientConfig(),
+  config: OptixClientConfig,
 ): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OPTIX_REQUEST_TIMEOUT_MS);
   let response: Response;
+
   try {
     response = await fetch(config.endpoint, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${config.personalToken}`,
+        authorization: `Bearer ${config.token}`,
         "content-type": "application/json",
       },
       body: JSON.stringify({ query, variables }),
+      signal: controller.signal,
     });
-  } catch (error) {
-    throw new OptixSyncError("remote_error", "Could not reach Optix.", {
-      retryable: true,
-      cause: error,
-    });
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      throw new OptixSyncError(
+        "timeout",
+        `Optix did not respond within ${Math.round(OPTIX_REQUEST_TIMEOUT_MS / 1000)} seconds. No bay booking was confirmed.`,
+        { retryable: true, cause: error },
+      );
+    }
+    throw new OptixSyncError(
+      "remote_error",
+      `Could not reach Optix: ${error instanceof Error ? error.message : "network request failed"}.`,
+      { retryable: true, cause: error },
+    );
+  } finally {
+    clearTimeout(timeout);
   }
 
   const responseText = await response.text();
@@ -213,13 +222,14 @@ async function optixGraphQL<T>(
       status: response.status,
       responseText: payload ? "" : responseText,
       graphQLErrors: payload?.errors,
+      requestId: response.headers.get("x-request-id") || response.headers.get("request-id") || "",
     });
   }
 
   return payload.data;
 }
 
-function buildBookingSetInput(input: OptixBookingInput) {
+function buildBookingSetInput(input: OptixBookingInput, tokenKind: OptixClientConfig["tokenKind"]) {
   if (!input.externalId.trim()) {
     throw new OptixSyncError("validation_failed", "An Optix external ID is required.");
   }
@@ -230,13 +240,16 @@ function buildBookingSetInput(input: OptixBookingInput) {
     throw new OptixSyncError("validation_failed", "The Optix booking end time must be after its start time.");
   }
 
+  const title = input.title || "Clarity Booking";
   return {
     ...(input.bookingSessionId ? { booking_session_id: input.bookingSessionId } : {}),
     account: { member_id: input.memberId },
-    owner_user_id: input.ownerUserId,
+    ...(tokenKind === "personal" ? { owner_user_id: input.ownerUserId } : {}),
     source: input.source || "Clarity Booking",
-    title: input.title || "Clarity Booking",
-    notes: input.notes || undefined,
+    title,
+    // Keep the Optix note intentionally simple: only the person on the
+    // corresponding Clarity booking.
+    notes: title,
     bookings: [
       {
         ...(input.bookingId ? { booking_id: input.bookingId } : {}),
@@ -260,16 +273,18 @@ function readBookingResult(payload: any): OptixBookingResult {
 }
 
 export async function draftOptixBooking(input: OptixBookingInput): Promise<OptixBookingResult> {
+  const config = getOptixClientConfig();
   const data = await optixGraphQL<any>(BOOKINGS_DRAFT, {
-    input: buildBookingSetInput(input),
-  });
+    input: buildBookingSetInput(input, config.tokenKind),
+  }, config);
   return readBookingResult(data);
 }
 
 export async function commitOptixBooking(input: OptixBookingInput): Promise<OptixBookingResult> {
+  const config = getOptixClientConfig();
   const data = await optixGraphQL<any>(BOOKINGS_COMMIT, {
-    input: buildBookingSetInput(input),
-  });
+    input: buildBookingSetInput(input, config.tokenKind),
+  }, config);
   return readBookingResult(data);
 }
 

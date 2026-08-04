@@ -80,6 +80,38 @@ async function checkStep(name: string, fn: () => Promise<unknown>) {
   }
 }
 
+async function checkOptixOrganizationCapabilities() {
+  const token = env("OPTIX_ORGANIZATION_TOKEN").trim();
+  const endpoint = env("OPTIX_GRAPHQL_ENDPOINT", "https://api.optixapp.com/graphql").trim();
+  if (!token) throw new Error("OPTIX_ORGANIZATION_TOKEN is not configured.");
+  const query = `query { me { capabilities(capabilities_to_check: ["authenticated", "manage", "bookings"]) } }`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ query, variables: {} }),
+  });
+  const text = await response.text();
+  let payload: any = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+  return {
+    httpStatus: response.status,
+    capabilities: payload?.data?.me?.capabilities || [],
+    errors: Array.isArray(payload?.errors)
+      ? payload.errors.map((error: any) => ({
+          message: String(error?.message || ""),
+          code: String(error?.extensions?.code || error?.extensions?.errorCode || ""),
+        }))
+      : [],
+  };
+}
+
 async function sendSmokeEmail(to: string) {
   const apiKey = env("RESEND_API_KEY");
   const from = env("CLARITY_EMAIL_FROM", "Clarity Golf Booking <bookings@claritygolf.app>");
@@ -117,6 +149,7 @@ export default async function handler(req: Request) {
           body: [{ key: "systemSmokeLastRun", value: smokeId, updated_at: nowIso() }],
         }),
       ),
+      await checkStep("optix_organization_capabilities", () => checkOptixOrganizationCapabilities()),
     ];
     const emailTo = url.searchParams.get("email");
     if (emailTo) steps.push(await checkStep("resend_send", () => sendSmokeEmail(emailTo)));

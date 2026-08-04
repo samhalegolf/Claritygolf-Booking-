@@ -1,7 +1,8 @@
 import type { Config, Context } from "@netlify/functions";
 
-import { syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
+import { syncGoogleCalendarChangesIfEnabled } from "./google-calendar-sync.mts";
 import { notifyBookingEvent } from "./notification-engine.mts";
+import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 
 function env(name: string, fallback = "") {
@@ -206,9 +207,12 @@ async function cancelPublicBooking(payload: any) {
 
   const appointment = rowToItem(row);
 
-  // The booking deletion is authoritative. Settings, Google Calendar and
-  // notification updates are secondary and must not turn a completed
-  // cancellation into a misleading failure response.
+  // Release any linked Optix bay before removing the Clarity lesson. A failed
+  // Optix cancellation deliberately leaves the lesson in place for a safe retry.
+  await cancelOptixBayForCalendarItem(appointmentId);
+
+  // The booking deletion is authoritative after linked resources are released.
+  // Settings, Google Calendar and notification updates remain secondary.
   await deleteVerifiedAppointment(appointmentId, account.id);
 
   await supabase("settings", {
@@ -246,7 +250,7 @@ async function cancelPublicBooking(payload: any) {
 
 function schedulePublicCancelSideEffects(context: Context | undefined, appointment: any) {
   const task = (async () => {
-    await syncGoogleCalendarIfEnabled("public_booking_cancelled").catch((error) =>
+    await syncGoogleCalendarChangesIfEnabled([{ id: appointment.id, action: "delete" }], "public_booking_cancelled").catch((error) =>
       console.error("public_cancel:google_calendar_sync_failed", error),
     );
 

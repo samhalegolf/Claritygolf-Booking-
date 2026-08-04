@@ -7,8 +7,12 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 
-import { getGoogleCalendarSyncStatus, syncGoogleCalendarIfEnabled } from "./google-calendar-sync.mts";
+import {
+  getGoogleCalendarSyncStatus,
+  syncGoogleCalendarChangesIfEnabled,
+} from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
+import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
 import {
@@ -4396,6 +4400,41 @@ export async function handlePublicBookingCatalogRequest() {
   }
 }
 
+function googleCalendarRelevantItem(item) {
+  if (!item) return null;
+  return {
+    kind: item.kind,
+    week: Number(item.week ?? 0),
+    day: Number(item.day ?? 0),
+    start: Number(item.start ?? 0),
+    duration: Number(item.duration ?? 0),
+    client: item.client || "",
+    title: item.title || "",
+    serviceId: item.serviceId || "",
+    locationId: item.locationId || "",
+    location: item.location || null,
+    phone: item.phone || "",
+    email: item.email || "",
+    note: item.note || "",
+  };
+}
+
+function googleCalendarChangesBetween(previousItems, nextItems) {
+  const previous = new Map((previousItems || []).map((item) => [item.id, item]));
+  const next = new Map((nextItems || []).map((item) => [item.id, item]));
+  const changes = [];
+  for (const [id, item] of next) {
+    const before = previous.get(id);
+    if (JSON.stringify(googleCalendarRelevantItem(before)) !== JSON.stringify(googleCalendarRelevantItem(item))) {
+      changes.push({ id, action: "upsert" });
+    }
+  }
+  for (const id of previous.keys()) {
+    if (!next.has(id)) changes.push({ id, action: "delete" });
+  }
+  return changes;
+}
+
 const GOOGLE_SYNC_RESPONSE_BUDGET_MS = 5000;
 
 // The calendar rows are committed before Google Calendar is synced, so a slow Google round trip
@@ -4403,8 +4442,8 @@ const GOOGLE_SYNC_RESPONSE_BUDGET_MS = 5000;
 // 409 against its own committed write, and reported "not saved" for a booking that had saved.
 // Time-box the sync: if Google is slow we answer the client now and let the sync finish in the
 // background (it re-runs on the next save or state read anyway).
-async function syncGoogleCalendarWithinBudget(trigger = "admin_calendar_save", budgetMs = GOOGLE_SYNC_RESPONSE_BUDGET_MS) {
-  const sync = syncGoogleCalendarIfEnabled(trigger).then(
+async function syncGoogleCalendarWithinBudget(changes, trigger = "admin_calendar_save", budgetMs = GOOGLE_SYNC_RESPONSE_BUDGET_MS) {
+  const sync = syncGoogleCalendarChangesIfEnabled(changes, trigger).then(
     (result) => result,
     async (error) => ({
       ...(await getGoogleCalendarSyncStatus().catch(() => ({}))),
@@ -4502,7 +4541,7 @@ async function writeCalendarState(nextState, context = null) {
     readAdminSettings(sharedSettingsMap),
     readBrandSettings(sharedSettingsMap),
     readCoachAccount(sharedSettingsMap),
-    syncGoogleCalendarWithinBudget("admin_calendar_save"),
+    syncGoogleCalendarWithinBudget(googleCalendarChangesBetween(current.items, items), "admin_calendar_save"),
   ]);
   return {
     syncKey,
@@ -4599,6 +4638,9 @@ async function deleteCalendarItemById(id, context = null) {
   const current = await readCalendarState();
   if (context) assertAccountFeature(context.account, "coachCalendar");
   const existingItem = current.items.find((item) => item.id === cleanId);
+  if (existingItem?.kind === "appointment") {
+    await cancelOptixBayForCalendarItem(cleanId);
+  }
   if (context) {
     if (!existingItem) {
       throw Object.assign(new Error("Booking was not found in this workspace."), {
@@ -4636,7 +4678,7 @@ async function deleteCalendarItemById(id, context = null) {
 
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  const googleCalendarSyncTask = syncGoogleCalendarIfEnabled("admin_calendar_delete")
+  const googleCalendarSyncTask = syncGoogleCalendarChangesIfEnabled([{ id: cleanId, action: "delete" }], "admin_calendar_delete")
     .then((result) => console.info("calendar_state:google_sync_completed_after_response", { ok: result?.ok !== false }))
     .catch((error) => console.error("calendar_state:google_sync_failed_after_response", error));
   if (context && typeof context.waitUntil === "function") {
@@ -4694,7 +4736,10 @@ async function writePublicBookingState(currentState, items) {
   const cleanItems = await writeItems(itemsToWrite);
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  await syncGoogleCalendarIfEnabled("public_booking_state_write").catch((error) =>
+  await syncGoogleCalendarChangesIfEnabled(
+    googleCalendarChangesBetween(currentState.items, cleanItems),
+    "public_booking_state_write",
+  ).catch((error) =>
     console.error("public_booking_state:google_calendar_sync_failed", error),
   );
   return {
@@ -4725,7 +4770,7 @@ function schedulePublicBookingSideEffects(context, appointment) {
     if (stamped.personId && stamped.personId !== appointment.personId) {
       await writeItems([stamped]);
     }
-    await syncGoogleCalendarIfEnabled("public_booking_created").catch((error) =>
+    await syncGoogleCalendarChangesIfEnabled([{ id: appointment.id, action: "upsert" }], "public_booking_created").catch((error) =>
       console.error("public_booking:google_calendar_sync_failed", error),
     );
   })().catch((error) => console.error("public_booking:side_effects_failed", appointment?.id, error));
@@ -8194,7 +8239,7 @@ export async function handleBookingApiRoute(
           // reschedule, edit, lesson-complete). Time-boxed like the other save
           // paths so a slow Google round trip finishes in the background instead
           // of holding this response open.
-          const googleCalendarSync = await syncGoogleCalendarWithinBudget("admin_item_upsert");
+          const googleCalendarSync = await syncGoogleCalendarWithinBudget([{ id: item.id, action: "upsert" }], "admin_item_upsert");
           let notificationResults = [];
           let notificationWarning = "";
           try {

@@ -65,6 +65,7 @@ import {
   setActivePhoneCountry,
 } from "../netlify/functions/_shared/phone.mts";
 import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
+import OptixIntegrationPanel from "./modules/optix/OptixIntegrationPanel";
 import type {
   VideoWorkspaceNavigationContext,
   VideoWorkspaceSaveResult,
@@ -22841,6 +22842,7 @@ function App() {
             </div>
 
             <div className={`settings-grid settings-tab-${settingsTab}`}>
+              {settingsTab === "integrations" ? <OptixIntegrationPanel /> : null}
               {servicesSettingsPanel}
               {isAdminUser ? coachesSettingsPanel : null}
               {isAdminUser ? locationsSettingsPanel : null}

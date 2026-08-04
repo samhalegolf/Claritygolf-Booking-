@@ -2,9 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import PlayerPortal, { isPlayerPortalMode, isBookingHandoff } from "./modules/player-portal/PlayerPortal";
-import { installOptixBookingTypeSettings } from "./optix-booking-type-settings";
 import { installOptixBookingFeedback } from "./optix-booking-feedback";
 import { installOptixBookingMutationSync } from "./optix-booking-mutation-sync";
+import { installOptixOriginFeedback } from "./optix-origin-feedback";
 import "./styles.css";
 
 // The player portal is a separate app personality (players.claritygolf.app or
@@ -24,15 +24,16 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>{selectRoot()}</StrictMode>,
 );
 
-// Every App booking surface, including the public/client booking hand-off,
-// triggers Optix immediately after a successful booking mutation. This module
-// adds no UI on the client route.
+// This compatibility hook remains installed but is intentionally a no-op.
+// Clarity-origin resource bookings are created only by the admin card's
+// explicit Book resource action.
 if (!isPlayerPortalMode()) {
   installOptixBookingMutationSync();
 }
 
-// Resource configuration and booking feedback remain admin-only.
+// Resource configuration, manual booking feedback, and external-origin
+// ownership indicators remain admin-only.
 if (!isPlayerPortalMode() && !isBookingHandoff()) {
-  installOptixBookingTypeSettings();
   installOptixBookingFeedback();
+  installOptixOriginFeedback();
 }

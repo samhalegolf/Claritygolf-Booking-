@@ -1,7 +1,5 @@
 import type { Config } from "@netlify/functions";
 
-import { reconcileOptixBookings } from "./optix-booking-reconcile.mts";
-
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
@@ -13,34 +11,28 @@ function json(value: unknown, status = 200) {
 }
 
 /**
- * Immediate event-driven Optix sync endpoint.
+ * Compatibility endpoint retained so older callers receive an explicit answer.
  *
- * Booking mutations call this route after the Clarity booking has been saved.
- * The scheduled reconcile function remains only as the 30-minute safety audit.
+ * Automatic/bulk Clarity -> Optix reconciliation is intentionally disabled.
+ * Resource bookings may only be created through the admin booking card's
+ * explicit Book resource action handled by optix-booking-reconcile.mts.
  */
 export default async function handler(req: Request) {
   if (req.method !== "POST") {
     return json({ error: "method_not_allowed" }, 405);
   }
 
-  try {
-    const result = await reconcileOptixBookings();
-    return json(result, result.ok ? 200 : 207);
-  } catch (error: any) {
-    const code = String(error?.code || "optix_reconcile_failed");
-    return json(
-      {
-        ok: false,
-        error: code,
-        message:
-          error instanceof Error ? error.message : "Optix reconciliation failed.",
-        tokenExpired: code === "token_expired",
-      },
-      code === "not_configured" ? 503 : 500,
-    );
-  }
+  return json(
+    {
+      ok: false,
+      error: "manual_booking_required",
+      message:
+        "Automatic Optix reconciliation is disabled. Use Book resource on the Clarity booking card.",
+    },
+    409,
+  );
 }
 
 export const config: Config = {
-  path: "/api/optix-booking-reconcile",
+  path: "/api/optix-booking-trigger",
 };

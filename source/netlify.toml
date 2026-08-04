@@ -12,6 +12,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/external-bookings"
+  to = "/.netlify/functions/external-bookings"
+  status = 200
+
+[[redirects]]
+  from = "/api/optix-booking-type-settings"
+  to = "/.netlify/functions/optix-booking-type-settings"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

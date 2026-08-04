@@ -160,7 +160,7 @@ function renderProfile(profile: ResourceProfile, services: Service[]) {
   </section>`;
 }
 
-async function openEditor() {
+export async function openOptixResourceEditor() {
   if (document.getElementById("optix-resource-modal")) return;
   const [services, saved] = await Promise.all([loadServices(), loadState()]);
   let profiles = migrateProfiles(services, saved);
@@ -261,24 +261,7 @@ async function openEditor() {
   });
 }
 
-function addResourcesMenuItem() {
-  if (document.getElementById("clarity-resources-menu-item")) return;
-  const locations = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
-    .find((button) => button.textContent?.trim() === "Locations" && button.offsetParent !== null);
-  if (!locations?.parentElement) return;
-  const button = locations.cloneNode(true) as HTMLButtonElement;
-  button.id = "clarity-resources-menu-item";
-  button.type = "button";
-  button.textContent = "Resources";
-  button.removeAttribute("aria-current");
-  button.addEventListener("click", openEditor);
-  locations.insertAdjacentElement("afterend", button);
-}
-
 export function installOptixBookingTypeSettings() {
   if (typeof window === "undefined") return;
   installStyles();
-  addResourcesMenuItem();
-  const observer = new MutationObserver(addResourcesMenuItem);
-  observer.observe(document.body, { childList: true, subtree: true });
 }

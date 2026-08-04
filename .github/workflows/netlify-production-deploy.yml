@@ -1,0 +1,50 @@
+name: Netlify production deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/netlify-production-deploy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: netlify-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NETLIFY_SITE_ID: 8234c6f3-97a7-4fc6-b00d-64443755d80d
+      NETLIFY_AUTH_TOKEN_PRIMARY: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_AUTH_TOKEN_PAT: ${{ secrets.NETLIFY_PERSONAL_ACCESS_TOKEN }}
+      NETLIFY_AUTH_TOKEN_FALLBACK: ${{ secrets.NETLIFY_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Select Netlify credential
+        id: netlify-auth
+        shell: bash
+        run: |
+          token="${NETLIFY_AUTH_TOKEN_PRIMARY:-${NETLIFY_AUTH_TOKEN_PAT:-${NETLIFY_AUTH_TOKEN_FALLBACK:-}}}"
+          if [ -z "$token" ]; then
+            echo "::error::No Netlify deployment secret is configured. Expected NETLIFY_AUTH_TOKEN, NETLIFY_PERSONAL_ACCESS_TOKEN, or NETLIFY_TOKEN."
+            exit 1
+          fi
+          echo "NETLIFY_AUTH_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Deploy current main to production
+        run: npx -y netlify-cli@latest deploy --build --prod --site "$NETLIFY_SITE_ID" --message "Deploy clarified Optix failed-state UI"
