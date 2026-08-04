@@ -4800,6 +4800,7 @@ function App() {
   const [calendarLocationFilterId, setCalendarLocationFilterId] = useState("");
   const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarSyncStatus>(defaultGoogleCalendarStatus);
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
+  const [googleCalendarStatusError, setGoogleCalendarStatusError] = useState("");
   const [googleCalendarDebug, setGoogleCalendarDebug] = useState<GoogleCalendarDebugLog | null>(null);
   const [googleCalendarDebugOpen, setGoogleCalendarDebugOpen] = useState(false);
   const [googleCalendarDebugLoading, setGoogleCalendarDebugLoading] = useState(false);
@@ -14695,10 +14696,30 @@ function App() {
         setAuthStatus("guest");
         return;
       }
-      if (!response.ok) return;
+      if (!response.ok) {
+        // A failed status read used to return silently, leaving the card on
+        // defaultGoogleCalendarStatus -- which renders identically to "OAuth
+        // credentials are missing". Those are very different problems, so say
+        // which one this is instead of guessing.
+        const detail = (await readJsonResponse<{ message?: string; failure?: GoogleCalendarDebugError }>(response, "").catch(
+          () => null,
+        )) as { message?: string; failure?: GoogleCalendarDebugError } | null;
+        const code = googleCalendarFailureCode(detail?.failure ?? null);
+        setGoogleCalendarStatusError(
+          `Status check failed (HTTP ${response.status})${code ? ` — ${code}` : ""}${
+            detail?.message ? `: ${detail.message}` : ""
+          }`,
+        );
+        return;
+      }
+      setGoogleCalendarStatusError("");
       applyGoogleCalendarStatus((await response.json()) as Partial<GoogleCalendarSyncStatus>);
-    } catch {
-      // Google Calendar sync is optional; keep the booking calendar usable.
+    } catch (error) {
+      setGoogleCalendarStatusError(
+        `Could not reach the Google Calendar status endpoint${
+          error instanceof Error && error.message ? `: ${error.message}` : "."
+        }`,
+      );
     }
   }
 
@@ -23353,6 +23374,8 @@ function App() {
                   <strong>
                     {!googleCalendarSyncEnabled
                       ? "Plan feature unavailable"
+                      : googleCalendarStatusError
+                      ? "Status check failed"
                       : !googleCalendar.configured
                       ? "Needs OAuth credentials"
                       : googleCalendar.connected
@@ -23366,6 +23389,8 @@ function App() {
                   <em>
                     {!googleCalendarSyncEnabled
                       ? featureUnavailableMessage("googleCalendarSync")
+                      : googleCalendarStatusError
+                      ? `${googleCalendarStatusError} — the settings below are placeholders, not the live configuration.`
                       : googleCalendar.lastSyncError
                       ? googleCalendar.manualOnly
                         ? `Last sync failed: ${googleCalendar.lastSyncError}`
