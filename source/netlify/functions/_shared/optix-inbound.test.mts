@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertProcessableEvent, createCalendarItemFromOptixBooking, matchPersonByEmail, matchPersonByPhone, normalizeOptixLessonEvent, updateCalendarItemFromOptixBooking, type OptixLessonMapping } from "./optix-origin.mts";
+import { assertProcessableEvent, createCalendarItemFromOptixBooking, findDuplicateBooking, matchPersonByEmail, matchPersonByPhone, normalizeOptixLessonEvent, updateCalendarItemFromOptixBooking, type OptixLessonMapping } from "./optix-origin.mts";
 import { buildOptixAppointmentInput } from "./optix-reconcile.mts";
 
 const mapping: OptixLessonMapping = {
@@ -139,6 +139,55 @@ test("an inbound event never reclassifies the booking's Clarity service", () => 
   assert.equal(created.service_id, "lesson-60");
   assert.equal(created.external_booking_type_name, "Swing Analysis");
   assert.equal(updateCalendarItemFromOptixBooking(normalizeOptixLessonEvent(payload), mapping).external_booking_type_name, "Swing Analysis");
+});
+
+test("a lesson the coach already has is not imported a second time", () => {
+  // The 13 duplicates found on 5 Aug 2026: a native lesson the coach booked,
+  // then the same lesson arriving through Optix.
+  const event = normalizeOptixLessonEvent(payload);
+  const native = { id: "appt-native", client: "Ada Lovelace", email: "", phone: "", start: 840, duration: 60, status: "booked" };
+  assert.equal(findDuplicateBooking([native], event, { start: 840, duration: 60 }), "appt-native");
+  // Matching on any one identity field is enough.
+  assert.equal(
+    findDuplicateBooking([{ ...native, client: "", email: "ada@example.com" }], event, { start: 840, duration: 60 }),
+    "appt-native",
+  );
+  // Phone matching is canonical, so stored formatting does not matter.
+  const phoneEvent = normalizeOptixLessonEvent({
+    ...payload,
+    member: { first_name: "", last_name: "", email: "", phone: "021 463 7700" },
+  });
+  assert.equal(
+    findDuplicateBooking(
+      [{ ...native, client: "", email: "", phone: "+64214637700" }],
+      phoneEvent,
+      { start: 840, duration: 60 },
+    ),
+    "appt-native",
+  );
+});
+
+test("a cancelled record never blocks the rebooking that replaced it", () => {
+  // The other form: Optix cancels a booking and reissues a new ID for the same
+  // slot. The cancelled row is history and the slot is genuinely free.
+  const event = normalizeOptixLessonEvent(payload);
+  const cancelled = { id: "optix-old", client: "Ada Lovelace", start: 840, duration: 60, status: "cancelled" };
+  assert.equal(findDuplicateBooking([cancelled], event, { start: 840, duration: 60 }), null);
+});
+
+test("a different customer or a clear slot is not a duplicate", () => {
+  const event = normalizeOptixLessonEvent(payload);
+  const other = { id: "appt-other", client: "Someone Else", start: 840, duration: 60, status: "booked" };
+  assert.equal(findDuplicateBooking([other], event, { start: 840, duration: 60 }), null);
+  const laterSameClient = { id: "appt-later", client: "Ada Lovelace", start: 1200, duration: 60, status: "booked" };
+  assert.equal(findDuplicateBooking([laterSameClient], event, { start: 840, duration: 60 }), null);
+  assert.equal(findDuplicateBooking([], event, { start: 840, duration: 60 }), null);
+});
+
+test("a lesson that merely overlaps the same customer's slot still counts", () => {
+  const event = normalizeOptixLessonEvent(payload);
+  const overlapping = { id: "appt-overlap", client: "Ada Lovelace", start: 870, duration: 60, status: "booked" };
+  assert.equal(findDuplicateBooking([overlapping], event, { start: 840, duration: 60 }), "appt-overlap");
 });
 
 test("external metadata is additive to normal lesson fields", () => {

@@ -229,6 +229,67 @@ export function createCalendarItemFromOptixBooking(event: OptixLessonEvent, mapp
   };
 }
 
+export type ExistingBookingCandidate = {
+  id?: unknown; client?: unknown; email?: unknown; phone?: unknown;
+  start?: unknown; duration?: unknown; status?: unknown;
+};
+
+function normalisedName(value: unknown) {
+  return text(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The booking Clarity already holds for this lesson, if it has one.
+ *
+ * Idempotency on the external booking ID stops the same webhook creating two
+ * records, but it cannot see that the coach already had the lesson on the
+ * calendar, or that Optix cancelled a booking and issued a fresh ID for the
+ * same slot. Both arrive looking like a brand-new booking, and both produced
+ * duplicates sitting on top of real lessons.
+ *
+ * A booked lesson overlapping this one for the same customer is that lesson
+ * arriving twice. Cancelled records are skipped: they are history, and the slot
+ * is genuinely free again.
+ */
+export function findDuplicateBooking(
+  candidates: ExistingBookingCandidate[],
+  event: OptixLessonEvent,
+  slot: { start: number; duration: number },
+): string | null {
+  const email = text(event.email).toLowerCase();
+  const phoneKey = canonicalPhoneKey(event.phone);
+  const name = normalisedName([event.firstName, event.lastName].filter(Boolean).join(" "));
+  const end = slot.start + slot.duration;
+  for (const row of rowsOf(candidates) as ExistingBookingCandidate[]) {
+    if (text(row?.status).toLowerCase() === "cancelled") continue;
+    const rowStart = Number(row?.start ?? NaN);
+    if (!Number.isFinite(rowStart)) continue;
+    const rowEnd = rowStart + Number(row?.duration ?? 0);
+    if (rowStart >= end || slot.start >= rowEnd) continue;
+    const rowEmail = text(row?.email).toLowerCase();
+    const rowPhone = canonicalPhoneKey(row?.phone);
+    const rowName = normalisedName(row?.client);
+    // Name alone is enough here, unlike customer matching: the slot is already
+    // taken, so this is "is this the same lesson", not "is this the same person
+    // across the whole client list".
+    const sameCustomer =
+      (Boolean(email) && email === rowEmail) ||
+      (Boolean(phoneKey) && phoneKey === rowPhone) ||
+      (Boolean(name) && name === rowName);
+    if (sameCustomer) return text(row?.id) || null;
+  }
+  return null;
+}
+
+async function findExistingBookingForEvent(event: OptixLessonEvent, mapping: OptixLessonMapping) {
+  const slot = calendarSlot(event.startIso, event.timezone);
+  const duration = Math.max(1, Math.round((Date.parse(event.endIso) - Date.parse(event.startIso)) / 60_000));
+  const rows = await optixOriginRequest(
+    `calendar_items?account_id=eq.${encodeURIComponent(mapping.accountId)}&kind=eq.appointment&week=eq.${slot.week}&day=eq.${slot.day}&select=id,client,email,phone,start,duration,status&limit=200`,
+  );
+  return findDuplicateBooking(rowsOf(rows), event, { start: slot.start, duration: duration || 60 });
+}
+
 export async function findOptixLink(externalBookingId: string, purpose = "lesson") {
   const rows = await optixOriginRequest(`external_booking_links?provider=eq.optix&purpose=eq.${purpose}&external_booking_id=eq.${encodeURIComponent(externalBookingId)}&limit=1`);
   return Array.isArray(rows) ? rows[0] || null : null;
@@ -411,6 +472,21 @@ export async function processStoredOptixEvent(eventKey: string, payload: unknown
       });
       await updateEvent(eventKey, { processing_status: "processed", clarity_item_id: itemId, failure_code: null, error_message: null, processed_at: new Date().toISOString() });
       return { status: "processed", clarityItemId: itemId, created: false, mapping, item: { id: itemId, status: "cancelled" } };
+    }
+    // Only on first sight of a booking. An event for a booking Clarity already
+    // tracks is an update, and belongs on its own record however the slot looks.
+    if (!existing) {
+      const duplicateOf = await findExistingBookingForEvent(event, mapping);
+      if (duplicateOf) {
+        await updateEvent(eventKey, {
+          processing_status: "ignored",
+          failure_code: "duplicate_existing_booking",
+          error_message: `This lesson is already on the calendar as ${duplicateOf}, so no second copy was created.`,
+          clarity_item_id: duplicateOf,
+          processed_at: new Date().toISOString(),
+        });
+        return { status: "ignored", reason: "duplicate_existing_booking", clarityItemId: duplicateOf };
+      }
     }
     const personId = existing?.person_id || linkedItem?.person_id || await resolvePerson(event, mapping.accountId);
     const item = createCalendarItemFromOptixBooking(event, mapping, { itemId, personId });
