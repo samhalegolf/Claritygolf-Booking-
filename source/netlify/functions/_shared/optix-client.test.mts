@@ -32,6 +32,30 @@ test("classifies unavailable resources as a booking conflict", () => {
   assert.equal(error.retryable, false);
 });
 
+test("a busy bay is a conflict however Optix words it", () => {
+  // Optix's actual wording, seen on 5 Aug 2026. It contains no "unavailable",
+  // so it used to classify as remote_error -- which stopped the auto-select
+  // loop at the first bay and left six configured bays untried.
+  const error = classifyOptixFailure({
+    status: 200,
+    graphQLErrors: [{ message: "The resource is not available during the selected times" }],
+  });
+
+  assert.equal(error.code, "resource_conflict");
+});
+
+test("a server outage is not mistaken for a busy bay", () => {
+  // Same words, different meaning: this must stay a remote error so the loop
+  // reports an outage instead of claiming every bay is booked.
+  const error = classifyOptixFailure({
+    status: 503,
+    responseText: "Service not available",
+  });
+
+  assert.equal(error.code, "remote_error");
+  assert.equal(error.retryable, true);
+});
+
 test("keeps generic server failures retryable", () => {
   const error = classifyOptixFailure({ status: 503, responseText: "Upstream service failed" });
 

@@ -165,9 +165,12 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord) {
     : isCancelled
       ? "Cancelled in Optix"
       : "No active Optix booking";
-  const failureSummary = record.errorCode && ERROR_LABELS[record.errorCode]
-    ? ERROR_LABELS[record.errorCode]
-    : "Previous booking attempt failed";
+  // Name the reason, or failing that the raw code. "Previous booking attempt
+  // failed" told the coach only that something had already been tried, which is
+  // the least useful thing on the card.
+  const failureSummary = record.errorCode
+    ? ERROR_LABELS[record.errorCode] || `Optix error: ${record.errorCode}`
+    : "Booking failed";
   const visibleMessage = hasFailed
     ? `${failureSummary}${record.errorMessage ? `: ${record.errorMessage}` : ""}`
     : "";
@@ -176,7 +179,10 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord) {
     : record.lastAttemptedAt || record.updatedAt || null;
   const metaLabel = isSynced ? "Last confirmed" : hasFailed ? "Last attempt" : "Last checked";
   const canBook = Boolean(record.calendarItemId) && !isSynced && !isCancelled;
-  const bookLabel = hasFailed ? "Retry resource booking" : "Book resource";
+  // One action, worded the same whatever came before it. Every press is a real
+  // attempt (the card sends forceRetry), so "Retry" only made a fresh booking
+  // look like it was repeating itself.
+  const bookLabel = "Book bay";
 
   panel.innerHTML = `
     <div class="optix-booking-feedback__head">

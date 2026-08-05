@@ -150,11 +150,31 @@ export function classifyOptixFailure(input: {
     return new OptixSyncError("token_expired", detailed || "The Optix access token has expired or is no longer valid.", { status, retryable: true });
   }
 
-  if (status === 403 || lower.includes("unauthorized") || lower.includes("not authorised") || lower.includes("forbidden")) {
+  // "Your user account is not allowed to make bookings" is a permissions
+  // problem, but it says neither "unauthorized" nor "forbidden", so it read as a
+  // generic remote error and gave no hint that the Optix account is the thing
+  // to fix.
+  if (
+    status === 403 ||
+    lower.includes("unauthorized") ||
+    lower.includes("not authorised") ||
+    lower.includes("not allowed") ||
+    lower.includes("forbidden")
+  ) {
     return new OptixSyncError("unauthorized", detailed || "Optix rejected this account or booking action.", { status, retryable: false });
   }
 
+  // Optix words a busy bay as "The resource is not available during the selected
+  // times" -- no "unavailable" anywhere in it, so this fell through to
+  // remote_error. That is not cosmetic: the auto-select loop only advances to
+  // the next bay on resource_conflict, so a misread conflict stopped the search
+  // at the first bay and reported failure with every other configured bay
+  // untried. Status-guarded so a 5xx "service not available" stays a remote
+  // error rather than being mistaken for a busy bay.
+  const busyResource = /\bnot available\b/.test(lower) && status !== null && status < 500;
+
   if (
+    busyResource ||
     lower.includes("unavailable") ||
     lower.includes("already booked") ||
     lower.includes("conflict") ||
