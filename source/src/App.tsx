@@ -448,12 +448,39 @@ type CalendarItem = {
   location?: BookingLocationSnapshot;
   coach?: BookingCoachSnapshot;
   status?: BookingStatus;
+  // Booking ownership, supplied by the backend and never written back. "clarity"
+  // means Clarity owns the lesson; anything else means an external system does
+  // and Clarity is mirroring it.
+  origin?: string;
+  externalProvider?: string;
+  externalBookingTypeName?: string;
   updatedAt?: string;
   completedAt?: string;
   customGroup?: true;
   attendees?: CustomGroupAttendee[];
   calculatedPrice?: number;
 };
+
+/**
+ * True when an outside system owns this booking and Clarity is only mirroring
+ * it. Clarity must not move such a lesson on its own: the external system is
+ * the source of truth for when it happens, and a change made only here would
+ * leave the two silently disagreeing.
+ */
+function isExternallyOwned(item: Pick<CalendarItem, "origin" | "externalProvider">) {
+  const origin = (item.origin || "clarity").trim().toLowerCase();
+  return origin !== "" && origin !== "clarity";
+}
+
+function externalProviderLabel(item: Pick<CalendarItem, "origin" | "externalProvider">) {
+  const provider = (item.externalProvider || item.origin || "").trim();
+  if (!provider) return "the booking system it came from";
+  return provider.toLowerCase() === "optix" ? "Optix" : provider;
+}
+
+function externalRescheduleMessage(item: Pick<CalendarItem, "origin" | "externalProvider">) {
+  return `This lesson is owned by ${externalProviderLabel(item)}. Reschedule it there — moving it only in Clarity would leave the two out of step.`;
+}
 
 type Location = {
   id: string;
@@ -4735,6 +4762,11 @@ function App() {
   const [quickClientSearch, setQuickClientSearch] = useState("");
   const [quickMatchField, setQuickMatchField] = useState<"name" | "phone" | "email" | "">("");
   const [dockBookings, setDockBookings] = useState<PendingBooking[]>([]);
+  // Lessons parked on the shelf. They stay in `items` -- the calendar save is a
+  // full replace, so dropping one here would delete it server-side -- and are
+  // only hidden from the grid. Nothing is written while a lesson is shelved, so
+  // a reload simply puts it back where it was.
+  const [shelvedItemIds, setShelvedItemIds] = useState<string[]>([]);
   const [flyingBooking, setFlyingBooking] = useState<DockFlight | null>(null);
   const [activeDockBookingId, setActiveDockBookingId] = useState("");
   const [placementAnimation, setPlacementAnimation] = useState<PlacementAnimation | null>(null);
@@ -5238,7 +5270,13 @@ function App() {
     : "";
   const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek]);
   const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
-  const accountItems = useMemo(() => filterRecordsForAccount(items, activeAccountId), [activeAccountId, items]);
+  const accountItems = useMemo(
+    () =>
+      filterRecordsForAccount(items, activeAccountId).filter(
+        (item) => !shelvedItemIds.includes(item.id),
+      ),
+    [activeAccountId, items, shelvedItemIds],
+  );
   const accountCoachProfiles = useMemo(() => filterRecordsForAccount(coachProfiles, activeAccountId), [activeAccountId, coachProfiles]);
   const accountLocations = useMemo(() => filterRecordsForAccount(locations, activeAccountId), [activeAccountId, locations]);
   const weekItems = useMemo(() => accountItems.filter((item) => itemWeek(item) === activeWeek), [activeWeek, accountItems]);
@@ -8495,6 +8533,10 @@ function App() {
   function dockAppointmentItem(movedItem: CalendarItem, options: { fromFlick?: boolean } = {}) {
     if (!requireLiveDatabase("dock appointments")) return false;
     if (movedItem.kind !== "appointment") return false;
+    if (isExternallyOwned(movedItem)) {
+      setToast({ message: externalRescheduleMessage(movedItem) });
+      return false;
+    }
     const service = itemService(movedItem, services);
     if (!service) return false;
 
@@ -8519,57 +8561,30 @@ function App() {
     const fromX = dockRect ? startX - dockRect.left : undefined;
     const fromY = dockRect ? startY - dockRect.top : undefined;
 
-    const previousItems = items;
-    setItems(items.filter((item) => item.id !== movedItem.id));
+    // Shelving is a hold, not an edit. The lesson keeps its id and its row --
+    // it is only hidden from the grid -- so placing it later is one reschedule
+    // of the same booking rather than a delete and a fresh create. That is what
+    // lets the 30-second grace cover this path: park it and put it back where
+    // it started and the calendar never changed at all.
+    setShelvedItemIds((current) => (current.includes(movedItem.id) ? current : [...current, movedItem.id]));
     setFloatingDrag(null);
     closeCalendarDetails();
     setFlyingBooking({ ...docked, fromX, fromY });
-    void (async () => {
-      beginAdminSave("calendar_delete");
-      try {
-        const response = await fetch(`/api/calendar-state?id=${encodeURIComponent(movedItem.id)}`, {
-          method: "DELETE",
-          credentials: "same-origin",
-          cache: "no-store",
-          headers: { Accept: "application/json" },
-        });
-        const data = await response.json().catch(() => ({}));
-        if (response.status === 401) {
-          setAuthStatus("guest");
-          throw new Error(data?.message || "Admin login expired. Sign in again before docking bookings.");
-        }
-        if (!response.ok) {
-          throw new Error(data?.message || "Booking could not be docked.");
-        }
-        const persistedItems: CalendarItem[] = Array.isArray(data.items) ? data.items : previousItems.filter((item) => item.id !== movedItem.id);
-        lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
-        lastPersistedCalendarItemsRef.current = persistedItems;
-        if (typeof data.updatedAt === "string") {
-          setCalendarStateVersion(data.updatedAt);
-        }
-        window.setTimeout(() => {
-          setDockBookings((current) => [...current, docked]);
-          setActiveDockBookingId(docked.id);
-          setFlyingBooking((current) => (current?.id === docked.id ? null : current));
-          setToast({
-            message: options.fromFlick
-              ? `${docked.client} flew into the dock.`
-              : `${docked.client} is parked on the shelf.`,
-            undo: () => {
-              setDockBookings((current) => current.filter((booking) => booking.id !== docked.id));
-              setItems((current) => [...current, movedItem]);
-              setActiveDockBookingId("");
-            },
-          });
-        }, 680);
-      } catch (error) {
-        setItems(previousItems);
-        setFlyingBooking(null);
-        setToast({ message: error instanceof Error ? error.message : "Booking could not be docked." });
-      } finally {
-        endAdminSave("calendar_delete");
-      }
-    })();
+    window.setTimeout(() => {
+      setDockBookings((current) => [...current, docked]);
+      setActiveDockBookingId(docked.id);
+      setFlyingBooking((current) => (current?.id === docked.id ? null : current));
+      setToast({
+        message: options.fromFlick
+          ? `${docked.client} flew into the dock.`
+          : `${docked.client} is parked on the shelf.`,
+        undo: () => {
+          setDockBookings((current) => current.filter((booking) => booking.id !== docked.id));
+          setShelvedItemIds((current) => current.filter((id) => id !== movedItem.id));
+          setActiveDockBookingId("");
+        },
+      });
+    }, 680);
     return true;
   }
 
@@ -9655,6 +9670,17 @@ function App() {
     });
   }
 
+  /**
+   * The tap-driven half of rescheduling: park the selected lesson on the shelf
+   * and arm it, so the next slot the user taps is where it lands. Same shelf,
+   * same placement path and same grace window as dragging it there — this only
+   * removes the need to drag.
+   */
+  function shelveSelectedForMove() {
+    if (!selected || selected.kind !== "appointment") return;
+    dockAppointmentItem(selected);
+  }
+
   function bookNextFromSelected() {
     if (!selected || selected.kind !== "appointment" || !selected.serviceId) return;
     const service = selectedService;
@@ -9709,11 +9735,58 @@ function App() {
       setToast({ message: "That parked lesson type is no longer available." });
       return false;
     }
-    if (!isValidAppointmentSlot(candidate, undefined, service)) {
+    // A shelved lesson still occupies its own row, so it has to be excluded from
+    // the collision check or it blocks itself — which would make putting one
+    // back exactly where it came from, the whole point of the grace window, the
+    // one move the calendar refused. New bookings have no source and are
+    // unaffected.
+    if (!isValidAppointmentSlot(candidate, booking.sourceItemId || undefined, service)) {
       setToast({ message: "That spot is not available. The lesson is still on the shelf." });
       return false;
     }
     if (!confirmPastAdminLesson(candidate)) return false;
+
+    // A lesson that came off the calendar goes back as the same booking. Moving
+    // it in place keeps the id, the client link and every field an admin had
+    // already set, and the backend sees one reschedule -- so returning it to its
+    // original slot inside the grace window is a no-op rather than a cancel
+    // followed by a new booking.
+    const shelvedSource = booking.sourceItemId
+      ? items.find((item) => item.id === booking.sourceItemId)
+      : null;
+    if (shelvedSource) {
+      const movedItem: CalendarItem = {
+        ...shelvedSource,
+        week: candidate.week,
+        day: candidate.day,
+        start: candidate.start,
+        duration: candidate.duration,
+      };
+      const animation = options.animateFromDock
+        ? buildDockPlacementAnimation(booking.id, movedItem.id, candidate)
+        : null;
+      setItems(
+        carveBusyBlocksForAppointment(
+          items.map((item) => (item.id === movedItem.id ? movedItem : item)),
+          itemSlot(movedItem),
+        ),
+      );
+      setShelvedItemIds((current) => current.filter((id) => id !== movedItem.id));
+      setDockBookings(dockBookings.filter((dockBooking) => dockBooking.id !== booking.id));
+      setActiveDockBookingId("");
+      closeCalendarDetails();
+      setQuickCreate(null);
+      if (animation) {
+        setPlacementAnimation(animation);
+        window.setTimeout(() => {
+          setPlacementAnimation((current) => (current?.itemId === movedItem.id ? null : current));
+        }, 620);
+      }
+      setToast({
+        message: `Moved ${booking.client} to ${weekDays[movedItem.day].short} at ${formatTime(movedItem.start)}.`,
+      });
+      return true;
+    }
 
     const coachId = service.coachId || defaultCoachId(coachProfiles);
     const location = bookingLocationSnapshotFor(service, locations, coachAccount);
@@ -17753,6 +17826,16 @@ function App() {
           <button className="primary-button" onClick={bookNextFromSelected}>
             <Plus size={16} />
             Book Next
+          </button>
+        )}
+        {selected.kind === "appointment" && !isExternallyOwned(selected) && (
+          <button
+            className="primary-button"
+            onClick={() => shelveSelectedForMove()}
+            title="Park this lesson on the shelf, then tap its new time"
+          >
+            <GripVertical size={16} />
+            Move
           </button>
         )}
         <button className="danger-button" disabled={deleteInFlightId === selected.id} onClick={removeSelected}>

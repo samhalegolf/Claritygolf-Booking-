@@ -2063,6 +2063,14 @@ function rowToItem(row) {
     coach: cleanBookingCoachSnapshot(row.coach),
     location: cleanBookingLocationSnapshot(row.location),
     status: cancelledGroupSession ? "cancelled" : status,
+    // Who owns this booking. The calendar needs this to tell a native lesson
+    // from one an external system owns -- without it the UI cannot label an
+    // Optix booking, and worse, cannot stop a gesture that would silently
+    // convert one. Read-only: writeItems() never updates these columns, so a
+    // client cannot claim a booking for a provider by echoing them back.
+    origin: row.origin || "clarity",
+    externalProvider: row.external_provider || "",
+    externalBookingTypeName: row.external_booking_type_name || "",
     updatedAt,
     completedAt,
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
