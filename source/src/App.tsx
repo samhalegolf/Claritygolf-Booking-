@@ -455,6 +455,9 @@ type CalendarItem = {
   externalProvider?: string;
   externalBookingId?: string;
   externalBookingTypeName?: string;
+  /** A live Optix bay is held for this lesson. Backend-supplied, never written back. */
+  bayBooked?: boolean;
+  bayResourceId?: string;
   updatedAt?: string;
   completedAt?: string;
   customGroup?: true;
@@ -18745,7 +18748,9 @@ function App() {
                         invalid ? "invalid" : ""
 	                      } ${flyAnimation ? "just-placed-from-dock" : ""} ${
 	                        pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
-	                      } ${item.kind === "appointment" && item.status ? `status-${item.status}` : ""}`}
+	                      } ${item.kind === "appointment" && item.status ? `status-${item.status}` : ""} ${
+                        item.kind === "appointment" && item.bayBooked ? "has-bay" : ""
+                      }`}
                       aria-label={tooltipRows.join(", ")}
                       onPointerEnter={(event) =>
                         showCalendarItemHover(event, item, service, latestClientEmail, latestCoachEmail, latestAdminEmail)
@@ -18841,34 +18846,10 @@ function App() {
                         </em>
                         {itemLocationTag ? <small className="item-location-tag">{itemLocationTag}</small> : null}
                       </div>
-                      {item.kind === "appointment" && (latestClientEmail || latestCoachEmail || latestAdminEmail) && (
-                        <div className="item-email-indicators" aria-label="Email receipt status">
-                          {latestClientEmail && (
-                            <span
-                              className={`email-status-dot ${notificationTone(latestClientEmail.status)}`}
-                              title={`Client: ${notificationStatusLabel(latestClientEmail)}`}
-                            >
-                              C
-                            </span>
-                          )}
-                          {latestCoachEmail && (
-                            <span
-                              className={`email-status-dot ${notificationTone(latestCoachEmail.status)}`}
-                              title={`Coach: ${notificationStatusLabel(latestCoachEmail)}`}
-                            >
-                              O
-                            </span>
-                          )}
-                          {latestAdminEmail && (
-                            <span
-                              className={`email-status-dot ${notificationTone(latestAdminEmail.status)}`}
-                              title={`Admin: ${notificationStatusLabel(latestAdminEmail)}`}
-                            >
-                              A
-                            </span>
-                          )}
-                        </div>
-                      )}
+                      {/* The C/O/A email dots lived here. Email status is still on
+                          the booking card and in the hover tooltip; three letters
+                          on every card was noise on the one view that has to stay
+                          readable at a glance. */}
                       {item.readOnly ? null : (
                         <button
                           className="resize-handle"

@@ -2073,6 +2073,8 @@ function rowToItem(row) {
     externalProvider: row.external_provider || "",
     externalBookingId: row.external_booking_id || "",
     externalBookingTypeName: row.external_booking_type_name || "",
+    bayBooked: row.bay_booked === true,
+    bayResourceId: row.bay_resource_id || "",
     updatedAt,
     completedAt,
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
@@ -2714,9 +2716,17 @@ function stampResolvedPersonIds(items, resolvedIds = []) {
 }
 
 async function readItems() {
+  // The bay comes along with the lesson so the calendar can show which ones are
+  // covered without a second request and without matching on rendered text.
+  // Only a live booking counts: a failed or cancelled sync row means no bay.
   const rows = await db().sql`
-    SELECT * FROM calendar_items
-    ORDER BY week, day, start, id
+    SELECT ci.*,
+           (s.optix_booking_id IS NOT NULL AND s.optix_booking_id <> ''
+            AND s.sync_status = 'synced') AS bay_booked,
+           s.resource_id AS bay_resource_id
+    FROM calendar_items ci
+    LEFT JOIN optix_booking_sync s ON s.calendar_item_id = ci.id
+    ORDER BY ci.week, ci.day, ci.start, ci.id
   `;
   return rows.map(rowToItem);
 }

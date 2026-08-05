@@ -3579,6 +3579,15 @@ button {
   outline-offset: 2px;
 }
 
+/* A live Optix bay is held for this lesson. Deliberately a thin outline rather
+   than a badge: it reads at a glance across the whole week without taking room
+   inside the card, and it sits outside the box so it never shifts the layout.
+   Kept narrower than .selected so the two are distinguishable when both apply. */
+.calendar-item.has-bay {
+  outline: 1px solid #e08a2e;
+  outline-offset: 1px;
+}
+
 .calendar-item.invalid {
   border-color: #d9482f;
   background: #ffe3dc;

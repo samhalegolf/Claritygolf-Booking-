@@ -157,7 +157,15 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord) {
   const isSynced = status === "synced";
   const isCancelled = status === "cancelled";
   const hasFailed = status === "failed" || status === "token_expired";
-  panel.className = `optix-booking-feedback${isSynced ? " optix-booking-feedback--synced" : hasFailed ? " optix-booking-feedback--failed" : ""}`;
+  // A failure from days ago is history, not the current state. Opening a lesson
+  // whose last attempt was the 429 storm on 2 Aug led with a red box about
+  // something that had not just happened, and buried the fact that the actual
+  // state is simply "no bay yet, press the button".
+  const attemptAge = record.lastAttemptedAt ? Date.now() - Date.parse(record.lastAttemptedAt) : Number.NaN;
+  const staleFailure = hasFailed && Number.isFinite(attemptAge) && attemptAge > 60 * 60 * 1000;
+  panel.className = `optix-booking-feedback${
+    isSynced ? " optix-booking-feedback--synced" : hasFailed && !staleFailure ? " optix-booking-feedback--failed" : ""
+  }`;
 
   const heading = isSynced ? record.bayName || "Resource booked" : "Resource not booked";
   const statusLabel = isSynced
@@ -171,9 +179,12 @@ function renderPanel(card: HTMLElement, record: OptixStatusRecord) {
   const failureSummary = record.errorCode
     ? ERROR_LABELS[record.errorCode] || `Optix error: ${record.errorCode}`
     : "Booking failed";
-  const visibleMessage = hasFailed
-    ? `${failureSummary}${record.errorMessage ? `: ${record.errorMessage}` : ""}`
-    : "";
+  const failureDetail = `${failureSummary}${record.errorMessage ? `: ${record.errorMessage}` : ""}`;
+  const visibleMessage = !hasFailed
+    ? ""
+    : staleFailure
+      ? `Earlier attempt on ${formatTime(record.lastAttemptedAt)} — ${failureDetail}`
+      : failureDetail;
   const lastChecked = isSynced
     ? record.lastSyncedAt || record.updatedAt || null
     : record.lastAttemptedAt || record.updatedAt || null;
