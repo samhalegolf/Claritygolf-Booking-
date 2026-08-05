@@ -9012,6 +9012,10 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     if (!requireLiveDatabase("move appointments")) return;
+    if (isExternallyOwned(item)) {
+      setToast({ message: externalRescheduleMessage(item) });
+      return;
+    }
     const slot = slotFromPointer(event);
     if (!slot) return;
     const rect = event.currentTarget.getBoundingClientRect();
@@ -9042,6 +9046,13 @@ function App() {
     event.preventDefault();
     event.stopPropagation();
     if (!requireLiveDatabase("resize appointments")) return;
+    // Resizing moves the end time, which the external system owns just as much
+    // as the start. Gating the drag but not this would leave the same drift
+    // reachable by a different handle.
+    if (isExternallyOwned(item)) {
+      setToast({ message: externalRescheduleMessage(item) });
+      return;
+    }
     pointerStartRef.current = { x: event.clientX, y: event.clientY };
     pointerClientRef.current = { x: event.clientX, y: event.clientY };
     resetPointerTrail(event.clientX, event.clientY);
