@@ -480,7 +480,8 @@ function externalProviderLabel(item: Pick<CalendarItem, "origin" | "externalProv
 }
 
 function externalRescheduleMessage(item: Pick<CalendarItem, "origin" | "externalProvider">) {
-  return `This lesson is owned by ${externalProviderLabel(item)}. Reschedule it there — moving it only in Clarity would leave the two out of step.`;
+  const provider = externalProviderLabel(item);
+  return `${provider} owns this lesson, so move it there — changing it only in Clarity would leave the two out of step. You can also remove it from Clarity from the booking card.`;
 }
 
 type Location = {
@@ -15787,6 +15788,19 @@ function App() {
   async function removeSelected() {
     if (!selected) return;
     if (!requireLiveDatabase("remove calendar items")) return;
+    // Removing an externally owned lesson only clears it from Clarity -- the
+    // booking is still live in the system that owns it, and Clarity has no way
+    // to cancel it there. Say so plainly before it disappears, or the calendar
+    // looks like it cancelled something it did not.
+    if (isExternallyOwned(selected)) {
+      const provider = externalProviderLabel(selected);
+      const confirmed = window.confirm(
+        `Remove this lesson from Clarity only?\n\n` +
+          `${selected.client ?? selected.title} stays booked in ${provider}. This does not cancel it there — ` +
+          `cancel it in ${provider} too, or the customer keeps the booking.`,
+      );
+      if (!confirmed) return;
+    }
     const calendarItemId = selected.id;
     const saveVersion = beginAdminSave("calendar_delete");
     const timer = startDiagnosticTimer({
@@ -17853,9 +17867,11 @@ function App() {
         <button className="danger-button" disabled={deleteInFlightId === selected.id} onClick={removeSelected}>
           {deleteInFlightId === selected.id
             ? "Removing..."
-            : selected.kind === "appointment"
-              ? "Cancel Lesson"
-              : "Remove Block"}
+            : selected.kind !== "appointment"
+              ? "Remove Block"
+              : isExternallyOwned(selected)
+                ? "Remove from Clarity"
+                : "Cancel Lesson"}
         </button>
       </div>
     </>
