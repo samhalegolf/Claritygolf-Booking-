@@ -352,6 +352,29 @@ function adminSettingsFromSettings(settings: Record<string, string>) {
   };
 }
 
+/** Calendar card colours: fill by lesson type, outline by booking status. */
+const defaultCalendarColors: Record<string, string> = {
+  lessonPrivate: "#2b2233",
+  lessonPlaying: "#1c3348",
+  lessonGroup: "#14342a",
+  lessonAssessment: "#3f3320",
+  statusConfirmed: "#1fd36d",
+  statusPending: "#b9c0b4",
+  statusCompleted: "#7f8a80",
+  statusCancelled: "#b52f1f",
+  statusNoShow: "#d08a1e",
+};
+
+function cleanCalendarColors(colors: unknown): Record<string, string> {
+  const source = colors && typeof colors === "object" ? (colors as Record<string, unknown>) : {};
+  const cleaned: Record<string, string> = {};
+  for (const [key, fallback] of Object.entries(defaultCalendarColors)) {
+    const value = source[key];
+    cleaned[key] = typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim() : fallback;
+  }
+  return cleaned;
+}
+
 function brandSettingsFromSettings(settings: Record<string, string>, account: ReturnType<typeof cleanCoachAccount>) {
   return {
     coachName: settingValue(settings, "coachName") || account.businessName,
@@ -363,6 +386,9 @@ function brandSettingsFromSettings(settings: Record<string, string>, account: Re
     secondary: settingValue(settings, "brandSecondary") || "#d7b06b",
     accent: settingValue(settings, "brandAccent") || "#07100a",
     bookingTheme: settingValue(settings, "brandBookingTheme") === "light" ? "light" : "dark",
+    calendarColors: cleanCalendarColors(
+      parseSettingJson(settings, "brandCalendarColorsJson", defaultCalendarColors),
+    ),
   };
 }
 

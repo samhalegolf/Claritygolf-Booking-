@@ -4263,25 +4263,30 @@ button {
 
   /* Card fill by lesson type. Flat colour, no gradient: the fill is the only
      thing carrying "what kind of lesson is this", so it has to survive being
-     read at 40px tall out of the corner of an eye. Retheme bookings by editing
-     these four and nothing else. */
-  --lesson-private: #2b2233;
-  --lesson-playing: #1c3348;
-  --lesson-group: #14342a;
-  --lesson-assessment: #3f3320;
-  /* What a card actually paints. Set per card (attribute below, or inline from
-     coach settings); this is the fallback for a booking with no known type. */
+     read at 40px tall out of the corner of an eye.
+
+     The --*-set variables come from coach settings (Branding → Calendar
+     colours) and are published on .app-shell. The hex here is what a workspace
+     that has never touched them gets, and the theme blocks below change only
+     that fallback — so a colour the coach chose is honoured in both themes
+     while an untouched default can still be tuned per theme. */
+  --lesson-private: var(--lesson-private-set, #2b2233);
+  --lesson-playing: var(--lesson-playing-set, #1c3348);
+  --lesson-group: var(--lesson-group-set, #14342a);
+  --lesson-assessment: var(--lesson-assessment-set, #3f3320);
+  /* What a card actually paints. Set per card by the attribute rules below, or
+     inline; this is the fallback for a booking with no known type. */
   --lesson-type-color: var(--lesson-private);
   --lesson-type-text: #f7fff9;
 
-  /* Card outline by booking status. Colour and stroke style both carry meaning,
-     so a status names the whole border, not just a hue — the dashed/dotted
-     strokes stay legible for anyone who cannot separate these by colour. */
-  --status-confirmed: 2px solid var(--coach-primary, #1fd36d);
-  --status-pending: 2px dashed #b9c0b4;
-  --status-completed: 2px solid #7f8a80;
-  --status-cancelled: 2px dashed var(--danger);
-  --status-no-show: 2px dotted #d08a1e;
+  /* Card outline by booking status. The stroke style is not a setting: it is
+     what keeps the five states apart for anyone who cannot separate them by
+     hue, so only the colour is editable. */
+  --status-confirmed-color: var(--status-confirmed-set, var(--coach-primary, #1fd36d));
+  --status-pending-color: var(--status-pending-set, #b9c0b4);
+  --status-completed-color: var(--status-completed-set, #7f8a80);
+  --status-cancelled-color: var(--status-cancelled-set, var(--danger));
+  --status-no-show-color: var(--status-no-show-set, #d08a1e);
   --shadow: 0 18px 46px rgba(8, 18, 12, 0.08);
   --shadow-strong: 0 18px 52px rgba(4, 9, 6, 0.2);
   --shine: linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 7%, #ffffff), rgba(255, 255, 255, 0));
@@ -4314,17 +4319,18 @@ button {
   --available: rgba(255, 255, 255, 0.045);
   --block-bg: rgba(255, 255, 255, 0.08);
   --block-text: rgba(248, 255, 249, 0.76);
-  /* Lifted off the light-theme hexes: the same fills against a near-black page
-     read as holes rather than cards. Same four hues, same order. */
-  --lesson-private: #4a3c58;
-  --lesson-playing: #2d557a;
-  --lesson-group: #1f5645;
-  --lesson-assessment: #6a5533;
+  /* Only the fallbacks change: the same fills against a near-black page read as
+     holes rather than cards, so an untouched workspace gets lifted hues here.
+     A colour set in coach settings still wins — it was chosen deliberately. */
+  --lesson-private: var(--lesson-private-set, #4a3c58);
+  --lesson-playing: var(--lesson-playing-set, #2d557a);
+  --lesson-group: var(--lesson-group-set, #1f5645);
+  --lesson-assessment: var(--lesson-assessment-set, #6a5533);
   --lesson-type-color: var(--lesson-private);
   --lesson-type-text: #f7fff9;
-  --status-pending: 2px dashed rgba(240, 255, 245, 0.42);
-  --status-completed: 2px solid rgba(240, 255, 245, 0.5);
-  --status-no-show: 2px dotted #e2a53f;
+  --status-pending-color: var(--status-pending-set, rgba(240, 255, 245, 0.42));
+  --status-completed-color: var(--status-completed-set, rgba(240, 255, 245, 0.5));
+  --status-no-show-color: var(--status-no-show-set, #e2a53f);
   --shadow: 0 20px 58px rgba(0, 0, 0, 0.36);
   --shadow-strong: 0 24px 70px rgba(0, 0, 0, 0.5);
   --shine: linear-gradient(180deg, rgba(31, 211, 109, 0.045), rgba(255, 255, 255, 0.02));
@@ -5023,7 +5029,7 @@ button {
   padding: 5px 7px;
   gap: 1px;
   justify-content: flex-start;
-  border: var(--status-confirmed);
+  border: 2px solid var(--status-confirmed-color);
   border-radius: 8px;
   background: var(--lesson-type-color);
   color: var(--lesson-type-text);
@@ -5288,6 +5294,80 @@ button {
   font-style: normal;
   text-transform: uppercase;
   opacity: 0.82;
+}
+
+.settings-note {
+  margin: 0 0 12px;
+  color: var(--muted, #6d746c);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Nine swatches: four lesson-type fills, five status outlines. The swatch is
+   the input, so what you click is the colour you are changing. */
+.calendar-colour-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.calendar-colour-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #dfe5d8);
+  border-radius: 8px;
+  background: var(--panel-soft, #f8faf4);
+  cursor: pointer;
+}
+
+.calendar-colour-field input[type="color"] {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border, #dfe5d8);
+  border-radius: 7px;
+  background: none;
+  cursor: pointer;
+}
+
+.calendar-colour-field input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.calendar-colour-field input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: 5px;
+}
+
+.calendar-colour-field span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.calendar-colour-field strong {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.calendar-colour-field em {
+  color: var(--quiet, #878d84);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.calendar-colour-field code {
+  color: var(--muted, #6d746c);
+  font-size: 11px;
+  text-transform: uppercase;
 }
 
 .booking-surface-setting {
@@ -7809,19 +7889,19 @@ button {
    colour, so the five states stay apart without relying on hue. */
 .calendar-item.appointment.status-booked,
 .calendar-item.appointment.status-confirmed {
-  border: var(--status-confirmed);
+  border: 2px solid var(--status-confirmed-color);
 }
 
 .calendar-item.appointment.status-pending {
-  border: var(--status-pending);
+  border: 2px dashed var(--status-pending-color);
 }
 
 .calendar-item.appointment.status-completed {
-  border: var(--status-completed);
+  border: 2px solid var(--status-completed-color);
 }
 
 .calendar-item.appointment.status-cancelled {
-  border: var(--status-cancelled);
+  border: 2px dashed var(--status-cancelled-color);
 }
 
 .calendar-item.appointment.status-cancelled .item-content strong {
@@ -7829,7 +7909,7 @@ button {
 }
 
 .calendar-item.appointment.status-no_show {
-  border: var(--status-no-show);
+  border: 2px dotted var(--status-no-show-color);
 }
 
 /* Time, not status, drives fade. Nothing else on a card sets opacity: a faded

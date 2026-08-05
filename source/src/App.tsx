@@ -1447,6 +1447,27 @@ type AvailabilityWindow = {
   end: number;
 };
 
+/**
+ * What a calendar card is painted with. Fill by lesson type, outline by
+ * booking status — the two channels the week calendar reads at a glance, so
+ * they belong to the coach rather than to the stylesheet.
+ *
+ * Colours only. Each status also has a stroke style (solid, dashed, dotted)
+ * which stays in CSS: it is what keeps the five states apart for anyone who
+ * cannot separate them by hue, so it is not a preference.
+ */
+type CalendarColorSettings = {
+  lessonPrivate: string;
+  lessonPlaying: string;
+  lessonGroup: string;
+  lessonAssessment: string;
+  statusConfirmed: string;
+  statusPending: string;
+  statusCompleted: string;
+  statusCancelled: string;
+  statusNoShow: string;
+};
+
 type BrandSettings = {
   coachName: string;
   logoName: string;
@@ -1457,6 +1478,7 @@ type BrandSettings = {
   secondary: string;
   accent: string;
   bookingTheme: ThemeMode;
+  calendarColors: CalendarColorSettings;
 };
 
 type CoachAccount = {
@@ -2545,6 +2567,31 @@ function generateSyncKey() {
   return `cg_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
 }
 
+/** Matches the --lesson-* / --status-* fallbacks in styles.css. */
+const defaultCalendarColors: CalendarColorSettings = {
+  lessonPrivate: "#2b2233",
+  lessonPlaying: "#1c3348",
+  lessonGroup: "#14342a",
+  lessonAssessment: "#3f3320",
+  statusConfirmed: "#1fd36d",
+  statusPending: "#b9c0b4",
+  statusCompleted: "#7f8a80",
+  statusCancelled: "#b52f1f",
+  statusNoShow: "#d08a1e",
+};
+
+const calendarColorFields: { key: keyof CalendarColorSettings; label: string; hint: string }[] = [
+  { key: "lessonPrivate", label: "Private lesson", hint: "Card fill" },
+  { key: "lessonPlaying", label: "Playing lesson", hint: "Card fill" },
+  { key: "lessonGroup", label: "Group / clinic", hint: "Card fill" },
+  { key: "lessonAssessment", label: "Assessment", hint: "Card fill" },
+  { key: "statusConfirmed", label: "Confirmed", hint: "Solid outline" },
+  { key: "statusPending", label: "Pending", hint: "Dashed outline" },
+  { key: "statusCompleted", label: "Completed", hint: "Solid outline" },
+  { key: "statusCancelled", label: "Cancelled", hint: "Dashed outline" },
+  { key: "statusNoShow", label: "No show", hint: "Dotted outline" },
+];
+
 const defaultBrandSettings: BrandSettings = {
   coachName: "Sam Hale Golf",
   logoName: "",
@@ -2555,6 +2602,7 @@ const defaultBrandSettings: BrandSettings = {
   secondary: "#d7b06b",
   accent: "#07100a",
   bookingTheme: "dark",
+  calendarColors: defaultCalendarColors,
 };
 
 const defaultCoachAccount: CoachAccount = {
@@ -4146,7 +4194,26 @@ function cleanBrandSettings(settings?: Partial<BrandSettings>): BrandSettings {
     secondary: cleanHexColor(settings?.secondary, defaultBrandSettings.secondary),
     accent: cleanHexColor(settings?.accent, defaultBrandSettings.accent),
     bookingTheme: settings?.bookingTheme === "light" ? "light" : "dark",
+    calendarColors: cleanCalendarColors(settings?.calendarColors),
   };
+}
+
+/** { lessonPrivate: "#2b2233" } -> { "--lesson-private-set": "#2b2233" } */
+function calendarColorVariables(colors: CalendarColorSettings): Record<string, string> {
+  const variables: Record<string, string> = {};
+  calendarColorFields.forEach(({ key }) => {
+    const name = key.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
+    variables[`--${name}-set`] = colors[key];
+  });
+  return variables;
+}
+
+function cleanCalendarColors(colors?: Partial<CalendarColorSettings>): CalendarColorSettings {
+  const cleaned = {} as CalendarColorSettings;
+  calendarColorFields.forEach(({ key }) => {
+    cleaned[key] = cleanHexColor(colors?.[key], defaultCalendarColors[key]);
+  });
+  return cleaned;
 }
 
 function getStoredTheme(): ThemeMode {
@@ -5747,6 +5814,11 @@ function App() {
         "--coach-primary": brandSettings.primary,
         "--coach-secondary": brandSettings.secondary,
         "--coach-accent": brandSettings.accent,
+        // The calendar palette is published as the *-set variables the theme
+        // tokens fall back through, not as --lesson-private and friends
+        // directly: an inline value would win over both themes, and dark needs
+        // its own take on whatever the coach chose.
+        ...calendarColorVariables(brandSettings.calendarColors),
       }) as CSSProperties,
     [brandSettings],
   );
@@ -25299,6 +25371,58 @@ function App() {
                     </button>
                     <button className="outline-button" onClick={resetBrandSettings}>
                       Reset
+                    </button>
+                  </div>
+                </details>
+
+                <details className="settings-subsection">
+                  <summary className="settings-subsection-title">
+                    <CalendarDays size={18} />
+                    <div>
+                      <span>Calendar colours</span>
+                      <strong>Lesson type fills and status outlines</strong>
+                    </div>
+                  </summary>
+                  <p className="settings-note">
+                    A booking card says three things at once: what kind of lesson it is (the fill), what state it
+                    is in (the outline) and whether it has already happened (it fades). Each outline keeps its own
+                    stroke — solid, dashed or dotted — so the five states stay apart without relying on colour.
+                  </p>
+                  <div className="calendar-colour-fields">
+                    {calendarColorFields.map(({ key, label, hint }) => (
+                      <label className="calendar-colour-field" key={key}>
+                        <input
+                          type="color"
+                          value={brandSettings.calendarColors[key]}
+                          aria-label={`${label} ${hint.toLowerCase()}`}
+                          onChange={(event) =>
+                            updateBrandSetting("calendarColors", {
+                              ...brandSettings.calendarColors,
+                              [key]: event.target.value,
+                            })
+                          }
+                          onBlur={() => void saveBrandSettings()}
+                        />
+                        <span>
+                          <strong>{label}</strong>
+                          <em>{hint}</em>
+                        </span>
+                        <code>{brandSettings.calendarColors[key]}</code>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="brand-vein-actions">
+                    <button className="outline-button" onClick={() => void saveBrandSettings()}>
+                      {brandSaveState === "saved" ? <Check size={16} /> : <Sparkles size={16} />}
+                      {brandSaveState === "saving" ? "Saving" : brandSaveState === "saved" ? "Saved" : "Apply"}
+                    </button>
+                    <button
+                      className="outline-button"
+                      onClick={() =>
+                        void saveBrandSettings({ ...brandSettings, calendarColors: defaultCalendarColors })
+                      }
+                    >
+                      Reset calendar colours
                     </button>
                   </div>
                 </details>
