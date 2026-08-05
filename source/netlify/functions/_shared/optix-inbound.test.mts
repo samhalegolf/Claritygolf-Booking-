@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertProcessableEvent, createCalendarItemFromOptixBooking, matchPersonByEmail, matchPersonByPhone, normalizeOptixLessonEvent, type OptixLessonMapping } from "./optix-origin.mts";
+import { assertProcessableEvent, createCalendarItemFromOptixBooking, matchPersonByEmail, matchPersonByPhone, normalizeOptixLessonEvent, updateCalendarItemFromOptixBooking, type OptixLessonMapping } from "./optix-origin.mts";
 import { buildOptixAppointmentInput } from "./optix-reconcile.mts";
 
 const mapping: OptixLessonMapping = {
@@ -113,6 +113,32 @@ test("two clients sharing a name or a phone never collapse into one record", () 
   assert.equal(matchPersonByPhone(sharedPhone, "0211"), null);
   assert.equal(matchPersonByEmail([{ id: "person-a", name: "John Smith" }], ""), null);
   assert.equal(matchPersonByPhone([{ id: "person-a", name: "John Smith" }], ""), null);
+});
+
+test("a reschedule moves the booking without touching what an admin owns", () => {
+  const moved = normalizeOptixLessonEvent({
+    ...payload,
+    event: "member_booking_updated",
+    check_in_timestamp: "2026-08-04T02:00:00.000Z",
+    check_out_timestamp: "2026-08-04T03:30:00.000Z",
+  });
+  const patch = updateCalendarItemFromOptixBooking(moved, mapping);
+  assert.equal(patch.duration, 90);
+  assert.equal(patch.external_event_type, "member_booking_updated");
+  // Anything an admin can edit after import must be absent from the patch, or
+  // the reschedule silently reverts it.
+  for (const field of ["coach_id", "note", "person_id", "service_id", "location_id", "client", "title", "email", "phone"]) {
+    assert.ok(!(field in patch), `reschedule must not write ${field}`);
+  }
+});
+
+test("an inbound event never reclassifies the booking's Clarity service", () => {
+  const created = createCalendarItemFromOptixBooking(normalizeOptixLessonEvent(payload), mapping, { itemId: "id", personId: "person" });
+  // The Clarity service is admin-mapped and internal; the Optix wording is what
+  // the calendar shows.
+  assert.equal(created.service_id, "lesson-60");
+  assert.equal(created.external_booking_type_name, "Swing Analysis");
+  assert.equal(updateCalendarItemFromOptixBooking(normalizeOptixLessonEvent(payload), mapping).external_booking_type_name, "Swing Analysis");
 });
 
 test("external metadata is additive to normal lesson fields", () => {

@@ -159,17 +159,56 @@ function customerName(event: OptixLessonEvent) {
   return [event.firstName, event.lastName].filter(Boolean).join(" ").trim() || event.email || event.phone;
 }
 
-export function createCalendarItemFromOptixBooking(event: OptixLessonEvent, mapping: OptixLessonMapping, ids: { itemId: string; personId: string }) {
+/**
+ * The booking type as the external source words it. Clarity shows this rather
+ * than the mapped service name, so an Optix "Swing Analysis" still reads as
+ * "Swing Analysis" even though it is filed under a Clarity service internally.
+ */
+function externalBookingTypeName(event: OptixLessonEvent, mapping: OptixLessonMapping) {
+  return event.workspaceName || mapping.workspaceName || "";
+}
+
+function optixOwnedFields(event: OptixLessonEvent, mapping: OptixLessonMapping) {
   const slot = calendarSlot(event.startIso, event.timezone);
   const derivedDuration = Math.max(1, Math.round((Date.parse(event.endIso) - Date.parse(event.startIso)) / 60_000));
+  return {
+    ...slot,
+    duration: derivedDuration || mapping.expectedDuration || 60,
+    status: event.eventType === "member_booking_cancelled" ? "cancelled" : "booked",
+    external_event_type: event.eventType,
+    external_booking_type_name: externalBookingTypeName(event, mapping),
+    external_source: event.source,
+    // A moved booking leaves any bay reservation at the old time, so the bay has
+    // to be claimed again. This is the inbound lesson's state, never the
+    // outbound bay's — that lives in optix_booking_sync.sync_status.
+    external_sync_state: event.eventType === "member_booking_cancelled" ? "cancelled" : "bay_required",
+    external_updated_at: new Date().toISOString(),
+  };
+}
+
+/**
+ * Fields an inbound event is allowed to change on a booking that already exists.
+ *
+ * Optix owns when the booking is and what it is called. Clarity owns everything
+ * an admin can edit after import — coach, note, location, the mapped service,
+ * and the customer link. Previously the whole item was rebuilt and PATCHed, so
+ * every reschedule reset the coach to the mapping default and blanked the note.
+ *
+ * Per the service-catalogue rule, service_id is absent here by design: an
+ * inbound event may never reclassify a booking or touch the Clarity catalogue.
+ */
+export function updateCalendarItemFromOptixBooking(event: OptixLessonEvent, mapping: OptixLessonMapping) {
+  return { ...optixOwnedFields(event, mapping), updated_at: new Date().toISOString() };
+}
+
+export function createCalendarItemFromOptixBooking(event: OptixLessonEvent, mapping: OptixLessonMapping, ids: { itemId: string; personId: string }) {
   const client = customerName(event);
   if (!client) throw Object.assign(new Error("Optix customer identity is missing."), { code: "missing_customer_identity" });
   return {
+    ...optixOwnedFields(event, mapping),
     id: ids.itemId,
     account_id: mapping.accountId,
     kind: "appointment",
-    ...slot,
-    duration: derivedDuration || mapping.expectedDuration || 60,
     coach_id: mapping.defaultCoachId || "",
     location_id: mapping.locationId,
     service_id: mapping.serviceId,
@@ -179,7 +218,6 @@ export function createCalendarItemFromOptixBooking(event: OptixLessonEvent, mapp
     email: event.email,
     person_id: ids.personId,
     note: "",
-    status: event.eventType === "member_booking_cancelled" ? "cancelled" : "booked",
     coach: null,
     location: { locationId: mapping.locationId, timezone: event.timezone },
     custom_group: null,
@@ -188,10 +226,6 @@ export function createCalendarItemFromOptixBooking(event: OptixLessonEvent, mapp
     external_booking_id: event.bookingId,
     external_workspace_id: event.workspaceId,
     external_organisation_id: event.organisationId,
-    external_event_type: event.eventType,
-    external_source: event.source,
-    external_sync_state: event.eventType === "member_booking_cancelled" ? "cancelled" : "bay_required",
-    external_updated_at: new Date().toISOString(),
   };
 }
 
@@ -381,7 +415,9 @@ export async function processStoredOptixEvent(eventKey: string, payload: unknown
     const personId = existing?.person_id || linkedItem?.person_id || await resolvePerson(event, mapping.accountId);
     const item = createCalendarItemFromOptixBooking(event, mapping, { itemId, personId });
     if (existing) {
-      await optixOriginRequest(`calendar_items?id=eq.${encodeURIComponent(itemId)}`, { method: "PATCH", body: JSON.stringify(item) });
+      // Patch only what Optix owns. Rebuilding the whole item here is what used
+      // to reset the coach and blank the note on every reschedule.
+      await optixOriginRequest(`calendar_items?id=eq.${encodeURIComponent(itemId)}`, { method: "PATCH", body: JSON.stringify(updateCalendarItemFromOptixBooking(event, mapping)) });
     } else {
       await optixOriginRequest("calendar_items", { method: "POST", body: JSON.stringify([item]) });
     }
