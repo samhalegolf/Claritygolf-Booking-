@@ -3584,7 +3584,7 @@ button {
    inside the card, and it sits outside the box so it never shifts the layout.
    Kept narrower than .selected so the two are distinguishable when both apply. */
 .calendar-item.has-bay {
-  outline: 1px solid #e08a2e;
+  outline: 2px solid #e08a2e;
   outline-offset: 1px;
 }
 
