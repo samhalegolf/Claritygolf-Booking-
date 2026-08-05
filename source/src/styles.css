@@ -3393,9 +3393,12 @@ button {
   white-space: nowrap;
 }
 
+/* Time gutter, then the week pager. The seven day columns live inside the
+   pager's panels now rather than in this grid, because the whole strip is what
+   takes the horizontal gesture. */
 .calendar-header-row {
   display: grid;
-  grid-template-columns: 64px repeat(7, minmax(92px, 1fr));
+  grid-template-columns: 64px minmax(0, 1fr);
   border-bottom: 1px solid #d7d7cf;
 }
 
@@ -3471,7 +3474,7 @@ button {
 
 .calendar-scroll {
   display: grid;
-  grid-template-columns: 64px minmax(644px, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr);
   max-height: calc(100vh - 230px);
   overflow: auto;
   overscroll-behavior: contain;
@@ -3497,7 +3500,10 @@ button {
 }
 
 .week-grid {
-  min-width: 644px;
+  /* The pager owns horizontal room now; a minimum here would push panels wider
+     than their scroller and stop them snapping. */
+  min-width: 0;
+  width: 100%;
   background:
     linear-gradient(to right, transparent calc(100% / 7 - 1px), #dddcd5 calc(100% / 7 - 1px)) 0 0 /
       calc(100% / 7) 100%,
@@ -4840,6 +4846,168 @@ button {
   display: none;
 }
 
+/* --- Week pager ---------------------------------------------------------
+   The date strip is the only element that takes the gesture; the grid mirrors
+   its scroll position and is never scrolled directly. Both hold the same three
+   panels at the same widths, so the columns stay lined up mid-swipe. */
+.week-strip,
+.week-pager {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.week-strip {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  cursor: grab;
+  touch-action: pan-x;
+}
+
+.week-strip.is-grabbing {
+  cursor: grabbing;
+  scroll-snap-type: none;
+}
+
+.week-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.week-pager {
+  overflow: hidden;
+}
+
+.week-strip-panel,
+.week-pager-panel {
+  /* 26px of the neighbouring week stays visible past the right edge — enough
+     to say "there is more this way" without asking to be read. */
+  flex: 0 0 calc(100% - 26px);
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.week-strip-panel {
+  display: flex;
+  align-items: stretch;
+}
+
+.week-strip-panel > .day-heading {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.week-pager-panel {
+  position: relative;
+}
+
+/* Without trailing room the last panel can never satisfy scroll-snap-align:
+   start, and mandatory snapping then cancels programmatic smooth scrolls — so
+   paging backward from the last week silently fails. */
+.week-pager-spacer {
+  flex: 0 0 26px;
+}
+
+.week-strip-panel.is-off-week,
+.week-pager-panel.is-off-week {
+  opacity: 0.38;
+}
+
+.week-pager-panel.is-off-week,
+.week-grid.is-peek {
+  pointer-events: none;
+}
+
+/* The gesture cue, deliberately quiet: a fade at the edge the next week comes
+   from, and a small hint centred on the strip. */
+.calendar-header-row {
+  position: relative;
+}
+
+.calendar-header-row::after {
+  content: "›";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 34px;
+  padding-right: 8px;
+  color: var(--quiet);
+  font-size: 15px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--panel) 62%);
+}
+
+/* Drawn on the header row rather than inside the strip: a pseudo-element on a
+   flex scroller becomes a flex item and would take width off the panels. */
+.calendar-header-row::before {
+  content: "↔";
+  position: absolute;
+  left: 50%;
+  bottom: 1px;
+  z-index: 2;
+  color: var(--quiet);
+  font-size: 10px;
+  opacity: 0.5;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* --- Squash view --------------------------------------------------------- */
+
+/* The axis switch sits above the time gutter: it changes how the vertical
+   scale reads, not what the week contains. */
+.axis-cycle-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 46px;
+  height: 46px;
+  margin: 6px auto 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.axis-cycle-button small {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.axis-cycle-button.is-squashed {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.quiet-gap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.quiet-gap small {
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
 .calendar-item.block {
   border-color: color-mix(in srgb, var(--coach-secondary) 22%, var(--border));
   background: var(--block-bg);
@@ -5889,7 +6057,7 @@ button {
   }
 
   .calendar-header-row {
-    grid-template-columns: 34px repeat(7, minmax(0, 1fr));
+    grid-template-columns: 34px minmax(0, 1fr);
     min-width: 0;
   }
 
@@ -5938,7 +6106,7 @@ button {
   }
 
   .calendar-card.calendar-detail-mode .calendar-header-row {
-    grid-template-columns: 52px repeat(7, minmax(0, 1fr));
+    grid-template-columns: 52px minmax(0, 1fr);
     min-width: 0;
   }
 
@@ -7661,14 +7829,18 @@ button {
   position: absolute;
   left: 0;
   right: 0;
+  /* Above the availability cards, below the bookings: the collapsed stretch
+     has to interrupt the day's surface, or it reads as time you could book
+     into. Cards sit at z-index 2 and up. */
+  z-index: 1;
   background: var(--page);
   border-top: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
   border-bottom: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
 }
 
 /* A day with no availability collapses to the width of the gap it would have
-   left behind, becoming its own divider. */
-.day-lane.is-unavailable,
+   left behind, becoming its own divider. Lanes are absolutely positioned and
+   take their 26px inline from the same column table the heading follows. */
 .day-heading.is-unavailable {
   flex: 0 0 26px;
   min-width: 26px;
