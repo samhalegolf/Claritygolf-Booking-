@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertProcessableEvent, createCalendarItemFromOptixBooking, normalizeOptixLessonEvent, type OptixLessonMapping } from "./optix-origin.mts";
+import { assertProcessableEvent, createCalendarItemFromOptixBooking, matchPersonByEmail, matchPersonByPhone, normalizeOptixLessonEvent, type OptixLessonMapping } from "./optix-origin.mts";
 import { buildOptixAppointmentInput } from "./optix-reconcile.mts";
 
 const mapping: OptixLessonMapping = {
@@ -90,6 +90,29 @@ test("update and cancellation retain the same external booking identity", () => 
   assert.equal(updatedItem.external_booking_id, cancelledItem.external_booking_id);
   assert.equal(updatedItem.duration, 90);
   assert.equal(cancelledItem.status, "cancelled");
+});
+
+test("an email match is case-insensitive but must be unambiguous", () => {
+  const people = [{ id: "person-ada", email: "ADA@example.com" }, { id: "person-sam", email: "sam@example.com" }];
+  assert.equal(matchPersonByEmail(people, "ada@example.com"), "person-ada");
+  assert.equal(matchPersonByEmail(people, "nobody@example.com"), null);
+  assert.equal(matchPersonByEmail([...people, { id: "person-ada-2", email: "ada@example.com" }], "ada@example.com"), null);
+});
+
+test("a phone match compares canonical numbers rather than stored formatting", () => {
+  const people = [{ id: "person-ada", phone: "021 463 7700" }, { id: "person-sam", phone: "+64274637700" }];
+  assert.equal(matchPersonByPhone(people, "+6421 4637700"), "person-ada");
+  assert.equal(matchPersonByPhone(people, "0274637700"), "person-sam");
+  assert.equal(matchPersonByPhone(people, "021 999 0000"), null);
+});
+
+test("two clients sharing a name or a phone never collapse into one record", () => {
+  // A duplicate is recoverable through the people merge; a wrong match is not,
+  // because merging deletes the loser row.
+  const sharedPhone = [{ id: "person-a", phone: "0211" }, { id: "person-b", phone: "0211" }];
+  assert.equal(matchPersonByPhone(sharedPhone, "0211"), null);
+  assert.equal(matchPersonByEmail([{ id: "person-a", name: "John Smith" }], ""), null);
+  assert.equal(matchPersonByPhone([{ id: "person-a", name: "John Smith" }], ""), null);
 });
 
 test("external metadata is additive to normal lesson fields", () => {

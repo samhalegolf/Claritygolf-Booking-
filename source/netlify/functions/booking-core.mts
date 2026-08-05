@@ -3397,6 +3397,7 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
 
   const client = await db().pool.connect();
   let mergedItemIds = [];
+  let mergedExternalBookingIds = [];
   try {
     await client.query("BEGIN");
     await client.query(
@@ -3416,6 +3417,34 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
       [survivorId, loserId],
     );
     mergedItemIds = queryRows(reassigned).map((row) => row.id);
+    // Both tables below are created outside ensureSchema() — one by a migration,
+    // one lazily on first player login — so a database that has never needed
+    // them is not an error and must not abort the merge.
+    const tableExists = async (table) =>
+      Boolean(
+        queryRows(await client.query("SELECT to_regclass($1) AS name", [`public.${table}`]))[0]?.name,
+      );
+    // External providers resolve the customer from their own link row, and
+    // processStoredOptixEvent() prefers that value over the calendar item. Left
+    // behind, the next inbound event would write the deleted loser id straight
+    // back onto the booking and silently undo this merge.
+    if (await tableExists("external_booking_links")) {
+      const relinked = await client.query(
+        "UPDATE external_booking_links SET person_id = $1, updated_at = NOW() WHERE person_id = $2 RETURNING external_booking_id",
+        [survivorId, loserId],
+      );
+      mergedExternalBookingIds = queryRows(relinked).map((row) => row.external_booking_id);
+    }
+    // A live player session carries the person id into playerProfileIdCandidates(),
+    // which is what selects the portal's lesson notes. The notes move to the
+    // survivor below, so a session left on the loser id would show the customer
+    // an empty notes list until their next sign-in. No updated_at on this table.
+    if (await tableExists("player_sessions")) {
+      await client.query(
+        "UPDATE player_sessions SET person_id = $1 WHERE person_id = $2",
+        [survivorId, loserId],
+      );
+    }
     await client.query("DELETE FROM people WHERE id = $1", [loserId]);
     await client.query("COMMIT");
   } catch (error) {
@@ -3443,6 +3472,7 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
     person: rowToPerson(savedRows[0], cleanAccountId),
     removedPersonId: loserId,
     mergedItemIds,
+    mergedExternalBookingIds,
     mergedNoteIds,
     people: await readPeople(cleanAccountId),
   };

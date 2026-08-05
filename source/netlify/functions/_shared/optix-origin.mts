@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
+import { canonicalPhoneKey } from "./phone.mts";
+
 export type OptixEmailBehaviour = "none" | "immediate" | "after_bay";
 
 export type OptixLessonMapping = {
@@ -240,22 +242,96 @@ async function findMapping(event: OptixLessonEvent): Promise<OptixLessonMapping 
   };
 }
 
+export type ExternalPersonCandidate = { id?: unknown; name?: unknown; email?: unknown; phone?: unknown };
+
+/**
+ * Stored phone numbers are not normalised, so the whole account's contactable
+ * people are compared in memory rather than by SQL string equality. This is one
+ * coaching business's client list, but the cap keeps a runaway read bounded.
+ */
+const PHONE_CANDIDATE_LIMIT = 2000;
+
+function rowsOf(value: unknown): ExternalPersonCandidate[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function uniqueById(rows: ExternalPersonCandidate[]) {
+  const seen = new Map<string, ExternalPersonCandidate>();
+  for (const row of rows) {
+    const id = text(row?.id);
+    if (id && !seen.has(id)) seen.set(id, row);
+  }
+  return [...seen.values()];
+}
+
+/**
+ * Identity matching for inbound external bookings is deliberately one-sided.
+ *
+ * A duplicate person is always recoverable — an admin merges it later. A wrong
+ * match is not, because merging hard-deletes the loser record and takes its
+ * history with it. So both matchers return null unless exactly one candidate
+ * survives, and the caller creates a new person instead of guessing.
+ */
+export function matchPersonByEmail(rows: ExternalPersonCandidate[], email: string): string | null {
+  const wanted = text(email).toLowerCase();
+  if (!wanted) return null;
+  const matches = uniqueById(rowsOf(rows).filter((row) => text(row?.email).toLowerCase() === wanted));
+  return matches.length === 1 ? text(matches[0].id) || null : null;
+}
+
+export function matchPersonByPhone(rows: ExternalPersonCandidate[], phone: string): string | null {
+  const wanted = canonicalPhoneKey(phone);
+  if (!wanted) return null;
+  const matches = uniqueById(rowsOf(rows).filter((row) => canonicalPhoneKey(row?.phone) === wanted));
+  return matches.length === 1 ? text(matches[0].id) || null : null;
+}
+
+function isDuplicateEmailError(error: any) {
+  const code = String(error?.code || "");
+  const message = error instanceof Error ? error.message : "";
+  return code === "23505" || /duplicate key|unique constraint|idx_people_.*email/i.test(message);
+}
+
+async function createExternalPerson(event: OptixLessonEvent, accountId: string, name: string) {
+  const personId = randomUUID();
+  try {
+    await optixOriginRequest("people", { method: "POST", body: JSON.stringify([{ id: personId, account_id: accountId, name, email: event.email || null, phone: event.phone || null, source: "optix" }]) });
+    return personId;
+  } catch (error: any) {
+    // The account-scoped unique index on email means at most one person can hold
+    // this address, so re-reading it resolves a constraint rather than guessing
+    // between candidates. Anything else is a real failure and must surface.
+    if (!event.email || !isDuplicateEmailError(error)) throw error;
+    const rows = await optixOriginRequest(`people?account_id=eq.${encodeURIComponent(accountId)}&email=ilike.${encodeURIComponent(event.email)}&select=id,name,email,phone&limit=10`);
+    const matched = matchPersonByEmail(rowsOf(rows), event.email);
+    if (matched) return matched;
+    throw error;
+  }
+}
+
 async function resolvePerson(event: OptixLessonEvent, accountId: string) {
   const name = customerName(event);
   if (!name) throw Object.assign(new Error("Optix customer identity is missing."), { code: "missing_customer_identity" });
-  let rows: any[] = [];
+  const account = encodeURIComponent(accountId);
+
   if (event.email) {
-    rows = await optixOriginRequest(`people?account_id=eq.${encodeURIComponent(accountId)}&email=ilike.${encodeURIComponent(event.email)}&select=id,name,email,phone&limit=5`);
-  } else if (event.phone) {
-    rows = await optixOriginRequest(`people?account_id=eq.${encodeURIComponent(accountId)}&phone=eq.${encodeURIComponent(event.phone)}&select=id,name,email,phone&limit=5`);
-  } else {
-    rows = await optixOriginRequest(`people?account_id=eq.${encodeURIComponent(accountId)}&name=ilike.${encodeURIComponent(name)}&select=id,name,email,phone&limit=5`);
+    const rows = await optixOriginRequest(`people?account_id=eq.${account}&email=ilike.${encodeURIComponent(event.email)}&select=id,name,email,phone&limit=10`);
+    const matched = matchPersonByEmail(rowsOf(rows), event.email);
+    if (matched) return matched;
   }
-  const match = Array.isArray(rows) ? rows[0] : null;
-  if (match?.id) return String(match.id);
-  const personId = randomUUID();
-  await optixOriginRequest("people", { method: "POST", body: JSON.stringify([{ id: personId, account_id: accountId, name, email: event.email || null, phone: event.phone || null, source: "optix" }]) });
-  return personId;
+
+  // An email that matches nothing must still fall through to the phone. The
+  // previous else-if stopped here and created a duplicate for every customer
+  // whose Optix email differed from the one Clarity already held.
+  if (canonicalPhoneKey(event.phone)) {
+    const rows = await optixOriginRequest(`people?account_id=eq.${account}&phone=not.is.null&select=id,name,email,phone&limit=${PHONE_CANDIDATE_LIMIT}`);
+    const matched = matchPersonByPhone(rowsOf(rows), event.phone);
+    if (matched) return matched;
+  }
+
+  // A shared name is not identity, so there is no name fallback: two clients
+  // called "John Smith" must not collapse into one record.
+  return createExternalPerson(event, accountId, name);
 }
 
 async function updateEvent(eventKey: string, values: Record<string, unknown>) {
