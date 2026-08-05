@@ -18669,26 +18669,38 @@ function App() {
         </section>
         )}
 
+        {/* Fixed to the corner rather than stacked under the calendar: it is a
+            developer tool that is shut almost all of the time, and the summary
+            bar for it was costing every admin a strip of the page. */}
         {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && isAdminUser && (
         <section className={`developer-diagnostics ${diagnosticsOpen ? "is-open" : ""}`}>
           <button
-            className="developer-diagnostics-summary"
+            className="developer-diagnostics-launcher"
             type="button"
             onClick={() => setDiagnosticsOpen((current) => !current)}
             aria-expanded={diagnosticsOpen}
+            aria-label={diagnosticsOpen ? "Hide developer diagnostics" : "Show developer diagnostics"}
+            title={`Developer diagnostics — ${
+              calendarFeedStatus === "connected" ? "Supabase connected" : "Supabase not connected"
+            }, ${diagnosticEvents.length} events, ${failedDiagnosticEvents.length} errors`}
           >
-            <span className="developer-diagnostics-title">
-              <Code2 size={16} />
-              <strong>Developer Diagnostics</strong>
-            </span>
-            <span className="developer-diagnostics-readout">
-              <span>{calendarFeedStatus === "connected" ? "Supabase connected" : "Supabase not connected"}</span>
-              <span>{diagnosticEvents.length} events</span>
-              <span>{failedDiagnosticEvents.length} errors</span>
-            </span>
+            {diagnosticsOpen ? <X size={15} /> : <Code2 size={15} />}
+            {/* The error count is the one thing worth surfacing while closed. */}
+            {!diagnosticsOpen && failedDiagnosticEvents.length ? (
+              <b aria-hidden="true">{failedDiagnosticEvents.length > 99 ? "99+" : failedDiagnosticEvents.length}</b>
+            ) : null}
           </button>
           {diagnosticsOpen ? (
             <div className="developer-diagnostics-body">
+              <div className="developer-diagnostics-readout">
+                <strong>
+                  <Code2 size={14} />
+                  Developer Diagnostics
+                </strong>
+                <span>{calendarFeedStatus === "connected" ? "Supabase connected" : "Supabase not connected"}</span>
+                <span>{diagnosticEvents.length} events</span>
+                <span>{failedDiagnosticEvents.length} errors</span>
+              </div>
               <div className="developer-diagnostics-tabs" role="tablist" aria-label="Developer diagnostics views">
                 {(["overview", "database", "calendar", "cache", "errors", "raw"] as DiagnosticTab[]).map((tab) => (
                   <button
