@@ -1840,6 +1840,26 @@ function itemService(item: CalendarItem, serviceCatalog = defaultServices): Serv
   return fallbackService;
 }
 
+/**
+ * The calendar paints a booking by lesson type: the card's fill is the only
+ * thing carrying "what kind of lesson is this", so it has to come from the
+ * service rather than from the booking's state.
+ *
+ * The returned id is a styling hook, not a data field — it selects one of the
+ * --lesson-* colours in styles.css and nothing else reads it. Two of the four
+ * types the design names (playing lesson, assessment) have no equivalent on
+ * Service yet; they will map here the moment a service can declare one, and
+ * until then they fall in with private lessons rather than being guessed at
+ * from a service's name.
+ */
+type CalendarLessonType = "private" | "playing" | "group" | "assessment";
+
+function calendarLessonType(service: Service | undefined): CalendarLessonType {
+  if (!service) return "private";
+  if (service.customGroup || service.lessonFormat === "group") return "group";
+  return "private";
+}
+
 function itemWeek(item: CalendarItem) {
   return item.week ?? 0;
 }
@@ -18669,14 +18689,20 @@ function App() {
                     {calendarAvailability[dayIndex].map((window, index) => {
                       const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
                       if (!visibleWindow) return null;
+                      const bandTop = calendarMinutesToTop(visibleWindow.start);
                       return (
                         <div
                           className="available-band"
                           key={`${day.label}-${index}`}
                           style={{
-                            top: calendarMinutesToTop(visibleWindow.start),
+                            top: bandTop,
                             height: durationToHeight(visibleWindow.duration),
-                          }}
+                            // The band draws its own hour ticks, and a window
+                            // rarely opens on the hour. Hand it its distance
+                            // from the top of the grid so the ticks count from
+                            // the time gutter rather than from the band edge.
+                            ["--band-offset" as string]: `${bandTop}px`,
+                          } as CSSProperties}
                         />
                       );
                     })}
@@ -18719,6 +18745,12 @@ function App() {
                   const latestClientEmail = itemNotifications.find((notification) => notification.kind.includes("client"));
                   const latestCoachEmail = itemNotifications.find((notification) => notification.kind.includes("coach"));
                   const latestAdminEmail = itemNotifications.find((notification) => notification.kind.includes("admin"));
+                  // A card fades only once the lesson is over, so "already
+                  // happened" never gets confused with "cancelled" — status is
+                  // carried by the border instead.
+                  const isPastItem =
+                    item.kind === "appointment" &&
+                    isSlotInPast({ week: itemWeek(item), day: item.day, start: item.start + item.duration });
                   const scheduledGroupSession = isScheduledGroupSessionSlot(item);
                   const groupSessionItem = isGroupSessionItem(item);
                   const groupSessionContext = getGroupSessionContext(item);
@@ -18750,7 +18782,8 @@ function App() {
 	                        pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
 	                      } ${item.kind === "appointment" && item.status ? `status-${item.status}` : ""} ${
                         item.kind === "appointment" && item.bayBooked ? "has-bay" : ""
-                      }`}
+                      } ${isPastItem ? "is-past" : ""}`}
+                      data-lesson-type={item.kind === "appointment" ? calendarLessonType(service) : undefined}
                       aria-label={tooltipRows.join(", ")}
                       onPointerEnter={(event) =>
                         showCalendarItemHover(event, item, service, latestClientEmail, latestCoachEmail, latestAdminEmail)
@@ -18759,8 +18792,12 @@ function App() {
                       style={{
                         top,
                         height: Math.max(height, 34),
-                        left: `calc(${left}% + 6px)`,
-                        width: `calc(${width}% - 12px)`,
+                        // Tucked inside the availability card behind it (inset
+                        // 3px left / 15px right) with 2px to spare on each
+                        // side, so a day column always reads wider than the
+                        // bookings sitting in it.
+                        left: `calc(${left}% + 5px)`,
+                        width: `calc(${width}% - 22px)`,
                         ...(scheduledGroupSession ? ({ cursor: "pointer" } as CSSProperties) : {}),
                         ...(flyAnimation
                           ? ({
@@ -18871,8 +18908,8 @@ function App() {
                         style={{
                           top: calendarMinutesToTop(visibleDraft.start),
                           height: Math.max(durationToHeight(visibleDraft.duration), 24),
-                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
-                          width: `calc(${100 / DAY_COUNT}% - 12px)`,
+                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 5px)`,
+                          width: `calc(${100 / DAY_COUNT}% - 22px)`,
                         }}
                       >
                         <div className="item-content">
@@ -18895,8 +18932,8 @@ function App() {
                         style={{
                           top: calendarMinutesToTop(visibleDraft.start),
                           height: Math.max(durationToHeight(visibleDraft.duration), 34),
-                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
-                          width: `calc(${100 / DAY_COUNT}% - 12px)`,
+                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 5px)`,
+                          width: `calc(${100 / DAY_COUNT}% - 22px)`,
                         }}
                       >
                         <div className="item-grip" aria-hidden="true">
