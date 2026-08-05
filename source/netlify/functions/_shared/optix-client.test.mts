@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyOptixFailure, OptixSyncError } from "./optix-client.mts";
+import { buildBookingSetInput, classifyOptixFailure, OptixSyncError } from "./optix-client.mts";
 
 test("classifies HTTP 401 as an expired or invalid personal token", () => {
   const error = classifyOptixFailure({ status: 401, responseText: "Unauthorized" });
@@ -10,6 +10,66 @@ test("classifies HTTP 401 as an expired or invalid personal token", () => {
   assert.equal(error.code, "token_expired");
   assert.equal(error.retryable, true);
   assert.match(error.message, /OPTIX_PERSONAL_TOKEN/);
+});
+
+test("an auth failure names the credential actually in use", () => {
+  // The two tokens are configured separately, so a message that does not say
+  // which one was used leaves the admin replacing the wrong secret.
+  const organization = classifyOptixFailure({
+    status: 401, responseText: "Unauthorized", tokenKind: "organization",
+  });
+  assert.match(organization.message, /OPTIX_ORGANIZATION_TOKEN/);
+  assert.doesNotMatch(organization.message, /OPTIX_PERSONAL_TOKEN/);
+
+  const personal = classifyOptixFailure({
+    status: 401, responseText: "Unauthorized", tokenKind: "personal",
+  });
+  assert.match(personal.message, /OPTIX_PERSONAL_TOKEN/);
+});
+
+test("a permissions refusal is not a generic remote error", () => {
+  // Optix's wording for a user that cannot book. It names neither
+  // "unauthorized" nor "forbidden", so it used to classify as remote_error.
+  const error = classifyOptixFailure({
+    status: 200,
+    graphQLErrors: [{ message: "Your user account is not allowed to make bookings" }],
+    tokenKind: "organization",
+  });
+  assert.equal(error.code, "unauthorized");
+  assert.equal(error.retryable, false);
+});
+
+const bookingInput = {
+  memberId: "", ownerUserId: "", resourceIds: ["600007"],
+  startTimestamp: 1_760_000_000, endTimestamp: 1_760_003_600,
+  externalId: "clarity:appt-1", title: "Ada Lovelace",
+};
+
+test("exactly the configured identity is sent, and the other is withheld", () => {
+  // Two identities exist in Optix -- a user record and an admin record -- and
+  // only one is accepted through the organisation token route. Sending both, or
+  // sending an empty one, is what has to be avoidable.
+  const memberOnly: any = buildBookingSetInput({ ...bookingInput, memberId: "member-123" });
+  assert.deepEqual(memberOnly.account, { member_id: "member-123" });
+  assert.ok(!("owner_user_id" in memberOnly), "the withheld user id must not be sent");
+
+  const ownerOnly: any = buildBookingSetInput({ ...bookingInput, ownerUserId: "user-456" });
+  assert.equal(ownerOnly.owner_user_id, "user-456");
+  assert.ok(!("account" in ownerOnly), "the withheld member id must not be sent");
+});
+
+test("the owning user is sent under an organisation token too", () => {
+  // It used to go only with a personal token, so organisation token plus a user
+  // id -- the combination that works -- could not be expressed.
+  const withOrgToken: any = buildBookingSetInput({ ...bookingInput, ownerUserId: "user-456" }, "organization");
+  assert.equal(withOrgToken.owner_user_id, "user-456");
+});
+
+test("Optix setup with neither identity fails before any request is made", () => {
+  assert.throws(
+    () => buildBookingSetInput(bookingInput),
+    (error: any) => error instanceof OptixSyncError && error.code === "not_configured",
+  );
 });
 
 test("classifies GraphQL token expiry messages even when HTTP is 200", () => {

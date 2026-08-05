@@ -99,8 +99,21 @@ export function getOptixClientConfig(): OptixClientConfig {
   if (!token) {
     throw new OptixSyncError(
       "not_configured",
-      "Optix is not configured. Add OPTIX_ORGANIZATION_TOKEN or OPTIX_PERSONAL_TOKEN in the server environment.",
+      "Optix is not configured. Set exactly one of OPTIX_ORGANIZATION_TOKEN or OPTIX_PERSONAL_TOKEN, " +
+        "and OPTIX_OWNER_USER_ID for the user the bookings belong to.",
     );
+  }
+
+  // Set one token, not both. Which credential is in use decides how Optix reads
+  // the request, so leaving a stale second one configured means the behaviour
+  // depends on this precedence rule rather than on anything visible in the
+  // environment. Say so rather than silently picking.
+  if (organizationToken && personalToken) {
+    console.warn("optix_client:both_tokens_configured", {
+      using: "OPTIX_ORGANIZATION_TOKEN",
+      ignored: "OPTIX_PERSONAL_TOKEN",
+      hint: "Withhold the token you are not using so the active credential is unambiguous.",
+    });
   }
 
   return { endpoint, token, tokenKind };
@@ -127,6 +140,8 @@ export function classifyOptixFailure(input: {
   responseText?: string;
   graphQLErrors?: OptixGraphQLError[];
   requestId?: string;
+  /** Which credential made the call, so an auth failure names what to fix. */
+  tokenKind?: "organization" | "personal" | null;
 }): OptixSyncError {
   const status = input.status ?? null;
   const message = concise([
@@ -138,6 +153,15 @@ export function classifyOptixFailure(input: {
     .join(", ");
   const detailed = [message, suffix ? `(${suffix})` : ""].filter(Boolean).join(" ");
   const lower = message.toLowerCase();
+  // Optix's own wording never says which credential Clarity used, and the two
+  // are configured separately -- so an auth failure that does not name the
+  // variable leaves the admin guessing which one to replace.
+  const credential = input.tokenKind === "personal"
+    ? "OPTIX_PERSONAL_TOKEN"
+    : input.tokenKind === "organization"
+      ? "OPTIX_ORGANIZATION_TOKEN"
+      : "OPTIX_ORGANIZATION_TOKEN or OPTIX_PERSONAL_TOKEN";
+  const withCredential = (text: string) => `${text} Check ${credential}.`;
 
   if (
     status === 401 ||
@@ -147,7 +171,11 @@ export function classifyOptixFailure(input: {
     lower.includes("access token has expired") ||
     lower.includes("jwt expired")
   ) {
-    return new OptixSyncError("token_expired", detailed || "The Optix access token has expired or is no longer valid.", { status, retryable: true });
+    return new OptixSyncError(
+      "token_expired",
+      withCredential(detailed || "The Optix access token has expired or is no longer valid."),
+      { status, retryable: true },
+    );
   }
 
   // "Your user account is not allowed to make bookings" is a permissions
@@ -161,7 +189,11 @@ export function classifyOptixFailure(input: {
     lower.includes("not allowed") ||
     lower.includes("forbidden")
   ) {
-    return new OptixSyncError("unauthorized", detailed || "Optix rejected this account or booking action.", { status, retryable: false });
+    return new OptixSyncError(
+      "unauthorized",
+      withCredential(detailed || "Optix rejected this account or booking action."),
+      { status, retryable: false },
+    );
   }
 
   // Optix words a busy bay as "The resource is not available during the selected
@@ -243,13 +275,14 @@ async function optixGraphQL<T>(
       responseText: payload ? "" : responseText,
       graphQLErrors: payload?.errors,
       requestId: response.headers.get("x-request-id") || response.headers.get("request-id") || "",
+      tokenKind: config.tokenKind,
     });
   }
 
   return payload.data;
 }
 
-function buildBookingSetInput(input: OptixBookingInput, tokenKind: OptixClientConfig["tokenKind"]) {
+export function buildBookingSetInput(input: OptixBookingInput, tokenKind?: OptixClientConfig["tokenKind"]) {
   if (!input.externalId.trim()) {
     throw new OptixSyncError("validation_failed", "An Optix external ID is required.");
   }
@@ -260,11 +293,23 @@ function buildBookingSetInput(input: OptixBookingInput, tokenKind: OptixClientCo
     throw new OptixSyncError("validation_failed", "The Optix booking end time must be after its start time.");
   }
 
+  if (!input.memberId && !input.ownerUserId) {
+    throw new OptixSyncError(
+      "not_configured",
+      "Optix needs an identity for the booking. Set OPTIX_MEMBER_ID or OPTIX_OWNER_USER_ID.",
+    );
+  }
+
   const title = input.title || "Clarity Booking";
   return {
     ...(input.bookingSessionId ? { booking_session_id: input.bookingSessionId } : {}),
-    account: { member_id: input.memberId },
-    ...(tokenKind === "personal" ? { owner_user_id: input.ownerUserId } : {}),
+    // Each identity is sent only when it is configured, so exactly one can be
+    // supplied and the other withheld. member_id used to go on every request
+    // even when unset, and owner_user_id was tied to the token kind, so the
+    // combination that Optix accepts -- one id, not both -- could not be
+    // expressed no matter what the environment said.
+    ...(input.memberId ? { account: { member_id: input.memberId } } : {}),
+    ...(input.ownerUserId ? { owner_user_id: input.ownerUserId } : {}),
     source: input.source || "Clarity Booking",
     title,
     // Keep the Optix note intentionally simple: only the person on the
