@@ -453,6 +453,7 @@ type CalendarItem = {
   // and Clarity is mirroring it.
   origin?: string;
   externalProvider?: string;
+  externalBookingId?: string;
   externalBookingTypeName?: string;
   updatedAt?: string;
   completedAt?: string;

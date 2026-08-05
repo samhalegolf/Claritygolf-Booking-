@@ -13,6 +13,7 @@ import {
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
 import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";
+import { planExternalReschedule } from "./_shared/external-reschedule.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
 import {
@@ -2070,6 +2071,7 @@ function rowToItem(row) {
     // client cannot claim a booking for a provider by echoing them back.
     origin: row.origin || "clarity",
     externalProvider: row.external_provider || "",
+    externalBookingId: row.external_booking_id || "",
     externalBookingTypeName: row.external_booking_type_name || "",
     updatedAt,
     completedAt,
@@ -4548,6 +4550,42 @@ async function writeCalendarState(nextState, context = null) {
     if (!context.isAdmin && (nextState?.replaceItems === true || nextState?.itemsOperation === "replace")) {
       const preservedItems = current.items.filter((item) => !canReadCalendarItem(context, item, current));
       requestedItems = [...preservedItems, ...requestedItems];
+    }
+  }
+  // The calendar refuses to move an externally owned booking, but the UI is not
+  // the boundary -- a direct PUT would otherwise move the lesson here while the
+  // provider carries on holding the original time, and nothing anywhere would
+  // signal the gap. Only the slot is guarded: notes, coach and the rest stay
+  // editable, and an unchanged external booking passes straight through.
+  const previousItemsById = new Map((current.items || []).map((item) => [item.id, item]));
+  for (const item of requestedItems) {
+    const previous = previousItemsById.get(item.id);
+    if (!previous) continue;
+    const plan = planExternalReschedule(
+      {
+        id: previous.id,
+        origin: previous.origin || "clarity",
+        externalProvider: previous.externalProvider || "",
+        externalBookingId: previous.externalBookingId || "",
+        week: Number(previous.week ?? 0),
+        day: Number(previous.day ?? 0),
+        start: Number(previous.start ?? 0),
+        duration: Number(previous.duration ?? 0),
+      },
+      {
+        week: Number(item.week ?? 0),
+        day: Number(item.day ?? 0),
+        start: Number(item.start ?? 0),
+        duration: Number(item.duration ?? 0),
+      },
+    );
+    if (plan.action === "refuse") {
+      throw Object.assign(new Error(plan.message), {
+        status: 409,
+        code: plan.code,
+        operationOwner: "external_reschedule_guard",
+        route: "PUT /api/calendar-state",
+      });
     }
   }
   const peopleAccountId = context?.accountId || defaultAccountId(current.workspaceAccounts);
