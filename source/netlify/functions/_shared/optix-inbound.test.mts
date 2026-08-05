@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertProcessableEvent, createCalendarItemFromOptixBooking, normalizeOptixLessonEvent, type OptixLessonMapping } from "./optix-origin.mts";
+import { assertProcessableEvent, createCalendarItemFromOptixBooking, matchPersonByEmail, matchPersonByPhone, normalizeOptixLessonEvent, updateCalendarItemFromOptixBooking, type OptixLessonMapping } from "./optix-origin.mts";
 import { buildOptixAppointmentInput } from "./optix-reconcile.mts";
 
 const mapping: OptixLessonMapping = {
@@ -90,6 +90,55 @@ test("update and cancellation retain the same external booking identity", () => 
   assert.equal(updatedItem.external_booking_id, cancelledItem.external_booking_id);
   assert.equal(updatedItem.duration, 90);
   assert.equal(cancelledItem.status, "cancelled");
+});
+
+test("an email match is case-insensitive but must be unambiguous", () => {
+  const people = [{ id: "person-ada", email: "ADA@example.com" }, { id: "person-sam", email: "sam@example.com" }];
+  assert.equal(matchPersonByEmail(people, "ada@example.com"), "person-ada");
+  assert.equal(matchPersonByEmail(people, "nobody@example.com"), null);
+  assert.equal(matchPersonByEmail([...people, { id: "person-ada-2", email: "ada@example.com" }], "ada@example.com"), null);
+});
+
+test("a phone match compares canonical numbers rather than stored formatting", () => {
+  const people = [{ id: "person-ada", phone: "021 463 7700" }, { id: "person-sam", phone: "+64274637700" }];
+  assert.equal(matchPersonByPhone(people, "+6421 4637700"), "person-ada");
+  assert.equal(matchPersonByPhone(people, "0274637700"), "person-sam");
+  assert.equal(matchPersonByPhone(people, "021 999 0000"), null);
+});
+
+test("two clients sharing a name or a phone never collapse into one record", () => {
+  // A duplicate is recoverable through the people merge; a wrong match is not,
+  // because merging deletes the loser row.
+  const sharedPhone = [{ id: "person-a", phone: "0211" }, { id: "person-b", phone: "0211" }];
+  assert.equal(matchPersonByPhone(sharedPhone, "0211"), null);
+  assert.equal(matchPersonByEmail([{ id: "person-a", name: "John Smith" }], ""), null);
+  assert.equal(matchPersonByPhone([{ id: "person-a", name: "John Smith" }], ""), null);
+});
+
+test("a reschedule moves the booking without touching what an admin owns", () => {
+  const moved = normalizeOptixLessonEvent({
+    ...payload,
+    event: "member_booking_updated",
+    check_in_timestamp: "2026-08-04T02:00:00.000Z",
+    check_out_timestamp: "2026-08-04T03:30:00.000Z",
+  });
+  const patch = updateCalendarItemFromOptixBooking(moved, mapping);
+  assert.equal(patch.duration, 90);
+  assert.equal(patch.external_event_type, "member_booking_updated");
+  // Anything an admin can edit after import must be absent from the patch, or
+  // the reschedule silently reverts it.
+  for (const field of ["coach_id", "note", "person_id", "service_id", "location_id", "client", "title", "email", "phone"]) {
+    assert.ok(!(field in patch), `reschedule must not write ${field}`);
+  }
+});
+
+test("an inbound event never reclassifies the booking's Clarity service", () => {
+  const created = createCalendarItemFromOptixBooking(normalizeOptixLessonEvent(payload), mapping, { itemId: "id", personId: "person" });
+  // The Clarity service is admin-mapped and internal; the Optix wording is what
+  // the calendar shows.
+  assert.equal(created.service_id, "lesson-60");
+  assert.equal(created.external_booking_type_name, "Swing Analysis");
+  assert.equal(updateCalendarItemFromOptixBooking(normalizeOptixLessonEvent(payload), mapping).external_booking_type_name, "Swing Analysis");
 });
 
 test("external metadata is additive to normal lesson fields", () => {
