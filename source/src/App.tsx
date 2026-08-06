@@ -4933,6 +4933,10 @@ function App() {
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
   const [calendarAxisMode, setCalendarAxisMode] = useState<CalendarAxisMode>("week");
+  // Day view: which weekday fills the grid, or null for the whole week. Phones
+  // start on a day because seven columns across a phone leaves 45px each, which
+  // is not enough for a client's name.
+  const [calendarDayFocus, setCalendarDayFocus] = useState<number | null>(null);
   // Minute of the day the now line is drawn at. Ticks on its own so the line
   // creeps down the column without anything else having to re-render it.
   const [calendarNowMinutes, setCalendarNowMinutes] = useState(() => {
@@ -7691,7 +7695,10 @@ function App() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calendarAvailability, calendarAxisMode, calendarAxisSource, calendarEndMinutes, calendarStartMinutes]);
-  const calendarDayColumns = useMemo(() => buildDayColumns(calendarCollapsedDays), [calendarCollapsedDays]);
+  const calendarDayColumns = useMemo(
+    () => buildDayColumns(calendarCollapsedDays, calendarDayFocus),
+    [calendarCollapsedDays, calendarDayFocus],
+  );
 
   // Hour labels are dropped when they land inside a collapsed gap — the hour
   // never visibly happens there — and thinned when squashing has pushed two of
@@ -7719,10 +7726,30 @@ function App() {
   // The now line is drawn once, in today's column, and only when the week on
   // screen is the one today falls in.
   const calendarTodayIndex = weekDays.findIndex((day) => day.isToday);
+  // Read by the breakpoint effect, which must not re-run when the week changes.
+  const calendarTodayIndexRef = useRef(calendarTodayIndex);
+  calendarTodayIndexRef.current = calendarTodayIndex;
   const calendarNowTop =
     calendarTodayIndex >= 0 && calendarNowMinutes >= calendarStartMinutes && calendarNowMinutes <= calendarEndMinutes
       ? calendarMinutesToTop(calendarNowMinutes)
       : null;
+
+  // A phone opens on a day and a desktop on the week. Keyed off crossing the
+  // breakpoint rather than every render, so tapping back to the week on a phone
+  // sticks until the viewport itself changes.
+  useEffect(() => {
+    const narrow = () => window.matchMedia("(max-width: 640px)").matches;
+    let wasNarrow: boolean | null = null;
+    const sync = () => {
+      const isNarrow = narrow();
+      if (isNarrow === wasNarrow) return;
+      wasNarrow = isNarrow;
+      setCalendarDayFocus(isNarrow ? (calendarTodayIndexRef.current >= 0 ? calendarTodayIndexRef.current : 0) : null);
+    };
+    sync();
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
+  }, []);
 
   useEffect(() => {
     const tick = window.setInterval(() => {
@@ -8547,7 +8574,7 @@ function App() {
     const y = clamp(clientY - rect.top, 0, gridHeight - 1);
     // Both axes are read back through the same mapping that drew the grid, so
     // a drop lands where the pointer is in squash view as well as week view.
-    const day = dayFromGridX(calendarCollapsedDays, rect.width, x);
+    const day = dayFromGridX(calendarCollapsedDays, rect.width, x, calendarDayFocus);
     const start = clamp(
       snap(axisTopToMinute(calendarAxis, y)),
       calendarStartMinutes,
@@ -8561,7 +8588,7 @@ function App() {
     const grid = gridRef.current;
     if (!grid) return undefined;
     const rect = grid.getBoundingClientRect();
-    const column = dayColumnPixels(calendarCollapsedDays, rect.width)[slot.day];
+    const column = dayColumnPixels(calendarCollapsedDays, rect.width, calendarDayFocus)[slot.day];
     const dayWidth = Math.max(1, column?.width ?? rect.width / DAY_COUNT);
     const xWithinDay = clamp(slot.x - (column?.left ?? slot.day * dayWidth), 0, Math.max(0, dayWidth - 1));
     const coachIndex = clamp(
@@ -8603,7 +8630,7 @@ function App() {
     if (!tileRect) return null;
 
     const gridRect = grid.getBoundingClientRect();
-    const column = dayColumnPixels(calendarCollapsedDays, gridRect.width)[candidate.day];
+    const column = dayColumnPixels(calendarCollapsedDays, gridRect.width, calendarDayFocus)[candidate.day];
     const dayWidth = column?.width ?? gridRect.width / DAY_COUNT;
     const dayLeft = column?.left ?? candidate.day * dayWidth;
     const finalWidth = dayWidth - 22;
@@ -8973,6 +9000,11 @@ function App() {
     }, 320);
   }
 
+  /** Tap a day to fill the grid with it; tap the same day again for the week. */
+  function focusCalendarDay(dayIndex: number) {
+    setCalendarDayFocus((current) => (current === dayIndex ? null : dayIndex));
+  }
+
   function cycleCalendarAxisMode() {
     suppressBlankGestureUntilRef.current = Date.now() + 360;
     setCalendarAxisMode((current) => (current === "week" ? "squash" : "week"));
@@ -8992,6 +9024,7 @@ function App() {
             <div
               className={`day-lane ${calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""}`}
               key={day.label}
+              hidden={calendarDayColumns[dayIndex].hidden}
               style={{ left: calendarDayColumns[dayIndex].left, width: calendarDayColumns[dayIndex].width }}
             >
               {calendarAvailability[dayIndex].map((window, index) => {
@@ -19077,11 +19110,17 @@ function App() {
                 {WEEK_PANEL_OFFSETS.map((offset) => (
                   <div className={`week-strip-panel ${offset === 0 ? "" : "is-off-week"}`} key={offset}>
                     {(offset === 0 ? weekDays : buildWeekDays(activeWeek + offset)).map((day, dayIndex) => (
-                      <div
+                      // In day view the strip is the day picker: the headings
+                      // stay where they are and tapping one fills the grid with
+                      // it, so the week is never more than a tap away.
+                      <button
+                        type="button"
                         className={`day-heading ${day.isToday ? "today" : ""} ${
                           offset === 0 && calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""
-                        }`}
+                        } ${offset === 0 && calendarDayFocus === dayIndex ? "is-focused-day" : ""}`}
                         key={day.label}
+                        aria-pressed={offset === 0 ? calendarDayFocus === dayIndex : undefined}
+                        onClick={() => (offset === 0 ? focusCalendarDay(dayIndex) : undefined)}
                       >
                         {offset === 0 && calendarCollapsedDays[dayIndex] ? (
                           <span className="day-label">{day.short}</span>
@@ -19103,7 +19142,7 @@ function App() {
                             ) : null}
                           </>
                         )}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ))}
@@ -19130,7 +19169,7 @@ function App() {
                 ref={gridRef}
                 className={`week-grid ${pointerSession ? "is-grabbing" : ""} ${
                   calendarAxis.squashed ? "is-squashed" : ""
-                }`}
+                } ${calendarDayFocus !== null ? "is-day-view" : ""}`}
                 style={{ height: gridHeight }}
                 onPointerDown={beginBlankGesture}
                 onPointerMove={updatePointer}
@@ -19160,6 +19199,7 @@ function App() {
                   <div
                     className={`day-lane ${calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""}`}
                     key={day.label}
+                    hidden={calendarDayColumns[dayIndex].hidden}
                     style={{ left: calendarDayColumns[dayIndex].left, width: calendarDayColumns[dayIndex].width }}
                   >
                     {calendarAvailability[dayIndex].map((window, index) => {
@@ -19185,7 +19225,7 @@ function App() {
                   </div>
                 ))}
 
-                {calendarNowTop !== null ? (
+                {calendarNowTop !== null && !calendarDayColumns[calendarTodayIndex]?.hidden ? (
                   <div
                     className="calendar-now-line"
                     aria-hidden="true"
@@ -19200,6 +19240,8 @@ function App() {
                 {displayItems.map((item) => {
                   const visibleItem = clipCalendarSegment(item.start, item.duration);
                   if (!visibleItem) return null;
+                  // Day view draws one day; the rest are not on screen at all.
+                  if (calendarDayColumns[item.day]?.hidden) return null;
                   const service = itemService(item, services);
                   const resolvedItemCoachId = resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount);
                   const activeDraft =

@@ -207,6 +207,39 @@ test("a pointer lands in the day it is over, collapsed columns included", () => 
   assert.equal(dayFromGridX(collapsed, 1000, 4000), DAY_COUNT - 1);
 });
 
+test("day view gives one day the whole grid and draws none of the others", () => {
+  const none = Array.from({ length: DAY_COUNT }, () => false);
+  const columns = buildDayColumns(none, 3);
+
+  assert.equal(columns.length, DAY_COUNT);
+  assert.deepEqual(columns[3], { left: "0%", width: "100%", collapsed: false, hidden: false });
+  columns.forEach((column, day) => {
+    if (day === 3) return;
+    assert.equal(column.hidden, true, `day ${day} is not drawn`);
+    assert.equal(column.width, "0%");
+  });
+
+  // Squash's collapsed days do not survive into day view: there is one column,
+  // so there is nothing for a hairline to sit beside.
+  const collapsed = [false, false, false, false, false, true, true];
+  buildDayColumns(collapsed, 3).forEach((column) => assert.equal(column.collapsed, false));
+});
+
+test("in day view every pointer position is that day", () => {
+  const none = Array.from({ length: DAY_COUNT }, () => false);
+
+  assert.equal(dayFromGridX(none, 700, 0, 5), 5);
+  assert.equal(dayFromGridX(none, 700, 350, 5), 5);
+  assert.equal(dayFromGridX(none, 700, 699, 5), 5);
+  // Still the week's rule when nothing is focused.
+  assert.equal(dayFromGridX(none, 700, 350, null), 3);
+
+  const pixels = dayColumnPixels(none, 700, 5);
+  assert.equal(pixels[5].width, 700);
+  assert.equal(pixels[5].left, 0);
+  assert.equal(pixels[0].width, 0);
+});
+
 test("gap durations read as a coach would say them", () => {
   assert.equal(formatDurationLabel(45), "45m");
   assert.equal(formatDurationLabel(60), "1h");

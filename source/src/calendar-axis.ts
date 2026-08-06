@@ -159,15 +159,35 @@ export function axisTopToMinute(axis: CalendarAxis, top: number) {
  * header row follows — the two have to agree or the columns and their headings
  * drift apart.
  */
-export type DayColumn = { left: string; width: string; collapsed: boolean };
+export type DayColumn = { left: string; width: string; collapsed: boolean; hidden: boolean };
 
-export function buildDayColumns(collapsedDays: boolean[]): DayColumn[] {
+/**
+ * Day view: one day fills the grid and the other six are not drawn.
+ *
+ * It is a column layout rather than a separate calendar because everything
+ * above the columns — the bands, the cards, the squash axis, the now line, the
+ * pointer maths that turns a drop back into a day — already works off this
+ * table. Seven columns on a phone leaves 45px a day, which is not enough for a
+ * name; one column leaves the lot.
+ */
+function focusedDayColumns(focusedDay: number): DayColumn[] {
+  return Array.from({ length: DAY_COUNT }, (_, day) => ({
+    left: "0%",
+    width: day === focusedDay ? "100%" : "0%",
+    collapsed: false,
+    hidden: day !== focusedDay,
+  }));
+}
+
+export function buildDayColumns(collapsedDays: boolean[], focusedDay: number | null = null): DayColumn[] {
+  if (focusedDay !== null) return focusedDayColumns(focusedDay);
   const collapsedCount = collapsedDays.filter(Boolean).length;
   if (!collapsedCount) {
     return collapsedDays.map((_, day) => ({
       left: `${(day / DAY_COUNT) * 100}%`,
       width: `${100 / DAY_COUNT}%`,
       collapsed: false,
+      hidden: false,
     }));
   }
   const expandedCount = Math.max(1, DAY_COUNT - collapsedCount);
@@ -179,6 +199,7 @@ export function buildDayColumns(collapsedDays: boolean[]): DayColumn[] {
       left: `calc(${collapsedBefore * COLLAPSED_DAY_WIDTH}px + ${expandedBefore} * ${share})`,
       width: collapsed ? `${COLLAPSED_DAY_WIDTH}px` : `calc(${share})`,
       collapsed,
+      hidden: false,
     };
     if (collapsed) collapsedBefore += 1;
     else expandedBefore += 1;
@@ -187,7 +208,13 @@ export function buildDayColumns(collapsedDays: boolean[]): DayColumn[] {
 }
 
 /** The same rule in pixels, for turning a pointer position back into a day. */
-export function dayColumnPixels(collapsedDays: boolean[], gridWidth: number) {
+export function dayColumnPixels(collapsedDays: boolean[], gridWidth: number, focusedDay: number | null = null) {
+  if (focusedDay !== null) {
+    return Array.from({ length: DAY_COUNT }, (_, day) => ({
+      left: 0,
+      width: day === focusedDay ? gridWidth : 0,
+    }));
+  }
   const collapsedCount = collapsedDays.filter(Boolean).length;
   const expandedCount = Math.max(1, DAY_COUNT - collapsedCount);
   const share = collapsedCount
@@ -202,7 +229,14 @@ export function dayColumnPixels(collapsedDays: boolean[], gridWidth: number) {
   });
 }
 
-export function dayFromGridX(collapsedDays: boolean[], gridWidth: number, x: number) {
+export function dayFromGridX(
+  collapsedDays: boolean[],
+  gridWidth: number,
+  x: number,
+  focusedDay: number | null = null,
+) {
+  // In day view every position in the grid is that one day, whatever the x.
+  if (focusedDay !== null) return focusedDay;
   const columns = dayColumnPixels(collapsedDays, gridWidth);
   for (let day = 0; day < columns.length; day += 1) {
     if (x < columns[day].left + columns[day].width) return day;
