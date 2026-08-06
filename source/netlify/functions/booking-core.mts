@@ -1,4 +1,5 @@
 import { getDatabase } from "@netlify/database";
+import { ddlBatch } from "./_shared/database.mts";
 import {
   createHash,
   randomBytes,
@@ -1600,14 +1601,15 @@ function parseSettingJson(settings, key, fallback) {
 }
 
 async function ensureCoreTables() {
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS calendar_items (
       id TEXT PRIMARY KEY,
       account_id TEXT,
@@ -1632,19 +1634,19 @@ async function ensureCoreTables() {
 	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	    )
 	  `;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS account_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS completed_at TEXT`;
-  await db().sql`
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS account_id TEXT`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach_id TEXT`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location_id TEXT`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach JSONB`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location JSONB`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS completed_at TEXT`;
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_calendar_items_slot
     ON calendar_items (week, day, start)
   `;
-	  await db().sql`
+	  ddl.sql`
 	    CREATE TABLE IF NOT EXISTS people (
 	      id TEXT PRIMARY KEY,
 	      account_id TEXT,
@@ -1659,23 +1661,23 @@ async function ensureCoreTables() {
 	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	    )
 	  `;
-  await db().sql`ALTER TABLE people ADD COLUMN IF NOT EXISTS account_id TEXT`;
-	  await db().sql`DROP INDEX IF EXISTS idx_people_email_unique`;
-	  await db().sql`
+  ddl.sql`ALTER TABLE people ADD COLUMN IF NOT EXISTS account_id TEXT`;
+	  ddl.sql`DROP INDEX IF EXISTS idx_people_email_unique`;
+	  ddl.sql`
 	    CREATE INDEX IF NOT EXISTS idx_people_email_lookup
 	    ON people (LOWER(email))
 	    WHERE email IS NOT NULL AND email <> ''
 	  `;
-	  await db().sql`
+	  ddl.sql`
 	    CREATE INDEX IF NOT EXISTS idx_people_name_phone_lookup
 	    ON people (LOWER(name), phone)
 	    WHERE phone IS NOT NULL AND phone <> ''
 	  `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_people_account_name_lookup
     ON people (account_id, LOWER(name), LOWER(email), id)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -1685,7 +1687,7 @@ async function ensureCoreTables() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_sessions (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1694,7 +1696,7 @@ async function ensureCoreTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_password_resets (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1704,17 +1706,19 @@ async function ensureCoreTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  await ddl.run();
 }
 
 async function ensureAuthTables() {
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -1724,7 +1728,7 @@ async function ensureAuthTables() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_sessions (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1733,7 +1737,7 @@ async function ensureAuthTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_password_resets (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1743,6 +1747,7 @@ async function ensureAuthTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  await ddl.run();
 }
 
 async function ensureAuthReady() {
@@ -1950,7 +1955,8 @@ async function ensureAdminUser() {
 }
 
 async function ensureNotificationHistoryTable() {
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS notification_history (
       id TEXT PRIMARY KEY,
       person_key TEXT,
@@ -1965,20 +1971,20 @@ async function ensureNotificationHistoryTable() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_notification_history_person
     ON notification_history (person_key, created_at DESC)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_notification_history_item
     ON notification_history (calendar_item_id, created_at DESC)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_notification_history_provider
     ON notification_history (provider_id)
     WHERE provider_id IS NOT NULL AND provider_id <> ''
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS notification_webhook_events (
       id TEXT PRIMARY KEY,
       provider_id TEXT,
@@ -1987,6 +1993,7 @@ async function ensureNotificationHistoryTable() {
       received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  await ddl.run();
 }
 
 // Self-creating like the notification tables above -- the player portal is
@@ -1996,7 +2003,8 @@ async function ensureNotificationHistoryTable() {
 let playerSessionsTableReady = false;
 async function ensurePlayerSessionsTable() {
   if (playerSessionsTableReady) return;
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS player_sessions (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -2008,14 +2016,17 @@ async function ensurePlayerSessionsTable() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_player_sessions_token
     ON player_sessions (token_hash)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_player_sessions_expires
     ON player_sessions (expires_at)
   `;
+  await ddl.run();
+  // Only once the statements have actually landed: marking it ready first would
+  // let a failed run leave every later call skipping the creation it needs.
   playerSessionsTableReady = true;
 }
 
