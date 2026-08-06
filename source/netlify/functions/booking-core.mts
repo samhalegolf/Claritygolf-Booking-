@@ -4498,6 +4498,10 @@ function googleCalendarRelevantItem(item) {
     phone: item.phone || "",
     email: item.email || "",
     note: item.note || "",
+    // Cancelling a booking changes nothing else about it, so without status
+    // here the change never registers and the Google event is never taken
+    // down — the slot stays held on a lesson that is not happening.
+    status: item.status || "",
   };
 }
 
@@ -7881,6 +7885,119 @@ function eventSummary(item, account, serviceList) {
   return `${item.client || item.title} - ${serviceName(item.serviceId, serviceList)}`;
 }
 
+/**
+ * A cancelled or no-show booking is not busy time. It stays on the Clarity
+ * calendar as a record, but publishing it to Google would hold an hour the
+ * coach is free to fill — the one thing a subscribed calendar must not do.
+ */
+export function feedItemIsBusy(item) {
+  if (item?.status === "cancelled" || item?.status === "no_show") return false;
+  // Cancelling a scheduled group session leaves a placeholder block behind so
+  // the slot does not regenerate. It marks an absence, not an engagement.
+  if (item?.kind === "block" && item?.note === CANCELLED_GROUP_SESSION_NOTE) return false;
+  return true;
+}
+
+/** How far ahead unavailable time is published. */
+const FEED_UNAVAILABLE_WEEKS = 12;
+
+/**
+ * The hours an unavailable block can span, taken from the earliest and latest
+ * the coach ever works. Blocking the true 24-hour complement would put a
+ * midnight-to-open and a close-to-midnight event on every single day, which
+ * buries the calendar in events that say nothing anyone needed to know.
+ */
+export function availabilityEnvelope(availability) {
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
+  (availability || []).forEach((dayWindows) => {
+    (dayWindows || []).forEach((window) => {
+      start = Math.min(start, Number(window.start));
+      end = Math.max(end, Number(window.end));
+    });
+  });
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  return { start, end };
+}
+
+/**
+ * The stretches of a day the coach cannot be booked: the envelope minus that
+ * weekday's availability windows, merged across coaches — a workspace is only
+ * unavailable when nobody is free.
+ *
+ * Returns whole-day coverage for a day with no availability at all, and
+ * nothing when the day is open end to end.
+ */
+export function unavailableWindowsForDay(dayWindows, envelope) {
+  const open = (dayWindows || [])
+    .map((window) => ({
+      start: Math.max(envelope.start, Number(window.start)),
+      end: Math.min(envelope.end, Number(window.end)),
+    }))
+    .filter((window) => window.end > window.start)
+    .sort((a, b) => a.start - b.start);
+
+  const merged = [];
+  open.forEach((window) => {
+    const last = merged[merged.length - 1];
+    if (last && window.start <= last.end) last.end = Math.max(last.end, window.end);
+    else merged.push({ ...window });
+  });
+
+  const closed = [];
+  let cursor = envelope.start;
+  merged.forEach((window) => {
+    if (window.start > cursor) closed.push({ start: cursor, end: window.start });
+    cursor = Math.max(cursor, window.end);
+  });
+  if (cursor < envelope.end) closed.push({ start: cursor, end: envelope.end });
+  return closed;
+}
+
+/**
+ * Busy events covering the time the coach is not open for bookings, so a
+ * subscribed calendar shows a working week rather than an empty one with a few
+ * lessons floating in it.
+ *
+ * Availability is a weekly pattern with no end date, so the blocks are walked
+ * out over a fixed horizon from the current week. UIDs are derived from the
+ * week, day and start minute: the same slot keeps the same UID across refreshes,
+ * so a client updates events in place instead of accumulating duplicates.
+ */
+function unavailableFeedEvents(state, account, stamp) {
+  const availability = state.availability || [];
+  const envelope = availabilityEnvelope(availability);
+  // No availability configured anywhere: the coach has not said when they work,
+  // so the feed has nothing to say about when they do not.
+  if (!envelope) return [];
+
+  const timezone = account.timezone;
+  const firstWeek = currentWeekOffset();
+  const lines = [];
+
+  for (let week = firstWeek; week < firstWeek + FEED_UNAVAILABLE_WEEKS; week += 1) {
+    for (let day = 0; day < 7; day += 1) {
+      unavailableWindowsForDay(availability[day], envelope).forEach((window) => {
+        lines.push(
+          "BEGIN:VEVENT",
+          `UID:unavailable-${week}-${day}-${window.start}@clarity-golf-booking`,
+          `DTSTAMP:${stamp}`,
+          `DTSTART;TZID=${timezone}:${formatLocalDateTime(week, day, window.start)}`,
+          `DTEND;TZID=${timezone}:${formatLocalDateTime(week, day, window.end)}`,
+          `SUMMARY:${escapeText(`Unavailable - ${account.businessName}`)}`,
+          `DESCRIPTION:${escapeText("Outside booking hours. Set by your Clarity availability.")}`,
+          "CATEGORIES:Unavailable",
+          "STATUS:CONFIRMED",
+          "TRANSP:OPAQUE",
+          "END:VEVENT",
+        );
+      });
+    }
+  }
+
+  return lines;
+}
+
 function generateCalendarFeed(state) {
   const stamp = formatUtcStamp();
   const account = cleanCoachAccount(state.account);
@@ -7899,8 +8016,11 @@ function generateCalendarFeed(state) {
     "REFRESH-INTERVAL;VALUE=DURATION:PT5M",
   ];
 
+  lines.push(...unavailableFeedEvents(state, account, stamp));
+
   state.items
     .slice()
+    .filter(feedItemIsBusy)
     .sort(
       (a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start,
     )
