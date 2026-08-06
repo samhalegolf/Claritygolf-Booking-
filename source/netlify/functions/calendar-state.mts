@@ -352,17 +352,10 @@ function adminSettingsFromSettings(settings: Record<string, string>) {
   };
 }
 
-/** Calendar card colours: fill by lesson type, outline by booking status. */
+/** The two outlines a booking card can wear; the fill lives on the service. */
 const defaultCalendarColors: Record<string, string> = {
-  lessonPrivate: "#2b2233",
-  lessonPlaying: "#1c3348",
-  lessonGroup: "#14342a",
-  lessonAssessment: "#3f3320",
-  statusConfirmed: "#1fd36d",
-  statusPending: "#b9c0b4",
   statusCompleted: "#7f8a80",
-  statusCancelled: "#b52f1f",
-  statusNoShow: "#d08a1e",
+  statusBayBooked: "#e08a2e",
 };
 
 function cleanCalendarColors(colors: unknown): Record<string, string> {

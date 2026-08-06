@@ -3712,20 +3712,13 @@ function adminSettingsFromSettings(settings) {
 }
 
 /**
- * Calendar card colours: fill by lesson type, outline by booking status. Kept
- * as one JSON setting rather than nine keys — they are edited and reset as a
- * palette, never one at a time.
+ * The two outlines a booking card can wear: a border once the lesson is done,
+ * and a ring while a bay is held for it. The fill is not here — that is the
+ * lesson type's own colour, stored on the service in servicesJson.
  */
 const defaultCalendarColors = {
-  lessonPrivate: "#2b2233",
-  lessonPlaying: "#1c3348",
-  lessonGroup: "#14342a",
-  lessonAssessment: "#3f3320",
-  statusConfirmed: "#1fd36d",
-  statusPending: "#b9c0b4",
   statusCompleted: "#7f8a80",
-  statusCancelled: "#b52f1f",
-  statusNoShow: "#d08a1e",
+  statusBayBooked: "#e08a2e",
 };
 
 function cleanCalendarColors(colors) {

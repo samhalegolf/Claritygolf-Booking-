@@ -3601,10 +3601,11 @@ button {
 
 /* A live Optix bay is held for this lesson. Deliberately a thin outline rather
    than a badge: it reads at a glance across the whole week without taking room
-   inside the card, and it sits outside the box so it never shifts the layout.
+   inside the card, and it sits outside the box so it never shifts the layout —
+   which is also what lets it coexist with the completed border.
    Kept narrower than .selected so the two are distinguishable when both apply. */
 .calendar-item.has-bay {
-  outline: 2px solid #e08a2e;
+  outline: 2px solid var(--status-bay-booked-color, #e08a2e);
   outline-offset: 1px;
 }
 
@@ -4270,23 +4271,18 @@ button {
      that has never touched them gets, and the theme blocks below change only
      that fallback — so a colour the coach chose is honoured in both themes
      while an untouched default can still be tuned per theme. */
-  --lesson-private: var(--lesson-private-set, #2b2233);
-  --lesson-playing: var(--lesson-playing-set, #1c3348);
-  --lesson-group: var(--lesson-group-set, #14342a);
-  --lesson-assessment: var(--lesson-assessment-set, #3f3320);
-  /* What a card actually paints. Set per card by the attribute rules below, or
-     inline; this is the fallback for a booking with no known type. */
-  --lesson-type-color: var(--lesson-private);
+  --lesson-neutral: #2b2233;
+  /* What a card actually paints. Each booking is given its lesson type's
+     colour inline; this is the fallback for one whose lesson type has been
+     deleted or has no colour set. */
+  --lesson-type-color: var(--lesson-neutral);
   --lesson-type-text: #f7fff9;
 
   /* Card outline by booking status. The stroke style is not a setting: it is
      what keeps the five states apart for anyone who cannot separate them by
      hue, so only the colour is editable. */
-  --status-confirmed-color: var(--status-confirmed-set, var(--coach-primary, #1fd36d));
-  --status-pending-color: var(--status-pending-set, #b9c0b4);
   --status-completed-color: var(--status-completed-set, #7f8a80);
-  --status-cancelled-color: var(--status-cancelled-set, var(--danger));
-  --status-no-show-color: var(--status-no-show-set, #d08a1e);
+  --status-bay-booked-color: var(--status-bay-booked-set, #e08a2e);
   --shadow: 0 18px 46px rgba(8, 18, 12, 0.08);
   --shadow-strong: 0 18px 52px rgba(4, 9, 6, 0.2);
   --shine: linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 7%, #ffffff), rgba(255, 255, 255, 0));
@@ -4322,15 +4318,11 @@ button {
   /* Only the fallbacks change: the same fills against a near-black page read as
      holes rather than cards, so an untouched workspace gets lifted hues here.
      A colour set in coach settings still wins — it was chosen deliberately. */
-  --lesson-private: var(--lesson-private-set, #4a3c58);
-  --lesson-playing: var(--lesson-playing-set, #2d557a);
-  --lesson-group: var(--lesson-group-set, #1f5645);
-  --lesson-assessment: var(--lesson-assessment-set, #6a5533);
-  --lesson-type-color: var(--lesson-private);
+  --lesson-neutral: #4a3c58;
+  --lesson-type-color: var(--lesson-neutral);
   --lesson-type-text: #f7fff9;
-  --status-pending-color: var(--status-pending-set, rgba(240, 255, 245, 0.42));
   --status-completed-color: var(--status-completed-set, rgba(240, 255, 245, 0.5));
-  --status-no-show-color: var(--status-no-show-set, #e2a53f);
+  --status-bay-booked-color: var(--status-bay-booked-set, #e2a53f);
   --shadow: 0 20px 58px rgba(0, 0, 0, 0.36);
   --shadow-strong: 0 24px 70px rgba(0, 0, 0, 0.5);
   --shine: linear-gradient(180deg, rgba(31, 211, 109, 0.045), rgba(255, 255, 255, 0.02));
@@ -5033,30 +5025,13 @@ button {
   padding: 5px 7px;
   gap: 1px;
   justify-content: flex-start;
-  border: 2px solid var(--status-confirmed-color);
+  /* Transparent unless a state claims it, so a card is the same size whether
+     or not it has an outline to show. */
+  border: 2px solid transparent;
   border-radius: 8px;
   background: var(--lesson-type-color);
   color: var(--lesson-type-text);
   box-shadow: 0 1px 3px rgba(8, 18, 12, 0.1);
-}
-
-/* Lesson type → fill. The attribute is the calendar's only input: anything that
-   can name a type (service format today, a per-service colour in coach settings
-   later) just has to set it, or set --lesson-type-color inline to a raw hex. */
-.calendar-item.appointment[data-lesson-type="private"] {
-  --lesson-type-color: var(--lesson-private);
-}
-
-.calendar-item.appointment[data-lesson-type="playing"] {
-  --lesson-type-color: var(--lesson-playing);
-}
-
-.calendar-item.appointment[data-lesson-type="group"] {
-  --lesson-type-color: var(--lesson-group);
-}
-
-.calendar-item.appointment[data-lesson-type="assessment"] {
-  --lesson-type-color: var(--lesson-assessment);
 }
 
 .calendar-item.appointment .item-content {
@@ -5366,6 +5341,13 @@ button {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+/* The lesson type's own colour, in the lesson editor. Same chrome as the two
+   outline pickers so the three read as one family. */
+.service-colour-field {
+  flex-direction: row;
+  align-items: center;
 }
 
 .calendar-colour-field code {
@@ -7951,29 +7933,24 @@ button {
    plus a fade, which collided with the lesson-type fill and made a cancelled
    lesson look like a past one. Stroke style carries the meaning alongside the
    colour, so the five states stay apart without relying on hue. */
-.calendar-item.appointment.status-booked,
-.calendar-item.appointment.status-confirmed {
-  border: 2px solid var(--status-confirmed-color);
-}
+/* Two states get an outline, and only two. Everything else a booking can be —
+   booked, pending, cancelled, a no-show — is either the normal case or already
+   said better somewhere else, and an outline for each turned the week into a
+   key you had to learn before you could read it.
 
-.calendar-item.appointment.status-pending {
-  border: 2px dashed var(--status-pending-color);
-}
-
+   The border is the lesson being done; the outline, drawn outside the box, is
+   the bay being held. Different channels, so a completed lesson with a live bay
+   shows both without either winning. */
 .calendar-item.appointment.status-completed {
   border: 2px solid var(--status-completed-color);
 }
 
-.calendar-item.appointment.status-cancelled {
-  border: 2px dashed var(--status-cancelled-color);
-}
-
-.calendar-item.appointment.status-cancelled .item-content strong {
+/* Not an outline: a struck-through name is the one thing that has to survive,
+   because a cancelled lesson still sitting in its slot is otherwise
+   indistinguishable from one that is going ahead. */
+.calendar-item.appointment.status-cancelled .item-content strong,
+.calendar-item.appointment.status-no_show .item-content strong {
   text-decoration: line-through;
-}
-
-.calendar-item.appointment.status-no_show {
-  border: 2px dotted var(--status-no-show-color);
 }
 
 /* Time, not status, drives fade. Nothing else on a card sets opacity: a faded
