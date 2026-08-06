@@ -3140,6 +3140,33 @@ async function deleteLessonNote(noteId, accountId = defaultWorkspaceAccountFromC
   return { notes };
 }
 
+/**
+ * True when writing this person would leave the stored row exactly as it is.
+ *
+ * The UPDATE in importPeople sets each field with COALESCE(NULLIF($n, ''),
+ * column), so an empty incoming value never overwrites anything and an equal one
+ * writes back what is already there. Every full calendar save re-derives a
+ * contact from every appointment on the calendar, and on an ordinary save none
+ * of them differ — so this is the check that turns hundreds of round trips into
+ * none. updated_at would move, but nothing reads it as a contact-changed signal.
+ */
+export function personRowUnchanged(person, existing, fallbackAccountId, source) {
+  const matches = (incoming, current) => {
+    const next = cleanString(incoming, "", 400);
+    return !next || next === cleanString(current, "", 400);
+  };
+  return (
+    matches(person.name, existing.name) &&
+    matches(person.email, existing.email) &&
+    matches(person.phone, existing.phone) &&
+    matches(person.notes, existing.notes) &&
+    matches(person.source || source, existing.source) &&
+    matches(person.caddyProfileId, existing.caddyProfileId) &&
+    matches(person.caddyProfileUrl, existing.caddyProfileUrl) &&
+    matches(person.accountId || fallbackAccountId, existing.accountId)
+  );
+}
+
 async function importPeople(rawPeople, source = "import", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
   const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
   // Indexed (not filtered) so callers that need to stamp a resolved person id
@@ -3164,24 +3191,24 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
 
   const knownPeople = await readPeople(cleanAccountId);
   const knownById = new Map(knownPeople.map((row) => [row.id, row]));
-  const client = await db().pool.connect();
+  // Opened on the first person that actually needs writing. A full calendar save
+  // re-derives a contact from every appointment on the calendar, and on a normal
+  // save none of them have changed — see personRowUnchanged. Connecting and
+  // running BEGIN/COMMIT for a transaction with no writes in it is pure latency
+  // on a pool that only has three connections to hand out.
+  let client = null;
+  const openTransaction = async () => {
+    if (!client) {
+      client = await db().pool.connect();
+      await client.query("BEGIN");
+    }
+    return client;
+  };
   let personIndex = 0;
   try {
-    await client.query("BEGIN");
     for (let sourceIndex = 0; sourceIndex < indexedPeople.length; sourceIndex += 1) {
       const person = indexedPeople[sourceIndex];
       if (!person) continue;
-      // Every person write gets its own savepoint. Deriving contacts from
-      // appointments is housekeeping that rides along with the caller's save;
-      // when one contact cannot be reconciled (for example its email already
-      // belongs to another row under the account-scoped unique index) it must
-      // not abort the transaction and take the lesson the coach just booked
-      // down with it. Previously a single duplicate contact rolled back the
-      // whole calendar save and surfaced as a 409 the coach could not act on.
-      const savepoint = `person_${personIndex}`;
-      personIndex += 1;
-      await client.query(`SAVEPOINT ${savepoint}`);
-      try {
       // A person id carried on the incoming record (an appointment's stored
       // person_id, see personFromAppointment) is an explicit, stable link set
       // up on a previous save. Trust it ahead of the fuzzy name/email/phone
@@ -3193,6 +3220,27 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
       const existing = linked || compatiblePersonMatch(person, knownPeople);
       const existingId = existing?.id || "";
 
+      // Already matches what is stored, so the UPDATE below would write the row
+      // back to itself. Skip it: this is the case for nearly every contact on
+      // nearly every save, and the round trips it saves are the difference
+      // between a save that lands and one that times out.
+      if (existingId && personRowUnchanged(person, existing, cleanAccountId, source)) {
+        result.updated += 1;
+        resolvedIds[sourceIndex] = existingId;
+        continue;
+      }
+
+      // Every person write gets its own savepoint. Deriving contacts from
+      // appointments is housekeeping that rides along with the caller's save;
+      // when one contact cannot be reconciled (for example its email already
+      // belongs to another row under the account-scoped unique index) it must
+      // not abort the transaction and take the lesson the coach just booked
+      // down with it. Previously a single duplicate contact rolled back the
+      // whole calendar save and surfaced as a 409 the coach could not act on.
+      const savepoint = `person_${personIndex}`;
+      personIndex += 1;
+      await (await openTransaction()).query(`SAVEPOINT ${savepoint}`);
+      try {
       if (existingId) {
         await client.query(
           `UPDATE people
@@ -3276,12 +3324,12 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
         });
       }
     }
-    await client.query("COMMIT");
+    if (client) await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (client) await client.query("ROLLBACK");
     throw error;
   } finally {
-    client.release();
+    if (client) client.release();
   }
 
   result.people = await readPeople(cleanAccountId);
@@ -3500,8 +3548,104 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
   };
 }
 
+// The columns every calendar item write sets, in the order calendarItemParams
+// builds them. created_at/updated_at come from NOW() rather than a parameter.
+const CALENDAR_ITEM_WRITE_COLUMNS = [
+  "id",
+  "account_id",
+  "kind",
+  "week",
+  "day",
+  "start",
+  "duration",
+  "coach_id",
+  "location_id",
+  "service_id",
+  "client",
+  "title",
+  "phone",
+  "email",
+  "person_id",
+  "note",
+  "status",
+  "custom_group",
+  "coach",
+  "location",
+];
+const CALENDAR_ITEM_JSON_WRITE_COLUMNS = new Set(["custom_group", "coach", "location"]);
+// Postgres caps a statement at 65535 parameters, which at twenty columns would
+// allow far more rows than this. The smaller chunk keeps any single statement
+// modest enough to stay well inside statement_timeout.
+const CALENDAR_ITEM_WRITE_CHUNK = 250;
+
+function calendarItemParams(item) {
+  return [
+    item.id,
+    item.accountId || defaultWorkspaceAccountFromCoachAccount().id,
+    item.kind,
+    item.week ?? 0,
+    item.day,
+    item.start,
+    item.duration,
+    item.coachId || defaultCoachProfileFromAccount().id,
+    item.locationId || item.location?.locationId || "",
+    item.serviceId || "",
+    item.client || "",
+    item.title,
+    item.phone || "",
+    item.email || "",
+    item.personId || "",
+    item.note || "",
+    item.status || "booked",
+    item.customGroup ? JSON.stringify(cleanCustomGroupData(item)) : null,
+    item.coach ? JSON.stringify(cleanBookingCoachSnapshot(item.coach)) : null,
+    item.location ? JSON.stringify(cleanBookingLocationSnapshot(item.location)) : null,
+  ];
+}
+
+/**
+ * Upsert a batch of calendar items in one statement.
+ *
+ * A full calendar save replaces the whole item array, so this used to run one
+ * INSERT per item. Every one of those is a round trip to Postgres, and the
+ * calendar only grows: a coach with a season of history behind them was paying
+ * hundreds of sequential round trips to move a single lesson, which is what
+ * eventually pushed the save past the function timeout and surfaced as
+ * "Calendar save failed" on a booking that had nothing wrong with it.
+ */
+export async function upsertCalendarItemChunk(client, chunk) {
+  const params = [];
+  const rows = chunk.map((item) => {
+    const placeholders = calendarItemParams(item).map((value, column) => {
+      params.push(value);
+      return CALENDAR_ITEM_JSON_WRITE_COLUMNS.has(CALENDAR_ITEM_WRITE_COLUMNS[column])
+        ? `$${params.length}::jsonb`
+        : `$${params.length}`;
+    });
+    return `(${placeholders.join(", ")}, NOW(), NOW())`;
+  });
+  const assignments = CALENDAR_ITEM_WRITE_COLUMNS
+    .filter((column) => column !== "id")
+    .map((column) => `${column} = EXCLUDED.${column}`)
+    .concat("updated_at = NOW()")
+    .join(", ");
+  const result = await client.query(
+    `INSERT INTO calendar_items (${CALENDAR_ITEM_WRITE_COLUMNS.join(", ")}, created_at, updated_at)
+     VALUES ${rows.join(", ")}
+     ON CONFLICT (id) DO UPDATE SET ${assignments}
+     RETURNING *`,
+    params,
+  );
+  return queryRows(result);
+}
+
 async function writeItems(items, options = {}) {
-  const cleanItems = normalizeItems(items);
+  // ON CONFLICT DO UPDATE cannot touch the same row twice in one statement, so
+  // a repeated id has to collapse before the insert. Last write wins, which is
+  // what the row-at-a-time loop did.
+  const cleanItems = Array.from(
+    new Map(normalizeItems(items).map((item) => [item.id, item])).values(),
+  );
   const returnedRows = [];
   const client = await db().pool.connect();
   try {
@@ -3513,57 +3657,10 @@ async function writeItems(items, options = {}) {
         await client.query("DELETE FROM calendar_items");
       }
     }
-    for (const item of cleanItems) {
-      const insertResult = await client.query(
-        `INSERT INTO calendar_items (
-          id, account_id, kind, week, day, start, duration, coach_id, location_id, service_id, client, title, phone, email, person_id, note, status, custom_group, coach, location, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19::jsonb, $20::jsonb, NOW(), NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          account_id = EXCLUDED.account_id,
-          kind = EXCLUDED.kind,
-          week = EXCLUDED.week,
-          day = EXCLUDED.day,
-          start = EXCLUDED.start,
-          duration = EXCLUDED.duration,
-          coach_id = EXCLUDED.coach_id,
-          location_id = EXCLUDED.location_id,
-          service_id = EXCLUDED.service_id,
-          client = EXCLUDED.client,
-          title = EXCLUDED.title,
-          phone = EXCLUDED.phone,
-          email = EXCLUDED.email,
-          person_id = EXCLUDED.person_id,
-          note = EXCLUDED.note,
-          status = EXCLUDED.status,
-          custom_group = EXCLUDED.custom_group,
-          coach = EXCLUDED.coach,
-          location = EXCLUDED.location,
-          updated_at = NOW()
-        RETURNING *`,
-        [
-          item.id,
-          item.accountId || defaultWorkspaceAccountFromCoachAccount().id,
-          item.kind,
-          item.week ?? 0,
-          item.day,
-          item.start,
-          item.duration,
-          item.coachId || defaultCoachProfileFromAccount().id,
-          item.locationId || item.location?.locationId || "",
-          item.serviceId || "",
-          item.client || "",
-          item.title,
-          item.phone || "",
-          item.email || "",
-          item.personId || "",
-          item.note || "",
-          item.status || "booked",
-          item.customGroup ? JSON.stringify(cleanCustomGroupData(item)) : null,
-          item.coach ? JSON.stringify(cleanBookingCoachSnapshot(item.coach)) : null,
-          item.location ? JSON.stringify(cleanBookingLocationSnapshot(item.location)) : null,
-        ],
+    for (let offset = 0; offset < cleanItems.length; offset += CALENDAR_ITEM_WRITE_CHUNK) {
+      returnedRows.push(
+        ...(await upsertCalendarItemChunk(client, cleanItems.slice(offset, offset + CALENDAR_ITEM_WRITE_CHUNK))),
       );
-      returnedRows.push(...queryRows(insertResult));
     }
     if (options.replaceItems === true && cleanItems.length) {
       const keepIds = new Set(cleanItems.map((item) => item.id));
@@ -3585,9 +3682,7 @@ async function writeItems(items, options = {}) {
           staleCount: staleIds.length,
           supportedCleanup: true,
         });
-      }
-      for (const staleId of staleIds) {
-        await client.query("DELETE FROM calendar_items WHERE id = $1", [staleId]);
+        await client.query("DELETE FROM calendar_items WHERE id = ANY($1::text[])", [staleIds]);
       }
     }
     await client.query("COMMIT");
