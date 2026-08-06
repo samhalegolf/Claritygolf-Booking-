@@ -11,6 +11,7 @@ import {
   resolveGoogleAccountId,
   saveGoogleAuthorization,
 } from "./_shared/google-provider.mts";
+import { unavailableSlots } from "./_shared/availability-blocks.mts";
 
 const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
@@ -684,11 +685,13 @@ function accountFromSettings(settings: Record<string, string>) {
 }
 
 function eventSummary(item: any, account: ReturnType<typeof accountFromSettings>, services: any[]) {
+  if (item.kind === "unavailable") return `Unavailable - ${account.businessName}`;
   if (item.kind === "block") return `Busy - ${account.businessName}`;
   return `${item.client || item.title} - ${serviceName(item.serviceId, services)}`;
 }
 
 function eventDescription(item: any, services: any[], location: any) {
+  if (item.kind === "unavailable") return "Outside booking hours. Set by your Clarity availability.";
   const rows =
     item.kind === "block"
       ? ["Blocked time", item.note]
@@ -713,15 +716,18 @@ function googleEventForItem(item: any, settings: Record<string, string>, service
   const timezone = location?.timezone || account.timezone;
   const start = googleLocalDateTime(week, item.day, item.start);
   const end = googleLocalDateTime(week, item.day, item.start + item.duration);
+  // An unavailable stretch is a property of the week, not of a venue. Naming a
+  // location on it would put an address on hours the coach is not there.
+  const unavailable = item.kind === "unavailable";
   return {
     id: eventId,
     summary: eventSummary(item, account, services),
     description: eventDescription(item, services, location),
-    location: bookingLocationDisplay(location),
+    location: unavailable ? "" : bookingLocationDisplay(location),
     start: { dateTime: start, timeZone: timezone },
     end: { dateTime: end, timeZone: timezone },
     transparency: "opaque",
-    visibility: item.kind === "block" ? "private" : "default",
+    visibility: item.kind === "appointment" ? "default" : "private",
     extendedProperties: {
       private: {
         clarityBooking: "true",
@@ -935,6 +941,42 @@ async function deleteGoogleEvent(
   }
 }
 
+/** Which week the horizon starts from. Mirrors currentWeekOffset in booking-core. */
+function currentWeekOffset() {
+  const today = new Date();
+  const day = today.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  const weekStart = new Date(today);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() + mondayOffset);
+  const weekStartUtc = Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
+  return Math.round((weekStartUtc - baseWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000));
+}
+
+/**
+ * The coach's unavailable stretches, shaped like calendar items so they travel
+ * the same upsert-and-diff path as bookings. Their ids are stable and derived
+ * from when the slot is, which is what lets the delete pass below retire the
+ * ones that fall out of the horizon or stop being unavailable — without it,
+ * every edit to availability would leave its old blocks behind in Google.
+ */
+function unavailableSyncItems(settings: Record<string, string>) {
+  const availability = parseJson<any[][]>(settings.availabilityJson, []);
+  return unavailableSlots(availability, currentWeekOffset()).map((slot) => ({
+    id: slot.id,
+    kind: "unavailable" as const,
+    week: slot.week,
+    day: slot.day,
+    start: slot.start,
+    duration: slot.end - slot.start,
+    title: "Unavailable",
+    client: "",
+    serviceId: "",
+    note: "",
+    status: "",
+  }));
+}
+
 async function calendarSyncPayload() {
   const [settingsRows, itemRows] = await Promise.all([
     supabase("settings", { query: "select=key,value" }),
@@ -943,7 +985,7 @@ async function calendarSyncPayload() {
   const settings = settingMap(settingsRows);
   return {
     settings,
-    items: itemRows.map(rowToItem).filter(isBusyGoogleItem),
+    items: [...itemRows.map(rowToItem).filter(isBusyGoogleItem), ...unavailableSyncItems(settings)],
     services: parseJson(settings.servicesJson, defaultServices),
     locations: parseJson(settings.locationsJson, []),
   };

@@ -4976,9 +4976,13 @@ button {
   align-items: center;
   justify-content: center;
   gap: 1px;
-  width: 46px;
+  /* Never wider than the gutter it sits in — that column shrinks to 34px and
+     then 30px on small screens, and a fixed 46px square spilled over the first
+     day of the week. */
+  width: min(46px, 100%);
   height: 46px;
   margin: 6px auto 0;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
@@ -6141,6 +6145,62 @@ button {
     min-width: 0;
   }
 
+  /* The label does not fit once the gutter shrinks to 34px. The icon carries
+     the view, the inverted fill carries the state, and the button's title and
+     label still say it in full for anyone reading them out. */
+  .axis-cycle-button small {
+    display: none;
+  }
+
+  /* Seven days across a phone leaves about 45px a column, and the desktop
+     insets were eating half of it — 18px off the availability card and 22px off
+     the booking on top. A name had 23px to render in and came out one letter
+     per line. The gap between days still has to exist, so it shrinks rather
+     than disappears. */
+  .calendar-card {
+    --card-inset-left: 4px;
+    --card-inset-total: 12px;
+  }
+
+  .available-band {
+    left: 2px;
+    right: 6px;
+    border-radius: 8px;
+  }
+
+  .day-heading::before {
+    left: -3px;
+  }
+
+  .calendar-item.appointment {
+    padding: 4px 5px;
+  }
+
+  /* The grip is a third of a card at this width, and a phone drags from the
+     card body anyway. */
+  .calendar-item .item-grip {
+    display: none;
+  }
+
+  /* "P…" and "9…" are not the lesson type and the time, they are noise where
+     those used to be. The name gets the whole card instead, and the detail
+     stays a tap away on the booking card. */
+  .calendar-item.appointment .item-content span,
+  .calendar-item.appointment .item-content em,
+  .calendar-item.appointment .item-content small {
+    display: none;
+  }
+
+  .calendar-item.appointment .item-content strong {
+    -webkit-line-clamp: 3;
+  }
+
+  /* The drag hint sits under a day number at this width, and the peeking next
+     week already says the strip moves. */
+  .calendar-header-row::before {
+    content: none;
+  }
+
   .time-gutter,
   .day-heading {
     height: 52px;
@@ -6321,8 +6381,12 @@ button {
     padding: 0 9px;
   }
 
+  /* Two columns, matching .calendar-scroll below: the seven day columns live
+     inside the pager's panels, not in this grid. Leaving repeat(7) here slotted
+     the whole week strip into one 49px column and crushed every heading to
+     12px while the grid below ran at full width. */
   .calendar-header-row {
-    grid-template-columns: 30px repeat(7, minmax(0, 1fr));
+    grid-template-columns: 30px minmax(0, 1fr);
     min-width: 0;
   }
 
