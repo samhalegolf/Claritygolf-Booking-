@@ -2,160 +2,152 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  availabilityEnvelope,
-  isUnavailableSlotId,
-  unavailableSlots,
-  unavailableWindowsForDay,
+  MINUTES_IN_DAY,
+  MINUTES_IN_WEEK,
+  isUnavailableSpanId,
+  mergedAvailableSpans,
+  unavailableSpans,
 } from "./availability-blocks.mts";
 import { feedItemIsBusy } from "../booking-core.mts";
 
 const at = (hour: number, minute = 0) => hour * 60 + minute;
-
 const window = (startHour: number, endHour: number, coachId = "coach-a") => ({
   start: at(startHour),
   end: at(endHour),
   coachId,
 });
+const emptyWeek = () => Array.from({ length: 7 }, () => [] as ReturnType<typeof window>[]);
 
-test("the envelope spans the earliest and latest the coach ever works", () => {
-  const availability = [
-    [window(9, 17)],
-    [window(7, 12)],
-    [],
-    [window(10, 20)],
-    [],
-    [],
-    [],
-  ];
+const weekWith = (byDay: Record<number, ReturnType<typeof window>[]>) => {
+  const week = emptyWeek();
+  Object.entries(byDay).forEach(([day, windows]) => {
+    week[Number(day)] = windows;
+  });
+  return week;
+};
 
-  assert.deepEqual(availabilityEnvelope(availability), { start: at(7), end: at(20) });
+/** Total minutes the spans cover, for checking the week adds up. */
+const totalMinutes = (spans: { durationMinutes: number }[]) =>
+  spans.reduce((sum, span) => sum + span.durationMinutes, 0);
+
+test("nothing available anywhere says nothing about when the coach is not", () => {
+  assert.deepEqual(unavailableSpans(emptyWeek()), []);
+  assert.deepEqual(unavailableSpans([]), []);
+  assert.deepEqual(unavailableSpans(undefined), []);
 });
 
-test("no availability anywhere means nothing to say about unavailable time", () => {
-  assert.equal(availabilityEnvelope([[], [], [], [], [], [], []]), null);
-  assert.equal(availabilityEnvelope([]), null);
-  assert.equal(availabilityEnvelope(undefined), null);
+test("a week open end to end leaves nothing unavailable", () => {
+  const week = Array.from({ length: 7 }, () => [{ start: 0, end: MINUTES_IN_DAY }]);
+  assert.deepEqual(unavailableSpans(week), []);
 });
 
-test("a day open end to end has no unavailable stretches", () => {
-  const envelope = { start: at(9), end: at(17) };
+test("every minute the coach is not available is covered", () => {
+  const week = weekWith({
+    0: [window(9, 12), window(13, 17)],
+    1: [window(8, 18)],
+    2: [window(9, 17)],
+    4: [window(9, 15)],
+  });
 
-  assert.deepEqual(unavailableWindowsForDay([window(9, 17)], envelope), []);
+  const open = mergedAvailableSpans(week);
+  const closed = unavailableSpans(week);
+
+  // The two together are the whole week, with nothing counted twice: this is
+  // the property that makes "not available" mean "not free" in Google.
+  const openMinutes = open.reduce((sum, span) => sum + (span.end - span.start), 0);
+  assert.equal(openMinutes + totalMinutes(closed), MINUTES_IN_WEEK);
 });
 
-test("a day with no availability is blocked across the envelope", () => {
-  const envelope = { start: at(7), end: at(20) };
+test("overnight is one span, not a pair either side of midnight", () => {
+  // Open 9-5 Monday and 9-5 Tuesday: the gap between them is a single stretch
+  // from Monday evening to Tuesday morning.
+  const week = weekWith({ 0: [window(9, 17)], 1: [window(9, 17)] });
+  const closed = unavailableSpans(week);
 
-  assert.deepEqual(unavailableWindowsForDay([], envelope), [{ start: at(7), end: at(20) }]);
-  assert.deepEqual(unavailableWindowsForDay(undefined, envelope), [{ start: at(7), end: at(20) }]);
+  const mondayEvening = closed.find((span) => span.day === 0 && span.start === at(17));
+  assert.ok(mondayEvening, "Monday 5pm starts a span");
+  assert.equal(mondayEvening.durationMinutes, at(16), "5pm Monday to 9am Tuesday is 16 hours");
+  assert.equal(
+    closed.some((span) => span.day === 1 && span.start === 0),
+    false,
+    "no separate Tuesday-morning span",
+  );
 });
 
-test("the edges of the envelope either side of a working day are blocked", () => {
-  const envelope = { start: at(7), end: at(20) };
+test("whole days off fold into the span either side of them", () => {
+  // Friday is day 4; Saturday and Sunday are closed entirely.
+  const week = weekWith({ 4: [window(9, 15)], 0: [window(9, 17)] });
+  const closed = unavailableSpans(week);
 
-  assert.deepEqual(unavailableWindowsForDay([window(9, 17)], envelope), [
-    { start: at(7), end: at(9) },
-    { start: at(17), end: at(20) },
-  ]);
+  const fridayAfternoon = closed.find((span) => span.day === 4 && span.start === at(15));
+  assert.ok(fridayAfternoon, "Friday 3pm starts a span");
+  // 3pm Friday to 9am Monday: 9h + 48h + 9h.
+  assert.equal(fridayAfternoon.durationMinutes, at(9) + 2 * MINUTES_IN_DAY + at(9));
 });
 
-test("a lunch break between two windows is blocked", () => {
-  const envelope = { start: at(9), end: at(17) };
+test("the week wraps: Sunday night and Monday morning are the same span", () => {
+  const week = weekWith({ 0: [window(9, 17)], 6: [window(9, 17)] });
+  const closed = unavailableSpans(week);
 
-  assert.deepEqual(unavailableWindowsForDay([window(9, 12), window(13, 17)], envelope), [
-    { start: at(12), end: at(13) },
-  ]);
+  // Nothing starts at Monday 00:00 — that time belongs to the span that began
+  // on Sunday evening.
+  assert.equal(closed.some((span) => span.day === 0 && span.start === 0), false);
+  const sundayEvening = closed.find((span) => span.day === 6 && span.start === at(17));
+  assert.ok(sundayEvening, "Sunday 5pm starts the wrapping span");
+  assert.equal(sundayEvening.durationMinutes, at(7) + at(9), "7h Sunday night plus 9h Monday morning");
 });
 
 test("a workspace is only unavailable when no coach is free", () => {
-  const envelope = { start: at(8), end: at(18) };
-  // Two coaches covering 8-13 and 12-18 between them: overlapping, so the day
-  // is continuously covered and nothing is blocked.
-  const covered = unavailableWindowsForDay(
-    [window(8, 13, "coach-a"), window(12, 18, "coach-b")],
-    envelope,
+  const covered = weekWith({ 0: [window(8, 13, "coach-a"), window(12, 18, "coach-b")] });
+  const gap = weekWith({ 0: [window(8, 11, "coach-a"), window(15, 18, "coach-b")] });
+
+  assert.equal(
+    unavailableSpans(covered).some((span) => span.day === 0 && span.start > at(8) && span.start < at(18)),
+    false,
+    "overlapping cover leaves no hole",
   );
-  assert.deepEqual(covered, []);
-
-  // Same two coaches with a real hole between them.
-  const withHole = unavailableWindowsForDay(
-    [window(8, 11, "coach-a"), window(15, 18, "coach-b")],
-    envelope,
-  );
-  assert.deepEqual(withHole, [{ start: at(11), end: at(15) }]);
-});
-
-test("windows are merged regardless of the order they arrive in", () => {
-  const envelope = { start: at(8), end: at(18) };
-
-  assert.deepEqual(
-    unavailableWindowsForDay([window(15, 18), window(8, 11), window(10, 12)], envelope),
-    [{ start: at(12), end: at(15) }],
+  assert.ok(
+    unavailableSpans(gap).find((span) => span.day === 0 && span.start === at(11)),
+    "a real hole between two coaches is unavailable",
   );
 });
 
-test("availability reaching outside the envelope is clipped, not overflowed", () => {
-  const envelope = { start: at(9), end: at(17) };
+test("windows merge regardless of the order they arrive in", () => {
+  const ordered = weekWith({ 0: [window(8, 11), window(10, 12), window(15, 18)] });
+  const shuffled = weekWith({ 0: [window(15, 18), window(8, 11), window(10, 12)] });
 
-  // A day that starts before and ends after the envelope covers all of it.
-  assert.deepEqual(unavailableWindowsForDay([window(6, 22)], envelope), []);
-  // One entirely outside leaves the envelope untouched.
-  assert.deepEqual(unavailableWindowsForDay([window(20, 22)], envelope), [
-    { start: at(9), end: at(17) },
-  ]);
+  assert.deepEqual(unavailableSpans(shuffled), unavailableSpans(ordered));
 });
 
-test("the unavailable stretches and the working windows tile the envelope exactly", () => {
-  const envelope = { start: at(7), end: at(21) };
-  const open = [window(8, 11), window(13, 16), window(18, 19)];
-  const closed = unavailableWindowsForDay(open, envelope);
+test("ids are stable across runs and unique within a week", () => {
+  const week = weekWith({ 0: [window(9, 17)], 2: [window(9, 17)], 4: [window(9, 17)] });
 
-  const total = [...open, ...closed].reduce((sum, entry) => sum + (entry.end - entry.start), 0);
-  assert.equal(total, envelope.end - envelope.start, "no minute is double-counted or dropped");
+  const first = unavailableSpans(week).map((span) => span.id);
+  const second = unavailableSpans(week).map((span) => span.id);
+  assert.deepEqual(first, second, "the same pattern gives the same ids");
+  assert.equal(new Set(first).size, first.length, "ids are unique");
+  first.forEach((id) => assert.equal(isUnavailableSpanId(id), true));
+});
 
-  const ordered = [...open, ...closed].sort((a, b) => a.start - b.start);
-  assert.equal(ordered[0].start, envelope.start);
-  assert.equal(ordered[ordered.length - 1].end, envelope.end);
-  ordered.forEach((entry, index) => {
-    if (index === 0) return;
-    assert.equal(entry.start, ordered[index - 1].end, "the day is contiguous");
+test("a handful of recurring spans covers the week, not hundreds of events", () => {
+  const week = weekWith({
+    0: [window(9, 17)],
+    1: [window(9, 17)],
+    2: [window(9, 17)],
+    3: [window(9, 17)],
+    4: [window(9, 17)],
   });
+
+  // Five working days: one overnight span after each, with the last wrapping
+  // through the weekend into Monday. Six events would already be too many.
+  assert.equal(unavailableSpans(week).length, 5);
 });
 
-test("slots are walked across the horizon with ids that say when they are", () => {
-  const availability = [
-    [window(9, 12), window(13, 17)], // Mon: 8-9, 12-13, 17-18 unavailable
-    [window(8, 18)], // Tue: open across the envelope
-    [window(9, 17)], // Wed: 8-9, 17-18
-    [window(9, 17)], // Thu: 8-9, 17-18
-    [window(9, 15)], // Fri: 8-9, 15-18
-    [], // Sat: whole envelope
-    [], // Sun: whole envelope
-  ];
-
-  const oneWeek = unavailableSlots(availability, 4, 1);
-  assert.equal(oneWeek.length, 11, "3 + 0 + 2 + 2 + 2 + 1 + 1");
-  assert.equal(oneWeek.filter((slot) => slot.day === 1).length, 0, "a day open end to end has none");
-  assert.deepEqual(oneWeek[0], { week: 4, day: 0, start: at(8), end: at(9), id: "unavailable-4-0-480" });
-
-  const twelveWeeks = unavailableSlots(availability, 4, 12);
-  assert.equal(twelveWeeks.length, 11 * 12);
-  assert.equal(new Set(twelveWeeks.map((slot) => slot.id)).size, twelveWeeks.length, "ids are unique");
-
-  // Same inputs, same ids — this is what stops a refresh duplicating events.
-  assert.deepEqual(unavailableSlots(availability, 4, 12).map((slot) => slot.id), twelveWeeks.map((slot) => slot.id));
-});
-
-test("no availability produces no slots at all", () => {
-  assert.deepEqual(unavailableSlots([[], [], [], [], [], [], []], 0, 12), []);
-  assert.deepEqual(unavailableSlots(undefined, 0, 12), []);
-});
-
-test("synthetic slot ids are distinguishable from booking ids", () => {
-  assert.equal(isUnavailableSlotId("unavailable-4-0-480"), true);
-  assert.equal(isUnavailableSlotId("b1a2c3"), false);
-  assert.equal(isUnavailableSlotId(""), false);
-  assert.equal(isUnavailableSlotId(undefined as unknown as string), false);
+test("synthetic span ids are distinguishable from booking ids", () => {
+  assert.equal(isUnavailableSpanId("unavailable-0-1020"), true);
+  assert.equal(isUnavailableSpanId("b1a2c3"), false);
+  assert.equal(isUnavailableSpanId(""), false);
+  assert.equal(isUnavailableSpanId(undefined as unknown as string), false);
 });
 
 test("a live booking or block holds its time", () => {
@@ -180,6 +172,5 @@ test("the placeholder left by a cancelled group session is not busy time", () =>
     }),
     false,
   );
-  // An ordinary block carrying an unrelated note still holds its time.
   assert.equal(feedItemIsBusy({ kind: "block", note: "Dentist" }), true);
 });

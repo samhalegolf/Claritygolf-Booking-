@@ -17,7 +17,7 @@ import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";
 import { planExternalReschedule } from "./_shared/external-reschedule.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
-import { unavailableSlots } from "./_shared/availability-blocks.mts";
+import { unavailableSpans } from "./_shared/availability-blocks.mts";
 import {
   canonicalPhoneKey,
   cleanPhoneCountry,
@@ -7886,6 +7886,16 @@ function formatLocalDateTime(week, day, minutes) {
   return `${date.year}${pad(date.month)}${pad(date.day)}T${pad(hour)}${pad(minute)}00`;
 }
 
+/**
+ * Like formatLocalDateTime, but for a time measured from the start of a weekday
+ * that may run past midnight — an unavailable span from Friday evening to
+ * Monday morning is 3900 minutes into Friday, not hour 65 of it.
+ */
+function formatSpanDateTime(day, minutes) {
+  const dayOffset = Math.floor(minutes / (24 * 60));
+  return formatLocalDateTime(0, day + dayOffset, minutes - dayOffset * 24 * 60);
+}
+
 function eventDescription(item, serviceList, location) {
   const rows =
     item.kind === "block"
@@ -7932,14 +7942,17 @@ export function feedItemIsBusy(item) {
  */
 function unavailableFeedEvents(state, account, stamp) {
   const timezone = account.timezone;
-  return unavailableSlots(state.availability || [], currentWeekOffset()).flatMap((slot) => [
+  // Anchored to week 0 and repeating weekly, so the event body never changes
+  // just because time passed and every hour stays covered indefinitely.
+  return unavailableSpans(state.availability || []).flatMap((span) => [
     "BEGIN:VEVENT",
-    `UID:${slot.id}@clarity-golf-booking`,
+    `UID:${span.id}@clarity-golf-booking`,
     `DTSTAMP:${stamp}`,
-    `DTSTART;TZID=${timezone}:${formatLocalDateTime(slot.week, slot.day, slot.start)}`,
-    `DTEND;TZID=${timezone}:${formatLocalDateTime(slot.week, slot.day, slot.end)}`,
+    `DTSTART;TZID=${timezone}:${formatSpanDateTime(span.day, span.start)}`,
+    `DTEND;TZID=${timezone}:${formatSpanDateTime(span.day, span.start + span.durationMinutes)}`,
+    "RRULE:FREQ=WEEKLY",
     `SUMMARY:${escapeText(`Unavailable - ${account.businessName}`)}`,
-    `DESCRIPTION:${escapeText("Outside booking hours. Set by your Clarity availability.")}`,
+    `DESCRIPTION:${escapeText("Not bookable. Set by your Clarity availability.")}`,
     "CATEGORIES:Unavailable",
     "STATUS:CONFIRMED",
     "TRANSP:OPAQUE",
