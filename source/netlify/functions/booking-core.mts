@@ -10,12 +10,14 @@ import {
 import {
   getGoogleCalendarSyncStatus,
   syncGoogleCalendarChangesIfEnabled,
+  syncGoogleCalendarNow,
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
 import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";
 import { planExternalReschedule } from "./_shared/external-reschedule.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
+import { unavailableSlots } from "./_shared/availability-blocks.mts";
 import {
   canonicalPhoneKey,
   cleanPhoneCountry,
@@ -4557,6 +4559,33 @@ async function syncGoogleCalendarWithinBudget(changes, trigger = "admin_calendar
   };
 }
 
+/**
+ * Push availability-derived blocks to Google after an availability edit.
+ *
+ * A full rebuild rather than a targeted change: unavailable blocks are not
+ * calendar items, so there is no item diff that describes them moving. Same
+ * response budget as the calendar save — the caller does not wait past it, and
+ * a slow Google does not hold up the availability response.
+ */
+async function syncGoogleCalendarAvailabilityWithinBudget(budgetMs = GOOGLE_SYNC_RESPONSE_BUDGET_MS) {
+  const sync = syncGoogleCalendarNow("availability_save").catch((error) => {
+    console.error("availability:google_sync_failed", error);
+    return null;
+  });
+  let budgetTimer = null;
+  const budget = new Promise((resolve) => {
+    budgetTimer = setTimeout(() => resolve(null), budgetMs);
+  });
+  const settled = await Promise.race([sync, budget]);
+  if (budgetTimer) clearTimeout(budgetTimer);
+  if (settled) return settled;
+  sync
+    .then((result) => console.info("availability:google_sync_completed_after_response", { ok: result?.ok !== false }))
+    .catch((error) => console.error("availability:google_sync_failed_after_response", error));
+  console.warn("availability:google_sync_deferred", { budgetMs });
+  return null;
+}
+
 async function writeCalendarState(nextState, context = null) {
   const current = await readCalendarState();
   if (context) {
@@ -7898,104 +7927,31 @@ export function feedItemIsBusy(item) {
   return true;
 }
 
-/** How far ahead unavailable time is published. */
-const FEED_UNAVAILABLE_WEEKS = 12;
-
-/**
- * The hours an unavailable block can span, taken from the earliest and latest
- * the coach ever works. Blocking the true 24-hour complement would put a
- * midnight-to-open and a close-to-midnight event on every single day, which
- * buries the calendar in events that say nothing anyone needed to know.
- */
-export function availabilityEnvelope(availability) {
-  let start = Number.POSITIVE_INFINITY;
-  let end = Number.NEGATIVE_INFINITY;
-  (availability || []).forEach((dayWindows) => {
-    (dayWindows || []).forEach((window) => {
-      start = Math.min(start, Number(window.start));
-      end = Math.max(end, Number(window.end));
-    });
-  });
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
-  return { start, end };
-}
-
-/**
- * The stretches of a day the coach cannot be booked: the envelope minus that
- * weekday's availability windows, merged across coaches — a workspace is only
- * unavailable when nobody is free.
- *
- * Returns whole-day coverage for a day with no availability at all, and
- * nothing when the day is open end to end.
- */
-export function unavailableWindowsForDay(dayWindows, envelope) {
-  const open = (dayWindows || [])
-    .map((window) => ({
-      start: Math.max(envelope.start, Number(window.start)),
-      end: Math.min(envelope.end, Number(window.end)),
-    }))
-    .filter((window) => window.end > window.start)
-    .sort((a, b) => a.start - b.start);
-
-  const merged = [];
-  open.forEach((window) => {
-    const last = merged[merged.length - 1];
-    if (last && window.start <= last.end) last.end = Math.max(last.end, window.end);
-    else merged.push({ ...window });
-  });
-
-  const closed = [];
-  let cursor = envelope.start;
-  merged.forEach((window) => {
-    if (window.start > cursor) closed.push({ start: cursor, end: window.start });
-    cursor = Math.max(cursor, window.end);
-  });
-  if (cursor < envelope.end) closed.push({ start: cursor, end: envelope.end });
-  return closed;
-}
-
 /**
  * Busy events covering the time the coach is not open for bookings, so a
  * subscribed calendar shows a working week rather than an empty one with a few
  * lessons floating in it.
  *
- * Availability is a weekly pattern with no end date, so the blocks are walked
- * out over a fixed horizon from the current week. UIDs are derived from the
- * week, day and start minute: the same slot keeps the same UID across refreshes,
- * so a client updates events in place instead of accumulating duplicates.
+ * The stretches themselves come from _shared/availability-blocks.mts, which the
+ * Google Calendar API sync publishes from too — two ideas of "unavailable"
+ * would drift, and a coach on the feed would see a different week from one on
+ * the sync with no way to tell which was right.
  */
 function unavailableFeedEvents(state, account, stamp) {
-  const availability = state.availability || [];
-  const envelope = availabilityEnvelope(availability);
-  // No availability configured anywhere: the coach has not said when they work,
-  // so the feed has nothing to say about when they do not.
-  if (!envelope) return [];
-
   const timezone = account.timezone;
-  const firstWeek = currentWeekOffset();
-  const lines = [];
-
-  for (let week = firstWeek; week < firstWeek + FEED_UNAVAILABLE_WEEKS; week += 1) {
-    for (let day = 0; day < 7; day += 1) {
-      unavailableWindowsForDay(availability[day], envelope).forEach((window) => {
-        lines.push(
-          "BEGIN:VEVENT",
-          `UID:unavailable-${week}-${day}-${window.start}@clarity-golf-booking`,
-          `DTSTAMP:${stamp}`,
-          `DTSTART;TZID=${timezone}:${formatLocalDateTime(week, day, window.start)}`,
-          `DTEND;TZID=${timezone}:${formatLocalDateTime(week, day, window.end)}`,
-          `SUMMARY:${escapeText(`Unavailable - ${account.businessName}`)}`,
-          `DESCRIPTION:${escapeText("Outside booking hours. Set by your Clarity availability.")}`,
-          "CATEGORIES:Unavailable",
-          "STATUS:CONFIRMED",
-          "TRANSP:OPAQUE",
-          "END:VEVENT",
-        );
-      });
-    }
-  }
-
-  return lines;
+  return unavailableSlots(state.availability || [], currentWeekOffset()).flatMap((slot) => [
+    "BEGIN:VEVENT",
+    `UID:${slot.id}@clarity-golf-booking`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART;TZID=${timezone}:${formatLocalDateTime(slot.week, slot.day, slot.start)}`,
+    `DTEND;TZID=${timezone}:${formatLocalDateTime(slot.week, slot.day, slot.end)}`,
+    `SUMMARY:${escapeText(`Unavailable - ${account.businessName}`)}`,
+    `DESCRIPTION:${escapeText("Outside booking hours. Set by your Clarity availability.")}`,
+    "CATEGORIES:Unavailable",
+    "STATUS:CONFIRMED",
+    "TRANSP:OPAQUE",
+    "END:VEVENT",
+  ]);
 }
 
 function generateCalendarFeed(state) {
@@ -8866,6 +8822,11 @@ export async function handleBookingApiRoute(
         defaultCoachId(state.coaches),
       );
       const savedAvailability = await writeAvailability(nextAvailability, requestContext);
+      // Unavailable blocks in Google are derived from availability, so a change
+      // here is the only thing that can move them. The targeted change path
+      // cannot express it — it works from calendar item diffs — so this takes
+      // the full rebuild, within the same response budget the calendar save uses.
+      await syncGoogleCalendarAvailabilityWithinBudget();
       const fallbackCoachId = defaultCoachId(state.coaches);
       return json({
         availability: savedAvailability.map((dayWindows) =>

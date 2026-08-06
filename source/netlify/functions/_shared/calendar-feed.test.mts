@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   availabilityEnvelope,
-  feedItemIsBusy,
+  isUnavailableSlotId,
+  unavailableSlots,
   unavailableWindowsForDay,
-} from "../booking-core.mts";
+} from "./availability-blocks.mts";
+import { feedItemIsBusy } from "../booking-core.mts";
 
 const at = (hour: number, minute = 0) => hour * 60 + minute;
 
@@ -118,6 +120,42 @@ test("the unavailable stretches and the working windows tile the envelope exactl
     if (index === 0) return;
     assert.equal(entry.start, ordered[index - 1].end, "the day is contiguous");
   });
+});
+
+test("slots are walked across the horizon with ids that say when they are", () => {
+  const availability = [
+    [window(9, 12), window(13, 17)], // Mon: 8-9, 12-13, 17-18 unavailable
+    [window(8, 18)], // Tue: open across the envelope
+    [window(9, 17)], // Wed: 8-9, 17-18
+    [window(9, 17)], // Thu: 8-9, 17-18
+    [window(9, 15)], // Fri: 8-9, 15-18
+    [], // Sat: whole envelope
+    [], // Sun: whole envelope
+  ];
+
+  const oneWeek = unavailableSlots(availability, 4, 1);
+  assert.equal(oneWeek.length, 11, "3 + 0 + 2 + 2 + 2 + 1 + 1");
+  assert.equal(oneWeek.filter((slot) => slot.day === 1).length, 0, "a day open end to end has none");
+  assert.deepEqual(oneWeek[0], { week: 4, day: 0, start: at(8), end: at(9), id: "unavailable-4-0-480" });
+
+  const twelveWeeks = unavailableSlots(availability, 4, 12);
+  assert.equal(twelveWeeks.length, 11 * 12);
+  assert.equal(new Set(twelveWeeks.map((slot) => slot.id)).size, twelveWeeks.length, "ids are unique");
+
+  // Same inputs, same ids — this is what stops a refresh duplicating events.
+  assert.deepEqual(unavailableSlots(availability, 4, 12).map((slot) => slot.id), twelveWeeks.map((slot) => slot.id));
+});
+
+test("no availability produces no slots at all", () => {
+  assert.deepEqual(unavailableSlots([[], [], [], [], [], [], []], 0, 12), []);
+  assert.deepEqual(unavailableSlots(undefined, 0, 12), []);
+});
+
+test("synthetic slot ids are distinguishable from booking ids", () => {
+  assert.equal(isUnavailableSlotId("unavailable-4-0-480"), true);
+  assert.equal(isUnavailableSlotId("b1a2c3"), false);
+  assert.equal(isUnavailableSlotId(""), false);
+  assert.equal(isUnavailableSlotId(undefined as unknown as string), false);
 });
 
 test("a live booking or block holds its time", () => {
