@@ -593,6 +593,7 @@ function rowToItem(row: any) {
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
+    status: row.status || "",
     coach: row.coach || undefined,
     location: cleanBookingLocationSnapshot(row.location),
   };
@@ -604,6 +605,20 @@ function isCancelledGroupSessionItem(item: any) {
     Boolean(item?.serviceId || item?.service_id) &&
     (item?.note === "__cancelled_group_session__" || item?.title === "Cancelled group session")
   );
+}
+
+/**
+ * Whether this item should hold time on the coach's Google calendar.
+ *
+ * A cancelled or no-show booking stays on the Clarity calendar as a record but
+ * is no longer busy time, and leaving it in Google would hold an hour the coach
+ * is free to fill. Falling out of this predicate is what deletes the event on
+ * the next sync, so cancelling in Clarity clears the Google slot.
+ */
+function isBusyGoogleItem(item: any) {
+  if (!item) return false;
+  if (isCancelledGroupSessionItem(item)) return false;
+  return item.status !== "cancelled" && item.status !== "no_show";
 }
 
 function serviceName(serviceId: string, services: any[]) {
@@ -928,7 +943,7 @@ async function calendarSyncPayload() {
   const settings = settingMap(settingsRows);
   return {
     settings,
-    items: itemRows.map(rowToItem).filter((item) => !isCancelledGroupSessionItem(item)),
+    items: itemRows.map(rowToItem).filter(isBusyGoogleItem),
     services: parseJson(settings.servicesJson, defaultServices),
     locations: parseJson(settings.locationsJson, []),
   };
@@ -1185,7 +1200,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
         });
         item = rows[0] ? rowToItem(rows[0]) : null;
       }
-      if (change.action === "delete" || !item || isCancelledGroupSessionItem(item)) {
+      if (change.action === "delete" || !isBusyGoogleItem(item)) {
         const eventId = eventMap[change.id] || googleEventId(change.id);
         stage = "delete";
         if (await deleteGoogleEvent(accessToken, calendarId, eventId, change.id, retryBudget)) deleted += 1;
