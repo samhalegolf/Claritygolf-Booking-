@@ -11,7 +11,7 @@ import {
   resolveGoogleAccountId,
   saveGoogleAuthorization,
 } from "./_shared/google-provider.mts";
-import { unavailableSlots } from "./_shared/availability-blocks.mts";
+import { unavailableSpans } from "./_shared/availability-blocks.mts";
 
 const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
@@ -670,6 +670,16 @@ function googleLocalDateTime(week: number, day: number, minutes: number) {
   return `${date.year}-${pad(date.month)}-${pad(date.day)}T${pad(hour)}:${pad(minute)}:00`;
 }
 
+/**
+ * Like googleLocalDateTime, but for a time measured from the start of a weekday
+ * that may run past midnight — an unavailable span from Friday evening to
+ * Monday morning is 3900 minutes into Friday, not hour 65 of it.
+ */
+function googleSpanDateTime(day: number, minutes: number) {
+  const dayOffset = Math.floor(minutes / (24 * 60));
+  return googleLocalDateTime(0, day + dayOffset, minutes - dayOffset * 24 * 60);
+}
+
 function googleEventId(itemId: string) {
   return `cg${createHash("sha256").update(itemId).digest("hex").slice(0, 30)}`;
 }
@@ -714,11 +724,15 @@ function googleEventForItem(item: any, settings: Record<string, string>, service
   const location = resolveLocation(item, service, locations, account);
   const week = Number(item.week ?? 0);
   const timezone = location?.timezone || account.timezone;
-  const start = googleLocalDateTime(week, item.day, item.start);
-  const end = googleLocalDateTime(week, item.day, item.start + item.duration);
   // An unavailable stretch is a property of the week, not of a venue. Naming a
   // location on it would put an address on hours the coach is not there.
   const unavailable = item.kind === "unavailable";
+  const start = unavailable
+    ? googleSpanDateTime(item.day, item.start)
+    : googleLocalDateTime(week, item.day, item.start);
+  const end = unavailable
+    ? googleSpanDateTime(item.day, item.start + item.duration)
+    : googleLocalDateTime(week, item.day, item.start + item.duration);
   return {
     id: eventId,
     summary: eventSummary(item, account, services),
@@ -726,6 +740,10 @@ function googleEventForItem(item: any, settings: Record<string, string>, service
     location: unavailable ? "" : bookingLocationDisplay(location),
     start: { dateTime: start, timeZone: timezone },
     end: { dateTime: end, timeZone: timezone },
+    // Availability is a weekly pattern with no dates in it, so the time it
+    // leaves over repeats weekly too. A handful of recurring events cover every
+    // hour indefinitely; walking a horizon would be hundreds that go stale.
+    ...(unavailable ? { recurrence: ["RRULE:FREQ=WEEKLY"] } : {}),
     transparency: "opaque",
     visibility: item.kind === "appointment" ? "default" : "private",
     extendedProperties: {
@@ -941,34 +959,26 @@ async function deleteGoogleEvent(
   }
 }
 
-/** Which week the horizon starts from. Mirrors currentWeekOffset in booking-core. */
-function currentWeekOffset() {
-  const today = new Date();
-  const day = today.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const weekStart = new Date(today);
-  weekStart.setHours(0, 0, 0, 0);
-  weekStart.setDate(weekStart.getDate() + mondayOffset);
-  const weekStartUtc = Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());
-  return Math.round((weekStartUtc - baseWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000));
-}
-
 /**
  * The coach's unavailable stretches, shaped like calendar items so they travel
- * the same upsert-and-diff path as bookings. Their ids are stable and derived
- * from when the slot is, which is what lets the delete pass below retire the
- * ones that fall out of the horizon or stop being unavailable — without it,
- * every edit to availability would leave its old blocks behind in Google.
+ * the same upsert-and-diff path as bookings. Their ids come from where the span
+ * sits in the week, which is what lets the delete pass retire the ones that
+ * stop being unavailable — without it, every edit to availability would leave
+ * its old blocks behind in Google.
+ *
+ * Anchored to week 0 and repeating weekly, so they cover every hour from here
+ * on rather than a horizon that needs walking forward, and the event body never
+ * changes just because time passed.
  */
 function unavailableSyncItems(settings: Record<string, string>) {
   const availability = parseJson<any[][]>(settings.availabilityJson, []);
-  return unavailableSlots(availability, currentWeekOffset()).map((slot) => ({
-    id: slot.id,
+  return unavailableSpans(availability).map((span) => ({
+    id: span.id,
     kind: "unavailable" as const,
-    week: slot.week,
-    day: slot.day,
-    start: slot.start,
-    duration: slot.end - slot.start,
+    week: 0,
+    day: span.day,
+    start: span.start,
+    duration: span.durationMinutes,
     title: "Unavailable",
     client: "",
     serviceId: "",

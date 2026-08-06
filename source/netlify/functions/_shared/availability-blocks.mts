@@ -5,108 +5,119 @@
  * and they have to agree. Two implementations of "unavailable" would drift,
  * and a coach subscribing to the feed would see a different week from one
  * whose calendar is synced, with no way to tell which was right.
+ *
+ * The point of publishing it is free/busy: any hour Clarity does not offer must
+ * not read as free to anyone looking at the coach's calendar. That means the
+ * whole 24 hours, not just the hours around the working day — an 8pm-to-8am
+ * hole that shows as free is exactly the hole something else will book into.
+ *
+ * Availability is a weekly pattern with no dates in it, so the time it leaves
+ * over is a weekly pattern too. That is published as weekly recurring events
+ * rather than one event per day: a handful of events that cover every hour
+ * forever, instead of a few hundred that cover a fixed horizon and go stale the
+ * moment it rolls. It is also why unavailable stretches merge across midnight —
+ * Friday evening through Monday morning is one span, not four.
  */
 
 export type AvailabilityWindow = { start: number; end: number; coachId?: string };
 export type MinuteRange = { start: number; end: number };
 
-/** How far ahead unavailable time is published. */
-export const UNAVAILABLE_HORIZON_WEEKS = 12;
+export const MINUTES_IN_DAY = 24 * 60;
+export const DAYS_IN_WEEK = 7;
+export const MINUTES_IN_WEEK = MINUTES_IN_DAY * DAYS_IN_WEEK;
 
 /**
- * The hours an unavailable block can span, taken from the earliest and latest
- * the coach ever works. Blocking the true 24-hour complement would put a
- * midnight-to-open and a close-to-midnight event on every single day, which
- * buries the calendar in events that say nothing anyone needed to know.
- *
- * Null when no availability is configured anywhere: the coach has not said
- * when they work, so there is nothing to say about when they do not.
+ * A stretch of unavailable time, anchored at a weekday and a time of day and
+ * repeating weekly. Longer than a day whenever it runs through one or more
+ * whole days the coach does not work.
  */
-export function availabilityEnvelope(
+export type UnavailableSpan = {
+  /** 0 = Monday, matching the availability array. */
+  day: number;
+  /** Minutes past midnight on that day. */
+  start: number;
+  /** How long the span runs. May exceed a day. */
+  durationMinutes: number;
+  /** Stable across runs, so a refresh updates in place instead of duplicating. */
+  id: string;
+};
+
+/**
+ * Every availability window in the week as one timeline of minutes from Monday
+ * 00:00, merged. Merged across coaches as well as across days: a workspace is
+ * only unavailable when nobody is free, and a window that runs to midnight
+ * joins the next day's rather than leaving a seam at 00:00.
+ */
+export function mergedAvailableSpans(
   availability: AvailabilityWindow[][] | undefined | null,
-): MinuteRange | null {
-  let start = Number.POSITIVE_INFINITY;
-  let end = Number.NEGATIVE_INFINITY;
-  (availability || []).forEach((dayWindows) => {
+): MinuteRange[] {
+  const spans: MinuteRange[] = [];
+  (availability || []).forEach((dayWindows, day) => {
+    if (day >= DAYS_IN_WEEK) return;
     (dayWindows || []).forEach((window) => {
-      start = Math.min(start, Number(window.start));
-      end = Math.max(end, Number(window.end));
+      const start = Math.max(0, Math.min(MINUTES_IN_DAY, Number(window.start)));
+      const end = Math.max(0, Math.min(MINUTES_IN_DAY, Number(window.end)));
+      if (!(end > start)) return;
+      spans.push({ start: day * MINUTES_IN_DAY + start, end: day * MINUTES_IN_DAY + end });
     });
   });
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
-  return { start, end };
+
+  spans.sort((a, b) => a.start - b.start);
+  const merged: MinuteRange[] = [];
+  spans.forEach((span) => {
+    const last = merged[merged.length - 1];
+    if (last && span.start <= last.end) last.end = Math.max(last.end, span.end);
+    else merged.push({ ...span });
+  });
+  return merged;
 }
 
 /**
- * The stretches of a day the coach cannot be booked: the envelope minus that
- * weekday's availability windows, merged across coaches first — a workspace is
- * only unavailable when nobody is free.
+ * The complement: every stretch of the week the coach cannot be booked.
  *
- * Returns whole-envelope coverage for a day with no availability at all, and
- * nothing when the day is open end to end.
+ * Empty when no availability is configured anywhere — the coach has not said
+ * when they work, so there is nothing to say about when they do not — and empty
+ * again when the week is open end to end.
+ *
+ * The last stretch wraps: if the week ends unavailable and begins unavailable,
+ * those are the same span seen from either side of Sunday midnight, so they are
+ * published as one event starting late in the week and running past its end.
  */
-export function unavailableWindowsForDay(
-  dayWindows: AvailabilityWindow[] | undefined | null,
-  envelope: MinuteRange,
-): MinuteRange[] {
-  const open = (dayWindows || [])
-    .map((window) => ({
-      start: Math.max(envelope.start, Number(window.start)),
-      end: Math.min(envelope.end, Number(window.end)),
-    }))
-    .filter((window) => window.end > window.start)
-    .sort((a, b) => a.start - b.start);
-
-  const merged: MinuteRange[] = [];
-  open.forEach((window) => {
-    const last = merged[merged.length - 1];
-    if (last && window.start <= last.end) last.end = Math.max(last.end, window.end);
-    else merged.push({ ...window });
-  });
+export function unavailableSpans(
+  availability: AvailabilityWindow[][] | undefined | null,
+): UnavailableSpan[] {
+  const open = mergedAvailableSpans(availability);
+  if (!open.length) return [];
 
   const closed: MinuteRange[] = [];
-  let cursor = envelope.start;
-  merged.forEach((window) => {
-    if (window.start > cursor) closed.push({ start: cursor, end: window.start });
-    cursor = Math.max(cursor, window.end);
+  let cursor = 0;
+  open.forEach((span) => {
+    if (span.start > cursor) closed.push({ start: cursor, end: span.start });
+    cursor = Math.max(cursor, span.end);
   });
-  if (cursor < envelope.end) closed.push({ start: cursor, end: envelope.end });
-  return closed;
-}
+  if (cursor < MINUTES_IN_WEEK) closed.push({ start: cursor, end: MINUTES_IN_WEEK });
+  if (!closed.length) return [];
 
-export type UnavailableSlot = MinuteRange & { week: number; day: number; id: string };
-
-/**
- * Every unavailable stretch across the horizon, each with a stable id derived
- * from when it is. The same slot keeps the same id run after run, so a
- * subscriber updates events in place instead of accumulating a fresh copy
- * every refresh, and the sync can tell an unchanged block from a new one.
- */
-export function unavailableSlots(
-  availability: AvailabilityWindow[][] | undefined | null,
-  firstWeek: number,
-  weeks = UNAVAILABLE_HORIZON_WEEKS,
-): UnavailableSlot[] {
-  const envelope = availabilityEnvelope(availability);
-  if (!envelope) return [];
-
-  const slots: UnavailableSlot[] = [];
-  for (let week = firstWeek; week < firstWeek + weeks; week += 1) {
-    for (let day = 0; day < 7; day += 1) {
-      unavailableWindowsForDay((availability || [])[day], envelope).forEach((window) => {
-        slots.push({
-          ...window,
-          week,
-          day,
-          id: `unavailable-${week}-${day}-${window.start}`,
-        });
-      });
-    }
+  // Sunday night and Monday morning are one stretch, not two. Fold the leading
+  // one onto the trailing one so it publishes as a single event.
+  if (closed.length > 1 && closed[0].start === 0 && closed[closed.length - 1].end === MINUTES_IN_WEEK) {
+    const leading = closed.shift() as MinuteRange;
+    closed[closed.length - 1].end += leading.end;
   }
-  return slots;
+
+  return closed.map((span) => {
+    const day = Math.floor(span.start / MINUTES_IN_DAY);
+    const start = span.start - day * MINUTES_IN_DAY;
+    return {
+      day,
+      start,
+      durationMinutes: span.end - span.start,
+      id: `unavailable-${day}-${start}`,
+    };
+  });
 }
 
 /** True for the synthetic ids minted above, never for a real booking. */
-export function isUnavailableSlotId(id: string) {
+export function isUnavailableSpanId(id: string) {
   return typeof id === "string" && id.startsWith("unavailable-");
 }

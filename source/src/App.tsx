@@ -406,6 +406,8 @@ type Service = {
   minParticipants: number;
   lessonFormat: LessonFormat;
   priceMode: PriceMode;
+  /** Fill for this lesson type's cards on the calendar. Hex, from settings. */
+  color?: string;
   locationId?: string;
   lessonNote?: string;
   location: string;
@@ -1448,24 +1450,17 @@ type AvailabilityWindow = {
 };
 
 /**
- * What a calendar card is painted with. Fill by lesson type, outline by
- * booking status — the two channels the week calendar reads at a glance, so
- * they belong to the coach rather than to the stylesheet.
+ * The two outlines a booking card can wear. The fill is not here: that is the
+ * lesson type's own colour, set on the service, because the lesson types are
+ * whatever this coach sells rather than a fixed list.
  *
- * Colours only. Each status also has a stroke style (solid, dashed, dotted)
- * which stays in CSS: it is what keeps the five states apart for anyone who
- * cannot separate them by hue, so it is not a preference.
+ * Only two states get an outline. Everything else a booking can be is either
+ * the normal case or already said better elsewhere, and an outline for each
+ * turned the week into a key you had to learn before you could read it.
  */
 type CalendarColorSettings = {
-  lessonPrivate: string;
-  lessonPlaying: string;
-  lessonGroup: string;
-  lessonAssessment: string;
-  statusConfirmed: string;
-  statusPending: string;
   statusCompleted: string;
-  statusCancelled: string;
-  statusNoShow: string;
+  statusBayBooked: string;
 };
 
 type BrandSettings = {
@@ -1879,23 +1874,16 @@ function itemService(item: CalendarItem, serviceCatalog = defaultServices): Serv
 }
 
 /**
- * The calendar paints a booking by lesson type: the card's fill is the only
- * thing carrying "what kind of lesson is this", so it has to come from the
- * service rather than from the booking's state.
+ * The fill a booking's card gets: the colour set on its lesson type.
  *
- * The returned id is a styling hook, not a data field — it selects one of the
- * --lesson-* colours in styles.css and nothing else reads it. Two of the four
- * types the design names (playing lesson, assessment) have no equivalent on
- * Service yet; they will map here the moment a service can declare one, and
- * until then they fall in with private lessons rather than being guessed at
- * from a service's name.
+ * It comes off the service rather than a fixed list of categories, because the
+ * lesson types are whatever this coach actually sells — a workspace with six
+ * kinds of lesson should be able to tell all six apart, not squeeze them into
+ * four names someone else chose. A booking with no service left (deleted
+ * lesson type) falls back to the neutral fill in styles.css.
  */
-type CalendarLessonType = "private" | "playing" | "group" | "assessment";
-
-function calendarLessonType(service: Service | undefined): CalendarLessonType {
-  if (!service) return "private";
-  if (service.customGroup || service.lessonFormat === "group") return "group";
-  return "private";
+function calendarLessonColor(service: Service | undefined) {
+  return service?.color || undefined;
 }
 
 function itemWeek(item: CalendarItem) {
@@ -2569,27 +2557,13 @@ function generateSyncKey() {
 
 /** Matches the --lesson-* / --status-* fallbacks in styles.css. */
 const defaultCalendarColors: CalendarColorSettings = {
-  lessonPrivate: "#2b2233",
-  lessonPlaying: "#1c3348",
-  lessonGroup: "#14342a",
-  lessonAssessment: "#3f3320",
-  statusConfirmed: "#1fd36d",
-  statusPending: "#b9c0b4",
   statusCompleted: "#7f8a80",
-  statusCancelled: "#b52f1f",
-  statusNoShow: "#d08a1e",
+  statusBayBooked: "#e08a2e",
 };
 
 const calendarColorFields: { key: keyof CalendarColorSettings; label: string; hint: string }[] = [
-  { key: "lessonPrivate", label: "Private lesson", hint: "Card fill" },
-  { key: "lessonPlaying", label: "Playing lesson", hint: "Card fill" },
-  { key: "lessonGroup", label: "Group / clinic", hint: "Card fill" },
-  { key: "lessonAssessment", label: "Assessment", hint: "Card fill" },
-  { key: "statusConfirmed", label: "Confirmed", hint: "Solid outline" },
-  { key: "statusPending", label: "Pending", hint: "Dashed outline" },
-  { key: "statusCompleted", label: "Completed", hint: "Solid outline" },
-  { key: "statusCancelled", label: "Cancelled", hint: "Dashed outline" },
-  { key: "statusNoShow", label: "No show", hint: "Dotted outline" },
+  { key: "statusCompleted", label: "Completed", hint: "Card border" },
+  { key: "statusBayBooked", label: "Bay booked", hint: "Outer ring" },
 ];
 
 const defaultBrandSettings: BrandSettings = {
@@ -2619,6 +2593,27 @@ const defaultCoachAccount: CoachAccount = {
   caddyWorkspaceUrl: CADDY_APP_URL,
   invoiceSettings: defaultInvoiceSettings,
 };
+
+/**
+ * Starting fills for lesson types, handed out by position so a workspace that
+ * has never opened the colour picker still reads as several kinds of lesson
+ * rather than one wall of the same colour. Dark enough to carry white text at
+ * the size a calendar card actually gets.
+ */
+const serviceColorPalette = [
+  "#2b2233",
+  "#1c3348",
+  "#14342a",
+  "#3f3320",
+  "#2f2438",
+  "#123043",
+  "#1a3b2f",
+  "#402b28",
+];
+
+function defaultServiceColor(index: number) {
+  return serviceColorPalette[Math.abs(index) % serviceColorPalette.length];
+}
 
 function cleanHexColor(value: unknown, fallback: string) {
   if (typeof value !== "string") return fallback;
@@ -3477,6 +3472,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     minParticipants,
     lessonFormat,
     priceMode,
+    color: cleanHexColor(service?.color, defaultServiceColor(index)),
     locationId: typeof service?.locationId === "string" ? cleanSlug(service.locationId, "") || undefined : undefined,
     lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
@@ -4096,6 +4092,7 @@ function emptyServiceEditor(): ServiceEditor {
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: defaultServiceColor(0),
     locationId: "",
     lessonNote: "",
     location: "",
@@ -4936,6 +4933,10 @@ function App() {
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
   const [calendarAxisMode, setCalendarAxisMode] = useState<CalendarAxisMode>("week");
+  // Day view: which weekday fills the grid, or null for the whole week. Phones
+  // start on a day because seven columns across a phone leaves 45px each, which
+  // is not enough for a client's name.
+  const [calendarDayFocus, setCalendarDayFocus] = useState<number | null>(null);
   // Minute of the day the now line is drawn at. Ticks on its own so the line
   // creeps down the column without anything else having to re-render it.
   const [calendarNowMinutes, setCalendarNowMinutes] = useState(() => {
@@ -7694,7 +7695,10 @@ function App() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calendarAvailability, calendarAxisMode, calendarAxisSource, calendarEndMinutes, calendarStartMinutes]);
-  const calendarDayColumns = useMemo(() => buildDayColumns(calendarCollapsedDays), [calendarCollapsedDays]);
+  const calendarDayColumns = useMemo(
+    () => buildDayColumns(calendarCollapsedDays, calendarDayFocus),
+    [calendarCollapsedDays, calendarDayFocus],
+  );
 
   // Hour labels are dropped when they land inside a collapsed gap — the hour
   // never visibly happens there — and thinned when squashing has pushed two of
@@ -7722,10 +7726,30 @@ function App() {
   // The now line is drawn once, in today's column, and only when the week on
   // screen is the one today falls in.
   const calendarTodayIndex = weekDays.findIndex((day) => day.isToday);
+  // Read by the breakpoint effect, which must not re-run when the week changes.
+  const calendarTodayIndexRef = useRef(calendarTodayIndex);
+  calendarTodayIndexRef.current = calendarTodayIndex;
   const calendarNowTop =
     calendarTodayIndex >= 0 && calendarNowMinutes >= calendarStartMinutes && calendarNowMinutes <= calendarEndMinutes
       ? calendarMinutesToTop(calendarNowMinutes)
       : null;
+
+  // A phone opens on a day and a desktop on the week. Keyed off crossing the
+  // breakpoint rather than every render, so tapping back to the week on a phone
+  // sticks until the viewport itself changes.
+  useEffect(() => {
+    const narrow = () => window.matchMedia("(max-width: 640px)").matches;
+    let wasNarrow: boolean | null = null;
+    const sync = () => {
+      const isNarrow = narrow();
+      if (isNarrow === wasNarrow) return;
+      wasNarrow = isNarrow;
+      setCalendarDayFocus(isNarrow ? (calendarTodayIndexRef.current >= 0 ? calendarTodayIndexRef.current : 0) : null);
+    };
+    sync();
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
+  }, []);
 
   useEffect(() => {
     const tick = window.setInterval(() => {
@@ -8550,7 +8574,7 @@ function App() {
     const y = clamp(clientY - rect.top, 0, gridHeight - 1);
     // Both axes are read back through the same mapping that drew the grid, so
     // a drop lands where the pointer is in squash view as well as week view.
-    const day = dayFromGridX(calendarCollapsedDays, rect.width, x);
+    const day = dayFromGridX(calendarCollapsedDays, rect.width, x, calendarDayFocus);
     const start = clamp(
       snap(axisTopToMinute(calendarAxis, y)),
       calendarStartMinutes,
@@ -8564,7 +8588,7 @@ function App() {
     const grid = gridRef.current;
     if (!grid) return undefined;
     const rect = grid.getBoundingClientRect();
-    const column = dayColumnPixels(calendarCollapsedDays, rect.width)[slot.day];
+    const column = dayColumnPixels(calendarCollapsedDays, rect.width, calendarDayFocus)[slot.day];
     const dayWidth = Math.max(1, column?.width ?? rect.width / DAY_COUNT);
     const xWithinDay = clamp(slot.x - (column?.left ?? slot.day * dayWidth), 0, Math.max(0, dayWidth - 1));
     const coachIndex = clamp(
@@ -8606,7 +8630,7 @@ function App() {
     if (!tileRect) return null;
 
     const gridRect = grid.getBoundingClientRect();
-    const column = dayColumnPixels(calendarCollapsedDays, gridRect.width)[candidate.day];
+    const column = dayColumnPixels(calendarCollapsedDays, gridRect.width, calendarDayFocus)[candidate.day];
     const dayWidth = column?.width ?? gridRect.width / DAY_COUNT;
     const dayLeft = column?.left ?? candidate.day * dayWidth;
     const finalWidth = dayWidth - 22;
@@ -8976,6 +9000,11 @@ function App() {
     }, 320);
   }
 
+  /** Tap a day to fill the grid with it; tap the same day again for the week. */
+  function focusCalendarDay(dayIndex: number) {
+    setCalendarDayFocus((current) => (current === dayIndex ? null : dayIndex));
+  }
+
   function cycleCalendarAxisMode() {
     suppressBlankGestureUntilRef.current = Date.now() + 360;
     setCalendarAxisMode((current) => (current === "week" ? "squash" : "week"));
@@ -8995,6 +9024,7 @@ function App() {
             <div
               className={`day-lane ${calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""}`}
               key={day.label}
+              hidden={calendarDayColumns[dayIndex].hidden}
               style={{ left: calendarDayColumns[dayIndex].left, width: calendarDayColumns[dayIndex].width }}
             >
               {calendarAvailability[dayIndex].map((window, index) => {
@@ -12260,6 +12290,9 @@ function App() {
     setServiceNumberDrafts({});
     setServiceEditor({
       ...emptyServiceEditor(),
+      // Next colour along, so two lesson types created back to back do not
+      // arrive the same shade and have to be told apart by hand.
+      color: defaultServiceColor(services.length),
       id: generateServiceDraftId(),
       coachId: serviceScopeCoachId || defaultCoachId(coachProfiles),
       locationId: defaultLocationId(locations),
@@ -16572,6 +16605,22 @@ function App() {
                   placeholder="Lesson name"
                 />
               </label>
+              {/* The colour lives on the lesson type because that is the thing
+                  it identifies. A card on the calendar is filled with it, which
+                  is how a week reads as several kinds of lesson at a glance. */}
+              <label className="settings-field calendar-colour-field service-colour-field">
+                <input
+                  type="color"
+                  value={serviceEditor.color || defaultServiceColor(0)}
+                  aria-label="Calendar colour for this lesson type"
+                  onChange={(event) => updateServiceEditor("color", event.target.value)}
+                />
+                <span>
+                  <strong>Calendar colour</strong>
+                  <em>Card fill</em>
+                </span>
+                <code>{serviceEditor.color || defaultServiceColor(0)}</code>
+              </label>
               <label className="settings-field">
                 <span>Optional description</span>
                 <input
@@ -19061,11 +19110,17 @@ function App() {
                 {WEEK_PANEL_OFFSETS.map((offset) => (
                   <div className={`week-strip-panel ${offset === 0 ? "" : "is-off-week"}`} key={offset}>
                     {(offset === 0 ? weekDays : buildWeekDays(activeWeek + offset)).map((day, dayIndex) => (
-                      <div
+                      // In day view the strip is the day picker: the headings
+                      // stay where they are and tapping one fills the grid with
+                      // it, so the week is never more than a tap away.
+                      <button
+                        type="button"
                         className={`day-heading ${day.isToday ? "today" : ""} ${
                           offset === 0 && calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""
-                        }`}
+                        } ${offset === 0 && calendarDayFocus === dayIndex ? "is-focused-day" : ""}`}
                         key={day.label}
+                        aria-pressed={offset === 0 ? calendarDayFocus === dayIndex : undefined}
+                        onClick={() => (offset === 0 ? focusCalendarDay(dayIndex) : undefined)}
                       >
                         {offset === 0 && calendarCollapsedDays[dayIndex] ? (
                           <span className="day-label">{day.short}</span>
@@ -19087,7 +19142,7 @@ function App() {
                             ) : null}
                           </>
                         )}
-                      </div>
+                      </button>
                     ))}
                   </div>
                 ))}
@@ -19114,7 +19169,7 @@ function App() {
                 ref={gridRef}
                 className={`week-grid ${pointerSession ? "is-grabbing" : ""} ${
                   calendarAxis.squashed ? "is-squashed" : ""
-                }`}
+                } ${calendarDayFocus !== null ? "is-day-view" : ""}`}
                 style={{ height: gridHeight }}
                 onPointerDown={beginBlankGesture}
                 onPointerMove={updatePointer}
@@ -19144,6 +19199,7 @@ function App() {
                   <div
                     className={`day-lane ${calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""}`}
                     key={day.label}
+                    hidden={calendarDayColumns[dayIndex].hidden}
                     style={{ left: calendarDayColumns[dayIndex].left, width: calendarDayColumns[dayIndex].width }}
                   >
                     {calendarAvailability[dayIndex].map((window, index) => {
@@ -19169,7 +19225,7 @@ function App() {
                   </div>
                 ))}
 
-                {calendarNowTop !== null ? (
+                {calendarNowTop !== null && !calendarDayColumns[calendarTodayIndex]?.hidden ? (
                   <div
                     className="calendar-now-line"
                     aria-hidden="true"
@@ -19184,6 +19240,8 @@ function App() {
                 {displayItems.map((item) => {
                   const visibleItem = clipCalendarSegment(item.start, item.duration);
                   if (!visibleItem) return null;
+                  // Day view draws one day; the rest are not on screen at all.
+                  if (calendarDayColumns[item.day]?.hidden) return null;
                   const service = itemService(item, services);
                   const resolvedItemCoachId = resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount);
                   const activeDraft =
@@ -19261,7 +19319,7 @@ function App() {
 	                      } ${item.kind === "appointment" && item.status ? `status-${item.status}` : ""} ${
                         item.kind === "appointment" && item.bayBooked ? "has-bay" : ""
                       } ${isPastItem ? "is-past" : ""}`}
-                      data-lesson-type={item.kind === "appointment" ? calendarLessonType(service) : undefined}
+
                       aria-label={tooltipRows.join(", ")}
                       onPointerEnter={(event) =>
                         showCalendarItemHover(event, item, service, latestClientEmail, latestCoachEmail, latestAdminEmail)
@@ -19276,6 +19334,12 @@ function App() {
                         // bookings sitting in it.
                         left: `calc(${columnLeft} + var(--card-inset-left, 5px))`,
                         width: `calc(${columnWidth} - var(--card-inset-total, 22px))`,
+                        // The fill is the lesson type. Set here rather than by
+                        // a class because the palette is per service, and
+                        // services are whatever this coach sells.
+                        ...(item.kind === "appointment" && calendarLessonColor(service)
+                          ? ({ "--lesson-type-color": calendarLessonColor(service) } as CSSProperties)
+                          : {}),
                         ...(scheduledGroupSession ? ({ cursor: "pointer" } as CSSProperties) : {}),
                         ...(flyAnimation
                           ? ({
@@ -25380,13 +25444,14 @@ function App() {
                     <CalendarDays size={18} />
                     <div>
                       <span>Calendar colours</span>
-                      <strong>Lesson type fills and status outlines</strong>
+                      <strong>Booking outlines</strong>
                     </div>
                   </summary>
                   <p className="settings-note">
-                    A booking card says three things at once: what kind of lesson it is (the fill), what state it
-                    is in (the outline) and whether it has already happened (it fades). Each outline keeps its own
-                    stroke — solid, dashed or dotted — so the five states stay apart without relying on colour.
+                    A booking card is filled with its lesson type's colour, which you set on the lesson type
+                    itself. These two are the outlines it can wear on top: a border once the lesson is done, and a
+                    ring around the card while a bay is held for it. They sit on different edges, so a completed
+                    lesson with a live bay shows both.
                   </p>
                   <div className="calendar-colour-fields">
                     {calendarColorFields.map(({ key, label, hint }) => (
