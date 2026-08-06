@@ -19274,8 +19274,8 @@ function App() {
                         // 3px left / 15px right) with 2px to spare on each
                         // side, so a day column always reads wider than the
                         // bookings sitting in it.
-                        left: `calc(${columnLeft} + 5px)`,
-                        width: `calc(${columnWidth} - 22px)`,
+                        left: `calc(${columnLeft} + var(--card-inset-left, 5px))`,
+                        width: `calc(${columnWidth} - var(--card-inset-total, 22px))`,
                         ...(scheduledGroupSession ? ({ cursor: "pointer" } as CSSProperties) : {}),
                         ...(flyAnimation
                           ? ({
@@ -19386,8 +19386,8 @@ function App() {
                         style={{
                           top: calendarMinutesToTop(visibleDraft.start),
                           height: Math.max(calendarSegmentHeight(visibleDraft.start, visibleDraft.duration), 24),
-                          left: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).left} + 5px)`,
-                          width: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).width} - 22px)`,
+                          left: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).left} + var(--card-inset-left, 5px))`,
+                          width: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).width} - var(--card-inset-total, 22px))`,
                         }}
                       >
                         <div className="item-content">
@@ -19410,8 +19410,8 @@ function App() {
                         style={{
                           top: calendarMinutesToTop(visibleDraft.start),
                           height: Math.max(calendarSegmentHeight(visibleDraft.start, visibleDraft.duration), 34),
-                          left: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).left} + 5px)`,
-                          width: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).width} - 22px)`,
+                          left: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).left} + var(--card-inset-left, 5px))`,
+                          width: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).width} - var(--card-inset-total, 22px))`,
                         }}
                       >
                         <div className="item-grip" aria-hidden="true">
