@@ -4516,70 +4516,58 @@ function googleCalendarChangesBetween(previousItems, nextItems) {
   return changes;
 }
 
-const GOOGLE_SYNC_RESPONSE_BUDGET_MS = 5000;
-
-// The calendar rows are committed before Google Calendar is synced, so a slow Google round trip
-// used to hold the save response open past the function timeout. The client then retried, hit a
-// 409 against its own committed write, and reported "not saved" for a booking that had saved.
-// Time-box the sync: if Google is slow we answer the client now and let the sync finish in the
-// background (it re-runs on the next save or state read anyway).
-async function syncGoogleCalendarWithinBudget(changes, trigger = "admin_calendar_save", budgetMs = GOOGLE_SYNC_RESPONSE_BUDGET_MS) {
-  const sync = syncGoogleCalendarChangesIfEnabled(changes, trigger).then(
-    (result) => result,
-    async (error) => ({
-      ...(await getGoogleCalendarSyncStatus().catch(() => ({}))),
-      ok: false,
-      skipped: false,
-      error: error instanceof Error ? error.message : "Google Calendar sync failed.",
-    }),
-  );
-  let budgetTimer = null;
-  const budget = new Promise((resolve) => {
-    budgetTimer = setTimeout(() => resolve(null), budgetMs);
-  });
-  const settled = await Promise.race([sync, budget]);
-  if (budgetTimer) clearTimeout(budgetTimer);
-  if (settled) return settled;
-  sync
-    .then((result) => console.info("calendar_state:google_sync_completed_after_response", { ok: result?.ok !== false }))
-    .catch((error) => console.error("calendar_state:google_sync_failed_after_response", error));
-  console.warn("calendar_state:google_sync_deferred", { budgetMs });
-  return {
-    ...(await getGoogleCalendarSyncStatus().catch(() => ({}))),
-    ok: true,
-    skipped: false,
-    pending: true,
-  };
+/**
+ * Hand a Google Calendar sync to the runtime instead of to the response.
+ *
+ * Google is not on the critical path of a save. The rows are committed before
+ * the sync starts, the sync re-runs on the next change, and the nightly
+ * reconcile rebuilds anything a failed push missed — so a save that waits on
+ * Google is paying for a round trip it does not need.
+ *
+ * It used to wait behind a five second budget, and that turned out to be worse
+ * than either waiting or not. A sync that outran the budget kept running, but
+ * the function froze as soon as it answered, suspending that sync mid-request.
+ * The change queue is module level, so the next save on the same warm instance
+ * queued behind the suspended one and inherited the whole stall. Two or three
+ * saves in a row and the calendar sat on "Saving…" for the full budget every
+ * time, with nothing actually reaching Google.
+ *
+ * waitUntil is what makes firing and forgetting safe: it holds the instance
+ * open until the sync finishes, so the work completes rather than being
+ * suspended. Failures still land in the Google sync debug log and in
+ * googleCalendarLastSyncStatus, so a coach sees them on the next save or state
+ * read instead of inline on this one.
+ */
+function deferGoogleCalendarSync(changes, trigger = "admin_calendar_save", netlifyContext = null) {
+  const task = syncGoogleCalendarChangesIfEnabled(changes, trigger)
+    .then((result) =>
+      console.info("calendar_state:google_sync_completed_after_response", { trigger, ok: result?.ok !== false }),
+    )
+    .catch((error) => console.error("calendar_state:google_sync_failed_after_response", trigger, error));
+  if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
+    netlifyContext.waitUntil(task);
+  }
+  return { ok: true, skipped: false, pending: true };
 }
 
 /**
  * Push availability-derived blocks to Google after an availability edit.
  *
  * A full rebuild rather than a targeted change: unavailable blocks are not
- * calendar items, so there is no item diff that describes them moving. Same
- * response budget as the calendar save — the caller does not wait past it, and
- * a slow Google does not hold up the availability response.
+ * calendar items, so there is no item diff that describes them moving. Deferred
+ * for the same reason as the calendar save — a rebuild touches every event on
+ * the calendar, which is the last thing a save should be made to wait for.
  */
-async function syncGoogleCalendarAvailabilityWithinBudget(budgetMs = GOOGLE_SYNC_RESPONSE_BUDGET_MS) {
-  const sync = syncGoogleCalendarNow("availability_save").catch((error) => {
-    console.error("availability:google_sync_failed", error);
-    return null;
-  });
-  let budgetTimer = null;
-  const budget = new Promise((resolve) => {
-    budgetTimer = setTimeout(() => resolve(null), budgetMs);
-  });
-  const settled = await Promise.race([sync, budget]);
-  if (budgetTimer) clearTimeout(budgetTimer);
-  if (settled) return settled;
-  sync
+function deferGoogleCalendarAvailabilitySync(netlifyContext = null) {
+  const task = syncGoogleCalendarNow("availability_save")
     .then((result) => console.info("availability:google_sync_completed_after_response", { ok: result?.ok !== false }))
     .catch((error) => console.error("availability:google_sync_failed_after_response", error));
-  console.warn("availability:google_sync_deferred", { budgetMs });
-  return null;
+  if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
+    netlifyContext.waitUntil(task);
+  }
 }
 
-async function writeCalendarState(nextState, context = null) {
+async function writeCalendarState(nextState, context = null, netlifyContext = null) {
   const current = await readCalendarState();
   if (context) {
     assertAccountFeature(context.account, "coachCalendar");
@@ -4679,14 +4667,25 @@ async function writeCalendarState(nextState, context = null) {
   // readAdminSettings/readBrandSettings/readCoachAccount all derive from the same settings
   // table, so share one bulk read across them instead of each fetching its own copy in parallel.
   const sharedSettingsMap = await readSettingsMap();
-  const [people, notifications, settings, brand, account, googleCalendarSync] = await Promise.all([
+  const [people, notifications, settings, brand, account, googleCalendar] = await Promise.all([
     readPeople(peopleAccountId),
     readNotificationHistory(),
     readAdminSettings(sharedSettingsMap),
     readBrandSettings(sharedSettingsMap),
     readCoachAccount(sharedSettingsMap),
-    syncGoogleCalendarWithinBudget(googleCalendarChangesBetween(current.items, items), "admin_calendar_save"),
+    getGoogleCalendarSyncStatus(),
   ]);
+  // Fired, not awaited: see deferGoogleCalendarSync. The connection status the
+  // client shows comes from the read above, so the pending marker adds to it
+  // rather than replacing it with a bare flag.
+  const googleCalendarSync = {
+    ...googleCalendar,
+    ...deferGoogleCalendarSync(
+      googleCalendarChangesBetween(current.items, items),
+      "admin_calendar_save",
+      netlifyContext,
+    ),
+  };
   return {
     syncKey,
     items: context ? items.filter((item) => canReadCalendarItem(context, item, { ...current, items })) : items,
@@ -4702,7 +4701,7 @@ async function writeCalendarState(nextState, context = null) {
     settings,
     brand,
     account,
-    googleCalendar: await getGoogleCalendarSyncStatus(),
+    googleCalendar,
     googleCalendarSync,
   };
 }
@@ -4769,7 +4768,7 @@ function deleteFailureDiagnostics(error, baseDetails, durationMs) {
   };
 }
 
-async function deleteCalendarItemById(id, context = null) {
+async function deleteCalendarItemById(id, context = null, netlifyContext = null) {
   const cleanId = cleanString(id, "", 140);
   if (!cleanId) {
     throw Object.assign(new Error("Calendar item id is required for delete."), {
@@ -4822,17 +4821,11 @@ async function deleteCalendarItemById(id, context = null) {
 
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  const googleCalendarSyncTask = syncGoogleCalendarChangesIfEnabled([{ id: cleanId, action: "delete" }], "admin_calendar_delete")
-    .then((result) => console.info("calendar_state:google_sync_completed_after_response", { ok: result?.ok !== false }))
-    .catch((error) => console.error("calendar_state:google_sync_failed_after_response", error));
-  if (context && typeof context.waitUntil === "function") {
-    context.waitUntil(googleCalendarSyncTask);
-  }
-  const googleCalendarSync = {
-    ok: true,
-    skipped: false,
-    pending: true,
-  };
+  const googleCalendarSync = deferGoogleCalendarSync(
+    [{ id: cleanId, action: "delete" }],
+    "admin_calendar_delete",
+    netlifyContext,
+  );
   let nextState = null;
   try {
     nextState = await readCalendarState();
@@ -8436,10 +8429,14 @@ export async function handleBookingApiRoute(
           const updatedAt = nowIso();
           await setSetting("updatedAt", updatedAt);
           // Keep Google Calendar in step with every single-booking change (drag
-          // reschedule, edit, lesson-complete). Time-boxed like the other save
-          // paths so a slow Google round trip finishes in the background instead
-          // of holding this response open.
-          const googleCalendarSync = await syncGoogleCalendarWithinBudget([{ id: item.id, action: "upsert" }], "admin_item_upsert");
+          // reschedule, edit, lesson-complete). Deferred like the other save
+          // paths so the round trip runs after the response rather than inside
+          // it.
+          const googleCalendarSync = deferGoogleCalendarSync(
+            [{ id: item.id, action: "upsert" }],
+            "admin_item_upsert",
+            context,
+          );
           let notificationResults = [];
           let notificationWarning = "";
           try {
@@ -8491,7 +8488,7 @@ export async function handleBookingApiRoute(
         clearItems: body.clearItems === true,
         itemsOperation: body.itemsOperation,
         updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
-      }, requestContext);
+      }, requestContext, context);
       let notificationResults = [];
       let notificationWarning = "";
       try {
@@ -8545,7 +8542,7 @@ export async function handleBookingApiRoute(
         operationOwner: "calendar_reload_verify",
       });
       try {
-        const nextState = await deleteCalendarItemById(calendarItemId, requestContext);
+        const nextState = await deleteCalendarItemById(calendarItemId, requestContext, context);
         const verificationResult = nextState.items.some((item) => item.id === calendarItemId)
           ? "found"
           : "not_found";
@@ -8831,8 +8828,8 @@ export async function handleBookingApiRoute(
       // Unavailable blocks in Google are derived from availability, so a change
       // here is the only thing that can move them. The targeted change path
       // cannot express it — it works from calendar item diffs — so this takes
-      // the full rebuild, within the same response budget the calendar save uses.
-      await syncGoogleCalendarAvailabilityWithinBudget();
+      // the full rebuild, deferred like every other save's sync.
+      deferGoogleCalendarAvailabilitySync(context);
       const fallbackCoachId = defaultCoachId(state.coaches);
       return json({
         availability: savedAvailability.map((dayWindows) =>
