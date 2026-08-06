@@ -1,4 +1,5 @@
 import { getDatabase } from "@netlify/database";
+import { ddlBatch } from "./_shared/database.mts";
 import {
   createHash,
   randomBytes,
@@ -1545,13 +1546,40 @@ function db() {
 }
 
 async function setSetting(key, value) {
-  await db().sql`
-    INSERT INTO settings (key, value, updated_at)
-    VALUES (${key}, ${String(value ?? "")}, NOW())
-    ON CONFLICT (key) DO UPDATE
-      SET value = EXCLUDED.value,
-          updated_at = EXCLUDED.updated_at
-  `;
+  await setSettingsBulk({ [key]: value });
+}
+
+/**
+ * Write a group of settings in one statement.
+ *
+ * Saving a settings form means writing a dozen or more keys, and doing that one
+ * key at a time is a dozen or more sequential round trips to Postgres for a
+ * change the coach experiences as pressing Save once. Same shape as the calendar
+ * save that was rewriting one item per round trip: individually cheap, and the
+ * cost is the count.
+ *
+ * Callers that write a single key keep using setSetting, which comes through
+ * here with one entry. `run` is the statement runner, injectable so the built
+ * SQL can be checked without a database behind it.
+ */
+export async function setSettingsBulk(values, run = null) {
+  const entries = Object.entries(values || {}).filter(([key]) => key);
+  if (!entries.length) return;
+
+  const params = [];
+  const rows = entries.map(([key, value]) => {
+    params.push(key, String(value ?? ""));
+    return `($${params.length - 1}, $${params.length}, NOW())`;
+  });
+  const query = run || ((text, args) => db().pool.query(text, args));
+  await query(
+    `INSERT INTO settings (key, value, updated_at)
+     VALUES ${rows.join(", ")}
+     ON CONFLICT (key) DO UPDATE
+       SET value = EXCLUDED.value,
+           updated_at = EXCLUDED.updated_at`,
+    params,
+  );
 }
 
 async function getSetting(key) {
@@ -1573,14 +1601,15 @@ function parseSettingJson(settings, key, fallback) {
 }
 
 async function ensureCoreTables() {
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS calendar_items (
       id TEXT PRIMARY KEY,
       account_id TEXT,
@@ -1605,19 +1634,19 @@ async function ensureCoreTables() {
 	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	    )
 	  `;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS account_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS completed_at TEXT`;
-  await db().sql`
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS account_id TEXT`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach_id TEXT`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location_id TEXT`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach JSONB`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location JSONB`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS completed_at TEXT`;
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_calendar_items_slot
     ON calendar_items (week, day, start)
   `;
-	  await db().sql`
+	  ddl.sql`
 	    CREATE TABLE IF NOT EXISTS people (
 	      id TEXT PRIMARY KEY,
 	      account_id TEXT,
@@ -1632,23 +1661,23 @@ async function ensureCoreTables() {
 	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	    )
 	  `;
-  await db().sql`ALTER TABLE people ADD COLUMN IF NOT EXISTS account_id TEXT`;
-	  await db().sql`DROP INDEX IF EXISTS idx_people_email_unique`;
-	  await db().sql`
+  ddl.sql`ALTER TABLE people ADD COLUMN IF NOT EXISTS account_id TEXT`;
+	  ddl.sql`DROP INDEX IF EXISTS idx_people_email_unique`;
+	  ddl.sql`
 	    CREATE INDEX IF NOT EXISTS idx_people_email_lookup
 	    ON people (LOWER(email))
 	    WHERE email IS NOT NULL AND email <> ''
 	  `;
-	  await db().sql`
+	  ddl.sql`
 	    CREATE INDEX IF NOT EXISTS idx_people_name_phone_lookup
 	    ON people (LOWER(name), phone)
 	    WHERE phone IS NOT NULL AND phone <> ''
 	  `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_people_account_name_lookup
     ON people (account_id, LOWER(name), LOWER(email), id)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -1658,7 +1687,7 @@ async function ensureCoreTables() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_sessions (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1667,7 +1696,7 @@ async function ensureCoreTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_password_resets (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1677,17 +1706,19 @@ async function ensureCoreTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  await ddl.run();
 }
 
 async function ensureAuthTables() {
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -1697,7 +1728,7 @@ async function ensureAuthTables() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_sessions (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1706,7 +1737,7 @@ async function ensureAuthTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_password_resets (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1716,6 +1747,7 @@ async function ensureAuthTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  await ddl.run();
 }
 
 async function ensureAuthReady() {
@@ -1803,15 +1835,25 @@ async function defaultSettings() {
   };
 }
 
+// Forty-five keys, and this runs once on every cold start before the instance
+// can answer anything. One INSERT per key made that forty-five sequential round
+// trips of pure latency on the first request each new instance served.
+// DO NOTHING, not DO UPDATE: these are defaults, so an existing value wins.
 async function seedSettings() {
-  const defaults = await defaultSettings();
-  for (const [key, value] of Object.entries(defaults)) {
-    await db().sql`
-      INSERT INTO settings (key, value, updated_at)
-      VALUES (${key}, ${String(value ?? "")}, NOW())
-      ON CONFLICT (key) DO NOTHING
-    `;
-  }
+  const entries = Object.entries(await defaultSettings()).filter(([key]) => key);
+  if (!entries.length) return;
+
+  const params = [];
+  const rows = entries.map(([key, value]) => {
+    params.push(key, String(value ?? ""));
+    return `($${params.length - 1}, $${params.length}, NOW())`;
+  });
+  await db().pool.query(
+    `INSERT INTO settings (key, value, updated_at)
+     VALUES ${rows.join(", ")}
+     ON CONFLICT (key) DO NOTHING`,
+    params,
+  );
 }
 
 async function seedItems() {
@@ -1913,7 +1955,8 @@ async function ensureAdminUser() {
 }
 
 async function ensureNotificationHistoryTable() {
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS notification_history (
       id TEXT PRIMARY KEY,
       person_key TEXT,
@@ -1928,20 +1971,20 @@ async function ensureNotificationHistoryTable() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_notification_history_person
     ON notification_history (person_key, created_at DESC)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_notification_history_item
     ON notification_history (calendar_item_id, created_at DESC)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_notification_history_provider
     ON notification_history (provider_id)
     WHERE provider_id IS NOT NULL AND provider_id <> ''
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS notification_webhook_events (
       id TEXT PRIMARY KEY,
       provider_id TEXT,
@@ -1950,6 +1993,7 @@ async function ensureNotificationHistoryTable() {
       received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  await ddl.run();
 }
 
 // Self-creating like the notification tables above -- the player portal is
@@ -1959,7 +2003,8 @@ async function ensureNotificationHistoryTable() {
 let playerSessionsTableReady = false;
 async function ensurePlayerSessionsTable() {
   if (playerSessionsTableReady) return;
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS player_sessions (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1971,14 +2016,17 @@ async function ensurePlayerSessionsTable() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_player_sessions_token
     ON player_sessions (token_hash)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_player_sessions_expires
     ON player_sessions (expires_at)
   `;
+  await ddl.run();
+  // Only once the statements have actually landed: marking it ready first would
+  // let a failed run leave every later call skipping the creation it needs.
   playerSessionsTableReady = true;
 }
 
@@ -3883,29 +3931,38 @@ async function readAdminSettings(settingsMap = null) {
   return adminSettingsFromSettings(settingsMap || (await readSettingsMap()));
 }
 
+// Only the keys the caller actually sent are written, so the shape stays a
+// partial update. They are collected rather than written one at a time: this is
+// one Save press, and it should cost one round trip rather than nineteen.
 async function writeAdminSettings(settings) {
-  if (hasOwn(settings, "emailNotificationsEnabled")) await setSetting("emailNotificationsEnabled", settings?.emailNotificationsEnabled ? "true" : "false");
-  if (hasOwn(settings, "notificationEmail")) await setSetting("notificationEmail", cleanString(settings?.notificationEmail, "", 180));
-  if (hasOwn(settings, "coachEmail")) await setSetting("coachEmail", cleanString(settings?.coachEmail, "", 180));
-  if (hasOwn(settings, "replyToEmail")) await setSetting("replyToEmail", cleanString(settings?.replyToEmail, "", 180));
+  const next = {};
+  const put = (key, value) => {
+    if (hasOwn(settings, key)) next[key] = value;
+  };
+  put("emailNotificationsEnabled", settings?.emailNotificationsEnabled ? "true" : "false");
+  put("notificationEmail", cleanString(settings?.notificationEmail, "", 180));
+  put("coachEmail", cleanString(settings?.coachEmail, "", 180));
+  put("replyToEmail", cleanString(settings?.replyToEmail, "", 180));
   if (hasOwn(settings, "notificationDelaySeconds")) {
     const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
-    await setSetting("notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
+    next.notificationDelaySeconds = String(
+      Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30,
+    );
   }
-  if (hasOwn(settings, "sendClientEmail")) await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
-  if (hasOwn(settings, "sendCoachEmail")) await setSetting("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
-  if (hasOwn(settings, "sendAdminEmail")) await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
-  if (hasOwn(settings, "clientEmailSubject")) await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
-  if (hasOwn(settings, "clientEmailIntro")) await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
-  if (hasOwn(settings, "clientEmailFooter")) await setSetting("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
-  if (hasOwn(settings, "adminEmailSubject")) await setSetting("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
-  if (hasOwn(settings, "adminEmailIntro")) await setSetting("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
-  if (hasOwn(settings, "smsProviderName")) await setSetting("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
-  if (hasOwn(settings, "smsWebhookUrl")) await setSetting("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
-  if (hasOwn(settings, "smsFromNumber")) await setSetting("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
-  if (hasOwn(settings, "sendClientSms")) await setSetting("sendClientSms", settings?.sendClientSms ? "true" : "false");
-  if (hasOwn(settings, "sendAdminSms")) await setSetting("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
-  await setSetting("updatedAt", nowIso());
+  put("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
+  put("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
+  put("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
+  put("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
+  put("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
+  put("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
+  put("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
+  put("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
+  put("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
+  put("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
+  put("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
+  put("sendClientSms", settings?.sendClientSms ? "true" : "false");
+  put("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
+  await setSettingsBulk({ ...next, updatedAt: nowIso() });
   return readAdminSettings();
 }
 
@@ -4064,27 +4121,27 @@ async function readCoachAccount(settingsMap = null) {
 
 async function writeCoachAccount(account) {
   const clean = cleanCoachAccount(account);
-  await setSetting("accountId", clean.id);
-  await setSetting("accountCoachName", clean.coachName);
-  await setSetting("accountBusinessName", clean.businessName);
-  await setSetting("accountVenueName", clean.venueName);
-  await setSetting("accountVenueShortName", clean.venueShortName);
-  await setSetting("accountTimezone", clean.timezone);
-  await setSetting("accountCountry", clean.country);
   // Keep contact matching in step with the country the coach just chose,
-  // without waiting for this instance to be recycled.
+  // without waiting for this instance to be recycled. In-memory, so it does not
+  // matter that it happens before the write rather than partway through it.
   setActivePhoneCountry(clean.country);
   setActiveTimeZone(clean.timezone);
-  await setSetting("accountContactEmail", clean.contactEmail);
-  await setSetting("accountBookingUrl", clean.bookingUrl);
-  await setSetting("accountCalendarSlug", clean.calendarSlug);
-  await setSetting("accountCaddyWorkspaceUrl", clean.caddyWorkspaceUrl);
-  await setSetting(
-    "accountInvoiceSettingsJson",
-    JSON.stringify(clean.invoiceSettings),
-  );
-  await setSetting("coachName", clean.businessName);
-  await setSetting("updatedAt", nowIso());
+  await setSettingsBulk({
+    accountId: clean.id,
+    accountCoachName: clean.coachName,
+    accountBusinessName: clean.businessName,
+    accountVenueName: clean.venueName,
+    accountVenueShortName: clean.venueShortName,
+    accountTimezone: clean.timezone,
+    accountCountry: clean.country,
+    accountContactEmail: clean.contactEmail,
+    accountBookingUrl: clean.bookingUrl,
+    accountCalendarSlug: clean.calendarSlug,
+    accountCaddyWorkspaceUrl: clean.caddyWorkspaceUrl,
+    accountInvoiceSettingsJson: JSON.stringify(clean.invoiceSettings),
+    coachName: clean.businessName,
+    updatedAt: nowIso(),
+  });
   return clean;
 }
 
@@ -4097,29 +4154,19 @@ async function readBrandSettings(settingsMap = null) {
 
 async function writeBrandSettings(settings) {
   const account = await readCoachAccount();
-  await setSetting(
-    "coachName",
-    cleanString(settings?.coachName, account.businessName, 80),
-  );
-  await setSetting("brandLogoName", cleanString(settings?.logoName, "", 120));
-  await setSetting("brandLogoPreview", cleanLogoPreview(settings?.logoPreview));
-  await setSetting("brandShowLogo", settings?.showLogo === true ? "true" : "false");
-  await setSetting("brandNeutral", cleanHexColor(settings?.neutral, "#ffffff"));
-  await setSetting("brandPrimary", cleanHexColor(settings?.primary, "#1fd36d"));
-  await setSetting(
-    "brandSecondary",
-    cleanHexColor(settings?.secondary, "#d7b06b"),
-  );
-  await setSetting("brandAccent", cleanHexColor(settings?.accent, "#07100a"));
-  await setSetting(
-    "brandBookingTheme",
-    settings?.bookingTheme === "light" ? "light" : "dark",
-  );
-  await setSetting(
-    "brandCalendarColorsJson",
-    JSON.stringify(cleanCalendarColors(settings?.calendarColors)),
-  );
-  await setSetting("updatedAt", nowIso());
+  await setSettingsBulk({
+    coachName: cleanString(settings?.coachName, account.businessName, 80),
+    brandLogoName: cleanString(settings?.logoName, "", 120),
+    brandLogoPreview: cleanLogoPreview(settings?.logoPreview),
+    brandShowLogo: settings?.showLogo === true ? "true" : "false",
+    brandNeutral: cleanHexColor(settings?.neutral, "#ffffff"),
+    brandPrimary: cleanHexColor(settings?.primary, "#1fd36d"),
+    brandSecondary: cleanHexColor(settings?.secondary, "#d7b06b"),
+    brandAccent: cleanHexColor(settings?.accent, "#07100a"),
+    brandBookingTheme: settings?.bookingTheme === "light" ? "light" : "dark",
+    brandCalendarColorsJson: JSON.stringify(cleanCalendarColors(settings?.calendarColors)),
+    updatedAt: nowIso(),
+  });
   return readBrandSettings();
 }
 
@@ -4756,7 +4803,7 @@ async function writeCalendarState(nextState, context = null, netlifyContext = nu
     accountId: context?.accountId,
   });
   const updatedAt = nowIso();
-  await Promise.all([setSetting("syncKey", syncKey), setSetting("updatedAt", updatedAt)]);
+  await setSettingsBulk({ syncKey, updatedAt });
   // The response payload rebuilds the whole admin state. None of these reads depend on each
   // other, and running them one after another stacked six round trips onto every save.
   // readAdminSettings/readBrandSettings/readCoachAccount all derive from the same settings

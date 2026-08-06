@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { personRowUnchanged, upsertCalendarItemChunk } from "../booking-core.mts";
+import { personRowUnchanged, setSettingsBulk, upsertCalendarItemChunk } from "../booking-core.mts";
 
 /** Stands in for a pg client, capturing the statement instead of running it. */
 function recordingClient() {
@@ -204,4 +204,49 @@ test("the source a contact arrived from is part of the comparison", () => {
   };
   assert.equal(personRowUnchanged({ name: "Sam Hale" }, stored, "clarity", "appointment"), false);
   assert.equal(personRowUnchanged({ name: "Sam Hale" }, stored, "clarity", "import"), true);
+});
+
+test("a group of settings is written in one statement", async () => {
+  const statements: { text: string; params: unknown[] }[] = [];
+  await setSettingsBulk(
+    { accountCoachName: "Sam Hale", accountCountry: "NZ", accountTimezone: "Pacific/Auckland" },
+    async (text: string, params: unknown[]) => {
+      statements.push({ text, params });
+      return { rows: [] };
+    },
+  );
+
+  assert.equal(statements.length, 1, "three keys still cost a single round trip");
+  const { text, params } = statements[0];
+  assert.deepEqual(params, [
+    "accountCoachName",
+    "Sam Hale",
+    "accountCountry",
+    "NZ",
+    "accountTimezone",
+    "Pacific/Auckland",
+  ]);
+  const placeholders = (text.match(/\$\d+/g) || []).map((token) => Number(token.slice(1)));
+  assert.deepEqual(placeholders, [1, 2, 3, 4, 5, 6], "key/value pairs stay in step");
+  assert.ok(text.includes("DO UPDATE"), "an existing key is overwritten, not ignored");
+});
+
+test("settings with no keys to write skip the database entirely", async () => {
+  let called = false;
+  const run = async () => {
+    called = true;
+    return { rows: [] };
+  };
+  await setSettingsBulk({}, run);
+  await setSettingsBulk(null, run);
+  assert.equal(called, false, "an empty update is not a statement with no values");
+});
+
+test("a null or undefined setting is stored as an empty string, not \"null\"", async () => {
+  let captured: unknown[] = [];
+  await setSettingsBulk({ notificationEmail: null, smsFromNumber: undefined }, async (_t, params) => {
+    captured = params;
+    return { rows: [] };
+  });
+  assert.deepEqual(captured, ["notificationEmail", "", "smsFromNumber", ""]);
 });
