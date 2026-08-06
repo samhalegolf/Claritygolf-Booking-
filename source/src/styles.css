@@ -3393,9 +3393,12 @@ button {
   white-space: nowrap;
 }
 
+/* Time gutter, then the week pager. The seven day columns live inside the
+   pager's panels now rather than in this grid, because the whole strip is what
+   takes the horizontal gesture. */
 .calendar-header-row {
   display: grid;
-  grid-template-columns: 64px repeat(7, minmax(92px, 1fr));
+  grid-template-columns: 64px minmax(0, 1fr);
   border-bottom: 1px solid #d7d7cf;
 }
 
@@ -3438,12 +3441,26 @@ button {
 }
 
 .day-heading {
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 3px;
   padding: 0 12px;
-  border-left: 1px solid #e1e1dc;
+  border-left: 0;
+}
+
+/* The column divider is drawn in the gap between two availability cards rather
+   than on the heading's own edge, so it lines up with the negative space in the
+   grid below. The lane edge sits 6px right of that gap's centre. */
+.day-heading::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: #e1e1dc;
 }
 
 .day-heading.today {
@@ -3457,7 +3474,7 @@ button {
 
 .calendar-scroll {
   display: grid;
-  grid-template-columns: 64px minmax(644px, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr);
   max-height: calc(100vh - 230px);
   overflow: auto;
   overscroll-behavior: contain;
@@ -3483,7 +3500,10 @@ button {
 }
 
 .week-grid {
-  min-width: 644px;
+  /* The pager owns horizontal room now; a minimum here would push panels wider
+     than their scroller and stop them snapping. */
+  min-width: 0;
+  width: 100%;
   background:
     linear-gradient(to right, transparent calc(100% / 7 - 1px), #dddcd5 calc(100% / 7 - 1px)) 0 0 /
       calc(100% / 7) 100%,
@@ -4235,6 +4255,38 @@ button {
   --available: #ffffff;
   --block-bg: #dfe2d7;
   --block-text: #2d312b;
+
+  /* Calendar geometry. One source of truth for the hour row so the ticks drawn
+     inside an availability card line up with the time gutter. Keep in step with
+     HOUR_HEIGHT in App.tsx. */
+  --hour-height: 72px;
+
+  /* Card fill by lesson type. Flat colour, no gradient: the fill is the only
+     thing carrying "what kind of lesson is this", so it has to survive being
+     read at 40px tall out of the corner of an eye.
+
+     The --*-set variables come from coach settings (Branding → Calendar
+     colours) and are published on .app-shell. The hex here is what a workspace
+     that has never touched them gets, and the theme blocks below change only
+     that fallback — so a colour the coach chose is honoured in both themes
+     while an untouched default can still be tuned per theme. */
+  --lesson-private: var(--lesson-private-set, #2b2233);
+  --lesson-playing: var(--lesson-playing-set, #1c3348);
+  --lesson-group: var(--lesson-group-set, #14342a);
+  --lesson-assessment: var(--lesson-assessment-set, #3f3320);
+  /* What a card actually paints. Set per card by the attribute rules below, or
+     inline; this is the fallback for a booking with no known type. */
+  --lesson-type-color: var(--lesson-private);
+  --lesson-type-text: #f7fff9;
+
+  /* Card outline by booking status. The stroke style is not a setting: it is
+     what keeps the five states apart for anyone who cannot separate them by
+     hue, so only the colour is editable. */
+  --status-confirmed-color: var(--status-confirmed-set, var(--coach-primary, #1fd36d));
+  --status-pending-color: var(--status-pending-set, #b9c0b4);
+  --status-completed-color: var(--status-completed-set, #7f8a80);
+  --status-cancelled-color: var(--status-cancelled-set, var(--danger));
+  --status-no-show-color: var(--status-no-show-set, #d08a1e);
   --shadow: 0 18px 46px rgba(8, 18, 12, 0.08);
   --shadow-strong: 0 18px 52px rgba(4, 9, 6, 0.2);
   --shine: linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 7%, #ffffff), rgba(255, 255, 255, 0));
@@ -4267,6 +4319,18 @@ button {
   --available: rgba(255, 255, 255, 0.045);
   --block-bg: rgba(255, 255, 255, 0.08);
   --block-text: rgba(248, 255, 249, 0.76);
+  /* Only the fallbacks change: the same fills against a near-black page read as
+     holes rather than cards, so an untouched workspace gets lifted hues here.
+     A colour set in coach settings still wins — it was chosen deliberately. */
+  --lesson-private: var(--lesson-private-set, #4a3c58);
+  --lesson-playing: var(--lesson-playing-set, #2d557a);
+  --lesson-group: var(--lesson-group-set, #1f5645);
+  --lesson-assessment: var(--lesson-assessment-set, #6a5533);
+  --lesson-type-color: var(--lesson-private);
+  --lesson-type-text: #f7fff9;
+  --status-pending-color: var(--status-pending-set, rgba(240, 255, 245, 0.42));
+  --status-completed-color: var(--status-completed-set, rgba(240, 255, 245, 0.5));
+  --status-no-show-color: var(--status-no-show-set, #e2a53f);
   --shadow: 0 20px 58px rgba(0, 0, 0, 0.36);
   --shadow-strong: 0 24px 70px rgba(0, 0, 0, 0.5);
   --shine: linear-gradient(180deg, rgba(31, 211, 109, 0.045), rgba(255, 255, 255, 0.02));
@@ -4696,8 +4760,10 @@ button {
   background: color-mix(in srgb, var(--coach-accent) 9%, var(--panel-soft));
 }
 
+/* The dock keeps the old gradient tile; calendar cards do not — on the grid the
+   fill has to mean "lesson type" and a gradient muddies four flat hues into one
+   dark smear. See the .calendar-item.appointment rules further down. */
 .dock-tile,
-.calendar-item.appointment,
 .draft-place {
   border-color: color-mix(in srgb, var(--coach-primary) 30%, #101613);
   border-radius: 8px;
@@ -4733,8 +4799,8 @@ button {
   border-bottom-color: var(--border);
 }
 
-.day-heading {
-  border-left-color: var(--border);
+.day-heading::before {
+  background: color-mix(in srgb, var(--border) 55%, transparent);
 }
 
 .time-column {
@@ -4746,31 +4812,292 @@ button {
   color: var(--quiet);
 }
 
+/* Unavailable time is the page, not a second surface. The old column gradient
+   painted every hour the coach does not work, which made an empty week the
+   loudest thing on screen; now only bookable time gets a fill. */
 .week-grid {
-  background:
-    linear-gradient(to right, transparent calc(100% / 7 - 1px), var(--grid-line) calc(100% / 7 - 1px)) 0 0 /
-      calc(100% / 7) 100%,
-    var(--grid-bg);
+  background: var(--page);
+  padding: 0 4px;
 }
 
+/* Available windows read as cards. Inset asymmetrically so the gap between two
+   days is wide enough to hold the column divider, and the day column reads a
+   little wider than the bookings inside it. The hour ticks moved in here from
+   .hour-line, so they stop at the edge of bookable time. */
 .available-band {
-  background: var(--available);
-  border-top-color: color-mix(in srgb, var(--coach-primary) 3%, var(--grid-line));
-  border-bottom-color: color-mix(in srgb, var(--coach-primary) 3%, var(--grid-line));
+  left: 3px;
+  right: 15px;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: 12px;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 calc(var(--hour-height) - 1px),
+      color-mix(in srgb, var(--grid-line) 45%, transparent) calc(var(--hour-height) - 1px) var(--hour-height)
+    ),
+    var(--available);
+  /* A window rarely starts on the hour, so the tick pattern is pulled back by
+     the band's own offset from the top of the grid. --band-offset is set per
+     band; without it the ticks would count hours from the band edge instead of
+     from the time gutter. */
+  background-position:
+    0 calc(-1 * var(--band-offset, 0px)),
+    0 0;
+  box-shadow: 0 1px 2px rgba(8, 18, 12, 0.03);
 }
 
+/* Ticks are drawn inside the availability card now, so a grid-wide hour rule
+   would only ever land on empty page. */
 .hour-line {
-  background: var(--grid-line);
+  display: none;
 }
 
-.hour-line::after {
-  border-top-color: color-mix(in srgb, var(--grid-line) 84%, transparent);
+/* --- Week pager ---------------------------------------------------------
+   The date strip is the only element that takes the gesture; the grid mirrors
+   its scroll position and is never scrolled directly. Both hold the same three
+   panels at the same widths, so the columns stay lined up mid-swipe. */
+.week-strip,
+.week-pager {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.week-strip {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  cursor: grab;
+  touch-action: pan-x;
+}
+
+.week-strip.is-grabbing {
+  cursor: grabbing;
+  scroll-snap-type: none;
+}
+
+.week-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.week-pager {
+  overflow: hidden;
+}
+
+.week-strip-panel,
+.week-pager-panel {
+  /* 26px of the neighbouring week stays visible past the right edge — enough
+     to say "there is more this way" without asking to be read. */
+  flex: 0 0 calc(100% - 26px);
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.week-strip-panel {
+  display: flex;
+  align-items: stretch;
+}
+
+.week-strip-panel > .day-heading {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.week-pager-panel {
+  position: relative;
+}
+
+/* Without trailing room the last panel can never satisfy scroll-snap-align:
+   start, and mandatory snapping then cancels programmatic smooth scrolls — so
+   paging backward from the last week silently fails. */
+.week-pager-spacer {
+  flex: 0 0 26px;
+}
+
+.week-strip-panel.is-off-week,
+.week-pager-panel.is-off-week {
+  opacity: 0.38;
+}
+
+.week-pager-panel.is-off-week,
+.week-grid.is-peek {
+  pointer-events: none;
+}
+
+/* The gesture cue, deliberately quiet: a fade at the edge the next week comes
+   from, and a small hint centred on the strip. */
+.calendar-header-row {
+  position: relative;
+}
+
+.calendar-header-row::after {
+  content: "›";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 34px;
+  padding-right: 8px;
+  color: var(--quiet);
+  font-size: 15px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--panel) 62%);
+}
+
+/* Drawn on the header row rather than inside the strip: a pseudo-element on a
+   flex scroller becomes a flex item and would take width off the panels. */
+.calendar-header-row::before {
+  content: "↔";
+  position: absolute;
+  left: 50%;
+  bottom: 1px;
+  z-index: 2;
+  color: var(--quiet);
+  font-size: 10px;
+  opacity: 0.5;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* --- Squash view --------------------------------------------------------- */
+
+/* The axis switch sits above the time gutter: it changes how the vertical
+   scale reads, not what the week contains. */
+.axis-cycle-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 46px;
+  height: 46px;
+  margin: 6px auto 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.axis-cycle-button small {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.axis-cycle-button.is-squashed {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-text);
+}
+
+.quiet-gap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.quiet-gap small {
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 
 .calendar-item.block {
   border-color: color-mix(in srgb, var(--coach-secondary) 22%, var(--border));
   background: var(--block-bg);
   color: var(--block-text);
+}
+
+/* A booking card carries three facts on three separate channels, so none of
+   them has to be decoded: fill = lesson type, border = status, opacity = has it
+   already happened. Flat fill, no gradient — four dark hues only stay apart
+   from each other if nothing is washed over them. */
+.calendar-item.appointment {
+  min-height: 32px;
+  padding: 5px 7px;
+  gap: 1px;
+  justify-content: flex-start;
+  border: 2px solid var(--status-confirmed-color);
+  border-radius: 8px;
+  background: var(--lesson-type-color);
+  color: var(--lesson-type-text);
+  box-shadow: 0 1px 3px rgba(8, 18, 12, 0.1);
+}
+
+/* Lesson type → fill. The attribute is the calendar's only input: anything that
+   can name a type (service format today, a per-service colour in coach settings
+   later) just has to set it, or set --lesson-type-color inline to a raw hex. */
+.calendar-item.appointment[data-lesson-type="private"] {
+  --lesson-type-color: var(--lesson-private);
+}
+
+.calendar-item.appointment[data-lesson-type="playing"] {
+  --lesson-type-color: var(--lesson-playing);
+}
+
+.calendar-item.appointment[data-lesson-type="group"] {
+  --lesson-type-color: var(--lesson-group);
+}
+
+.calendar-item.appointment[data-lesson-type="assessment"] {
+  --lesson-type-color: var(--lesson-assessment);
+}
+
+.calendar-item.appointment .item-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The client name always gets its room — up to two rows for a long one — and
+   the detail lines are what give way when the card is short. */
+.calendar-item.appointment .item-content strong {
+  flex: 0 0 auto;
+  min-height: 15px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  white-space: normal;
+  text-overflow: clip;
+}
+
+/* Detail lines give way, in order of how little they are missed: the lesson
+   type outlasts the time, which outlasts the bay. The shrink weights do the
+   ordering — an even 1 shrinks all three at once and leaves a card wearing
+   three half-clipped rows instead of one whole one. */
+.calendar-item.appointment .item-content span,
+.calendar-item.appointment .item-content em,
+.calendar-item.appointment .item-content small {
+  min-height: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-item.appointment .item-content span {
+  flex: 0 1 auto;
+}
+
+.calendar-item.appointment .item-content em {
+  flex: 0 40 auto;
+}
+
+.calendar-item.appointment .item-content small {
+  flex: 0 200 auto;
 }
 
 .calendar-item.selected {
@@ -4967,6 +5294,80 @@ button {
   font-style: normal;
   text-transform: uppercase;
   opacity: 0.82;
+}
+
+.settings-note {
+  margin: 0 0 12px;
+  color: var(--muted, #6d746c);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Nine swatches: four lesson-type fills, five status outlines. The swatch is
+   the input, so what you click is the colour you are changing. */
+.calendar-colour-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.calendar-colour-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #dfe5d8);
+  border-radius: 8px;
+  background: var(--panel-soft, #f8faf4);
+  cursor: pointer;
+}
+
+.calendar-colour-field input[type="color"] {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--border, #dfe5d8);
+  border-radius: 7px;
+  background: none;
+  cursor: pointer;
+}
+
+.calendar-colour-field input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.calendar-colour-field input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: 5px;
+}
+
+.calendar-colour-field span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.calendar-colour-field strong {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.calendar-colour-field em {
+  color: var(--quiet, #878d84);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.calendar-colour-field code {
+  color: var(--muted, #6d746c);
+  font-size: 11px;
+  text-transform: uppercase;
 }
 
 .booking-surface-setting {
@@ -5736,7 +6137,7 @@ button {
   }
 
   .calendar-header-row {
-    grid-template-columns: 34px repeat(7, minmax(0, 1fr));
+    grid-template-columns: 34px minmax(0, 1fr);
     min-width: 0;
   }
 
@@ -5785,7 +6186,7 @@ button {
   }
 
   .calendar-card.calendar-detail-mode .calendar-header-row {
-    grid-template-columns: 52px repeat(7, minmax(0, 1fr));
+    grid-template-columns: 52px minmax(0, 1fr);
     min-width: 0;
   }
 
@@ -5950,53 +6351,23 @@ button {
   position: relative;
   z-index: 1;
   min-width: 0;
-  padding-right: 26px;
 }
 
-.calendar-item.appointment .item-content strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.calendar-item.appointment .item-content span,
-.calendar-item.appointment .item-content em,
-.calendar-item.appointment .item-content small {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  transform: translateY(-2px);
-  transition: opacity 150ms ease, max-height 150ms ease, transform 150ms ease;
-}
-
+/* Detail lines are always on now — they truncate rather than disappear, so a
+   card reads the same whether or not the pointer is over it. The reveal-on-
+   hover animation that used to live here fought the name for vertical room and
+   made short cards flicker. */
 .item-location-tag {
-  color: #1f5d3a;
   font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
-  max-height: 14px !important;
-  opacity: 0.82 !important;
-  transform: translateY(0) !important;
+  opacity: 0.82;
 }
 
 .calendar-item.appointment:hover,
 .calendar-item.appointment.selected {
   z-index: 6;
   transform: translateY(-1px);
-}
-
-.calendar-item.appointment:hover .item-content span,
-.calendar-item.appointment:hover .item-content em,
-.calendar-item.appointment:hover .item-content small,
-.calendar-item.appointment.selected .item-content span,
-.calendar-item.appointment.selected .item-content em,
-.calendar-item.appointment.selected .item-content small,
-.floating-drag-tile .item-content span,
-.floating-drag-tile .item-content em,
-.floating-drag-tile .item-content small {
-  max-height: 16px;
-  opacity: 0.76;
-  transform: translateY(0);
 }
 
 .calendar-item.appointment.is-lifted {
@@ -6385,16 +6756,6 @@ button {
   }
 }
 
-/* Keep calendar lane cards compact; full details live in the external hover preview or click-through card. */
-.calendar-item.appointment:hover .item-content span,
-.calendar-item.appointment:hover .item-content em,
-.calendar-item.appointment.selected .item-content span,
-.calendar-item.appointment.selected .item-content em {
-  max-height: 0;
-  opacity: 0;
-  transform: translateY(-2px);
-}
-
 /* Persistence safety: make the production database save state visible. */
 .calendar-save-pill {
   display: inline-flex;
@@ -6462,47 +6823,98 @@ button {
   font-weight: 700;
 }
 
+/* A developer tool that is shut almost all of the time, so it costs the page
+   no height: the launcher is pinned to the corner and the panel opens over the
+   calendar rather than pushing it down. The section itself lays out nothing. */
 .developer-diagnostics {
-  margin: 0 0 14px;
-  border: 1px solid rgba(20, 25, 20, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.76);
-  box-shadow: 0 10px 24px rgba(20, 20, 20, 0.07);
-  overflow: hidden;
+  display: contents;
 }
 
-.developer-diagnostics-summary {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 10px 12px;
-  border: 0;
-  background: transparent;
-  color: #24251f;
-  cursor: pointer;
-  text-align: left;
-}
-
-.developer-diagnostics-title,
-.developer-diagnostics-readout {
+.developer-diagnostics-launcher {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 11;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(20, 25, 20, 0.14);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #4b5147;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(20, 20, 20, 0.12);
+  backdrop-filter: blur(8px);
 }
 
-.developer-diagnostics-title strong {
-  font-size: 13px;
+.developer-diagnostics-launcher:hover {
+  color: #24251f;
+  border-color: rgba(20, 25, 20, 0.28);
+}
+
+.developer-diagnostics.is-open .developer-diagnostics-launcher {
+  background: #14180f;
+  border-color: #14180f;
+  color: #f7fff9;
+}
+
+/* Errors are the only thing worth saying while the panel is shut. */
+.developer-diagnostics-launcher b {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger, #b52f1f);
+  color: #fff;
+  font-size: 9px;
   font-weight: 900;
+  line-height: 16px;
+  text-align: center;
+}
+
+.developer-diagnostics-body {
+  position: fixed;
+  right: 18px;
+  bottom: 60px;
+  z-index: 11;
+  display: grid;
+  gap: 12px;
+  width: min(560px, calc(100vw - 36px));
+  max-height: min(560px, calc(100vh - 96px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
+  border: 1px solid rgba(20, 25, 20, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 18px 46px rgba(20, 20, 20, 0.2);
+  backdrop-filter: blur(10px);
 }
 
 .developer-diagnostics-readout {
+  display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   color: #5b5f51;
   font-size: 12px;
   font-weight: 800;
+}
+
+.developer-diagnostics-readout strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  color: #24251f;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .developer-diagnostics-readout span {
@@ -6510,12 +6922,6 @@ button {
   border: 1px solid rgba(20, 25, 20, 0.1);
   border-radius: 999px;
   background: rgba(246, 247, 241, 0.82);
-}
-
-.developer-diagnostics-body {
-  display: grid;
-  gap: 12px;
-  padding: 0 12px 12px;
 }
 
 .developer-diagnostics-tabs {
@@ -6543,9 +6949,11 @@ button {
   color: #1f6b3d;
 }
 
+/* Six across was sized for the full-width bar this used to be. In a 560px
+   drawer that clips every value it is meant to show. */
 .developer-diagnostics-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
@@ -6648,15 +7056,8 @@ button {
 }
 
 @media (max-width: 980px) {
-  .developer-diagnostics-summary {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .developer-diagnostics-readout {
-    justify-content: flex-start;
-  }
-
+  /* The drawer is nearly full-width here, so two up rather than whatever
+     auto-fit would squeeze in. */
   .developer-diagnostics-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -7482,28 +7883,97 @@ button {
   background: color-mix(in srgb, var(--coach-primary) 12%, var(--panel-soft));
 }
 
-.calendar-item.status-completed {
-  border-color: color-mix(in srgb, #2d8f58 52%, var(--border));
-  box-shadow:
-    inset 4px 0 0 #2d8f58,
-    var(--shadow);
+/* Status is the card's border and nothing else. It used to be an inset stripe
+   plus a fade, which collided with the lesson-type fill and made a cancelled
+   lesson look like a past one. Stroke style carries the meaning alongside the
+   colour, so the five states stay apart without relying on hue. */
+.calendar-item.appointment.status-booked,
+.calendar-item.appointment.status-confirmed {
+  border: 2px solid var(--status-confirmed-color);
 }
 
-.calendar-item.status-cancelled,
-.calendar-item.status-no_show {
-  opacity: 0.72;
+.calendar-item.appointment.status-pending {
+  border: 2px dashed var(--status-pending-color);
 }
 
-.calendar-item.status-cancelled {
-  box-shadow:
-    inset 4px 0 0 #a34c39,
-    var(--shadow);
+.calendar-item.appointment.status-completed {
+  border: 2px solid var(--status-completed-color);
 }
 
-.calendar-item.status-no_show {
-  box-shadow:
-    inset 4px 0 0 #b1842d,
-    var(--shadow);
+.calendar-item.appointment.status-cancelled {
+  border: 2px dashed var(--status-cancelled-color);
+}
+
+.calendar-item.appointment.status-cancelled .item-content strong {
+  text-decoration: line-through;
+}
+
+.calendar-item.appointment.status-no_show {
+  border: 2px dotted var(--status-no-show-color);
+}
+
+/* Time, not status, drives fade. Nothing else on a card sets opacity: a faded
+   card means "already happened", full stop. */
+.calendar-item.appointment.is-past {
+  opacity: 0.55;
+}
+
+/* The current time, drawn only in today's lane and inset from the right so it
+   stops short of the next day's column. Sits above cards deliberately: it is
+   the one mark that has to stay findable on a full day. */
+.calendar-now-line {
+  position: absolute;
+  left: 0;
+  right: 12px;
+  z-index: 5;
+  height: 1px;
+  background: var(--danger);
+  pointer-events: none;
+}
+
+.calendar-now-line::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+/* Squash view: unbooked stretches collapse to a marker rather than vanishing,
+   so the time that was skipped is still stated. Styling only — the piecewise
+   minute mapping that produces these lives in App.tsx. */
+.week-grid.is-squashed .quiet-gap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* Above the availability cards, below the bookings: the collapsed stretch
+     has to interrupt the day's surface, or it reads as time you could book
+     into. Cards sit at z-index 2 and up. */
+  z-index: 1;
+  background: var(--page);
+  border-top: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+  border-bottom: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+/* A day with no availability collapses to the width of the gap it would have
+   left behind, becoming its own divider. Lanes are absolutely positioned and
+   take their 26px inline from the same column table the heading follows. */
+.day-heading.is-unavailable {
+  flex: 0 0 26px;
+  min-width: 26px;
+  padding: 0;
+}
+
+.day-heading.is-unavailable .day-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  align-self: center;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .custom-group-panel {
