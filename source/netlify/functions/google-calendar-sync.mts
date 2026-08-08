@@ -11,6 +11,7 @@ import {
   resolveGoogleAccountId,
   saveGoogleAuthorization,
 } from "./_shared/google-provider.mts";
+import { unavailableSpans } from "./_shared/availability-blocks.mts";
 
 const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
@@ -593,6 +594,7 @@ function rowToItem(row: any) {
     phone: row.phone || "",
     email: row.email || "",
     note: row.note || "",
+    status: row.status || "",
     coach: row.coach || undefined,
     location: cleanBookingLocationSnapshot(row.location),
   };
@@ -604,6 +606,20 @@ function isCancelledGroupSessionItem(item: any) {
     Boolean(item?.serviceId || item?.service_id) &&
     (item?.note === "__cancelled_group_session__" || item?.title === "Cancelled group session")
   );
+}
+
+/**
+ * Whether this item should hold time on the coach's Google calendar.
+ *
+ * A cancelled or no-show booking stays on the Clarity calendar as a record but
+ * is no longer busy time, and leaving it in Google would hold an hour the coach
+ * is free to fill. Falling out of this predicate is what deletes the event on
+ * the next sync, so cancelling in Clarity clears the Google slot.
+ */
+function isBusyGoogleItem(item: any) {
+  if (!item) return false;
+  if (isCancelledGroupSessionItem(item)) return false;
+  return item.status !== "cancelled" && item.status !== "no_show";
 }
 
 function serviceName(serviceId: string, services: any[]) {
@@ -654,6 +670,16 @@ function googleLocalDateTime(week: number, day: number, minutes: number) {
   return `${date.year}-${pad(date.month)}-${pad(date.day)}T${pad(hour)}:${pad(minute)}:00`;
 }
 
+/**
+ * Like googleLocalDateTime, but for a time measured from the start of a weekday
+ * that may run past midnight — an unavailable span from Friday evening to
+ * Monday morning is 3900 minutes into Friday, not hour 65 of it.
+ */
+function googleSpanDateTime(day: number, minutes: number) {
+  const dayOffset = Math.floor(minutes / (24 * 60));
+  return googleLocalDateTime(0, day + dayOffset, minutes - dayOffset * 24 * 60);
+}
+
 function googleEventId(itemId: string) {
   return `cg${createHash("sha256").update(itemId).digest("hex").slice(0, 30)}`;
 }
@@ -669,11 +695,13 @@ function accountFromSettings(settings: Record<string, string>) {
 }
 
 function eventSummary(item: any, account: ReturnType<typeof accountFromSettings>, services: any[]) {
+  if (item.kind === "unavailable") return `Unavailable - ${account.businessName}`;
   if (item.kind === "block") return `Busy - ${account.businessName}`;
   return `${item.client || item.title} - ${serviceName(item.serviceId, services)}`;
 }
 
 function eventDescription(item: any, services: any[], location: any) {
+  if (item.kind === "unavailable") return "Outside booking hours. Set by your Clarity availability.";
   const rows =
     item.kind === "block"
       ? ["Blocked time", item.note]
@@ -696,17 +724,28 @@ function googleEventForItem(item: any, settings: Record<string, string>, service
   const location = resolveLocation(item, service, locations, account);
   const week = Number(item.week ?? 0);
   const timezone = location?.timezone || account.timezone;
-  const start = googleLocalDateTime(week, item.day, item.start);
-  const end = googleLocalDateTime(week, item.day, item.start + item.duration);
+  // An unavailable stretch is a property of the week, not of a venue. Naming a
+  // location on it would put an address on hours the coach is not there.
+  const unavailable = item.kind === "unavailable";
+  const start = unavailable
+    ? googleSpanDateTime(item.day, item.start)
+    : googleLocalDateTime(week, item.day, item.start);
+  const end = unavailable
+    ? googleSpanDateTime(item.day, item.start + item.duration)
+    : googleLocalDateTime(week, item.day, item.start + item.duration);
   return {
     id: eventId,
     summary: eventSummary(item, account, services),
     description: eventDescription(item, services, location),
-    location: bookingLocationDisplay(location),
+    location: unavailable ? "" : bookingLocationDisplay(location),
     start: { dateTime: start, timeZone: timezone },
     end: { dateTime: end, timeZone: timezone },
+    // Availability is a weekly pattern with no dates in it, so the time it
+    // leaves over repeats weekly too. A handful of recurring events cover every
+    // hour indefinitely; walking a horizon would be hundreds that go stale.
+    ...(unavailable ? { recurrence: ["RRULE:FREQ=WEEKLY"] } : {}),
     transparency: "opaque",
-    visibility: item.kind === "block" ? "private" : "default",
+    visibility: item.kind === "appointment" ? "default" : "private",
     extendedProperties: {
       private: {
         clarityBooking: "true",
@@ -920,6 +959,34 @@ async function deleteGoogleEvent(
   }
 }
 
+/**
+ * The coach's unavailable stretches, shaped like calendar items so they travel
+ * the same upsert-and-diff path as bookings. Their ids come from where the span
+ * sits in the week, which is what lets the delete pass retire the ones that
+ * stop being unavailable — without it, every edit to availability would leave
+ * its old blocks behind in Google.
+ *
+ * Anchored to week 0 and repeating weekly, so they cover every hour from here
+ * on rather than a horizon that needs walking forward, and the event body never
+ * changes just because time passed.
+ */
+function unavailableSyncItems(settings: Record<string, string>) {
+  const availability = parseJson<any[][]>(settings.availabilityJson, []);
+  return unavailableSpans(availability).map((span) => ({
+    id: span.id,
+    kind: "unavailable" as const,
+    week: 0,
+    day: span.day,
+    start: span.start,
+    duration: span.durationMinutes,
+    title: "Unavailable",
+    client: "",
+    serviceId: "",
+    note: "",
+    status: "",
+  }));
+}
+
 async function calendarSyncPayload() {
   const [settingsRows, itemRows] = await Promise.all([
     supabase("settings", { query: "select=key,value" }),
@@ -928,7 +995,7 @@ async function calendarSyncPayload() {
   const settings = settingMap(settingsRows);
   return {
     settings,
-    items: itemRows.map(rowToItem).filter((item) => !isCancelledGroupSessionItem(item)),
+    items: [...itemRows.map(rowToItem).filter(isBusyGoogleItem), ...unavailableSyncItems(settings)],
     services: parseJson(settings.servicesJson, defaultServices),
     locations: parseJson(settings.locationsJson, []),
   };
@@ -1185,7 +1252,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
         });
         item = rows[0] ? rowToItem(rows[0]) : null;
       }
-      if (change.action === "delete" || !item || isCancelledGroupSessionItem(item)) {
+      if (change.action === "delete" || !isBusyGoogleItem(item)) {
         const eventId = eventMap[change.id] || googleEventId(change.id);
         stage = "delete";
         if (await deleteGoogleEvent(accessToken, calendarId, eventId, change.id, retryBudget)) deleted += 1;

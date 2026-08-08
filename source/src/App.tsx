@@ -28,6 +28,7 @@ import {
   LogOut,
   Mail,
   MapPin,
+  Minimize2,
   Moon,
   MoreHorizontal,
   Package,
@@ -155,6 +156,22 @@ import {
   buildExpenseCandidates,
   type ExpenseCsvField,
 } from "./modules/billing/expenseCsv";
+import {
+  axisMinuteToTop,
+  axisTopToMinute,
+  buildCalendarAxis,
+  buildDayColumns,
+  dayColumnPixels,
+  dayFromGridX,
+  formatDurationLabel,
+  DAY_COUNT,
+  HOUR_HEIGHT,
+  WEEK_FOCUS_INDEX,
+  WEEK_PANEL_COUNT,
+  WEEK_PANEL_OFFSETS,
+  WEEK_PEEK,
+} from "./calendar-axis";
+import type { CalendarAxisMode } from "./calendar-axis";
 import { clamp } from "./lib/number";
 import { dateInputValue } from "./lib/date";
 import type {
@@ -389,6 +406,8 @@ type Service = {
   minParticipants: number;
   lessonFormat: LessonFormat;
   priceMode: PriceMode;
+  /** Fill for this lesson type's cards on the calendar. Hex, from settings. */
+  color?: string;
   locationId?: string;
   lessonNote?: string;
   location: string;
@@ -1430,6 +1449,20 @@ type AvailabilityWindow = {
   end: number;
 };
 
+/**
+ * The two outlines a booking card can wear. The fill is not here: that is the
+ * lesson type's own colour, set on the service, because the lesson types are
+ * whatever this coach sells rather than a fixed list.
+ *
+ * Only two states get an outline. Everything else a booking can be is either
+ * the normal case or already said better elsewhere, and an outline for each
+ * turned the week into a key you had to learn before you could read it.
+ */
+type CalendarColorSettings = {
+  statusCompleted: string;
+  statusBayBooked: string;
+};
+
 type BrandSettings = {
   coachName: string;
   logoName: string;
@@ -1440,6 +1473,7 @@ type BrandSettings = {
   secondary: string;
   accent: string;
   bookingTheme: ThemeMode;
+  calendarColors: CalendarColorSettings;
 };
 
 type CoachAccount = {
@@ -1559,14 +1593,12 @@ const DEFAULT_CALENDAR_START_HOUR = 7;
 const DEFAULT_CALENDAR_END_HOUR = 20;
 const DEFAULT_CALENDAR_START_MINUTES = DEFAULT_CALENDAR_START_HOUR * 60;
 const DEFAULT_CALENDAR_END_MINUTES = DEFAULT_CALENDAR_END_HOUR * 60;
-const HOUR_HEIGHT = 72;
 const SNAP_MINUTES = 15;
 const LAST_TIME_SLOT_MINUTES = DAY_END_MINUTES - SNAP_MINUTES;
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
 const MOUSE_DRAG_THRESHOLD = 10;
 const TOUCH_DRAG_THRESHOLD = 16;
 const EDGE_NAV_ZONE = 26;
-const DAY_COUNT = 7;
 const BOOKING_EMBED_PARAM = "embed";
 const BOOKING_EMBED_VALUE = "booking";
 const BOOKING_LOGO_PARAM = "logo";
@@ -1818,6 +1850,7 @@ function durationToHeight(minutes: number) {
   return (minutes / 60) * HOUR_HEIGHT;
 }
 
+
 function itemService(item: CalendarItem, serviceCatalog = defaultServices): Service | undefined {
   const service = serviceCatalog.find((candidate) => candidate.id === item.serviceId);
   if (service) return service;
@@ -1838,6 +1871,19 @@ function itemService(item: CalendarItem, serviceCatalog = defaultServices): Serv
     bookingScreenIds: ["main"],
   };
   return fallbackService;
+}
+
+/**
+ * The fill a booking's card gets: the colour set on its lesson type.
+ *
+ * It comes off the service rather than a fixed list of categories, because the
+ * lesson types are whatever this coach actually sells — a workspace with six
+ * kinds of lesson should be able to tell all six apart, not squeeze them into
+ * four names someone else chose. A booking with no service left (deleted
+ * lesson type) falls back to the neutral fill in styles.css.
+ */
+function calendarLessonColor(service: Service | undefined) {
+  return service?.color || undefined;
 }
 
 function itemWeek(item: CalendarItem) {
@@ -2509,6 +2555,17 @@ function generateSyncKey() {
   return `cg_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
 }
 
+/** Matches the --lesson-* / --status-* fallbacks in styles.css. */
+const defaultCalendarColors: CalendarColorSettings = {
+  statusCompleted: "#7f8a80",
+  statusBayBooked: "#e08a2e",
+};
+
+const calendarColorFields: { key: keyof CalendarColorSettings; label: string; hint: string }[] = [
+  { key: "statusCompleted", label: "Completed", hint: "Card border" },
+  { key: "statusBayBooked", label: "Bay booked", hint: "Outer ring" },
+];
+
 const defaultBrandSettings: BrandSettings = {
   coachName: "Sam Hale Golf",
   logoName: "",
@@ -2519,6 +2576,7 @@ const defaultBrandSettings: BrandSettings = {
   secondary: "#d7b06b",
   accent: "#07100a",
   bookingTheme: "dark",
+  calendarColors: defaultCalendarColors,
 };
 
 const defaultCoachAccount: CoachAccount = {
@@ -2535,6 +2593,27 @@ const defaultCoachAccount: CoachAccount = {
   caddyWorkspaceUrl: CADDY_APP_URL,
   invoiceSettings: defaultInvoiceSettings,
 };
+
+/**
+ * Starting fills for lesson types, handed out by position so a workspace that
+ * has never opened the colour picker still reads as several kinds of lesson
+ * rather than one wall of the same colour. Dark enough to carry white text at
+ * the size a calendar card actually gets.
+ */
+const serviceColorPalette = [
+  "#2b2233",
+  "#1c3348",
+  "#14342a",
+  "#3f3320",
+  "#2f2438",
+  "#123043",
+  "#1a3b2f",
+  "#402b28",
+];
+
+function defaultServiceColor(index: number) {
+  return serviceColorPalette[Math.abs(index) % serviceColorPalette.length];
+}
 
 function cleanHexColor(value: unknown, fallback: string) {
   if (typeof value !== "string") return fallback;
@@ -3393,6 +3472,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     minParticipants,
     lessonFormat,
     priceMode,
+    color: cleanHexColor(service?.color, defaultServiceColor(index)),
     locationId: typeof service?.locationId === "string" ? cleanSlug(service.locationId, "") || undefined : undefined,
     lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
@@ -4012,6 +4092,7 @@ function emptyServiceEditor(): ServiceEditor {
     minParticipants: 1,
     lessonFormat: "private",
     priceMode: "session",
+    color: defaultServiceColor(0),
     locationId: "",
     lessonNote: "",
     location: "",
@@ -4110,7 +4191,26 @@ function cleanBrandSettings(settings?: Partial<BrandSettings>): BrandSettings {
     secondary: cleanHexColor(settings?.secondary, defaultBrandSettings.secondary),
     accent: cleanHexColor(settings?.accent, defaultBrandSettings.accent),
     bookingTheme: settings?.bookingTheme === "light" ? "light" : "dark",
+    calendarColors: cleanCalendarColors(settings?.calendarColors),
   };
+}
+
+/** { lessonPrivate: "#2b2233" } -> { "--lesson-private-set": "#2b2233" } */
+function calendarColorVariables(colors: CalendarColorSettings): Record<string, string> {
+  const variables: Record<string, string> = {};
+  calendarColorFields.forEach(({ key }) => {
+    const name = key.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
+    variables[`--${name}-set`] = colors[key];
+  });
+  return variables;
+}
+
+function cleanCalendarColors(colors?: Partial<CalendarColorSettings>): CalendarColorSettings {
+  const cleaned = {} as CalendarColorSettings;
+  calendarColorFields.forEach(({ key }) => {
+    cleaned[key] = cleanHexColor(colors?.[key], defaultCalendarColors[key]);
+  });
+  return cleaned;
 }
 
 function getStoredTheme(): ThemeMode {
@@ -4832,6 +4932,17 @@ function App() {
   const [lessonCompleteErrors, setLessonCompleteErrors] = useState<LessonCompleteErrorMap>({});
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
   const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
+  const [calendarAxisMode, setCalendarAxisMode] = useState<CalendarAxisMode>("week");
+  // Day view: which weekday fills the grid, or null for the whole week. Phones
+  // start on a day because seven columns across a phone leaves 45px each, which
+  // is not enough for a client's name.
+  const [calendarDayFocus, setCalendarDayFocus] = useState<number | null>(null);
+  // Minute of the day the now line is drawn at. Ticks on its own so the line
+  // creeps down the column without anything else having to re-render it.
+  const [calendarNowMinutes, setCalendarNowMinutes] = useState(() => {
+    const now = new Date();
+    return now.getHours() * 60 + now.getMinutes();
+  });
   const [calendarPerspective, setCalendarPerspective] = useState<CalendarPerspective>("all");
   const [calendarCoachFilterId, setCalendarCoachFilterId] = useState("");
   const [calendarLocationFilterId, setCalendarLocationFilterId] = useState("");
@@ -5089,6 +5200,15 @@ function App() {
   const suppressItemClickRef = useRef(false);
   const suppressItemClickUntilRef = useRef(0);
   const activeWeekRef = useRef(activeWeek);
+  // The two halves of the week pager: the date strip takes the gesture, the
+  // grid is driven from it and never scrolled directly.
+  const weekStripRef = useRef<HTMLDivElement | null>(null);
+  const weekPanelsRef = useRef<HTMLDivElement | null>(null);
+  const weekSettleTimerRef = useRef<number | null>(null);
+  const weekLandingTimerRef = useRef<number | null>(null);
+  // Set while the pager repositions itself, so the scroll events that causes
+  // are not read back as the user paging again.
+  const weekPagerSyncingRef = useRef(false);
   const hasLoadedCalendarApiRef = useRef(false);
   const adminHydrationRunIdRef = useRef(0);
   const clickPlaceRef = useRef<null | { bookingId: string; candidate: SlotCandidate }>(null);
@@ -5536,8 +5656,8 @@ function App() {
     }
     return marks;
   }, [calendarStartMinutes, calendarEndMinutes]);
-  const gridHeight = ((calendarEndMinutes - calendarStartMinutes) / 60) * HOUR_HEIGHT;
-  const calendarMinutesToTop = (minutes: number) => minutesToTop(minutes, calendarStartMinutes);
+  // gridHeight / calendarMinutesToTop live further down: they come off the
+  // squash axis, which needs the week's items to know what to collapse.
   const clipCalendarSegment = (start: number, duration: number) => {
     const end = start + duration;
     const visibleStart = Math.max(start, calendarStartMinutes);
@@ -5695,6 +5815,11 @@ function App() {
         "--coach-primary": brandSettings.primary,
         "--coach-secondary": brandSettings.secondary,
         "--coach-accent": brandSettings.accent,
+        // The calendar palette is published as the *-set variables the theme
+        // tokens fall back through, not as --lesson-private and friends
+        // directly: an inline value would win over both themes, and dark needs
+        // its own take on whatever the coach chose.
+        ...calendarColorVariables(brandSettings.calendarColors),
       }) as CSSProperties,
     [brandSettings],
   );
@@ -7522,6 +7647,141 @@ function App() {
   const floatingItem = floatingDrag ? items.find((item) => item.id === floatingDrag.itemId) : null;
   const floatingService = floatingItem ? itemService(floatingItem, services) : null;
 
+  // --- Calendar axis -------------------------------------------------------
+  // Everything the grid draws is positioned through this. In week view it is
+  // the plain 72px-an-hour mapping; in squash view it collapses the stretches
+  // of the week with nothing in them. The axis is built from the settled week
+  // (visibleWeekItems plus any scheduled group sessions) rather than from
+  // displayItems, so it does not re-flow underneath a card being dragged.
+  const calendarAxisSource = useMemo(
+    () => [...visibleWeekItems, ...scheduledGroupSlots],
+    [scheduledGroupSlots, visibleWeekItems],
+  );
+  const calendarAxis = useMemo(
+    () =>
+      buildCalendarAxis(
+        calendarStartMinutes,
+        calendarEndMinutes,
+        calendarAxisSource
+          .map((item) => clipCalendarSegment(item.start, item.duration))
+          .filter((segment): segment is { start: number; duration: number } => Boolean(segment)),
+        calendarAxisMode === "squash",
+      ),
+    // clipCalendarSegment is derived from the same two bounds it is listed with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [calendarAxisMode, calendarAxisSource, calendarEndMinutes, calendarStartMinutes],
+  );
+  const gridHeight = calendarAxis.height;
+  const calendarMinutesToTop = (minutes: number) => axisMinuteToTop(calendarAxis, minutes);
+  /**
+   * Height of a stretch of time on the current axis. Not durationToHeight: in
+   * squash view a booking that spans a collapsed gap is shorter than its
+   * duration alone would make it.
+   */
+  const calendarSegmentHeight = (start: number, duration: number) =>
+    Math.max(0, axisMinuteToTop(calendarAxis, start + duration) - axisMinuteToTop(calendarAxis, start));
+
+  // A day collapses horizontally when the week has nothing to say about it:
+  // no availability loaded and nothing booked. Week view never collapses.
+  const calendarCollapsedDays = useMemo(() => {
+    const collapsed = Array.from({ length: DAY_COUNT }, () => false);
+    if (calendarAxisMode !== "squash") return collapsed;
+    return collapsed.map((_, day) => {
+      const hasAvailability = (calendarAvailability[day] ?? []).some(
+        (window) => clipCalendarSegment(window.start, window.end - window.start) !== null,
+      );
+      if (hasAvailability) return false;
+      return !calendarAxisSource.some((item) => item.day === day);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendarAvailability, calendarAxisMode, calendarAxisSource, calendarEndMinutes, calendarStartMinutes]);
+  const calendarDayColumns = useMemo(
+    () => buildDayColumns(calendarCollapsedDays, calendarDayFocus),
+    [calendarCollapsedDays, calendarDayFocus],
+  );
+
+  // Hour labels are dropped when they land inside a collapsed gap — the hour
+  // never visibly happens there — and thinned when squashing has pushed two of
+  // them within 15px of each other.
+  const visibleCalendarHourMarks = useMemo(() => {
+    if (!calendarAxis.squashed) return calendarHourMarks.map((hour, index) => ({ hour, top: index * HOUR_HEIGHT }));
+    const marks: { hour: number; top: number }[] = [];
+    let lastTop = Number.NEGATIVE_INFINITY;
+    calendarHourMarks.forEach((hour) => {
+      const segment = calendarAxis.segments.find((entry) => hour >= entry.start && hour < entry.end);
+      if (segment?.quiet) return;
+      const top = axisMinuteToTop(calendarAxis, hour);
+      if (top - lastTop < 15) return;
+      lastTop = top;
+      marks.push({ hour, top });
+    });
+    return marks;
+  }, [calendarAxis, calendarHourMarks]);
+
+  const calendarQuietGaps = useMemo(
+    () => (calendarAxis.squashed ? calendarAxis.segments.filter((segment) => segment.quiet) : []),
+    [calendarAxis],
+  );
+
+  // The now line is drawn once, in today's column, and only when the week on
+  // screen is the one today falls in.
+  const calendarTodayIndex = weekDays.findIndex((day) => day.isToday);
+  // Read by the breakpoint effect, which must not re-run when the week changes.
+  const calendarTodayIndexRef = useRef(calendarTodayIndex);
+  calendarTodayIndexRef.current = calendarTodayIndex;
+  const calendarNowTop =
+    calendarTodayIndex >= 0 && calendarNowMinutes >= calendarStartMinutes && calendarNowMinutes <= calendarEndMinutes
+      ? calendarMinutesToTop(calendarNowMinutes)
+      : null;
+
+  // A phone opens on a day and a desktop on the week. Keyed off crossing the
+  // breakpoint rather than every render, so tapping back to the week on a phone
+  // sticks until the viewport itself changes.
+  useEffect(() => {
+    const narrow = () => window.matchMedia("(max-width: 640px)").matches;
+    let wasNarrow: boolean | null = null;
+    const sync = () => {
+      const isNarrow = narrow();
+      if (isNarrow === wasNarrow) return;
+      wasNarrow = isNarrow;
+      setCalendarDayFocus(isNarrow ? (calendarTodayIndexRef.current >= 0 ? calendarTodayIndexRef.current : 0) : null);
+    };
+    sync();
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
+  }, []);
+
+  useEffect(() => {
+    const tick = window.setInterval(() => {
+      const now = new Date();
+      setCalendarNowMinutes(now.getHours() * 60 + now.getMinutes());
+    }, 60_000);
+    return () => window.clearInterval(tick);
+  }, []);
+
+  // Whatever moved the week — a swipe that landed on a neighbour, the toolbar
+  // arrows, Today, or edge navigation during a drag — the pager ends up back
+  // on the middle panel. A resize changes the step, so it has to re-centre for
+  // that too or the strip is left parked between two weeks.
+  useEffect(() => {
+    if (activeView !== "calendar") return;
+    centreWeekPager();
+    const onResize = () => centreWeekPager();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // centreWeekPager reads only refs; re-centring is keyed off the week and
+    // the layout switches that change the strip's width.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, activeWeek, calendarDetailMode, effectiveCalendarPerspective]);
+
+  useEffect(
+    () => () => {
+      if (weekSettleTimerRef.current) window.clearTimeout(weekSettleTimerRef.current);
+      if (weekLandingTimerRef.current) window.clearTimeout(weekLandingTimerRef.current);
+    },
+    [],
+  );
+
   const clients = useMemo<ClientSummary[]>(() => {
     // Grouping keys off personId first — the stable backend link — and only
     // falls back to the name/email/phone heuristic (clientKey) for legacy
@@ -8312,10 +8572,11 @@ function App() {
     const rect = grid.getBoundingClientRect();
     const x = clamp(clientX - rect.left, 0, rect.width - 1);
     const y = clamp(clientY - rect.top, 0, gridHeight - 1);
-    const day = clamp(Math.floor((x / rect.width) * DAY_COUNT), 0, DAY_COUNT - 1);
-    const minutesFromStart = snap((y / HOUR_HEIGHT) * 60);
+    // Both axes are read back through the same mapping that drew the grid, so
+    // a drop lands where the pointer is in squash view as well as week view.
+    const day = dayFromGridX(calendarCollapsedDays, rect.width, x, calendarDayFocus);
     const start = clamp(
-      calendarStartMinutes + minutesFromStart,
+      snap(axisTopToMinute(calendarAxis, y)),
       calendarStartMinutes,
       Math.max(calendarStartMinutes, calendarEndMinutes - SNAP_MINUTES),
     );
@@ -8327,8 +8588,9 @@ function App() {
     const grid = gridRef.current;
     if (!grid) return undefined;
     const rect = grid.getBoundingClientRect();
-    const dayWidth = rect.width / DAY_COUNT;
-    const xWithinDay = clamp(slot.x - slot.day * dayWidth, 0, Math.max(0, dayWidth - 1));
+    const column = dayColumnPixels(calendarCollapsedDays, rect.width, calendarDayFocus)[slot.day];
+    const dayWidth = Math.max(1, column?.width ?? rect.width / DAY_COUNT);
+    const xWithinDay = clamp(slot.x - (column?.left ?? slot.day * dayWidth), 0, Math.max(0, dayWidth - 1));
     const coachIndex = clamp(
       Math.floor((xWithinDay / dayWidth) * locationCalendarCoachGroups.length),
       0,
@@ -8368,10 +8630,12 @@ function App() {
     if (!tileRect) return null;
 
     const gridRect = grid.getBoundingClientRect();
-    const dayWidth = gridRect.width / DAY_COUNT;
-    const finalWidth = dayWidth - 12;
-    const finalHeight = Math.max(durationToHeight(candidate.duration), 34);
-    const finalCenterX = candidate.day * dayWidth + 6 + finalWidth / 2;
+    const column = dayColumnPixels(calendarCollapsedDays, gridRect.width, calendarDayFocus)[candidate.day];
+    const dayWidth = column?.width ?? gridRect.width / DAY_COUNT;
+    const dayLeft = column?.left ?? candidate.day * dayWidth;
+    const finalWidth = dayWidth - 22;
+    const finalHeight = Math.max(calendarSegmentHeight(candidate.start, candidate.duration), 34);
+    const finalCenterX = dayLeft + 5 + finalWidth / 2;
     const finalCenterY = calendarMinutesToTop(candidate.start) + finalHeight / 2;
     const tileCenterX = tileRect.left + tileRect.width / 2 - gridRect.left;
     const tileCenterY = tileRect.top + tileRect.height / 2 - gridRect.top;
@@ -8617,6 +8881,175 @@ function App() {
     setActiveWeek(nextWeek);
     closeCalendarDetails();
     setQuickCreate(null);
+  }
+
+  // --- Week pager ----------------------------------------------------------
+  // The date strip is the only thing that takes the horizontal gesture; the
+  // grid mirrors its scroll position and is never scrolled directly. Three
+  // panels are mounted at a time and the focused week is always the middle
+  // one, so landing on a neighbour swaps the week and re-centres underneath —
+  // the panel you scrolled to becomes the panel you are looking at, which is
+  // what makes the recentre invisible.
+  function weekPagerStep() {
+    const strip = weekStripRef.current;
+    if (!strip) return 0;
+    return Math.max(1, strip.clientWidth - WEEK_PEEK);
+  }
+
+  function centreWeekPager() {
+    const strip = weekStripRef.current;
+    const panels = weekPanelsRef.current;
+    if (!strip) return;
+    // Any pending landing would put the strip back on the panel we just came
+    // from, so it goes with the week it belonged to — along with the class it
+    // would otherwise have been left to clear.
+    if (weekLandingTimerRef.current) {
+      window.clearTimeout(weekLandingTimerRef.current);
+      weekLandingTimerRef.current = null;
+    }
+    strip.classList.remove("is-grabbing");
+    const left = weekPagerStep() * WEEK_FOCUS_INDEX;
+    weekPagerSyncingRef.current = true;
+    strip.scrollLeft = left;
+    if (panels) panels.scrollLeft = left;
+    window.setTimeout(() => {
+      weekPagerSyncingRef.current = false;
+    }, 60);
+  }
+
+  function handleWeekStripScroll() {
+    const strip = weekStripRef.current;
+    if (!strip) return;
+    const panels = weekPanelsRef.current;
+    if (panels) panels.scrollLeft = strip.scrollLeft;
+    if (weekPagerSyncingRef.current) return;
+    if (weekSettleTimerRef.current) window.clearTimeout(weekSettleTimerRef.current);
+    weekSettleTimerRef.current = window.setTimeout(() => {
+      weekSettleTimerRef.current = null;
+      const index = clamp(Math.round(strip.scrollLeft / weekPagerStep()), 0, WEEK_PANEL_COUNT - 1);
+      if (index === WEEK_FOCUS_INDEX) return;
+      setActiveWeekState(activeWeekRef.current + (index - WEEK_FOCUS_INDEX));
+    }, 140);
+  }
+
+  /**
+   * Drag-to-page for pointers that cannot scroll sideways on their own. Touch
+   * and trackpads scroll the strip natively; a mouse would be left with only
+   * the toolbar arrows, and the strip says "grab" either way.
+   */
+  function beginWeekStripDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const strip = weekStripRef.current;
+    if (!strip || event.pointerType === "touch") return;
+    const startX = event.clientX;
+    const startLeft = strip.scrollLeft;
+    let dragged = false;
+
+    const onMove = (move: globalThis.PointerEvent) => {
+      const dx = move.clientX - startX;
+      if (Math.abs(dx) > 3) dragged = true;
+      strip.scrollLeft = startLeft - dx;
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      if (!dragged) {
+        strip.classList.remove("is-grabbing");
+        return;
+      }
+      // A decisive push pages; anything less falls back. Landing on whichever
+      // panel happens to be nearest would mean dragging half the calendar's
+      // width before the week changed, which is not what a swipe feels like.
+      const step = weekPagerStep();
+      const travelled = strip.scrollLeft - startLeft;
+      const delta = Math.abs(travelled) > Math.max(40, step * 0.15) ? Math.sign(travelled) : 0;
+      const left = step * clamp(WEEK_FOCUS_INDEX + delta, 0, WEEK_PANEL_COUNT - 1);
+      // is-grabbing stays on until the strip has landed: it is what suspends
+      // snapping, and re-enabling mandatory snap mid-flight cancels the scroll
+      // and drops the strip back on whichever panel was nearest at the time.
+      strip.scrollTo({ left, behavior: "smooth" });
+      if (weekLandingTimerRef.current) window.clearTimeout(weekLandingTimerRef.current);
+      weekLandingTimerRef.current = window.setTimeout(() => {
+        weekLandingTimerRef.current = null;
+        strip.scrollLeft = left;
+        strip.classList.remove("is-grabbing");
+      }, 320);
+      // The scroll handler picks the landing up from here and commits the week.
+    };
+
+    strip.classList.add("is-grabbing");
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }
+
+  function pageWeek(delta: number) {
+    const strip = weekStripRef.current;
+    if (!strip) {
+      setActiveWeekState(activeWeekRef.current + delta);
+      return;
+    }
+    const left = weekPagerStep() * clamp(WEEK_FOCUS_INDEX + delta, 0, WEEK_PANEL_COUNT - 1);
+    strip.scrollTo({ left, behavior: "smooth" });
+    // Mandatory snapping can cancel a programmatic smooth scroll part-way.
+    // Land it anyway rather than leaving the strip between two weeks.
+    if (weekLandingTimerRef.current) window.clearTimeout(weekLandingTimerRef.current);
+    weekLandingTimerRef.current = window.setTimeout(() => {
+      weekLandingTimerRef.current = null;
+      if (Math.abs(strip.scrollLeft - left) > 2) strip.scrollLeft = left;
+    }, 320);
+  }
+
+  /** Tap a day to fill the grid with it; tap the same day again for the week. */
+  function focusCalendarDay(dayIndex: number) {
+    setCalendarDayFocus((current) => (current === dayIndex ? null : dayIndex));
+  }
+
+  function cycleCalendarAxisMode() {
+    suppressBlankGestureUntilRef.current = Date.now() + 360;
+    setCalendarAxisMode((current) => (current === "week" ? "squash" : "week"));
+  }
+
+  /**
+   * The 26px of the neighbouring week that stays visible past the edge. It
+   * shows the shape of that week's availability and nothing else: at 26px a
+   * booking card is unreadable, and keeping the panels inert means one live
+   * week's worth of drag, drop and quick-create logic rather than three.
+   */
+  function renderWeekPeekPanel(offset: number) {
+    return (
+      <div className="week-pager-panel is-off-week" key={offset} aria-hidden="true">
+        <div className="week-grid is-peek" style={{ height: gridHeight }}>
+          {weekDays.map((day, dayIndex) => (
+            <div
+              className={`day-lane ${calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""}`}
+              key={day.label}
+              hidden={calendarDayColumns[dayIndex].hidden}
+              style={{ left: calendarDayColumns[dayIndex].left, width: calendarDayColumns[dayIndex].width }}
+            >
+              {calendarAvailability[dayIndex].map((window, index) => {
+                const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
+                if (!visibleWindow) return null;
+                const bandTop = calendarMinutesToTop(visibleWindow.start);
+                return (
+                  <div
+                    className="available-band"
+                    key={`${day.label}-${index}`}
+                    style={
+                      {
+                        top: bandTop,
+                        height: calendarSegmentHeight(visibleWindow.start, visibleWindow.duration),
+                        ["--band-offset" as string]: `${bandTop}px`,
+                      } as CSSProperties
+                    }
+                  />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   function toggleCalendarDetailMode() {
@@ -9879,7 +10312,9 @@ function App() {
   }
 
   function moveWeek(delta: number) {
-    setActiveWeekState(activeWeekRef.current + delta);
+    // Goes through the pager so the arrows and the swipe land the same way,
+    // with the strip animating rather than the week snapping over underneath.
+    pageWeek(delta);
   }
 
   function switchView(view: View) {
@@ -11855,6 +12290,9 @@ function App() {
     setServiceNumberDrafts({});
     setServiceEditor({
       ...emptyServiceEditor(),
+      // Next colour along, so two lesson types created back to back do not
+      // arrive the same shade and have to be told apart by hand.
+      color: defaultServiceColor(services.length),
       id: generateServiceDraftId(),
       coachId: serviceScopeCoachId || defaultCoachId(coachProfiles),
       locationId: defaultLocationId(locations),
@@ -16167,6 +16605,22 @@ function App() {
                   placeholder="Lesson name"
                 />
               </label>
+              {/* The colour lives on the lesson type because that is the thing
+                  it identifies. A card on the calendar is filled with it, which
+                  is how a week reads as several kinds of lesson at a glance. */}
+              <label className="settings-field calendar-colour-field service-colour-field">
+                <input
+                  type="color"
+                  value={serviceEditor.color || defaultServiceColor(0)}
+                  aria-label="Calendar colour for this lesson type"
+                  onChange={(event) => updateServiceEditor("color", event.target.value)}
+                />
+                <span>
+                  <strong>Calendar colour</strong>
+                  <em>Card fill</em>
+                </span>
+                <code>{serviceEditor.color || defaultServiceColor(0)}</code>
+              </label>
               <label className="settings-field">
                 <span>Optional description</span>
                 <input
@@ -18336,26 +18790,38 @@ function App() {
         </section>
         )}
 
+        {/* Fixed to the corner rather than stacked under the calendar: it is a
+            developer tool that is shut almost all of the time, and the summary
+            bar for it was costing every admin a strip of the page. */}
         {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && isAdminUser && (
         <section className={`developer-diagnostics ${diagnosticsOpen ? "is-open" : ""}`}>
           <button
-            className="developer-diagnostics-summary"
+            className="developer-diagnostics-launcher"
             type="button"
             onClick={() => setDiagnosticsOpen((current) => !current)}
             aria-expanded={diagnosticsOpen}
+            aria-label={diagnosticsOpen ? "Hide developer diagnostics" : "Show developer diagnostics"}
+            title={`Developer diagnostics — ${
+              calendarFeedStatus === "connected" ? "Supabase connected" : "Supabase not connected"
+            }, ${diagnosticEvents.length} events, ${failedDiagnosticEvents.length} errors`}
           >
-            <span className="developer-diagnostics-title">
-              <Code2 size={16} />
-              <strong>Developer Diagnostics</strong>
-            </span>
-            <span className="developer-diagnostics-readout">
-              <span>{calendarFeedStatus === "connected" ? "Supabase connected" : "Supabase not connected"}</span>
-              <span>{diagnosticEvents.length} events</span>
-              <span>{failedDiagnosticEvents.length} errors</span>
-            </span>
+            {diagnosticsOpen ? <X size={15} /> : <Code2 size={15} />}
+            {/* The error count is the one thing worth surfacing while closed. */}
+            {!diagnosticsOpen && failedDiagnosticEvents.length ? (
+              <b aria-hidden="true">{failedDiagnosticEvents.length > 99 ? "99+" : failedDiagnosticEvents.length}</b>
+            ) : null}
           </button>
           {diagnosticsOpen ? (
             <div className="developer-diagnostics-body">
+              <div className="developer-diagnostics-readout">
+                <strong>
+                  <Code2 size={14} />
+                  Developer Diagnostics
+                </strong>
+                <span>{calendarFeedStatus === "connected" ? "Supabase connected" : "Supabase not connected"}</span>
+                <span>{diagnosticEvents.length} events</span>
+                <span>{failedDiagnosticEvents.length} errors</span>
+              </div>
               <div className="developer-diagnostics-tabs" role="tablist" aria-label="Developer diagnostics views">
                 {(["overview", "database", "calendar", "cache", "errors", "raw"] as DiagnosticTab[]).map((tab) => (
                   <button
@@ -18616,39 +19082,94 @@ function App() {
             ) : null}
 
             <div className="calendar-header-row">
-              <div className="time-gutter" />
-              {weekDays.map((day) => (
-                <div className={`day-heading ${day.isToday ? "today" : ""}`} key={day.label}>
-                  <span>{day.short}</span>
-                  <strong>{day.date}</strong>
-                  {effectiveCalendarPerspective === "location" && locationCalendarCoachGroups.length ? (
-                    <div className="location-coach-columns" aria-label="Coach columns">
-                      {locationCalendarCoachGroups.map((coach) => (
-                        <em key={coach.coachId || coach.name}>
-                          <span>{coach.displayName || coach.name}</span>
-                          <small>{locationCalendarCoachItemCount(coach.coachId)} appt</small>
-                        </em>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
+              <div className="time-gutter">
+                {/* Sits above the time gutter because that is the corner the
+                    axis belongs to: it changes how the vertical scale reads,
+                    not what the week contains. */}
+                <button
+                  type="button"
+                  className={`axis-cycle-button ${calendarAxisMode === "squash" ? "is-squashed" : ""}`}
+                  onClick={cycleCalendarAxisMode}
+                  aria-pressed={calendarAxisMode === "squash"}
+                  title={
+                    calendarAxisMode === "squash"
+                      ? "Squash view: quiet stretches collapsed. Switch to the full week."
+                      : "Week view: every hour at full height. Switch to squash."
+                  }
+                >
+                  {calendarAxisMode === "squash" ? <Minimize2 size={16} /> : <CalendarDays size={16} />}
+                  <small>{calendarAxisMode === "squash" ? "Squash" : "Week"}</small>
+                </button>
+              </div>
+              <div
+                className="week-strip"
+                ref={weekStripRef}
+                onScroll={handleWeekStripScroll}
+                onPointerDown={beginWeekStripDrag}
+              >
+                {WEEK_PANEL_OFFSETS.map((offset) => (
+                  <div className={`week-strip-panel ${offset === 0 ? "" : "is-off-week"}`} key={offset}>
+                    {(offset === 0 ? weekDays : buildWeekDays(activeWeek + offset)).map((day, dayIndex) => (
+                      // In day view the strip is the day picker: the headings
+                      // stay where they are and tapping one fills the grid with
+                      // it, so the week is never more than a tap away.
+                      <button
+                        type="button"
+                        className={`day-heading ${day.isToday ? "today" : ""} ${
+                          offset === 0 && calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""
+                        } ${offset === 0 && calendarDayFocus === dayIndex ? "is-focused-day" : ""}`}
+                        key={day.label}
+                        aria-pressed={offset === 0 ? calendarDayFocus === dayIndex : undefined}
+                        onClick={() => (offset === 0 ? focusCalendarDay(dayIndex) : undefined)}
+                      >
+                        {offset === 0 && calendarCollapsedDays[dayIndex] ? (
+                          <span className="day-label">{day.short}</span>
+                        ) : (
+                          <>
+                            <span>{day.short}</span>
+                            <strong>{day.date}</strong>
+                            {offset === 0 &&
+                            effectiveCalendarPerspective === "location" &&
+                            locationCalendarCoachGroups.length ? (
+                              <div className="location-coach-columns" aria-label="Coach columns">
+                                {locationCalendarCoachGroups.map((coach) => (
+                                  <em key={coach.coachId || coach.name}>
+                                    <span>{coach.displayName || coach.name}</span>
+                                    <small>{locationCalendarCoachItemCount(coach.coachId)} appt</small>
+                                  </em>
+                                ))}
+                              </div>
+                            ) : null}
+                          </>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+                <div className="week-pager-spacer" aria-hidden="true" />
+              </div>
             </div>
 
             <div className="calendar-scroll">
               <div className="time-column" style={{ height: gridHeight }}>
-                {calendarHourMarks.map((hour, index) => {
+                {visibleCalendarHourMarks.map(({ hour, top }) => {
                   return (
-                    <div className="time-label" key={hour} style={{ top: index * HOUR_HEIGHT }}>
+                    <div className="time-label" key={hour} style={{ top }}>
                       {hour === 12 * 60 ? "Noon" : formatTime(hour).replace(":00 ", "")}
                     </div>
                   );
                 })}
               </div>
 
+              {/* Driven, never scrolled directly: it mirrors the date strip. */}
+              <div className="week-pager" ref={weekPanelsRef}>
+                {renderWeekPeekPanel(-1)}
+                <div className="week-pager-panel">
               <div
                 ref={gridRef}
-                className={`week-grid ${pointerSession ? "is-grabbing" : ""}`}
+                className={`week-grid ${pointerSession ? "is-grabbing" : ""} ${
+                  calendarAxis.squashed ? "is-squashed" : ""
+                } ${calendarDayFocus !== null ? "is-day-view" : ""}`}
                 style={{ height: gridHeight }}
                 onPointerDown={beginBlankGesture}
                 onPointerMove={updatePointer}
@@ -18664,32 +19185,63 @@ function App() {
                   if (pointerSession) updatePointer(event);
                 }}
               >
+                {/* Full-width markers for the stretches squash collapsed, so the
+                    time that was skipped is stated rather than just missing. */}
+                {calendarQuietGaps.map((gap) => (
+                  <div className="quiet-gap" key={gap.start} style={{ top: gap.top, height: gap.height }}>
+                    <small>
+                      {formatDurationLabel(gap.end - gap.start)} quiet · {formatTime(gap.start)} – {formatTime(gap.end)}
+                    </small>
+                  </div>
+                ))}
+
                 {weekDays.map((day, dayIndex) => (
-                  <div className="day-lane" key={day.label} style={{ left: `${(dayIndex / DAY_COUNT) * 100}%` }}>
+                  <div
+                    className={`day-lane ${calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""}`}
+                    key={day.label}
+                    hidden={calendarDayColumns[dayIndex].hidden}
+                    style={{ left: calendarDayColumns[dayIndex].left, width: calendarDayColumns[dayIndex].width }}
+                  >
                     {calendarAvailability[dayIndex].map((window, index) => {
                       const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
                       if (!visibleWindow) return null;
+                      const bandTop = calendarMinutesToTop(visibleWindow.start);
                       return (
                         <div
                           className="available-band"
                           key={`${day.label}-${index}`}
                           style={{
-                            top: calendarMinutesToTop(visibleWindow.start),
-                            height: durationToHeight(visibleWindow.duration),
-                          }}
+                            top: bandTop,
+                            height: calendarSegmentHeight(visibleWindow.start, visibleWindow.duration),
+                            // The band draws its own hour ticks, and a window
+                            // rarely opens on the hour. Hand it its distance
+                            // from the top of the grid so the ticks count from
+                            // the time gutter rather than from the band edge.
+                            ["--band-offset" as string]: `${bandTop}px`,
+                          } as CSSProperties}
                         />
                       );
                     })}
                   </div>
                 ))}
 
-                {calendarHourMarks.map((hour, index) => (
-                  <div className="hour-line" key={index} style={{ top: index * HOUR_HEIGHT }} />
-                ))}
+                {calendarNowTop !== null && !calendarDayColumns[calendarTodayIndex]?.hidden ? (
+                  <div
+                    className="calendar-now-line"
+                    aria-hidden="true"
+                    style={{
+                      top: calendarNowTop,
+                      left: calendarDayColumns[calendarTodayIndex].left,
+                      width: calendarDayColumns[calendarTodayIndex].width,
+                    }}
+                  />
+                ) : null}
 
                 {displayItems.map((item) => {
                   const visibleItem = clipCalendarSegment(item.start, item.duration);
                   if (!visibleItem) return null;
+                  // Day view draws one day; the rest are not on screen at all.
+                  if (calendarDayColumns[item.day]?.hidden) return null;
                   const service = itemService(item, services);
                   const resolvedItemCoachId = resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount);
                   const activeDraft =
@@ -18698,8 +19250,8 @@ function App() {
                       : null;
                   const invalid = activeDraft ? !activeDraft.valid : false;
                   const top = calendarMinutesToTop(visibleItem.start);
-                  const height = durationToHeight(visibleItem.duration);
-                  const dayWidth = 100 / DAY_COUNT;
+                  const height = calendarSegmentHeight(visibleItem.start, visibleItem.duration);
+                  const dayColumn = calendarDayColumns[item.day] ?? calendarDayColumns[0];
                   const coachColumnCount =
                     effectiveCalendarPerspective === "location" ? Math.max(1, locationCalendarCoachGroups.length) : 1;
                   const locationWideBlock = effectiveCalendarPerspective === "location" && isLocationOnlyBlock(item);
@@ -18712,13 +19264,29 @@ function App() {
                           ),
                         )
                       : 0;
-                  const width = locationWideBlock ? dayWidth : dayWidth / coachColumnCount;
-                  const left = item.day * dayWidth + coachColumnIndex * width;
+                  // Widths come off the day column rather than a flat 1/7 so a
+                  // card still lands in its lane when squash view has collapsed
+                  // some of the other days to a hairline.
+                  const columnWidth =
+                    locationWideBlock || coachColumnCount === 1
+                      ? dayColumn.width
+                      : `calc(${dayColumn.width} / ${coachColumnCount})`;
+                  const columnLeft = coachColumnIndex
+                    ? `calc(${dayColumn.left} + ${coachColumnIndex} * ${
+                        columnWidth.startsWith("calc") ? columnWidth.slice(4) : `(${columnWidth})`
+                      })`
+                    : dayColumn.left;
                   const flyAnimation = placementAnimation?.itemId === item.id ? placementAnimation : null;
                   const itemNotifications = notificationsByAppointment.get(item.id) ?? [];
                   const latestClientEmail = itemNotifications.find((notification) => notification.kind.includes("client"));
                   const latestCoachEmail = itemNotifications.find((notification) => notification.kind.includes("coach"));
                   const latestAdminEmail = itemNotifications.find((notification) => notification.kind.includes("admin"));
+                  // A card fades only once the lesson is over, so "already
+                  // happened" never gets confused with "cancelled" — status is
+                  // carried by the border instead.
+                  const isPastItem =
+                    item.kind === "appointment" &&
+                    isSlotInPast({ week: itemWeek(item), day: item.day, start: item.start + item.duration });
                   const scheduledGroupSession = isScheduledGroupSessionSlot(item);
                   const groupSessionItem = isGroupSessionItem(item);
                   const groupSessionContext = getGroupSessionContext(item);
@@ -18750,7 +19318,8 @@ function App() {
 	                        pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
 	                      } ${item.kind === "appointment" && item.status ? `status-${item.status}` : ""} ${
                         item.kind === "appointment" && item.bayBooked ? "has-bay" : ""
-                      }`}
+                      } ${isPastItem ? "is-past" : ""}`}
+
                       aria-label={tooltipRows.join(", ")}
                       onPointerEnter={(event) =>
                         showCalendarItemHover(event, item, service, latestClientEmail, latestCoachEmail, latestAdminEmail)
@@ -18759,8 +19328,18 @@ function App() {
                       style={{
                         top,
                         height: Math.max(height, 34),
-                        left: `calc(${left}% + 6px)`,
-                        width: `calc(${width}% - 12px)`,
+                        // Tucked inside the availability card behind it (inset
+                        // 3px left / 15px right) with 2px to spare on each
+                        // side, so a day column always reads wider than the
+                        // bookings sitting in it.
+                        left: `calc(${columnLeft} + var(--card-inset-left, 5px))`,
+                        width: `calc(${columnWidth} - var(--card-inset-total, 22px))`,
+                        // The fill is the lesson type. Set here rather than by
+                        // a class because the palette is per service, and
+                        // services are whatever this coach sells.
+                        ...(item.kind === "appointment" && calendarLessonColor(service)
+                          ? ({ "--lesson-type-color": calendarLessonColor(service) } as CSSProperties)
+                          : {}),
                         ...(scheduledGroupSession ? ({ cursor: "pointer" } as CSSProperties) : {}),
                         ...(flyAnimation
                           ? ({
@@ -18870,9 +19449,9 @@ function App() {
                         className={`calendar-item block draft-block ${draft.valid ? "" : "invalid"}`}
                         style={{
                           top: calendarMinutesToTop(visibleDraft.start),
-                          height: Math.max(durationToHeight(visibleDraft.duration), 24),
-                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
-                          width: `calc(${100 / DAY_COUNT}% - 12px)`,
+                          height: Math.max(calendarSegmentHeight(visibleDraft.start, visibleDraft.duration), 24),
+                          left: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).left} + var(--card-inset-left, 5px))`,
+                          width: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).width} - var(--card-inset-total, 22px))`,
                         }}
                       >
                         <div className="item-content">
@@ -18894,9 +19473,9 @@ function App() {
                         className={`calendar-item appointment draft-place ${draft.valid ? "" : "invalid"}`}
                         style={{
                           top: calendarMinutesToTop(visibleDraft.start),
-                          height: Math.max(durationToHeight(visibleDraft.duration), 34),
-                          left: `calc(${draft.day * (100 / DAY_COUNT)}% + 6px)`,
-                          width: `calc(${100 / DAY_COUNT}% - 12px)`,
+                          height: Math.max(calendarSegmentHeight(visibleDraft.start, visibleDraft.duration), 34),
+                          left: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).left} + var(--card-inset-left, 5px))`,
+                          width: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).width} - var(--card-inset-total, 22px))`,
                         }}
                       >
                         <div className="item-grip" aria-hidden="true">
@@ -18913,6 +19492,10 @@ function App() {
                     );
                   })()
                 )}
+              </div>
+                </div>
+                {renderWeekPeekPanel(1)}
+                <div className="week-pager-spacer" aria-hidden="true" />
               </div>
             </div>
 
@@ -24852,6 +25435,59 @@ function App() {
                     </button>
                     <button className="outline-button" onClick={resetBrandSettings}>
                       Reset
+                    </button>
+                  </div>
+                </details>
+
+                <details className="settings-subsection">
+                  <summary className="settings-subsection-title">
+                    <CalendarDays size={18} />
+                    <div>
+                      <span>Calendar colours</span>
+                      <strong>Booking outlines</strong>
+                    </div>
+                  </summary>
+                  <p className="settings-note">
+                    A booking card is filled with its lesson type's colour, which you set on the lesson type
+                    itself. These two are the outlines it can wear on top: a border once the lesson is done, and a
+                    ring around the card while a bay is held for it. They sit on different edges, so a completed
+                    lesson with a live bay shows both.
+                  </p>
+                  <div className="calendar-colour-fields">
+                    {calendarColorFields.map(({ key, label, hint }) => (
+                      <label className="calendar-colour-field" key={key}>
+                        <input
+                          type="color"
+                          value={brandSettings.calendarColors[key]}
+                          aria-label={`${label} ${hint.toLowerCase()}`}
+                          onChange={(event) =>
+                            updateBrandSetting("calendarColors", {
+                              ...brandSettings.calendarColors,
+                              [key]: event.target.value,
+                            })
+                          }
+                          onBlur={() => void saveBrandSettings()}
+                        />
+                        <span>
+                          <strong>{label}</strong>
+                          <em>{hint}</em>
+                        </span>
+                        <code>{brandSettings.calendarColors[key]}</code>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="brand-vein-actions">
+                    <button className="outline-button" onClick={() => void saveBrandSettings()}>
+                      {brandSaveState === "saved" ? <Check size={16} /> : <Sparkles size={16} />}
+                      {brandSaveState === "saving" ? "Saving" : brandSaveState === "saved" ? "Saved" : "Apply"}
+                    </button>
+                    <button
+                      className="outline-button"
+                      onClick={() =>
+                        void saveBrandSettings({ ...brandSettings, calendarColors: defaultCalendarColors })
+                      }
+                    >
+                      Reset calendar colours
                     </button>
                   </div>
                 </details>

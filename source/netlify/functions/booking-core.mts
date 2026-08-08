@@ -1,4 +1,5 @@
 import { getDatabase } from "@netlify/database";
+import { ddlBatch } from "./_shared/database.mts";
 import {
   createHash,
   randomBytes,
@@ -10,12 +11,14 @@ import {
 import {
   getGoogleCalendarSyncStatus,
   syncGoogleCalendarChangesIfEnabled,
+  syncGoogleCalendarNow,
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
 import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";
 import { planExternalReschedule } from "./_shared/external-reschedule.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
+import { unavailableSpans } from "./_shared/availability-blocks.mts";
 import {
   canonicalPhoneKey,
   cleanPhoneCountry,
@@ -1543,13 +1546,40 @@ function db() {
 }
 
 async function setSetting(key, value) {
-  await db().sql`
-    INSERT INTO settings (key, value, updated_at)
-    VALUES (${key}, ${String(value ?? "")}, NOW())
-    ON CONFLICT (key) DO UPDATE
-      SET value = EXCLUDED.value,
-          updated_at = EXCLUDED.updated_at
-  `;
+  await setSettingsBulk({ [key]: value });
+}
+
+/**
+ * Write a group of settings in one statement.
+ *
+ * Saving a settings form means writing a dozen or more keys, and doing that one
+ * key at a time is a dozen or more sequential round trips to Postgres for a
+ * change the coach experiences as pressing Save once. Same shape as the calendar
+ * save that was rewriting one item per round trip: individually cheap, and the
+ * cost is the count.
+ *
+ * Callers that write a single key keep using setSetting, which comes through
+ * here with one entry. `run` is the statement runner, injectable so the built
+ * SQL can be checked without a database behind it.
+ */
+export async function setSettingsBulk(values, run = null) {
+  const entries = Object.entries(values || {}).filter(([key]) => key);
+  if (!entries.length) return;
+
+  const params = [];
+  const rows = entries.map(([key, value]) => {
+    params.push(key, String(value ?? ""));
+    return `($${params.length - 1}, $${params.length}, NOW())`;
+  });
+  const query = run || ((text, args) => db().pool.query(text, args));
+  await query(
+    `INSERT INTO settings (key, value, updated_at)
+     VALUES ${rows.join(", ")}
+     ON CONFLICT (key) DO UPDATE
+       SET value = EXCLUDED.value,
+           updated_at = EXCLUDED.updated_at`,
+    params,
+  );
 }
 
 async function getSetting(key) {
@@ -1571,14 +1601,15 @@ function parseSettingJson(settings, key, fallback) {
 }
 
 async function ensureCoreTables() {
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS calendar_items (
       id TEXT PRIMARY KEY,
       account_id TEXT,
@@ -1603,19 +1634,19 @@ async function ensureCoreTables() {
 	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	    )
 	  `;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS account_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location_id TEXT`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
-  await db().sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS completed_at TEXT`;
-  await db().sql`
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS account_id TEXT`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'booked'`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach_id TEXT`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location_id TEXT`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS coach JSONB`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location JSONB`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS completed_at TEXT`;
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_calendar_items_slot
     ON calendar_items (week, day, start)
   `;
-	  await db().sql`
+	  ddl.sql`
 	    CREATE TABLE IF NOT EXISTS people (
 	      id TEXT PRIMARY KEY,
 	      account_id TEXT,
@@ -1630,23 +1661,23 @@ async function ensureCoreTables() {
 	      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	    )
 	  `;
-  await db().sql`ALTER TABLE people ADD COLUMN IF NOT EXISTS account_id TEXT`;
-	  await db().sql`DROP INDEX IF EXISTS idx_people_email_unique`;
-	  await db().sql`
+  ddl.sql`ALTER TABLE people ADD COLUMN IF NOT EXISTS account_id TEXT`;
+	  ddl.sql`DROP INDEX IF EXISTS idx_people_email_unique`;
+	  ddl.sql`
 	    CREATE INDEX IF NOT EXISTS idx_people_email_lookup
 	    ON people (LOWER(email))
 	    WHERE email IS NOT NULL AND email <> ''
 	  `;
-	  await db().sql`
+	  ddl.sql`
 	    CREATE INDEX IF NOT EXISTS idx_people_name_phone_lookup
 	    ON people (LOWER(name), phone)
 	    WHERE phone IS NOT NULL AND phone <> ''
 	  `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_people_account_name_lookup
     ON people (account_id, LOWER(name), LOWER(email), id)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -1656,7 +1687,7 @@ async function ensureCoreTables() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_sessions (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1665,7 +1696,7 @@ async function ensureCoreTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_password_resets (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1675,17 +1706,19 @@ async function ensureCoreTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  await ddl.run();
 }
 
 async function ensureAuthTables() {
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -1695,7 +1728,7 @@ async function ensureAuthTables() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_sessions (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1704,7 +1737,7 @@ async function ensureAuthTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_password_resets (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1714,6 +1747,7 @@ async function ensureAuthTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  await ddl.run();
 }
 
 async function ensureAuthReady() {
@@ -1801,15 +1835,25 @@ async function defaultSettings() {
   };
 }
 
+// Forty-five keys, and this runs once on every cold start before the instance
+// can answer anything. One INSERT per key made that forty-five sequential round
+// trips of pure latency on the first request each new instance served.
+// DO NOTHING, not DO UPDATE: these are defaults, so an existing value wins.
 async function seedSettings() {
-  const defaults = await defaultSettings();
-  for (const [key, value] of Object.entries(defaults)) {
-    await db().sql`
-      INSERT INTO settings (key, value, updated_at)
-      VALUES (${key}, ${String(value ?? "")}, NOW())
-      ON CONFLICT (key) DO NOTHING
-    `;
-  }
+  const entries = Object.entries(await defaultSettings()).filter(([key]) => key);
+  if (!entries.length) return;
+
+  const params = [];
+  const rows = entries.map(([key, value]) => {
+    params.push(key, String(value ?? ""));
+    return `($${params.length - 1}, $${params.length}, NOW())`;
+  });
+  await db().pool.query(
+    `INSERT INTO settings (key, value, updated_at)
+     VALUES ${rows.join(", ")}
+     ON CONFLICT (key) DO NOTHING`,
+    params,
+  );
 }
 
 async function seedItems() {
@@ -1911,7 +1955,8 @@ async function ensureAdminUser() {
 }
 
 async function ensureNotificationHistoryTable() {
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS notification_history (
       id TEXT PRIMARY KEY,
       person_key TEXT,
@@ -1926,20 +1971,20 @@ async function ensureNotificationHistoryTable() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_notification_history_person
     ON notification_history (person_key, created_at DESC)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_notification_history_item
     ON notification_history (calendar_item_id, created_at DESC)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_notification_history_provider
     ON notification_history (provider_id)
     WHERE provider_id IS NOT NULL AND provider_id <> ''
   `;
-  await db().sql`
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS notification_webhook_events (
       id TEXT PRIMARY KEY,
       provider_id TEXT,
@@ -1948,6 +1993,7 @@ async function ensureNotificationHistoryTable() {
       received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  await ddl.run();
 }
 
 // Self-creating like the notification tables above -- the player portal is
@@ -1957,7 +2003,8 @@ async function ensureNotificationHistoryTable() {
 let playerSessionsTableReady = false;
 async function ensurePlayerSessionsTable() {
   if (playerSessionsTableReady) return;
-  await db().sql`
+  const ddl = ddlBatch();
+  ddl.sql`
     CREATE TABLE IF NOT EXISTS player_sessions (
       id TEXT PRIMARY KEY,
       token_hash TEXT UNIQUE NOT NULL,
@@ -1969,14 +2016,17 @@ async function ensurePlayerSessionsTable() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_player_sessions_token
     ON player_sessions (token_hash)
   `;
-  await db().sql`
+  ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_player_sessions_expires
     ON player_sessions (expires_at)
   `;
+  await ddl.run();
+  // Only once the statements have actually landed: marking it ready first would
+  // let a failed run leave every later call skipping the creation it needs.
   playerSessionsTableReady = true;
 }
 
@@ -3138,6 +3188,33 @@ async function deleteLessonNote(noteId, accountId = defaultWorkspaceAccountFromC
   return { notes };
 }
 
+/**
+ * True when writing this person would leave the stored row exactly as it is.
+ *
+ * The UPDATE in importPeople sets each field with COALESCE(NULLIF($n, ''),
+ * column), so an empty incoming value never overwrites anything and an equal one
+ * writes back what is already there. Every full calendar save re-derives a
+ * contact from every appointment on the calendar, and on an ordinary save none
+ * of them differ — so this is the check that turns hundreds of round trips into
+ * none. updated_at would move, but nothing reads it as a contact-changed signal.
+ */
+export function personRowUnchanged(person, existing, fallbackAccountId, source) {
+  const matches = (incoming, current) => {
+    const next = cleanString(incoming, "", 400);
+    return !next || next === cleanString(current, "", 400);
+  };
+  return (
+    matches(person.name, existing.name) &&
+    matches(person.email, existing.email) &&
+    matches(person.phone, existing.phone) &&
+    matches(person.notes, existing.notes) &&
+    matches(person.source || source, existing.source) &&
+    matches(person.caddyProfileId, existing.caddyProfileId) &&
+    matches(person.caddyProfileUrl, existing.caddyProfileUrl) &&
+    matches(person.accountId || fallbackAccountId, existing.accountId)
+  );
+}
+
 async function importPeople(rawPeople, source = "import", accountId = defaultWorkspaceAccountFromCoachAccount().id) {
   const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
   // Indexed (not filtered) so callers that need to stamp a resolved person id
@@ -3162,24 +3239,24 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
 
   const knownPeople = await readPeople(cleanAccountId);
   const knownById = new Map(knownPeople.map((row) => [row.id, row]));
-  const client = await db().pool.connect();
+  // Opened on the first person that actually needs writing. A full calendar save
+  // re-derives a contact from every appointment on the calendar, and on a normal
+  // save none of them have changed — see personRowUnchanged. Connecting and
+  // running BEGIN/COMMIT for a transaction with no writes in it is pure latency
+  // on a pool that only has three connections to hand out.
+  let client = null;
+  const openTransaction = async () => {
+    if (!client) {
+      client = await db().pool.connect();
+      await client.query("BEGIN");
+    }
+    return client;
+  };
   let personIndex = 0;
   try {
-    await client.query("BEGIN");
     for (let sourceIndex = 0; sourceIndex < indexedPeople.length; sourceIndex += 1) {
       const person = indexedPeople[sourceIndex];
       if (!person) continue;
-      // Every person write gets its own savepoint. Deriving contacts from
-      // appointments is housekeeping that rides along with the caller's save;
-      // when one contact cannot be reconciled (for example its email already
-      // belongs to another row under the account-scoped unique index) it must
-      // not abort the transaction and take the lesson the coach just booked
-      // down with it. Previously a single duplicate contact rolled back the
-      // whole calendar save and surfaced as a 409 the coach could not act on.
-      const savepoint = `person_${personIndex}`;
-      personIndex += 1;
-      await client.query(`SAVEPOINT ${savepoint}`);
-      try {
       // A person id carried on the incoming record (an appointment's stored
       // person_id, see personFromAppointment) is an explicit, stable link set
       // up on a previous save. Trust it ahead of the fuzzy name/email/phone
@@ -3191,6 +3268,27 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
       const existing = linked || compatiblePersonMatch(person, knownPeople);
       const existingId = existing?.id || "";
 
+      // Already matches what is stored, so the UPDATE below would write the row
+      // back to itself. Skip it: this is the case for nearly every contact on
+      // nearly every save, and the round trips it saves are the difference
+      // between a save that lands and one that times out.
+      if (existingId && personRowUnchanged(person, existing, cleanAccountId, source)) {
+        result.updated += 1;
+        resolvedIds[sourceIndex] = existingId;
+        continue;
+      }
+
+      // Every person write gets its own savepoint. Deriving contacts from
+      // appointments is housekeeping that rides along with the caller's save;
+      // when one contact cannot be reconciled (for example its email already
+      // belongs to another row under the account-scoped unique index) it must
+      // not abort the transaction and take the lesson the coach just booked
+      // down with it. Previously a single duplicate contact rolled back the
+      // whole calendar save and surfaced as a 409 the coach could not act on.
+      const savepoint = `person_${personIndex}`;
+      personIndex += 1;
+      await (await openTransaction()).query(`SAVEPOINT ${savepoint}`);
+      try {
       if (existingId) {
         await client.query(
           `UPDATE people
@@ -3274,12 +3372,12 @@ async function importPeople(rawPeople, source = "import", accountId = defaultWor
         });
       }
     }
-    await client.query("COMMIT");
+    if (client) await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK");
+    if (client) await client.query("ROLLBACK");
     throw error;
   } finally {
-    client.release();
+    if (client) client.release();
   }
 
   result.people = await readPeople(cleanAccountId);
@@ -3498,8 +3596,104 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
   };
 }
 
+// The columns every calendar item write sets, in the order calendarItemParams
+// builds them. created_at/updated_at come from NOW() rather than a parameter.
+const CALENDAR_ITEM_WRITE_COLUMNS = [
+  "id",
+  "account_id",
+  "kind",
+  "week",
+  "day",
+  "start",
+  "duration",
+  "coach_id",
+  "location_id",
+  "service_id",
+  "client",
+  "title",
+  "phone",
+  "email",
+  "person_id",
+  "note",
+  "status",
+  "custom_group",
+  "coach",
+  "location",
+];
+const CALENDAR_ITEM_JSON_WRITE_COLUMNS = new Set(["custom_group", "coach", "location"]);
+// Postgres caps a statement at 65535 parameters, which at twenty columns would
+// allow far more rows than this. The smaller chunk keeps any single statement
+// modest enough to stay well inside statement_timeout.
+const CALENDAR_ITEM_WRITE_CHUNK = 250;
+
+function calendarItemParams(item) {
+  return [
+    item.id,
+    item.accountId || defaultWorkspaceAccountFromCoachAccount().id,
+    item.kind,
+    item.week ?? 0,
+    item.day,
+    item.start,
+    item.duration,
+    item.coachId || defaultCoachProfileFromAccount().id,
+    item.locationId || item.location?.locationId || "",
+    item.serviceId || "",
+    item.client || "",
+    item.title,
+    item.phone || "",
+    item.email || "",
+    item.personId || "",
+    item.note || "",
+    item.status || "booked",
+    item.customGroup ? JSON.stringify(cleanCustomGroupData(item)) : null,
+    item.coach ? JSON.stringify(cleanBookingCoachSnapshot(item.coach)) : null,
+    item.location ? JSON.stringify(cleanBookingLocationSnapshot(item.location)) : null,
+  ];
+}
+
+/**
+ * Upsert a batch of calendar items in one statement.
+ *
+ * A full calendar save replaces the whole item array, so this used to run one
+ * INSERT per item. Every one of those is a round trip to Postgres, and the
+ * calendar only grows: a coach with a season of history behind them was paying
+ * hundreds of sequential round trips to move a single lesson, which is what
+ * eventually pushed the save past the function timeout and surfaced as
+ * "Calendar save failed" on a booking that had nothing wrong with it.
+ */
+export async function upsertCalendarItemChunk(client, chunk) {
+  const params = [];
+  const rows = chunk.map((item) => {
+    const placeholders = calendarItemParams(item).map((value, column) => {
+      params.push(value);
+      return CALENDAR_ITEM_JSON_WRITE_COLUMNS.has(CALENDAR_ITEM_WRITE_COLUMNS[column])
+        ? `$${params.length}::jsonb`
+        : `$${params.length}`;
+    });
+    return `(${placeholders.join(", ")}, NOW(), NOW())`;
+  });
+  const assignments = CALENDAR_ITEM_WRITE_COLUMNS
+    .filter((column) => column !== "id")
+    .map((column) => `${column} = EXCLUDED.${column}`)
+    .concat("updated_at = NOW()")
+    .join(", ");
+  const result = await client.query(
+    `INSERT INTO calendar_items (${CALENDAR_ITEM_WRITE_COLUMNS.join(", ")}, created_at, updated_at)
+     VALUES ${rows.join(", ")}
+     ON CONFLICT (id) DO UPDATE SET ${assignments}
+     RETURNING *`,
+    params,
+  );
+  return queryRows(result);
+}
+
 async function writeItems(items, options = {}) {
-  const cleanItems = normalizeItems(items);
+  // ON CONFLICT DO UPDATE cannot touch the same row twice in one statement, so
+  // a repeated id has to collapse before the insert. Last write wins, which is
+  // what the row-at-a-time loop did.
+  const cleanItems = Array.from(
+    new Map(normalizeItems(items).map((item) => [item.id, item])).values(),
+  );
   const returnedRows = [];
   const client = await db().pool.connect();
   try {
@@ -3511,57 +3705,10 @@ async function writeItems(items, options = {}) {
         await client.query("DELETE FROM calendar_items");
       }
     }
-    for (const item of cleanItems) {
-      const insertResult = await client.query(
-        `INSERT INTO calendar_items (
-          id, account_id, kind, week, day, start, duration, coach_id, location_id, service_id, client, title, phone, email, person_id, note, status, custom_group, coach, location, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19::jsonb, $20::jsonb, NOW(), NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          account_id = EXCLUDED.account_id,
-          kind = EXCLUDED.kind,
-          week = EXCLUDED.week,
-          day = EXCLUDED.day,
-          start = EXCLUDED.start,
-          duration = EXCLUDED.duration,
-          coach_id = EXCLUDED.coach_id,
-          location_id = EXCLUDED.location_id,
-          service_id = EXCLUDED.service_id,
-          client = EXCLUDED.client,
-          title = EXCLUDED.title,
-          phone = EXCLUDED.phone,
-          email = EXCLUDED.email,
-          person_id = EXCLUDED.person_id,
-          note = EXCLUDED.note,
-          status = EXCLUDED.status,
-          custom_group = EXCLUDED.custom_group,
-          coach = EXCLUDED.coach,
-          location = EXCLUDED.location,
-          updated_at = NOW()
-        RETURNING *`,
-        [
-          item.id,
-          item.accountId || defaultWorkspaceAccountFromCoachAccount().id,
-          item.kind,
-          item.week ?? 0,
-          item.day,
-          item.start,
-          item.duration,
-          item.coachId || defaultCoachProfileFromAccount().id,
-          item.locationId || item.location?.locationId || "",
-          item.serviceId || "",
-          item.client || "",
-          item.title,
-          item.phone || "",
-          item.email || "",
-          item.personId || "",
-          item.note || "",
-          item.status || "booked",
-          item.customGroup ? JSON.stringify(cleanCustomGroupData(item)) : null,
-          item.coach ? JSON.stringify(cleanBookingCoachSnapshot(item.coach)) : null,
-          item.location ? JSON.stringify(cleanBookingLocationSnapshot(item.location)) : null,
-        ],
+    for (let offset = 0; offset < cleanItems.length; offset += CALENDAR_ITEM_WRITE_CHUNK) {
+      returnedRows.push(
+        ...(await upsertCalendarItemChunk(client, cleanItems.slice(offset, offset + CALENDAR_ITEM_WRITE_CHUNK))),
       );
-      returnedRows.push(...queryRows(insertResult));
     }
     if (options.replaceItems === true && cleanItems.length) {
       const keepIds = new Set(cleanItems.map((item) => item.id));
@@ -3583,9 +3730,7 @@ async function writeItems(items, options = {}) {
           staleCount: staleIds.length,
           supportedCleanup: true,
         });
-      }
-      for (const staleId of staleIds) {
-        await client.query("DELETE FROM calendar_items WHERE id = $1", [staleId]);
+        await client.query("DELETE FROM calendar_items WHERE id = ANY($1::text[])", [staleIds]);
       }
     }
     await client.query("COMMIT");
@@ -3709,6 +3854,24 @@ function adminSettingsFromSettings(settings) {
   };
 }
 
+/**
+ * The two outlines a booking card can wear: a border once the lesson is done,
+ * and a ring while a bay is held for it. The fill is not here — that is the
+ * lesson type's own colour, stored on the service in servicesJson.
+ */
+const defaultCalendarColors = {
+  statusCompleted: "#7f8a80",
+  statusBayBooked: "#e08a2e",
+};
+
+function cleanCalendarColors(colors) {
+  const cleaned = {};
+  for (const [key, fallback] of Object.entries(defaultCalendarColors)) {
+    cleaned[key] = cleanHexColor(colors?.[key], fallback);
+  }
+  return cleaned;
+}
+
 function brandSettingsFromSettings(settings, account) {
   return {
     coachName: settingValue(settings, "coachName") || account.businessName,
@@ -3721,6 +3884,9 @@ function brandSettingsFromSettings(settings, account) {
     accent: settingValue(settings, "brandAccent") || "#07100a",
     bookingTheme:
       settingValue(settings, "brandBookingTheme") === "light" ? "light" : "dark",
+    calendarColors: cleanCalendarColors(
+      parseSettingJson(settings, "brandCalendarColorsJson", defaultCalendarColors),
+    ),
   };
 }
 
@@ -3765,29 +3931,38 @@ async function readAdminSettings(settingsMap = null) {
   return adminSettingsFromSettings(settingsMap || (await readSettingsMap()));
 }
 
+// Only the keys the caller actually sent are written, so the shape stays a
+// partial update. They are collected rather than written one at a time: this is
+// one Save press, and it should cost one round trip rather than nineteen.
 async function writeAdminSettings(settings) {
-  if (hasOwn(settings, "emailNotificationsEnabled")) await setSetting("emailNotificationsEnabled", settings?.emailNotificationsEnabled ? "true" : "false");
-  if (hasOwn(settings, "notificationEmail")) await setSetting("notificationEmail", cleanString(settings?.notificationEmail, "", 180));
-  if (hasOwn(settings, "coachEmail")) await setSetting("coachEmail", cleanString(settings?.coachEmail, "", 180));
-  if (hasOwn(settings, "replyToEmail")) await setSetting("replyToEmail", cleanString(settings?.replyToEmail, "", 180));
+  const next = {};
+  const put = (key, value) => {
+    if (hasOwn(settings, key)) next[key] = value;
+  };
+  put("emailNotificationsEnabled", settings?.emailNotificationsEnabled ? "true" : "false");
+  put("notificationEmail", cleanString(settings?.notificationEmail, "", 180));
+  put("coachEmail", cleanString(settings?.coachEmail, "", 180));
+  put("replyToEmail", cleanString(settings?.replyToEmail, "", 180));
   if (hasOwn(settings, "notificationDelaySeconds")) {
     const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
-    await setSetting("notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
+    next.notificationDelaySeconds = String(
+      Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30,
+    );
   }
-  if (hasOwn(settings, "sendClientEmail")) await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
-  if (hasOwn(settings, "sendCoachEmail")) await setSetting("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
-  if (hasOwn(settings, "sendAdminEmail")) await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
-  if (hasOwn(settings, "clientEmailSubject")) await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
-  if (hasOwn(settings, "clientEmailIntro")) await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
-  if (hasOwn(settings, "clientEmailFooter")) await setSetting("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
-  if (hasOwn(settings, "adminEmailSubject")) await setSetting("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
-  if (hasOwn(settings, "adminEmailIntro")) await setSetting("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
-  if (hasOwn(settings, "smsProviderName")) await setSetting("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
-  if (hasOwn(settings, "smsWebhookUrl")) await setSetting("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
-  if (hasOwn(settings, "smsFromNumber")) await setSetting("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
-  if (hasOwn(settings, "sendClientSms")) await setSetting("sendClientSms", settings?.sendClientSms ? "true" : "false");
-  if (hasOwn(settings, "sendAdminSms")) await setSetting("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
-  await setSetting("updatedAt", nowIso());
+  put("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
+  put("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
+  put("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
+  put("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
+  put("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
+  put("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
+  put("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
+  put("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
+  put("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
+  put("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
+  put("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
+  put("sendClientSms", settings?.sendClientSms ? "true" : "false");
+  put("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
+  await setSettingsBulk({ ...next, updatedAt: nowIso() });
   return readAdminSettings();
 }
 
@@ -3946,27 +4121,27 @@ async function readCoachAccount(settingsMap = null) {
 
 async function writeCoachAccount(account) {
   const clean = cleanCoachAccount(account);
-  await setSetting("accountId", clean.id);
-  await setSetting("accountCoachName", clean.coachName);
-  await setSetting("accountBusinessName", clean.businessName);
-  await setSetting("accountVenueName", clean.venueName);
-  await setSetting("accountVenueShortName", clean.venueShortName);
-  await setSetting("accountTimezone", clean.timezone);
-  await setSetting("accountCountry", clean.country);
   // Keep contact matching in step with the country the coach just chose,
-  // without waiting for this instance to be recycled.
+  // without waiting for this instance to be recycled. In-memory, so it does not
+  // matter that it happens before the write rather than partway through it.
   setActivePhoneCountry(clean.country);
   setActiveTimeZone(clean.timezone);
-  await setSetting("accountContactEmail", clean.contactEmail);
-  await setSetting("accountBookingUrl", clean.bookingUrl);
-  await setSetting("accountCalendarSlug", clean.calendarSlug);
-  await setSetting("accountCaddyWorkspaceUrl", clean.caddyWorkspaceUrl);
-  await setSetting(
-    "accountInvoiceSettingsJson",
-    JSON.stringify(clean.invoiceSettings),
-  );
-  await setSetting("coachName", clean.businessName);
-  await setSetting("updatedAt", nowIso());
+  await setSettingsBulk({
+    accountId: clean.id,
+    accountCoachName: clean.coachName,
+    accountBusinessName: clean.businessName,
+    accountVenueName: clean.venueName,
+    accountVenueShortName: clean.venueShortName,
+    accountTimezone: clean.timezone,
+    accountCountry: clean.country,
+    accountContactEmail: clean.contactEmail,
+    accountBookingUrl: clean.bookingUrl,
+    accountCalendarSlug: clean.calendarSlug,
+    accountCaddyWorkspaceUrl: clean.caddyWorkspaceUrl,
+    accountInvoiceSettingsJson: JSON.stringify(clean.invoiceSettings),
+    coachName: clean.businessName,
+    updatedAt: nowIso(),
+  });
   return clean;
 }
 
@@ -3979,25 +4154,19 @@ async function readBrandSettings(settingsMap = null) {
 
 async function writeBrandSettings(settings) {
   const account = await readCoachAccount();
-  await setSetting(
-    "coachName",
-    cleanString(settings?.coachName, account.businessName, 80),
-  );
-  await setSetting("brandLogoName", cleanString(settings?.logoName, "", 120));
-  await setSetting("brandLogoPreview", cleanLogoPreview(settings?.logoPreview));
-  await setSetting("brandShowLogo", settings?.showLogo === true ? "true" : "false");
-  await setSetting("brandNeutral", cleanHexColor(settings?.neutral, "#ffffff"));
-  await setSetting("brandPrimary", cleanHexColor(settings?.primary, "#1fd36d"));
-  await setSetting(
-    "brandSecondary",
-    cleanHexColor(settings?.secondary, "#d7b06b"),
-  );
-  await setSetting("brandAccent", cleanHexColor(settings?.accent, "#07100a"));
-  await setSetting(
-    "brandBookingTheme",
-    settings?.bookingTheme === "light" ? "light" : "dark",
-  );
-  await setSetting("updatedAt", nowIso());
+  await setSettingsBulk({
+    coachName: cleanString(settings?.coachName, account.businessName, 80),
+    brandLogoName: cleanString(settings?.logoName, "", 120),
+    brandLogoPreview: cleanLogoPreview(settings?.logoPreview),
+    brandShowLogo: settings?.showLogo === true ? "true" : "false",
+    brandNeutral: cleanHexColor(settings?.neutral, "#ffffff"),
+    brandPrimary: cleanHexColor(settings?.primary, "#1fd36d"),
+    brandSecondary: cleanHexColor(settings?.secondary, "#d7b06b"),
+    brandAccent: cleanHexColor(settings?.accent, "#07100a"),
+    brandBookingTheme: settings?.bookingTheme === "light" ? "light" : "dark",
+    brandCalendarColorsJson: JSON.stringify(cleanCalendarColors(settings?.calendarColors)),
+    updatedAt: nowIso(),
+  });
   return readBrandSettings();
 }
 
@@ -4466,6 +4635,10 @@ function googleCalendarRelevantItem(item) {
     phone: item.phone || "",
     email: item.email || "",
     note: item.note || "",
+    // Cancelling a booking changes nothing else about it, so without status
+    // here the change never registers and the Google event is never taken
+    // down — the slot stays held on a lesson that is not happening.
+    status: item.status || "",
   };
 }
 
@@ -4485,43 +4658,58 @@ function googleCalendarChangesBetween(previousItems, nextItems) {
   return changes;
 }
 
-const GOOGLE_SYNC_RESPONSE_BUDGET_MS = 5000;
-
-// The calendar rows are committed before Google Calendar is synced, so a slow Google round trip
-// used to hold the save response open past the function timeout. The client then retried, hit a
-// 409 against its own committed write, and reported "not saved" for a booking that had saved.
-// Time-box the sync: if Google is slow we answer the client now and let the sync finish in the
-// background (it re-runs on the next save or state read anyway).
-async function syncGoogleCalendarWithinBudget(changes, trigger = "admin_calendar_save", budgetMs = GOOGLE_SYNC_RESPONSE_BUDGET_MS) {
-  const sync = syncGoogleCalendarChangesIfEnabled(changes, trigger).then(
-    (result) => result,
-    async (error) => ({
-      ...(await getGoogleCalendarSyncStatus().catch(() => ({}))),
-      ok: false,
-      skipped: false,
-      error: error instanceof Error ? error.message : "Google Calendar sync failed.",
-    }),
-  );
-  let budgetTimer = null;
-  const budget = new Promise((resolve) => {
-    budgetTimer = setTimeout(() => resolve(null), budgetMs);
-  });
-  const settled = await Promise.race([sync, budget]);
-  if (budgetTimer) clearTimeout(budgetTimer);
-  if (settled) return settled;
-  sync
-    .then((result) => console.info("calendar_state:google_sync_completed_after_response", { ok: result?.ok !== false }))
-    .catch((error) => console.error("calendar_state:google_sync_failed_after_response", error));
-  console.warn("calendar_state:google_sync_deferred", { budgetMs });
-  return {
-    ...(await getGoogleCalendarSyncStatus().catch(() => ({}))),
-    ok: true,
-    skipped: false,
-    pending: true,
-  };
+/**
+ * Hand a Google Calendar sync to the runtime instead of to the response.
+ *
+ * Google is not on the critical path of a save. The rows are committed before
+ * the sync starts, the sync re-runs on the next change, and the nightly
+ * reconcile rebuilds anything a failed push missed — so a save that waits on
+ * Google is paying for a round trip it does not need.
+ *
+ * It used to wait behind a five second budget, and that turned out to be worse
+ * than either waiting or not. A sync that outran the budget kept running, but
+ * the function froze as soon as it answered, suspending that sync mid-request.
+ * The change queue is module level, so the next save on the same warm instance
+ * queued behind the suspended one and inherited the whole stall. Two or three
+ * saves in a row and the calendar sat on "Saving…" for the full budget every
+ * time, with nothing actually reaching Google.
+ *
+ * waitUntil is what makes firing and forgetting safe: it holds the instance
+ * open until the sync finishes, so the work completes rather than being
+ * suspended. Failures still land in the Google sync debug log and in
+ * googleCalendarLastSyncStatus, so a coach sees them on the next save or state
+ * read instead of inline on this one.
+ */
+function deferGoogleCalendarSync(changes, trigger = "admin_calendar_save", netlifyContext = null) {
+  const task = syncGoogleCalendarChangesIfEnabled(changes, trigger)
+    .then((result) =>
+      console.info("calendar_state:google_sync_completed_after_response", { trigger, ok: result?.ok !== false }),
+    )
+    .catch((error) => console.error("calendar_state:google_sync_failed_after_response", trigger, error));
+  if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
+    netlifyContext.waitUntil(task);
+  }
+  return { ok: true, skipped: false, pending: true };
 }
 
-async function writeCalendarState(nextState, context = null) {
+/**
+ * Push availability-derived blocks to Google after an availability edit.
+ *
+ * A full rebuild rather than a targeted change: unavailable blocks are not
+ * calendar items, so there is no item diff that describes them moving. Deferred
+ * for the same reason as the calendar save — a rebuild touches every event on
+ * the calendar, which is the last thing a save should be made to wait for.
+ */
+function deferGoogleCalendarAvailabilitySync(netlifyContext = null) {
+  const task = syncGoogleCalendarNow("availability_save")
+    .then((result) => console.info("availability:google_sync_completed_after_response", { ok: result?.ok !== false }))
+    .catch((error) => console.error("availability:google_sync_failed_after_response", error));
+  if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
+    netlifyContext.waitUntil(task);
+  }
+}
+
+async function writeCalendarState(nextState, context = null, netlifyContext = null) {
   const current = await readCalendarState();
   if (context) {
     assertAccountFeature(context.account, "coachCalendar");
@@ -4615,20 +4803,31 @@ async function writeCalendarState(nextState, context = null) {
     accountId: context?.accountId,
   });
   const updatedAt = nowIso();
-  await Promise.all([setSetting("syncKey", syncKey), setSetting("updatedAt", updatedAt)]);
+  await setSettingsBulk({ syncKey, updatedAt });
   // The response payload rebuilds the whole admin state. None of these reads depend on each
   // other, and running them one after another stacked six round trips onto every save.
   // readAdminSettings/readBrandSettings/readCoachAccount all derive from the same settings
   // table, so share one bulk read across them instead of each fetching its own copy in parallel.
   const sharedSettingsMap = await readSettingsMap();
-  const [people, notifications, settings, brand, account, googleCalendarSync] = await Promise.all([
+  const [people, notifications, settings, brand, account, googleCalendar] = await Promise.all([
     readPeople(peopleAccountId),
     readNotificationHistory(),
     readAdminSettings(sharedSettingsMap),
     readBrandSettings(sharedSettingsMap),
     readCoachAccount(sharedSettingsMap),
-    syncGoogleCalendarWithinBudget(googleCalendarChangesBetween(current.items, items), "admin_calendar_save"),
+    getGoogleCalendarSyncStatus(),
   ]);
+  // Fired, not awaited: see deferGoogleCalendarSync. The connection status the
+  // client shows comes from the read above, so the pending marker adds to it
+  // rather than replacing it with a bare flag.
+  const googleCalendarSync = {
+    ...googleCalendar,
+    ...deferGoogleCalendarSync(
+      googleCalendarChangesBetween(current.items, items),
+      "admin_calendar_save",
+      netlifyContext,
+    ),
+  };
   return {
     syncKey,
     items: context ? items.filter((item) => canReadCalendarItem(context, item, { ...current, items })) : items,
@@ -4644,7 +4843,7 @@ async function writeCalendarState(nextState, context = null) {
     settings,
     brand,
     account,
-    googleCalendar: await getGoogleCalendarSyncStatus(),
+    googleCalendar,
     googleCalendarSync,
   };
 }
@@ -4711,7 +4910,7 @@ function deleteFailureDiagnostics(error, baseDetails, durationMs) {
   };
 }
 
-async function deleteCalendarItemById(id, context = null) {
+async function deleteCalendarItemById(id, context = null, netlifyContext = null) {
   const cleanId = cleanString(id, "", 140);
   if (!cleanId) {
     throw Object.assign(new Error("Calendar item id is required for delete."), {
@@ -4764,17 +4963,11 @@ async function deleteCalendarItemById(id, context = null) {
 
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
-  const googleCalendarSyncTask = syncGoogleCalendarChangesIfEnabled([{ id: cleanId, action: "delete" }], "admin_calendar_delete")
-    .then((result) => console.info("calendar_state:google_sync_completed_after_response", { ok: result?.ok !== false }))
-    .catch((error) => console.error("calendar_state:google_sync_failed_after_response", error));
-  if (context && typeof context.waitUntil === "function") {
-    context.waitUntil(googleCalendarSyncTask);
-  }
-  const googleCalendarSync = {
-    ok: true,
-    skipped: false,
-    pending: true,
-  };
+  const googleCalendarSync = deferGoogleCalendarSync(
+    [{ id: cleanId, action: "delete" }],
+    "admin_calendar_delete",
+    netlifyContext,
+  );
   let nextState = null;
   try {
     nextState = await readCalendarState();
@@ -7828,6 +8021,16 @@ function formatLocalDateTime(week, day, minutes) {
   return `${date.year}${pad(date.month)}${pad(date.day)}T${pad(hour)}${pad(minute)}00`;
 }
 
+/**
+ * Like formatLocalDateTime, but for a time measured from the start of a weekday
+ * that may run past midnight — an unavailable span from Friday evening to
+ * Monday morning is 3900 minutes into Friday, not hour 65 of it.
+ */
+function formatSpanDateTime(day, minutes) {
+  const dayOffset = Math.floor(minutes / (24 * 60));
+  return formatLocalDateTime(0, day + dayOffset, minutes - dayOffset * 24 * 60);
+}
+
 function eventDescription(item, serviceList, location) {
   const rows =
     item.kind === "block"
@@ -7849,6 +8052,49 @@ function eventSummary(item, account, serviceList) {
   return `${item.client || item.title} - ${serviceName(item.serviceId, serviceList)}`;
 }
 
+/**
+ * A cancelled or no-show booking is not busy time. It stays on the Clarity
+ * calendar as a record, but publishing it to Google would hold an hour the
+ * coach is free to fill — the one thing a subscribed calendar must not do.
+ */
+export function feedItemIsBusy(item) {
+  if (item?.status === "cancelled" || item?.status === "no_show") return false;
+  // Cancelling a scheduled group session leaves a placeholder block behind so
+  // the slot does not regenerate. It marks an absence, not an engagement.
+  if (item?.kind === "block" && item?.note === CANCELLED_GROUP_SESSION_NOTE) return false;
+  return true;
+}
+
+/**
+ * Busy events covering the time the coach is not open for bookings, so a
+ * subscribed calendar shows a working week rather than an empty one with a few
+ * lessons floating in it.
+ *
+ * The stretches themselves come from _shared/availability-blocks.mts, which the
+ * Google Calendar API sync publishes from too — two ideas of "unavailable"
+ * would drift, and a coach on the feed would see a different week from one on
+ * the sync with no way to tell which was right.
+ */
+function unavailableFeedEvents(state, account, stamp) {
+  const timezone = account.timezone;
+  // Anchored to week 0 and repeating weekly, so the event body never changes
+  // just because time passed and every hour stays covered indefinitely.
+  return unavailableSpans(state.availability || []).flatMap((span) => [
+    "BEGIN:VEVENT",
+    `UID:${span.id}@clarity-golf-booking`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART;TZID=${timezone}:${formatSpanDateTime(span.day, span.start)}`,
+    `DTEND;TZID=${timezone}:${formatSpanDateTime(span.day, span.start + span.durationMinutes)}`,
+    "RRULE:FREQ=WEEKLY",
+    `SUMMARY:${escapeText(`Unavailable - ${account.businessName}`)}`,
+    `DESCRIPTION:${escapeText("Not bookable. Set by your Clarity availability.")}`,
+    "CATEGORIES:Unavailable",
+    "STATUS:CONFIRMED",
+    "TRANSP:OPAQUE",
+    "END:VEVENT",
+  ]);
+}
+
 function generateCalendarFeed(state) {
   const stamp = formatUtcStamp();
   const account = cleanCoachAccount(state.account);
@@ -7867,8 +8113,11 @@ function generateCalendarFeed(state) {
     "REFRESH-INTERVAL;VALUE=DURATION:PT5M",
   ];
 
+  lines.push(...unavailableFeedEvents(state, account, stamp));
+
   state.items
     .slice()
+    .filter(feedItemIsBusy)
     .sort(
       (a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start,
     )
@@ -8322,10 +8571,14 @@ export async function handleBookingApiRoute(
           const updatedAt = nowIso();
           await setSetting("updatedAt", updatedAt);
           // Keep Google Calendar in step with every single-booking change (drag
-          // reschedule, edit, lesson-complete). Time-boxed like the other save
-          // paths so a slow Google round trip finishes in the background instead
-          // of holding this response open.
-          const googleCalendarSync = await syncGoogleCalendarWithinBudget([{ id: item.id, action: "upsert" }], "admin_item_upsert");
+          // reschedule, edit, lesson-complete). Deferred like the other save
+          // paths so the round trip runs after the response rather than inside
+          // it.
+          const googleCalendarSync = deferGoogleCalendarSync(
+            [{ id: item.id, action: "upsert" }],
+            "admin_item_upsert",
+            context,
+          );
           let notificationResults = [];
           let notificationWarning = "";
           try {
@@ -8377,7 +8630,7 @@ export async function handleBookingApiRoute(
         clearItems: body.clearItems === true,
         itemsOperation: body.itemsOperation,
         updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
-      }, requestContext);
+      }, requestContext, context);
       let notificationResults = [];
       let notificationWarning = "";
       try {
@@ -8431,7 +8684,7 @@ export async function handleBookingApiRoute(
         operationOwner: "calendar_reload_verify",
       });
       try {
-        const nextState = await deleteCalendarItemById(calendarItemId, requestContext);
+        const nextState = await deleteCalendarItemById(calendarItemId, requestContext, context);
         const verificationResult = nextState.items.some((item) => item.id === calendarItemId)
           ? "found"
           : "not_found";
@@ -8714,6 +8967,11 @@ export async function handleBookingApiRoute(
         defaultCoachId(state.coaches),
       );
       const savedAvailability = await writeAvailability(nextAvailability, requestContext);
+      // Unavailable blocks in Google are derived from availability, so a change
+      // here is the only thing that can move them. The targeted change path
+      // cannot express it — it works from calendar item diffs — so this takes
+      // the full rebuild, deferred like every other save's sync.
+      deferGoogleCalendarAvailabilitySync(context);
       const fallbackCoachId = defaultCoachId(state.coaches);
       return json({
         availability: savedAvailability.map((dayWindows) =>

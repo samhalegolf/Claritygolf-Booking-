@@ -352,6 +352,22 @@ function adminSettingsFromSettings(settings: Record<string, string>) {
   };
 }
 
+/** The two outlines a booking card can wear; the fill lives on the service. */
+const defaultCalendarColors: Record<string, string> = {
+  statusCompleted: "#7f8a80",
+  statusBayBooked: "#e08a2e",
+};
+
+function cleanCalendarColors(colors: unknown): Record<string, string> {
+  const source = colors && typeof colors === "object" ? (colors as Record<string, unknown>) : {};
+  const cleaned: Record<string, string> = {};
+  for (const [key, fallback] of Object.entries(defaultCalendarColors)) {
+    const value = source[key];
+    cleaned[key] = typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim() : fallback;
+  }
+  return cleaned;
+}
+
 function brandSettingsFromSettings(settings: Record<string, string>, account: ReturnType<typeof cleanCoachAccount>) {
   return {
     coachName: settingValue(settings, "coachName") || account.businessName,
@@ -363,6 +379,9 @@ function brandSettingsFromSettings(settings: Record<string, string>, account: Re
     secondary: settingValue(settings, "brandSecondary") || "#d7b06b",
     accent: settingValue(settings, "brandAccent") || "#07100a",
     bookingTheme: settingValue(settings, "brandBookingTheme") === "light" ? "light" : "dark",
+    calendarColors: cleanCalendarColors(
+      parseSettingJson(settings, "brandCalendarColorsJson", defaultCalendarColors),
+    ),
   };
 }
 
