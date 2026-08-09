@@ -457,6 +457,26 @@ function cleanUrl(value, fallback) {
   }
 }
 
+/**
+ * Starting fills for lesson types, handed out by position. Kept in step with
+ * serviceColorPalette in src/App.tsx so a service that has never had a colour
+ * picked reads the same on the server as it does in the browser.
+ */
+const serviceColorPalette = [
+  "#2b2233",
+  "#1c3348",
+  "#14342a",
+  "#3f3320",
+  "#2f2438",
+  "#123043",
+  "#1a3b2f",
+  "#402b28",
+];
+
+function defaultServiceColor(index) {
+  return serviceColorPalette[Math.abs(index) % serviceColorPalette.length];
+}
+
 function cleanHexColor(value, fallback) {
   if (typeof value !== "string") return fallback;
   const trimmed = value.trim();
@@ -575,6 +595,7 @@ function cleanService(service, index = 0) {
     minParticipants,
     lessonFormat,
     priceMode,
+    color: cleanHexColor(service?.color, defaultServiceColor(index)),
     locationId: cleanSlug(service?.locationId, "") || undefined,
     lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
