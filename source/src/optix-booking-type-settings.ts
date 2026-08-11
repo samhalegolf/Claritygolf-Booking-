@@ -127,6 +127,8 @@ function installStyles() {
     #optix-resource-modal .removed-bays button{background:#26382c;color:#fff;padding:7px 9px}
     #optix-resource-modal .service-list{display:grid;gap:7px}
     #optix-resource-modal .service-list label{display:flex;align-items:center;gap:9px;padding:8px;border-radius:8px;background:#142219;font-size:13px}
+    #optix-resource-modal .auto-book-card{border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:15px;margin:12px 0;background:rgba(255,255,255,.025)}
+    #optix-resource-modal .auto-book-card .service-list{margin-top:10px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
     #optix-resource-modal .resource-foot{justify-content:flex-end;margin-top:18px}
     #optix-resource-modal .status{font-size:12px;color:#a9b7ac;margin-right:auto}
     @media(max-width:720px){#optix-resource-modal .profile-grid{grid-template-columns:1fr}.profile-head{align-items:flex-start!important;flex-wrap:wrap}}
@@ -164,11 +166,20 @@ export async function openOptixResourceEditor() {
   if (document.getElementById("optix-resource-modal")) return;
   const [services, saved] = await Promise.all([loadServices(), loadState()]);
   let profiles = migrateProfiles(services, saved);
+  const autoBookByService: Record<string, boolean> = Object.fromEntries(
+    services.map((service) => [service.id, saved.config?.[service.id]?.autoBook === true]),
+  );
   const modal = document.createElement("div");
   modal.id = "optix-resource-modal";
 
+  const renderAutoBook = () => `<section class="auto-book-card">
+    <div class="section-title">Auto-book resource after client bookings</div>
+    <div class="resource-subtitle">Ticked lesson types get a bay booked automatically once a client booking lands on the calendar. Needs a resource profile above; if no bay is free the booking still goes ahead and the card shows no resource.</div>
+    <div class="service-list">${services.map((service) => `<label><input type="checkbox" data-auto-book-service="${esc(service.id)}"${autoBookByService[service.id] ? " checked" : ""}> ${esc(service.name || service.id)}</label>`).join("")}</div>
+  </section>`;
+
   const render = () => {
-    modal.innerHTML = `<div class="resource-panel"><div class="resource-head"><div><h2>Resources</h2><div class="resource-subtitle">A lesson type can use one standard profile and one left-handed profile.</div></div><button class="secondary close-resources">Close</button></div><button class="add-profile" type="button">+ New resource profile</button><div class="profiles">${profiles.map((profile) => renderProfile(profile, services)).join("")}</div><div class="resource-foot"><span class="status"></span><button class="primary save-resources">Save resources</button></div></div>`;
+    modal.innerHTML = `<div class="resource-panel"><div class="resource-head"><div><h2>Resources</h2><div class="resource-subtitle">A lesson type can use one standard profile and one left-handed profile.</div></div><button class="secondary close-resources">Close</button></div><button class="add-profile" type="button">+ New resource profile</button><div class="profiles">${profiles.map((profile) => renderProfile(profile, services)).join("")}</div>${renderAutoBook()}<div class="resource-foot"><span class="status"></span><button class="primary save-resources">Save resources</button></div></div>`;
   };
 
   const syncFromDom = () => {
@@ -179,6 +190,9 @@ export async function openOptixResourceEditor() {
       resourceIds: Array.from(card.querySelectorAll<HTMLElement>(".bay-row")).map((row) => row.dataset.bayId || "").filter(Boolean),
       serviceIds: Array.from(card.querySelectorAll<HTMLInputElement>("[data-service-id]:checked")).map((input) => input.dataset.serviceId || "").filter(Boolean),
     }));
+    for (const input of Array.from(modal.querySelectorAll<HTMLInputElement>("[data-auto-book-service]"))) {
+      autoBookByService[input.dataset.autoBookService || ""] = input.checked;
+    }
   };
 
   render();
@@ -245,6 +259,7 @@ export async function openOptixResourceEditor() {
       const leftProfile = profiles.find((item) => item.handedness === "left" && item.serviceIds.includes(service.id));
       return [service.id, {
         enabled: Boolean(standardProfile || leftProfile),
+        autoBook: autoBookByService[service.id] === true,
         leftHanded: false,
         preferredResourceIds: standardProfile?.resourceIds || [],
         leftHandedResourceIds: leftProfile?.resourceIds || [],

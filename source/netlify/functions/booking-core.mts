@@ -15,6 +15,7 @@ import {
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
 import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";
+import { autoBookResourceForNewBooking } from "./_shared/optix-book-resource.mts";
 import { planExternalReschedule } from "./_shared/external-reschedule.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
@@ -5053,7 +5054,7 @@ async function writePublicBookingState(currentState, items) {
   };
 }
 
-function schedulePublicBookingSideEffects(context, appointment) {
+function schedulePublicBookingSideEffects(context, appointment, options = {}) {
   const task = (async () => {
     // The appointment was already written without waiting on this (public
     // booking latency matters more than the client link being instant). Once
@@ -5073,6 +5074,15 @@ function schedulePublicBookingSideEffects(context, appointment) {
     await syncGoogleCalendarChangesIfEnabled([{ id: appointment.id, action: "upsert" }], "public_booking_created").catch((error) =>
       console.error("public_booking:google_calendar_sync_failed", error),
     );
+    // Lesson types with Auto-book ticked in Resources get their Optix bay
+    // booked here — after the booking is already on the calendar — instead of
+    // holding up the client's booking flow. Only for newly created client
+    // bookings (not reschedules: a bay already booked stays where it is until
+    // the coach moves it). Never throws; on failure the card simply shows no
+    // bay and the coach books it manually as before.
+    if (options.autoBookResource === true) {
+      await autoBookResourceForNewBooking(appointment.id, appointment.serviceId);
+    }
   })().catch((error) => console.error("public_booking:side_effects_failed", appointment?.id, error));
 
   if (context && typeof context.waitUntil === "function") {
@@ -5080,12 +5090,12 @@ function schedulePublicBookingSideEffects(context, appointment) {
   }
 }
 
-async function writePublicBookingAppointment(currentState, appointment, context = null) {
+async function writePublicBookingAppointment(currentState, appointment, context = null, options = {}) {
   const cleanItems = await writeItems([appointment]);
   const updatedAt = nowIso();
   await setSetting("updatedAt", updatedAt);
   const savedAppointment = cleanItems.find((item) => item.id === appointment.id) || appointment;
-  schedulePublicBookingSideEffects(context, savedAppointment);
+  schedulePublicBookingSideEffects(context, savedAppointment, options);
   return {
     syncKey: currentState.syncKey,
     updatedAt,
@@ -7378,7 +7388,7 @@ async function createPublicBooking(payload, context = null) {
     location,
     ...(customGroup || {}),
   };
-  const nextState = await writePublicBookingAppointment(state, appointment, context);
+  const nextState = await writePublicBookingAppointment(state, appointment, context, { autoBookResource: true });
   return { appointment, notifications: [], state: nextState };
 }
 

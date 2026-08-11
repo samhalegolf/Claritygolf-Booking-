@@ -580,9 +580,22 @@ function rowToItem(row: Record<string, unknown>) {
     phone: cleanString(row.phone, "", 80),
     email: cleanEmail(row.email, ""),
     note: cleanString(row.note, "", 1200),
+    personId: cleanString(row.person_id, "", 140),
     coach: cleanBookingCoachSnapshot(row.coach),
     location: cleanBookingLocationSnapshot(row.location),
     status: cancelledGroupSession ? "cancelled" : status,
+    // Ownership and bay fields, mirroring booking-core's rowToItem. The shell
+    // is just a faster route to the same calendar: dropping these here made
+    // the Optix bay outline vanish on a fresh load and let externally-owned
+    // lessons be dragged as if Clarity owned them.
+    origin: cleanString(row.origin, "clarity", 80),
+    externalProvider: cleanString(row.external_provider, "", 80),
+    externalBookingId: cleanString(row.external_booking_id, "", 160),
+    externalBookingTypeName: cleanString(row.external_booking_type_name, "", 180),
+    bayBooked: row.bay_booked === true,
+    bayResourceId: cleanString(row.bay_resource_id, "", 80),
+    updatedAt: cleanString(typeof row.updated_at === "string" ? row.updated_at : String(row.updated_at || ""), "", 120),
+    completedAt: cleanString(typeof row.completed_at === "string" ? row.completed_at : String(row.completed_at || ""), "", 120),
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
     ...(customGroup || {}),
   };
@@ -644,10 +657,17 @@ async function readSettingsMap() {
 }
 
 async function readItems() {
+  // Same join booking-core's readItems() uses: the bay comes along with the
+  // lesson so the calendar can show which ones are covered on first load.
+  // Only a live booking counts: a failed or cancelled sync row means no bay.
   const rows = await db().sql`
-    SELECT *
-    FROM calendar_items
-    ORDER BY week, day, start, id
+    SELECT ci.*,
+           (s.optix_booking_id IS NOT NULL AND s.optix_booking_id <> ''
+            AND s.sync_status = 'synced') AS bay_booked,
+           s.resource_id AS bay_resource_id
+    FROM calendar_items ci
+    LEFT JOIN optix_booking_sync s ON s.calendar_item_id = ci.id
+    ORDER BY ci.week, ci.day, ci.start, ci.id
   `;
   return rows.map(rowToItem);
 }

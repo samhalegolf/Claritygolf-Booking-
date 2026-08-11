@@ -78,6 +78,10 @@ function cleanConfig(value: unknown) {
         if (!id) return null;
         return [id, {
           enabled: raw?.enabled === true,
+          // Book the Optix bay automatically once a client booking of this
+          // lesson type lands on the calendar (see booking-core's public
+          // booking side effects). Only meaningful alongside enabled: true.
+          autoBook: raw?.autoBook === true,
           leftHanded: raw?.leftHanded === true,
           preferredResourceIds: cleanIds(raw?.preferredResourceIds),
           leftHandedResourceIds: cleanIds(raw?.leftHandedResourceIds),
