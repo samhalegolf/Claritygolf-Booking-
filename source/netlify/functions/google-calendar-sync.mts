@@ -1104,8 +1104,14 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
     for (const [itemId, eventId] of Object.entries(previousMap)) {
       if (nextMap[itemId]) continue;
       if (await deleteGoogleEvent(accessToken, calendarId, eventId, itemId, retryBudget)) deleted += 1;
-      delete nextMap[itemId];
-      delete nextHashMap[itemId];
+      // Whether Google deleted it just now or it was already gone (404), the
+      // event no longer exists. Drop it from previousMap too: persistProgress
+      // merges previousMap back in on a mid-run failure, and before this line
+      // existed a rate-limited delete pass resurrected every entry it had
+      // already cleared — so a large backlog of stale events was retried in
+      // full every night, hit the rate limit again, and never shrank.
+      delete previousMap[itemId];
+      delete previousHashMap[itemId];
     }
 
     const syncedAt = nowIso();
