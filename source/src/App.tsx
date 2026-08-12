@@ -5720,8 +5720,13 @@ function App() {
   );
   const currentScreenPublicServiceIds = currentScreenPublicServices.map((service) => service.id).join("|");
   const quickCreateServices = effectiveCalendarPerspective === "location" ? [] : appointmentServices;
+  // Resolve the quick-create service from all account services, not just the
+  // appointment-style pick list: "Add person" on a scheduled group session sets
+  // serviceId to the group service, which the pick list deliberately excludes.
+  // Resolving against the pick list made the popover fall back to the "choose a
+  // service" list of normal lessons instead of the group booking form.
   const quickCreateService = quickCreate?.serviceId
-    ? quickCreateServices.find((service) => service.id === quickCreate.serviceId) ?? null
+    ? activeServices.find((service) => service.id === quickCreate.serviceId) ?? null
     : null;
   const selectedRescheduleMatch =
     rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
@@ -8179,37 +8184,6 @@ function App() {
     return true;
   }
 
-  function openQuickCreateForGroupSlot(item: CalendarItem, anchor: { x: number; y: number }) {
-    const service = services.find((candidate) => candidate.id === item.serviceId);
-    if (!service || !isScheduledGroupService(service)) return;
-    const slotWeek = itemWeek(item);
-    if (!isGroupServiceSlotMatch(service, slotWeek, item.day, item.start)) return;
-    const candidate = {
-      week: slotWeek,
-      day: item.day,
-      start: item.start,
-      duration: service.duration,
-    };
-    closeCalendarDetails();
-    setQuickMatchField("name");
-    setQuickClientSearch("");
-    setQuickCreate({
-      week: slotWeek,
-      day: item.day,
-      start: item.start,
-      x: anchor.x,
-      y: anchor.y,
-      serviceId: service.id,
-      phone: "",
-      email: "",
-      note: "",
-      attendees: [],
-      attendeeName: "",
-      attendeeEmail: "",
-      error: quickCreateAvailabilityError(candidate, service),
-    });
-  }
-
   function openGroupSessionFromSlot(item: CalendarItem): boolean {
     const failWith = (reason: string) => {
       setToast({ message: `Unable to open group session: ${reason}` });
@@ -9963,9 +9937,14 @@ function App() {
   }
 
   function backToQuickServiceChoice() {
-    setQuickCreate((current) =>
-      current ? { ...current, serviceId: "", phone: "", email: "", note: "", error: "" } : current,
-    );
+    setQuickCreate((current) => {
+      if (!current) return current;
+      // "Add person" on a scheduled group session pins the service; going back
+      // to the normal lesson pick list makes no sense there, so just close.
+      const service = activeServices.find((candidate) => candidate.id === current.serviceId);
+      if (isScheduledGroupService(service)) return null;
+      return { ...current, serviceId: "", phone: "", email: "", note: "", error: "" };
+    });
   }
 
   function confirmQuickAppointment() {
