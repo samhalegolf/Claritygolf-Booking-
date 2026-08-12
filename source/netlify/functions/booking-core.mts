@@ -615,12 +615,32 @@ function cleanService(service, index = 0) {
   };
 }
 
+// Every inbound external booking (Optix) files under this reserved lesson
+// type. The id must match EXTERNAL_BOOKING_SERVICE_ID in _shared/optix-origin.mts.
+export const EXTERNAL_BOOKING_SERVICE_ID = "external-booking";
+
+const externalBookingServiceTemplate = {
+  id: EXTERNAL_BOOKING_SERVICE_ID,
+  name: "External Booking",
+  duration: 60,
+  price: 0,
+  description: "Booking imported from an external system. Its time comes from the source; the source's own label is in the lesson note.",
+  visibility: "private",
+  active: true,
+  capacity: 1,
+  minParticipants: 1,
+  lessonFormat: "private",
+  priceMode: "session",
+  lessonNote: "",
+  location: "",
+};
+
 export function normalizeServices(serviceList) {
   // Only seed the demo lesson types when there is no services data at all.
   // An explicit empty list means the coach deleted them and must stay empty.
   const source = Array.isArray(serviceList) ? serviceList : defaultServices;
   const seen = new Set();
-  return source.map((service, index) => {
+  const services = source.map((service, index) => {
     const clean = cleanService(service, index);
     let id = clean.id;
     let suffix = 2;
@@ -631,6 +651,14 @@ export function normalizeServices(serviceList) {
     seen.add(id);
     return { ...clean, id };
   });
+  // The reserved External Booking type always exists, so an inbound external
+  // booking can never reference a lesson type that isn't in the catalogue. A
+  // stored copy wins (the coach may recolour or rename it); deleting it just
+  // brings the default back on the next read.
+  if (!seen.has(EXTERNAL_BOOKING_SERVICE_ID)) {
+    services.push(cleanService(externalBookingServiceTemplate, services.length));
+  }
+  return services;
 }
 
 function normalizeAvailability(availability) {
@@ -1684,6 +1712,9 @@ async function ensureCoreTables() {
 	    )
 	  `;
   ddl.sql`ALTER TABLE people ADD COLUMN IF NOT EXISTS account_id TEXT`;
+  // External booking clients (created by an inbound Optix booking) live in
+  // their own list until an admin merges or moves them into the main list.
+  ddl.sql`ALTER TABLE people ADD COLUMN IF NOT EXISTS external BOOLEAN NOT NULL DEFAULT FALSE`;
 	  ddl.sql`DROP INDEX IF EXISTS idx_people_email_unique`;
 	  ddl.sql`
 	    CREATE INDEX IF NOT EXISTS idx_people_email_lookup
@@ -2144,7 +2175,6 @@ function rowToItem(row) {
     origin: row.origin || "clarity",
     externalProvider: row.external_provider || "",
     externalBookingId: row.external_booking_id || "",
-    externalBookingTypeName: row.external_booking_type_name || "",
     bayBooked: row.bay_booked === true,
     bayResourceId: row.bay_resource_id || "",
     updatedAt,
@@ -2961,6 +2991,10 @@ function rowToPerson(row, fallbackAccountId = defaultWorkspaceAccountFromCoachAc
     source: row.source || "",
     caddyProfileId: row.caddy_profile_id || "",
     caddyProfileUrl: row.caddy_profile_url || "",
+    // TRUE only for people an inbound external booking created. They show in
+    // the external booking clients list until merged or moved into the main
+    // client list.
+    external: row.external === true,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -9229,6 +9263,29 @@ export async function handleBookingApiRoute(
         ok: true,
         ...result,
         people: filterPeopleForContext(result.people, requestContext, state),
+      });
+    }
+
+    // Moves a client between the external booking clients list and the main
+    // client list. A plain flag flip on the same row: bookings, notes and the
+    // person id all stay exactly as they are.
+    if (req.method === "POST" && pathname === "/api/people/set-external") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      const personId = cleanString(body?.personId, "", 120);
+      const external = body?.external === true;
+      const knownPeople = await readPeople(requestContext.accountId);
+      const personRow = knownPeople.find((person) => person.id === personId);
+      if (!personRow) {
+        return json({ error: "PERSON_NOT_FOUND", message: "That client could not be found." }, 404);
+      }
+      assertCanManagePerson(requestContext, personRow, state);
+      await db().sql`UPDATE people SET external = ${external}, updated_at = NOW() WHERE id = ${personId}`;
+      return json({
+        ok: true,
+        person: { ...personRow, external },
+        people: filterPeopleForContext(await readPeople(requestContext.accountId), requestContext, state),
       });
     }
 

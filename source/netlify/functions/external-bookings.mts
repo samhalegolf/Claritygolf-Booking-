@@ -73,9 +73,12 @@ export default async function handler(req: Request) {
     if (req.method === "PUT") {
       if (String(body.workspaceId) !== "637949") return json({ error: "unknown_mapping" }, 400);
       const emailBehaviour = ["none", "immediate", "after_bay"].includes(body.emailBehaviour) ? body.emailBehaviour : "none";
+      // No service mapping: every inbound booking files under the reserved
+      // External Booking lesson type, so the mapping only carries location,
+      // default coach and email behaviour.
       await optixOriginRequest("external_booking_mappings?provider=eq.optix&workspace_id=eq.637949", {
         method: "PATCH", body: JSON.stringify({
-          enabled: body.enabled === true, service_id: String(body.serviceId || ""), service_name: String(body.serviceName || ""),
+          enabled: body.enabled === true,
           location_id: String(body.locationId || ""), default_coach_id: String(body.defaultCoachId || "") || null,
           email_behaviour: emailBehaviour, updated_at: new Date().toISOString(),
         }),

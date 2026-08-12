@@ -42,7 +42,20 @@ test("the chosen format is kept for group lesson types named like a package", ()
 });
 
 test("an explicitly empty lesson type list is not repopulated with the demo defaults", () => {
-  assert.deepEqual(normalizeServices([]), []);
+  // Only the reserved External Booking type comes back: inbound external
+  // bookings always file under it, so it can never be missing. The demo
+  // defaults stay gone.
+  assert.deepEqual(normalizeServices([]).map((service) => service.id), ["external-booking"]);
+});
+
+test("the reserved External Booking type always exists and stays private", () => {
+  const services = normalizeServices([lessonType({ id: "lesson-a" })]);
+  const external = services.find((service) => service.id === "external-booking");
+  assert.ok(external, "external-booking must be appended when missing");
+  assert.equal(external?.visibility, "private");
+  // A stored copy wins, so the coach can rename or recolour it.
+  const [stored] = normalizeServices([lessonType({ id: "external-booking", name: "Optix bookings", visibility: "private" })]);
+  assert.equal(stored.name, "Optix bookings");
 });
 
 test("missing lesson type data still seeds the demo defaults", () => {

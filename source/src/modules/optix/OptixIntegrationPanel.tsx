@@ -24,7 +24,7 @@ export default function OptixIntegrationPanel() {
   const [profiles, setProfiles] = useState<ResourceProfile[]>([]);
   const [resourceServices, setResourceServices] = useState<any[]>([]);
   const [resourceConfig, setResourceConfig] = useState<Record<string, any>>({});
-  const [setupDraft, setSetupDraft] = useState({ enabled: false, serviceId: "", locationId: "", defaultCoachId: "", emailBehaviour: "none" });
+  const [setupDraft, setSetupDraft] = useState({ enabled: false, locationId: "", defaultCoachId: "", emailBehaviour: "none" });
   const [saving, setSaving] = useState<"" | "setup" | "resources">("");
   const [saved, setSaved] = useState("");
 
@@ -36,7 +36,7 @@ export default function OptixIntegrationPanel() {
       setIntegration(payload);
       setIntegrationError("");
       const mapping = payload.mappings?.find((row: any) => String(row.workspace_id) === "637949") || {};
-      setSetupDraft({ enabled: mapping.enabled === true, serviceId: mapping.service_id || "", locationId: mapping.location_id || "", defaultCoachId: mapping.default_coach_id || "", emailBehaviour: mapping.email_behaviour || "none" });
+      setSetupDraft({ enabled: mapping.enabled === true, locationId: mapping.location_id || "", defaultCoachId: mapping.default_coach_id || "", emailBehaviour: mapping.email_behaviour || "none" });
     } catch (error) {
       setIntegrationError(error instanceof Error ? error.message : "Optix feed could not load.");
     }
@@ -63,7 +63,9 @@ export default function OptixIntegrationPanel() {
 
   useEffect(() => { void Promise.all([loadIntegration(), loadResources()]); }, [loadIntegration, loadResources]);
 
-  const services = integration?.catalog?.services?.length ? integration.catalog.services : resourceServices;
+  // /api/services is normalized, so it always includes the reserved External
+  // Booking lesson type; the raw settings catalog only has it after a save.
+  const services = resourceServices.length ? resourceServices : integration?.catalog?.services || [];
   const mapping = integration?.mappings?.find((row) => String(row.workspace_id) === "637949") || null;
   const events = integration?.events || [];
   const failedCount = useMemo(() => events.filter((event) => event.processing_status === "failed").length, [events]);
@@ -83,8 +85,7 @@ export default function OptixIntegrationPanel() {
 
   async function saveSetup() {
     setSaving("setup"); setSaved("");
-    const selectedService = services.find((service) => service.id === setupDraft.serviceId);
-    const response = await fetch("/api/external-bookings", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceId: "637949", ...setupDraft, serviceName: selectedService?.name || "" }) });
+    const response = await fetch("/api/external-bookings", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceId: "637949", ...setupDraft }) });
     const payload = await response.json().catch(() => ({})); setSaving("");
     if (!response.ok) return setIntegrationError(payload?.message || payload?.error || "Optix setup could not be saved.");
     setIntegration(payload.state); setIntegrationError(""); setSaved("Setup saved");
@@ -130,11 +131,11 @@ export default function OptixIntegrationPanel() {
       <div className="optix-native-body">
         {tab === "setup" ? <>
           {integrationError ? <div className="optix-native-error"><strong>Setup data is unavailable</strong>{integrationError}</div> : null}
-          <div className="optix-native-note"><strong>Inbound Swing Analysis lessons</strong><span>Workspace 637949 is recognised. Ordinary bay workspaces, including 600006, are ignored.</span></div>
+          <div className="optix-native-note"><strong>Inbound Optix lessons</strong><span>Workspace 637949 is recognised; ordinary bay workspaces, including 600006, are ignored. Every booking imports as the External Booking lesson type — its time comes from Optix, the Optix label goes in the lesson note, and the customer lands in the external booking clients list unless their email matches an existing client.</span></div>
           <div className="optix-native-grid">
             <label className="toggle"><input checked={setupDraft.enabled} onChange={(event) => setSetupDraft((draft) => ({ ...draft, enabled: event.target.checked }))} type="checkbox" /> Enable appointment creation</label>
             <label>Optix workspace<input readOnly value="637949 · Swing Analysis" /></label>
-            <label>Clarity service<select disabled={!integration} value={setupDraft.serviceId} onChange={(event) => setSetupDraft((draft) => ({ ...draft, serviceId: event.target.value }))}><option value="">Select service</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name || service.id}</option>)}</select></label>
+            <label>Lesson type<input readOnly value="External Booking (automatic)" /></label>
             <label>Clarity location<select disabled={!integration} value={setupDraft.locationId} onChange={(event) => setSetupDraft((draft) => ({ ...draft, locationId: event.target.value }))}><option value="">Select location</option>{(integration?.catalog?.locations || []).map((location) => <option key={location.id} value={location.id}>{location.name || location.id}</option>)}</select></label>
             <label>Default coach<select disabled={!integration} value={setupDraft.defaultCoachId} onChange={(event) => setSetupDraft((draft) => ({ ...draft, defaultCoachId: event.target.value }))}><option value="">No default coach</option>{(integration?.catalog?.coaches || []).map((coach) => <option key={coach.id} value={coach.id}>{coach.displayName || coach.name || coach.id}</option>)}</select></label>
             <label>Customer email<select value={setupDraft.emailBehaviour} onChange={(event) => setSetupDraft((draft) => ({ ...draft, emailBehaviour: event.target.value }))}><option value="none">No Clarity email</option><option value="immediate">Send immediately</option><option value="after_bay">Send after bay booking</option></select></label>

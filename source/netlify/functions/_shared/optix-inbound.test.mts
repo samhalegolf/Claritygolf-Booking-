@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertProcessableEvent, createCalendarItemFromOptixBooking, findDuplicateBooking, matchPersonByEmail, matchPersonByPhone, normalizeOptixLessonEvent, updateCalendarItemFromOptixBooking, type OptixLessonMapping } from "./optix-origin.mts";
+import { EXTERNAL_BOOKING_SERVICE_ID, assertProcessableEvent, createCalendarItemFromOptixBooking, externalBookingNote, findDuplicateBooking, matchPersonByEmail, normalizeOptixLessonEvent, updateCalendarItemFromOptixBooking, type OptixLessonMapping } from "./optix-origin.mts";
 import { buildOptixAppointmentInput } from "./optix-reconcile.mts";
 
 const mapping: OptixLessonMapping = {
   provider: "optix", organisationId: "org-1", workspaceId: "637949", workspaceName: "Swing Analysis",
-  accountId: "sam-hale-golf", serviceId: "lesson-60", serviceName: "1 Hour Golf Lesson",
+  accountId: "sam-hale-golf",
   locationId: "three-kings", defaultCoachId: "sam-hale", enabled: true, expectedDuration: 60,
   bayProfileId: "standard", emailBehaviour: "none",
 };
@@ -21,7 +21,7 @@ test("workspace 637949 creates the canonical calendar appointment contract", () 
   const event = normalizeOptixLessonEvent(payload);
   const item = createCalendarItemFromOptixBooking(event, mapping, { itemId: "optix-item-1", personId: "person-1" });
   assert.deepEqual({ kind: item.kind, account: item.account_id, service: item.service_id, location: item.location_id, coach: item.coach_id }, {
-    kind: "appointment", account: "sam-hale-golf", service: "lesson-60", location: "three-kings", coach: "sam-hale",
+    kind: "appointment", account: "sam-hale-golf", service: EXTERNAL_BOOKING_SERVICE_ID, location: "three-kings", coach: "sam-hale",
   });
   assert.equal(item.duration, 60);
   assert.equal(item.client, "Ada Lovelace");
@@ -67,7 +67,7 @@ test("generated item is accepted unchanged by the existing Book resource payload
   };
   const outbound = buildOptixAppointmentInput(appointment, null, {
     memberId: "clarity-member", ownerUserId: "owner", defaultResourceId: "600006",
-    resourceMap: { "service:lesson-60": "600009" }, defaultTimeZone: "Pacific/Auckland",
+    resourceMap: { [`service:${EXTERNAL_BOOKING_SERVICE_ID}`]: "600009" }, defaultTimeZone: "Pacific/Auckland",
   });
   assert.equal(outbound.externalId, "clarity:optix-item-1");
   assert.deepEqual(outbound.resourceIds, ["600009"]);
@@ -99,20 +99,12 @@ test("an email match is case-insensitive but must be unambiguous", () => {
   assert.equal(matchPersonByEmail([...people, { id: "person-ada-2", email: "ada@example.com" }], "ada@example.com"), null);
 });
 
-test("a phone match compares canonical numbers rather than stored formatting", () => {
-  const people = [{ id: "person-ada", phone: "021 463 7700" }, { id: "person-sam", phone: "+64274637700" }];
-  assert.equal(matchPersonByPhone(people, "+6421 4637700"), "person-ada");
-  assert.equal(matchPersonByPhone(people, "0274637700"), "person-sam");
-  assert.equal(matchPersonByPhone(people, "021 999 0000"), null);
-});
-
-test("two clients sharing a name or a phone never collapse into one record", () => {
+test("two clients sharing an email or a name never collapse into one record", () => {
   // A duplicate is recoverable through the people merge; a wrong match is not,
   // because merging deletes the loser row.
-  const sharedPhone = [{ id: "person-a", phone: "0211" }, { id: "person-b", phone: "0211" }];
-  assert.equal(matchPersonByPhone(sharedPhone, "0211"), null);
+  const sharedEmail = [{ id: "person-a", email: "family@example.com" }, { id: "person-b", email: "family@example.com" }];
+  assert.equal(matchPersonByEmail(sharedEmail, "family@example.com"), null);
   assert.equal(matchPersonByEmail([{ id: "person-a", name: "John Smith" }], ""), null);
-  assert.equal(matchPersonByPhone([{ id: "person-a", name: "John Smith" }], ""), null);
 });
 
 test("a reschedule moves the booking without touching what an admin owns", () => {
@@ -132,13 +124,21 @@ test("a reschedule moves the booking without touching what an admin owns", () =>
   }
 });
 
-test("an inbound event never reclassifies the booking's Clarity service", () => {
+test("every inbound booking files under the reserved External Booking type", () => {
   const created = createCalendarItemFromOptixBooking(normalizeOptixLessonEvent(payload), mapping, { itemId: "id", personId: "person" });
-  // The Clarity service is admin-mapped and internal; the Optix wording is what
-  // the calendar shows.
-  assert.equal(created.service_id, "lesson-60");
-  assert.equal(created.external_booking_type_name, "Swing Analysis");
-  assert.equal(updateCalendarItemFromOptixBooking(normalizeOptixLessonEvent(payload), mapping).external_booking_type_name, "Swing Analysis");
+  assert.equal(created.service_id, EXTERNAL_BOOKING_SERVICE_ID);
+  // The Optix wording lives in the note, written on create only.
+  assert.equal(created.note, "Optix: Swing Analysis");
+});
+
+test("the note carries the source's own label, workspace and type", () => {
+  const event = normalizeOptixLessonEvent({ ...payload, workspace_name: "Sam Hale Golf", workspace_type: "Golf Lessons" });
+  assert.equal(externalBookingNote(event, mapping), "Optix: Sam Hale Golf · Golf Lessons");
+  // A repeated label is not written twice, and an empty payload still notes
+  // where the booking came from.
+  const bare = normalizeOptixLessonEvent({ ...payload, workspace_name: "", workspace_type: "" });
+  assert.equal(externalBookingNote(bare, { ...mapping, workspaceName: "" }), "Optix booking");
+  assert.equal(externalBookingNote(bare, mapping), "Optix: Swing Analysis");
 });
 
 test("a lesson the coach already has is not imported a second time", () => {

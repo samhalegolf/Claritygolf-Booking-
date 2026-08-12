@@ -591,7 +591,6 @@ function rowToItem(row: Record<string, unknown>) {
     origin: cleanString(row.origin, "clarity", 80),
     externalProvider: cleanString(row.external_provider, "", 80),
     externalBookingId: cleanString(row.external_booking_id, "", 160),
-    externalBookingTypeName: cleanString(row.external_booking_type_name, "", 180),
     bayBooked: row.bay_booked === true,
     bayResourceId: cleanString(row.bay_resource_id, "", 80),
     updatedAt: cleanString(typeof row.updated_at === "string" ? row.updated_at : String(row.updated_at || ""), "", 120),

@@ -4,6 +4,16 @@ import { canonicalPhoneKey } from "./phone.mts";
 
 export type OptixEmailBehaviour = "none" | "immediate" | "after_bay";
 
+/**
+ * Every inbound external booking files under this one reserved lesson type.
+ * External sources reuse the same workspace for different kinds of lesson, so
+ * mapping a workspace onto a specific Clarity service mislabelled bookings.
+ * The only per-booking variable Clarity needs is time, which comes from the
+ * event's own timestamps; the source's wording goes into the lesson note.
+ * booking-core's normalizeServices() guarantees the service exists.
+ */
+export const EXTERNAL_BOOKING_SERVICE_ID = "external-booking";
+
 export type OptixLessonMapping = {
   id?: string;
   provider: "optix";
@@ -11,8 +21,6 @@ export type OptixLessonMapping = {
   workspaceId: string;
   workspaceName: string;
   accountId: string;
-  serviceId: string;
-  serviceName: string;
   locationId: string;
   defaultCoachId: string | null;
   enabled: boolean;
@@ -27,6 +35,7 @@ export type OptixLessonEvent = {
   organisationId: string;
   workspaceId: string;
   workspaceName: string;
+  workspaceType: string;
   startIso: string;
   endIso: string;
   timezone: string;
@@ -111,6 +120,7 @@ export function normalizeOptixLessonEvent(payload: any): OptixLessonEvent {
     organisationId: text(pick(payload, "organization_id", "organisation_id", "booking.organization_id", "booking.organisation_id")),
     workspaceId: text(pick(payload, "workspace_id", "workspace.id", "booking.workspace_id", "booking.workspace.id")),
     workspaceName: text(pick(payload, "workspace_name", "workspace.name", "booking.workspace_name", "booking.workspace.name")),
+    workspaceType: text(pick(payload, "workspace_type", "workspace.type", "booking.workspace_type", "booking.workspace.type")),
     startIso,
     endIso,
     timezone: text(pick(payload, "timezone", "time_zone", "booking.timezone")) || "Pacific/Auckland",
@@ -160,12 +170,18 @@ function customerName(event: OptixLessonEvent) {
 }
 
 /**
- * The booking type as the external source words it. Clarity shows this rather
- * than the mapped service name, so an Optix "Swing Analysis" still reads as
- * "Swing Analysis" even though it is filed under a Clarity service internally.
+ * The lesson note as written on first import: the booking as the external
+ * source words it, e.g. "Optix: Sam Hale Golf · Golf Lessons". The booking
+ * itself files under the reserved External Booking lesson type, so this note
+ * is where the source's own label lives. Written on create only — the note is
+ * Clarity-owned after import and an inbound update never touches it.
  */
-function externalBookingTypeName(event: OptixLessonEvent, mapping: OptixLessonMapping) {
-  return event.workspaceName || mapping.workspaceName || "";
+export function externalBookingNote(event: OptixLessonEvent, mapping: OptixLessonMapping) {
+  const parts = [event.workspaceName || mapping.workspaceName, event.workspaceType]
+    .map((part) => (part || "").trim())
+    .filter(Boolean);
+  const unique = parts.filter((part, index) => parts.indexOf(part) === index);
+  return unique.length ? `Optix: ${unique.join(" · ")}` : "Optix booking";
 }
 
 function optixOwnedFields(event: OptixLessonEvent, mapping: OptixLessonMapping) {
@@ -176,7 +192,6 @@ function optixOwnedFields(event: OptixLessonEvent, mapping: OptixLessonMapping) 
     duration: derivedDuration || mapping.expectedDuration || 60,
     status: event.eventType === "member_booking_cancelled" ? "cancelled" : "booked",
     external_event_type: event.eventType,
-    external_booking_type_name: externalBookingTypeName(event, mapping),
     external_source: event.source,
     // A moved booking leaves any bay reservation at the old time, so the bay has
     // to be claimed again. This is the inbound lesson's state, never the
@@ -189,13 +204,14 @@ function optixOwnedFields(event: OptixLessonEvent, mapping: OptixLessonMapping) 
 /**
  * Fields an inbound event is allowed to change on a booking that already exists.
  *
- * Optix owns when the booking is and what it is called. Clarity owns everything
- * an admin can edit after import — coach, note, location, the mapped service,
- * and the customer link. Previously the whole item was rebuilt and PATCHed, so
- * every reschedule reset the coach to the mapping default and blanked the note.
+ * Optix owns when the booking is. Clarity owns everything an admin can edit
+ * after import — coach, note, location, the lesson type, and the customer
+ * link. Previously the whole item was rebuilt and PATCHed, so every reschedule
+ * reset the coach to the mapping default and blanked the note.
  *
- * Per the service-catalogue rule, service_id is absent here by design: an
- * inbound event may never reclassify a booking or touch the Clarity catalogue.
+ * service_id is absent here by design: a booking imports under the reserved
+ * External Booking type, and an inbound event may never reclassify it after
+ * an admin has had the chance to touch it.
  */
 export function updateCalendarItemFromOptixBooking(event: OptixLessonEvent, mapping: OptixLessonMapping) {
   return { ...optixOwnedFields(event, mapping), updated_at: new Date().toISOString() };
@@ -211,13 +227,13 @@ export function createCalendarItemFromOptixBooking(event: OptixLessonEvent, mapp
     kind: "appointment",
     coach_id: mapping.defaultCoachId || "",
     location_id: mapping.locationId,
-    service_id: mapping.serviceId,
+    service_id: EXTERNAL_BOOKING_SERVICE_ID,
     client,
     title: client,
     phone: event.phone,
     email: event.email,
     person_id: ids.personId,
-    note: "",
+    note: externalBookingNote(event, mapping),
     coach: null,
     location: { locationId: mapping.locationId, timezone: event.timezone },
     custom_group: null,
@@ -326,8 +342,6 @@ async function findMapping(event: OptixLessonEvent): Promise<OptixLessonMapping 
     workspaceId: text(row.workspace_id),
     workspaceName: text(row.workspace_name),
     accountId: text(row.account_id),
-    serviceId: text(row.service_id),
-    serviceName: text(row.service_name),
     locationId: text(row.location_id),
     defaultCoachId: text(row.default_coach_id) || null,
     enabled: row.enabled === true,
@@ -338,13 +352,6 @@ async function findMapping(event: OptixLessonEvent): Promise<OptixLessonMapping 
 }
 
 export type ExternalPersonCandidate = { id?: unknown; name?: unknown; email?: unknown; phone?: unknown };
-
-/**
- * Stored phone numbers are not normalised, so the whole account's contactable
- * people are compared in memory rather than by SQL string equality. This is one
- * coaching business's client list, but the cap keeps a runaway read bounded.
- */
-const PHONE_CANDIDATE_LIMIT = 2000;
 
 function rowsOf(value: unknown): ExternalPersonCandidate[] {
   return Array.isArray(value) ? value : [];
@@ -360,24 +367,21 @@ function uniqueById(rows: ExternalPersonCandidate[]) {
 }
 
 /**
- * Identity matching for inbound external bookings is deliberately one-sided.
+ * Identity matching for inbound external bookings is deliberately one-sided,
+ * and matches on email alone.
  *
- * A duplicate person is always recoverable — an admin merges it later. A wrong
- * match is not, because merging hard-deletes the loser record and takes its
- * history with it. So both matchers return null unless exactly one candidate
- * survives, and the caller creates a new person instead of guessing.
+ * A duplicate person is always recoverable — the new record lands in the
+ * external booking clients list, where an admin merges or moves it later. A
+ * wrong match is not, because merging hard-deletes the loser record and takes
+ * its history with it. So the matcher returns null unless exactly one
+ * candidate survives, and the caller creates a new external person instead of
+ * guessing. Names are never matched: two clients called "John Smith" must not
+ * collapse into one record.
  */
 export function matchPersonByEmail(rows: ExternalPersonCandidate[], email: string): string | null {
   const wanted = text(email).toLowerCase();
   if (!wanted) return null;
   const matches = uniqueById(rowsOf(rows).filter((row) => text(row?.email).toLowerCase() === wanted));
-  return matches.length === 1 ? text(matches[0].id) || null : null;
-}
-
-export function matchPersonByPhone(rows: ExternalPersonCandidate[], phone: string): string | null {
-  const wanted = canonicalPhoneKey(phone);
-  if (!wanted) return null;
-  const matches = uniqueById(rowsOf(rows).filter((row) => canonicalPhoneKey(row?.phone) === wanted));
   return matches.length === 1 ? text(matches[0].id) || null : null;
 }
 
@@ -390,7 +394,10 @@ function isDuplicateEmailError(error: any) {
 async function createExternalPerson(event: OptixLessonEvent, accountId: string, name: string) {
   const personId = randomUUID();
   try {
-    await optixOriginRequest("people", { method: "POST", body: JSON.stringify([{ id: personId, account_id: accountId, name, email: event.email || null, phone: event.phone || null, source: "optix" }]) });
+    // external: TRUE files the new person in the external booking clients
+    // list, not the main client list. They move across when an admin merges
+    // them into a main client or moves them over.
+    await optixOriginRequest("people", { method: "POST", body: JSON.stringify([{ id: personId, account_id: accountId, name, email: event.email || null, phone: event.phone || null, source: "optix", external: true }]) });
     return personId;
   } catch (error: any) {
     // The account-scoped unique index on email means at most one person can hold
@@ -409,23 +416,15 @@ async function resolvePerson(event: OptixLessonEvent, accountId: string) {
   if (!name) throw Object.assign(new Error("Optix customer identity is missing."), { code: "missing_customer_identity" });
   const account = encodeURIComponent(accountId);
 
+  // Email is the only auto-match. When it matches exactly one person —
+  // external or main — the booking files under that client id; anything less
+  // certain becomes a new external booking client for the admin to merge.
   if (event.email) {
     const rows = await optixOriginRequest(`people?account_id=eq.${account}&email=ilike.${encodeURIComponent(event.email)}&select=id,name,email,phone&limit=10`);
     const matched = matchPersonByEmail(rowsOf(rows), event.email);
     if (matched) return matched;
   }
 
-  // An email that matches nothing must still fall through to the phone. The
-  // previous else-if stopped here and created a duplicate for every customer
-  // whose Optix email differed from the one Clarity already held.
-  if (canonicalPhoneKey(event.phone)) {
-    const rows = await optixOriginRequest(`people?account_id=eq.${account}&phone=not.is.null&select=id,name,email,phone&limit=${PHONE_CANDIDATE_LIMIT}`);
-    const matched = matchPersonByPhone(rowsOf(rows), event.phone);
-    if (matched) return matched;
-  }
-
-  // A shared name is not identity, so there is no name fallback: two clients
-  // called "John Smith" must not collapse into one record.
   return createExternalPerson(event, accountId, name);
 }
 
@@ -449,7 +448,9 @@ export async function processStoredOptixEvent(eventKey: string, payload: unknown
   await updateEvent(eventKey, { processing_status: "processing", attempt_count: attemptCount });
   try {
     const mapping = await findMapping(event);
-    if (!mapping || !mapping.enabled || !mapping.serviceId || !mapping.locationId) {
+    // No service check: every inbound booking files under the reserved
+    // External Booking lesson type, so only a location still needs choosing.
+    if (!mapping || !mapping.enabled || !mapping.locationId) {
       const reason = !mapping ? "unmapped_workspace" : !mapping.enabled ? "disabled_mapping" : "incomplete_mapping";
       await updateEvent(eventKey, { processing_status: "ignored", failure_code: reason, error_message: null, processed_at: new Date().toISOString() });
       return { status: "ignored", reason };

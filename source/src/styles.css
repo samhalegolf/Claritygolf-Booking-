@@ -1308,6 +1308,21 @@ button {
   color: #fff;
 }
 
+.client-list-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.client-list-tabs .outline-button {
+  min-height: 38px;
+}
+
+.client-list-tabs .outline-button.active {
+  border-color: #111;
+  background: #111;
+  color: #fff;
+}
+
 .import-card {
   display: grid;
   gap: 12px;
@@ -5221,10 +5236,10 @@ button {
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--coach-primary) 28%, var(--border));
   border-radius: 8px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent),
-    color-mix(in srgb, var(--coach-accent) 82%, #101a12);
-  color: #ffffff;
+  /* Light neutral surface so transparent logos read naturally — the old
+     accent-based fill rendered as a near-black box behind every logo. */
+  background: color-mix(in srgb, var(--coach-neutral, #ffffff) 86%, #eef1ea);
+  color: color-mix(in srgb, var(--coach-accent, #10160f) 88%, #000000);
   overflow: hidden;
 }
 

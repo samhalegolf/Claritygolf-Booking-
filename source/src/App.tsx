@@ -473,7 +473,6 @@ type CalendarItem = {
   origin?: string;
   externalProvider?: string;
   externalBookingId?: string;
-  externalBookingTypeName?: string;
   /** A live Optix bay is held for this lesson. Backend-supplied, never written back. */
   bayBooked?: boolean;
   bayResourceId?: string;
@@ -606,6 +605,10 @@ type Person = {
   source: string;
   caddyProfileId: string;
   caddyProfileUrl: string;
+  // TRUE for a person an inbound external booking (Optix) created. They show
+  // in the external booking clients list until merged or moved into the main
+  // client list. Backend-owned: set on import, changed via /api/people/set-external.
+  external?: boolean;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -4351,6 +4354,45 @@ async function analyzeLogoFile(file: File): Promise<BrandSettings> {
     >();
     const pixels = sampleContext.getImageData(0, 0, sampleCanvas.width, sampleCanvas.height).data;
 
+    // Logos exported as JPG/PNG are often a transparent design flattened onto a
+    // solid white or black sheet. That sheet floods the pixel counts and used to
+    // win a swatch (usually black). Detect it from the border ring: if most
+    // border pixels are one near-neutral colour, treat that colour as the
+    // background and keep it out of the brand-colour picks (it still counts
+    // toward the neutral swatch, which is meant to be a surface colour).
+    const sampleWidth = sampleCanvas.width;
+    const sampleHeight = sampleCanvas.height;
+    const borderBuckets = new Map<string, { r: number; g: number; b: number; count: number }>();
+    let borderOpaqueCount = 0;
+    for (let y = 0; y < sampleHeight; y += 1) {
+      for (let x = 0; x < sampleWidth; x += 1) {
+        if (x !== 0 && y !== 0 && x !== sampleWidth - 1 && y !== sampleHeight - 1) continue;
+        const index = (y * sampleWidth + x) * 4;
+        if (pixels[index + 3] < 200) continue;
+        borderOpaqueCount += 1;
+        const r = clamp(Math.round(pixels[index] / 24) * 24, 0, 255);
+        const g = clamp(Math.round(pixels[index + 1] / 24) * 24, 0, 255);
+        const b = clamp(Math.round(pixels[index + 2] / 24) * 24, 0, 255);
+        const key = `${r},${g},${b}`;
+        const existing = borderBuckets.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          borderBuckets.set(key, { r, g, b, count: 1 });
+        }
+      }
+    }
+    const dominantBorder = Array.from(borderBuckets.values()).sort((a, b) => b.count - a.count)[0] ?? null;
+    const borderStats = dominantBorder ? rgbStats(dominantBorder.r, dominantBorder.g, dominantBorder.b) : null;
+    const backgroundColour =
+      dominantBorder &&
+      borderStats &&
+      borderOpaqueCount >= 16 &&
+      dominantBorder.count / borderOpaqueCount >= 0.4 &&
+      (borderStats.saturation < 0.14 || borderStats.lightness > 0.9 || borderStats.lightness < 0.1)
+        ? dominantBorder
+        : null;
+
     for (let index = 0; index < pixels.length; index += 4) {
       const alpha = pixels[index + 3];
       if (alpha < 120) continue;
@@ -4373,6 +4415,7 @@ async function analyzeLogoFile(file: File): Promise<BrandSettings> {
       }
 
       if (lightness > 0.96 && saturation < 0.08) continue;
+      if (backgroundColour && colorDistance({ r: rawR, g: rawG, b: rawB }, backgroundColour) < 50) continue;
 
       const existing = buckets.get(key);
       if (existing) {
@@ -4605,6 +4648,8 @@ function App() {
   const [clientMergeReview, setClientMergeReview] = useState<ClientMergeReview | null>(null);
   const [clientMergeSaving, setClientMergeSaving] = useState(false);
   const [clientMergeError, setClientMergeError] = useState("");
+  const [clientListTab, setClientListTab] = useState<"main" | "external">("main");
+  const [clientMoveSavingId, setClientMoveSavingId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
   const [videoContext, setVideoContext] = useState<{ playerId: string; playerName: string; savedVideoId?: string } | null>(null);
@@ -7853,6 +7898,10 @@ function App() {
     if (!clientSearchTerm) return clients;
     return clients.filter((client) => clientMatchesSearchTerm(client, clientSearchTerm));
   }, [clientSearchTerm, clients]);
+  // External booking clients (created by an inbound Optix booking) live in
+  // their own list until merged or moved into the main client list.
+  const mainListClients = useMemo(() => filteredClients.filter((client) => client.external !== true), [filteredClients]);
+  const externalListClients = useMemo(() => filteredClients.filter((client) => client.external === true), [filteredClients]);
   const clientReassignSearchTerm = clientReassignSearch.trim();
   const clientReassignMatches = useMemo(() => {
     if (!clientReassignOpen || !clientReassignSearchTerm) return [];
@@ -12407,10 +12456,15 @@ function App() {
 
   function openClientMergeReview() {
     if (clientMergeSelection.length !== 2) return;
-    const [survivor, loser] = clientMergeSelection
+    let [survivor, loser] = clientMergeSelection
       .map((id) => clients.find((client) => client.id === id))
       .filter((client): client is ClientSummary => Boolean(client));
     if (!survivor || !loser) return;
+    // Merging an external booking client into a main client keeps the main
+    // record, whichever was selected first: the external one is the duplicate.
+    if (survivor.external === true && loser.external !== true) {
+      [survivor, loser] = [loser, survivor];
+    }
     setClientMergeError("");
     setClientMergeReview({
       survivor,
@@ -12469,6 +12523,36 @@ function App() {
       setClientMergeError(error instanceof Error ? error.message : "Clients could not be merged.");
     } finally {
       setClientMergeSaving(false);
+    }
+  }
+
+  // Moves an external booking client into the main client list. Same person id,
+  // same bookings and notes — only the list they appear in changes.
+  async function moveExternalClientToMain(client: ClientSummary) {
+    if (clientMoveSavingId) return;
+    setClientMoveSavingId(client.id);
+    try {
+      const response = await fetch("/api/people/set-external", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ personId: client.id, external: false }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error(data?.message || "Admin login expired. Sign in again before moving clients.");
+      }
+      if (!response.ok || data?.ok === false) {
+        throw new Error(data?.message || "The client could not be moved.");
+      }
+      if (Array.isArray(data.people)) setPeople(data.people);
+      setToast({ message: `Moved ${client.name || client.email || "that client"} to your clients.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "The client could not be moved." });
+    } finally {
+      setClientMoveSavingId("");
     }
   }
 
@@ -19849,9 +19933,30 @@ function App() {
 	              </article>
 	            )}
 
+            <div className="client-list-tabs" role="tablist" aria-label="Client lists">
+              <button
+                className={`outline-button${clientListTab === "main" ? " active" : ""}`}
+                onClick={() => setClientListTab("main")}
+                role="tab"
+                aria-selected={clientListTab === "main"}
+                type="button"
+              >
+                Clients ({mainListClients.length})
+              </button>
+              <button
+                className={`outline-button${clientListTab === "external" ? " active" : ""}`}
+                onClick={() => setClientListTab("external")}
+                role="tab"
+                aria-selected={clientListTab === "external"}
+                type="button"
+              >
+                External bookings ({externalListClients.length})
+              </button>
+            </div>
+
             <div className="client-table">
-              {filteredClients.length ? (
-                filteredClients.map((client) => {
+              {(clientListTab === "external" ? externalListClients : mainListClients).length ? (
+                (clientListTab === "external" ? externalListClients : mainListClients).map((client) => {
                   const mergeEligible = !client.id.startsWith("appointment-");
                   const mergeSelected = clientMergeSelection.includes(client.id);
                   return (
@@ -19882,6 +19987,11 @@ function App() {
                     </button>
                   );
                 })
+              ) : clientListTab === "external" ? (
+                <div className="empty-panel compact">
+                  <h2>No external booking clients</h2>
+                  <p>People created by an inbound Optix booking appear here until you merge or move them into your clients.</p>
+                </div>
               ) : (
                 <div className="empty-panel compact">
                   <h2>No clients found</h2>
@@ -25826,6 +25936,17 @@ function App() {
                     <strong>Profile notes</strong>
                     <p>{profileNotesText(selectedClient)}</p>
                   </div>
+                )}
+                {selectedClient?.external === true && (
+                  <button
+                    type="button"
+                    className="outline-button client-move-button"
+                    disabled={clientMoveSavingId === selectedClient.id}
+                    onClick={() => void moveExternalClientToMain(selectedClient)}
+                  >
+                    <GitMerge size={16} />
+                    {clientMoveSavingId === selectedClient.id ? "Moving…" : "Move to clients"}
+                  </button>
                 )}
                 {selectedClient && (
                   <button
