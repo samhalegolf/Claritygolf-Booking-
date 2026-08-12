@@ -17,3 +17,8 @@ source/.netlify/
 *.sqlite-shm
 *.sqlite-wal
 source/server/clarity-booking.sqlite
+
+# Staging area for files on their way out. Nothing in here is part of the
+# build, and git on some setups can't unlink its own index.lock, so stale
+# lock artefacts collect here too. Never commit it.
+_to_delete/

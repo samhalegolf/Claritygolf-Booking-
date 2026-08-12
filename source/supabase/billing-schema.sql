@@ -44,6 +44,7 @@ create table if not exists public.billing_invoices (
   customer_note text,
   internal_note text,
   reference text,
+  tax_inclusive boolean not null default false,
   sent_at timestamptz,
   paid_at timestamptz,
   created_at timestamptz not null default now(),

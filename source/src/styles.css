@@ -9214,3 +9214,185 @@ button {
     text-align: left;
   }
 }
+
+/* --- POS (point of sale) ---------------------------------------------------
+   Counter-sale UI: the checkout modal, the POS Transactions tab and the
+   Unpaid/All/Paid filter on the invoice pull lists. Composes the existing
+   billing vocabulary (.data-card, .settings-field, .details-modal,
+   .billing-catalog-list) rather than introducing a parallel one. */
+
+.pos-checkout-modal {
+  width: min(480px, calc(100vw - 32px));
+}
+
+.pos-error {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* The amount is the one field that gets edited on nearly every sale, so it
+   reads a size larger than the rest of the form. */
+.pos-amount-field input {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.pos-reset-amount {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--coach-primary, #1fd36d);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pos-method-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.pos-method-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 46px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pos-method-button.active {
+  border-color: #171717;
+  background: #171717;
+  color: #fff;
+}
+
+.pos-method-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+/* The QR has to survive being read by a phone camera held at arm's length
+   across a counter, so it gets a fixed white quiet zone regardless of theme -
+   inverting it in dark mode would stop it scanning. */
+.pos-qr {
+  display: grid;
+  place-items: center;
+  margin: 14px auto;
+  padding: 12px;
+  width: min(260px, 70vw);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.pos-qr svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.pos-done {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 6px 0 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--success-soft, #eaf8ed);
+}
+
+.pos-done > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.pos-done strong {
+  font-size: 20px;
+}
+
+.pos-done span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* "Paid" line under the price on a lesson card. */
+.pos-paid-line {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pos-range-row {
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pos-method-totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.pos-method-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.pos-method-total span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pos-method-total strong {
+  font-size: 18px;
+}
+
+.pos-method-total em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Shown when the amount taken differs from the list price. */
+.pos-adjusted-note {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pos-settles-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.pull-filter-field {
+  margin-bottom: 8px;
+}

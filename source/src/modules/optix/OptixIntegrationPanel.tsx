@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-type Tab = "setup" | "resources" | "feed" | "diagnostics";
+type Tab = "setup" | "resources" | "passes" | "feed" | "diagnostics";
 type ResourceProfile = { id: string; name: string; handedness: "standard" | "left"; resourceIds: string[]; serviceIds: string[] };
-type IntegrationState = { mappings: any[]; catalog: { services: any[]; locations: any[]; coaches: any[] }; events: any[] };
+type PendingSummary = { count: number; oldest: string | null; newest: string | null };
+type PassPurchase = {
+  id: string; event_type: string; external_purchase_id: string | null;
+  member_email: string | null; member_name: string | null; person_id: string | null;
+  item_name: string | null; amount_cents: number | null; currency: string | null;
+  purchased_at: string; is_pass: boolean; classification: "pass" | "not_pass" | "unknown"; rawPayload: unknown;
+};
+type IntegrationState = { mappings: any[]; catalog: { services: any[]; locations: any[]; coaches: any[] }; events: any[]; pending?: PendingSummary; purchases?: PassPurchase[] };
+
+/** Events that never reached a conclusion, so the panel can retry them. */
+const UNPROCESSED = ["received", "stored", "failed"];
 
 const BAYS = [
   ["600009", "Bay #1"], ["600004", "Bay #2"], ["600005", "Bay #3"], ["600006", "Bay #4"],
@@ -11,6 +21,12 @@ const BAYS = [
 const BAY_IDS = BAYS.map(([id]) => id);
 const bayName = (id: string) => BAYS.find(([candidate]) => candidate === id)?.[1] || id;
 const newProfile = (number = 1): ResourceProfile => ({ id: `resource-${Date.now()}-${number}`, name: number === 1 ? "Standard lessons" : `Resource profile ${number}`, handedness: "standard", resourceIds: [...BAY_IDS], serviceIds: [] });
+
+function formatAmount(row: { amount_cents: number | null; currency: string | null }) {
+  if (row.amount_cents == null) return "Amount unknown";
+  const amount = (row.amount_cents / 100).toFixed(2);
+  return row.currency ? `${row.currency} ${amount}` : amount;
+}
 
 function safeJson(value: unknown) {
   try { return JSON.stringify(value ?? {}, null, 2); } catch { return "Unable to display payload."; }
@@ -27,6 +43,10 @@ export default function OptixIntegrationPanel() {
   const [setupDraft, setSetupDraft] = useState({ enabled: false, locationId: "", defaultCoachId: "", emailBehaviour: "none" });
   const [saving, setSaving] = useState<"" | "setup" | "resources">("");
   const [saved, setSaved] = useState("");
+  const [replayDays, setReplayDays] = useState(7);
+  const [showUnclassified, setShowUnclassified] = useState(false);
+  const [replaying, setReplaying] = useState(false);
+  const [replayResult, setReplayResult] = useState("");
 
   const loadIntegration = useCallback(async () => {
     try {
@@ -68,6 +88,13 @@ export default function OptixIntegrationPanel() {
   const services = resourceServices.length ? resourceServices : integration?.catalog?.services || [];
   const mapping = integration?.mappings?.find((row) => String(row.workspace_id) === "637949") || null;
   const events = integration?.events || [];
+  const pending: PendingSummary = integration?.pending || { count: 0, oldest: null, newest: null };
+  const purchases = integration?.purchases || [];
+  // The tab is a Pass feed, so it shows Passes. Anything the classifier could
+  // not call sits behind a toggle rather than being hidden, because a Pass
+  // landing in "unclassified" is exactly the case worth spotting.
+  const passes = useMemo(() => purchases.filter((row) => row.is_pass), [purchases]);
+  const unclassified = useMemo(() => purchases.filter((row) => row.classification === "unknown"), [purchases]);
   const failedCount = useMemo(() => events.filter((event) => event.processing_status === "failed").length, [events]);
 
   function patchProfile(id: string, patch: Partial<ResourceProfile>) {
@@ -111,6 +138,17 @@ export default function OptixIntegrationPanel() {
     setProfiles(payload.profiles || profiles); setResourceConfig(payload.config || config); setResourceError(""); setSaved("Resources saved");
   }
 
+  async function processPending() {
+    setReplaying(true); setReplayResult("");
+    const since = new Date(Date.now() - replayDays * 86_400_000).toISOString();
+    const response = await fetch("/api/external-bookings", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "process-pending", since }) });
+    const payload = await response.json().catch(() => ({})); setReplaying(false);
+    if (!response.ok) return setIntegrationError(payload?.message || payload?.error || "Pending events could not be processed.");
+    setIntegration(payload.state); setIntegrationError("");
+    const summary = Object.entries(payload.summary || {}).map(([key, value]) => `${key} ${value}`).join(" · ");
+    setReplayResult(`Processed ${payload.attempted || 0} event${payload.attempted === 1 ? "" : "s"}${summary ? ` — ${summary}` : ""}.`);
+  }
+
   async function retryEvent(eventKey: string) {
     const response = await fetch("/api/external-bookings", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "retry", eventKey }) });
     const payload = await response.json().catch(() => ({}));
@@ -125,7 +163,7 @@ export default function OptixIntegrationPanel() {
         <strong className={integrationError || resourceError ? "needs-attention" : ""}>{integrationError || resourceError ? "Needs attention" : "Ready"}</strong>
       </header>
       <div className="optix-native-tabs" role="tablist" aria-label="Optix settings">
-        {(["setup", "resources", "feed", "diagnostics"] as Tab[]).map((value) => <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)} role="tab" aria-selected={tab === value} type="button">{value === "feed" ? "Data feed" : value[0].toUpperCase() + value.slice(1)}{value === "feed" && events.length ? <b>{events.length}</b> : null}</button>)}
+        {(["setup", "resources", "passes", "feed", "diagnostics"] as Tab[]).map((value) => <button key={value} className={tab === value ? "active" : ""} onClick={() => setTab(value)} role="tab" aria-selected={tab === value} type="button">{value === "feed" ? "Data feed" : value[0].toUpperCase() + value.slice(1)}{value === "feed" && events.length ? <b>{events.length}</b> : null}{value === "passes" && passes.length ? <b>{passes.length}</b> : null}</button>)}
       </div>
 
       <div className="optix-native-body">
@@ -159,9 +197,23 @@ export default function OptixIntegrationPanel() {
           <div className="optix-native-actions"><button disabled={saving === "resources" || Boolean(resourceError && !profiles.length)} onClick={() => void saveResources()} type="button">{saving === "resources" ? "Saving…" : "Save resources"}</button>{saved ? <span>{saved}</span> : null}</div>
         </> : null}
 
-        {tab === "feed" ? <>{integrationError ? <div className="optix-native-error"><strong>Webhook feed is unavailable</strong>{integrationError}</div> : null}<div className="optix-feed-toolbar"><div><h3>Received Optix data</h3><p>Protected raw webhook records, newest first.</p></div><button onClick={() => void loadIntegration()} type="button">Refresh</button></div>{events.length ? events.map((event) => <details className="optix-native-event" key={event.event_key} open={event.processing_status === "failed"}><summary><strong>{event.event_type || "Unknown event"}</strong><span>{event.customer || "No customer"}</span><time>{event.received_at ? new Date(event.received_at).toLocaleString() : ""}</time><em>{event.processing_status}</em></summary><div className="event-facts"><span>Workspace <b>{event.workspaceId || "—"}</b></span><span>Lesson ID <b>{event.external_booking_id || "—"}</b></span><span>Appointment <b>{event.clarity_item_id || "Not created"}</b></span><span>Bay ID <b>{event.outboundBayBookingId || "Not booked"}</b></span></div>{event.error_message ? <div className="optix-native-error"><strong>{event.failure_code || "Processing error"}</strong>{event.error_message}</div> : null}<pre>{safeJson(event.rawPayload)}</pre>{event.processing_status === "failed" ? <button onClick={() => void retryEvent(event.event_key)} type="button">Retry this event</button> : null}</details>) : <div className="optix-native-empty">No webhook events have been received yet.</div>}</> : null}
+        {tab === "passes" ? <>
+          {integrationError ? <div className="optix-native-error"><strong>Pass purchases are unavailable</strong>{integrationError}</div> : null}
+          <div className="optix-feed-toolbar"><div><h3>Pass purchases</h3><p>Recorded from Optix payment webhooks, newest first.</p></div><button onClick={() => void loadIntegration()} type="button">Refresh</button></div>
+          {purchases.length ? null : <div className="optix-native-note"><strong>Nothing recorded yet</strong><span>Subscribe to <code>invoice_paid</code>, <code>new_sale</code> and <code>new_plan_subscription</code> in your Optix app, then buy a Pass. Whichever event fires will land here with its raw payload.</span></div>}
+          {passes.length ? passes.map((row) => <details className="optix-native-event" key={row.id}><summary><strong>{row.item_name || "Pass"}</strong><span>{row.member_name || row.member_email || "No customer"}</span><time>{new Date(row.purchased_at).toLocaleString()}</time><em>{formatAmount(row)}</em></summary><div className="event-facts"><span>Event <b>{row.event_type}</b></span><span>Purchase ID <b>{row.external_purchase_id || "—"}</b></span><span>Email <b>{row.member_email || "—"}</b></span><span>Client <b>{row.person_id ? "Linked" : "Not matched"}</b></span></div><pre>{safeJson(row.rawPayload)}</pre></details>) : purchases.length ? <div className="optix-native-empty">No purchases have been classified as a Pass yet.</div> : null}
+          {unclassified.length ? <>
+            <div className="optix-feed-toolbar"><div><h3>Unclassified purchases</h3><p>Payment events that matched neither a Pass nor a recurring plan. If a Pass is in here, its wording is the fix.</p></div><button onClick={() => setShowUnclassified((current) => !current)} type="button">{showUnclassified ? "Hide" : `Show ${unclassified.length}`}</button></div>
+            {showUnclassified ? unclassified.map((row) => <details className="optix-native-event" key={row.id}><summary><strong>{row.item_name || "Unnamed purchase"}</strong><span>{row.member_name || row.member_email || "No customer"}</span><time>{new Date(row.purchased_at).toLocaleString()}</time><em>{row.event_type}</em></summary><pre>{safeJson(row.rawPayload)}</pre></details>) : null}
+          </> : null}
+        </> : null}
 
-        {tab === "diagnostics" ? <><div className="optix-stat-grid"><div><span>Received</span><strong>{events.length}</strong></div><div><span>Processed</span><strong>{events.filter((event) => event.processing_status === "processed").length}</strong></div><div><span>Ignored</span><strong>{events.filter((event) => event.processing_status === "ignored").length}</strong></div><div><span>Failed</span><strong>{failedCount}</strong></div></div><div className="optix-diagnostic-list"><p><span>Inbound endpoint</span><code>/api/optix-webhook</code></p><p><span>Settings/feed endpoint</span><code>{integrationError || "Connected"}</code></p><p><span>Resource endpoint</span><code>{resourceError || "Connected"}</code></p><p><span>Mapping</span><code>{mapping ? `${mapping.workspace_id} · ${mapping.enabled ? "enabled" : "disabled"}` : "Unavailable"}</code></p><p><span>Bay booking</span><code>Manual · auto-book per lesson type</code></p></div></> : null}
+        {tab === "feed" ? <>{integrationError ? <div className="optix-native-error"><strong>Webhook feed is unavailable</strong>{integrationError}</div> : null}<div className="optix-feed-toolbar"><div><h3>Received Optix data</h3><p>Protected raw webhook records, newest first.</p></div><button onClick={() => void loadIntegration()} type="button">Refresh</button></div>
+          {pending.count ? <div className="optix-pending-bar"><div><strong>{pending.count} event{pending.count === 1 ? "" : "s"} waiting</strong><span>Oldest {pending.oldest ? new Date(pending.oldest).toLocaleDateString() : "—"}. Bookings only reach the calendar once these are processed.</span></div><label>Replay the last<select value={replayDays} onChange={(event) => setReplayDays(Number(event.target.value))}><option value={1}>24 hours</option><option value={7}>7 days</option><option value={30}>30 days</option><option value={365}>everything</option></select></label><button disabled={replaying} onClick={() => void processPending()} type="button">{replaying ? "Processing…" : "Process pending"}</button></div> : null}
+          {replayResult ? <div className="optix-native-note"><strong>Replay finished</strong><span>{replayResult}</span></div> : null}
+          {events.length ? events.map((event) => <details className="optix-native-event" key={event.event_key} open={event.processing_status === "failed"}><summary><strong>{event.event_type || "Unknown event"}</strong><span>{event.customer || "No customer"}</span><time>{event.received_at ? new Date(event.received_at).toLocaleString() : ""}</time><em>{event.processing_status}</em></summary><div className="event-facts"><span>Workspace <b>{event.workspaceId || "—"}</b></span><span>Lesson ID <b>{event.external_booking_id || "—"}</b></span><span>Appointment <b>{event.clarity_item_id || "Not created"}</b></span><span>Bay ID <b>{event.outboundBayBookingId || "Not booked"}</b></span></div>{event.error_message ? <div className="optix-native-error"><strong>{event.failure_code || "Processing error"}</strong>{event.error_message}</div> : null}<pre>{safeJson(event.rawPayload)}</pre>{UNPROCESSED.includes(event.processing_status) ? <button onClick={() => void retryEvent(event.event_key)} type="button">{event.processing_status === "failed" ? "Retry this event" : "Process this event"}</button> : null}</details>) : <div className="optix-native-empty">No webhook events have been received yet.</div>}</> : null}
+
+        {tab === "diagnostics" ? <><div className="optix-stat-grid"><div><span>Received</span><strong>{events.length}</strong></div><div><span>Processed</span><strong>{events.filter((event) => event.processing_status === "processed").length}</strong></div><div><span>Ignored</span><strong>{events.filter((event) => event.processing_status === "ignored").length}</strong></div><div><span>Failed</span><strong>{failedCount}</strong></div></div><div className="optix-diagnostic-list"><p><span>Inbound endpoint</span><code>/api/optix-webhook</code></p><p><span>Settings/feed endpoint</span><code>{integrationError || "Connected"}</code></p><p><span>Resource endpoint</span><code>{resourceError || "Connected"}</code></p><p><span>Mapping</span><code>{mapping ? `${mapping.workspace_id} · ${mapping.enabled ? "enabled" : "disabled"}` : "Unavailable"}</code></p><p><span>Bay booking</span><code>Manual · auto-book per lesson type</code></p><p><span>Waiting to process</span><code>{pending.count ? `${pending.count} event${pending.count === 1 ? "" : "s"}` : "None"}</code></p></div></> : null}
       </div>
     </article>
   );

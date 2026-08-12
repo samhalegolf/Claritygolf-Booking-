@@ -1,9 +1,14 @@
 import { createHash } from "node:crypto";
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
-import { optixOriginRequest, processStoredOptixEvent } from "./_shared/optix-origin.mts";
+import { processStoredOptixEvent } from "./_shared/optix-origin.mts";
+import { optixOriginRequest } from "./_shared/optix-db.mts";
 
 const SESSION_COOKIE = "clarity_session";
+/** Stored but never concluded: still safe to run through processing. */
+const UNPROCESSED_STATUSES = "received,stored,failed";
+/** One replay pass stays inside the function timeout; run it again for more. */
+const PENDING_REPLAY_LIMIT = 150;
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 
 function cookies(req: Request) {
@@ -35,9 +40,14 @@ async function catalogue() {
 }
 
 async function getState() {
-  const [mappings, events, links, resources, catalog] = await Promise.all([
+  const [mappings, events, pending, purchases, links, resources, catalog] = await Promise.all([
     optixOriginRequest("external_booking_mappings?provider=eq.optix&order=workspace_id.asc"),
     optixOriginRequest("optix_webhook_events?select=id,event_key,event_type,external_booking_id,received_at,processing_status,processed_at,failure_code,error_message,attempt_count,clarity_item_id,payload_json&order=received_at.desc&limit=50"),
+    // Just the keys, so the panel can show how many events are still waiting
+    // without pulling their payloads.
+    optixOriginRequest(`optix_webhook_events?processing_status=in.(${UNPROCESSED_STATUSES})&select=event_key,received_at&order=received_at.asc&limit=2000`).catch(() => []),
+    // Recorded pass purchases, newest first. Absent until the migration runs.
+    optixOriginRequest("optix_pass_purchases?select=id,event_type,external_purchase_id,member_email,member_name,person_id,item_name,amount_cents,currency,purchased_at,is_pass,classification,payload_json&order=purchased_at.desc&limit=100").catch(() => []),
     optixOriginRequest("external_booking_links?provider=eq.optix&purpose=eq.lesson&select=external_booking_id,clarity_item_id,processing_status,email_status,confirmation_sent_at,workspace_id&order=updated_at.desc&limit=100"),
     optixOriginRequest("optix_booking_sync?select=calendar_item_id,optix_booking_id,resource_id,sync_status,last_synced_at&order=updated_at.desc&limit=100").catch(() => []),
     catalogue(),
@@ -46,6 +56,12 @@ async function getState() {
   const resourceByItem = new Map((resources || []).map((row: any) => [row.calendar_item_id, row]));
   return {
     mappings, catalog,
+    pending: {
+      count: (pending || []).length,
+      oldest: (pending || [])[0]?.received_at || null,
+      newest: (pending || []).at(-1)?.received_at || null,
+    },
+    purchases: (purchases || []).map((row: any) => ({ ...row, payload_json: undefined, rawPayload: row.payload_json })),
     events: (events || []).map((event: any) => {
       const link: any = linkByBooking.get(event.external_booking_id) || {};
       const resource: any = resourceByItem.get(event.clarity_item_id || link.clarity_item_id) || {};
@@ -87,10 +103,34 @@ export default async function handler(req: Request) {
     }
     if (req.method === "POST" && body.action === "retry") {
       const eventKey = String(body.eventKey || "").trim();
-      const rows = await optixOriginRequest(`optix_webhook_events?event_key=eq.${encodeURIComponent(eventKey)}&processing_status=eq.failed&select=event_key,payload_json&limit=1`);
-      if (!rows?.[0]) return json({ error: "failed_event_not_found" }, 404);
+      // Any event that never reached a conclusion is retryable, not just a
+      // failed one. Restricting this to 'failed' left the 804 events stranded
+      // at 'received' by the receipt-only period with no button at all.
+      const rows = await optixOriginRequest(`optix_webhook_events?event_key=eq.${encodeURIComponent(eventKey)}&processing_status=in.(${UNPROCESSED_STATUSES})&select=event_key,payload_json&limit=1`);
+      if (!rows?.[0]) return json({ error: "retryable_event_not_found" }, 404);
       const result = await processStoredOptixEvent(eventKey, rows[0].payload_json);
       return json({ ok: true, result, state: await getState() });
+    }
+    // Replays every event still waiting, oldest first, from a cutoff date.
+    // Sequential by design: two events for one booking must not race, and the
+    // duplicate guard reads calendar_items that the previous event just wrote.
+    if (req.method === "POST" && body.action === "process-pending") {
+      const sinceIso = new Date(String(body.since || "")).toISOString();
+      const rows = await optixOriginRequest(
+        `optix_webhook_events?processing_status=in.(${UNPROCESSED_STATUSES})&received_at=gte.${encodeURIComponent(sinceIso)}&select=event_key,payload_json&order=received_at.asc&limit=${PENDING_REPLAY_LIMIT}`,
+      );
+      const summary: Record<string, number> = {};
+      for (const row of rows || []) {
+        try {
+          const result: any = await processStoredOptixEvent(row.event_key, row.payload_json);
+          const key = result?.status === "ignored" ? `ignored:${result?.reason || "unknown"}` : String(result?.status || "unknown");
+          summary[key] = (summary[key] || 0) + 1;
+        } catch (error: any) {
+          const key = `failed:${String(error?.code || "processing_failed")}`;
+          summary[key] = (summary[key] || 0) + 1;
+        }
+      }
+      return json({ ok: true, attempted: (rows || []).length, summary, state: await getState() });
     }
     return json({ error: "method_not_allowed" }, 405);
   } catch (error: any) {

@@ -211,6 +211,93 @@ export type BillingExpenseCategory = {
   active: boolean;
 };
 
+// --- POS -------------------------------------------------------------------
+// Counter sales. Deliberately a separate world from BillingInvoiceRecord: its
+// own table, its own POS-#### receipt series, and never summed into invoice
+// revenue or aging. A lesson can be paid at the counter AND appear on an
+// invoice, so any shared numbering would double-count.
+
+// "clarity_pay" is the Stripe-backed method (exactly one per account, seeded by
+// the backend). Everything else is a manual method the coach defines.
+export type PosPaymentMethodKind = "clarity_pay" | "custom";
+
+export type PosPaymentMethod = {
+  id: string;
+  name: string;
+  kind: PosPaymentMethodKind;
+  // false = the money is owed, not received (On account). Sales on such a
+  // method are recorded as pending rather than paid.
+  settlesImmediately: boolean;
+  sortOrder: number;
+  active: boolean;
+};
+
+export type PosTransactionStatus = "pending" | "paid" | "refunded" | "void";
+
+// Where the sale was started from. "lesson" carries a bookingId; "client" is a
+// sale opened from a client profile; "counter" is a walk-up sale.
+export type PosTransactionSource = "lesson" | "client" | "counter";
+
+export type PosTransaction = {
+  id: string;
+  receiptNumber: string;
+  status: PosTransactionStatus;
+  paymentMethodId: string;
+  paymentMethodName: string;
+  paymentMethodKind: PosPaymentMethodKind;
+  description: string;
+  amount: number;
+  // What the lesson type / product was priced at when the sale was opened, so
+  // a discount given at the counter stays visible afterwards. null when the
+  // sale never had a list price.
+  listedAmount: number | null;
+  currency: string;
+  customerId: string;
+  customerName: string;
+  customerEmail: string;
+  bookingId: string;
+  source: PosTransactionSource;
+  note: string;
+  paidAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// bookingId -> the paid sale that settled it. Drives the "paid at POS" badge on
+// lesson cards and the Unpaid/Paid filter on the invoice pull lists.
+export type PosBookingPayment = {
+  id: string;
+  receiptNumber: string;
+  amount: number;
+  currency: string;
+  paymentMethodName: string;
+  paidAt: string;
+};
+
+// Counter takings for a date range, split by method. Kept out of
+// BillingReportSummary on purpose.
+export type PosSummary = {
+  currency: string;
+  paidCount: number;
+  pendingCount: number;
+  paidTotal: number;
+  byMethod: Array<{ paymentMethodName: string; count: number; total: number }>;
+};
+
+// What the checkout modal needs to open a sale. Everything is optional except
+// the amount and description defaults, so the same modal serves a lesson card,
+// a client profile and a blank counter sale.
+export type PosCheckoutContext = {
+  source: PosTransactionSource;
+  description: string;
+  amount: number;
+  listedAmount: number | null;
+  customerId?: string;
+  customerName?: string;
+  customerEmail?: string;
+  bookingId?: string;
+};
+
 // Shape returned by /api/billing/expenses. Not linked to invoices/bookings -
 // this is simple outgoing-spend tracking, not cost-of-goods-sold.
 export type BillingExpense = {

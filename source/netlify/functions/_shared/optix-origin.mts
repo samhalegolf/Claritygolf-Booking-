@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 
+import { matchPersonByEmail, optixOriginRequest, rowsOf } from "./optix-db.mts";
+import { isOptixPurchaseEvent, recordOptixPassPurchase } from "./optix-passes.mts";
+import { iso, pick, text } from "./optix-payload.mts";
 import { canonicalPhoneKey } from "./phone.mts";
 
 export type OptixEmailBehaviour = "none" | "immediate" | "after_bay";
@@ -46,8 +49,6 @@ export type OptixLessonEvent = {
   source: string;
 };
 
-type SupabaseConfig = { url: string; key: string };
-
 type ExistingOptixCalendarItem = {
   id: string;
   origin: string;
@@ -55,60 +56,6 @@ type ExistingOptixCalendarItem = {
   external_booking_id: string;
   person_id: string;
 };
-
-function env(name: string) {
-  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
-}
-
-function config(): SupabaseConfig {
-  const url = env("SUPABASE_URL").replace(/\/$/, "");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
-  if (!url || !key) throw Object.assign(new Error("Supabase is not configured."), { code: "not_configured" });
-  return { url, key };
-}
-
-export async function optixOriginRequest(path: string, init: RequestInit = {}) {
-  const { url, key } = config();
-  const response = await fetch(`${url}/rest/v1/${path}`, {
-    ...init,
-    headers: {
-      apikey: key,
-      authorization: `Bearer ${key}`,
-      "content-type": "application/json",
-      prefer: "return=representation",
-      ...(init.headers || {}),
-    },
-  });
-  const raw = await response.text();
-  const body = raw ? JSON.parse(raw) : null;
-  if (!response.ok) {
-    const message = body?.message || body?.error || `Supabase request failed (${response.status}).`;
-    throw Object.assign(new Error(message), { code: body?.code || "supabase_error", status: response.status });
-  }
-  return body;
-}
-
-function text(value: unknown) {
-  return typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
-}
-
-function pick(payload: any, ...paths: string[]) {
-  for (const path of paths) {
-    const value = path.split(".").reduce((item, key) => item?.[key], payload);
-    if (value !== undefined && value !== null && text(value)) return value;
-  }
-  return "";
-}
-
-function iso(value: unknown) {
-  const raw = text(value);
-  if (!raw) return "";
-  const numeric = Number(raw);
-  const date = Number.isFinite(numeric) && /^\d+$/.test(raw)
-    ? new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric)
-    : new Date(raw);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : "";
-}
 
 export function normalizeOptixLessonEvent(payload: any): OptixLessonEvent {
   const startIso = iso(pick(payload, "check_in_timestamp", "booking.check_in_timestamp", "start_timestamp", "start"));
@@ -351,40 +298,6 @@ async function findMapping(event: OptixLessonEvent): Promise<OptixLessonMapping 
   };
 }
 
-export type ExternalPersonCandidate = { id?: unknown; name?: unknown; email?: unknown; phone?: unknown };
-
-function rowsOf(value: unknown): ExternalPersonCandidate[] {
-  return Array.isArray(value) ? value : [];
-}
-
-function uniqueById(rows: ExternalPersonCandidate[]) {
-  const seen = new Map<string, ExternalPersonCandidate>();
-  for (const row of rows) {
-    const id = text(row?.id);
-    if (id && !seen.has(id)) seen.set(id, row);
-  }
-  return [...seen.values()];
-}
-
-/**
- * Identity matching for inbound external bookings is deliberately one-sided,
- * and matches on email alone.
- *
- * A duplicate person is always recoverable — the new record lands in the
- * external booking clients list, where an admin merges or moves it later. A
- * wrong match is not, because merging hard-deletes the loser record and takes
- * its history with it. So the matcher returns null unless exactly one
- * candidate survives, and the caller creates a new external person instead of
- * guessing. Names are never matched: two clients called "John Smith" must not
- * collapse into one record.
- */
-export function matchPersonByEmail(rows: ExternalPersonCandidate[], email: string): string | null {
-  const wanted = text(email).toLowerCase();
-  if (!wanted) return null;
-  const matches = uniqueById(rowsOf(rows).filter((row) => text(row?.email).toLowerCase() === wanted));
-  return matches.length === 1 ? text(matches[0].id) || null : null;
-}
-
 function isDuplicateEmailError(error: any) {
   const code = String(error?.code || "");
   const message = error instanceof Error ? error.message : "";
@@ -433,6 +346,29 @@ async function updateEvent(eventKey: string, values: Record<string, unknown>) {
 }
 
 export async function processStoredOptixEvent(eventKey: string, payload: unknown) {
+  // Purchase events are a different shape entirely — no booking, no workspace,
+  // no times — so they branch before the booking normaliser touches them.
+  const rawEventType = text(pick(payload, "event", "event_type"));
+  if (isOptixPurchaseEvent(rawEventType)) {
+    try {
+      const recorded = await recordOptixPassPurchase(eventKey, payload);
+      await updateEvent(eventKey, {
+        processing_status: "processed",
+        failure_code: recorded.isPass ? null : recorded.classification,
+        error_message: null,
+        processed_at: new Date().toISOString(),
+      });
+      return { status: "processed", purpose: "purchase", ...recorded };
+    } catch (error: any) {
+      await updateEvent(eventKey, {
+        processing_status: "failed",
+        failure_code: String(error?.code || "purchase_record_failed"),
+        error_message: error instanceof Error ? error.message.slice(0, 1000) : "Purchase could not be recorded.",
+      }).catch(() => undefined);
+      throw error;
+    }
+  }
+
   const event = normalizeOptixLessonEvent(payload);
   try {
     assertProcessableEvent(event);

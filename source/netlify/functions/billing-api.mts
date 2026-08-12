@@ -1823,12 +1823,14 @@ async function sendInvoice(accountId: string, id: string, body: Record<string, u
 }
 
 // --- Clarity Pay (Stripe Checkout) -------------------------------------------
-// Create a one-time hosted Stripe Checkout page for an invoice's total. The
-// invoice record is the source of truth; Stripe just collects the payment. The
-// internal invoice id rides along in metadata so a webhook (if added later) can
-// reconcile it. Uses the Stripe REST API directly (form-encoded) so no SDK is
-// required. Requires STRIPE_SECRET_KEY in the environment.
-async function createInvoiceCheckout(accountId: string, id: string, req: Request) {
+// One hosted Stripe Checkout page for a single amount. Shared by invoices and
+// by POS sales: in both cases our own record is the source of truth and Stripe
+// only collects the money, so the shape of the request is identical apart from
+// the description and the metadata that lets us reconcile it afterwards.
+// Uses the Stripe REST API directly (form-encoded) so no SDK is required.
+// Requires STRIPE_SECRET_KEY in the environment.
+
+function stripeSecret() {
   const secret = env("STRIPE_SECRET_KEY");
   if (!secret) {
     throw Object.assign(new Error("Clarity Pay is not configured yet (missing Stripe key)."), {
@@ -1836,51 +1838,102 @@ async function createInvoiceCheckout(accountId: string, id: string, req: Request
       code: "STRIPE_NOT_CONFIGURED",
     });
   }
-  const invoice = await getInvoiceWithItems(accountId, id);
-  if (!invoice) throw Object.assign(new Error("Invoice not found."), { status: 404 });
+  return secret;
+}
 
-  const amount = Math.round((Number(invoice.total) || 0) * 100);
-  if (amount <= 0) {
-    throw Object.assign(new Error("Invoice total must be greater than zero to take a payment."), { status: 400 });
-  }
-  const currency = String(invoice.currency || "NZD").toLowerCase();
-  const branding = await resolveInvoiceBranding();
-  const origin = new URL(req.url).origin;
-
-  const params = new URLSearchParams();
-  params.set("mode", "payment");
-  params.set("success_url", `${origin}/?pay=success&invoice=${encodeURIComponent(String(invoice.invoiceNumber))}`);
-  params.set("cancel_url", `${origin}/?pay=cancel&invoice=${encodeURIComponent(String(invoice.invoiceNumber))}`);
-  params.set("client_reference_id", String(invoice.id));
-  params.set("metadata[invoice_id]", String(invoice.id));
-  params.set("metadata[account_id]", accountId);
-  params.set("metadata[invoice_number]", String(invoice.invoiceNumber));
-  if (invoice.customerEmail) params.set("customer_email", String(invoice.customerEmail));
-  // A single line for the invoice total keeps the charged amount identical to the
-  // invoice (no per-line rounding drift, tax already reflected in the total).
-  params.set("line_items[0][quantity]", "1");
-  params.set("line_items[0][price_data][currency]", currency);
-  params.set("line_items[0][price_data][unit_amount]", String(amount));
-  params.set("line_items[0][price_data][product_data][name]", `Invoice ${invoice.invoiceNumber} - ${branding.businessName}`);
-  if (invoice.customerName) {
-    params.set("line_items[0][price_data][product_data][description]", `Billed to ${invoice.customerName}`);
-  }
-
-  const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body: params.toString(),
+async function stripeRequest(path: string, options: { method?: string; params?: URLSearchParams } = {}) {
+  const secret = stripeSecret();
+  const method = options.method || "GET";
+  const query = method === "GET" && options.params ? `?${options.params.toString()}` : "";
+  const response = await fetch(`https://api.stripe.com/v1/${path}${query}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${secret}`,
+      ...(method === "GET" ? {} : { "Content-Type": "application/x-www-form-urlencoded" }),
+    },
+    ...(method === "GET" ? {} : { body: (options.params || new URLSearchParams()).toString() }),
   });
   const text = await response.text();
   if (!response.ok) {
-    throw Object.assign(new Error(`Stripe checkout failed (${response.status}): ${text.slice(0, 300)}`), {
+    throw Object.assign(new Error(`Stripe ${method} ${path} failed (${response.status}): ${text.slice(0, 300)}`), {
       status: 502,
       code: "STRIPE_ERROR",
     });
   }
-  const session = text ? JSON.parse(text) : {};
+  return text ? JSON.parse(text) : {};
+}
+
+type StripeCheckoutInput = {
+  // Major units (12.50), not cents - converted here so no caller has to remember.
+  amount: number;
+  currency: string;
+  productName: string;
+  productDescription?: string;
+  customerEmail?: string;
+  clientReferenceId?: string;
+  metadata?: Record<string, string>;
+  successUrl: string;
+  cancelUrl: string;
+};
+
+async function createStripeCheckoutSession(input: StripeCheckoutInput) {
+  const amountInCents = Math.round((Number(input.amount) || 0) * 100);
+  if (amountInCents <= 0) {
+    throw Object.assign(new Error("Amount must be greater than zero to take a payment."), { status: 400 });
+  }
+
+  const params = new URLSearchParams();
+  params.set("mode", "payment");
+  params.set("success_url", input.successUrl);
+  params.set("cancel_url", input.cancelUrl);
+  if (input.clientReferenceId) params.set("client_reference_id", input.clientReferenceId);
+  for (const [key, value] of Object.entries(input.metadata || {})) {
+    if (value) params.set(`metadata[${key}]`, value);
+  }
+  if (input.customerEmail) params.set("customer_email", input.customerEmail);
+  // A single line for the whole total keeps the charged amount identical to our
+  // record (no per-line rounding drift; tax is already reflected in the total).
+  params.set("line_items[0][quantity]", "1");
+  params.set("line_items[0][price_data][currency]", String(input.currency || "NZD").toLowerCase());
+  params.set("line_items[0][price_data][unit_amount]", String(amountInCents));
+  params.set("line_items[0][price_data][product_data][name]", input.productName);
+  if (input.productDescription) {
+    params.set("line_items[0][price_data][product_data][description]", input.productDescription);
+  }
+
+  const session = await stripeRequest("checkout/sessions", { method: "POST", params });
   if (!session.url) throw Object.assign(new Error("Stripe did not return a checkout URL."), { status: 502 });
   return { url: session.url as string, sessionId: (session.id as string) || "" };
+}
+
+async function retrieveStripeCheckoutSession(sessionId: string) {
+  const session = await stripeRequest(`checkout/sessions/${encodeURIComponent(sessionId)}`);
+  return {
+    paid: session?.payment_status === "paid",
+    expired: session?.status === "expired",
+    paymentIntentId: typeof session?.payment_intent === "string" ? (session.payment_intent as string) : "",
+  };
+}
+
+async function createInvoiceCheckout(accountId: string, id: string, req: Request) {
+  const invoice = await getInvoiceWithItems(accountId, id);
+  if (!invoice) throw Object.assign(new Error("Invoice not found."), { status: 404 });
+
+  const branding = await resolveInvoiceBranding();
+  const origin = new URL(req.url).origin;
+  const invoiceNumber = String(invoice.invoiceNumber);
+
+  return createStripeCheckoutSession({
+    amount: Number(invoice.total) || 0,
+    currency: String(invoice.currency || "NZD"),
+    productName: `Invoice ${invoiceNumber} - ${branding.businessName}`,
+    productDescription: invoice.customerName ? `Billed to ${invoice.customerName}` : "",
+    customerEmail: invoice.customerEmail ? String(invoice.customerEmail) : "",
+    clientReferenceId: String(invoice.id),
+    metadata: { invoice_id: String(invoice.id), account_id: accountId, invoice_number: invoiceNumber },
+    successUrl: `${origin}/?pay=success&invoice=${encodeURIComponent(invoiceNumber)}`,
+    cancelUrl: `${origin}/?pay=cancel&invoice=${encodeURIComponent(invoiceNumber)}`,
+  });
 }
 
 async function invoicePdfResponse(accountId: string, id: string) {
@@ -2096,6 +2149,373 @@ async function reportPdfResponse(accountId: string, url: URL) {
   });
 }
 
+// --- POS (point of sale) ------------------------------------------------------
+// A POS sale is money taken at the counter. It is deliberately NOT an invoice:
+// separate table, separate receipt series (POS-0001), never summed into invoice
+// revenue, A/R aging or the invoice reports. The same lesson can be both paid
+// at the counter and pulled onto an invoice, so any shared numbering would
+// double-count. Keeping the two apart at the table level is what makes that
+// impossible rather than merely unlikely.
+
+const POS_RECEIPT_PREFIX = "POS";
+
+// Seeded once per account the first time the methods are read. Clarity Pay is
+// the Stripe-backed method and is the only one the UI treats specially; the
+// rest are ordinary manual methods the coach can rename, reorder or retire.
+const DEFAULT_PAYMENT_METHODS = [
+  { name: "Clarity Pay", kind: "clarity_pay", settles_immediately: true, sort_order: 10 },
+  { name: "Cash", kind: "custom", settles_immediately: true, sort_order: 20 },
+  { name: "Eftpos", kind: "custom", settles_immediately: true, sort_order: 30 },
+  { name: "On account", kind: "custom", settles_immediately: false, sort_order: 40 },
+];
+
+function paymentMethodRowToApi(row: Record<string, unknown>) {
+  return {
+    id: String(row.id ?? ""),
+    name: String(row.name ?? ""),
+    kind: row.kind === "clarity_pay" ? "clarity_pay" : "custom",
+    settlesImmediately: row.settles_immediately !== false,
+    sortOrder: Number(row.sort_order) || 0,
+    active: row.active !== false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// Only custom methods are editable. The Clarity Pay row is created by the seed
+// and its kind is fixed: a manual method that claimed to be Stripe-backed (or
+// the reverse) would silently take payments through the wrong path.
+function cleanPaymentMethodPayload(raw: Record<string, unknown>) {
+  return {
+    name: cleanString(raw?.name, "", 60),
+    settles_immediately: raw?.settlesImmediately !== false,
+    sort_order: Math.round(cleanNumber(raw?.sortOrder, 100, { min: 0, max: 9999 })),
+    active: raw?.active !== false,
+  };
+}
+
+async function listPaymentMethods(accountId: string) {
+  let rows = await supabase("billing_payment_methods", {
+    query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=sort_order.asc,name.asc`,
+  });
+  if (!rows.length) {
+    const seeded = DEFAULT_PAYMENT_METHODS.map((method) => ({
+      id: randomUUID(),
+      account_id: accountId,
+      ...method,
+      active: true,
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    }));
+    try {
+      await supabase("billing_payment_methods", { method: "POST", body: seeded, prefer: "return=minimal" });
+      rows = seeded;
+    } catch (error) {
+      // A 409 means a concurrent request seeded them first - re-read rather
+      // than fail the page load.
+      if ((error as { supabaseStatus?: number })?.supabaseStatus !== 409) throw error;
+      rows = await supabase("billing_payment_methods", {
+        query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=sort_order.asc,name.asc`,
+      });
+    }
+  }
+  return { paymentMethods: rows.map(paymentMethodRowToApi) };
+}
+
+async function createPaymentMethod(accountId: string, body: Record<string, unknown>) {
+  const clean = cleanPaymentMethodPayload(body);
+  if (!clean.name) throw Object.assign(new Error("Payment method name is required."), { status: 400 });
+  const row = { id: randomUUID(), account_id: accountId, kind: "custom", ...clean, created_at: nowIso(), updated_at: nowIso() };
+  try {
+    await supabase("billing_payment_methods", { method: "POST", body: [row], prefer: "return=minimal" });
+  } catch (error) {
+    if ((error as { supabaseStatus?: number })?.supabaseStatus === 409) {
+      throw Object.assign(new Error(`"${clean.name}" already exists.`), { status: 409, code: "PAYMENT_METHOD_EXISTS" });
+    }
+    throw error;
+  }
+  return { paymentMethod: paymentMethodRowToApi(row) };
+}
+
+async function updatePaymentMethod(accountId: string, id: string, body: Record<string, unknown>) {
+  const clean = cleanPaymentMethodPayload(body);
+  if (!clean.name) throw Object.assign(new Error("Payment method name is required."), { status: 400 });
+  const rows = await supabase("billing_payment_methods", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: { ...clean, updated_at: nowIso() },
+    prefer: "return=representation",
+  });
+  if (!rows.length) throw Object.assign(new Error("Payment method not found."), { status: 404 });
+  return { paymentMethod: paymentMethodRowToApi(rows[0]) };
+}
+
+function posRowToApi(row: Record<string, unknown>) {
+  return {
+    id: String(row.id ?? ""),
+    receiptNumber: String(row.receipt_number ?? ""),
+    status: String(row.status ?? "paid"),
+    paymentMethodId: String(row.payment_method_id ?? ""),
+    paymentMethodName: String(row.payment_method_name ?? ""),
+    paymentMethodKind: row.payment_method_kind === "clarity_pay" ? "clarity_pay" : "custom",
+    description: String(row.description ?? ""),
+    amount: Number(row.amount) || 0,
+    listedAmount: row.listed_amount === null || row.listed_amount === undefined ? null : Number(row.listed_amount),
+    currency: String(row.currency ?? "NZD"),
+    customerId: String(row.customer_id ?? ""),
+    customerName: String(row.customer_name ?? ""),
+    customerEmail: String(row.customer_email ?? ""),
+    bookingId: String(row.booking_id ?? ""),
+    source: String(row.source ?? "counter"),
+    note: String(row.note ?? ""),
+    paidAt: String(row.paid_at ?? ""),
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: String(row.updated_at ?? ""),
+  };
+}
+
+// Same "highest existing number wins" approach as invoice numbering, computed
+// in JS so a 5-digit receipt doesn't lose to a zero-padded 4-digit one. Reads
+// only the POS table, so the two series can never collide or influence each
+// other.
+async function nextReceiptNumber(accountId: string) {
+  const rows = (await supabase("billing_pos_transactions", {
+    query:
+      `select=receipt_number&account_id=eq.${encodeFilter(accountId)}` +
+      `&receipt_number=like.${encodeFilter(`${POS_RECEIPT_PREFIX}-*`)}&limit=100000`,
+  })) as Array<{ receipt_number?: string }>;
+  let highest = 0;
+  for (const row of rows) {
+    const match = new RegExp(`^${POS_RECEIPT_PREFIX}-(\\d+)$`).exec(cleanString(row?.receipt_number, "", 60));
+    const sequence = match ? Number(match[1]) : NaN;
+    if (Number.isFinite(sequence) && sequence > highest) highest = sequence;
+  }
+  const sequence = highest + 1;
+  return { sequence, receiptNumber: `${POS_RECEIPT_PREFIX}-${String(sequence).padStart(4, "0")}` };
+}
+
+async function listPosTransactions(accountId: string, url: URL) {
+  const limit = Math.max(1, Math.min(500, cleanNumber(url.searchParams.get("limit"), 100)));
+  const from = cleanString(url.searchParams.get("from"), "", 20);
+  const to = cleanString(url.searchParams.get("to"), "", 20);
+  const filters = [`account_id=eq.${encodeFilter(accountId)}`];
+  // created_at is a timestamp; widen a bare date bound to cover the whole day.
+  if (from) filters.push(`created_at=gte.${encodeFilter(`${from}T00:00:00.000Z`)}`);
+  if (to) filters.push(`created_at=lte.${encodeFilter(`${to}T23:59:59.999Z`)}`);
+  const rows = await supabase("billing_pos_transactions", {
+    query: `select=*&${filters.join("&")}&order=created_at.desc&limit=${limit}`,
+  });
+  return { transactions: rows.map(posRowToApi) };
+}
+
+async function getPosTransaction(accountId: string, id: string) {
+  const rows = await supabase("billing_pos_transactions", {
+    query: `select=*&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+  });
+  return rows.length ? posRowToApi(rows[0]) : null;
+}
+
+async function createPosTransaction(accountId: string, body: Record<string, unknown>) {
+  const amount = round2(cleanNumber(body?.amount, 0, { min: 0 }));
+  if (amount <= 0) throw Object.assign(new Error("Enter an amount greater than zero."), { status: 400 });
+
+  const description = cleanString(body?.description, "", 300);
+  if (!description) throw Object.assign(new Error("A description is required."), { status: 400 });
+
+  const methodId = cleanString(body?.paymentMethodId, "", 160);
+  const methods = (await listPaymentMethods(accountId)).paymentMethods;
+  const method = methods.find((entry) => entry.id === methodId);
+  if (!method) throw Object.assign(new Error("Choose a payment method."), { status: 400 });
+  if (!method.active) throw Object.assign(new Error(`${method.name} is no longer available.`), { status: 400 });
+
+  // Clarity Pay starts pending and only becomes paid once Stripe confirms it.
+  // Manual methods are recorded by a human who just took the money, so they are
+  // paid on creation - except "On account", which is money still owed.
+  const status = method.kind === "clarity_pay" ? "pending" : method.settlesImmediately ? "paid" : "pending";
+  const listedAmountRaw = body?.listedAmount;
+  const source = ["lesson", "client", "counter"].includes(String(body?.source)) ? String(body.source) : "counter";
+
+  const row = {
+    id: randomUUID(),
+    account_id: accountId,
+    receipt_number: (await nextReceiptNumber(accountId)).receiptNumber,
+    status,
+    payment_method_id: method.id,
+    payment_method_name: method.name,
+    payment_method_kind: method.kind,
+    description,
+    amount,
+    listed_amount: listedAmountRaw === null || listedAmountRaw === undefined || listedAmountRaw === ""
+      ? null
+      : round2(cleanNumber(listedAmountRaw, 0, { min: 0 })),
+    currency: cleanString(body?.currency, await resolveDefaultCurrency(), 10),
+    customer_id: cleanString(body?.customerId, "", 160) || null,
+    customer_name: cleanString(body?.customerName, "", 140) || null,
+    customer_email: cleanString(body?.customerEmail, "", 180) || null,
+    booking_id: cleanString(body?.bookingId, "", 160) || null,
+    source,
+    stripe_session_id: null as string | null,
+    stripe_payment_intent_id: null as string | null,
+    note: cleanString(body?.note, "", 600) || null,
+    paid_at: status === "paid" ? nowIso() : null,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await supabase("billing_pos_transactions", { method: "POST", body: [row], prefer: "return=minimal" });
+      break;
+    } catch (error) {
+      // A 409 means another till claimed this receipt number between our read
+      // and write. Recompute and retry, same as invoice numbering.
+      if ((error as { supabaseStatus?: number })?.supabaseStatus === 409 && attempt < 5) {
+        row.receipt_number = (await nextReceiptNumber(accountId)).receiptNumber;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return { transaction: posRowToApi(row) };
+}
+
+async function updatePosTransactionStatus(accountId: string, id: string, body: Record<string, unknown>) {
+  const status = String(body?.status || "");
+  if (!["pending", "paid", "refunded", "void"].includes(status)) {
+    throw Object.assign(new Error("Unknown status."), { status: 400 });
+  }
+  const patch: Record<string, unknown> = { status, updated_at: nowIso() };
+  if (status === "paid") patch.paid_at = nowIso();
+  if (body?.note !== undefined) patch.note = cleanString(body?.note, "", 600) || null;
+  const rows = await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: patch,
+    prefer: "return=representation",
+  });
+  if (!rows.length) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  return { transaction: posRowToApi(rows[0]) };
+}
+
+// Clarity Pay at the counter: create a Stripe Checkout session for this sale.
+// The client renders the returned URL as a QR code so the customer can pay
+// contactless from their own phone (Apple Pay / Google Pay), or opens it
+// directly to key a card in on the till.
+async function createPosCheckout(accountId: string, id: string, req: Request) {
+  const transaction = await getPosTransaction(accountId, id);
+  if (!transaction) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  if (transaction.status === "paid") {
+    throw Object.assign(new Error(`${transaction.receiptNumber} is already paid.`), { status: 409, code: "POS_ALREADY_PAID" });
+  }
+
+  const branding = await resolveInvoiceBranding();
+  const origin = new URL(req.url).origin;
+  const receiptNumber = String(transaction.receiptNumber);
+
+  const session = await createStripeCheckoutSession({
+    amount: transaction.amount,
+    currency: String(transaction.currency),
+    productName: `${transaction.description} - ${branding.businessName}`,
+    productDescription: transaction.customerName ? `For ${transaction.customerName}` : "",
+    customerEmail: transaction.customerEmail || "",
+    clientReferenceId: String(transaction.id),
+    metadata: { pos_transaction_id: String(transaction.id), account_id: accountId, receipt_number: receiptNumber },
+    successUrl: `${origin}/pos-paid?receipt=${encodeURIComponent(receiptNumber)}`,
+    cancelUrl: `${origin}/pos-cancelled?receipt=${encodeURIComponent(receiptNumber)}`,
+  });
+
+  await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: { stripe_session_id: session.sessionId, updated_at: nowIso() },
+    prefer: "return=minimal",
+  });
+
+  return { url: session.url, sessionId: session.sessionId, receiptNumber };
+}
+
+// Polled by the checkout modal while the QR is on screen. Asking Stripe
+// directly (rather than waiting for a webhook) means the till updates even if
+// webhook delivery is delayed or the endpoint is not configured.
+async function syncPosCheckout(accountId: string, id: string) {
+  const transaction = await getPosTransaction(accountId, id);
+  if (!transaction) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  if (transaction.status === "paid") return { transaction, paid: true };
+
+  const rows = await supabase("billing_pos_transactions", {
+    query: `select=stripe_session_id&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+  });
+  const sessionId = cleanString(rows[0]?.stripe_session_id, "", 200);
+  if (!sessionId) return { transaction, paid: false };
+
+  const session = await retrieveStripeCheckoutSession(sessionId);
+  if (!session.paid) return { transaction, paid: false, expired: session.expired };
+
+  const updated = await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: {
+      status: "paid",
+      paid_at: nowIso(),
+      stripe_payment_intent_id: session.paymentIntentId || null,
+      updated_at: nowIso(),
+    },
+    prefer: "return=representation",
+  });
+  return { transaction: updated.length ? posRowToApi(updated[0]) : transaction, paid: true };
+}
+
+// bookingId -> the sale that settled it. Drives the "paid at POS" badge on
+// lesson cards and the Unpaid/Paid filter on the invoice pull lists. Only paid
+// sales count: a pending Clarity Pay session is not money in the till.
+async function posBookingPayments(accountId: string, bookingIds: string[]) {
+  if (!bookingIds.length) return { payments: {} as Record<string, unknown> };
+  const list = bookingIds.slice(0, 400).map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+  const rows = await supabase("billing_pos_transactions", {
+    query:
+      `select=id,receipt_number,booking_id,amount,currency,payment_method_name,paid_at` +
+      `&account_id=eq.${encodeFilter(accountId)}&status=eq.paid&booking_id=in.(${encodeURIComponent(list)})`,
+  });
+  const payments: Record<string, unknown> = {};
+  for (const row of rows as Array<Record<string, unknown>>) {
+    const bookingId = String(row.booking_id || "");
+    if (!bookingId) continue;
+    payments[bookingId] = {
+      id: row.id,
+      receiptNumber: row.receipt_number,
+      amount: Number(row.amount) || 0,
+      currency: row.currency || "NZD",
+      paymentMethodName: row.payment_method_name,
+      paidAt: row.paid_at || "",
+    };
+  }
+  return { payments };
+}
+
+// Counter takings for a date range, split by method. Kept out of
+// reports/summary on purpose: mixing it in there is exactly the double-count
+// this whole section is designed to avoid.
+async function posSummary(accountId: string, url: URL) {
+  const { transactions } = await listPosTransactions(accountId, url);
+  const paid = transactions.filter((entry) => entry.status === "paid");
+  const byMethod = new Map<string, { paymentMethodName: string; count: number; total: number }>();
+  for (const entry of paid) {
+    const key = String(entry.paymentMethodName);
+    const bucket = byMethod.get(key) || { paymentMethodName: key, count: 0, total: 0 };
+    bucket.count += 1;
+    bucket.total = round2(bucket.total + entry.amount);
+    byMethod.set(key, bucket);
+  }
+  return {
+    currency: paid[0]?.currency || (await resolveDefaultCurrency()),
+    paidCount: paid.length,
+    pendingCount: transactions.filter((entry) => entry.status === "pending").length,
+    paidTotal: round2(paid.reduce((sum, entry) => sum + entry.amount, 0)),
+    byMethod: [...byMethod.values()].sort((a, b) => b.total - a.total),
+  };
+}
+
 // --- Router ------------------------------------------------------------------
 
 export default async function handler(req: Request) {
@@ -2170,6 +2590,45 @@ export default async function handler(req: Request) {
     }
     if (action.startsWith("invoices/") && req.method === "DELETE") {
       return json(await deleteInvoice(accountId, action.slice("invoices/".length)));
+    }
+
+    // POS. Its own namespace and its own tables - nothing under pos/ touches
+    // billing_invoices, and nothing above this line reads billing_pos_transactions.
+    if (action === "pos/payment-methods" && req.method === "GET") return json(await listPaymentMethods(accountId));
+    if (action === "pos/payment-methods" && req.method === "POST") {
+      return json(await createPaymentMethod(accountId, await parseBody(req)), 201);
+    }
+    if (action.startsWith("pos/payment-methods/") && (req.method === "PUT" || req.method === "PATCH")) {
+      return json(await updatePaymentMethod(accountId, action.slice("pos/payment-methods/".length), await parseBody(req)));
+    }
+
+    if (action === "pos/summary" && req.method === "GET") return json(await posSummary(accountId, url));
+    if (action === "pos/booking-payments" && req.method === "GET") {
+      const ids = (url.searchParams.get("bookingIds") || "").split(",").map((id) => id.trim()).filter(Boolean);
+      return json(await posBookingPayments(accountId, ids));
+    }
+
+    if (action === "pos/transactions" && req.method === "GET") return json(await listPosTransactions(accountId, url));
+    if (action === "pos/transactions" && req.method === "POST") {
+      return json(await createPosTransaction(accountId, await parseBody(req)), 201);
+    }
+    // Sub-actions must be matched before the generic transactions/:id handlers,
+    // which would otherwise read "id/checkout" as the id.
+    if (action.startsWith("pos/transactions/") && action.endsWith("/checkout") && req.method === "POST") {
+      const transactionId = action.slice("pos/transactions/".length, -"/checkout".length);
+      return json(await createPosCheckout(accountId, transactionId, req));
+    }
+    if (action.startsWith("pos/transactions/") && action.endsWith("/checkout-status") && req.method === "GET") {
+      const transactionId = action.slice("pos/transactions/".length, -"/checkout-status".length);
+      return json(await syncPosCheckout(accountId, transactionId));
+    }
+    if (action.startsWith("pos/transactions/") && req.method === "GET") {
+      const transaction = await getPosTransaction(accountId, action.slice("pos/transactions/".length));
+      if (!transaction) return json({ error: "not_found", message: "Transaction not found." }, 404);
+      return json({ transaction });
+    }
+    if (action.startsWith("pos/transactions/") && req.method === "PATCH") {
+      return json(await updatePosTransactionStatus(accountId, action.slice("pos/transactions/".length), await parseBody(req)));
     }
 
     if (action === "booking-links" && req.method === "GET") {

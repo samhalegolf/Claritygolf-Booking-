@@ -135,7 +135,13 @@ import type {
   BillingDiscount,
   BillingExpenseCategory,
   BillingExpense,
+  PosPaymentMethod,
+  PosTransaction,
+  PosBookingPayment,
+  PosSummary,
+  PosCheckoutContext,
 } from "./modules/billing/types";
+import { PosCheckoutModal } from "./modules/billing/PosCheckoutModal";
 import {
   defaultInvoiceSettings,
   cleanInvoiceSettings,
@@ -931,7 +937,20 @@ type Toast = {
 };
 
 type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video" | "players";
-type BillingSection = "none" | "dashboard" | "new-invoice" | "invoices" | "expenses" | "reports" | "settings";
+type BillingSection = "none" | "dashboard" | "new-invoice" | "invoices" | "expenses" | "reports" | "pos" | "settings";
+
+// Which completed bookings the "ready to pull" lists show. "unpaid" hides
+// anything already invoiced or already paid at the counter (the normal
+// workflow); "paid" is for looking back at what has been settled; "all" is the
+// original behaviour, everything with already-settled rows disabled.
+type BookingPullFilter = "unpaid" | "all" | "paid";
+const BOOKING_PULL_FILTER_STORAGE_KEY = "clarity.billing.pullFilter";
+
+function readStoredPullFilter(): BookingPullFilter {
+  if (typeof window === "undefined") return "unpaid";
+  const stored = window.localStorage.getItem(BOOKING_PULL_FILTER_STORAGE_KEY);
+  return stored === "all" || stored === "paid" ? stored : "unpaid";
+}
 // A money-out bank transaction (Akahu) awaiting review as an expense.
 type BankExpenseCandidate = {
   id: string;
@@ -4918,6 +4937,28 @@ function App() {
     failed: number;
   } | null>(null);
   const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, string>>({});
+  // --- POS ------------------------------------------------------------------
+  // Counter sales. Kept in their own state (and their own tables) so nothing
+  // here can leak into invoice totals - a lesson can legitimately be paid at
+  // the counter and also appear on an invoice.
+  const [posCheckout, setPosCheckout] = useState<PosCheckoutContext | null>(null);
+  const [posTransactions, setPosTransactions] = useState<PosTransaction[]>([]);
+  const [posTransactionsLoadState, setPosTransactionsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [posSummary, setPosSummary] = useState<PosSummary | null>(null);
+  const [posRangeFrom, setPosRangeFrom] = useState("");
+  const [posRangeTo, setPosRangeTo] = useState("");
+  const [posPaymentMethods, setPosPaymentMethods] = useState<PosPaymentMethod[]>([]);
+  const [posMethodEditor, setPosMethodEditor] = useState<{ id: string; name: string; settlesImmediately: boolean }>({
+    id: "",
+    name: "",
+    settlesImmediately: true,
+  });
+  const [posMethodSaveState, setPosMethodSaveState] = useState<"idle" | "saving">("idle");
+  // bookingId -> the paid counter sale that settled it.
+  const [posPaidBookings, setPosPaidBookings] = useState<Record<string, PosBookingPayment>>({});
+  // Which completed bookings the pull lists should show. Persisted locally so
+  // the till keeps whatever the coach last chose.
+  const [bookingPullFilter, setBookingPullFilter] = useState<BookingPullFilter>(readStoredPullFilter);
   // Ready to Pull date range. Empty string on either side means "no bound" -
   // i.e. defaults to showing everything, same as before this filter existed.
   const [pullRangeFrom, setPullRangeFrom] = useState("");
@@ -5901,11 +5942,15 @@ function App() {
         .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start),
     [coachAccount, coachProfiles, isAdminUser, items, services, serviceScopeCoachId],
   );
-  const uninvoicedCompletedAppointments = useMemo(
-    () => completedAppointments.filter((item) => !invoicedBookingIds[item.id]),
-    [completedAppointments, invoicedBookingIds],
+  // A lesson is "settled" once it has been either pulled onto an invoice or paid
+  // at the counter. The two are independent - a lesson can end up on both - so
+  // the pull lists check for either rather than assuming an invoice is the only
+  // way money arrives.
+  const unsettledCompletedAppointments = useMemo(
+    () => completedAppointments.filter((item) => !invoicedBookingIds[item.id] && !posPaidBookings[item.id]),
+    [completedAppointments, invoicedBookingIds, posPaidBookings],
   );
-  const completedUninvoicedCount = uninvoicedCompletedAppointments.length;
+  const completedUninvoicedCount = unsettledCompletedAppointments.length;
   // "Ready to Pull" with an adjustable date range, per the billing build plan.
   // itemDateValue converts a calendar item's week/day slot back into a real
   // calendar date the same way the rest of the app already does (dateForSlot),
@@ -5945,9 +5990,18 @@ function App() {
     }
     return ids;
   }, [invoiceDraft.lines]);
+  // The Unpaid / All / Paid selector on the pull lists. "unpaid" is the default
+  // working view; "paid" is for looking back at what has already been settled.
+  const pullFilteredCompletedAppointments = useMemo(() => {
+    if (bookingPullFilter === "unpaid") return unsettledCompletedAppointments;
+    if (bookingPullFilter === "paid") {
+      return completedAppointments.filter((item) => invoicedBookingIds[item.id] || posPaidBookings[item.id]);
+    }
+    return completedAppointments;
+  }, [bookingPullFilter, completedAppointments, invoicedBookingIds, posPaidBookings, unsettledCompletedAppointments]);
   const pullableCompletedAppointments = useMemo(
-    () => uninvoicedCompletedAppointments.filter((item) => inPullRange(item) && !draftBookingIds.has(item.id)),
-    [uninvoicedCompletedAppointments, effectivePullFrom, effectivePullTo, draftBookingIds],
+    () => pullFilteredCompletedAppointments.filter((item) => inPullRange(item) && !draftBookingIds.has(item.id)),
+    [pullFilteredCompletedAppointments, effectivePullFrom, effectivePullTo, draftBookingIds],
   );
   // When a billing customer is chosen, surface that client's own completed
   // lessons at the top of the (unpaid) pull list and flag them. Matches on email,
@@ -13492,24 +13546,202 @@ function App() {
     }
   }
 
+  // Booking ids go into the query string, and a coach with a few years of
+  // history has thousands of them - past a point the URL is rejected by the
+  // proxy (414) and the lookup silently returns nothing, which would drop every
+  // "already invoiced" / "paid at POS" marker at once. Batch instead.
+  const BOOKING_LOOKUP_BATCH_SIZE = 150;
+
+  async function fetchBookingMap<T>(path: string, key: string, bookingIds: string[]): Promise<Record<string, T>> {
+    const merged: Record<string, T> = {};
+    for (let index = 0; index < bookingIds.length; index += BOOKING_LOOKUP_BATCH_SIZE) {
+      const batch = bookingIds.slice(index, index + BOOKING_LOOKUP_BATCH_SIZE);
+      const response = await fetch(`${path}?bookingIds=${batch.map(encodeURIComponent).join(",")}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not check booking payments."));
+      const data = (await response.json()) as Record<string, Record<string, T> | undefined>;
+      Object.assign(merged, data[key] || {});
+    }
+    return merged;
+  }
+
   async function fetchInvoicedBookingIds(bookingIds: string[]) {
     if (!bookingIds.length) {
       setInvoicedBookingIds({});
       return;
     }
-    const response = await fetch(`/api/billing/booking-links?bookingIds=${bookingIds.map(encodeURIComponent).join(",")}`, {
-      credentials: "same-origin",
-      cache: "no-store",
+    try {
+      setInvoicedBookingIds(await fetchBookingMap<string>("/api/billing/booking-links", "links", bookingIds));
+    } catch {
+      // Leave the previous map in place: showing slightly stale "already
+      // invoiced" markers is safer than showing none at all.
+    }
+  }
+
+  // --- POS fetchers ----------------------------------------------------------
+  // All of these talk to /api/billing/pos/* only. Nothing here reads or writes
+  // an invoice, which is what keeps counter takings out of invoice revenue.
+
+  async function fetchPosPaymentMethods() {
+    const response = await fetch("/api/billing/pos/payment-methods", { credentials: "same-origin", cache: "no-store" });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      return;
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load payment methods."));
+    const data = (await response.json()) as { paymentMethods?: PosPaymentMethod[] };
+    setPosPaymentMethods(Array.isArray(data.paymentMethods) ? data.paymentMethods : []);
+  }
+
+  function posRangeQuery() {
+    const params = new URLSearchParams({ limit: "200" });
+    if (posRangeFrom) params.set("from", posRangeFrom);
+    if (posRangeTo) params.set("to", posRangeTo);
+    return params.toString();
+  }
+
+  async function fetchPosTransactions() {
+    setPosTransactionsLoadState("loading");
+    try {
+      const query = posRangeQuery();
+      const [listResponse, summaryResponse] = await Promise.all([
+        fetch(`/api/billing/pos/transactions?${query}`, { credentials: "same-origin", cache: "no-store" }),
+        fetch(`/api/billing/pos/summary?${query}`, { credentials: "same-origin", cache: "no-store" }),
+      ]);
+      if (listResponse.status === 401 || summaryResponse.status === 401) {
+        setAuthStatus("guest");
+        setPosTransactionsLoadState("error");
+        return;
+      }
+      if (!listResponse.ok) throw new Error(await readApiFailure(listResponse, "Could not load POS transactions."));
+      const listData = (await listResponse.json()) as { transactions?: PosTransaction[] };
+      setPosTransactions(Array.isArray(listData.transactions) ? listData.transactions : []);
+      setPosSummary(summaryResponse.ok ? ((await summaryResponse.json()) as PosSummary) : null);
+      setPosTransactionsLoadState("loaded");
+    } catch (error) {
+      setPosTransactionsLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load POS transactions." });
+    }
+  }
+
+  async function fetchPosBookingPayments(bookingIds: string[]) {
+    if (!bookingIds.length) {
+      setPosPaidBookings({});
+      return;
+    }
+    try {
+      setPosPaidBookings(
+        await fetchBookingMap<PosBookingPayment>("/api/billing/pos/booking-payments", "payments", bookingIds),
+      );
+    } catch {
+      // Same reasoning as the invoice map: keep the last known state rather
+      // than blanking every "paid at POS" marker on one failed request.
+    }
+  }
+
+  // Called by the checkout modal whenever a sale is created or settles. Both the
+  // POS list and the per-lesson paid map need to reflect it immediately.
+  function handlePosSaleChanged(sale: PosTransaction) {
+    setPosTransactions((current) => {
+      const index = current.findIndex((entry) => entry.id === sale.id);
+      if (index === -1) return [sale, ...current];
+      const next = current.slice();
+      next[index] = sale;
+      return next;
     });
-    if (!response.ok) return;
-    const data = (await response.json()) as { links?: Record<string, string> };
-    setInvoicedBookingIds(data.links || {});
+    if (sale.bookingId) {
+      setPosPaidBookings((current) => {
+        const next = { ...current };
+        if (sale.status === "paid") {
+          next[sale.bookingId] = {
+            id: sale.id,
+            receiptNumber: sale.receiptNumber,
+            amount: sale.amount,
+            currency: sale.currency,
+            paymentMethodName: sale.paymentMethodName,
+            paidAt: sale.paidAt,
+          };
+        } else {
+          delete next[sale.bookingId];
+        }
+        return next;
+      });
+    }
+    if (billingSection === "pos") void fetchPosTransactions();
+  }
+
+  async function setPosTransactionStatus(id: string, status: PosTransaction["status"]) {
+    try {
+      const response = await fetch(`/api/billing/pos/transactions/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update the transaction."));
+      const data = (await response.json()) as { transaction?: PosTransaction };
+      if (data.transaction) handlePosSaleChanged(data.transaction);
+      setToast({ message: `${data.transaction?.receiptNumber || "Transaction"} marked ${status}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update the transaction." });
+    }
+  }
+
+  async function savePosPaymentMethod() {
+    const name = posMethodEditor.name.trim();
+    if (!name) {
+      setToast({ message: "Give the payment method a name." });
+      return;
+    }
+    setPosMethodSaveState("saving");
+    try {
+      const editingId = posMethodEditor.id;
+      const response = await fetch(
+        editingId ? `/api/billing/pos/payment-methods/${encodeURIComponent(editingId)}` : "/api/billing/pos/payment-methods",
+        {
+          method: editingId ? "PUT" : "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, settlesImmediately: posMethodEditor.settlesImmediately, active: true }),
+        },
+      );
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not save the payment method."));
+      setPosMethodEditor({ id: "", name: "", settlesImmediately: true });
+      await fetchPosPaymentMethods();
+      setToast({ message: `${name} saved.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save the payment method." });
+    } finally {
+      setPosMethodSaveState("idle");
+    }
+  }
+
+  async function setPosPaymentMethodActive(method: PosPaymentMethod, active: boolean) {
+    try {
+      const response = await fetch(`/api/billing/pos/payment-methods/${encodeURIComponent(method.id)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: method.name,
+          settlesImmediately: method.settlesImmediately,
+          sortOrder: method.sortOrder,
+          active,
+        }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update the payment method."));
+      await fetchPosPaymentMethods();
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update the payment method." });
+    }
   }
 
   async function loadBillingWorkspace() {
     setBillingDataLoadState("loading");
     try {
-      await Promise.all([fetchBillingProducts(), fetchRecentInvoices(), fetchBillingDiscounts(), fetchExpenseCategories(), fetchExpenses(), refreshSuggestedInvoiceNumber()]);
+      await Promise.all([fetchBillingProducts(), fetchRecentInvoices(), fetchBillingDiscounts(), fetchExpenseCategories(), fetchExpenses(), fetchPosPaymentMethods(), refreshSuggestedInvoiceNumber()]);
       setBillingDataLoadState("loaded");
     } catch (error) {
       setBillingDataLoadState("error");
@@ -13530,6 +13762,19 @@ function App() {
     // creation also refreshes this map directly after a successful pull.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEmbedMode, authStatus, billingWorkspaceEnabled, completedAppointments.map((item) => item.id).join(",")]);
+
+  // Same idea for counter sales: which completed bookings were paid at the
+  // till. Separate call so a POS failure can never break the invoice pull list.
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    void fetchPosBookingPayments(completedAppointments.map((item) => item.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, completedAppointments.map((item) => item.id).join(",")]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(BOOKING_PULL_FILTER_STORAGE_KEY, bookingPullFilter);
+  }, [bookingPullFilter]);
 
   async function fetchRevenueReport(period: "week" | "month" | "year") {
     setRevenueLoadState("loading");
@@ -13821,6 +14066,17 @@ function App() {
   function addCompletedBookingLine(item: CalendarItem) {
     if (invoicedBookingIds[item.id]) {
       setToast({ message: "This booking has already been invoiced." });
+      return;
+    }
+    // A counter sale settles the lesson exactly as an invoice does. This is the
+    // single guard that stops a paid lesson being billed a second time - the
+    // pull lists also disable those rows, but the filter can be set to show
+    // them, so the check has to live here too.
+    const posPayment = posPaidBookings[item.id];
+    if (posPayment) {
+      setToast({
+        message: `Already paid at the counter (${posPayment.receiptNumber}, ${formatMoney(posPayment.amount, posPayment.currency)}).`,
+      });
       return;
     }
     const service = itemService(item, services);
@@ -14599,6 +14855,48 @@ function App() {
     } finally {
       setClarityPayState("idle");
     }
+  }
+
+  // --- POS checkout entry points ---------------------------------------------
+  // Three ways in, one modal. Each just decides what to prefill; the modal owns
+  // the rest of the flow.
+
+  function openPosCheckoutForLesson(item: CalendarItem) {
+    const service = itemService(item, services);
+    const isCustomGroup = isCustomGroupService(service);
+    const attendees = isCustomGroup ? attendeeListWithBooker(item) : [];
+    const listed = isCustomGroup && service
+      ? calculateCustomGroupPrice(service, attendees.length)
+      : Number(service?.price ?? item.calculatedPrice ?? 0);
+    setPosCheckout({
+      source: "lesson",
+      description: `${service?.name || item.title}${item.client ? ` - ${item.client}` : ""}`,
+      amount: listed,
+      listedAmount: listed,
+      customerId: item.personId || "",
+      customerName: item.client || "",
+      customerEmail: item.email || "",
+      bookingId: item.id,
+    });
+  }
+
+  function openPosCheckoutForClient(client: ClientSummary) {
+    setPosCheckout({
+      source: "client",
+      description: "",
+      amount: 0,
+      // No list price to compare against on a free-form client sale.
+      listedAmount: null,
+      // Synthetic ids (appointment-<key>) are not real people rows, so they
+      // must never be stored as a customer id.
+      customerId: client.id.startsWith("appointment-") ? "" : client.id,
+      customerName: client.name || "",
+      customerEmail: client.email || "",
+    });
+  }
+
+  function openPosCheckoutCounter() {
+    setPosCheckout({ source: "counter", description: "", amount: 0, listedAmount: null });
   }
 
   // Download the server-rendered PDF (opens the attachment endpoint in a new tab;
@@ -18072,6 +18370,8 @@ function App() {
     selectedIsCustomGroupAppointment && selectedService
       ? calculateCustomGroupPrice(selectedService, selectedCustomGroupAttendees.length)
       : Number(selected?.calculatedPrice ?? 0);
+  // The counter sale that settled this lesson, if there is one.
+  const selectedPosPayment = selected ? posPaidBookings[selected.id] : undefined;
 
   const selectedAppointmentDetails = selected ? (
     <>
@@ -18195,8 +18495,21 @@ function App() {
       </div>
 
       <div className="service-summary">
-        <span>Price</span>
-        <strong>{selectedIsCustomGroupAppointment ? formatMoney(selectedCustomGroupPrice) : servicePriceLabel(selectedService)}</strong>
+        <span>{selectedPosPayment ? "Paid" : "Price"}</span>
+        <strong>
+          {selectedPosPayment
+            ? formatMoney(selectedPosPayment.amount, selectedPosPayment.currency)
+            : selectedIsCustomGroupAppointment
+              ? formatMoney(selectedCustomGroupPrice)
+              : servicePriceLabel(selectedService)}
+        </strong>
+        {/* Once a lesson is paid at the counter, what was actually taken is the
+            useful number - the list price is history. */}
+        {selectedPosPayment && (
+          <p className="pos-paid-line">
+            {selectedPosPayment.paymentMethodName} - {selectedPosPayment.receiptNumber}
+          </p>
+        )}
         <p>{selectedService?.description ?? selected.note}</p>
       </div>
 
@@ -18365,6 +18678,17 @@ function App() {
       )}
 
       <div className="panel-actions">
+        {/* Take payment for this lesson at the counter. Hidden once a sale has
+            already settled it, so the same lesson can't be charged twice by
+            accident, and hidden for externally-owned bookings (Optix) - their
+            money is collected over there and they carry a placeholder lesson
+            type with no meaningful price. */}
+        {selected.kind === "appointment" && billingWorkspaceEnabled && !selectedPosPayment && !isExternallyOwned(selected) && (
+          <button className="primary-button" onClick={() => openPosCheckoutForLesson(selected)} type="button">
+            <CreditCard size={16} />
+            Checkout
+          </button>
+        )}
         {selected.kind === "appointment" && (
           <button className="primary-button" onClick={bookNextFromSelected}>
             <Plus size={16} />
@@ -18529,6 +18853,21 @@ function App() {
   const selectedDetails = selectedGroupSessionDetails
     ? selectedGroupSessionDetails
     : selectedAppointmentDetails;
+  // Shared by both "ready to pull" lists (Dashboard and the New Invoice side
+  // panel) so they can never drift apart.
+  const pullFilterControl = (
+    <label className="settings-field pull-filter-field">
+      <span>Show</span>
+      <select
+        value={bookingPullFilter}
+        onChange={(event) => setBookingPullFilter(event.target.value as BookingPullFilter)}
+      >
+        <option value="unpaid">Unpaid only</option>
+        <option value="all">All completed</option>
+        <option value="paid">Already paid</option>
+      </select>
+    </label>
+  );
   const adminWorkspaceReady = isEmbedMode || adminWorkspaceLoadStatus === "loaded";
   const adminWorkspaceLoading =
     !isEmbedMode &&
@@ -20823,6 +21162,19 @@ function App() {
                 Expenses
               </button>
               <button
+                className={billingSection === "pos" ? "active" : ""}
+                onClick={() => {
+                  setBillingSection("pos");
+                  void fetchPosTransactions();
+                }}
+                role="tab"
+                aria-selected={billingSection === "pos"}
+                type="button"
+              >
+                <CreditCard size={16} />
+                POS Transactions
+              </button>
+              <button
                 className={billingSection === "reports" ? "active" : ""}
                 onClick={() => setBillingSection("reports")}
                 role="tab"
@@ -20964,27 +21316,49 @@ function App() {
                         </div>
                       )}
                     </div>
+                    {pullFilterControl}
                     <div className="completed-booking-list compact">
                       {pullableCompletedAppointments.length ? (
                         pullableCompletedAppointments.slice(0, 6).map((item) => {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
+                          // The filter can be set to show already-settled
+                          // lessons, so this list has to mark them the same way
+                          // the New Invoice panel does.
+                          const posPayment = posPaidBookings[item.id];
+                          const settled = Boolean(invoicedBookingIds[item.id] || posPayment);
                           return (
-                            <button key={item.id} onClick={() => addCompletedBookingLine(item)} type="button">
+                            <button
+                              key={item.id}
+                              className={settled ? "already-invoiced" : undefined}
+                              disabled={settled}
+                              onClick={() => addCompletedBookingLine(item)}
+                              type="button"
+                            >
                               <span>
                                 <strong>{item.client || item.title}</strong>
                                 <em>
                                   {service?.name ?? "Lesson"} - {days[item.day].label}, {formatTime(item.start)}
                                 </em>
                               </span>
-                              <Plus size={16} />
+                              {posPayment ? (
+                                <em>Paid at POS</em>
+                              ) : settled ? (
+                                <em>Already invoiced</em>
+                              ) : (
+                                <Plus size={16} />
+                              )}
                             </button>
                           );
                         })
-                      ) : uninvoicedCompletedAppointments.length ? (
+                      ) : pullFilteredCompletedAppointments.length ? (
                         <p>No completed bookings in this date range.</p>
                       ) : completedAppointments.length ? (
-                        <p>All completed bookings have already been invoiced.</p>
+                        <p>
+                          {bookingPullFilter === "paid"
+                            ? "No completed bookings have been paid yet."
+                            : "All completed bookings have already been settled."}
+                        </p>
                       ) : (
                         <p>No completed bookings yet. Mark a lesson completed from the appointment details panel.</p>
                       )}
@@ -21990,18 +22364,24 @@ function App() {
                         </div>
                       )}
                     </div>
+                    {pullFilterControl}
                     <div className="completed-booking-list">
                       {calendarPullRangeSorted.length ? (
                         calendarPullRangeSorted.map((item) => {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
                           const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
+                          // A counter sale settles the lesson just as an invoice
+                          // does - pulling it onto an invoice as well would bill
+                          // the same lesson twice.
+                          const posPayment = posPaidBookings[item.id];
+                          const settled = alreadyInvoiced || Boolean(posPayment);
                           const matchesPayer = invoicePayerBookingIds.has(item.id);
                           return (
                             <button
                               key={item.id}
-                              className={`${alreadyInvoiced ? "already-invoiced" : ""}${matchesPayer ? " for-billing-client" : ""}`.trim()}
-                              disabled={alreadyInvoiced}
+                              className={`${settled ? "already-invoiced" : ""}${matchesPayer ? " for-billing-client" : ""}`.trim()}
+                              disabled={settled}
                               onClick={() => addCompletedBookingLine(item)}
                               type="button"
                             >
@@ -22014,7 +22394,13 @@ function App() {
                                   {service?.name ?? "Lesson"} - {days[item.day].label}, {formatRange(item.start, item.duration)}
                                 </em>
                               </span>
-                              {alreadyInvoiced ? <em>Already invoiced</em> : <Plus size={16} />}
+                              {posPayment ? (
+                                <em>Paid at POS - {formatMoney(posPayment.amount, posPayment.currency)}</em>
+                              ) : alreadyInvoiced ? (
+                                <em>Already invoiced</em>
+                              ) : (
+                                <Plus size={16} />
+                              )}
                             </button>
                           );
                         })
@@ -22602,6 +22988,146 @@ function App() {
               </div>
             )}
 
+            {/* POS Transactions. Its own numbers, deliberately never mixed into
+                the invoice figures above - a lesson can be paid at the counter
+                and also appear on an invoice, so combining them would
+                double-count. */}
+            {billingSection === "pos" && (
+              <div className="billing-dashboard billing-pos">
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Point of sale</span>
+                      <h2>{formatMoney(posSummary?.paidTotal ?? 0, posSummary?.currency ?? invoiceSettings.currency)}</h2>
+                    </div>
+                    <CreditCard size={24} />
+                  </div>
+                  <p className="field-help">
+                    Counter takings, kept separate from invoicing. These totals are not included in Revenue, Reports or
+                    accounts receivable.
+                  </p>
+                  <div className="settings-field-row pos-range-row">
+                    <div className="settings-field">
+                      <label htmlFor="pos-range-from">From</label>
+                      <input
+                        id="pos-range-from"
+                        type="date"
+                        value={posRangeFrom}
+                        onChange={(event) => setPosRangeFrom(event.target.value)}
+                      />
+                    </div>
+                    <div className="settings-field">
+                      <label htmlFor="pos-range-to">To</label>
+                      <input
+                        id="pos-range-to"
+                        type="date"
+                        value={posRangeTo}
+                        onChange={(event) => setPosRangeTo(event.target.value)}
+                      />
+                    </div>
+                    <button className="outline-button" onClick={() => void fetchPosTransactions()} type="button">
+                      Apply
+                    </button>
+                    <button className="primary-button" onClick={openPosCheckoutCounter} type="button">
+                      <Plus size={16} />
+                      New Sale
+                    </button>
+                  </div>
+                  {posSummary && posSummary.byMethod.length > 0 && (
+                    <div className="pos-method-totals">
+                      {posSummary.byMethod.map((entry) => (
+                        <div key={entry.paymentMethodName} className="pos-method-total">
+                          <span>{entry.paymentMethodName}</span>
+                          <strong>{formatMoney(entry.total, posSummary.currency)}</strong>
+                          <em>
+                            {entry.count} sale{entry.count === 1 ? "" : "s"}
+                          </em>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+
+                <article className="data-card wide recent-invoices-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Receipts</span>
+                      <h2>POS transactions</h2>
+                    </div>
+                    <Receipt size={24} />
+                  </div>
+                  {posTransactionsLoadState === "loading" && <p>Loading transactions...</p>}
+                  {posTransactionsLoadState === "error" && (
+                    <p>
+                      Could not load transactions.{" "}
+                      <button className="link-button" onClick={() => void fetchPosTransactions()} type="button">
+                        Retry
+                      </button>
+                    </p>
+                  )}
+                  {posTransactionsLoadState === "loaded" && !posTransactions.length && (
+                    <p>No counter sales in this range yet.</p>
+                  )}
+                  {posTransactions.length > 0 && (
+                    <table className="recent-invoices-table">
+                      <thead>
+                        <tr>
+                          <th>Receipt</th>
+                          <th>Description</th>
+                          <th>Customer</th>
+                          <th>Method</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {posTransactions.map((transaction) => (
+                          <tr key={transaction.id}>
+                            <td>{transaction.receiptNumber}</td>
+                            <td>
+                              {transaction.description}
+                              {transaction.listedAmount !== null &&
+                                Math.abs(transaction.listedAmount - transaction.amount) > 0.005 && (
+                                  <em className="pos-adjusted-note">
+                                    listed {formatMoney(transaction.listedAmount, transaction.currency)}
+                                  </em>
+                                )}
+                            </td>
+                            <td>{transaction.customerName || "-"}</td>
+                            <td>{transaction.paymentMethodName}</td>
+                            <td>{formatMoney(transaction.amount, transaction.currency)}</td>
+                            <td>
+                              <span className={`invoice-status-pill invoice-status-${transaction.status === "paid" ? "paid" : transaction.status === "void" ? "void" : "published"}`}>
+                                {transaction.status}
+                              </span>
+                              {transaction.status === "pending" && (
+                                <button
+                                  className="link-button"
+                                  onClick={() => void setPosTransactionStatus(transaction.id, "paid")}
+                                  type="button"
+                                >
+                                  Mark paid
+                                </button>
+                              )}
+                              {transaction.status === "paid" && (
+                                <button
+                                  className="link-button"
+                                  onClick={() => void setPosTransactionStatus(transaction.id, "refunded")}
+                                  type="button"
+                                >
+                                  Refund
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </article>
+              </div>
+            )}
+
             {billingSection === "reports" && (
               <BillingReportsPanel
                 summary={reportSummary}
@@ -22754,6 +23280,102 @@ function App() {
                     />
                   </label>
                   </EditableSettingsBlock>
+                </article>
+
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Point of sale</span>
+                      <h2>Payment Methods</h2>
+                    </div>
+                    <CreditCard size={24} />
+                  </div>
+                  <p className="field-help">
+                    The buttons shown in the checkout modal. Clarity Pay is the Stripe-backed method and is always
+                    available; add your own for Cash, Eftpos, On account and anything else you take.
+                  </p>
+                  <div className="billing-catalog-editor">
+                    <label className="settings-field">
+                      <span>Name</span>
+                      <input
+                        value={posMethodEditor.name}
+                        onChange={(event) => setPosMethodEditor((current) => ({ ...current, name: event.target.value }))}
+                        placeholder="e.g. Eftpos"
+                      />
+                    </label>
+                    <label className="settings-field pos-settles-toggle">
+                      <input
+                        checked={posMethodEditor.settlesImmediately}
+                        onChange={(event) =>
+                          setPosMethodEditor((current) => ({ ...current, settlesImmediately: event.target.checked }))
+                        }
+                        type="checkbox"
+                      />
+                      <span>Money is received straight away</span>
+                    </label>
+                    <p className="field-help">
+                      Leave that unticked for methods like On account, where the sale is recorded as owed and marked
+                      paid later.
+                    </p>
+                    <button
+                      className="outline-button"
+                      disabled={posMethodSaveState === "saving"}
+                      onClick={() => void savePosPaymentMethod()}
+                      type="button"
+                    >
+                      <Plus size={16} />
+                      {posMethodSaveState === "saving"
+                        ? "Saving..."
+                        : posMethodEditor.id
+                          ? "Save Changes"
+                          : "Add Payment Method"}
+                    </button>
+                    {Boolean(posMethodEditor.id) && (
+                      <button
+                        className="outline-button"
+                        onClick={() => setPosMethodEditor({ id: "", name: "", settlesImmediately: true })}
+                        type="button"
+                      >
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                  <div className="billing-catalog-list">
+                    {posPaymentMethods.length ? (
+                      posPaymentMethods.map((method) => (
+                        <div key={method.id} className={`billing-catalog-list-item${method.active ? "" : " inactive"}`}>
+                          <button
+                            onClick={() =>
+                              setPosMethodEditor({
+                                id: method.id,
+                                name: method.name,
+                                settlesImmediately: method.settlesImmediately,
+                              })
+                            }
+                            type="button"
+                          >
+                            <span>
+                              <strong>{method.name}</strong>
+                              <em>
+                                {method.kind === "clarity_pay" ? "Stripe - card, Apple Pay, Google Pay" : "Manual"}
+                                {method.settlesImmediately ? "" : " - recorded as owed"}
+                                {method.active ? "" : " - inactive"}
+                              </em>
+                            </span>
+                          </button>
+                          <button
+                            className="text-link-button"
+                            onClick={() => void setPosPaymentMethodActive(method, !method.active)}
+                            type="button"
+                          >
+                            {method.active ? "Deactivate" : "Reactivate"}
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p>Loading payment methods...</p>
+                    )}
+                  </div>
                 </article>
 
                 <article className="data-card">
@@ -26114,6 +26736,16 @@ function App() {
                 </>
               ) : (
                 <>
+                  {selectedClient && billingWorkspaceEnabled && (
+                    <button
+                      className="primary-button"
+                      onClick={() => openPosCheckoutForClient(selectedClient)}
+                      type="button"
+                    >
+                      <CreditCard size={16} />
+                      Checkout
+                    </button>
+                  )}
                   <button className="primary-button" onClick={startClientEdit}>
                     <User size={16} />
                     Edit
@@ -26139,6 +26771,17 @@ function App() {
             </div>
           </aside>
         </div>
+      )}
+
+      {!isEmbedMode && posCheckout && (
+        <PosCheckoutModal
+          context={posCheckout}
+          currency={invoiceSettings.currency}
+          formatMoney={formatMoney}
+          onClose={() => setPosCheckout(null)}
+          onCompleted={handlePosSaleChanged}
+          onToast={(message) => setToast({ message })}
+        />
       )}
 
       {edgeCue && <div className={`edge-cue ${edgeCue}`}>{edgeCue === "next" ? "Next week" : "Previous week"}</div>}
