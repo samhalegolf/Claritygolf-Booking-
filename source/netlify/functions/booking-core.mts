@@ -3839,6 +3839,13 @@ function coachAccountFromSettings(settings) {
   });
 }
 
+// Reminder lead time: 1 hour to 14 days before the lesson, default 24 hours.
+// Mirrors admin-settings.mts, which owns the /api/admin-settings write path.
+function cleanReminderLeadMinutes(value, fallback = 24 * 60) {
+  const minutes = Number(value === "" || value === undefined || value === null ? fallback : value);
+  return Number.isFinite(minutes) ? Math.max(60, Math.min(14 * 24 * 60, Math.round(minutes))) : fallback;
+}
+
 function adminSettingsFromSettings(settings) {
   const delaySeconds = Number(settingValue(settings, "notificationDelaySeconds") || 30);
   return {
@@ -3852,6 +3859,8 @@ function adminSettingsFromSettings(settings) {
     sendClientEmail: settingValue(settings, "sendClientEmail") !== "false",
     sendCoachEmail: settingValue(settings, "sendCoachEmail") !== "false",
     sendAdminEmail: settingValue(settings, "sendAdminEmail") !== "false",
+    reminderEnabled: settingValue(settings, "reminderEnabled") === "true",
+    reminderLeadMinutes: cleanReminderLeadMinutes(settingValue(settings, "reminderLeadMinutes")),
     clientEmailSubject:
       settingValue(settings, "clientEmailSubject") ||
       defaultEmailTemplates.clientEmailSubject,
@@ -3974,6 +3983,10 @@ async function writeAdminSettings(settings) {
   put("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
   put("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
   put("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
+  put("reminderEnabled", settings?.reminderEnabled ? "true" : "false");
+  if (hasOwn(settings, "reminderLeadMinutes")) {
+    next.reminderLeadMinutes = String(cleanReminderLeadMinutes(settings?.reminderLeadMinutes));
+  }
   put("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
   put("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
   put("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
@@ -5056,6 +5069,28 @@ async function writePublicBookingState(currentState, items) {
 
 function schedulePublicBookingSideEffects(context, appointment, options = {}) {
   const task = (async () => {
+    // Send the booking confirmation from the server, first thing. It used to
+    // be triggered only by the client's browser calling
+    // /api/public-booking-notifications after the confirmation screen
+    // rendered — so closing the tab (or a dropped mobile request) right after
+    // booking meant no email until something poked the appointment later.
+    // The history check keeps this idempotent against retries and replays.
+    if (options.sendConfirmation === true) {
+      try {
+        const history = clientNotificationRecords(
+          await readNotificationHistoryForAppointment(appointment.id),
+          appointment.id,
+        );
+        const alreadySent = history.some(
+          (notification) => notification.kind.startsWith("booking_") && notification.status === "sent",
+        );
+        if (!alreadySent) {
+          await sendBookingNotifications(appointment, { kind: "booking" });
+        }
+      } catch (error) {
+        console.error("public_booking:confirmation_email_failed", appointment?.id, error);
+      }
+    }
     // The appointment was already written without waiting on this (public
     // booking latency matters more than the client link being instant). Once
     // the person is resolved/created here, stamp its id back onto the row so
@@ -5550,6 +5585,85 @@ export async function flushAdminNotificationQueue() {
     timeZone: state.account?.timezone,
   });
   return { pending: pending.length, results };
+}
+
+// Cap reminder sends per scheduled run so a backlog (e.g. the feature being
+// switched on with a full week already booked) drains over a few runs instead
+// of tripping Resend's rate limit or the function timeout. Leftovers are
+// picked up by the next run — the due window is wide, not a single instant.
+const REMINDER_MAX_SENDS_PER_RUN = 20;
+
+// Send lesson reminder emails for appointments whose start time is within the
+// configured lead window. Called by the scheduled function
+// (lesson-reminders.mts); everything here must therefore be idempotent — the
+// notification_history row written by the send is what stops the next run
+// from reminding the same lesson again.
+export async function processDueLessonReminders() {
+  const settingsMap = await readSettingsMap();
+  const settings = adminSettingsFromSettings(settingsMap);
+  if (!settings.reminderEnabled) return { enabled: false, due: 0, sent: 0 };
+  const leadMinutes = settings.reminderLeadMinutes;
+  const timeZone = accountTimeZone();
+  const items = await readItems();
+
+  const due = items.filter((item) => {
+    if (item.kind !== "appointment") return false;
+    // Cancelled, no-show and already-completed lessons never need a reminder.
+    if (["cancelled", "no_show", "completed"].includes(item.status)) return false;
+    // Reminders go to whoever booked; group slots without a direct email are
+    // skipped rather than guessed at.
+    if (!cleanEmail(item.email, "")) return false;
+    const minutesUntilStart = -appointmentMinutesSinceEnd(item, timeZone) - Number(item.duration || 0);
+    return minutesUntilStart > 0 && minutesUntilStart <= leadMinutes;
+  });
+  if (!due.length) return { enabled: true, due: 0, sent: 0 };
+
+  let sent = 0;
+  let skipped = 0;
+  for (const item of due.slice(0, REMINDER_MAX_SENDS_PER_RUN)) {
+    try {
+      const history = await readNotificationHistoryForAppointment(item.id);
+      // One reminder per lesson. A failed send may retry, but at most once an
+      // hour — not on every 5-minute run — so a dead address can't flood the
+      // history while the lesson is still days away.
+      const reminderRows = history.filter((notification) => notification.kind === "reminder_client_email");
+      const alreadyReminded =
+        reminderRows.some((notification) => notification.status === "sent" || notification.status === "skipped") ||
+        reminderRows.some((notification) => {
+          const createdMs = new Date(notification.createdAt || 0).getTime();
+          return Number.isFinite(createdMs) && Date.now() - createdMs < 60 * 60000;
+        });
+      if (alreadyReminded) {
+        skipped += 1;
+        continue;
+      }
+      // If the confirmation (or a reschedule/update email) went out after the
+      // reminder became due, the client already has a fresh email with the
+      // full details — booking 2 hours before a lesson with a 24-hour lead
+      // should not stack a reminder straight on top of the confirmation.
+      const minutesUntilStart = -appointmentMinutesSinceEnd(item, timeZone) - Number(item.duration || 0);
+      const dueAtMs = Date.now() + (minutesUntilStart - leadMinutes) * 60000;
+      const freshClientEmail = history.some((notification) => {
+        if (!/^(booking|rescheduled|reschedule|updated)_client_email$/.test(notification.kind)) return false;
+        if (notification.status !== "sent") return false;
+        // created_at can arrive as a string or a Date depending on the driver.
+        const createdMs = new Date(notification.createdAt || 0).getTime();
+        return Number.isFinite(createdMs) && createdMs >= dueAtMs;
+      });
+      if (freshClientEmail) {
+        skipped += 1;
+        continue;
+      }
+      await notifyBookingEvent({ action: "reminder", appointment: item, source: "lesson-reminder-schedule" });
+      sent += 1;
+    } catch (error) {
+      console.error("lesson_reminders:send_failed", item.id, error);
+    }
+  }
+  if (due.length > REMINDER_MAX_SENDS_PER_RUN) {
+    console.warn("lesson_reminders:capped", { due: due.length, cap: REMINDER_MAX_SENDS_PER_RUN });
+  }
+  return { enabled: true, due: due.length, sent, skipped };
 }
 
 async function verifyAdminPassword(email, password) {
@@ -7388,7 +7502,10 @@ async function createPublicBooking(payload, context = null) {
     location,
     ...(customGroup || {}),
   };
-  const nextState = await writePublicBookingAppointment(state, appointment, context, { autoBookResource: true });
+  const nextState = await writePublicBookingAppointment(state, appointment, context, {
+    autoBookResource: true,
+    sendConfirmation: true,
+  });
   return { appointment, notifications: [], state: nextState };
 }
 

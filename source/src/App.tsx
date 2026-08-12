@@ -1425,6 +1425,8 @@ type NotificationSettings = {
   sendClientEmail: boolean;
   sendCoachEmail: boolean;
   sendAdminEmail: boolean;
+  reminderEnabled: boolean;
+  reminderLeadMinutes: number;
   clientEmailSubject: string;
   clientEmailIntro: string;
   clientEmailFooter: string;
@@ -1796,6 +1798,22 @@ function snap(value: number) {
 
 function cleanMinBookingNoticeMinutes(value: number) {
   return Number.isFinite(value) ? clamp(Math.round(value), 0, MAX_MIN_BOOKING_NOTICE_MINUTES) : DEFAULT_MIN_BOOKING_NOTICE_MINUTES;
+}
+
+/** Days + hours from the reminder settings UI, combined and clamped to the
+ *  backend's 1 hour – 14 days range (see admin-settings.mts). */
+function reminderLeadMinutesFrom(days: number, hours: number) {
+  return clamp(Math.round(days) * 1440 + Math.round(hours) * 60, 60, 14 * 24 * 60);
+}
+
+function reminderLeadLabel(minutes: number) {
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.round((minutes % 1440) / 60);
+  const parts = [
+    days ? `${days} day${days === 1 ? "" : "s"}` : "",
+    hours ? `${hours} hour${hours === 1 ? "" : "s"}` : "",
+  ].filter(Boolean);
+  return parts.join(" ") || "1 hour";
 }
 
 function formatBookingNoticeLabel(minutes: number) {
@@ -4428,6 +4446,8 @@ const defaultNotificationSettings: NotificationSettings = {
   sendClientEmail: true,
   sendCoachEmail: true,
   sendAdminEmail: true,
+  reminderEnabled: false,
+  reminderLeadMinutes: 24 * 60,
   clientEmailSubject: "Your {{service}} is confirmed",
   clientEmailIntro: "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
   clientEmailFooter: "We look forward to seeing you.",
@@ -5233,7 +5253,6 @@ function App() {
   const lastPersistedCalendarItemsRef = useRef<CalendarItem[]>([]);
   const pendingLessonCompleteIdRef = useRef("");
   const activeAdminSaveOwnersRef = useRef<Map<AdminSaveOwner, number>>(new Map());
-  const publicNotificationTriggerRef = useRef<Set<string>>(new Set());
   const publicBookingSlotRequestsRef = useRef<Set<string>>(new Set());
   const pendingQuickCreateRef = useRef<QuickCreateState | null>(null);
   const adminBootStartedAtRef = useRef(typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -6094,7 +6113,6 @@ function App() {
     let cancelled = false;
     let attempts = 0;
     let timer: number | null = null;
-    const triggerKey = `${bookingConfirmation.kind}:${bookingConfirmation.appointmentId}`;
 
     const mergeNotificationResults = (results: EmailSendResult[]) => {
       if (!results.length || cancelled) return;
@@ -6112,31 +6130,10 @@ function App() {
       if (results.some((result) => result.channel === "client" && result.sent)) setEmailNoticeVisible(true);
     };
 
-    const triggerEmailSend = async () => {
-      if (publicNotificationTriggerRef.current.has(triggerKey)) return;
-      publicNotificationTriggerRef.current.add(triggerKey);
-      try {
-        const response = await fetch("/api/public-booking-notifications", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({
-            appointmentId: bookingConfirmation.appointmentId,
-            email: bookingConfirmation.email,
-            phone: bookingConfirmation.phone || "",
-            kind: bookingConfirmation.kind,
-          }),
-        });
-        const data = (await response.json().catch(() => ({}))) as {
-          results?: EmailSendResult[];
-          notifications?: NotificationRecord[];
-        };
-        if (Array.isArray(data.notifications)) setNotifications(data.notifications);
-        if (Array.isArray(data.results)) mergeNotificationResults(data.results);
-      } catch {
-        // The booking is confirmed already; polling below can still pick up a background receipt.
-      }
-    };
-
+    // The confirmation email is sent server-side in the booking's background
+    // side effects (see booking-core's schedulePublicBookingSideEffects), so
+    // this screen only polls for the receipt — the send no longer depends on
+    // this tab staying open.
     const poll = async () => {
       attempts += 1;
       try {
@@ -6159,9 +6156,7 @@ function App() {
       if (!cancelled && attempts < 36) timer = window.setTimeout(poll, 5000);
     };
 
-    void triggerEmailSend().finally(() => {
-      if (!cancelled) timer = window.setTimeout(poll, 1200);
-    });
+    timer = window.setTimeout(poll, 1200);
 
     return () => {
       cancelled = true;
@@ -6637,11 +6632,13 @@ function App() {
   function applyNotificationSettings(settings?: Partial<NotificationSettings>) {
     const delaySeconds = Number(settings?.notificationDelaySeconds ?? defaultNotificationSettings.notificationDelaySeconds);
     const minBookingNoticeMinutes = Number(settings?.minBookingNoticeMinutes ?? defaultNotificationSettings.minBookingNoticeMinutes);
+    const reminderLeadMinutes = Number(settings?.reminderLeadMinutes ?? defaultNotificationSettings.reminderLeadMinutes);
     setNotificationSettings({
       ...defaultNotificationSettings,
       ...(settings ?? {}),
       notificationDelaySeconds: Number.isFinite(delaySeconds) ? clamp(delaySeconds, 30, 3600) : 30,
       minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(minBookingNoticeMinutes),
+      reminderLeadMinutes: Number.isFinite(reminderLeadMinutes) ? clamp(reminderLeadMinutes, 60, 14 * 24 * 60) : 24 * 60,
       googleReviewUrl: cleanUrl(settings?.googleReviewUrl, ""),
     });
   }
@@ -24831,6 +24828,10 @@ function App() {
                     <strong>{notificationSettings.sendAdminEmail ? "On" : "Off"}</strong>
                     admin
                   </span>
+                  <span>
+                    <strong>{notificationSettings.reminderEnabled ? "On" : "Off"}</strong>
+                    reminder
+                  </span>
                 </div>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
@@ -24925,6 +24926,76 @@ function App() {
                     />
                     <span>Send admin booking alert</span>
                   </label>
+                </details>
+                <details className="settings-subsection">
+                  <summary className="settings-subsection-title">
+                    <Mail size={18} />
+                    <div>
+                      <span>Lesson reminder</span>
+                      <strong>
+                        {notificationSettings.reminderEnabled
+                          ? `${reminderLeadLabel(notificationSettings.reminderLeadMinutes)} before`
+                          : "Off"}
+                      </strong>
+                    </div>
+                  </summary>
+                  <label className="settings-toggle">
+                    <input
+                      checked={emailNotificationsDraft.reminderEnabled}
+                      disabled={emailNotificationsIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "reminderEnabled", event.target.checked)}
+                      type="checkbox"
+                    />
+                    <span>Send clients a reminder email before their lesson</span>
+                  </label>
+                  <div className="settings-field-row">
+                    <label className="settings-field">
+                      <span>Days before</span>
+                      <input
+                        value={Math.floor(emailNotificationsDraft.reminderLeadMinutes / 1440)}
+                        readOnly={emailNotificationsIsLocked}
+                        min={0}
+                        max={14}
+                        inputMode="numeric"
+                        type="number"
+                        onChange={(event) =>
+                          updateNotificationBlockDraft(
+                            emailNotificationsEditor,
+                            "reminderLeadMinutes",
+                            reminderLeadMinutesFrom(
+                              clamp(Number(event.target.value || 0), 0, 14),
+                              Math.round((emailNotificationsDraft.reminderLeadMinutes % 1440) / 60),
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span>Hours before</span>
+                      <input
+                        value={Math.round((emailNotificationsDraft.reminderLeadMinutes % 1440) / 60)}
+                        readOnly={emailNotificationsIsLocked}
+                        min={0}
+                        max={23}
+                        inputMode="numeric"
+                        type="number"
+                        onChange={(event) =>
+                          updateNotificationBlockDraft(
+                            emailNotificationsEditor,
+                            "reminderLeadMinutes",
+                            reminderLeadMinutesFrom(
+                              Math.floor(emailNotificationsDraft.reminderLeadMinutes / 1440),
+                              clamp(Number(event.target.value || 0), 0, 23),
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                  <p className="field-help">
+                    Sent once per lesson, to the client only. A lesson booked inside the reminder window skips the
+                    reminder — the confirmation email they just received already has the details.
+                  </p>
                 </details>
                 </EditableSettingsBlock>
               </article>

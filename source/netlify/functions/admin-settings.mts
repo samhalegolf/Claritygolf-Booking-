@@ -61,6 +61,12 @@ function cleanMinBookingNoticeMinutes(value: unknown, fallback = defaultMinBooki
   return Number.isFinite(minutes) ? Math.max(0, Math.min(7 * 24 * 60, Math.round(minutes))) : fallback;
 }
 
+// Reminder lead time: 1 hour to 14 days before the lesson, default 24 hours.
+function cleanReminderLeadMinutes(value: unknown, fallback = 24 * 60) {
+  const minutes = Number(value ?? fallback);
+  return Number.isFinite(minutes) ? Math.max(60, Math.min(14 * 24 * 60, Math.round(minutes))) : fallback;
+}
+
 function modernClientEmailFooter(value: unknown) {
   const footer = cleanString(value, defaultEmailTemplates.clientEmailFooter, 900);
   return /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i.test(footer)
@@ -154,6 +160,8 @@ async function readAdminSettings() {
     sendClientEmail: settings.sendClientEmail !== "false",
     sendCoachEmail: settings.sendCoachEmail !== "false",
     sendAdminEmail: settings.sendAdminEmail !== "false",
+    reminderEnabled: settings.reminderEnabled === "true",
+    reminderLeadMinutes: cleanReminderLeadMinutes(settings.reminderLeadMinutes),
     clientEmailSubject: settings.clientEmailSubject || defaultEmailTemplates.clientEmailSubject,
     clientEmailIntro: settings.clientEmailIntro || defaultEmailTemplates.clientEmailIntro,
     clientEmailFooter: modernClientEmailFooter(settings.clientEmailFooter),
@@ -185,6 +193,8 @@ async function writeAdminSettings(settings: any) {
   if (hasOwn(settings, "sendClientEmail")) await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
   if (hasOwn(settings, "sendCoachEmail")) await setSetting("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
   if (hasOwn(settings, "sendAdminEmail")) await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
+  if (hasOwn(settings, "reminderEnabled")) await setSetting("reminderEnabled", settings?.reminderEnabled ? "true" : "false");
+  if (hasOwn(settings, "reminderLeadMinutes")) await setSetting("reminderLeadMinutes", String(cleanReminderLeadMinutes(settings?.reminderLeadMinutes)));
   if (hasOwn(settings, "clientEmailSubject")) await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
   if (hasOwn(settings, "clientEmailIntro")) await setSetting("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
   if (hasOwn(settings, "clientEmailFooter")) await setSetting("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));

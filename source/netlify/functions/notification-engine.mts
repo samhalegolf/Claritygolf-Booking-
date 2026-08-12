@@ -765,6 +765,16 @@ export async function notifyBookingEvent(input: NotifyInput) {
     return results;
   }
 
+  // Reminders go to the client only — the coach and admin already have the
+  // lesson on their calendar. The feature's own toggle (reminderEnabled,
+  // checked by the scheduler before calling this) is the gate, not
+  // sendClientEmail, so switching confirmations off doesn't silently kill
+  // reminders too.
+  if (action === "reminder") {
+    await sendAndRecord("client", appt.email, subjects.client);
+    return results;
+  }
+
   if (settings.sendClientEmail || action === "cancelled" || action === "rescheduled") {
     await sendAndRecord("client", appt.email, subjects.client);
   } else {

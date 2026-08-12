@@ -76,6 +76,13 @@ button {
   gap: 7px;
 }
 
+/* Two small inputs side by side (e.g. the reminder's days + hours). */
+.settings-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .login-card label span,
 .settings-field span {
   color: #76736d;
