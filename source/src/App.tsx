@@ -1358,6 +1358,17 @@ type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | 
 type GoogleDriveActionState = "idle" | "connecting" | "testing" | "disconnecting";
 type AuthStatus = "checking" | "authenticated" | "guest";
 
+/** What Clarity Caddy knows about a player, for the profile card. */
+type CaddyStatus = {
+  connected: boolean;
+  coachLinked?: boolean;
+  coachCount?: number;
+  access: string;
+  active?: boolean;
+  expiresAt?: string | null;
+  unavailable?: string;
+};
+
 /** A client the coach has given player portal access to. */
 type PortalPlayer = {
   id: string;
@@ -5097,6 +5108,10 @@ function App({ onSessionLost }: AppProps = {}) {
   // portal_players in the booking functions.
   const [portalPlayers, setPortalPlayers] = useState<PortalPlayer[]>([]);
   const [portalPlayerBusyId, setPortalPlayerBusyId] = useState("");
+  const [includeCaddyPass, setIncludeCaddyPass] = useState(false);
+  // Keyed by personId. Loaded lazily per profile so opening Player Profiles
+  // does not fan out a Caddy request for every client.
+  const [caddyStatuses, setCaddyStatuses] = useState<Record<string, { status: CaddyStatus; deepLink: string }>>({});
   const [clarityCloudImportActionIds, setClarityCloudImportActionIds] = useState<Set<string>>(() => new Set());
   const autoCloudUploadKeyRef = useRef("");
   const [notificationSettings, setNotificationSettings] =
@@ -15726,6 +15741,36 @@ function App({ onSessionLost }: AppProps = {}) {
     }
   }
 
+  async function refreshCaddyStatus(personId: string) {
+    if (!personId) return;
+    try {
+      const response = await fetch(`/api/caddy-status?personId=${encodeURIComponent(personId)}`, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      const data = (await response.json().catch(() => ({}))) as {
+        status?: CaddyStatus;
+        deepLink?: string;
+      };
+      if (!data.status) return;
+      setCaddyStatuses((current) => ({
+        ...current,
+        [personId]: { status: data.status as CaddyStatus, deepLink: data.deepLink || "" },
+      }));
+    } catch {
+      // The card says "could not be read" rather than the profile failing.
+      setCaddyStatuses((current) => ({
+        ...current,
+        [personId]: { status: { connected: false, access: "none", unavailable: "unreachable" }, deepLink: "" },
+      }));
+    }
+  }
+
   /** Grants access, or re-sends the set-password invite if they already have it. */
   async function grantPortalAccess(person: Pick<Person, "id" | "name" | "email">) {
     if (portalPlayerBusyId) return;
@@ -15735,13 +15780,14 @@ function App({ onSessionLost }: AppProps = {}) {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ personId: person.id }),
+        body: JSON.stringify({ personId: person.id, includeCaddyPass }),
       });
       const data = (await response.json().catch(() => ({}))) as {
         ok?: boolean;
         message?: string;
         inviteSent?: boolean;
         inviteUrl?: string;
+        caddy?: { attempted?: boolean; linked?: boolean; passIssued?: boolean; error?: string };
       };
       if (response.status === 401) {
         setAuthStatus("guest");
@@ -15752,8 +15798,16 @@ function App({ onSessionLost }: AppProps = {}) {
         return;
       }
       await refreshPortalPlayers();
+      void refreshCaddyStatus(person.id);
+      // A Caddy problem never fails the portal invite, so it is reported
+      // separately rather than swallowed.
+      if (data.caddy?.error) {
+        setToast({ message: `Portal access is on, but Clarity Caddy: ${data.caddy.error}` });
+        return;
+      }
       if (data.inviteSent) {
-        setToast({ message: `Invite sent to ${person.email || person.name}.` });
+        const suffix = data.caddy?.passIssued ? " with a Clarity Caddy pass" : "";
+        setToast({ message: `Invite sent to ${person.email || person.name}${suffix}.` });
       } else if (data.inviteUrl) {
         // Email is not configured or was refused. The link still works, so
         // hand it over rather than leaving the coach with a dead end.
@@ -20442,6 +20496,15 @@ function App({ onSessionLost }: AppProps = {}) {
                                         </span>
                                       </div>
                                       <div className="player-portal-access-actions">
+                                        <label className="player-caddy-pass-toggle" title="Issues a 30 day Clarity Caddy pass at the same time">
+                                          <input
+                                            type="checkbox"
+                                            checked={includeCaddyPass}
+                                            onChange={(event) => setIncludeCaddyPass(event.target.checked)}
+                                            disabled={busy || !notesWorkspaceClient.email}
+                                          />
+                                          <span>Include Clarity Caddy Pass</span>
+                                        </label>
                                         <button
                                           type="button"
                                           className="outline-button"
@@ -20458,6 +20521,68 @@ function App({ onSessionLost }: AppProps = {}) {
                                             onClick={() => void revokePortalAccess(portalPlayer.id, notesWorkspaceClient.id)}
                                           >
                                             Remove access
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+
+                                {/* Caddy is a separate product with separate access, so it gets its
+                                    own card rather than being folded into the portal row. */}
+                                {(() => {
+                                  const entry = caddyStatuses[notesWorkspaceClient.id];
+                                  const hasPortal = portalPlayers.some(
+                                    (candidate) =>
+                                      candidate.personId === notesWorkspaceClient.id && candidate.status !== "disabled",
+                                  );
+                                  if (!hasPortal) return null;
+                                  const status = entry?.status;
+                                  const detail = !entry
+                                    ? "Checking…"
+                                    : status?.unavailable === "unreachable"
+                                      ? "Could not read Caddy status right now."
+                                      : status?.unavailable === "not_configured"
+                                        ? "Clarity Caddy is not connected to this deployment."
+                                        : !status?.connected
+                                          ? "No Clarity Caddy account yet."
+                                          : `Account: Connected · Access: ${
+                                              status.active ? status.access : "Free"
+                                            }${status.expiresAt ? ` until ${formatTimestampForDisplay(status.expiresAt)}` : ""}`;
+                                  return (
+                                    <div className="player-caddy-card">
+                                      <div className="player-caddy-card-body">
+                                        <strong>Clarity Caddy</strong>
+                                        <span>{detail}</span>
+                                        {status?.connected && status.coachCount && status.coachCount > 1 ? (
+                                          <span>Also coached by {status.coachCount - 1} other{status.coachCount - 1 === 1 ? "" : "s"}.</span>
+                                        ) : null}
+                                      </div>
+                                      <div className="player-caddy-card-actions">
+                                        {!entry ? (
+                                          <button
+                                            type="button"
+                                            className="outline-button"
+                                            onClick={() => void refreshCaddyStatus(notesWorkspaceClient.id)}
+                                          >
+                                            Check Caddy
+                                          </button>
+                                        ) : entry.deepLink ? (
+                                          <a
+                                            className="outline-button"
+                                            href={entry.deepLink}
+                                            target="_blank"
+                                            rel="noreferrer noopener"
+                                          >
+                                            Open in Clarity Caddy ↗
+                                          </a>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            className="outline-button"
+                                            onClick={() => void refreshCaddyStatus(notesWorkspaceClient.id)}
+                                          >
+                                            Retry
                                           </button>
                                         )}
                                       </div>

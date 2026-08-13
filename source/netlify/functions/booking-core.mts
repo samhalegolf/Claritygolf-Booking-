@@ -19,6 +19,14 @@ import { autoBookResourceForNewBooking } from "./_shared/optix-book-resource.mts
 import { planExternalReschedule } from "./_shared/external-reschedule.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
+import {
+  caddyAppUrl,
+  caddyConfigured,
+  caddyPlayerDeepLink,
+  ensureCoachPlayerRelationship,
+  issueCaddyPass,
+  readCaddyPlayerStatus,
+} from "./_shared/caddy.mts";
 import { unavailableSpans } from "./_shared/availability-blocks.mts";
 import {
   canonicalPhoneKey,
@@ -7005,35 +7013,54 @@ async function issuePortalInvite(portalPlayerId) {
   return { token, expiresAt };
 }
 
-async function sendPortalInviteEmail({ req, email, name, token }) {
+/**
+ * One invite email with two variants. They are deliberately near-identical: the
+ * Caddy version adds a line and a second link, and says the same login works
+ * for both. Keeping them one template stops this becoming a second
+ * communications system.
+ */
+async function sendPortalInviteEmail({ req, email, name, token, withCaddyPass }) {
   const account = await readCoachAccount();
   const businessName = account.businessName || "Clarity Golf";
+  const coachName = account.coachName || businessName;
   const inviteUrl = portalInviteUrl(req, token);
+  const caddyUrl = caddyAppUrl();
   const greeting = name ? `Hi ${escapeHtml(name.split(/\s+/)[0])},` : "Hi,";
+  const subject = withCaddyPass
+    ? `Your ${businessName} player portal and Clarity Caddy pass`
+    : `Your ${businessName} player portal`;
+
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
-      <h2>Your ${escapeHtml(businessName)} player portal</h2>
+      <h2>Welcome to the Clarity Player Portal</h2>
       <p>${greeting}</p>
-      <p>${escapeHtml(account.coachName || businessName)} has set up a player portal account for you. Set a password to see your lessons, your lesson notes and your videos, and to book your next session.</p>
+      <p>${escapeHtml(coachName)} has set up a player portal account for you. Set a password to see your lessons, your lesson notes and your videos, and to book your next session.</p>
+      ${withCaddyPass ? `<p><strong>You also have a Clarity Caddy pass.</strong> The same login works for both.</p>` : ""}
       <p><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:#07100a;color:#fff;padding:12px 16px;text-decoration:none;border-radius:6px">Set your password</a></p>
       <p>If the button does not work, paste this link into your browser:</p>
       <p><a href="${escapeHtml(inviteUrl)}">${escapeHtml(inviteUrl)}</a></p>
+      ${withCaddyPass ? `<p>Clarity Caddy: <a href="${escapeHtml(caddyUrl)}">${escapeHtml(caddyUrl)}</a></p>` : ""}
       <p>This link expires in ${portalInviteDays} days.</p>
     </div>
   `;
   const textBody = [
-    `Your ${businessName} player portal`,
+    "Welcome to the Clarity Player Portal",
     "",
-    `${account.coachName || businessName} has set up a player portal account for you.`,
+    `${coachName} has set up a player portal account for you.`,
+    withCaddyPass ? "You also have a Clarity Caddy pass. The same login works for both." : "",
+    "",
     "Set a password to see your lessons, lesson notes and videos, and to book your next session:",
     inviteUrl,
+    withCaddyPass ? `\nClarity Caddy: ${caddyUrl}` : "",
     "",
     `This link expires in ${portalInviteDays} days.`,
-  ].join("\n");
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 
   return sendEmail({
     to: email,
-    subject: `Your ${businessName} player portal`,
+    subject,
     html,
     text: textBody,
     idempotencyKey: `portal-invite-${hashToken(token).slice(0, 24)}`,
@@ -7046,7 +7073,7 @@ async function sendPortalInviteEmail({ req, email, name, token }) {
  * for someone who already has access just re-issues the invite, which is what
  * "resend invite" needs.
  */
-async function grantPortalAccess({ req, personId, accountId }) {
+async function grantPortalAccess({ req, personId, accountId, includeCaddyPass = false }) {
   await ensurePlayerSessionsTable();
   const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
   const cleanPersonId = cleanString(personId, "", 160);
@@ -7094,17 +7121,59 @@ async function grantPortalAccess({ req, personId, accountId }) {
     `;
   }
 
+  // --- Clarity Caddy ------------------------------------------------------
+  //
+  // Booking administers the coaching relationship, so it makes sure the
+  // relationship exists in Caddy too. That is idempotent and additive: it never
+  // takes the player away from another coach.
+  //
+  // A pass is separate and optional. Having a Clarity login does not mean
+  // having paid Caddy access, and Booking does not own that decision -- it just
+  // asks Caddy to issue one when the coach ticks the box.
+  //
+  // Neither step may fail the portal invite. The player still gets their
+  // portal; the coach gets told what did not happen.
+  const caddy = { attempted: false, linked: false, passIssued: false, error: "" };
+  if (caddyConfigured()) {
+    caddy.attempted = true;
+    try {
+      const link = await ensureCoachPlayerRelationship(authUserId, email);
+      caddy.linked = Boolean(link?.linked);
+    } catch (error) {
+      caddy.error =
+        error instanceof Error ? error.message : "Could not reach Clarity Caddy.";
+    }
+    if (includeCaddyPass && !caddy.error) {
+      try {
+        await issueCaddyPass({
+          playerAuthUserId: authUserId,
+          playerEmail: email,
+          issuedBy: cleanString((await readCoachAccount()).coachName, "clarity_booking", 160),
+        });
+        caddy.passIssued = true;
+      } catch (error) {
+        caddy.error =
+          error instanceof Error ? error.message : "Could not issue the Clarity Caddy pass.";
+      }
+    }
+  } else if (includeCaddyPass) {
+    caddy.error = "Clarity Caddy is not configured for this deployment.";
+  }
+
   const invite = await issuePortalInvite(portalPlayerId);
   const emailResult = await sendPortalInviteEmail({
     req,
     email,
     name: cleanString(person.name, "", 180),
     token: invite.token,
+    // Only promise a pass in the email if one was actually issued.
+    withCaddyPass: caddy.passIssued,
   });
 
   const portalPlayer = await readPortalPlayerById(portalPlayerId);
   return {
     portalPlayer,
+    caddy,
     inviteSent: Boolean(emailResult?.sent),
     inviteReason: emailResult?.sent ? "" : cleanString(emailResult?.reason, "", 80),
     // Returned so the coach can hand the link over directly when email is not
@@ -9729,8 +9798,31 @@ export async function handleBookingApiRoute(
         req,
         personId: body?.personId || body?.playerId || "",
         accountId: requestContext.accountId,
+        includeCaddyPass: body?.includeCaddyPass === true,
       });
       return json({ ok: true, ...result });
+    }
+
+    // The Caddy card on a Booking player profile. Read-only, and it never
+    // fails the page: an unreachable Caddy comes back as unavailable.
+    if (req.method === "GET" && pathname === "/api/caddy-status") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const personId = cleanString(url.searchParams.get("personId"), "", 160);
+      const portalPlayers = await listPortalPlayers(requestContext.accountId);
+      const portalPlayer = portalPlayers.find(
+        (entry) => entry.personId === personId && entry.status !== "disabled",
+      );
+      if (!portalPlayer) {
+        return json({ ok: true, status: { connected: false, access: "none", unavailable: "no_portal_access" } });
+      }
+      const status = await readCaddyPlayerStatus(portalPlayer.authUserId, portalPlayer.email);
+      return json({
+        ok: true,
+        status,
+        deepLink: status.connected ? caddyPlayerDeepLink(portalPlayer.authUserId) : "",
+      });
     }
 
     if (req.method === "DELETE" && pathname === "/api/portal-players") {

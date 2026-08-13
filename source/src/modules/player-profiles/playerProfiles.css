@@ -657,3 +657,62 @@
   background: var(--coach-accent, #6c8f63);
   color: #ffffff;
 }
+
+/* --- Clarity Caddy card -------------------------------------------------- */
+
+.player-caddy-pass-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted, #77746d);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.player-caddy-pass-toggle input {
+  margin: 0;
+}
+
+.player-caddy-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line, #e4e3dd);
+  border-radius: 12px;
+  background: var(--surface-2, #f7f7f4);
+}
+
+.player-caddy-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-caddy-card-body strong {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.player-caddy-card-body span {
+  font-size: 12px;
+  color: var(--muted, #77746d);
+}
+
+.player-caddy-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.player-caddy-card-actions a.outline-button {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
