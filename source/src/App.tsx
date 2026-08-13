@@ -67,6 +67,14 @@ import {
 } from "../netlify/functions/_shared/phone.mts";
 import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
 import OptixIntegrationPanel from "./modules/optix/OptixIntegrationPanel";
+import {
+  BASE_WEEK_START,
+  BOOKING_EMBED_PARAM,
+  BOOKING_EMBED_VALUE,
+  BOOKING_LOGIN_STORAGE_KEY,
+  PUBLIC_BOOKING_HOST,
+  isBookingEmbedMode,
+} from "./modules/shared/bookingHandoff";
 import type {
   VideoWorkspaceNavigationContext,
   VideoWorkspaceSaveResult,
@@ -88,6 +96,7 @@ import {
   cancelSavedVideoCloudUpload,
   importSavedVideoFromClarityCloud,
   listClarityCloudImportTransfers,
+  markClarityCloudSubmissionSeen,
   pauseSavedVideoCloudUpload,
   reconnectManagedLocalVideoLibrary,
   removeSavedVideoCloudTransfer,
@@ -1348,7 +1357,16 @@ type GoogleCalendarDebugLog = {
 type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting" | "migrating";
 type GoogleDriveActionState = "idle" | "connecting" | "testing" | "disconnecting";
 type AuthStatus = "checking" | "authenticated" | "guest";
-type AuthMode = "login" | "forgot" | "reset";
+
+/** A client the coach has given player portal access to. */
+type PortalPlayer = {
+  id: string;
+  personId: string;
+  email: string;
+  status: "invited" | "active" | "disabled";
+  invitedAt?: string | null;
+  lastLoginAt?: string | null;
+};
 type ThemeMode = "light" | "dark";
 type PermissionScope = "own" | "assigned" | "all";
 type SubscriptionStatus =
@@ -1447,6 +1465,10 @@ type NotificationSettings = {
   sendClientEmail: boolean;
   sendCoachEmail: boolean;
   sendAdminEmail: boolean;
+  // Off by default. A lesson type swap rewrites the booking's duration, so
+  // it would otherwise go out as a reschedule email - and those bypass the
+  // three toggles above.
+  sendLessonTypeChangeEmail: boolean;
   reminderEnabled: boolean;
   reminderLeadMinutes: number;
   clientEmailSubject: string;
@@ -1623,10 +1645,7 @@ const MAX_GROUP_OCCURRENCE_COUNT = 52;
 const MOUSE_DRAG_THRESHOLD = 10;
 const TOUCH_DRAG_THRESHOLD = 16;
 const EDGE_NAV_ZONE = 26;
-const BOOKING_EMBED_PARAM = "embed";
-const BOOKING_EMBED_VALUE = "booking";
 const BOOKING_LOGO_PARAM = "logo";
-const PUBLIC_BOOKING_HOST = "book.claritygolf.app";
 const CLARITY_BOOKING_HOSTS = new Set(["claritygolf.app", "booking.claritygolf.app", PUBLIC_BOOKING_HOST]);
 const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
 const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
@@ -1653,13 +1672,13 @@ const THEME_STORAGE_KEY = "clarity-booking-theme";
 const BRAND_STORAGE_KEY = "clarity-booking-brand";
 const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
 const RESCHEDULE_LOGIN_STORAGE_KEY = "clarity-booking-reschedule-login";
-const BOOKING_LOGIN_STORAGE_KEY = "clarity-booking-login";
 const PAST_ADMIN_LESSON_WARNING =
   "This lesson is in the past. It will be saved for records only and no emails will be sent.";
 
 const baseWeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const fullDayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const baseWeekStart = new Date(2026, 5, 1);
+// Shared with the player portal -- see modules/shared/bookingHandoff.
+const baseWeekStart = BASE_WEEK_START;
 
 const defaultServices: Service[] = [
   {
@@ -2081,11 +2100,6 @@ function getInitialView(): View {
   return isPublicBookingMode() ? "booking" : "calendar";
 }
 
-function getInitialResetToken() {
-  if (typeof window === "undefined") return "";
-  return new URLSearchParams(window.location.search).get("reset") ?? "";
-}
-
 function getInitialRescheduleLogin(): SavedRescheduleLogin | null {
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
@@ -2179,13 +2193,10 @@ function isBookingLogoHiddenByUrl() {
   return new URLSearchParams(window.location.search).get(BOOKING_LOGO_PARAM) === "0";
 }
 
-function isPublicBookingMode() {
-  if (typeof window === "undefined") return false;
-  return (
-    window.location.hostname === PUBLIC_BOOKING_HOST ||
-    new URLSearchParams(window.location.search).get(BOOKING_EMBED_PARAM) === BOOKING_EMBED_VALUE
-  );
-}
+// Kept as a local alias so the many call sites below read the same as before.
+// The definition is shared with the entry point, which has to make the same
+// call before it knows who is signed in.
+const isPublicBookingMode = isBookingEmbedMode;
 
 function normalizeBookingPath(pathname = "") {
   const cleaned = pathname.trim().toLowerCase();
@@ -4004,6 +4015,14 @@ function formatDateForDisplay(value: string) {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+// An ISO timestamp -> "15 Jul 2026". Used where only the day matters.
+function formatTimestampForDisplay(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
 // Whole days between two "YYYY-MM-DD" strings, computed via UTC midnight so
 // it isn't affected by daylight saving or the browser's local time zone.
 function isoDateDiffDays(laterIso: string, earlierIso: string) {
@@ -4508,6 +4527,7 @@ const defaultNotificationSettings: NotificationSettings = {
   sendClientEmail: true,
   sendCoachEmail: true,
   sendAdminEmail: true,
+  sendLessonTypeChangeEmail: false,
   reminderEnabled: false,
   reminderLeadMinutes: 24 * 60,
   clientEmailSubject: "Your {{service}} is confirmed",
@@ -4570,7 +4590,16 @@ const emptyClientEditor: ClientEditor = {
   caddyProfileUrl: "",
 };
 
-function App() {
+type AppProps = {
+  /**
+   * Called when the coach session goes away underneath the workspace. The entry
+   * point owns which app is on screen, so this is how the workspace asks to be
+   * replaced by the login screen.
+   */
+  onSessionLost?: () => void;
+};
+
+function App({ onSessionLost }: AppProps = {}) {
   const isEmbedMode = isPublicBookingMode();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
@@ -4590,24 +4619,25 @@ function App() {
   const [currentAppUser, setCurrentAppUser] = useState<AppUser>(() => defaultAppUserFromCoachAccount(getStoredCoachAccount()));
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(getStoredBrandSettings);
   const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [authStatus, setAuthStatus] = useState<AuthStatus>(isEmbedMode ? "authenticated" : "checking");
-  const [authMode, setAuthMode] = useState<AuthMode>(() => (getInitialResetToken() ? "reset" : "login"));
+  // The entry point only mounts this component for a coach session or the
+  // public booking embed, so it starts authenticated. What is still tracked
+  // here is the session going away underneath a running workspace -- an expired
+  // or revoked cookie.
+  const [authStatus, setAuthStatusState] = useState<AuthStatus>("authenticated");
+  // Every "the server said 401" path in this file calls setAuthStatus("guest").
+  // The workspace no longer renders its own login form, so that has to hand
+  // control back to the entry point, which does.
+  const setAuthStatus = useCallback(
+    (next: AuthStatus) => {
+      setAuthStatusState(next);
+      if (next === "guest") onSessionLost?.();
+    },
+    [onSessionLost],
+  );
   const [adminEmail, setAdminEmail] = useState("");
-  const [adminPassword, setAdminPassword] = useState("");
-  const [showAdminPassword, setShowAdminPassword] = useState(false);
-  const [authError, setAuthError] = useState("");
-  const [loginState, setLoginState] = useState<"idle" | "signing-in">("idle");
   const [adminWorkspaceLoadStatus, setAdminWorkspaceLoadStatus] =
     useState<AdminWorkspaceLoadStatus>(isEmbedMode ? "loaded" : "idle");
   const [adminWorkspaceLoadError, setAdminWorkspaceLoadError] = useState("");
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [forgotState, setForgotState] = useState<"idle" | "sending" | "sent">("idle");
-  const [forgotMessage, setForgotMessage] = useState("");
-  const [resetToken] = useState(getInitialResetToken);
-  const [resetPassword, setResetPassword] = useState("");
-  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
-  const [showResetPassword, setShowResetPassword] = useState(false);
-  const [resetState, setResetState] = useState<"idle" | "saving">("idle");
   const [passwordChangeForm, setPasswordChangeForm] = useState<PasswordChangeForm>({
     currentPassword: "",
     newPassword: "",
@@ -4660,8 +4690,7 @@ function App() {
   const [playerProfileTool, setPlayerProfileTool] = useState<PlayerProfileTool>("recent");
   const [playerToolExpanded, setPlayerToolExpanded] = useState(true);
   const [selectedId, setSelectedId] = useState("");
-  const [clientReassignOpen, setClientReassignOpen] = useState(false);
-  const [clientReassignSearch, setClientReassignSearch] = useState("");
+  const [lessonTypeChangeState, setLessonTypeChangeState] = useState<"idle" | "saving">("idle");
   const [clientMergeMode, setClientMergeMode] = useState(false);
   const [clientMergeSelection, setClientMergeSelection] = useState<string[]>([]);
   const [clientMergeReview, setClientMergeReview] = useState<ClientMergeReview | null>(null);
@@ -4753,6 +4782,7 @@ function App() {
     if (activeView === "players") {
       refreshSavedVideoLibrary();
       void refreshLessonNotes();
+      void refreshPortalPlayers();
     }
   }, [activeView, refreshSavedVideoLibrary]);
 
@@ -5063,6 +5093,10 @@ function App() {
   const [googleDriveTransfer, setGoogleDriveTransfer] = useState<GoogleDriveTransferStatus>(defaultGoogleDriveTransferStatus);
   const [googleDriveAction, setGoogleDriveAction] = useState<GoogleDriveActionState>("idle");
   const [clarityCloudImports, setClarityCloudImports] = useState<ClarityCloudImportTransfer[]>([]);
+  // Portal access is granted per player, not to every contact -- see
+  // portal_players in the booking functions.
+  const [portalPlayers, setPortalPlayers] = useState<PortalPlayer[]>([]);
+  const [portalPlayerBusyId, setPortalPlayerBusyId] = useState("");
   const [clarityCloudImportActionIds, setClarityCloudImportActionIds] = useState<Set<string>>(() => new Set());
   const autoCloudUploadKeyRef = useRef("");
   const [notificationSettings, setNotificationSettings] =
@@ -7956,11 +7990,14 @@ function App() {
   // their own list until merged or moved into the main client list.
   const mainListClients = useMemo(() => filteredClients.filter((client) => client.external !== true), [filteredClients]);
   const externalListClients = useMemo(() => filteredClients.filter((client) => client.external === true), [filteredClients]);
-  const clientReassignSearchTerm = clientReassignSearch.trim();
-  const clientReassignMatches = useMemo(() => {
-    if (!clientReassignOpen || !clientReassignSearchTerm) return [];
-    return clients.filter((client) => clientMatchesSearchTerm(client, clientReassignSearchTerm)).slice(0, 6);
-  }, [clientReassignOpen, clientReassignSearchTerm, clients]);
+  // Lesson types offered by the in-card type picker. Custom-group services are
+  // excluded: they carry attendees and a computed price, so switching a normal
+  // lesson into one (or out of one) would need attendee handling this quick
+  // change deliberately doesn't do.
+  const lessonTypeOptions = useMemo(
+    () => services.filter((service) => service.active && !isCustomGroupService(service)),
+    [services],
+  );
 
   // ----- Player Profiles derivations -----
   const savedVideoIds = useMemo(() => {
@@ -8111,6 +8148,23 @@ function App() {
       .filter((video) => playerIds.has(video.playerId))
       .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
   }, [notesWorkspaceClient, savedVideoItems]);
+  // Player submissions the coach has not opened yet, counted per profile so the
+  // list itself shows where the new video is.
+  const unseenSubmissionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    const unseen = clarityCloudImports.filter(
+      (transfer) => transfer.direction === "player-submission" && !transfer.coachSeenAt,
+    );
+    if (!unseen.length) return counts;
+    for (const player of playerProfiles) {
+      const playerIds = profileIdsForClient(player);
+      const count = unseen.filter(
+        (transfer) => transfer.savedVideo?.playerId && playerIds.has(transfer.savedVideo.playerId),
+      ).length;
+      if (count) counts.set(player.id, count);
+    }
+    return counts;
+  }, [clarityCloudImports, playerProfiles]);
   const playerToolCloudVideos = useMemo(() => {
     if (!notesWorkspaceClient) return [];
     const playerIds = profileIdsForClient(notesWorkspaceClient);
@@ -8272,8 +8326,6 @@ function App() {
   function closeCalendarDetails() {
     setSelectedId("");
     setSelectedGroupSession(null);
-    setClientReassignOpen(false);
-    setClientReassignSearch("");
   }
 
   function isGroupServiceSlotMatch(service: Service | null | undefined, week: number, day: number, start: number) {
@@ -10795,6 +10847,27 @@ function App() {
     }
   }
 
+  /**
+   * Opening a player submission clears its unseen marker; opening the coach's
+   * own cloud copy is just a download. Both play the same way.
+   */
+  async function openPlayerSubmissionOrCloudVideo(transfer: ClarityCloudImportTransfer, playerName: string) {
+    const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+    if (transfer.direction === "player-submission" && !transfer.coachSeenAt && savedVideoId) {
+      // Optimistic: the dot should go the moment it is clicked, not after a
+      // round trip and a list refresh.
+      setClarityCloudImports((current) =>
+        current.map((entry) =>
+          (entry.savedVideoId || entry.savedVideo?.savedVideoId) === savedVideoId
+            ? { ...entry, coachSeenAt: new Date().toISOString() }
+            : entry,
+        ),
+      );
+      void markClarityCloudSubmissionSeen(savedVideoId);
+    }
+    await openCloudVideoFromCatalogue(transfer, playerName);
+  }
+
   async function openCloudVideoFromCatalogue(transfer: ClarityCloudImportTransfer, playerName: string) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
@@ -12448,48 +12521,80 @@ function App() {
     openClientProfile(selectedPerson);
   }
 
-  function openClientReassign() {
-    setClientReassignSearch(selected?.kind === "appointment" ? selected.client ?? "" : "");
-    setClientReassignOpen(true);
+  // The pencil on the lesson card. Opens the client's profile in edit mode
+  // straight over the calendar - unlike viewSelectedClientProfile it does not
+  // switch view, so closing the profile drops you back on the lesson card.
+  function editSelectedClientProfile() {
+    if (!selectedPerson) return;
+    openClientProfile(selectedPerson);
+    setClientEditMode(true);
   }
 
-  function closeClientReassign() {
-    setClientReassignOpen(false);
-    setClientReassignSearch("");
-  }
-
-  function reassignSelectedAppointmentClient(client: ClientSummary) {
+  // Change a booking's lesson type in place. The new type's duration, coach and
+  // location all follow - a lesson type is the definition of the booking, so
+  // half-applying it would leave the card and the calendar disagreeing. Refuses
+  // if the re-timed booking would collide, using the same validator the drag
+  // handler uses, so this can't create a state a move would have prevented.
+  async function changeSelectedLessonType(nextServiceId: string) {
     if (!selected || selected.kind !== "appointment") return;
-    const itemId = selected.id;
+    if (!nextServiceId || nextServiceId === selected.serviceId) return;
+
+    const nextService = services.find((service) => service.id === nextServiceId);
+    if (!nextService) {
+      setToast({ message: "That lesson type is no longer available." });
+      return;
+    }
+    if (isCustomGroupService(selectedService) || isCustomGroupService(nextService)) {
+      setToast({ message: "Custom group lessons can't be switched here - rebook instead." });
+      return;
+    }
+
     const targetItem = selected;
     const previous = items;
-    // A synthetic appointment-<key> id (see the `clients` grouping above) is a
-    // display-only stand-in for a booking that was never linked to a real
-    // people row — never persist it as personId. The next save will resolve
-    // and stamp a real one (see personFromAppointment/stampResolvedPersonIds).
-    const linkedId = client.id.startsWith("appointment-") ? "" : client.id;
-    setItems((current) =>
-      current.map((item) =>
-        item.id === itemId && item.kind === "appointment"
-          ? {
-              ...item,
-              personId: linkedId,
-              client: client.name,
-              title: client.name,
-              email: client.email || item.email,
-              phone: client.phone || item.phone,
-            }
-          : item,
-      ),
-    );
-    closeClientReassign();
-    setToast({
-      message: `Linked this booking to ${client.name}.`,
-      undo: () => {
-        setItems(previous);
-        void reconcileUndoByUpsert(targetItem, previous);
-      },
-    });
+    const candidate = {
+      week: itemWeek(targetItem),
+      day: targetItem.day,
+      start: targetItem.start,
+      duration: nextService.duration,
+    };
+    if (!isValidAppointmentSlotForItem(targetItem, candidate)) {
+      setToast({
+        message:
+          nextService.duration > targetItem.duration
+            ? `${nextService.name} needs ${nextService.duration} min and something is already in that time.`
+            : `${nextService.name} doesn't fit this slot.`,
+      });
+      return;
+    }
+
+    const nextItem: CalendarItem = {
+      ...targetItem,
+      serviceId: nextServiceId,
+      duration: nextService.duration,
+      coachId: nextService.coachId || targetItem.coachId,
+      location: bookingLocationSnapshotFor(nextService, locations, coachAccount),
+      locationId: nextService.locationId || targetItem.locationId,
+      updatedAt: new Date().toISOString(),
+    };
+    const optimisticItems = items.map((item) => (item.id === targetItem.id ? nextItem : item));
+
+    setLessonTypeChangeState("saving");
+    setItems(optimisticItems);
+    try {
+      await persistUpsertItem(nextItem, previous, optimisticItems);
+      setToast({
+        message: `Changed to ${nextService.name}.`,
+        undo: () => {
+          setItems(previous);
+          void reconcileUndoByUpsert(targetItem, previous);
+        },
+      });
+    } catch (error) {
+      setItems(previous);
+      setToast({ message: error instanceof Error ? error.message : "Could not change the lesson type." });
+    } finally {
+      setLessonTypeChangeState("idle");
+    }
   }
 
   function toggleClientMergeMode() {
@@ -15362,110 +15467,9 @@ function App() {
     }
   }
 
-  async function handleAdminLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setAuthError("");
-    setLoginState("signing-in");
-    try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: adminEmail, password: adminPassword }),
-      });
-      const data = (await response.json()) as { authenticated?: boolean; message?: string; email?: string };
-      if (!response.ok || !data.authenticated) {
-        setAuthError(data.message || "Login failed.");
-        setAdminWorkspaceLoadStatus("idle");
-        setAdminWorkspaceLoadError("");
-        return;
-      }
-      if (data.email) setAdminEmail(data.email);
-      setAuthStatus("authenticated");
-      setAdminPassword("");
-      setAuthError("");
-      void startAdminWorkspaceHydration();
-    } catch {
-      hasLoadedCalendarApiRef.current = false;
-      setAuthStatus("guest");
-      setAuthError("Could not reach the booking server.");
-      setCalendarFeedStatus("offline");
-      setAdminWorkspaceLoadStatus("idle");
-      setAdminWorkspaceLoadError("");
-    } finally {
-      setLoginState("idle");
-    }
-  }
-
-  async function handleForgotPassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setAuthError("");
-    setForgotMessage("");
-    setForgotState("sending");
-    try {
-      const response = await fetch("/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: forgotEmail }),
-      });
-      const data = (await response.json()) as { ok?: boolean; message?: string };
-      if (!response.ok || !data.ok) {
-        setAuthError(data.message || "Could not send the reset email.");
-        setForgotState("idle");
-        return;
-      }
-      setForgotState("sent");
-      setForgotMessage(data.message || "If that email matches an admin account, a reset link has been sent.");
-    } catch {
-      setForgotState("idle");
-      setAuthError("Could not reach the booking server.");
-    }
-  }
-
-  async function handleResetPassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setAuthError("");
-    if (!resetToken) {
-      setAuthError("This reset link is missing its token.");
-      return;
-    }
-    if (resetPassword.length < 8) {
-      setAuthError("Use at least 8 characters.");
-      return;
-    }
-    if (resetPassword !== resetConfirmPassword) {
-      setAuthError("Those passwords do not match.");
-      return;
-    }
-
-    setResetState("saving");
-    try {
-      const response = await fetch("/api/auth/reset-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: resetToken, password: resetPassword }),
-      });
-      const data = (await response.json()) as { authenticated?: boolean; message?: string; email?: string };
-      if (!response.ok || !data.authenticated) {
-        setAuthError(data.message || "Could not reset password.");
-        setResetState("idle");
-        return;
-      }
-      setAuthStatus("authenticated");
-      setResetPassword("");
-      setResetConfirmPassword("");
-      setResetState("idle");
-      if (data.email) setAdminEmail(data.email);
-      if (typeof window !== "undefined") window.history.replaceState(null, "", window.location.pathname);
-      setAuthError("");
-      void startAdminWorkspaceHydration();
-    } catch {
-      setResetState("idle");
-      setAuthError("Could not reach the booking server.");
-      setCalendarFeedStatus("offline");
-      setAdminWorkspaceLoadStatus("idle");
-      setAdminWorkspaceLoadError("");
-    }
-  }
+  // Sign-in, forgot-password and reset-password now live in
+  // modules/auth/LoginScreen, which the entry point renders when there is no
+  // session. Changing a password from inside the workspace stays here.
 
   function updatePasswordChangeForm<K extends keyof PasswordChangeForm>(field: K, value: PasswordChangeForm[K]) {
     setPasswordChangeState("idle");
@@ -15699,6 +15703,96 @@ function App() {
       applyGoogleDriveTransferStatus(await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive status did not return JSON."));
     } catch {
       // Google Drive transfer is optional; keep the rest of Settings usable.
+    }
+  }
+
+  async function refreshPortalPlayers() {
+    try {
+      const response = await fetch("/api/portal-players", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      const data = (await response.json().catch(() => ({}))) as { portalPlayers?: PortalPlayer[] };
+      setPortalPlayers(Array.isArray(data.portalPlayers) ? data.portalPlayers : []);
+    } catch {
+      // Portal access is additive to the profile; a failed read should not
+      // stop the rest of Player Profiles rendering.
+      setPortalPlayers([]);
+    }
+  }
+
+  /** Grants access, or re-sends the set-password invite if they already have it. */
+  async function grantPortalAccess(person: Pick<Person, "id" | "name" | "email">) {
+    if (portalPlayerBusyId) return;
+    setPortalPlayerBusyId(person.id);
+    try {
+      const response = await fetch("/api/portal-players", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ personId: person.id }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+        inviteSent?: boolean;
+        inviteUrl?: string;
+      };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok || !data.ok) {
+        setToast({ message: data.message || "Could not set up portal access." });
+        return;
+      }
+      await refreshPortalPlayers();
+      if (data.inviteSent) {
+        setToast({ message: `Invite sent to ${person.email || person.name}.` });
+      } else if (data.inviteUrl) {
+        // Email is not configured or was refused. The link still works, so
+        // hand it over rather than leaving the coach with a dead end.
+        await navigator.clipboard?.writeText(data.inviteUrl).catch(() => {});
+        setToast({ message: "Email is not set up. Invite link copied to your clipboard." });
+      } else {
+        setToast({ message: "Portal access is on." });
+      }
+    } catch {
+      setToast({ message: "Could not reach the booking server." });
+    } finally {
+      setPortalPlayerBusyId("");
+    }
+  }
+
+  async function revokePortalAccess(portalPlayerId: string, personId: string) {
+    if (portalPlayerBusyId) return;
+    setPortalPlayerBusyId(personId);
+    try {
+      const response = await fetch(`/api/portal-players?id=${encodeURIComponent(portalPlayerId)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { message?: string };
+        setToast({ message: data.message || "Could not remove portal access." });
+        return;
+      }
+      await refreshPortalPlayers();
+      setToast({ message: "Portal access removed. They are signed out everywhere." });
+    } catch {
+      setToast({ message: "Could not reach the booking server." });
+    } finally {
+      setPortalPlayerBusyId("");
     }
   }
 
@@ -18395,15 +18489,21 @@ function App() {
           ) : (
             <h2 id="appointment-details-title">{selected.client}</h2>
           )}
-          <button
-            className="icon-button small booking-client-reassign-toggle"
-            onClick={clientReassignOpen ? closeClientReassign : openClientReassign}
-            aria-label="Change linked client"
-            title="Change linked client"
-            type="button"
-          >
-            <Pencil size={13} />
-          </button>
+          {/* Opens this client's profile in edit mode, over the calendar. It
+              edits the person (fix a typo, correct an email) - it does not
+              change who the lesson is for. Hidden when the booking has no real
+              people row to open. */}
+          {selectedPerson && (
+            <button
+              className="icon-button small booking-client-edit-toggle"
+              onClick={editSelectedClientProfile}
+              aria-label="Edit client details"
+              title="Edit client details"
+              type="button"
+            >
+              <Pencil size={13} />
+            </button>
+          )}
         </div>
       ) : (
         <h2 id="appointment-details-title">{selected.title}</h2>
@@ -18416,34 +18516,33 @@ function App() {
           {selectedPerson.count} booking{selectedPerson.count === 1 ? "" : "s"} with this client
         </p>
       )}
-      {selected.kind === "appointment" && clientReassignOpen && (
-        <div className="booking-client-reassign-panel">
-          <input
-            autoFocus
-            onChange={(event) => setClientReassignSearch(event.target.value)}
-            placeholder="Search clients by name, email, or phone"
-            value={clientReassignSearch}
-          />
-          <div className="booking-client-reassign-results">
-            {clientReassignMatches.length ? (
-              clientReassignMatches.map((client) => (
-                <button
-                  className="booking-client-reassign-result"
-                  key={client.id}
-                  onClick={() => reassignSelectedAppointmentClient(client)}
-                  type="button"
-                >
-                  <strong>{client.name}</strong>
-                  <span>{[client.phone, client.email].filter(Boolean).join(" · ")}</span>
-                </button>
-              ))
-            ) : clientReassignSearchTerm ? (
-              <p className="muted">No matching client.</p>
-            ) : null}
-          </div>
+      {/* Lesson type is editable in place: picking a different type re-times the
+          booking to that type's duration, so a 30 minute lesson becomes an hour
+          without going through move/rebook. Blocked if the longer slot would
+          clash - see changeSelectedLessonType. */}
+      {selected.kind === "appointment" && !selected.readOnly && !isExternallyOwned(selected) ? (
+        <div className="booking-lesson-type">
+          <select
+            aria-label="Lesson type"
+            value={selected.serviceId ?? ""}
+            disabled={lessonTypeChangeState === "saving"}
+            onChange={(event) => void changeSelectedLessonType(event.target.value)}
+          >
+            {/* An archived or deleted type still has to render its own booking,
+                otherwise the select would silently show the wrong lesson. */}
+            {!lessonTypeOptions.some((service) => service.id === selected.serviceId) && (
+              <option value={selected.serviceId ?? ""}>{selectedService?.name ?? "Lesson"}</option>
+            )}
+            {lessonTypeOptions.map((service) => (
+              <option key={service.id} value={service.id}>
+                {service.name} - {service.duration} min
+              </option>
+            ))}
+          </select>
         </div>
+      ) : (
+        <p className="muted">{selectedService?.name ?? selected.note}</p>
       )}
-      <p className="muted">{selectedService?.name ?? selected.note}</p>
 
       <div className="info-stack">
         <div>
@@ -18677,14 +18776,18 @@ function App() {
         </div>
       )}
 
-      <div className="panel-actions">
+      <div className="panel-actions booking-panel-actions">
         {/* Take payment for this lesson at the counter. Hidden once a sale has
             already settled it, so the same lesson can't be charged twice by
             accident, and hidden for externally-owned bookings (Optix) - their
             money is collected over there and they carry a placeholder lesson
             type with no meaningful price. */}
         {selected.kind === "appointment" && billingWorkspaceEnabled && !selectedPosPayment && !isExternallyOwned(selected) && (
-          <button className="primary-button" onClick={() => openPosCheckoutForLesson(selected)} type="button">
+          <button
+            className="primary-button booking-checkout-button"
+            onClick={() => openPosCheckoutForLesson(selected)}
+            type="button"
+          >
             <CreditCard size={16} />
             Checkout
           </button>
@@ -18920,181 +19023,8 @@ function App() {
     return counts;
   }, {});
 
-  if (!isEmbedMode && authStatus !== "authenticated") {
-    return (
-      <main className={`login-shell theme-${themeMode}`} style={brandStyle}>
-        <form
-          className="login-card"
-          onSubmit={
-            authMode === "forgot"
-              ? handleForgotPassword
-              : authMode === "reset"
-                ? handleResetPassword
-                : handleAdminLogin
-          }
-        >
-          <div className="brand">
-            <div className="brand-mark">
-              <img src="/assets/clarity-golf-logo.png" alt="Clarity Golf" />
-            </div>
-            <div>
-              <strong>Clarity Golf</strong>
-              <span>Booking System</span>
-            </div>
-          </div>
-          <div>
-            <p className="eyebrow">
-              {authMode === "forgot" ? "Password Reset" : authMode === "reset" ? "New Password" : "Admin Login"}
-            </p>
-            <h1>
-              {authStatus === "checking"
-                ? "Checking session"
-                : authMode === "forgot"
-                  ? "Forgot password"
-                  : authMode === "reset"
-                    ? "Reset password"
-                    : "Welcome back"}
-            </h1>
-            <p>
-              {authMode === "forgot"
-                ? "Enter your admin email and we will send a reset link."
-                : authMode === "reset"
-                  ? "Choose a new admin password for Clarity Golf Booking."
-                  : "Sign in to manage bookings, Google Calendar sync, notifications, and text hooks."}
-            </p>
-          </div>
-
-          {authMode === "login" && (
-            <>
-              <label>
-                <span>Email</span>
-                <input value={adminEmail} onChange={(event) => setAdminEmail(event.target.value)} type="email" />
-              </label>
-              <label>
-                <span>Password</span>
-                <input
-                  value={adminPassword}
-                  onChange={(event) => setAdminPassword(event.target.value)}
-                  type={showAdminPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                />
-              </label>
-              <label className="show-password-toggle">
-                <input
-                  checked={showAdminPassword}
-                  onChange={(event) => setShowAdminPassword(event.target.checked)}
-                  type="checkbox"
-                />
-                <span>Show password</span>
-              </label>
-            </>
-          )}
-
-          {authMode === "forgot" && (
-            <label>
-              <span>Email</span>
-              <input
-                value={forgotEmail}
-                onChange={(event) => {
-                  setForgotEmail(event.target.value);
-                  setForgotState("idle");
-                  setForgotMessage("");
-                  setAuthError("");
-                }}
-                type="email"
-                autoComplete="email"
-              />
-            </label>
-          )}
-
-          {authMode === "reset" && (
-            <>
-              <label>
-                <span>New password</span>
-                <input
-                  value={resetPassword}
-                  onChange={(event) => setResetPassword(event.target.value)}
-                  type={showResetPassword ? "text" : "password"}
-                  autoComplete="new-password"
-                />
-              </label>
-              <label>
-                <span>Confirm password</span>
-                <input
-                  value={resetConfirmPassword}
-                  onChange={(event) => setResetConfirmPassword(event.target.value)}
-                  type={showResetPassword ? "text" : "password"}
-                  autoComplete="new-password"
-                />
-              </label>
-              <label className="show-password-toggle">
-                <input
-                  checked={showResetPassword}
-                  onChange={(event) => setShowResetPassword(event.target.checked)}
-                  type="checkbox"
-                />
-                <span>Show password</span>
-              </label>
-            </>
-          )}
-
-          {authError && <div className="auth-error">{authError}</div>}
-          {forgotMessage && <div className="auth-success">{forgotMessage}</div>}
-          <button
-            className="primary-button"
-            type="submit"
-            disabled={
-              authStatus === "checking" ||
-              loginState === "signing-in" ||
-              forgotState === "sending" ||
-              resetState === "saving"
-            }
-          >
-            {authStatus === "checking"
-              ? "Checking"
-              : authMode === "forgot"
-                ? forgotState === "sending"
-                  ? "Sending"
-                  : forgotState === "sent"
-                    ? "Sent"
-                    : "Send Reset Link"
-                : authMode === "reset"
-                  ? resetState === "saving"
-                    ? "Saving"
-                    : "Save New Password"
-                  : loginState === "signing-in"
-                    ? "Signing In"
-                    : "Sign In"}
-          </button>
-          {authMode === "login" ? (
-            <button
-              className="text-button"
-              type="button"
-              onClick={() => {
-                setAuthMode("forgot");
-                setForgotEmail(adminEmail);
-                setAuthError("");
-              }}
-            >
-              Forgot password?
-            </button>
-          ) : (
-            <button
-              className="text-button"
-              type="button"
-              onClick={() => {
-                setAuthMode("login");
-                setAuthError("");
-                setForgotMessage("");
-              }}
-            >
-              Back to sign in
-            </button>
-          )}
-        </form>
-      </main>
-    );
-  }
+  // No guest branch here any more: the entry point renders the login screen
+  // when there is no session, and only mounts this component for a coach.
 
   return (
     <div className={`app-shell theme-${themeMode} ${isEmbedMode ? "embed-mode" : ""}`} style={brandStyle}>
@@ -19775,8 +19705,6 @@ function App() {
                         setSelectedGroupSession(null);
                         setSelectedId(item.id);
                         setQuickCreate(null);
-                        setClientReassignOpen(false);
-                        setClientReassignSearch("");
                       }}
                       onKeyDown={(event) => {
                         if ((event.key === "Enter" || event.key === " ") && groupSessionItem && !scheduledGroupSession) {
@@ -20423,6 +20351,11 @@ function App() {
                                   <FileText size={12} /> Lesson notes
                                 </span>
                               )}
+                              {unseenSubmissionCounts.get(player.id) ? (
+                                <span className="tag is-unseen-submission">
+                                  <Video size={12} /> {unseenSubmissionCounts.get(player.id)} new
+                                </span>
+                              ) : null}
                             </div>
                           </div>
                           <button
@@ -20489,6 +20422,48 @@ function App() {
 
                             {playerToolExpanded && playerProfileTool === "recent" ? (
                               <div className="player-tool-body">
+                                {(() => {
+                                  const portalPlayer = portalPlayers.find(
+                                    (entry) => entry.personId === notesWorkspaceClient.id && entry.status !== "disabled",
+                                  );
+                                  const busy = portalPlayerBusyId === notesWorkspaceClient.id;
+                                  return (
+                                    <div className="player-portal-access">
+                                      <div className="player-portal-access-body">
+                                        <strong>Player portal</strong>
+                                        <span>
+                                          {!notesWorkspaceClient.email
+                                            ? "Add an email address to give this player portal access."
+                                            : !portalPlayer
+                                              ? "No access yet. They can be given a login to see their lessons, notes and videos."
+                                              : portalPlayer.status === "active"
+                                                ? `Active${portalPlayer.lastLoginAt ? ` · last signed in ${formatTimestampForDisplay(portalPlayer.lastLoginAt)}` : ""}`
+                                                : "Invited · waiting for them to set a password"}
+                                        </span>
+                                      </div>
+                                      <div className="player-portal-access-actions">
+                                        <button
+                                          type="button"
+                                          className="outline-button"
+                                          disabled={busy || !notesWorkspaceClient.email}
+                                          onClick={() => void grantPortalAccess(notesWorkspaceClient)}
+                                        >
+                                          {portalPlayer ? "Resend invite" : "Give portal access"}
+                                        </button>
+                                        {portalPlayer && (
+                                          <button
+                                            type="button"
+                                            className="outline-button"
+                                            disabled={busy}
+                                            onClick={() => void revokePortalAccess(portalPlayer.id, notesWorkspaceClient.id)}
+                                          >
+                                            Remove access
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                                 <div className="player-record-list">
                                   {playerToolRecentRecords.length ? (
                                     playerToolRecentRecords.map((record) => (
@@ -20928,15 +20903,23 @@ function App() {
                                         const isDownloading = clarityCloudImportActionIds.has(savedVideoId);
                                         const cloudVideoTitle = profileRecordTitle(notesWorkspaceClient.name, timestamp);
                                         const cloudVideoRawTitle = savedVideo?.title || cloudVideoTitle;
+                                        // A player submission is someone waiting on you, not your
+                                        // own library syncing. It reads differently and keeps an
+                                        // unseen dot until you open it.
+                                        const isSubmission = transfer.direction === "player-submission";
+                                        const isUnseen = isSubmission && !transfer.coachSeenAt;
                                         return (
-                                          <article className="player-video-card is-cloud-only" key={savedVideoId}>
+                                          <article
+                                            className={`player-video-card is-cloud-only${isSubmission ? " is-player-submission" : ""}${isUnseen ? " is-unseen" : ""}`}
+                                            key={savedVideoId}
+                                          >
                                             <button
                                               type="button"
                                               className="player-video-thumb-button"
                                               disabled={isDownloading}
                                               title={isDownloading ? "Downloading from Clarity Cloud" : "Play video"}
                                               aria-label={isDownloading ? "Downloading from Clarity Cloud" : "Play video"}
-                                              onClick={() => void openCloudVideoFromCatalogue(transfer, notesWorkspaceClient.name)}
+                                              onClick={() => void openPlayerSubmissionOrCloudVideo(transfer, notesWorkspaceClient.name)}
                                             >
                                               <div className="player-video-thumb is-empty">
                                                 <Video size={16} />
@@ -20949,6 +20932,17 @@ function App() {
                                               <strong title={cloudVideoRawTitle !== cloudVideoTitle ? cloudVideoRawTitle : undefined}>
                                                 {cloudVideoTitle}
                                               </strong>
+                                              {isSubmission && (
+                                                <span className="player-video-submission-meta">
+                                                  {isUnseen ? "New · " : ""}
+                                                  Sent by {transfer.submittedByName || notesWorkspaceClient.name}
+                                                </span>
+                                              )}
+                                              {isSubmission && transfer.playerMessage && (
+                                                <span className="player-video-submission-note">
+                                                  “{transfer.playerMessage}”
+                                                </span>
+                                              )}
                                             </div>
                                             <div className="player-video-card-actions">
                                               <span
@@ -25637,6 +25631,21 @@ function App() {
                     />
                     <span>Send admin booking alert</span>
                   </label>
+                  <label className="settings-toggle">
+                    <input
+                      checked={emailNotificationsDraft.sendLessonTypeChangeEmail}
+                      disabled={emailNotificationsIsLocked}
+                      onChange={(event) =>
+                        updateNotificationBlockDraft(emailNotificationsEditor, "sendLessonTypeChangeEmail", event.target.checked)
+                      }
+                      type="checkbox"
+                    />
+                    <span>Email when a lesson type changes</span>
+                  </label>
+                  <p className="field-help">
+                    Off by default. Switching a booking between lesson types on the lesson card stays silent, so
+                    tidying your own calendar doesn't mail the client. Real reschedules still send either way.
+                  </p>
                 </details>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">

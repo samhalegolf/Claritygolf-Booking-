@@ -160,6 +160,7 @@ async function readAdminSettings() {
     sendClientEmail: settings.sendClientEmail !== "false",
     sendCoachEmail: settings.sendCoachEmail !== "false",
     sendAdminEmail: settings.sendAdminEmail !== "false",
+    sendLessonTypeChangeEmail: settings.sendLessonTypeChangeEmail === "true",
     reminderEnabled: settings.reminderEnabled === "true",
     reminderLeadMinutes: cleanReminderLeadMinutes(settings.reminderLeadMinutes),
     clientEmailSubject: settings.clientEmailSubject || defaultEmailTemplates.clientEmailSubject,
@@ -193,6 +194,7 @@ async function writeAdminSettings(settings: any) {
   if (hasOwn(settings, "sendClientEmail")) await setSetting("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
   if (hasOwn(settings, "sendCoachEmail")) await setSetting("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
   if (hasOwn(settings, "sendAdminEmail")) await setSetting("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
+  if (hasOwn(settings, "sendLessonTypeChangeEmail")) await setSetting("sendLessonTypeChangeEmail", settings?.sendLessonTypeChangeEmail ? "true" : "false");
   if (hasOwn(settings, "reminderEnabled")) await setSetting("reminderEnabled", settings?.reminderEnabled ? "true" : "false");
   if (hasOwn(settings, "reminderLeadMinutes")) await setSetting("reminderLeadMinutes", String(cleanReminderLeadMinutes(settings?.reminderLeadMinutes)));
   if (hasOwn(settings, "clientEmailSubject")) await setSetting("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));

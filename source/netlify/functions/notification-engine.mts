@@ -179,6 +179,11 @@ async function readSettings() {
     sendClientEmail: s.sendClientEmail !== "false",
     sendCoachEmail: s.sendCoachEmail !== "false",
     sendAdminEmail: s.sendAdminEmail !== "false",
+    // Off by default. Swapping a 30 minute lesson for an hour rewrites the
+    // duration as well as the lesson type, so without this it lands as a
+    // "rescheduled" email — and those deliberately bypass the send toggles
+    // above. Tidying up your own calendar shouldn't mail the client.
+    sendLessonTypeChangeEmail: s.sendLessonTypeChangeEmail === "true",
     clientEmailSubject: s.clientEmailSubject || "Your {{service}} is confirmed",
     clientEmailIntro: s.clientEmailIntro || "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
     clientEmailFooter: s.clientEmailFooter || "We look forward to seeing you.",
@@ -772,6 +777,38 @@ export async function notifyBookingEvent(input: NotifyInput) {
   // reminders too.
   if (action === "reminder") {
     await sendAndRecord("client", appt.email, subjects.client);
+    return results;
+  }
+
+  // A lesson type change rewrites serviceId *and* duration, so it arrives here
+  // as "rescheduled" — which normally sends unconditionally. When the only
+  // thing that moved is the lesson type (the booking still starts at the same
+  // moment), honour the coach's setting instead and stay quiet by default.
+  const lessonTypeOnlyChange =
+    Boolean(previous) &&
+    cleanText(previous?.serviceId) !== cleanText(appt.serviceId) &&
+    Number(previous?.week ?? 0) === Number(appt.week ?? 0) &&
+    Number(previous?.day ?? 0) === Number(appt.day ?? 0) &&
+    Number(previous?.start ?? 0) === Number(appt.start ?? 0) &&
+    (action === "rescheduled" || action === "updated");
+
+  if (lessonTypeOnlyChange && !settings.sendLessonTypeChangeEmail) {
+    for (const [channel, recipient] of [
+      ["client", appt.email],
+      ["coach", resolveAppointmentCoach(appt, settings).email],
+      ["admin", settings.notificationEmail || settings.contactEmail],
+    ] as Array<[NotificationChannel, string]>) {
+      await recordNotification({
+        personKey,
+        calendarItemId: appt.id,
+        recipient,
+        subject: channel === "client" ? subjects.client : subjects.admin,
+        kind: `${action}_${channel}_email`,
+        status: "skipped",
+        provider: "settings",
+        error: "disabled_lesson_type_change_email",
+      });
+    }
     return results;
   }
 

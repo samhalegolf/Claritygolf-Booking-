@@ -1896,14 +1896,14 @@ button {
   text-decoration-color: currentColor;
 }
 
-.booking-client-reassign-toggle {
+.booking-client-edit-toggle {
   width: 26px;
   height: 26px;
   min-height: 26px;
   opacity: 0.55;
 }
 
-.booking-client-reassign-toggle:hover {
+.booking-client-edit-toggle:hover {
   opacity: 1;
 }
 
@@ -1913,44 +1913,36 @@ button {
   font-size: 13px;
 }
 
-.booking-client-reassign-panel {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  margin-bottom: 12px;
-  border: 1px solid #deded8;
-  background: #f8f8f4;
+/* Lesson type picker on the lesson card. Sits exactly where the plain service
+   name used to, so it reads as the same line of information rather than a form
+   control bolted on - it only grows a border on hover/focus. */
+.booking-lesson-type {
+  margin: 0 0 12px;
 }
 
-.booking-client-reassign-panel input {
-  height: 34px;
-}
-
-.booking-client-reassign-results {
-  display: grid;
-  gap: 4px;
-}
-
-.booking-client-reassign-result {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
-  border: none;
-  background: #fff;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-}
-
-.booking-client-reassign-result:hover {
-  background: #eeeeea;
-}
-
-.booking-client-reassign-result span {
+.booking-lesson-type select {
+  width: 100%;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   color: #76736d;
-  font-size: 12px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.booking-lesson-type select:hover:not(:disabled),
+.booking-lesson-type select:focus-visible {
+  border-color: #deded8;
+  background: #f8f8f4;
+  color: #171717;
+}
+
+.booking-lesson-type select:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .public-booking {
@@ -9395,4 +9387,60 @@ button {
 
 .pull-filter-field {
   margin-bottom: 8px;
+}
+
+/* Lesson card action row. Adding Checkout made four buttons compete for a
+   440px panel, which pushed Cancel Lesson off the right edge. The row now
+   wraps, the two navigation actions (Book Next / Move) are a size down, and
+   the destructive action drops to underlined text - it should be reachable,
+   not prominent. Scoped to the appointment panel so the group-session and
+   client-profile action rows are untouched. */
+.booking-panel-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.booking-panel-actions .primary-button {
+  height: 36px;
+  padding: 0 13px;
+  font-size: 13px;
+}
+
+/* Checkout is the one action with money attached, so it keeps full weight.
+   Targeted by its own class, not :first-child - the button is hidden once a
+   lesson is paid, which would otherwise promote Book Next in its place. */
+.booking-panel-actions .booking-checkout-button {
+  height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+/* Cancel Lesson / Remove Block / Remove from Clarity. */
+.booking-panel-actions .danger-button {
+  height: auto;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--danger, #a52e15);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Park it at the far end of whichever row it lands on, so it reads as separate
+   from the actions above rather than as another button in the sequence. Not
+   when it's alone though - a blocked-time card only has "Remove Block", and a
+   single right-aligned link looks stranded. */
+.booking-panel-actions .danger-button:not(:only-child) {
+  margin-left: auto;
+}
+
+.booking-panel-actions .danger-button:hover:not(:disabled) {
+  text-decoration-thickness: 2px;
+}
+
+.booking-panel-actions .danger-button:disabled {
+  opacity: 0.6;
+  text-decoration: none;
 }

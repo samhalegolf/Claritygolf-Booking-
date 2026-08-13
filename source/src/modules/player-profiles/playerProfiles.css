@@ -593,3 +593,67 @@
   margin: 16px 0;
   position: relative;
 }
+
+/* --- Portal access ------------------------------------------------------- */
+
+.player-portal-access {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line, #e4e3dd);
+  border-radius: 12px;
+  background: var(--surface-2, #f7f7f4);
+}
+
+.player-portal-access-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-portal-access-body strong {
+  font-size: 13px;
+}
+
+.player-portal-access-body span {
+  font-size: 12px;
+  color: var(--muted, #77746d);
+}
+
+.player-portal-access-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* --- Player submissions -------------------------------------------------- */
+
+.player-video-card.is-player-submission {
+  border-color: var(--coach-accent, #6c8f63);
+}
+
+.player-video-card.is-unseen {
+  box-shadow: inset 3px 0 0 var(--coach-accent, #6c8f63);
+}
+
+.player-video-submission-meta {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--coach-accent, #4f7a46);
+}
+
+.player-video-submission-note {
+  font-size: 12px;
+  color: var(--muted, #77746d);
+  font-style: italic;
+}
+
+.player-profile-tags .tag.is-unseen-submission {
+  background: var(--coach-accent, #6c8f63);
+  color: #ffffff;
+}

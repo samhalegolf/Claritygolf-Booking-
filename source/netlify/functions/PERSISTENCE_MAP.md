@@ -90,3 +90,37 @@ These route files should not grow their own persistence logic:
 ## Runtime note
 
 This file is documentation only. It does not change imports, routes, handlers, schema, environment variables, sessions, cookies, UI, packages, invoicing, or deployment behaviour.
+
+## Player portal and portal players
+
+One login screen serves the whole product. `/api/auth/login` checks `admin_users`
+first and falls back to Supabase Auth; the response's `role` (`coach` or
+`player`) is what the frontend routes on. `/api/auth/session` answers for both,
+and `/api/auth/logout` clears both cookies.
+
+| Route | Auth | Tables Touched | Notes |
+| --- | --- | --- | --- |
+| `/api/auth/login` | public | `admin_users`, `admin_sessions`, `portal_players`, `player_sessions`, `auth.users` (via GoTrue) | Coach first, then player. A player's password is verified against Supabase Auth server-side; the browser never receives a Supabase JWT. |
+| `/api/auth/session` | cookie | `admin_sessions`, `player_sessions`, `portal_players` | Returns `role`. A revoked `portal_players` row invalidates the session on read. |
+| `/api/portal/invite` | public (token is the credential) | `portal_players` | Validates a set-password link. |
+| `/api/portal/set-password` | public (token is the credential) | `portal_players`, `auth.users` (via GoTrue admin) | Completes an invite. |
+| `/api/portal-players` | admin | `portal_players`, `people`, `auth.users` (via GoTrue admin) | GET list, POST grant/resend invite, DELETE revoke. Revoking deletes that player's sessions. |
+| `/api/player/profile` | player cookie | `settings` (lesson notes), `calendar_items`, `people` | Unchanged, except the phone used for booking lookup now comes from the linked `people` row rather than the login form. |
+
+`/api/player/login` has been removed. Email + phone is not a credential for a
+surface that holds lesson notes and video.
+
+## Player video submissions
+
+`video-transfer.mts` now serves two directions through one engine.
+`/api/video-transfer/*` is the coach's own library sync, unchanged.
+`/api/video-transfer/player/*` is authorised by a player session:
+
+- `POST :savedVideoId/session`, `PUT :savedVideoId/chunk`, `POST :savedVideoId/finalize`, `DELETE :savedVideoId/session` — sending a video to the coach.
+- `GET imports`, `GET :savedVideoId/import`, `GET :savedVideoId/download` — pre-existing, coach-to-player.
+
+The player's id is forced from their session, never read from the request body.
+Submissions are capped at 750 MB each and 20 per player per 24 hours, and land
+in a separate `Player Submissions` folder in the coach's Drive.
+`video_transfer_sessions.direction` distinguishes the two; `coach_seen_at`
+drives the unseen marker in Player Profiles.

@@ -369,14 +369,21 @@ function cleanCustomGroupData(value) {
 }
 
 function json(value, status = 200, extraHeaders = {}) {
-  return new Response(safeJsonStringify(value), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-      ...extraHeaders,
-    },
+  const headers = new Headers({
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
   });
+  // An array value is appended one header at a time. Set-Cookie is the reason:
+  // logout clears both the admin and the player cookie, and a comma-joined
+  // Set-Cookie is not a valid header -- the browser would drop both.
+  for (const [name, value] of Object.entries(extraHeaders)) {
+    if (Array.isArray(value)) {
+      for (const entry of value) headers.append(name, entry);
+    } else if (value !== undefined && value !== null) {
+      headers.set(name, value);
+    }
+  }
+  return new Response(safeJsonStringify(value), { status, headers });
 }
 
 function text(value, status = 200, contentType = "text/plain; charset=utf-8") {
@@ -1848,6 +1855,7 @@ async function defaultSettings() {
     sendClientEmail: "true",
     sendCoachEmail: "true",
     sendAdminEmail: "true",
+    sendLessonTypeChangeEmail: "false",
     clientEmailSubject: defaultEmailTemplates.clientEmailSubject,
     clientEmailIntro: defaultEmailTemplates.clientEmailIntro,
     clientEmailFooter: defaultEmailTemplates.clientEmailFooter,
@@ -2063,12 +2071,20 @@ async function ensurePlayerSessionsTable() {
       token_hash TEXT UNIQUE NOT NULL,
       person_id TEXT,
       email TEXT NOT NULL,
-      phone TEXT NOT NULL,
+      phone TEXT,
       account_id TEXT,
+      auth_user_id UUID,
+      portal_player_id TEXT,
       expires_at TIMESTAMPTZ NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  // Sessions predate the Supabase Auth login, so an existing table needs the
+  // new columns adding and its phone requirement dropping -- phone is no longer
+  // collected at login.
+  ddl.sql`ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS auth_user_id UUID`;
+  ddl.sql`ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS portal_player_id TEXT`;
+  ddl.sql`ALTER TABLE player_sessions ALTER COLUMN phone DROP NOT NULL`;
   ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_player_sessions_token
     ON player_sessions (token_hash)
@@ -2076,6 +2092,41 @@ async function ensurePlayerSessionsTable() {
   ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_player_sessions_expires
     ON player_sessions (expires_at)
+  `;
+  ddl.sql`
+    CREATE INDEX IF NOT EXISTS idx_player_sessions_portal_player
+    ON player_sessions (portal_player_id)
+  `;
+  ddl.sql`
+    CREATE TABLE IF NOT EXISTS portal_players (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+      auth_user_id UUID NOT NULL,
+      email TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'invited',
+      invite_token_hash TEXT,
+      invite_expires_at TIMESTAMPTZ,
+      invited_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      activated_at TIMESTAMPTZ,
+      last_login_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT portal_players_status_check
+        CHECK (status IN ('invited', 'active', 'disabled'))
+    )
+  `;
+  ddl.sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS portal_players_account_person_idx
+    ON portal_players (account_id, person_id)
+  `;
+  ddl.sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS portal_players_auth_user_idx
+    ON portal_players (auth_user_id)
+  `;
+  ddl.sql`
+    CREATE INDEX IF NOT EXISTS portal_players_invite_token_idx
+    ON portal_players (invite_token_hash)
   `;
   await ddl.run();
   // Only once the statements have actually landed: marking it ready first would
@@ -3893,6 +3944,7 @@ function adminSettingsFromSettings(settings) {
     sendClientEmail: settingValue(settings, "sendClientEmail") !== "false",
     sendCoachEmail: settingValue(settings, "sendCoachEmail") !== "false",
     sendAdminEmail: settingValue(settings, "sendAdminEmail") !== "false",
+    sendLessonTypeChangeEmail: settingValue(settings, "sendLessonTypeChangeEmail") === "true",
     reminderEnabled: settingValue(settings, "reminderEnabled") === "true",
     reminderLeadMinutes: cleanReminderLeadMinutes(settingValue(settings, "reminderLeadMinutes")),
     clientEmailSubject:
@@ -4017,6 +4069,7 @@ async function writeAdminSettings(settings) {
   put("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
   put("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
   put("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
+  put("sendLessonTypeChangeEmail", settings?.sendLessonTypeChangeEmail ? "true" : "false");
   put("reminderEnabled", settings?.reminderEnabled ? "true" : "false");
   if (hasOwn(settings, "reminderLeadMinutes")) {
     next.reminderLeadMinutes = String(cleanReminderLeadMinutes(settings?.reminderLeadMinutes));
@@ -6612,17 +6665,223 @@ async function requireAdmin(req) {
   return session;
 }
 
-// --- Player portal sessions (email+phone identity, mirroring the reschedule
-// trust model) -----------------------------------------------------------
+// --- Portal players (Supabase Auth) ---------------------------------------
+//
+// A person becomes a portal user only when the coach promotes them in Player
+// Profiles. This is deliberately not every row in `people` -- most clients are
+// a name and a phone number on a booking, not an account.
+//
+// The credential lives in Supabase Auth (auth.users), the same one Clarity
+// Caddy uses, so a player who has a Caddy account signs in to both products
+// with one email and password. `portal_players` is what makes an auth user a
+// valid login here: an auth user with no active row for this account gets
+// nothing.
+//
+// The browser never receives a Supabase JWT. The password is verified against
+// GoTrue server-side and then the app mints its own player_sessions cookie, so
+// there is one session mechanism in this app rather than two.
 
-async function createPlayerSession({ personId, email, phone, accountId }) {
+const portalInviteDays = 14;
+
+function supabaseAuthConfig() {
+  const { url, key } = supabaseStorageConfig();
+  // The password grant is a public endpoint and expects the anon key. The
+  // service key is accepted as a fallback so a deploy that only sets the
+  // service key still logs players in.
+  const anonKey =
+    env("SUPABASE_ANON_KEY") || env("SUPABASE_PUBLISHABLE_KEY") || key;
+  return { url, serviceKey: key, anonKey };
+}
+
+async function supabaseAuthFetch(path, { method = "POST", body, useAnonKey = false } = {}) {
+  const { url, serviceKey, anonKey } = supabaseAuthConfig();
+  const key = useAnonKey ? anonKey : serviceKey;
+  const response = await fetch(`${url}/auth/v1${path}`, {
+    method,
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const text = await response.text();
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+  return { ok: response.ok, status: response.status, payload };
+}
+
+function supabaseAuthError(payload, fallback, status) {
+  const message =
+    cleanString(payload?.msg, "", 300) ||
+    cleanString(payload?.message, "", 300) ||
+    cleanString(payload?.error_description, "", 300) ||
+    fallback;
+  return Object.assign(new Error(message), { status: status || 502 });
+}
+
+// The password grant hands back a Supabase session we have no use for. Ending
+// it immediately means a portal login never leaves a live Supabase refresh
+// token behind for a browser that was never going to hold one.
+async function revokeSupabaseAuthSession(accessToken) {
+  if (!accessToken) return;
+  try {
+    const { url, anonKey } = supabaseAuthConfig();
+    await fetch(`${url}/auth/v1/logout?scope=local`, {
+      method: "POST",
+      headers: { apikey: anonKey, Authorization: `Bearer ${accessToken}` },
+    });
+  } catch {
+    // Best effort. The token expires on its own.
+  }
+}
+
+/** Verifies an email + password against Supabase Auth. Returns the auth user id, or "". */
+async function verifySupabaseAuthPassword(email, password) {
+  if (!email || !password) return "";
+  const { ok, payload } = await supabaseAuthFetch("/token?grant_type=password", {
+    body: { email, password },
+    useAnonKey: true,
+  });
+  if (!ok) return "";
+  await revokeSupabaseAuthSession(cleanString(payload?.access_token, "", 4000));
+  return cleanString(payload?.user?.id, "", 80);
+}
+
+/**
+ * Look the auth user up in Postgres rather than through GoTrue's admin list
+ * endpoint. This app talks to Postgres directly, `auth.users` is right there,
+ * and the admin list endpoint's filtering behaviour varies by GoTrue version.
+ */
+async function findSupabaseAuthUserId(email) {
+  const cleanEmailValue = cleanEmail(email, "");
+  if (!cleanEmailValue) return "";
+  try {
+    const rows = await db().sql`
+      SELECT id FROM auth.users WHERE lower(email) = ${cleanEmailValue} LIMIT 1
+    `;
+    return cleanString(rows[0]?.id, "", 80);
+  } catch (error) {
+    console.warn("portal_players:auth_user_lookup_failed", error instanceof Error ? error.message : error);
+    return "";
+  }
+}
+
+/**
+ * Creates the Supabase Auth user for a promoted player, or links to the one
+ * they already have (most likely from Clarity Caddy). The password set here is
+ * random and thrown away -- the player sets a real one through the invite.
+ */
+async function ensureSupabaseAuthUser(email) {
+  const existing = await findSupabaseAuthUserId(email);
+  if (existing) return { authUserId: existing, created: false };
+
+  const { ok, status, payload } = await supabaseAuthFetch("/admin/users", {
+    body: {
+      email,
+      email_confirm: true,
+      password: randomBytes(24).toString("base64url"),
+    },
+  });
+  if (ok) {
+    const authUserId = cleanString(payload?.id, "", 80);
+    if (authUserId) return { authUserId, created: true };
+  }
+  // A race, or an account GoTrue knows about that the lookup missed.
+  const afterConflict = await findSupabaseAuthUserId(email);
+  if (afterConflict) return { authUserId: afterConflict, created: false };
+  throw supabaseAuthError(payload, "Could not create the portal login.", status);
+}
+
+async function setSupabaseAuthPassword(authUserId, password) {
+  const { ok, status, payload } = await supabaseAuthFetch(
+    `/admin/users/${encodeURIComponent(authUserId)}`,
+    { method: "PUT", body: { password, email_confirm: true } },
+  );
+  if (!ok) throw supabaseAuthError(payload, "Could not set that password.", status);
+}
+
+function rowToPortalPlayer(row) {
+  if (!row) return null;
+  return {
+    id: cleanString(row.id, "", 80),
+    accountId: cleanString(row.account_id, "", 120),
+    personId: cleanString(row.person_id, "", 160),
+    authUserId: cleanString(row.auth_user_id, "", 80),
+    email: cleanEmail(row.email, ""),
+    status: cleanString(row.status, "invited", 20),
+    invitedAt: row.invited_at || null,
+    activatedAt: row.activated_at || null,
+    lastLoginAt: row.last_login_at || null,
+  };
+}
+
+async function readPortalPlayerByAuthUser(authUserId, accountId) {
+  if (!authUserId) return null;
+  await ensurePlayerSessionsTable();
+  const rows = await db().sql`
+    SELECT * FROM portal_players
+    WHERE auth_user_id = ${authUserId} AND account_id = ${accountId}
+    LIMIT 1
+  `;
+  return rowToPortalPlayer(rows[0]);
+}
+
+async function readPortalPlayerById(portalPlayerId) {
+  if (!portalPlayerId) return null;
+  await ensurePlayerSessionsTable();
+  const rows = await db().sql`
+    SELECT * FROM portal_players WHERE id = ${portalPlayerId} LIMIT 1
+  `;
+  return rowToPortalPlayer(rows[0]);
+}
+
+async function listPortalPlayers(accountId) {
+  await ensurePlayerSessionsTable();
+  const rows = await db().sql`
+    SELECT * FROM portal_players
+    WHERE account_id = ${accountId}
+    ORDER BY updated_at DESC
+  `;
+  return rows.map(rowToPortalPlayer).filter(Boolean);
+}
+
+/**
+ * The portal shows a player their bookings, and bookings are matched by email
+ * and phone. The login no longer collects a phone, so it comes from the linked
+ * people row instead -- which is the more trustworthy source anyway.
+ */
+async function portalPlayerContact(portalPlayer) {
+  const people = await readPeople(portalPlayer.accountId);
+  const person = people.find((candidate) => candidate.id === portalPlayer.personId);
+  return {
+    personId: portalPlayer.personId,
+    name: cleanString(person?.name, "", 180),
+    email: portalPlayer.email || cleanEmail(person?.email, ""),
+    phone: cleanString(person?.phone, "", 80),
+  };
+}
+
+async function createPlayerSession({ personId, email, phone, accountId, authUserId, portalPlayerId }) {
   await ensurePlayerSessionsTable();
   const token = randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
   const expiresAt = new Date(Date.now() + playerSessionDays * 24 * 60 * 60 * 1000).toISOString();
   await db().sql`
-    INSERT INTO player_sessions (id, token_hash, person_id, email, phone, account_id, expires_at, created_at)
-    VALUES (${randomUUID()}, ${tokenHash}, ${personId || null}, ${email}, ${phone}, ${accountId || null}, ${expiresAt}, NOW())
+    INSERT INTO player_sessions (
+      id, token_hash, person_id, email, phone, account_id,
+      auth_user_id, portal_player_id, expires_at, created_at
+    )
+    VALUES (
+      ${randomUUID()}, ${tokenHash}, ${personId || null}, ${email}, ${phone || null}, ${accountId || null},
+      ${authUserId || null}, ${portalPlayerId || null}, ${expiresAt}, NOW()
+    )
   `;
   return { token, expiresAt };
 }
@@ -6631,7 +6890,7 @@ async function readPlayerSession(token) {
   if (!token) return null;
   await ensurePlayerSessionsTable();
   const rows = await db().sql`
-    SELECT person_id, email, phone, account_id, expires_at
+    SELECT person_id, email, phone, account_id, auth_user_id, portal_player_id, expires_at
     FROM player_sessions
     WHERE token_hash = ${hashToken(token)}
   `;
@@ -6641,11 +6900,23 @@ async function readPlayerSession(token) {
     await destroyPlayerSession(token);
     return null;
   }
+  // Revoking portal access has to end the session that access created, not
+  // wait for it to expire up to 30 days later.
+  const portalPlayerId = cleanString(row.portal_player_id, "", 80);
+  if (portalPlayerId) {
+    const portalPlayer = await readPortalPlayerById(portalPlayerId);
+    if (!portalPlayer || portalPlayer.status === "disabled") {
+      await destroyPlayerSession(token);
+      return null;
+    }
+  }
   return {
     personId: row.person_id || "",
     email: row.email || "",
     phone: row.phone || "",
     accountId: row.account_id || "",
+    authUserId: cleanString(row.auth_user_id, "", 80),
+    portalPlayerId,
     expiresAt: row.expires_at,
   };
 }
@@ -6656,42 +6927,245 @@ async function destroyPlayerSession(token) {
   await db().sql`DELETE FROM player_sessions WHERE token_hash = ${hashToken(token)}`;
 }
 
-// Verifies a would-be player by the same bar public reschedule already uses:
-// at least one appointment on file matches the given email AND phone. Returns
-// the resolved identity (person id + display name) or null if unverified.
-async function verifyPlayerContact(rawEmail, rawPhone) {
-  const email = cleanString(rawEmail, "", 180).toLowerCase();
-  const normalizedEmail = normalizeRescheduleContact(email);
-  const normalizedPhone = normalizeRescheduleContact(rawPhone);
-  if (!email || !normalizedEmail || !normalizedPhone) return null;
+async function destroyPortalPlayerSessions(portalPlayerId) {
+  if (!portalPlayerId) return;
+  await ensurePlayerSessionsTable();
+  await db().sql`DELETE FROM player_sessions WHERE portal_player_id = ${portalPlayerId}`;
+}
+
+/**
+ * Signs a player in against Supabase Auth. Returns the session identity, or
+ * null when the credentials are wrong or the auth user has no active portal
+ * access for this account -- the two are deliberately indistinguishable to the
+ * caller so the login response cannot be used to probe who has an account.
+ */
+async function verifyPortalPlayerLogin(rawEmail, password) {
+  const email = cleanEmail(rawEmail, "");
+  if (!email || !password) return null;
 
   const state = await readPublicCatalogState();
-  const workspaceAccount = publicWorkspaceAccount(state);
-  const itemRead = await readPublicAppointmentsForContact({
-    accountId: workspaceAccount.id,
-    email,
-    phone: rawPhone,
-  });
-  if (!itemRead.items.length) return null;
+  const accountId = publicWorkspaceAccount(state).id;
 
-  const appointment = itemRead.items[0];
-  const knownPeople = await readPeople(workspaceAccount.id);
-  const person = compatiblePersonMatch(
-    {
-      id: appointment.personId || "",
-      name: appointment.client || appointment.title || "",
-      email,
-      phone: rawPhone,
-    },
-    knownPeople,
-  );
+  const authUserId = await verifySupabaseAuthPassword(email, password);
+  if (!authUserId) return null;
+
+  const portalPlayer = await readPortalPlayerByAuthUser(authUserId, accountId);
+  if (!portalPlayer || portalPlayer.status === "disabled") return null;
+
+  const contact = await portalPlayerContact(portalPlayer);
+  await db().sql`
+    UPDATE portal_players
+    SET status = 'active',
+        activated_at = COALESCE(activated_at, NOW()),
+        last_login_at = NOW(),
+        invite_token_hash = NULL,
+        invite_expires_at = NULL,
+        updated_at = NOW()
+    WHERE id = ${portalPlayer.id}
+  `;
+
   return {
-    accountId: workspaceAccount.id,
-    personId: person?.id || appointment.personId || "",
-    email,
-    phone: normalizedPhone,
-    name: person?.name || appointment.client || appointment.title || "",
+    accountId,
+    personId: contact.personId,
+    email: contact.email || email,
+    phone: contact.phone,
+    name: contact.name,
+    authUserId,
+    portalPlayerId: portalPlayer.id,
   };
+}
+
+// --- Portal invites --------------------------------------------------------
+//
+// The set-password link is this app's own token, not a Supabase invite link.
+// Supabase's link redirects through GoTrue and hands the browser a Supabase
+// session, which is exactly what this design avoids. Issuing our own token
+// keeps the flow the same shape as the existing admin password reset, and
+// means "resend invite" and a future player "forgot password" are the same
+// code path.
+
+function portalInviteUrl(req, token) {
+  const origin = env("CLARITY_APP_URL", new URL(req.url).origin).replace(/\/$/, "");
+  const url = new URL(origin || new URL(req.url).origin);
+  url.searchParams.set("portalInvite", token);
+  return url.toString();
+}
+
+async function issuePortalInvite(portalPlayerId) {
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + portalInviteDays * 24 * 60 * 60 * 1000).toISOString();
+  await db().sql`
+    UPDATE portal_players
+    SET invite_token_hash = ${hashToken(token)},
+        invite_expires_at = ${expiresAt},
+        invited_at = NOW(),
+        updated_at = NOW()
+    WHERE id = ${portalPlayerId}
+  `;
+  return { token, expiresAt };
+}
+
+async function sendPortalInviteEmail({ req, email, name, token }) {
+  const account = await readCoachAccount();
+  const businessName = account.businessName || "Clarity Golf";
+  const inviteUrl = portalInviteUrl(req, token);
+  const greeting = name ? `Hi ${escapeHtml(name.split(/\s+/)[0])},` : "Hi,";
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
+      <h2>Your ${escapeHtml(businessName)} player portal</h2>
+      <p>${greeting}</p>
+      <p>${escapeHtml(account.coachName || businessName)} has set up a player portal account for you. Set a password to see your lessons, your lesson notes and your videos, and to book your next session.</p>
+      <p><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:#07100a;color:#fff;padding:12px 16px;text-decoration:none;border-radius:6px">Set your password</a></p>
+      <p>If the button does not work, paste this link into your browser:</p>
+      <p><a href="${escapeHtml(inviteUrl)}">${escapeHtml(inviteUrl)}</a></p>
+      <p>This link expires in ${portalInviteDays} days.</p>
+    </div>
+  `;
+  const textBody = [
+    `Your ${businessName} player portal`,
+    "",
+    `${account.coachName || businessName} has set up a player portal account for you.`,
+    "Set a password to see your lessons, lesson notes and videos, and to book your next session:",
+    inviteUrl,
+    "",
+    `This link expires in ${portalInviteDays} days.`,
+  ].join("\n");
+
+  return sendEmail({
+    to: email,
+    subject: `Your ${businessName} player portal`,
+    html,
+    text: textBody,
+    idempotencyKey: `portal-invite-${hashToken(token).slice(0, 24)}`,
+  });
+}
+
+/**
+ * Promotes a person to a portal player: links (or creates) their Supabase Auth
+ * user, records the grant, and issues the set-password invite. Re-running it
+ * for someone who already has access just re-issues the invite, which is what
+ * "resend invite" needs.
+ */
+async function grantPortalAccess({ req, personId, accountId }) {
+  await ensurePlayerSessionsTable();
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const cleanPersonId = cleanString(personId, "", 160);
+  if (!cleanPersonId) {
+    throw Object.assign(new Error("A player is required."), { status: 400 });
+  }
+
+  const people = await readPeople(cleanAccountId);
+  const person = people.find((candidate) => candidate.id === cleanPersonId);
+  if (!person) {
+    throw Object.assign(new Error("That player is not in this account."), { status: 404 });
+  }
+  const email = cleanEmail(person.email, "");
+  if (!email) {
+    throw Object.assign(
+      new Error("Add an email address to this player before giving them portal access."),
+      { status: 400 },
+    );
+  }
+
+  const { authUserId } = await ensureSupabaseAuthUser(email);
+  const existingRows = await db().sql`
+    SELECT * FROM portal_players
+    WHERE account_id = ${cleanAccountId} AND person_id = ${cleanPersonId}
+    LIMIT 1
+  `;
+  const existing = rowToPortalPlayer(existingRows[0]);
+
+  let portalPlayerId = existing?.id || "";
+  if (existing) {
+    portalPlayerId = existing.id;
+    await db().sql`
+      UPDATE portal_players
+      SET auth_user_id = ${authUserId},
+          email = ${email},
+          status = CASE WHEN status = 'disabled' THEN 'invited' ELSE status END,
+          updated_at = NOW()
+      WHERE id = ${portalPlayerId}
+    `;
+  } else {
+    portalPlayerId = randomUUID();
+    await db().sql`
+      INSERT INTO portal_players (id, account_id, person_id, auth_user_id, email, status, invited_at, created_at, updated_at)
+      VALUES (${portalPlayerId}, ${cleanAccountId}, ${cleanPersonId}, ${authUserId}, ${email}, 'invited', NOW(), NOW(), NOW())
+    `;
+  }
+
+  const invite = await issuePortalInvite(portalPlayerId);
+  const emailResult = await sendPortalInviteEmail({
+    req,
+    email,
+    name: cleanString(person.name, "", 180),
+    token: invite.token,
+  });
+
+  const portalPlayer = await readPortalPlayerById(portalPlayerId);
+  return {
+    portalPlayer,
+    inviteSent: Boolean(emailResult?.sent),
+    inviteReason: emailResult?.sent ? "" : cleanString(emailResult?.reason, "", 80),
+    // Returned so the coach can hand the link over directly when email is not
+    // configured or bounces. It is single-use and time limited.
+    inviteUrl: emailResult?.sent ? "" : portalInviteUrl(req, invite.token),
+  };
+}
+
+async function revokePortalAccess({ portalPlayerId, accountId }) {
+  await ensurePlayerSessionsTable();
+  const portalPlayer = await readPortalPlayerById(portalPlayerId);
+  if (!portalPlayer || portalPlayer.accountId !== accountId) {
+    throw Object.assign(new Error("That portal player was not found."), { status: 404 });
+  }
+  // The row is kept rather than deleted so the history of who had access
+  // survives, and so re-granting reuses the same auth user.
+  await db().sql`
+    UPDATE portal_players
+    SET status = 'disabled', invite_token_hash = NULL, invite_expires_at = NULL, updated_at = NOW()
+    WHERE id = ${portalPlayerId}
+  `;
+  await destroyPortalPlayerSessions(portalPlayerId);
+  return readPortalPlayerById(portalPlayerId);
+}
+
+async function readPortalInvite(token) {
+  if (!token) return null;
+  await ensurePlayerSessionsTable();
+  const rows = await db().sql`
+    SELECT * FROM portal_players
+    WHERE invite_token_hash = ${hashToken(token)}
+    LIMIT 1
+  `;
+  const portalPlayer = rowToPortalPlayer(rows[0]);
+  if (!portalPlayer) return null;
+  const expiresAt = rows[0]?.invite_expires_at;
+  if (!expiresAt || new Date(expiresAt).getTime() <= Date.now()) return null;
+  if (portalPlayer.status === "disabled") return null;
+  return portalPlayer;
+}
+
+/** Completes an invite: sets the real Supabase Auth password and clears the token. */
+async function completePortalInvite(token, password) {
+  const portalPlayer = await readPortalInvite(token);
+  if (!portalPlayer) {
+    return { error: "invalid_token" };
+  }
+  if (cleanString(password, "", 200).length < 10) {
+    return { error: "weak_password" };
+  }
+  await setSupabaseAuthPassword(portalPlayer.authUserId, password);
+  await db().sql`
+    UPDATE portal_players
+    SET status = 'active',
+        activated_at = COALESCE(activated_at, NOW()),
+        invite_token_hash = NULL,
+        invite_expires_at = NULL,
+        updated_at = NOW()
+    WHERE id = ${portalPlayer.id}
+  `;
+  return { portalPlayer: await readPortalPlayerById(portalPlayer.id) };
 }
 
 function playerBase64(value) {
@@ -6762,6 +7236,10 @@ async function readPlayerProfile(session) {
   const primary = itemRead.items[0];
   return {
     player: {
+      // The person id matters to the portal: videos recorded there are filed
+      // under it, which is what makes them line up with this player's profile
+      // on the coach side.
+      id: session.personId || "",
       email: session.email,
       name: primary?.client || primary?.title || "",
       phone: primary?.phone || session.phone || "",
@@ -8349,12 +8827,15 @@ export async function handleBookingApiRoute(
   try {
     // A browser with no session cookie should reach the login form immediately.
     // Avoid running the full calendar/settings seed path for this read-only check.
+    // Both cookies have to be absent: this endpoint now answers for players too,
+    // and the app routes on its `role`.
     if (
       req.method === "GET" &&
       pathname === "/api/auth/session" &&
-      !sessionTokenFromRequest(req)
+      !sessionTokenFromRequest(req) &&
+      !playerSessionTokenFromRequest(req)
     ) {
-      return json({ authenticated: false });
+      return json({ authenticated: false, role: "guest" });
     }
 
     if (req.method === "GET" && pathname === "/api/public-booking-state") {
@@ -8399,20 +8880,51 @@ export async function handleBookingApiRoute(
       return handleCalendarFeedRequest(req);
     }
 
+    // One login form for the whole app. The coach is checked first against
+    // admin_users, exactly as before; anything that is not a coach is then
+    // offered to Supabase Auth as a portal player. The response's `role` is
+    // what the app routes on -- coach to the booking workspace, player to the
+    // portal.
     if (req.method === "POST" && pathname === "/api/auth/login") {
       const body = await parseBody(req);
       const user = await verifyAdminPassword(body.email || "", body.password || "");
-      if (!user) return json({ error: "invalid_login", message: "Email or password is incorrect." }, 401);
-      const session = await createAdminSession(user);
-      return json(
-        {
-          authenticated: true,
-          email: user.email,
-          expiresAt: session.expiresAt,
-        },
-        200,
-        { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
-      );
+      if (user) {
+        const session = await createAdminSession(user);
+        return json(
+          {
+            authenticated: true,
+            role: "coach",
+            email: user.email,
+            expiresAt: session.expiresAt,
+          },
+          200,
+          { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
+        );
+      }
+
+      const player = await verifyPortalPlayerLogin(body.email || "", body.password || "");
+      if (player) {
+        const session = await createPlayerSession(player);
+        return json(
+          {
+            authenticated: true,
+            role: "player",
+            email: player.email,
+            name: player.name,
+            expiresAt: session.expiresAt,
+          },
+          200,
+          {
+            "Set-Cookie": playerCookieHeader(
+              session.token,
+              req,
+              playerSessionDays * 24 * 60 * 60,
+            ),
+          },
+        );
+      }
+
+      return json({ error: "invalid_login", message: "Email or password is incorrect." }, 401);
     }
 
     if (req.method === "POST" && pathname === "/api/auth/forgot-password") {
@@ -8533,20 +9045,32 @@ export async function handleBookingApiRoute(
       );
     }
 
+    // Clears whichever session the browser is holding. A coach who is also a
+    // player on the same browser can hold both cookies, so both are cleared.
     if (req.method === "POST" && pathname === "/api/auth/logout") {
-      await destroyAdminSession(sessionTokenFromRequest(req));
-      return json({ authenticated: false }, 200, {
-        "Set-Cookie": clearCookieHeader(),
+      const adminToken = sessionTokenFromRequest(req);
+      const playerToken = playerSessionTokenFromRequest(req);
+      if (adminToken) await destroyAdminSession(adminToken);
+      if (playerToken) await destroyPlayerSession(playerToken);
+      return json({ authenticated: false, role: "guest" }, 200, {
+        "Set-Cookie": [clearCookieHeader(), clearPlayerCookieHeader()],
       });
     }
 
     if (req.method === "GET" && pathname === "/api/auth/session") {
       const session = await readAdminSession(sessionTokenFromRequest(req));
-      return json(
-        session
-          ? { authenticated: true, email: session.email }
-          : { authenticated: false },
-      );
+      if (session) {
+        return json({ authenticated: true, role: "coach", email: session.email });
+      }
+      const player = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (player) {
+        return json({
+          authenticated: true,
+          role: "player",
+          email: player.email,
+        });
+      }
+      return json({ authenticated: false, role: "guest" });
     }
 
     if (req.method === "GET" && pathname === "/api/public-booking-state") {
@@ -8600,38 +9124,42 @@ export async function handleBookingApiRoute(
     // --- Player portal (public, pre-gate). Each route does its own player-
     // session check; the admin gate below is intentionally left untouched so
     // the player surface can never widen admin access. ---------------------
-    if (req.method === "POST" && pathname === "/api/player/login") {
+    //
+    // Login, session and logout are handled by /api/auth/* for everyone. The
+    // old /api/player/login (email + phone) is gone: a phone number is not a
+    // credential for a surface holding lesson notes and video.
+
+    // Completing an invite is necessarily unauthenticated -- the token is the
+    // credential.
+    if (req.method === "GET" && pathname === "/api/portal/invite") {
+      const token = new URL(req.url).searchParams.get("token") || "";
+      const portalPlayer = await readPortalInvite(token);
+      return json(
+        portalPlayer
+          ? { valid: true, email: portalPlayer.email }
+          : { valid: false, message: "That invite link has expired. Ask your coach to send a new one." },
+      );
+    }
+
+    if (req.method === "POST" && pathname === "/api/portal/set-password") {
       const body = await parseBody(req);
-      const verified = await verifyPlayerContact(body?.email || "", body?.phone || "");
-      if (!verified) {
+      const result = await completePortalInvite(body?.token || "", body?.password || "");
+      if (result.error === "weak_password") {
         return json(
-          {
-            error: "invalid_login",
-            message: "We couldn't find a booking with that email and phone. Check they match your booking confirmation.",
-          },
-          401,
+          { error: "weak_password", message: "Use at least 10 characters." },
+          400,
         );
       }
-      const session = await createPlayerSession(verified);
-      return json(
-        { authenticated: true, player: { name: verified.name, email: verified.email } },
-        200,
-        { "Set-Cookie": playerCookieHeader(session.token, req, playerSessionDays * 24 * 60 * 60) },
-      );
-    }
-
-    if (req.method === "GET" && pathname === "/api/player/session") {
-      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
-      return json(
-        session
-          ? { authenticated: true, player: { email: session.email } }
-          : { authenticated: false },
-      );
-    }
-
-    if (req.method === "POST" && pathname === "/api/player/logout") {
-      await destroyPlayerSession(playerSessionTokenFromRequest(req));
-      return json({ authenticated: false }, 200, { "Set-Cookie": clearPlayerCookieHeader() });
+      if (result.error) {
+        return json(
+          {
+            error: "invalid_token",
+            message: "That invite link has expired. Ask your coach to send a new one.",
+          },
+          400,
+        );
+      }
+      return json({ ok: true, email: result.portalPlayer?.email || "" });
     }
 
     if (req.method === "GET" && pathname === "/api/player/profile") {
@@ -9179,6 +9707,44 @@ export async function handleBookingApiRoute(
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       return json({ people: filterPeopleForContext(await readPeople(requestContext.accountId), requestContext, state) });
+    }
+
+    // --- Portal access (admin) ---------------------------------------------
+    // Granting is the coach's decision, made per player in Player Profiles.
+    if (req.method === "GET" && pathname === "/api/portal-players") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json({ portalPlayers: await listPortalPlayers(requestContext.accountId) });
+    }
+
+    // POST both grants access and resends the invite -- for a player who
+    // already has a row it just issues a fresh set-password link.
+    if (req.method === "POST" && pathname === "/api/portal-players") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const body = await parseBody(req);
+      const result = await grantPortalAccess({
+        req,
+        personId: body?.personId || body?.playerId || "",
+        accountId: requestContext.accountId,
+      });
+      return json({ ok: true, ...result });
+    }
+
+    if (req.method === "DELETE" && pathname === "/api/portal-players") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const portalPlayerId =
+        cleanString(url.searchParams.get("id"), "", 80) ||
+        cleanString((await parseBody(req))?.id, "", 80);
+      const portalPlayer = await revokePortalAccess({
+        portalPlayerId,
+        accountId: requestContext.accountId,
+      });
+      return json({ ok: true, portalPlayer });
     }
 
     if (req.method === "GET" && pathname === "/api/notes") {

@@ -43,6 +43,16 @@ type TransferStatus =
 
 export type ClarityCloudProviderId = "google-drive";
 
+export type TransferDirection = "coach-device" | "player-submission";
+
+/** Set only for player submissions; forced from the session, never the body. */
+export type PlayerSubmission = {
+  playerId: string;
+  portalPlayerId: string;
+  name: string;
+  message: string;
+};
+
 type ClarityCloudCatalogueStatus =
   | "uploading"
   | "ready_to_import"
@@ -246,6 +256,17 @@ export type VideoTransferSession = {
   resumableSessionCreatedAt: string;
   resumableSessionExpiresAt?: string;
   sourceDeviceId?: string;
+  /**
+   * 'coach-device' is the original flow: the coach's library syncing to their
+   * own Drive and back down to another of their devices. 'player-submission'
+   * is a portal player sending a video in. Same engine, same Drive account --
+   * only the credential that authorised the upload differs.
+   */
+  direction?: TransferDirection;
+  submittedByPortalPlayerId?: string;
+  submittedByName?: string;
+  playerMessage?: string;
+  coachSeenAt?: string;
   readyToImportAt?: string;
   destinationDeviceId?: string;
   destinationDeviceName?: string;
@@ -471,21 +492,57 @@ async function requireAdmin(req: Request) {
   return rows.length > 0;
 }
 
-type PlayerScope = { personId: string; email: string; phone: string };
+type PlayerScope = {
+  personId: string;
+  email: string;
+  phone: string;
+  portalPlayerId: string;
+  name: string;
+};
 
 async function readPlayerScope(req: Request): Promise<PlayerScope | null> {
   const token = parseCookies(req)[playerSessionCookieName] || "";
   if (!token) return null;
   const rows = await supabase("player_sessions", {
-    query: `select=person_id,email,phone&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
+    query: `select=person_id,email,phone,portal_player_id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
   });
   const row = rows[0];
   if (!row) return null;
+  const personId = cleanString(row.person_id, "", 160);
+  // The display name is only used to label the submission for the coach, so a
+  // failed lookup is not worth failing the upload over.
+  let name = "";
+  if (personId) {
+    const people = await supabase("people", {
+      query: `select=name&id=eq.${encodeURIComponent(personId)}&limit=1`,
+    }).catch(() => []);
+    name = cleanString(people[0]?.name, "", 180);
+  }
   return {
-    personId: cleanString(row.person_id, "", 160),
+    personId,
     email: cleanString(row.email, "", 180).toLowerCase(),
     phone: cleanString(row.phone, "", 80),
+    portalPlayerId: cleanString(row.portal_player_id, "", 80),
+    name,
   };
+}
+
+// A player session is the one credential that can write to the coach's Drive
+// without being the coach, so submissions are bounded on both size and rate.
+const playerSubmissionMaxBytes = 750 * 1024 * 1024;
+const playerSubmissionsPerDay = 20;
+
+async function playerSubmissionsToday(accountId: string, portalPlayerId: string) {
+  if (!portalPlayerId) return 0;
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const rows = await supabase(transferSessionTable, {
+    query:
+      `select=transfer_id&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&direction=eq.player-submission` +
+      `&submitted_by_portal_player_id=eq.${encodeURIComponent(portalPlayerId)}` +
+      `&created_at=gt.${encodeURIComponent(since)}`,
+  }).catch(() => []);
+  return Array.isArray(rows) ? rows.length : 0;
 }
 
 function playerVideoBase64(value: string) {
@@ -580,6 +637,10 @@ export function publicTransferSession(session: VideoTransferSession) {
     resumableSessionCreatedAt: session.resumableSessionCreatedAt,
     resumableSessionExpiresAt: session.resumableSessionExpiresAt,
     sourceDeviceId: session.sourceDeviceId,
+    direction: session.direction || "coach-device",
+    submittedByName: session.submittedByName,
+    playerMessage: session.playerMessage,
+    coachSeenAt: session.coachSeenAt,
     readyToImportAt: session.readyToImportAt,
     destinationDeviceId: session.destinationDeviceId,
     destinationDeviceName: session.destinationDeviceName,
@@ -1408,6 +1469,11 @@ function rowToSession(row: any): VideoTransferSession {
     resumableSessionCreatedAt: row.resumable_session_created_at,
     resumableSessionExpiresAt: row.resumable_session_expires_at || undefined,
     sourceDeviceId: row.source_device_id || undefined,
+    direction: row.direction === "player-submission" ? "player-submission" : "coach-device",
+    submittedByPortalPlayerId: row.submitted_by_portal_player_id || undefined,
+    submittedByName: row.submitted_by_name || undefined,
+    playerMessage: row.player_message || undefined,
+    coachSeenAt: row.coach_seen_at || undefined,
     readyToImportAt: row.ready_to_import_at || undefined,
     destinationDeviceId: row.destination_device_id || undefined,
     destinationDeviceName: row.destination_device_name || undefined,
@@ -1449,6 +1515,11 @@ function sessionToRow(session: VideoTransferSession) {
     resumable_session_created_at: session.resumableSessionCreatedAt,
     resumable_session_expires_at: session.resumableSessionExpiresAt || null,
     source_device_id: session.sourceDeviceId || null,
+    direction: session.direction || "coach-device",
+    submitted_by_portal_player_id: session.submittedByPortalPlayerId || null,
+    submitted_by_name: session.submittedByName || null,
+    player_message: session.playerMessage || null,
+    coach_seen_at: session.coachSeenAt || null,
     ready_to_import_at: session.readyToImportAt || null,
     destination_device_id: session.destinationDeviceId || null,
     destination_device_name: session.destinationDeviceName || null,
@@ -1557,7 +1628,8 @@ async function handleSession(
   settings: Record<string, string>,
   provider: ClarityCloudProviderAdapter,
   savedVideoId: string,
-  diagnostics: ProviderDiagnostics = {}
+  diagnostics: ProviderDiagnostics = {},
+  submission: PlayerSubmission | null = null
 ) {
   if (req.method === "GET") {
     const session = await readTransferSession(accountId, savedVideoId);
@@ -1567,6 +1639,17 @@ async function handleSession(
 
   const body = await readJson(req) as any;
   const { savedVideo, video } = validateUploadSessionPayload(body, savedVideoId);
+  // A player's own id comes from their session, never from the body they sent.
+  // Without this, a portal player could file a video under someone else.
+  if (submission) savedVideo.playerId = submission.playerId;
+  const submissionFields = submission
+    ? {
+        direction: "player-submission" as const,
+        submittedByPortalPlayerId: submission.portalPlayerId,
+        submittedByName: submission.name,
+        playerMessage: submission.message || cleanString(body?.message, "", 600),
+      }
+    : { direction: "coach-device" as const };
   const existing = await readTransferSession(accountId, savedVideoId);
   const sourceMatchesExisting = Boolean(
     existing && existing.expectedSizeBytes === video.sizeBytes && existing.checksumSha256 === video.checksumSha256
@@ -1599,7 +1682,25 @@ async function handleSession(
     });
   }
 
-  const folders = await provider.ensureTransferStorage(accountId);
+  const transferFolders = await provider.ensureTransferStorage(accountId);
+  // Player submissions land in their own Drive folder rather than mixed in with
+  // the coach's own device-to-device transfers.
+  const folders = submission
+    ? {
+        ...transferFolders,
+        inbox: await ensureFolder(
+          accessToken,
+          "Player Submissions",
+          {
+            clarityType: "video-transfer-player-submissions",
+            clarityAccountId: accountId,
+            clarityVersion,
+          },
+          transferFolders.transfer.id,
+          { ...diagnostics, step: "drive-player-submissions-folder-provision" }
+        ),
+      }
+    : transferFolders;
   // If we know the saved source changed since the last completed upload, the
   // finalized manifest in Drive is stale — skip the ready shortcut and
   // re-upload the new bytes.
@@ -1623,6 +1724,7 @@ async function handleSession(
         accountId,
         providerId: provider.id,
         catalogueStatus: "ready_to_import",
+        ...submissionFields,
         playerId: savedVideo.playerId,
         lessonId: savedVideo.lessonId,
         analysisId: savedVideo.analysisId,
@@ -1658,6 +1760,7 @@ async function handleSession(
       accountId,
       providerId: provider.id,
       catalogueStatus: "uploading",
+      ...submissionFields,
       playerId: savedVideo.playerId,
       lessonId: savedVideo.lessonId,
       analysisId: savedVideo.analysisId,
@@ -1880,6 +1983,13 @@ async function handleFinalize(
     lastErrorCode: undefined,
     lastErrorMessage: undefined,
   });
+  // A coach-device transfer is the coach's own sync and needs no telling. A
+  // player submission is someone waiting for them to look at it.
+  if (ready.direction === "player-submission") {
+    await notifyCoachOfPlayerSubmission(ready).catch((error) => {
+      console.warn("video_transfer:submission_notify_failed", redactForLogs(error?.message || error));
+    });
+  }
   return json({
     ok: true,
     status: "ready",
@@ -2099,6 +2209,59 @@ async function handleImportReceipt(req: Request, accountId: string, savedVideoId
 // Player-scoped video routes (/api/video-transfer/player/*). A logged-in player
 // may only list and download videos whose transfer session player_id matches
 // their own identity -- never another player's, and never the admin routes.
+/**
+ * Emails the coach that a player has sent them a video, and leaves a row in
+ * notification_history so it shows up alongside every other message the system
+ * sends. Both are best effort -- a failed email must never fail an upload that
+ * has already landed in Drive.
+ */
+async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
+  const apiKey = env("RESEND_API_KEY");
+  const to = env("CLARITY_ALERT_EMAIL") || env("CLARITY_COACH_EMAIL");
+  const playerName = cleanString(session.submittedByName, "A player", 180);
+  const subject = `${playerName} sent you a video`;
+  const message = cleanString(session.playerMessage, "", 600);
+  const lines = [
+    `${playerName} has sent you a swing video through the player portal.`,
+    message ? `\nTheir note: ${message}` : "",
+    "\nOpen Player Profiles in Clarity Golf Booking to watch it.",
+  ].filter(Boolean);
+
+  if (apiKey && to) {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": `player-submission-${session.transferId}`,
+      },
+      body: JSON.stringify({
+        from: env("CLARITY_EMAIL_FROM", "Clarity Golf <onboarding@resend.dev>"),
+        to: [to],
+        subject,
+        text: lines.join("\n"),
+      }),
+    });
+  }
+
+  await supabase("notification_history", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: {
+      id: randomUUID(),
+      person_key: session.playerId,
+      recipient: to || "",
+      subject,
+      kind: "player_video_submission",
+      status: apiKey && to ? "sent" : "skipped",
+      provider: "resend",
+      created_at: new Date().toISOString(),
+    },
+  }).catch(() => {
+    // notification_history is a log, not a dependency of the upload.
+  });
+}
+
 async function handlePlayerVideoRoute(
   req: Request,
   scope: PlayerScope,
@@ -2123,8 +2286,115 @@ async function handlePlayerVideoRoute(
   const savedVideoId = cleanString(sub[0], "", 160);
   if (!savedVideoId) return json({ error: "not_found", message: "Player video route not found." }, 404);
   const owned = await readTransferSession(accountId, savedVideoId);
+
+  // --- Sending a video to the coach -------------------------------------
+  //
+  // Starting an upload is the one player route with no existing session to
+  // check ownership against, so the guard is the other way round: if a session
+  // for this saved video already exists it has to be theirs, and the player id
+  // written to the new one is forced from their session rather than read from
+  // the request.
+  if (req.method === "POST" && sub[1] === "session") {
+    if (owned && !candidates.has(owned.playerId)) {
+      return json({ error: "not_found", message: "Video not found for this player." }, 404);
+    }
+    if (!scope.portalPlayerId) {
+      return json(
+        { error: "forbidden", message: "Ask your coach to set up portal access before sending videos." },
+        403,
+      );
+    }
+
+    const body = await req.clone().json().catch(() => ({})) as any;
+    const sizeBytes = Number(body?.video?.sizeBytes || 0);
+    if (sizeBytes > playerSubmissionMaxBytes) {
+      return errorJson(
+        "DRIVE_UPLOAD_TOO_LARGE",
+        `That video is too large to send. The limit is ${Math.round(playerSubmissionMaxBytes / (1024 * 1024))} MB.`,
+        413,
+      );
+    }
+    // Resuming an interrupted upload must not count again.
+    if (!owned && (await playerSubmissionsToday(accountId, scope.portalPlayerId)) >= playerSubmissionsPerDay) {
+      return errorJson(
+        "CLARITY_CLOUD_PROVIDER_FAILED",
+        "You have sent a lot of videos today. Try again tomorrow, or talk to your coach.",
+        429,
+      );
+    }
+
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    return await handleSession(
+      req,
+      accountId,
+      accessToken,
+      settings,
+      googleDriveProviderAdapter(accessToken, settings, diagnostics),
+      savedVideoId,
+      diagnostics,
+      {
+        playerId: scope.personId || scope.email,
+        portalPlayerId: scope.portalPlayerId,
+        name: scope.name,
+        message: cleanString(body?.message, "", 600),
+      },
+    );
+  }
+
   if (!owned || !candidates.has(owned.playerId)) {
     return json({ error: "not_found", message: "Video not found for this player." }, 404);
+  }
+
+  // Everything below acts on a transfer the player already owns. Mutating one
+  // is restricted to their own submissions: a coach-device transfer that
+  // happens to carry this player's id is the coach's, not theirs.
+  const ownedSubmission = owned.direction === "player-submission";
+  const mutating =
+    req.method === "PUT" ||
+    req.method === "DELETE" ||
+    (req.method === "POST" && sub[1] !== "seen");
+  if (mutating && !ownedSubmission) {
+    return json({ error: "not_found", message: "Video not found for this player." }, 404);
+  }
+
+  if (req.method === "PUT" && (sub[1] === "chunk" || sub[1] === "upload")) {
+    return await handleChunk(req, accountId, savedVideoId, googleDriveProviderAdapter("", settings, diagnostics));
+  }
+  if (req.method === "POST" && sub[1] === "finalize") {
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    return await handleFinalize(
+      req,
+      accountId,
+      accessToken,
+      googleDriveProviderAdapter(accessToken, settings, diagnostics),
+      savedVideoId,
+    );
+  }
+  if (req.method === "POST" && sub[1] === "pause") {
+    return await updateSessionStatus(accountId, savedVideoId, "paused", "Paused");
+  }
+  if (req.method === "POST" && (sub[1] === "resume" || sub[1] === "retry")) {
+    return await updateSessionStatus(accountId, savedVideoId, "uploading");
+  }
+  if (req.method === "DELETE" && (sub[1] === "session" || !sub[1])) {
+    return await updateSessionStatus(
+      accountId,
+      savedVideoId,
+      "cancelled",
+      "Send cancelled. Your copy on this device was not deleted.",
+    );
+  }
+  if (req.method === "GET" && sub[1] === "session") {
+    const accessToken = "";
+    return await handleSession(
+      req,
+      accountId,
+      accessToken,
+      settings,
+      googleDriveProviderAdapter(accessToken, settings, diagnostics),
+      savedVideoId,
+      diagnostics,
+    );
   }
 
   if (req.method === "GET" && sub[1] === "download") {
@@ -2201,6 +2471,15 @@ export default async function handler(req: Request) {
     if (req.method === "GET" && parts[1] === "download") {
       const accessToken = await ensureDriveReady(accountId, diagnostics);
       return await handleImportDownload(req, accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
+    }
+    // Opening a submission clears its unseen dot in Player Profiles.
+    if (req.method === "POST" && parts[1] === "seen") {
+      const session = await readTransferSession(accountId, parts[0]);
+      if (!session) return json({ error: "not_found", message: "Transfer not found." }, 404);
+      const seen = await patchTransferSession(session, {
+        coachSeenAt: session.coachSeenAt || new Date().toISOString(),
+      });
+      return json({ ok: true, session: publicTransferSession(seen) });
     }
     if (req.method === "POST" && parts[1] === "import-receipt") return await handleImportReceipt(req, accountId, parts[0]);
     if (req.method === "GET" && parts[1] === "status") return await handleStatus(accountId, await ensureDriveReady(accountId, diagnostics), settings, parts[0], diagnostics);

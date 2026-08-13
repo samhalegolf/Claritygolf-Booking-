@@ -245,3 +245,96 @@
     transform: rotate(360deg);
   }
 }
+
+/* --- Tabs ---------------------------------------------------------------- */
+
+.player-portal-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 18px 0 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: #f1f0ec;
+}
+
+.player-portal-tabs button {
+  flex: 1;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #57544d;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.player-portal-tabs button.active {
+  background: #ffffff;
+  color: #171717;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* --- Videos -------------------------------------------------------------- */
+
+.player-portal-video {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e4e3dd;
+  border-radius: 12px;
+  background: #ffffff;
+  flex-wrap: wrap;
+}
+
+.player-portal-video-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-portal-video-main strong {
+  font-size: 14px;
+  color: #171717;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-portal-video-main span {
+  font-size: 12px;
+  color: #77746d;
+}
+
+.player-portal-video-status {
+  font-weight: 600;
+}
+
+.player-portal-video-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.player-portal-video-actions .player-portal-primary,
+.player-portal-video-actions .player-portal-ghost {
+  width: auto;
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.player-portal-video-actions .player-portal-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* The video workspace takes the whole screen -- the portal card would crop it. */
+.player-portal-video-host {
+  padding: 0;
+  display: block;
+  min-height: 100vh;
+}

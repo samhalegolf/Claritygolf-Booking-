@@ -725,6 +725,14 @@ type PublicTransferSession = {
   providerFolderLink?: string;
   lastErrorCode?: string;
   lastErrorMessage?: string;
+  /**
+   * 'player-submission' means a portal player sent this in, rather than it
+   * being the coach's own library syncing between their devices.
+   */
+  direction?: VideoTransferDirection;
+  submittedByName?: string;
+  playerMessage?: string;
+  coachSeenAt?: string;
 };
 
 export type ClarityCloudImportTransfer = PublicTransferSession & {
@@ -790,6 +798,26 @@ const applyTransferSessionToCloud = (
   errorMessage: session.lastErrorMessage,
 });
 
+/**
+ * Who is uploading decides which routes authorise the transfer.
+ *
+ * A coach uploading from their own library authorises with the admin session at
+ * /api/video-transfer/*. A portal player sending a video to their coach
+ * authorises with the player session at /api/video-transfer/player/*. Same
+ * transfer engine, same Drive account, different credential -- so the only
+ * thing that varies is the path.
+ */
+export type VideoTransferScope = "coach" | "player";
+
+export type VideoTransferDirection = "coach-device" | "player-submission";
+
+const transferUrl = (scope: VideoTransferScope, ...segments: string[]) =>
+  [
+    "/api/video-transfer",
+    ...(scope === "player" ? ["player"] : []),
+    ...segments.map((segment) => encodeURIComponent(segment)),
+  ].join("/");
+
 const isCloudSetupError = (code: SavedVideoCloudErrorCode) =>
   code === "CLOUD_OAUTH_NOT_CONFIGURED" ||
   code === "PROVIDER_STORAGE_UNAVAILABLE" ||
@@ -803,10 +831,11 @@ const uploadChunkToClarity = async (
   chunk: Blob,
   startByte: number,
   totalSize: number,
-  mimeType: string
+  mimeType: string,
+  scope: VideoTransferScope = "coach"
 ): Promise<PublicTransferSession> => {
   const endByte = startByte + chunk.size - 1;
-  const response = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/chunk`, {
+  const response = await fetch(transferUrl(scope, savedVideoId, "chunk"), {
     method: "PUT",
     headers: {
       "Content-Type": mimeType,
@@ -831,12 +860,13 @@ const uploadChunkWithRetry = async (
   chunk: Blob,
   startByte: number,
   totalSize: number,
-  mimeType: string
+  mimeType: string,
+  scope: VideoTransferScope = "coach"
 ): Promise<PublicTransferSession> => {
   const maxAttempts = 3;
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await uploadChunkToClarity(savedVideoId, session, chunk, startByte, totalSize, mimeType);
+      return await uploadChunkToClarity(savedVideoId, session, chunk, startByte, totalSize, mimeType, scope);
     } catch (error) {
       const retryable = error instanceof SavedVideoCloudError && error.code === "DRIVE_UPLOAD_INTERRUPTED";
       if (!retryable || attempt >= maxAttempts) throw error;
@@ -939,8 +969,11 @@ export const saveSavedVideoToCloud = async (
     deviceId?: string;
     deviceName?: string;
     platform?: string;
+    scope?: VideoTransferScope;
+    message?: string;
   } = {}
 ): Promise<SavedVideoItem> => {
+  const scope: VideoTransferScope = options.scope || "coach";
   const item = await store.getItem(savedVideoId);
   if (!item) {
     throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
@@ -975,8 +1008,12 @@ export const saveSavedVideoToCloud = async (
       deviceName: options.deviceName || currentDevice.deviceName,
       platform: options.platform || currentDevice.platform,
     };
-    const uploadSessionRequest = buildVideoUploadSessionRequest(working, blob, checksumSha256, sourceDevice);
-    const sessionResponse = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/session`, {
+    const uploadSessionRequest = {
+      ...buildVideoUploadSessionRequest(working, blob, checksumSha256, sourceDevice),
+      // Only a player sends one: a short note to the coach alongside the video.
+      ...(options.message ? { message: options.message } : {}),
+    };
+    const sessionResponse = await fetch(transferUrl(scope, savedVideoId, "session"), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(uploadSessionRequest),
@@ -1018,7 +1055,8 @@ export const saveSavedVideoToCloud = async (
         chunk,
         startByte,
         session.expectedSizeBytes,
-        blob.type || working.source.mimeType || "application/octet-stream"
+        blob.type || working.source.mimeType || "application/octet-stream",
+        scope
       );
       working = await patchCloudState(store, working, applyTransferSessionToCloud(working.cloud, session));
       options.onProgress?.(working.cloud?.progress || transferProgress(session.acceptedOffsetBytes, session.expectedSizeBytes));
@@ -1037,7 +1075,7 @@ export const saveSavedVideoToCloud = async (
       progress: 99,
     });
 
-    const finalizeResponse = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/finalize`, {
+    const finalizeResponse = await fetch(transferUrl(scope, savedVideoId, "finalize"), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
@@ -1109,12 +1147,13 @@ export const retrySavedVideoCloudUpload = saveSavedVideoToCloud;
 
 export const pauseSavedVideoCloudUpload = async (
   savedVideoId: string,
-  store: SavedVideoLibraryStore
+  store: SavedVideoLibraryStore,
+  scope: VideoTransferScope = "coach"
 ): Promise<SavedVideoItem> => {
   const item = await store.getItem(savedVideoId);
   if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
   try {
-    const response = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/pause`, {
+    const response = await fetch(transferUrl(scope, savedVideoId, "pause"), {
       method: "POST",
       headers: { Accept: "application/json" },
     });
@@ -1129,12 +1168,13 @@ export const pauseSavedVideoCloudUpload = async (
 
 export const cancelSavedVideoCloudUpload = async (
   savedVideoId: string,
-  store: SavedVideoLibraryStore
+  store: SavedVideoLibraryStore,
+  scope: VideoTransferScope = "coach"
 ): Promise<SavedVideoItem> => {
   const item = await store.getItem(savedVideoId);
   if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
   try {
-    await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/session`, {
+    await fetch(transferUrl(scope, savedVideoId, "session"), {
       method: "DELETE",
       headers: { Accept: "application/json" },
     });
@@ -1153,13 +1193,14 @@ export const cancelSavedVideoCloudUpload = async (
 
 export const removeSavedVideoCloudTransfer = async (
   savedVideoId: string,
-  store: SavedVideoLibraryStore
+  store: SavedVideoLibraryStore,
+  scope: VideoTransferScope = "coach"
 ): Promise<SavedVideoItem> => {
   const item = await store.getItem(savedVideoId);
   if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
   if (item.cloud?.transferId) {
     try {
-      await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/session`, {
+      await fetch(transferUrl(scope, savedVideoId, "session"), {
         method: "DELETE",
         headers: { Accept: "application/json" },
       });
@@ -1168,6 +1209,21 @@ export const removeSavedVideoCloudTransfer = async (
     }
   }
   return patchCloudState(store, item, { status: "not-uploaded" });
+};
+
+/**
+ * Clears the unseen marker on a player submission. Best effort: the coach is
+ * already looking at the video, so a failed call must not block playback.
+ */
+export const markClarityCloudSubmissionSeen = async (savedVideoId: string): Promise<void> => {
+  try {
+    await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/seen`, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+  } catch {
+    // The dot reappearing is a smaller problem than an error dialog.
+  }
 };
 
 export const listClarityCloudImportTransfers = async (): Promise<ClarityCloudImportTransfer[]> => {
