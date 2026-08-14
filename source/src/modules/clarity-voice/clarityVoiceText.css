@@ -83,23 +83,56 @@
   justify-content: flex-end;
 }
 
+/* Ready to save: solid blue, matching the textarea focus accent. This has to
+   read as clearly live next to the disabled state below it. */
 .clarityVoiceSaveButton {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 999px;
-  padding: 9px 13px;
+  padding: 9px 15px;
   font: inherit;
   font-weight: 700;
-  background: #111827;
+  background: #1976d2;
   color: #fff;
   cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18);
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
 
+.clarityVoiceSaveButton:hover:not(:disabled) {
+  background: #1565c0;
+}
+
+.clarityVoiceSaveButton:focus-visible {
+  outline: 2px solid rgba(25, 118, 210, 0.45);
+  outline-offset: 2px;
+}
+
+/* Nothing to save yet: flat and outlined, so it reads as waiting rather than
+   as a dimmed version of the live button. */
 .clarityVoiceSaveButton:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  background: #fff;
+  color: #9aa4b2;
+  border-color: rgba(15, 23, 42, 0.14);
+  box-shadow: none;
+}
+
+.clarityVoiceSaveButton.is-saving:disabled {
+  background: rgba(25, 118, 210, 0.12);
+  color: #1565c0;
+  border-color: rgba(25, 118, 210, 0.3);
+  cursor: progress;
+}
+
+.clarityVoiceSaveButton.is-saved {
+  background: #15803d;
+}
+
+.clarityVoiceSaveButton.is-saved:hover:not(:disabled) {
+  background: #166534;
 }
 
 @media (max-width: 640px) {

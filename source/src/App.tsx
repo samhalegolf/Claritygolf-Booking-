@@ -4688,7 +4688,7 @@ function App({ onSessionLost }: AppProps = {}) {
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
   const [people, setPeople] = useState<Person[]>([]);
   const [lessonNotes, setLessonNotes] = useState<LessonNote[]>([]);
-  const [lessonNoteSaveState, setLessonNoteSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [lessonNoteBusy, setLessonNoteBusy] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [peopleImportText, setPeopleImportText] = useState("");
   const [peopleImportState, setPeopleImportState] = useState<"idle" | "importing" | "imported">("idle");
@@ -16378,14 +16378,16 @@ function App({ onSessionLost }: AppProps = {}) {
     }
   }
 
+  // Returns whether the note actually reached the server. The note panel keeps
+  // the coach's text in the box until this says the save landed.
   async function saveLessonNoteForClient(
     client: Pick<Person, "id" | "name"> | null | undefined,
     text: string,
     source: LessonNoteSource = "typed",
-  ) {
+  ): Promise<boolean> {
     const cleanBody = text.trim();
-    if (!client || !cleanBody) return;
-    setLessonNoteSaveState("saving");
+    if (!client || !cleanBody) return false;
+    setLessonNoteBusy(true);
     try {
       const response = await fetch("/api/notes", {
         method: "POST",
@@ -16408,18 +16410,19 @@ function App({ onSessionLost }: AppProps = {}) {
       if (!response.ok) throw new Error(await readApiFailure(response, "Lesson note save failed"));
       const data = (await response.json()) as NotesResult;
       if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
-      setLessonNoteSaveState("saved");
       setToast({ message: "Lesson note saved." });
-      window.setTimeout(() => setLessonNoteSaveState("idle"), 1400);
+      return true;
     } catch (error) {
-      setLessonNoteSaveState("error");
       setToast({ message: error instanceof Error ? error.message : "Could not save lesson note." });
+      return false;
+    } finally {
+      setLessonNoteBusy(false);
     }
   }
 
   async function deleteLessonNote(noteId: string) {
     if (!noteId) return;
-    setLessonNoteSaveState("saving");
+    setLessonNoteBusy(true);
     try {
       const response = await fetch(`/api/notes?id=${encodeURIComponent(noteId)}`, {
         method: "DELETE",
@@ -16433,12 +16436,11 @@ function App({ onSessionLost }: AppProps = {}) {
       if (!response.ok) throw new Error(await readApiFailure(response, "Lesson note delete failed"));
       const data = (await response.json()) as NotesResult;
       if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
-      setLessonNoteSaveState("saved");
       setToast({ message: "Lesson note deleted." });
-      window.setTimeout(() => setLessonNoteSaveState("idle"), 1400);
     } catch (error) {
-      setLessonNoteSaveState("error");
       setToast({ message: error instanceof Error ? error.message : "Could not delete lesson note." });
+    } finally {
+      setLessonNoteBusy(false);
     }
   }
 
@@ -20639,7 +20641,7 @@ function App({ onSessionLost }: AppProps = {}) {
                                   <ClarityVoiceTextPanel
                                     fieldLabel="Lesson note"
                                     placeholder="Type or dictate the coach lesson note."
-                                    onCommit={(text) => void saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
+                                    onCommit={(text) => saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
                                   />
                                 </Suspense>
                                 <div className="lesson-notes-list">
@@ -20660,7 +20662,7 @@ function App({ onSessionLost }: AppProps = {}) {
                                           type="button"
                                           className="outline-button"
                                           onClick={() => void deleteLessonNote(note.id)}
-                                          disabled={lessonNoteSaveState === "saving"}
+                                          disabled={lessonNoteBusy}
                                         >
                                           <Trash2 size={14} />
                                           Delete

@@ -2909,6 +2909,24 @@ async function readItems() {
   return rows.map(rowToItem);
 }
 
+// Same shape as readItems() but for a single booking. Used by paths that act on
+// one item and have no reason to pull the whole calendar first.
+async function readCalendarItemById(itemId) {
+  const cleanId = cleanString(itemId, "", 140);
+  if (!cleanId) return null;
+  const rows = await db().sql`
+    SELECT ci.*,
+           (s.optix_booking_id IS NOT NULL AND s.optix_booking_id <> ''
+            AND s.sync_status = 'synced') AS bay_booked,
+           s.resource_id AS bay_resource_id
+    FROM calendar_items ci
+    LEFT JOIN optix_booking_sync s ON s.calendar_item_id = ci.id
+    WHERE ci.id = ${cleanId}
+    LIMIT 1
+  `;
+  return rows.length ? rowToItem(rows[0]) : null;
+}
+
 function publicBookingSlotsWeek(value) {
   const rawWeek = Number(value ?? currentWeekOffset());
   return Number.isInteger(rawWeek) ? rawWeek : currentWeekOffset();
@@ -4343,6 +4361,32 @@ async function readCalendarState() {
     brand: brandSettingsFromSettings(settingsMap, account),
     account,
     googleCalendar,
+  };
+}
+
+// Marking one lesson complete needs the target booking plus the settings the
+// permission check reads. It does not need people, notification history or the
+// Google sync status, so this skips those three reads entirely and looks the
+// booking up by id instead of scanning the whole calendar.
+async function readLessonCompleteState(itemId) {
+  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
+  const account = coachAccountFromSettings(settingsMap);
+  const item = await readCalendarItemById(itemId);
+  return {
+    syncKey,
+    updatedAt,
+    items: item ? [item] : [],
+    services: servicesFromSettings(settingsMap),
+    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
+    coaches: coachProfilesFromSettings(settingsMap, account),
+    currentUser: appUsersFromSettings(settingsMap, account)[0],
+    locations: locationsFromSettings(settingsMap, account),
+    availability: availabilityFromSettings(settingsMap),
+    people: [],
+    notifications: [],
+    settings: adminSettingsFromSettings(settingsMap),
+    brand: brandSettingsFromSettings(settingsMap, account),
+    account,
   };
 }
 
@@ -9272,12 +9316,12 @@ export async function handleBookingApiRoute(
 
     if (req.method === "PUT" && pathname === "/api/calendar-state") {
       const body = await parseBody(req);
-      const current = await readCalendarState();
       const action = cleanString(body?.action, "", 120);
       if (action === "complete_lesson") {
         const startAt = Date.now();
-        const requestContext = await resolveBackendRequestContext(req, current);
         const itemId = cleanString(body?.itemId, "", 140);
+        const current = await readLessonCompleteState(itemId);
+        const requestContext = await resolveBackendRequestContext(req, current);
         const timedDetails = {
           action: "lesson_complete",
           itemId,
@@ -9329,6 +9373,7 @@ export async function handleBookingApiRoute(
           );
         }
       }
+      const current = await readCalendarState();
       if (action === "upsert_item") {
         const startAt = Date.now();
         const requestContext = await resolveBackendRequestContext(req, current);

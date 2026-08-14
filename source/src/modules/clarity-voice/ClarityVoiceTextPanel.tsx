@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Mic, Save, Square } from 'lucide-react';
+import { Check, Mic, Save, Square } from 'lucide-react';
 import { buildVocabularyPhrases, DEFAULT_CLARITY_VOICE_VOCABULARY } from './clarityVoiceVocabulary';
 import { useClarityVoice } from './useClarityVoice';
 import './clarityVoiceText.css';
+
+type SaveState = 'idle' | 'saving' | 'saved';
 
 export interface ClarityVoiceTextPanelProps {
   initialValue?: string;
   fieldLabel?: string;
   placeholder?: string;
-  onCommit?: (text: string) => void;
+  /**
+   * Return false (or throw) to tell the panel the save failed. The typed note is
+   * kept in the box so nothing the coach dictated is lost.
+   */
+  onCommit?: (text: string) => void | boolean | Promise<void | boolean>;
 }
 
 export function ClarityVoiceTextPanel({
@@ -18,6 +24,7 @@ export function ClarityVoiceTextPanel({
   onCommit
 }: ClarityVoiceTextPanelProps) {
   const [noteText, setNoteText] = useState(initialValue);
+  const [saveState, setSaveState] = useState<SaveState>('idle');
   const lastAppliedTranscriptRef = useRef('');
 
   const voice = useClarityVoice({
@@ -52,7 +59,15 @@ export function ClarityVoiceTextPanel({
     });
   }, [cleanedTranscript]);
 
-  const saveDisabled = useMemo(() => !noteText.trim(), [noteText]);
+  useEffect(() => {
+    if (saveState !== 'saved') return;
+    const timer = window.setTimeout(() => setSaveState('idle'), 1600);
+    return () => window.clearTimeout(timer);
+  }, [saveState]);
+
+  const hasText = useMemo(() => noteText.trim().length > 0, [noteText]);
+  const isSaving = saveState === 'saving';
+  const saveDisabled = !hasText || isSaving;
 
   function toggleDictation() {
     if (isListening) {
@@ -67,14 +82,28 @@ export function ClarityVoiceTextPanel({
     lastAppliedTranscriptRef.current = '';
   }
 
-  function commitText() {
+  async function commitText() {
     const text = noteText.trim();
-    if (!text) return;
-    onCommit?.(text);
+    if (!text || isSaving) return;
+    setSaveState('saving');
+    let saved = true;
+    try {
+      saved = (await onCommit?.(text)) !== false;
+    } catch {
+      saved = false;
+    }
+    if (!saved) {
+      setSaveState('idle');
+      return;
+    }
     setNoteText('');
     lastAppliedTranscriptRef.current = '';
     voice.reset();
+    setSaveState('saved');
   }
+
+  const saveLabel = isSaving ? 'Saving…' : saveState === 'saved' ? 'Saved' : 'Save note';
+  const saveHint = hasText ? saveLabel : 'Type or dictate a note first';
 
   return (
     <section className="clarityVoicePanel" aria-label="Lesson note dictation">
@@ -103,9 +132,16 @@ export function ClarityVoiceTextPanel({
         <p className="clarityVoiceInterim">{voice.transcript.interimText}</p>
       )}
       <div className="clarityVoiceSaveRow">
-        <button type="button" className="clarityVoiceSaveButton" onClick={commitText} disabled={saveDisabled}>
-          <Save size={15} />
-          Save note
+        <button
+          type="button"
+          className={`clarityVoiceSaveButton${isSaving ? ' is-saving' : ''}${saveState === 'saved' ? ' is-saved' : ''}`}
+          onClick={() => void commitText()}
+          disabled={saveDisabled}
+          title={saveHint}
+          aria-live="polite"
+        >
+          {saveState === 'saved' ? <Check size={15} /> : <Save size={15} />}
+          {saveLabel}
         </button>
       </div>
     </section>
