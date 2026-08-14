@@ -175,9 +175,9 @@ export function useDrawing({
     (cursor: DrawingPoint) => {
       const { width, height } = videoDimensions;
       if (!width || !height) return;
-      if (!draftObject) return;
       if (!editMode) return;
       if (editMode === "create") {
+        if (!draftObject) return;
         setDraftObject(DrawingEngine.updateDraftObject(draftObject, cursor, videoDimensions));
         return;
       }
@@ -212,51 +212,37 @@ export function useDrawing({
   const pointerUp = useCallback(
     (cursor: DrawingPoint) => {
       if (!videoDimensions.width || !videoDimensions.height) return;
-      if (!draftObject) {
-        setEditMode(null);
-        setInteraction(null);
-        return;
-      }
       if (editMode === "create") {
-        if (DrawingEngine.canFinishDraft(draftObject)) {
+        if (draftObject && DrawingEngine.canFinishDraft(draftObject)) {
           commit([...objects, draftObject]);
-          setDraftObject(null);
-        } else {
-          setDraftObject(null);
-          setEditMode(null);
-        }
-        return;
-      }
-      if (editMode === "edit" && selectedObjectId) {
-        if (!interaction?.hasMoved) {
-          setDraftObject(null);
-          setInteraction(null);
-          setEditMode(null);
+          // Drop back to select and keep the new shape selected, so it can be
+          // dragged straight away instead of the next press drawing another one.
+          setSelectedObjectId(draftObject.id);
+          setSelectedTool("select");
           return;
         }
-        let nextObjects = objects;
-        if (draftObject.id === selectedObjectId) {
-          nextObjects = objects.map((entry) =>
-            entry.id === selectedObjectId ? draftObject : entry
-          );
-        }
-        commit(nextObjects);
+        setDraftObject(null);
+        setInteraction(null);
+        setEditMode(null);
         return;
       }
-      if (selectedObjectId) {
+      // A press that never passed the drag threshold is a selection, not an edit.
+      if (editMode === "edit" && selectedObjectId && interaction?.hasMoved) {
         const base = objects.find((entry) => entry.id === selectedObjectId);
-        if (base && interaction) {
-          const moved = DrawingEngine.transformObject(
-            base,
-            interaction.handle,
-            cursor,
-            { x: interaction.startX, y: interaction.startY },
-            videoDimensions
-          );
-          const nextObjects = objects.map((entry) =>
-            entry.id === selectedObjectId ? moved : entry
-          );
-          commit(nextObjects);
+        const moved =
+          draftObject && draftObject.id === selectedObjectId
+            ? draftObject
+            : base
+              ? DrawingEngine.transformObject(
+                  base,
+                  interaction.handle,
+                  cursor,
+                  { x: interaction.startX, y: interaction.startY },
+                  videoDimensions
+                )
+              : null;
+        if (moved) {
+          commit(objects.map((entry) => (entry.id === selectedObjectId ? moved : entry)));
           return;
         }
       }

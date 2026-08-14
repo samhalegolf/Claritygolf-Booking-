@@ -174,10 +174,12 @@ export function VideoCanvas({
     };
   }, [measure, onDimensionsChange]);
 
-  const allObjects = [...objects];
-  if (draftObject) {
-    allObjects.push(draftObject);
-  }
+  // While an existing object is dragged, draftObject is the edited copy and
+  // carries the same id. Render only the copy, otherwise the original draws
+  // underneath it and React sees two nodes sharing a key.
+  const allObjects = draftObject
+    ? [...objects.filter((entry) => entry.id !== draftObject.id), draftObject]
+    : objects;
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
