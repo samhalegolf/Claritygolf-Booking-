@@ -1958,6 +1958,51 @@ button {
   margin: -22px -22px 22px;
 }
 
+/* Booking entered from the Player Terminal. The strip keeps the way back to
+   the portal in view and says whose booking this is, so the player never has
+   to wonder whether the widget knows them.
+   It only ever renders inside the booking widget, where .embed-mode has
+   already zeroed the page padding -- hence no negative margins here. */
+.booking-player-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #e8e6df;
+  background: #f6f6f2;
+}
+
+.booking-player-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #deded8;
+  border-radius: 999px;
+  background: #fff;
+  color: #171717;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.booking-player-back:hover {
+  background: #f1f0ec;
+}
+
+.booking-player-identity {
+  color: #57544d;
+  font-size: 13px;
+}
+
+.booking-player-identity strong {
+  color: #171717;
+}
+
 .booking-brand strong {
   font-size: 32px;
   letter-spacing: 0;
@@ -5984,6 +6029,31 @@ button {
 .app-shell .public-booking .booking-brand.booking-brand-subtle em,
 .app-shell .public-booking.booking-theme-light .booking-brand.booking-brand-subtle em {
   color: var(--booking-muted);
+}
+
+/* The Player Terminal strip follows whichever booking theme is set, so it
+   reads as part of the widget rather than bolted above it. */
+.app-shell .public-booking .booking-player-bar {
+  border-bottom-color: var(--booking-border);
+  background: color-mix(in srgb, var(--booking-text) 5%, transparent);
+}
+
+.app-shell .public-booking .booking-player-back {
+  border-color: var(--booking-border);
+  background: color-mix(in srgb, var(--booking-text) 7%, transparent);
+  color: var(--booking-text);
+}
+
+.app-shell .public-booking .booking-player-back:hover {
+  background: color-mix(in srgb, var(--booking-text) 13%, transparent);
+}
+
+.app-shell .public-booking .booking-player-identity {
+  color: var(--booking-muted);
+}
+
+.app-shell .public-booking .booking-player-identity strong {
+  color: var(--booking-text);
 }
 
 @media (max-width: 1120px) {

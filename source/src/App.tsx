@@ -73,7 +73,9 @@ import {
   BOOKING_EMBED_VALUE,
   BOOKING_LOGIN_STORAGE_KEY,
   PUBLIC_BOOKING_HOST,
+  closePlayerBooking,
   isBookingEmbedMode,
+  type BookingEntryMode,
 } from "./modules/shared/bookingHandoff";
 import type {
   VideoWorkspaceNavigationContext,
@@ -2112,7 +2114,7 @@ function getInitialView(): View {
   if (requestedView === "notes") return "players";
   if (requestedView === "players") return "players";
   if (requestedView === "video") return "video";
-  return isPublicBookingMode() ? "booking" : "calendar";
+  return isBookingWidgetMode() ? "booking" : "calendar";
 }
 
 function getInitialRescheduleLogin(): SavedRescheduleLogin | null {
@@ -2208,10 +2210,14 @@ function isBookingLogoHiddenByUrl() {
   return new URLSearchParams(window.location.search).get(BOOKING_LOGO_PARAM) === "0";
 }
 
-// Kept as a local alias so the many call sites below read the same as before.
+// True for either way into the booking widget -- the public one and the
+// Player Terminal one. Everything that makes this page the booking widget
+// rather than the coach workspace keys off this; only the handful of places
+// that care *who* is booking look at the entry mode.
+//
 // The definition is shared with the entry point, which has to make the same
 // call before it knows who is signed in.
-const isPublicBookingMode = isBookingEmbedMode;
+const isBookingWidgetMode = isBookingEmbedMode;
 
 function normalizeBookingPath(pathname = "") {
   const cleaned = pathname.trim().toLowerCase();
@@ -4612,10 +4618,18 @@ type AppProps = {
    * replaced by the login screen.
    */
   onSessionLost?: () => void;
+  /**
+   * How this booking page load was entered. "player" means the visitor arrived
+   * from their signed-in Player Terminal, so the widget already knows who is
+   * booking. The entry point resolves this from the server session -- never
+   * from the URL alone.
+   */
+  bookingEntry?: BookingEntryMode;
 };
 
-function App({ onSessionLost }: AppProps = {}) {
-  const isEmbedMode = isPublicBookingMode();
+function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
+  const isEmbedMode = isBookingWidgetMode();
+  const isPlayerBooking = isEmbedMode && bookingEntry === "player";
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
   // Contact matching and phone formatting resolve bare national numbers against
@@ -5046,8 +5060,17 @@ function App({ onSessionLost }: AppProps = {}) {
   const [bookingStart, setBookingStart] = useState<number | null>(null);
   const [openPublicBookingSection, setOpenPublicBookingSection] = useState<PublicBookingSection>("appointment");
   const [bookingForm, setBookingForm] = useState<BookingForm>(
-    () => getInitialBookingLogin() ?? { firstName: "", lastName: "", phone: "", email: "" },
+    // A player's details come from their session, not from whatever this
+    // browser happens to have cached. The effect below fills them in.
+    () =>
+      (isPlayerBooking ? null : getInitialBookingLogin()) ?? {
+        firstName: "",
+        lastName: "",
+        phone: "",
+        email: "",
+      },
   );
+  const [playerBookingIdentity, setPlayerBookingIdentity] = useState<{ name: string; email: string } | null>(null);
   const [customGroupAttendees, setCustomGroupAttendees] = useState<CustomGroupAttendee[]>([]);
   const [customGroupAttendeeDraft, setCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
   const [selectedCustomGroupAttendeeDraft, setSelectedCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
@@ -6252,7 +6275,10 @@ function App({ onSessionLost }: AppProps = {}) {
   }, [bookingMode, rescheduleForm.email, rescheduleForm.phone, selectedRescheduleId]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || !isEmbedMode) return;
+    // Player booking has no use for the cached copy: the session is the
+    // identity, and there is no reason to leave the player's details sitting in
+    // this browser once they can be asked for properly.
+    if (typeof window === "undefined" || !isEmbedMode || isPlayerBooking) return;
     const hasBookingDetails = Boolean(bookingForm.firstName.trim() && bookingForm.lastName.trim() && bookingForm.email.trim());
     if (!hasBookingDetails) return;
     window.localStorage.setItem(
@@ -6264,7 +6290,54 @@ function App({ onSessionLost }: AppProps = {}) {
         email: bookingForm.email.trim(),
       }),
     );
-  }, [bookingForm.email, bookingForm.firstName, bookingForm.lastName, bookingForm.phone, isEmbedMode]);
+  }, [bookingForm.email, bookingForm.firstName, bookingForm.lastName, bookingForm.phone, isEmbedMode, isPlayerBooking]);
+
+  // Who is booking, answered by the server rather than by the browser. This is
+  // what replaces the old handoff: the player crosses from the portal into
+  // booking without re-entering anything and without anything personal
+  // travelling in the URL.
+  useEffect(() => {
+    if (!isPlayerBooking) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/player/profile", {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const data = (await response.json().catch(() => null)) as {
+          player?: { name?: string; email?: string; phone?: string };
+        } | null;
+        const player = data?.player;
+        if (cancelled || !player?.email) return;
+        const nameParts = safeText(player.name).trim().split(/\s+/).filter(Boolean);
+        setPlayerBookingIdentity({
+          name: safeText(player.name).trim(),
+          email: safeText(player.email).trim(),
+        });
+        setBookingForm((current) => ({
+          firstName: nameParts[0] || current.firstName,
+          lastName: nameParts.slice(1).join(" ") || current.lastName,
+          phone: safeText(player.phone).trim() || current.phone,
+          email: safeText(player.email).trim() || current.email,
+        }));
+        // The reschedule lookup is the other place that used to ask a player to
+        // prove who they are. It gets the same answer.
+        setRescheduleForm((current) => ({
+          email: safeText(player.email).trim() || current.email,
+          phone: safeText(player.phone).trim() || current.phone,
+        }));
+      } catch {
+        // Offline or the function is down. The form is still there to fill in
+        // by hand, which beats blocking the booking.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPlayerBooking]);
 
   useEffect(() => {
     if (!isEmbedMode || !bookingConfirmation?.appointmentId) return;
@@ -23816,6 +23889,23 @@ function App({ onSessionLost }: AppProps = {}) {
 
         {isEmbedMode && activeView === "booking" && (
           <section className={`public-booking booking-theme-${brandSettings.bookingTheme} module-page`}>
+            {isPlayerBooking && (
+              <div className="booking-player-bar">
+                <button
+                  className="booking-player-back"
+                  onClick={() => closePlayerBooking()}
+                  type="button"
+                >
+                  <ArrowLeft size={15} />
+                  <span>Player Portal</span>
+                </button>
+                {playerBookingIdentity && (
+                  <span className="booking-player-identity">
+                    Booking as <strong>{playerBookingIdentity.name || playerBookingIdentity.email}</strong>
+                  </span>
+                )}
+              </div>
+            )}
             <div className={`booking-brand ${showBookingBrandLogo ? "" : "booking-brand-subtle"}`}>
               {showBookingBrandLogo && brandSettings.logoPreview ? (
                 <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
@@ -23839,13 +23929,15 @@ function App({ onSessionLost }: AppProps = {}) {
                 <CalendarDays size={16} />
                 <span>Book a lesson</span>
               </button>
+              {/* A signed-in player is not asked to sign in again: the same
+                  button goes straight to their existing bookings. */}
               <button
                 className={`booking-login-trigger ${bookingMode === "reschedule" ? "active" : ""}`}
-                onClick={() => changeBookingMode("reschedule", true)}
+                onClick={() => changeBookingMode("reschedule", !isPlayerBooking)}
                 type="button"
               >
                 <KeyRound size={14} />
-                <span>Sign in</span>
+                <span>{isPlayerBooking ? "My bookings" : "Sign in"}</span>
               </button>
             </div>
 

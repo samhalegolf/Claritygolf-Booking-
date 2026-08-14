@@ -10,6 +10,16 @@
 export const BOOKING_EMBED_PARAM = "embed";
 export const BOOKING_EMBED_VALUE = "booking";
 
+/**
+ * Marks a booking page load as entered from the signed-in Player Terminal.
+ *
+ * The parameter is a request, not a grant. The entry point still asks the
+ * server who is signed in, and anyone who is not a player gets the ordinary
+ * public widget -- so a shared or edited URL can never turn into an identity.
+ */
+export const PLAYER_BOOKING_PARAM = "portal";
+export const PLAYER_BOOKING_VALUE = "player";
+
 /** The public booking host serves the embed with no parameter at all. */
 export const PUBLIC_BOOKING_HOST = "book.claritygolf.app";
 
@@ -42,6 +52,27 @@ export function isBookingEmbedMode(): boolean {
   );
 }
 
+/** Which of the two ways into the booking widget this page load is. */
+export type BookingEntryMode = "public" | "player";
+
+/**
+ * True when the booking widget was opened from the Player Terminal. Same
+ * widget, same booking flow -- it just already knows who is booking, so the
+ * player is never asked to identify themselves a second time.
+ */
+export function isPlayerBookingMode(): boolean {
+  if (!isBookingEmbedMode()) return false;
+  return (
+    new URLSearchParams(window.location.search).get(PLAYER_BOOKING_PARAM) ===
+    PLAYER_BOOKING_VALUE
+  );
+}
+
+/** True for the ordinary public widget: no session needed, none assumed. */
+export function isPublicBookingEmbedMode(): boolean {
+  return isBookingEmbedMode() && !isPlayerBookingMode();
+}
+
 /** Turns a stored (week, day, start-minute) triple into a local Date. */
 export function slotDate(week: number, day: number, startMinutes: number): Date {
   const date = new Date(BASE_WEEK_START);
@@ -66,10 +97,33 @@ export function storeBookingHandoff(details: BookingHandoffDetails) {
   }
 }
 
-/** Sends the browser to the booking embed on this origin. */
+/** Sends the browser to the public booking embed on this origin. */
 export function openBookingEmbed() {
   const url = new URL(window.location.href);
-  url.searchParams.delete("portal");
+  // Public booking must never inherit a player entry from the current URL.
+  url.searchParams.delete(PLAYER_BOOKING_PARAM);
   url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
+  window.location.href = url.toString();
+}
+
+/**
+ * Sends the browser to booking as the signed-in player.
+ *
+ * Nothing personal travels in the URL: the booking page asks the server who
+ * this session belongs to. The old localStorage handoff stays available for
+ * public prefill, but it is no longer how the portal identifies a player.
+ */
+export function openPlayerBooking() {
+  const url = new URL(window.location.href);
+  url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
+  url.searchParams.set(PLAYER_BOOKING_PARAM, PLAYER_BOOKING_VALUE);
+  window.location.href = url.toString();
+}
+
+/** Returns from player booking to the Player Terminal on this origin. */
+export function closePlayerBooking() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(BOOKING_EMBED_PARAM);
+  url.searchParams.delete(PLAYER_BOOKING_PARAM);
   window.location.href = url.toString();
 }

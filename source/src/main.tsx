@@ -2,7 +2,7 @@ import { StrictMode, Suspense, lazy, useCallback, useEffect, useState } from "re
 import { createRoot } from "react-dom/client";
 import LoginScreen from "./modules/auth/LoginScreen";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
-import { isBookingEmbedMode } from "./modules/shared/bookingHandoff";
+import { isBookingEmbedMode, isPlayerBookingMode } from "./modules/shared/bookingHandoff";
 import { installOptixBookingFeedback } from "./optix-booking-feedback";
 import { installOptixBookingMutationSync } from "./optix-booking-mutation-sync";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
@@ -15,9 +15,14 @@ const App = lazy(() => import("./App"));
 const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
 
 // The booking embed is public by design -- it is the widget clients book
-// through, and a signed-in player handing off to book must reach it too. It
-// wins over everything below, including any session.
+// through. It wins over everything below, including any session.
+//
+// Player booking is the same widget entered from the Player Terminal. It is
+// the one booking entry that waits for the session, because the whole point is
+// that the player is already signed in and is not asked again.
 const bookingEmbed = isBookingEmbedMode();
+const playerBooking = isPlayerBookingMode();
+const publicBookingOnly = bookingEmbed && !playerBooking;
 
 let adminHooksInstalled = false;
 
@@ -44,7 +49,7 @@ function Root() {
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    if (bookingEmbed) return;
+    if (publicBookingOnly) return;
     let cancelled = false;
     void fetchSession().then((next) => {
       if (!cancelled) setSession(next);
@@ -59,6 +64,7 @@ function Root() {
   // cannot live inside App -- but a player must never get them.
   useEffect(() => {
     if (bookingEmbed || session?.role !== "coach" || adminHooksInstalled) return;
+    // (bookingEmbed covers player booking too: the widget never wants them.)
     adminHooksInstalled = true;
     // This compatibility hook remains installed but is intentionally a no-op.
     // Clarity-origin resource bookings are created only by the admin card's
@@ -73,7 +79,7 @@ function Root() {
   // leaving a workspace on screen that can no longer save anything.
   const handleSessionLost = useCallback(() => setSession(guestSession), []);
 
-  if (bookingEmbed) {
+  if (publicBookingOnly) {
     return (
       <Suspense fallback={<Splash label="Loading booking…" />}>
         <App />
@@ -82,6 +88,17 @@ function Root() {
   }
 
   if (!session) return <Splash label="Checking session…" />;
+
+  // Player booking. The parameter asked for it; the session decides. Anyone who
+  // is not a signed-in player -- a shared link, an expired cookie -- falls
+  // through to the ordinary public widget rather than a login wall.
+  if (bookingEmbed) {
+    return (
+      <Suspense fallback={<Splash label="Loading booking…" />}>
+        <App bookingEntry={session.role === "player" ? "player" : "public"} />
+      </Suspense>
+    );
+  }
 
   if (session.role === "coach") {
     return (

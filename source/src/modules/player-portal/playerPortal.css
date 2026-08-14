@@ -42,13 +42,6 @@
   color: #77746d;
 }
 
-.player-portal-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .player-portal-card h1 {
   margin: 0;
   font-size: 26px;
@@ -246,35 +239,6 @@
   }
 }
 
-/* --- Tabs ---------------------------------------------------------------- */
-
-.player-portal-tabs {
-  display: flex;
-  gap: 4px;
-  margin: 18px 0 4px;
-  padding: 4px;
-  border-radius: 12px;
-  background: #f1f0ec;
-}
-
-.player-portal-tabs button {
-  flex: 1;
-  padding: 9px 10px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: #57544d;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.player-portal-tabs button.active {
-  background: #ffffff;
-  color: #171717;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-}
-
 /* --- Videos -------------------------------------------------------------- */
 
 .player-portal-video {
@@ -337,4 +301,222 @@
   padding: 0;
   display: block;
   min-height: 100vh;
+}
+
+/* --- Player Terminal shell ----------------------------------------------- */
+
+/* The terminal owns the viewport now; the screens inside it just fill what is
+   left below the nav. Without this the old 100vh minimums would each demand a
+   full screen of their own and push the page into a scroll it does not need. */
+.player-terminal {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #eef0ea;
+}
+
+.player-terminal * {
+  box-sizing: border-box;
+}
+
+.player-terminal .player-portal,
+.player-terminal .player-portal-video-host {
+  flex: 1;
+  min-height: 0;
+}
+
+.player-terminal .player-portal {
+  padding-top: 28px;
+}
+
+/* Sticky rather than fixed: it stays reachable while a long list scrolls, and
+   a phone in landscape gets its height back as soon as the page moves. */
+.player-terminal-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid #deded8;
+  background: #fff;
+}
+
+.player-terminal-nav-inner {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+}
+
+.player-terminal-nav-lead {
+  flex-shrink: 0;
+}
+
+.player-terminal-nav-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #deded8;
+  border-radius: 999px;
+  background: #fff;
+  color: #171717;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.player-terminal-nav-back:hover {
+  background: #f1f0ec;
+}
+
+.player-terminal-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.player-terminal-nav-links::-webkit-scrollbar {
+  display: none;
+}
+
+.player-terminal-nav-links button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #57544d;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.player-terminal-nav-links button:hover {
+  background: #f4f3ef;
+  color: #171717;
+}
+
+.player-terminal-nav-links button.active {
+  background: #f1f0ec;
+  color: #171717;
+}
+
+.player-terminal-nav-external {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.player-terminal-nav-menu {
+  flex-shrink: 0;
+}
+
+@media (max-width: 700px) {
+  /* Two rows rather than one scrolling row. Sharing a phone's width between
+     five destinations and a sign-out button pushes the last destination off
+     the end, where nothing tells you it exists -- so the links take a line of
+     their own and all five stay visible. */
+  .player-terminal-nav-inner {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .player-terminal-nav-lead {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .player-terminal-nav-links {
+    order: 3;
+    flex: 0 0 100%;
+    justify-content: space-between;
+    gap: 0;
+  }
+
+  .player-terminal-nav-links button {
+    padding: 0 8px;
+    font-size: 13px;
+  }
+
+  .player-terminal .player-portal {
+    padding: 20px 12px;
+  }
+}
+
+/* --- Lessons landing ------------------------------------------------------ */
+
+.player-portal-next {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 16px;
+  border: 1px solid #d8d7cf;
+  border-radius: 12px;
+  background: #fbfbf8;
+}
+
+.player-portal-next strong {
+  font-size: 18px;
+}
+
+.player-portal-next span {
+  font-size: 14px;
+  color: #33312c;
+}
+
+.player-portal-next em {
+  font-size: 13px;
+  font-style: normal;
+  color: #77746d;
+}
+
+.player-portal-past {
+  border: 1px solid #ecebe5;
+  border-radius: 10px;
+  background: #fbfbf8;
+  padding: 10px 14px;
+}
+
+.player-portal-past summary {
+  font-size: 13px;
+  font-weight: 700;
+  color: #57544d;
+  cursor: pointer;
+}
+
+.player-portal-past .player-portal-list {
+  margin-top: 10px;
+}
+
+/* --- Clarity Caddy -------------------------------------------------------- */
+
+.player-portal-caddy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid #ecebe5;
+  border-radius: 10px;
+  background: #fbfbf8;
+}
+
+.player-portal-caddy-access {
+  font-size: 14px;
+  font-weight: 600;
+  color: #33312c;
 }

@@ -9300,6 +9300,21 @@ export async function handleBookingApiRoute(
       return json(await readPlayerProfile(session));
     }
 
+    // The player's own view of Clarity Caddy. Deliberately not the coach deep
+    // link: that one names a player for a coach to open, and hands a coach's
+    // view to whoever holds it. A player opens Caddy as themselves, so all this
+    // returns is where Caddy lives plus their own access state.
+    if (req.method === "GET" && pathname === "/api/player/caddy") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      // Never throws -- an unreachable or unconfigured Caddy still has to leave
+      // the portal with a working link.
+      const status = await readCaddyPlayerStatus(session.authUserId, session.email);
+      return json({ ok: true, appUrl: caddyAppUrl(), status });
+    }
+
     if (pathname.startsWith("/api/")) {
       if (!(await requireAdmin(req)))
         return json(
