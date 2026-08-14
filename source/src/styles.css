@@ -6554,6 +6554,29 @@ button {
   justify-self: start;
 }
 
+.booking-profile-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.booking-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The note panel is shared with the player profile, where it sits on the same
+   panel background. Keep it flush inside the tab body. */
+.booking-profile-tab .clarityVoicePanel {
+  max-width: 100%;
+}
+
+.booking-profile-tab .clarityVoiceTextOutput textarea {
+  min-height: 96px;
+}
+
 .booking-email-records {
   display: grid;
   gap: 6px;

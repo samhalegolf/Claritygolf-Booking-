@@ -25,6 +25,7 @@ export interface VideoAnalysisPageProps {
   onSaveAndSend?: (result: VideoWorkspaceSaveResult) => Promise<void>;
   onOpenCloudSettings?: () => void;
   onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
+  autoStartLiveRecording?: boolean;
 }
 
 export function VideoAnalysisPage(props: VideoAnalysisPageProps) {

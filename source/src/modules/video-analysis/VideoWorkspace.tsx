@@ -133,6 +133,8 @@ interface VideoWorkspaceProps {
   onOpenCloudSettings?: () => void;
   /** Return false to tell the note panel the save failed and keep the text. */
   onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
+  /** Open the camera recorder as soon as the workspace mounts. */
+  autoStartLiveRecording?: boolean;
 }
 
 const cloudSettingsActionCodes = new Set([
@@ -370,6 +372,7 @@ export function VideoWorkspace({
   onSaveAndSend,
   onOpenCloudSettings,
   onSaveNote,
+  autoStartLiveRecording,
 }: VideoWorkspaceProps) {
   const leftVideoRef = useRef<HTMLVideoElement>(null);
   const rightVideoRef = useRef<HTMLVideoElement>(null);
@@ -1180,6 +1183,16 @@ export function VideoWorkspace({
     setLiveStream(null);
     setLiveRecording(null);
   }, [liveStream, stopLiveStream]);
+
+  // Entering straight from the Profile tab's record button. The ref keeps this
+  // to a single shot, so closing the recorder does not immediately reopen it.
+  const autoRecordStartedRef = useRef(false);
+  useEffect(() => {
+    if (!autoStartLiveRecording || autoRecordStartedRef.current) return;
+    if (workspaceHasVideo) return;
+    autoRecordStartedRef.current = true;
+    void openLiveRecording("left");
+  }, [autoStartLiveRecording, openLiveRecording, workspaceHasVideo]);
 
   const startLiveRecording = useCallback(() => {
     if (!liveRecording || !liveStream) {

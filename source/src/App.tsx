@@ -4715,7 +4715,12 @@ function App({ onSessionLost }: AppProps = {}) {
   const [clientMoveSavingId, setClientMoveSavingId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(getInitialView);
-  const [videoContext, setVideoContext] = useState<{ playerId: string; playerName: string; savedVideoId?: string } | null>(null);
+  const [videoContext, setVideoContext] = useState<{
+    playerId: string;
+    playerName: string;
+    savedVideoId?: string;
+    startRecording?: boolean;
+  } | null>(null);
   const [playerProfilesLocal, setPlayerProfilesLocal] = useState<PlayerProfilesLocalState>(() => ({
     manualIds: [],
     notesStamps: {},
@@ -10483,9 +10488,89 @@ function App({ onSessionLost }: AppProps = {}) {
     if (view !== "calendar") closeCalendarDetails();
   }
 
-  function openVideoAnalysisForClient(client: { id: string; name: string; savedVideoId?: string }) {
-    setVideoContext({ playerId: client.id, playerName: client.name, savedVideoId: client.savedVideoId });
+  function openVideoAnalysisForClient(client: {
+    id: string;
+    name: string;
+    savedVideoId?: string;
+    startRecording?: boolean;
+  }) {
+    setVideoContext({
+      playerId: client.id,
+      playerName: client.name,
+      savedVideoId: client.savedVideoId,
+      startRecording: client.startRecording,
+    });
     setActiveView("video");
+    closeClientModal();
+    setQuickCreate(null);
+    closeCalendarDetails();
+  }
+
+  // Straight from a booking into a fresh camera recording for that player.
+  function startVideoRecordingForClient(client: Pick<Person, "id" | "name" | "email" | "phone">) {
+    openVideoAnalysisForClient({
+      id: preferredVideoPlayerId(client, videoPlayerIds),
+      name: client.name,
+      startRecording: true,
+    });
+  }
+
+  // A booking that was never linked to a client still needs somewhere to hang a
+  // note or a video. Create the client from the booking's own details and the
+  // existing rule (note or video = player profile) promotes them from there.
+  async function ensureClientForSelectedBooking(): Promise<Person | null> {
+    if (selectedPerson) return selectedPerson;
+    if (!selected || selected.kind !== "appointment") return null;
+    const name = safeText(selected.client || selected.title).trim();
+    const email = safeText(selected.email).trim();
+    const phone = safeText(selected.phone).trim();
+    if (!name && !email) {
+      setToast({ message: "This booking needs a name or email before a note can be saved." });
+      return null;
+    }
+    try {
+      const response = await fetch("/api/people", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          person: { name, email, phone, notes: "", caddyProfileUrl: "" },
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) {
+        throw new Error(await readApiFailure(response, "Could not add this booking to clients."));
+      }
+      const result = (await response.json()) as PeopleUpdateResult;
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
+      if (!result.person?.id) return null;
+      setToast({ message: `${result.person.name || "Client"} added to clients.` });
+      return result.person;
+    } catch (error) {
+      setToast({
+        message: error instanceof Error ? error.message : "Could not add this booking to clients.",
+      });
+      return null;
+    }
+  }
+
+  async function saveSelectedBookingNote(text: string) {
+    const client = await ensureClientForSelectedBooking();
+    if (!client) return false;
+    return saveLessonNoteForClient(client, text, "voice");
+  }
+
+  async function startSelectedBookingRecording() {
+    const client = await ensureClientForSelectedBooking();
+    if (!client) return;
+    startVideoRecordingForClient(client);
+  }
+
+  function openPlayerProfileVideos(client: Pick<Person, "id" | "name">) {
+    selectPlayerProfileTool(client, "videos");
+    setActiveView("players");
     closeClientModal();
     setQuickCreate(null);
     closeCalendarDetails();
@@ -18784,6 +18869,55 @@ function App({ onSessionLost }: AppProps = {}) {
       )}
 
       {selected.kind === "appointment" && (
+        <details className="booking-records-tab booking-profile-tab">
+          <summary className="booking-records-summary">
+            <User size={16} />
+            <span>Profile</span>
+            <em>
+              {selectedPerson
+                ? selectedPerson.name
+                : selected.client || selected.title || "Not a client yet"}
+            </em>
+          </summary>
+          <div className="booking-records-body">
+            <div className="booking-profile-actions">
+              <button
+                className="outline-button"
+                onClick={() => void startSelectedBookingRecording()}
+                type="button"
+              >
+                <Video size={16} />
+                New recording
+              </button>
+              {selectedPerson ? (
+                <button
+                  className="outline-button"
+                  onClick={() => openPlayerProfileVideos(selectedPerson)}
+                  type="button"
+                >
+                  <User size={16} />
+                  Player profile
+                </button>
+              ) : null}
+            </div>
+            {selectedPerson ? null : (
+              <p className="booking-profile-hint">
+                Saving a note or a recording adds this booking to clients and gives them a
+                player profile.
+              </p>
+            )}
+            <Suspense fallback={<div className="module-loading">Loading notes…</div>}>
+              <ClarityVoiceTextPanel
+                fieldLabel="Lesson note"
+                placeholder="Type or dictate a note for this lesson."
+                onCommit={(text) => saveSelectedBookingNote(text)}
+              />
+            </Suspense>
+          </div>
+        </details>
+      )}
+
+      {selected.kind === "appointment" && (
         <details className="booking-records-tab">
           <summary className="booking-records-summary">
             <Mail size={16} />
@@ -21227,6 +21361,7 @@ function App({ onSessionLost }: AppProps = {}) {
                 playerId={videoContext?.playerId}
                 playerName={videoContext?.playerName}
                 savedVideoId={videoContext?.savedVideoId}
+                autoStartLiveRecording={videoContext?.startRecording}
                 savedVideoLibrary={savedVideoLibraryRef.current}
                 onSavedVideoLibraryChange={refreshSavedVideoLibrary}
                 onNavigateBack={returnToPlayerProfileVideos}
