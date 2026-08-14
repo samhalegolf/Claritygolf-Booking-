@@ -3,6 +3,7 @@ import {
   VideoWorkspace,
   type VideoWorkspaceNavigationContext,
   type VideoWorkspaceSaveResult,
+  type VideoWorkspaceVariant,
 } from "./VideoWorkspace";
 import "./theme/videoAnalysis.css";
 import type { VideoAnalysisPersistenceLayer } from "./utils/localPersistence";
@@ -26,6 +27,8 @@ export interface VideoAnalysisPageProps {
   onOpenCloudSettings?: () => void;
   onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
   autoStartLiveRecording?: boolean;
+  /** Which control set to show. Defaults to the full coach console. */
+  variant?: VideoWorkspaceVariant;
 }
 
 export function VideoAnalysisPage(props: VideoAnalysisPageProps) {

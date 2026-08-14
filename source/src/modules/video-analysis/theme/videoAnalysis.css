@@ -1290,12 +1290,24 @@
     grid-template-columns: 1fr;
   }
 
+  .workspace-bottom {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Split View is a side-by-side comparison, so it follows the long edge of the
+   screen. Held upright there is no room for two videos: tablets stack, and
+   phones get the rotate prompt from the workspace instead. */
+@media (max-width: 960px) and (orientation: portrait) {
   .comparison-layout.is-compare {
     grid-template-columns: 1fr;
   }
+}
 
-  .workspace-bottom {
-    grid-template-columns: 1fr;
+@media (max-width: 960px) and (orientation: landscape) {
+  .comparison-layout.is-compare {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 6px;
   }
 }
 
@@ -1341,4 +1353,185 @@
 .video-trash-target svg {
   width: 30px;
   height: 30px;
+}
+
+/* Shown on a phone held upright when Split View is on. The comparison itself
+   is never stacked -- it waits for the long edge of the screen. */
+.compare-rotate-gate {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 28px 20px;
+  text-align: center;
+  border: 1px solid rgba(148, 169, 222, 0.22);
+  border-radius: 16px;
+  background: rgba(11, 17, 31, 0.88);
+}
+
+.compare-rotate-gate h2 {
+  margin: 0;
+  font-family: "Montserrat", "Inter", sans-serif;
+  font-size: 1.05rem;
+  color: #eef4ff;
+}
+
+.compare-rotate-gate p {
+  margin: 0;
+  max-width: 30ch;
+  color: var(--va-muted, #a3adc2);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.compare-rotate-gate-icon {
+  display: inline-flex;
+  color: var(--va-accent, #57e59c);
+}
+
+.compare-rotate-gate-icon svg {
+  width: 46px;
+  height: 46px;
+  animation: compare-rotate-gate-nudge 2.6s ease-in-out infinite;
+}
+
+@keyframes compare-rotate-gate-nudge {
+  0%,
+  55%,
+  100% {
+    transform: rotate(0deg);
+  }
+  75%,
+  90% {
+    transform: rotate(-90deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compare-rotate-gate-icon svg {
+    animation: none;
+  }
+}
+
+/* Touch devices have no hover, so anything hover-revealed has to stand on its
+   own, and tap targets need to be finger sized. */
+@media (hover: none) and (pointer: coarse) {
+  .focus-window .focus-window-controls {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+
+  .video-tool-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .video-tool-btn svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .focus-window-control,
+  .focus-artifact-action {
+    padding: 8px 11px;
+    font-size: 12px;
+  }
+}
+
+/* ---- Phone ---- */
+@media (max-width: 700px) {
+  .video-analysis-page {
+    padding: 8px;
+  }
+
+  .video-analysis-shell {
+    max-width: 100%;
+    /* Leaves room for the toolbar and timeline without pinning a tall floor
+       the phone cannot honour. */
+    --va-video-max-height: max(180px, calc(100svh - 230px));
+  }
+
+  .video-analysis-shell h1 {
+    font-size: 1.12rem;
+    margin-bottom: 8px;
+  }
+
+  .video-analysis-shell .subtitle {
+    margin-bottom: 12px;
+    font-size: 0.82rem;
+  }
+
+  .video-analysis-toolbar {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .analysis-save-controls {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .analysis-save-status {
+    max-width: 100%;
+  }
+
+  .comparison-video-panel {
+    padding: 6px;
+  }
+
+  /* The canvas shell hugs the clip instead of reserving desktop-sized space. */
+  .video-canvas-shell {
+    min-height: 0;
+  }
+
+  .video-upload-card,
+  .video-upload-card.is-primary {
+    min-height: min(54svh, 360px);
+    padding: 16px;
+  }
+
+  .video-intake-panel .comparison-video-panel {
+    min-height: 0;
+  }
+
+  /* Bottom sheet rather than a floating desktop panel. */
+  .focus-window {
+    left: 8px;
+    right: 8px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: auto;
+    max-height: 70svh;
+    overflow-y: auto;
+  }
+
+  .focus-window .focus-window-controls {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+}
+
+/* Phone in landscape: the whole screen is only a few hundred pixels tall, so
+   the page header gives its space back to the video. */
+@media (max-width: 960px) and (orientation: landscape) and (max-height: 560px) {
+  .video-analysis-shell h1,
+  .video-analysis-shell .subtitle {
+    display: none;
+  }
+
+  .video-analysis-shell {
+    --va-video-max-height: max(150px, calc(100svh - 170px));
+  }
+
+  .comparison-layout.is-compare {
+    --va-video-max-height: max(140px, calc(100svh - 160px));
+  }
+
+  .video-analysis-toolbar {
+    margin-bottom: 8px;
+  }
+
+  .focus-window {
+    max-height: calc(100svh - 24px);
+  }
 }

@@ -287,6 +287,7 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
       <div className="player-portal player-portal-video-host">
         <Suspense fallback={<div className="player-portal-card">Loading video…</div>}>
           <VideoAnalysisPage
+            variant="player"
             playerId={playerId || playerEmail}
             playerName={playerName}
             savedVideoId={openVideoId || undefined}

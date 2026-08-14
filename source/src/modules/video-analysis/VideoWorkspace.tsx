@@ -97,6 +97,10 @@ interface CloudUploadFailureFeedback {
   actionRequired: boolean;
 }
 
+/** One video engine, two control sets: the coach console and the player's
+    simplified workspace. */
+export type VideoWorkspaceVariant = "coach" | "player";
+
 export interface VideoWorkspaceNavigationContext {
   playerId?: string;
   playerName?: string;
@@ -135,6 +139,8 @@ interface VideoWorkspaceProps {
   onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
   /** Open the camera recorder as soon as the workspace mounts. */
   autoStartLiveRecording?: boolean;
+  /** Which control set to show. Defaults to the full coach console. */
+  variant?: VideoWorkspaceVariant;
 }
 
 const cloudSettingsActionCodes = new Set([
@@ -358,6 +364,49 @@ const hasSaveableAnalysisContent = (analysis: VideoAnalysis) => {
 const briefSuccessDelay = () =>
   new Promise((resolve) => window.setTimeout(resolve, 450));
 
+const MOBILE_VIEWPORT_QUERY = "(max-width: 700px)";
+const PORTRAIT_VIEWPORT_QUERY = "(orientation: portrait)";
+
+const readVideoViewport = () => {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return { mobile: false, portrait: false };
+  }
+  return {
+    mobile: window.matchMedia(MOBILE_VIEWPORT_QUERY).matches,
+    portrait: window.matchMedia(PORTRAIT_VIEWPORT_QUERY).matches,
+  };
+};
+
+/* Phone width and rotation. Compare needs the long edge of a phone, so the
+   workspace asks for landscape rather than stacking two unreadable videos. */
+function useVideoViewport() {
+  const [viewport, setViewport] = useState(readVideoViewport);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const update = () => {
+      const next = readVideoViewport();
+      setViewport((previous) =>
+        previous.mobile === next.mobile && previous.portrait === next.portrait
+          ? previous
+          : next
+      );
+    };
+
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    update();
+
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+
+  return viewport;
+}
+
 export function VideoWorkspace({
   playerId,
   playerName,
@@ -373,7 +422,9 @@ export function VideoWorkspace({
   onOpenCloudSettings,
   onSaveNote,
   autoStartLiveRecording,
+  variant = "coach",
 }: VideoWorkspaceProps) {
+  const isPlayerVariant = variant === "player";
   const leftVideoRef = useRef<HTMLVideoElement>(null);
   const rightVideoRef = useRef<HTMLVideoElement>(null);
   const livePreviewRef = useRef<HTMLVideoElement>(null);
@@ -447,6 +498,10 @@ export function VideoWorkspace({
   const timelineEngine = useMemo(() => new TimelineEngine(), []);
   const modeIsCompare = comparisonMode === "compare";
   const workspaceHasVideo = Boolean(playerVideoLeft || playerVideoRight);
+  const { mobile: isMobileViewport, portrait: isPortraitViewport } = useVideoViewport();
+  // Desktop keeps Split View exactly as it is. A phone held upright gets the
+  // rotate prompt instead, and side by side once it is turned.
+  const needsCompareRotation = modeIsCompare && isMobileViewport && isPortraitViewport;
 
   const leftStore = useAnalysisStore({
     playerId: resolvedPlayerId,
@@ -2149,8 +2204,13 @@ export function VideoWorkspace({
   const handleManualSave = useCallback(async () => {
     const result = await performDurableSave("save");
     if (!result) return;
-    await completeSuccessfulSave(result, "Saved safely. Returning to Player Profile.");
-  }, [completeSuccessfulSave, performDurableSave]);
+    await completeSuccessfulSave(
+      result,
+      isPlayerVariant
+        ? "Saved to this device. Find it under Your videos."
+        : "Saved safely. Returning to Player Profile."
+    );
+  }, [completeSuccessfulSave, isPlayerVariant, performDurableSave]);
 
   const handleMyLibrarySave = useCallback(async () => {
     const result = await performDurableSave("my-library-save", { archiveToMyLibrary: true });
@@ -2174,12 +2234,17 @@ export function VideoWorkspace({
     }
 
     setSaveStatus("sending");
-    setSaveMessage("Preparing Clarity Cloud transfer...");
+    setSaveMessage(
+      isPlayerVariant ? "Sending to your coach..." : "Preparing Clarity Cloud transfer..."
+    );
     setCloudUploadFailure(null);
     try {
       await onSaveAndSend(result);
       setCloudUploadFailure(null);
-      await completeSuccessfulSave(result, "Uploading 0% in Player Profile.");
+      await completeSuccessfulSave(
+        result,
+        isPlayerVariant ? "Sending to your coach. Track it under Your videos." : "Uploading 0% in Player Profile."
+      );
     } catch (error) {
       setSaveStatus("error");
       const cloudFailure = buildCloudUploadFailureFeedback(error);
@@ -2202,6 +2267,7 @@ export function VideoWorkspace({
     }
   }, [
     completeSuccessfulSave,
+    isPlayerVariant,
     onSaveAndSend,
     onSavedVideoLibraryChange,
     performDurableSave,
@@ -2570,8 +2636,11 @@ export function VideoWorkspace({
     );
   };
 
+  const saveBusy =
+    saveStatus === "saving" || saveStatus === "sending" || saveStatus === "downloading";
+
   return (
-    <div className="video-analysis-shell">
+    <div className={`video-analysis-shell is-${variant}`}>
       <style>{videoAnalysisThemeCss}</style>
       <h1>{playerName ? `${playerName} Video Analysis` : "Clarity Golf Video Analysis"}</h1>
       <p className="subtitle">
@@ -2607,7 +2676,7 @@ export function VideoWorkspace({
               type="button"
               className="upload-button"
               onClick={() => void handleSaveAndSend()}
-              disabled={saveStatus === "saving" || saveStatus === "sending" || saveStatus === "downloading"}
+              disabled={saveBusy}
             >
               Retry
             </button>
@@ -2669,60 +2738,90 @@ export function VideoWorkspace({
             onUndo={activeDrawing.undo}
             canUndo={activeDrawing.canUndo}
           />
-          <div className="analysis-save-controls" aria-label="Video analysis save controls">
-            <button
-              type="button"
-              className="upload-button video-save-button"
-              onClick={handleManualSave}
-              disabled={saveStatus === "saving" || saveStatus === "sending" || saveStatus === "downloading"}
-            >
-              {saveStatus === "saving" ? "Saving..." : "Save"}
-            </button>
-            <button
-              type="button"
-              className="upload-button video-save-button"
-              onClick={handleMyLibrarySave}
-              disabled={saveStatus === "saving" || saveStatus === "sending" || saveStatus === "downloading"}
-            >
-              Save permanently to My Library
-            </button>
-            <span className={`analysis-save-status is-${saveStatus}`} role="status">
-              {saveMessage}
-            </span>
-          </div>
-          <div className="analysis-record-controls" aria-label="Screen recording">
-            <button
-              type="button"
-              className={`upload-button video-record-button${
-                screenRecordingStatus === "recording" ? " is-recording" : ""
-              }`}
-              onClick={() =>
-                screenRecordingStatus === "recording"
-                  ? void stopScreenRecording()
-                  : void startScreenRecording()
-              }
-              disabled={screenRecordingStatus === "saving"}
-            >
-              <IconRecord />
-              {screenRecordingStatus === "recording"
-                ? "Stop recording"
-                : screenRecordingStatus === "saving"
-                  ? "Saving..."
-                  : "Screen record"}
-            </button>
-            {screenRecordingMessage ? (
-              <span className={`analysis-record-status is-${screenRecordingStatus}`} role="status">
-                {screenRecordingMessage}
+          {isPlayerVariant ? (
+            /* A player saves to their own phone, or sends the clip to their
+               coach. There is no third destination to choose between. */
+            <div className="analysis-save-controls" aria-label="Video save controls">
+              <button
+                type="button"
+                className="upload-button video-save-button"
+                onClick={handleManualSave}
+                disabled={saveBusy}
+              >
+                {saveStatus === "saving" ? "Saving..." : "Save"}
+              </button>
+              <button
+                type="button"
+                className="upload-button video-save-button"
+                onClick={() => void handleSaveAndSend()}
+                disabled={saveBusy}
+              >
+                {saveStatus === "sending" ? "Sending..." : "Send to Coach"}
+              </button>
+              <span className={`analysis-save-status is-${saveStatus}`} role="status">
+                {saveMessage}
               </span>
-            ) : null}
-          </div>
-          <button
-            type="button"
-            className="upload-button"
-            onClick={() => setShowDiagnostics((previous) => !previous)}
-          >
-            {showDiagnostics ? "Hide diagnostics" : "Show diagnostics"}
-          </button>
+            </div>
+          ) : (
+            <div className="analysis-save-controls" aria-label="Video analysis save controls">
+              <button
+                type="button"
+                className="upload-button video-save-button"
+                onClick={handleManualSave}
+                disabled={saveBusy}
+              >
+                {saveStatus === "saving" ? "Saving..." : "Save"}
+              </button>
+              <button
+                type="button"
+                className="upload-button video-save-button"
+                onClick={handleMyLibrarySave}
+                disabled={saveBusy}
+              >
+                Save permanently to My Library
+              </button>
+              <span className={`analysis-save-status is-${saveStatus}`} role="status">
+                {saveMessage}
+              </span>
+            </div>
+          )}
+          {isPlayerVariant ? null : (
+            <div className="analysis-record-controls" aria-label="Screen recording">
+              <button
+                type="button"
+                className={`upload-button video-record-button${
+                  screenRecordingStatus === "recording" ? " is-recording" : ""
+                }`}
+                onClick={() =>
+                  screenRecordingStatus === "recording"
+                    ? void stopScreenRecording()
+                    : void startScreenRecording()
+                }
+                disabled={screenRecordingStatus === "saving"}
+              >
+                <IconRecord />
+                {screenRecordingStatus === "recording"
+                  ? "Stop recording"
+                  : screenRecordingStatus === "saving"
+                    ? "Saving..."
+                    : "Screen record"}
+              </button>
+              {screenRecordingMessage ? (
+                <span className={`analysis-record-status is-${screenRecordingStatus}`} role="status">
+                  {screenRecordingMessage}
+                </span>
+              ) : null}
+            </div>
+          )}
+          {isPlayerVariant ? null : (
+            <button
+              type="button"
+              className="upload-button"
+              onClick={() => setShowDiagnostics((previous) => !previous)}
+            >
+              {showDiagnostics ? "Hide diagnostics" : "Show diagnostics"}
+            </button>
+          )}
         </div>
       ) : null}
 
@@ -2842,7 +2941,26 @@ export function VideoWorkspace({
         </div>
       ) : null}
 
-      {workspaceHasVideo ? (
+      {workspaceHasVideo && needsCompareRotation ? (
+        <section className="compare-rotate-gate" aria-live="polite">
+          <span className="compare-rotate-gate-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+              <rect x="7" y="2.5" width="10" height="19" rx="2.4" />
+              <path d="M3.6 15.4a9 9 0 0 0 3 4.2" strokeLinecap="round" />
+              <path d="M20.4 8.6a9 9 0 0 0-3-4.2" strokeLinecap="round" />
+              <path d="M3.4 12.2l.2 3.4 3.2-1.2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M20.6 11.8l-.2-3.4-3.2 1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          <h2>Rotate your phone</h2>
+          <p>Split View puts two swings side by side. Turn your phone sideways to compare them.</p>
+          <button type="button" className="upload-button" onClick={() => updateMode("single")}>
+            Back to one video
+          </button>
+        </section>
+      ) : null}
+
+      {workspaceHasVideo && !needsCompareRotation ? (
         <div className={`comparison-layout ${modeIsCompare ? "is-compare" : "is-single"}`}>
           {modeIsCompare ? (
             <>
