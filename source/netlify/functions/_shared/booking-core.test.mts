@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  compatiblePersonMatch,
   handlePublicBookingSlotsRequest,
   publicAppointmentContactQuery,
   publicAppointmentReadQuery,
@@ -813,4 +814,45 @@ test("public booking never offers times earlier than now today", () => {
     starts.some((start: number) => start >= nowMinutes + 30),
     "a clearly-future slot should remain bookable",
   );
+});
+
+// --- compatiblePersonMatch: contactless clients ------------------------------
+// A walk-in booked with a name and no email or phone used to match nothing, so
+// every booking minted another person row for the same customer.
+
+const contactlessRows = [
+  { id: "p-tony", accountId, name: "Tony Shaw", email: "", phone: "" },
+  { id: "p-shaun", accountId, name: "Shaun Kao", email: "shaun@example.com", phone: "0210531240" },
+];
+
+test("compatiblePersonMatch reuses a contactless person with the same name", () => {
+  const match = compatiblePersonMatch(
+    { accountId, name: "tony  shaw", email: "", phone: "" },
+    contactlessRows,
+  );
+  assert.equal(match?.id, "p-tony");
+});
+
+test("compatiblePersonMatch will not absorb a person who has contact details", () => {
+  const match = compatiblePersonMatch(
+    { accountId, name: "Shaun Kao", email: "", phone: "" },
+    contactlessRows,
+  );
+  assert.equal(match, null);
+});
+
+test("compatiblePersonMatch stays out of it when two contactless namesakes exist", () => {
+  const match = compatiblePersonMatch({ accountId, name: "Tony Shaw", email: "", phone: "" }, [
+    ...contactlessRows,
+    { id: "p-tony-2", accountId, name: "Tony Shaw", email: "", phone: "" },
+  ]);
+  assert.equal(match, null);
+});
+
+test("compatiblePersonMatch keeps a contactless booking out of another account", () => {
+  const match = compatiblePersonMatch(
+    { accountId: "other-account", name: "Tony Shaw", email: "", phone: "" },
+    contactlessRows,
+  );
+  assert.equal(match, null);
 });

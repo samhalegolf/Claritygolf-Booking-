@@ -2766,7 +2766,7 @@ function normalizedPersonPhone(value, country = getActivePhoneCountry()) {
   return canonicalPhoneKey(cleanString(value, "", 80), country);
 }
 
-function compatiblePersonMatch(candidate, rows = []) {
+export function compatiblePersonMatch(candidate, rows = []) {
   if (!candidate || !Array.isArray(rows) || !rows.length) return null;
   const accountId = cleanSlug(candidate.accountId, defaultWorkspaceAccountFromCoachAccount().id);
   const scopedRows = rows.filter((row) => recordBelongsToAccount(row, accountId));
@@ -2831,6 +2831,23 @@ function compatiblePersonMatch(candidate, rows = []) {
       const existingName = normalizedPersonName(only?.name);
       if (!name || !existingName || name === existingName) return only;
     }
+  }
+
+  // A booking taken with a name and nothing else. Every check above needs an
+  // email or a phone number, so a contact with neither fell through to null and
+  // the caller minted a fresh person row -- one per booking, forever, for the
+  // same walk-in. Match on the name alone, but only against rows that are
+  // themselves contactless and only when exactly one exists: two people who
+  // share a name are told apart by their contact details, and a row that has
+  // some must not be silently absorbed by one that has none.
+  if (name && !email && !phone) {
+    const matches = scopedRows.filter(
+      (row) =>
+        normalizedPersonName(row?.name) === name &&
+        !normalizedPersonEmail(row?.email) &&
+        !normalizedPersonPhone(row?.phone),
+    );
+    if (matches.length === 1) return matches[0];
   }
 
   return null;

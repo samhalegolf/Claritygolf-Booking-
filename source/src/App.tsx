@@ -776,6 +776,10 @@ function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
     source: safeText(person.source),
     caddyProfileId: safeText(person.caddyProfileId),
     caddyProfileUrl: safeText(person.caddyProfileUrl),
+    // Backend-owned flag that decides which client list a person appears in.
+    // Dropping it here used to send every person to the main list, so the
+    // External bookings tab always read zero no matter what the API returned.
+    external: person.external === true,
     createdAt: typeof person.createdAt === "string" ? person.createdAt : undefined,
     updatedAt: typeof person.updatedAt === "string" ? person.updatedAt : undefined,
   };
@@ -4797,11 +4801,16 @@ function App({ onSessionLost }: AppProps = {}) {
     }
   }, [activeView, refreshSavedVideoLibrary]);
 
-  // The client list is lazy-loaded (peopleDeferred on the initial workspace load),
-  // so it may not be in memory when the invoice editor opens. Ensure it's fetched
-  // when Billing is active so the customer search can suggest existing clients.
+  // The client list is lazy-loaded (peopleDeferred on the initial workspace
+  // load) and that single deferred fetch is allowed to fail silently — it is
+  // also dropped outright if a calendar save happens to be in flight when it
+  // lands (see shouldApplyAdminWorkspaceDetail). When that happened the
+  // Clients page fell back to the handful of people it could derive from
+  // bookings and stayed that way until a reload. Any view that reads `people`
+  // now asks for it when it opens.
   useEffect(() => {
-    if (activeView === "billing" && authStatus === "authenticated" && !people.length) {
+    const viewNeedsPeople = activeView === "clients" || activeView === "players" || activeView === "billing";
+    if (viewNeedsPeople && authStatus === "authenticated" && !people.length) {
       void refreshPeopleList();
     }
   }, [activeView, authStatus, people.length]);
