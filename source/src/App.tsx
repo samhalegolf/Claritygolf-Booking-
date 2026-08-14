@@ -21232,6 +21232,13 @@ function App({ onSessionLost }: AppProps = {}) {
                 onNavigateBack={returnToPlayerProfileVideos}
                 onLocalSaveComplete={handleVideoAnalysisLocalSaveComplete}
                 onSaveAndSend={handleVideoAnalysisSaveAndSend}
+                onSaveNote={(text) =>
+                  saveLessonNoteForClient(
+                    videoContext ? { id: videoContext.playerId, name: videoContext.playerName } : null,
+                    text,
+                    "voice",
+                  )
+                }
                 onOpenCloudSettings={() => {
                   setActiveView("settings");
                   setSettingsTab("integrations");

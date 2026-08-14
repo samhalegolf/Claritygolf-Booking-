@@ -13,7 +13,6 @@ import { FocusPalette } from "./components/FocusPalette";
 import { FocusWindow } from "./components/FocusWindow";
 import { FocusAreaRect } from "./models/Focus";
 import { FocusSnapshot, VideoAnalysis } from "./models/Analysis";
-import { Inspector } from "./components/Inspector";
 import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
 import { Toolbar } from "./components/Toolbar";
@@ -49,6 +48,14 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { usePlayback } from "./hooks/usePlayback";
 import { useTimeline } from "./hooks/useTimeline";
 import { TimelineEngine } from "./engines/TimelineEngine";
+import { ClarityVoiceTextPanel } from "../clarity-voice/ClarityVoiceTextPanel";
+import {
+  AnalysisViewRecorder,
+  getPreferredRecordingMimeType,
+  getRecordingFileName,
+  type AnalysisRecorderFrame,
+  type AnalysisRecording,
+} from "./utils/analysisRecorder";
 import { PlayerVideo } from "./models/Video";
 import { DrawingTool } from "./models/Drawing";
 import { TimelineMarker } from "./models/Timeline";
@@ -71,6 +78,7 @@ const SNAPSHOT_PREVIEW_HEIGHT = 50;
 const DEFAULT_PLAYER_ID = "player-demo-1";
 type SaveStatus = "idle" | "saving" | "sending" | "downloading" | "saved" | "error";
 type RecordingStatus = "ready" | "recording" | "processing" | "error";
+type ScreenRecordingStatus = "idle" | "recording" | "saving" | "error";
 type CloudUploadFailureStage =
   | "Configuration"
   | "Connection"
@@ -123,6 +131,8 @@ interface VideoWorkspaceProps {
   onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;
   onSaveAndSend?: (result: VideoWorkspaceSaveResult) => Promise<void>;
   onOpenCloudSettings?: () => void;
+  /** Return false to tell the note panel the save failed and keep the text. */
+  onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
 }
 
 const cloudSettingsActionCodes = new Set([
@@ -332,30 +342,6 @@ const buildRectFromDrag = (
   };
 };
 
-const getPreferredRecordingMimeType = () => {
-  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
-    return "";
-  }
-  return (
-    [
-      "video/mp4;codecs=h264",
-      "video/webm;codecs=vp9",
-      "video/webm;codecs=vp8",
-      "video/webm",
-    ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) || ""
-  );
-};
-
-const getRecordingFileName = (side: ComparisonSide, mimeType: string) => {
-  const extension = mimeType.includes("mp4") ? "mp4" : "webm";
-  const timestamp = new Date()
-    .toISOString()
-    .replace(/[:.]/g, "-")
-    .replace("T", "-")
-    .replace("Z", "");
-  return `live-recording-${side}-${timestamp}.${extension}`;
-};
-
 const hasSaveableAnalysisContent = (analysis: VideoAnalysis) => {
   return Boolean(
     analysis.videoMeta ||
@@ -383,6 +369,7 @@ export function VideoWorkspace({
   onLocalSaveComplete,
   onSaveAndSend,
   onOpenCloudSettings,
+  onSaveNote,
 }: VideoWorkspaceProps) {
   const leftVideoRef = useRef<HTMLVideoElement>(null);
   const rightVideoRef = useRef<HTMLVideoElement>(null);
@@ -1262,7 +1249,7 @@ export function VideoWorkspace({
 
           const file = new File(
             [blob],
-            getRecordingFileName(recordingSide, blob.type || blobType),
+            getRecordingFileName(`live-recording-${recordingSide}`, blob.type || blobType),
             { type: blob.type || blobType }
           );
           await loadClipFileForSide(recordingSide, file);
@@ -1607,22 +1594,26 @@ export function VideoWorkspace({
     showFocusWindow ||
     comparisonMode === "compare" ||
     Boolean(onNavigateBack);
-  const clearDrawingLabel = activeDrawing.selectedObjectId
-    ? "Clear selected"
-    : "Clear drawings on this side";
-  const clearDrawingTooltip = clearDrawingLabel;
   const canClearDrawings = activeDrawing.objects.length > 0;
 
+  const analysisRecorderRef = useRef<AnalysisViewRecorder | null>(null);
+  const [screenRecordingStatus, setScreenRecordingStatus] = useState<ScreenRecordingStatus>("idle");
+  const [screenRecordingMessage, setScreenRecordingMessage] = useState("");
+  // The recorder reads this on every frame, so it always draws the current
+  // video and drawings without needing to be restarted when they change.
+  const recorderFrameRef = useRef<AnalysisRecorderFrame>({
+    video: null,
+    objects: [],
+    overlay: { width: 1, height: 1 },
+  });
+  recorderFrameRef.current = {
+    video: effectiveActiveSide === "left" ? leftVideoRef.current : rightVideoRef.current,
+    objects: activeDrawing.objects,
+    overlay: effectiveActiveSide === "left" ? leftOverlayDimensions : rightOverlayDimensions,
+  };
+
   const clearActiveDrawing = useCallback(() => {
-    if (activeDrawing.selectedObjectId) {
-      activeDrawing.deleteSelected();
-      return;
-    }
     if (!activeDrawing.objects.length) {
-      return;
-    }
-    const message = `Clear ${activeDrawing.objects.length} drawings on this side? This can be undone.`;
-    if (!window.confirm(message)) {
       return;
     }
     activeDrawing.clearAll();
@@ -2203,6 +2194,108 @@ export function VideoWorkspace({
     performDurableSave,
   ]);
 
+  // The recording is always saved as a brand new library item. The source
+  // video it was recorded over is never written to.
+  const saveScreenRecording = useCallback(
+    async (recording: AnalysisRecording) => {
+      if (!savedVideoStore) {
+        throw new Error("Device video storage is unavailable in this browser.");
+      }
+      const side = effectiveActiveSide;
+      const analysisStore = side === "left" ? leftStore : rightStore;
+      const sourceVideo = side === "left" ? playerVideoLeft : playerVideoRight;
+      const createdAt = new Date().toISOString();
+      const title = sourceVideo?.title ? `${sourceVideo.title} - commentary` : "Analysis commentary";
+      const item = await savedVideoStore.saveItem({
+        playerId: resolvedPlayerId,
+        lessonId,
+        title,
+        sourceSide: side,
+        sourceVideo: {
+          id: `analysis-recording-${createId()}`,
+          playerId: resolvedPlayerId,
+          lessonId,
+          sourceUrl: "",
+          title: getRecordingFileName("analysis-recording", recording.mimeType),
+          createdAt,
+          duration: recording.durationMs / 1000,
+          width: recording.width,
+          height: recording.height,
+        },
+        sourceBlob: recording.blob,
+        analysisSnapshot: analysisStore.analysis as VideoAnalysis,
+        workspaceSnapshot: buildWorkspaceState(),
+        thumbnailDataUrl: captureSideThumbnail(side),
+      });
+      onSavedVideoLibraryChange?.();
+      setScreenRecordingStatus("idle");
+      setScreenRecordingMessage(`Saved "${item.title || title}" as a new video.`);
+    },
+    [
+      buildWorkspaceState,
+      captureSideThumbnail,
+      effectiveActiveSide,
+      leftStore,
+      lessonId,
+      onSavedVideoLibraryChange,
+      playerVideoLeft,
+      playerVideoRight,
+      resolvedPlayerId,
+      rightStore,
+      savedVideoStore,
+    ]
+  );
+
+  const startScreenRecording = useCallback(async () => {
+    if (analysisRecorderRef.current) return;
+    const recorder = new AnalysisViewRecorder(() => recorderFrameRef.current);
+    try {
+      await recorder.start();
+      analysisRecorderRef.current = recorder;
+      setScreenRecordingStatus("recording");
+      setScreenRecordingMessage("Recording this view with your commentary.");
+    } catch (error) {
+      setScreenRecordingStatus("error");
+      setScreenRecordingMessage(
+        error instanceof Error ? error.message : "Could not start recording."
+      );
+    }
+  }, []);
+
+  const stopScreenRecording = useCallback(async () => {
+    const recorder = analysisRecorderRef.current;
+    if (!recorder) return;
+    setScreenRecordingStatus("saving");
+    setScreenRecordingMessage("Saving recording...");
+    try {
+      const recording = await recorder.stop();
+      analysisRecorderRef.current = null;
+      await saveScreenRecording(recording);
+    } catch (error) {
+      analysisRecorderRef.current = null;
+      setScreenRecordingStatus("error");
+      setScreenRecordingMessage(
+        error instanceof Error ? error.message : "Could not save the recording."
+      );
+    }
+  }, [saveScreenRecording]);
+
+  useEffect(
+    () => () => {
+      analysisRecorderRef.current?.cancel();
+      analysisRecorderRef.current = null;
+    },
+    []
+  );
+
+  const handleWorkspaceNoteCommit = useCallback(
+    async (text: string) => {
+      if (!onSaveNote) return false;
+      return (await onSaveNote(text)) !== false;
+    },
+    [onSaveNote]
+  );
+
   const renderVideoCard = (
     side: ComparisonSide,
     metadataReady: boolean,
@@ -2560,8 +2653,8 @@ export function VideoWorkspace({
             canGoBack={canGoBack}
             onClearDrawings={clearActiveDrawing}
             canClearDrawings={canClearDrawings}
-            clearDrawingLabel={clearDrawingLabel}
-            clearDrawingTooltip={clearDrawingTooltip}
+            onUndo={activeDrawing.undo}
+            canUndo={activeDrawing.canUndo}
           />
           <div className="analysis-save-controls" aria-label="Video analysis save controls">
             <button
@@ -2583,6 +2676,32 @@ export function VideoWorkspace({
             <span className={`analysis-save-status is-${saveStatus}`} role="status">
               {saveMessage}
             </span>
+          </div>
+          <div className="analysis-record-controls" aria-label="Screen recording">
+            <button
+              type="button"
+              className={`upload-button video-record-button${
+                screenRecordingStatus === "recording" ? " is-recording" : ""
+              }`}
+              onClick={() =>
+                screenRecordingStatus === "recording"
+                  ? void stopScreenRecording()
+                  : void startScreenRecording()
+              }
+              disabled={screenRecordingStatus === "saving"}
+            >
+              <IconRecord />
+              {screenRecordingStatus === "recording"
+                ? "Stop recording"
+                : screenRecordingStatus === "saving"
+                  ? "Saving..."
+                  : "Screen record"}
+            </button>
+            {screenRecordingMessage ? (
+              <span className={`analysis-record-status is-${screenRecordingStatus}`} role="status">
+                {screenRecordingMessage}
+              </span>
+            ) : null}
           </div>
           <button
             type="button"
@@ -2731,6 +2850,17 @@ export function VideoWorkspace({
             renderVideoCard("left", leftMetadataReady, leftOverlayDimensions, setLeftOverlayDimensions)
           )}
         </div>
+      ) : null}
+
+      {workspaceHasVideo && onSaveNote ? (
+        <section className="video-note-panel" aria-label="Lesson note">
+          <h2>Lesson note</h2>
+          <ClarityVoiceTextPanel
+            fieldLabel="Lesson note"
+            placeholder="Type or dictate a note about this swing."
+            onCommit={handleWorkspaceNoteCommit}
+          />
+        </section>
       ) : null}
 
       {workspaceHasVideo && showFocusWindow && (
@@ -2911,15 +3041,6 @@ export function VideoWorkspace({
         />
       ) : null}
 
-      {workspaceHasVideo ? (
-      <Inspector
-        selectedTool={activeDrawing.selectedTool}
-        selectedObject={currentDrawingObject}
-        canUndo={activeDrawing.canUndo}
-        canRedo={activeDrawing.canRedo}
-        currentObjects={activeDrawing.objects.length}
-      />
-      ) : null}
     </div>
   );
 }

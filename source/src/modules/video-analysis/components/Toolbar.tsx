@@ -14,6 +14,7 @@ import {
   IconToolPen,
   IconToolSelect,
   IconTrash,
+  IconUndo,
 } from "./VideoIcons";
 
 const iconForTool = (tool: DrawingTool): React.ReactNode => {
@@ -46,8 +47,8 @@ interface ToolbarProps {
   canGoBack: boolean;
   onClearDrawings: () => void;
   canClearDrawings: boolean;
-  clearDrawingLabel: string;
-  clearDrawingTooltip: string;
+  onUndo: () => void;
+  canUndo: boolean;
 }
 
 export function Toolbar({
@@ -65,8 +66,8 @@ export function Toolbar({
   canGoBack,
   onClearDrawings,
   canClearDrawings,
-  clearDrawingLabel,
-  clearDrawingTooltip,
+  onUndo,
+  canUndo,
 }: ToolbarProps) {
   const uniqueTools = ["select", "line", "circle", "pen", ...(showAngleTool ? ["angle"] : [])] as DrawingTool[];
 
@@ -82,11 +83,19 @@ export function Toolbar({
       />
       <ToolButton
         icon={<IconTrash />}
-        label={clearDrawingLabel}
-        tooltip={clearDrawingTooltip}
+        label="Clear objects"
+        tooltip="Clear objects on this side"
         className="is-subtle"
         disabled={!canClearDrawings}
         onClick={onClearDrawings}
+      />
+      <ToolButton
+        icon={<IconUndo />}
+        label="Undo"
+        tooltip="Undo last change"
+        className="is-subtle"
+        disabled={!canUndo}
+        onClick={onUndo}
       />
       <ToolButton
         icon={<IconModeSingle />}

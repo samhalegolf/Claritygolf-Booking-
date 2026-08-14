@@ -142,6 +142,13 @@ export const IconBack = ({ className }: IconProps) => (
   </Svg>
 );
 
+export const IconUndo = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M9 8H5V4" />
+    <path d="M5 8a8 8 0 1 1-1.2 6" />
+  </Svg>
+);
+
 export const IconTrash = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M8 8h8" />

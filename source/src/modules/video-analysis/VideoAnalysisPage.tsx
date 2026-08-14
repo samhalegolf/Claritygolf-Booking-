@@ -24,6 +24,7 @@ export interface VideoAnalysisPageProps {
   onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;
   onSaveAndSend?: (result: VideoWorkspaceSaveResult) => Promise<void>;
   onOpenCloudSettings?: () => void;
+  onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
 }
 
 export function VideoAnalysisPage(props: VideoAnalysisPageProps) {

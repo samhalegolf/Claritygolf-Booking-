@@ -36,9 +36,21 @@ const toScreen = (point: DrawingPoint, dimensions: Dimensions) => ({
 const HANDLE_VISUAL_RADIUS = 5.4;
 const HANDLE_PICK_RADIUS = 11;
 const SELECT_OUTLINE = 3;
-const TRASH_ZONE_SIZE = 34;
-const TRASH_ZONE_MARGIN = 10;
-const TRASH_HIT_PADDING = 18;
+const TRASH_ZONE_SIZE = 64;
+const TRASH_ZONE_MARGIN = 14;
+const TRASH_HIT_PADDING = 20;
+
+// A flick only counts if it is fast, travels a real distance, and is actually
+// aimed at the bin. All three together keep an ordinary quick drag from
+// deleting something the coach meant to keep.
+const FLICK_SAMPLE_WINDOW_MS = 130;
+const FLICK_MIN_SPEED_PX_PER_MS = 1.1;
+const FLICK_MIN_TRAVEL_PX = 44;
+// Dot product of the flick direction against the direction to the bin.
+// 0.72 is roughly a 44 degree cone.
+const FLICK_MIN_AIM = 0.72;
+
+type PointerSample = { x: number; y: number; t: number };
 
 const HandlePoint = ({
   point,
@@ -87,20 +99,52 @@ export function VideoCanvas({
   const overlayRef = useRef<HTMLDivElement>(null);
   const dimensionsRef = useRef(overlayDimensions);
   dimensionsRef.current = overlayDimensions;
+  const pointerSamplesRef = useRef<PointerSample[]>([]);
   const [isTrashHovered, setIsTrashHovered] = useState(false);
   const isTrashDropEnabled = !!draggedObjectId;
 
   const trashTarget = {
     size: TRASH_ZONE_SIZE,
-    x: Math.max(TRASH_ZONE_MARGIN, overlayDimensions.width - TRASH_ZONE_SIZE - TRASH_ZONE_MARGIN),
+    x: TRASH_ZONE_MARGIN,
     y: Math.max(TRASH_ZONE_MARGIN, overlayDimensions.height - TRASH_ZONE_SIZE - TRASH_ZONE_MARGIN),
+  };
+  const trashCenter = {
+    x: trashTarget.x + trashTarget.size / 2,
+    y: trashTarget.y + trashTarget.size / 2,
   };
 
   const isPointOverTrash = (point: { x: number; y: number }) => {
-    const centerX = trashTarget.x + trashTarget.size / 2;
-    const centerY = trashTarget.y + trashTarget.size / 2;
     const hitRadius = TRASH_ZONE_SIZE / 2 + TRASH_HIT_PADDING;
-    return Math.hypot(point.x - centerX, point.y - centerY) <= hitRadius;
+    return Math.hypot(point.x - trashCenter.x, point.y - trashCenter.y) <= hitRadius;
+  };
+
+  const trackPointerSample = (point: { x: number; y: number }) => {
+    const samples = pointerSamplesRef.current;
+    const now = Date.now();
+    samples.push({ x: point.x, y: point.y, t: now });
+    while (samples.length > 2 && now - samples[0].t > FLICK_SAMPLE_WINDOW_MS) {
+      samples.shift();
+    }
+  };
+
+  const isFlickTowardTrash = () => {
+    const samples = pointerSamplesRef.current;
+    if (samples.length < 2) return false;
+    const last = samples[samples.length - 1];
+    const first = samples.find((sample) => last.t - sample.t <= FLICK_SAMPLE_WINDOW_MS) ?? samples[0];
+    const elapsed = last.t - first.t;
+    if (elapsed <= 0) return false;
+    const dx = last.x - first.x;
+    const dy = last.y - first.y;
+    const travel = Math.hypot(dx, dy);
+    if (travel < FLICK_MIN_TRAVEL_PX) return false;
+    if (travel / elapsed < FLICK_MIN_SPEED_PX_PER_MS) return false;
+    const toTrashX = trashCenter.x - last.x;
+    const toTrashY = trashCenter.y - last.y;
+    const toTrashLength = Math.hypot(toTrashX, toTrashY);
+    if (toTrashLength < 1) return true;
+    const aim = (dx * toTrashX + dy * toTrashY) / (travel * toTrashLength);
+    return aim >= FLICK_MIN_AIM;
   };
 
   const measure = useCallback(() => {
@@ -137,8 +181,11 @@ export function VideoCanvas({
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
+    const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     event.currentTarget.setPointerCapture(event.pointerId);
-    onPointerDown({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+    pointerSamplesRef.current = [];
+    trackPointerSample(point);
+    onPointerDown(point);
     event.preventDefault();
   };
 
@@ -148,6 +195,7 @@ export function VideoCanvas({
       x: event.clientX - rect.left,
       y: event.clientY - rect.top,
     };
+    trackPointerSample(point);
     onPointerMove(point);
     if (isTrashDropEnabled) {
       const isOverTrash = isPointOverTrash(point);
@@ -164,10 +212,13 @@ export function VideoCanvas({
       x: event.clientX - rect.left,
       y: event.clientY - rect.top,
     };
-    if (isTrashDropEnabled && draggedObjectId && onTrashDrop && isPointOverTrash(point)) {
+    trackPointerSample(point);
+    const wantsTrash = isPointOverTrash(point) || isFlickTowardTrash();
+    if (isTrashDropEnabled && draggedObjectId && onTrashDrop && wantsTrash) {
       const wasDeleted = onTrashDrop(draggedObjectId);
       if (wasDeleted) {
         setIsTrashHovered(false);
+        pointerSamplesRef.current = [];
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId);
         }
@@ -176,6 +227,7 @@ export function VideoCanvas({
       }
     }
     onPointerUp(point);
+    pointerSamplesRef.current = [];
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }

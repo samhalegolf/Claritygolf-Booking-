@@ -255,9 +255,9 @@
 /* Hover text label */
 .video-tool-tip {
   position: absolute;
-  bottom: calc(100% + 7px);
+  top: calc(100% + 7px);
   left: 50%;
-  transform: translateX(-50%) translateY(4px);
+  transform: translateX(-50%) translateY(-4px);
   padding: 3px 8px;
   border-radius: 6px;
   background: rgba(6, 16, 10, 0.94);
@@ -1200,17 +1200,79 @@
   box-shadow: 0 0 0 1px rgba(87, 229, 156, 0.3), 0 0 10px rgba(87, 229, 156, 0.16);
 }
 
-.inspector {
-  margin-top: 10px;
-  border: 1px solid rgba(148, 169, 222, 0.25);
-  border-radius: 12px;
-  background: #0f1830;
-  padding: 10px;
-  color: #cbd7ff;
+.analysis-record-controls {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.video-record-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.video-record-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.video-record-button.is-recording {
+  border-color: rgba(255, 107, 138, 0.62);
+  color: #ffd8e1;
+  background: rgba(120, 26, 46, 0.5);
+}
+
+.analysis-record-status {
+  max-width: 220px;
+  color: var(--va-muted, #a3adc2);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.analysis-record-status.is-recording {
+  color: rgba(255, 174, 194, 0.96);
+}
+
+.analysis-record-status.is-error {
+  color: var(--va-danger, #ff6b8a);
+}
+
+.video-note-panel {
+  margin-top: 14px;
+  border: 1px solid var(--va-border, rgba(148, 169, 222, 0.22));
+  border-radius: var(--va-radius-md, 13px);
+  background: rgba(13, 18, 32, 0.82);
+  padding: 12px 14px;
   display: grid;
-  gap: 6px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  font-size: 12px;
+  gap: 10px;
+}
+
+.video-note-panel h2 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--va-text, #e9f0ff);
+}
+
+/* The note panel borrows the shared Clarity Voice panel, which is styled for
+   light surfaces. Pull it onto the dark analysis theme. */
+.video-note-panel .clarityVoiceTextOutput,
+.video-note-panel .clarityVoiceInterim {
+  color: var(--va-muted, #a3adc2);
+}
+
+.video-note-panel .clarityVoiceTextOutput textarea {
+  background: rgba(6, 10, 20, 0.72);
+  border-color: var(--va-border, rgba(148, 169, 222, 0.22));
+  color: var(--va-text, #e9f0ff);
+}
+
+.video-note-panel .clarityVoiceMicButton {
+  background: rgba(6, 10, 20, 0.72);
+  border-color: var(--va-border, rgba(148, 169, 222, 0.22));
+  color: var(--va-text, #e9f0ff);
 }
 
 .workspace-bottom {
@@ -1262,21 +1324,21 @@
   align-items: center;
   justify-content: center;
   pointer-events: none;
-  opacity: 0;
-  transform: scale(0.92);
+  opacity: 0.78;
+  transform: scale(0.96);
   transition: opacity 140ms ease, transform 140ms ease, border-color 140ms ease,
     color 140ms ease, box-shadow 140ms ease;
 }
 
 .video-trash-target.is-active {
-  opacity: 0.96;
-  transform: scale(1);
+  opacity: 1;
+  transform: scale(1.06);
   color: rgba(255, 214, 170, 0.95);
   border-color: rgba(255, 131, 76, 0.62);
   box-shadow: 0 0 0 1px rgba(255, 131, 76, 0.28), 0 8px 16px rgba(34, 13, 1, 0.42);
 }
 
 .video-trash-target svg {
-  width: 16px;
-  height: 16px;
+  width: 30px;
+  height: 30px;
 }
