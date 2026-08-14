@@ -47,8 +47,8 @@ type Note = {
   updatedAt?: string;
 };
 
-// Book and Clarity Caddy are destinations rather than tabs: one navigates into
-// authenticated booking, the other leaves for Caddy.
+// Book is a destination rather than a tab: it navigates into authenticated
+// booking rather than swapping the panel below.
 type PortalTab = "lessons" | "notes" | "videos";
 
 type CaddyAccess = {
@@ -251,15 +251,11 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
         openPlayerBooking();
         return;
       }
-      if (destination === "caddy") {
-        openCaddy();
-        return;
-      }
       setRecording(false);
       setOpenVideoId("");
       setTab(destination);
     },
-    [openCaddy],
+    [],
   );
 
   const sendToCoach = useCallback(
@@ -359,7 +355,6 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
     <PlayerTerminalNav
       active={active}
       back={back}
-      caddyAvailable={Boolean(caddy?.appUrl)}
       onNavigate={navigateTerminal}
       onSignOut={() => void handleSignOut()}
     />
@@ -459,6 +454,21 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
                       <summary>Past lessons ({pastBookings.length})</summary>
                       <ul className="player-portal-list">{pastBookings.slice(0, 20).map(renderBooking)}</ul>
                     </details>
+                  )}
+
+                  {/* Caddy is its own product with its own billing. The portal
+                      shows where the player stands and opens the door --
+                      nothing more, and only from the home route. */}
+                  {caddy?.appUrl && (
+                    <section className="player-portal-section player-portal-caddy">
+                      <h2>Clarity Caddy</h2>
+                      <div className="player-portal-caddy-row">
+                        <span className="player-portal-caddy-access">{caddyAccessLabel(caddy)}</span>
+                        <button className="player-portal-ghost" type="button" onClick={openCaddy}>
+                          Open Clarity Caddy ↗
+                        </button>
+                      </div>
+                    </section>
                   )}
                 </>
               )}
@@ -561,24 +571,6 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
                 </section>
               )}
             </>
-          )}
-
-          {/* Caddy is its own product with its own billing. The portal shows
-              where the player stands and opens the door -- nothing more. */}
-          {caddy?.appUrl && (
-            <section className="player-portal-section player-portal-caddy">
-              <h2>Clarity Caddy</h2>
-              <div className="player-portal-caddy-row">
-                <span className="player-portal-caddy-access">{caddyAccessLabel(caddy)}</span>
-                <button
-                  className="player-portal-ghost"
-                  type="button"
-                  onClick={() => navigateTerminal("caddy")}
-                >
-                  Open Clarity Caddy ↗
-                </button>
-              </div>
-            </section>
           )}
         </div>
       </div>

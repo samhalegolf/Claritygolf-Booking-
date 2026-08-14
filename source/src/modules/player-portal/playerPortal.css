@@ -414,11 +414,6 @@
   color: #171717;
 }
 
-.player-terminal-nav-external {
-  font-size: 11px;
-  opacity: 0.6;
-}
-
 .player-terminal-nav-menu {
   flex-shrink: 0;
 }

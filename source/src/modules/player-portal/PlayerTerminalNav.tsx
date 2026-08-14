@@ -6,13 +6,14 @@
 // owning its own back behaviour -- the bar just calls the callback the portal
 // already had.
 
-export type PlayerTerminalDestination = "lessons" | "book" | "notes" | "videos" | "caddy";
+// Clarity Caddy is deliberately absent. It is a different product, and its one
+// way in is the card on the home route -- a permanent link in the bar would put
+// "leave here" next to every screen in the terminal.
+export type PlayerTerminalDestination = "lessons" | "book" | "notes" | "videos";
 
 type NavLink = {
   id: PlayerTerminalDestination;
   label: string;
-  /** True for the destinations that leave the terminal shell. */
-  external?: boolean;
 };
 
 const NAV_LINKS: NavLink[] = [
@@ -20,7 +21,6 @@ const NAV_LINKS: NavLink[] = [
   { id: "book", label: "Book" },
   { id: "notes", label: "Notes" },
   { id: "videos", label: "Videos" },
-  { id: "caddy", label: "Clarity Caddy", external: true },
 ];
 
 export type PlayerTerminalNavProps = {
@@ -30,8 +30,6 @@ export type PlayerTerminalNavProps = {
   /** Present only inside a child workspace, e.g. the video workspace. */
   back?: { label: string; onBack: () => void } | null;
   onSignOut: () => void;
-  /** Hidden until the destination is known to exist. */
-  caddyAvailable?: boolean;
 };
 
 export function PlayerTerminalNav({
@@ -39,10 +37,7 @@ export function PlayerTerminalNav({
   onNavigate,
   back,
   onSignOut,
-  caddyAvailable = true,
 }: PlayerTerminalNavProps) {
-  const links = NAV_LINKS.filter((link) => link.id !== "caddy" || caddyAvailable);
-
   return (
     <header className="player-terminal-nav">
       <div className="player-terminal-nav-inner">
@@ -65,7 +60,7 @@ export function PlayerTerminalNav({
         </div>
 
         <nav className="player-terminal-nav-links" aria-label="Player Terminal">
-          {links.map((link) => (
+          {NAV_LINKS.map((link) => (
             <button
               key={link.id}
               type="button"
@@ -74,11 +69,6 @@ export function PlayerTerminalNav({
               onClick={() => onNavigate(link.id)}
             >
               {link.label}
-              {link.external ? (
-                <span className="player-terminal-nav-external" aria-hidden="true">
-                  ↗
-                </span>
-              ) : null}
             </button>
           ))}
         </nav>
