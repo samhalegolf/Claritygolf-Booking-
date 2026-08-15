@@ -9731,3 +9731,48 @@ button {
   min-width: 18px;
   text-align: center;
 }
+
+/* Inventory is grouped by kind and each group folds away. On a real account
+   the Services group is ~100 imported lesson types with no stock, no SKU and no
+   supplier - useful to have, useless to scroll past every time. */
+.product-group + .product-group {
+  margin-top: 10px;
+}
+
+.product-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 4px;
+  border: none;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.product-group-header strong {
+  font-size: 14px;
+}
+
+/* The count sits next to the name rather than in its own column so the header
+   still reads as one line at narrow widths. */
+.product-group-header em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.product-group-header:hover {
+  color: var(--coach-primary, #1fd36d);
+}
+
+/* Only the stocked group has SKU/Supplier/Stock columns, so the name column in
+   the simpler tables would otherwise stretch the full width. */
+.product-table th:first-child,
+.product-table td:first-child {
+  width: 45%;
+}
