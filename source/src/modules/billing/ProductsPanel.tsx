@@ -24,6 +24,8 @@ export type ProductFormValues = {
   taxRate: number;
   trackStock: boolean;
   lowStockThreshold: number;
+  // Selling this issues a gift voucher rather than just taking money.
+  isVoucher: boolean;
   // Only sent when creating - stock on an existing product moves through an
   // adjustment so a save can't undo a sale made while the form was open.
   openingStock: number;
@@ -101,6 +103,7 @@ function emptyForm(taxRate: number): ProductFormDraft {
     trackStock: true,
     lowStockThreshold: "",
     openingStock: "",
+    isVoucher: false,
   };
 }
 
@@ -118,6 +121,7 @@ function toForm(product: BillingCatalogItem, fallbackTaxRate: number): ProductFo
     trackStock: product.trackStock !== false,
     lowStockThreshold: String(product.lowStockThreshold || 0),
     openingStock: "",
+    isVoucher: product.isVoucher === true,
   };
 }
 
@@ -429,6 +433,14 @@ export function ProductsPanel({
               </label>
             </>
           )}
+          <label className="settings-field pos-settles-toggle">
+            <input
+              checked={form.isVoucher}
+              onChange={(event) => updateForm("isVoucher", event.target.checked)}
+              type="checkbox"
+            />
+            <span>This is a gift voucher</span>
+          </label>
           <label className="settings-field product-notes-field">
             <span>Notes</span>
             <textarea
@@ -439,6 +451,12 @@ export function ProductsPanel({
             />
           </label>
         </div>
+        {form.isVoucher && (
+          <p className="field-help">
+            Selling this issues a coupon with a code for the amount paid, and it turns up under Billing &gt; Coupons.
+            Tick it on the products people buy on Squarespace so those purchases can be imported too.
+          </p>
+        )}
         {isProduct && !form.trackStock && (
           <p className="field-help">
             Not counted - use this for things like a fitting fee that you sell but never have on a shelf.
@@ -532,10 +550,14 @@ export function ProductsPanel({
                               >
                                 {product.name}
                               </button>
-                              {(product.active === false || marginLabel(product) || product.description) && (
+                              {(product.active === false ||
+                                product.isVoucher ||
+                                marginLabel(product) ||
+                                product.description) && (
                                 <em className="product-row-meta">
                                   {[
                                     product.active === false ? "Retired" : "",
+                                    product.isVoucher ? "Gift voucher" : "",
                                     marginLabel(product),
                                     stocked ? "" : product.description,
                                   ]

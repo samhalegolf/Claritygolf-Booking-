@@ -68,6 +68,10 @@ export type BillingCatalogItem = {
   // Computed by the backend so the list, the checkout picker and any future
   // reorder report all agree on what "low" means.
   lowStock?: boolean;
+  // Selling this issues a gift voucher rather than just taking money. Any kind
+  // can be one - the vouchers sold on Squarespace arrive as Stripe products of
+  // kind "service".
+  isVoucher?: boolean;
 };
 
 // Why a stock level is what it is. Append-only; "sale"/"sale_reversal" rows
@@ -302,6 +306,11 @@ export type PosTransaction = {
   bookingId: string;
   source: PosTransactionSource;
   note: string;
+  // A sale can be part voucher, part card. `amount` is still the whole sale;
+  // couponAmount is the slice a coupon covered, so the takings report can net
+  // it off the payment method.
+  couponId?: string;
+  couponAmount?: number;
   paidAt: string;
   createdAt: string;
   updatedAt: string;
@@ -328,6 +337,10 @@ export type PosSummary = {
   paidCount: number;
   pendingCount: number;
   paidTotal: number;
+  // Value settled with vouchers over the range. Already excluded from each
+  // method's total in byMethod, and shown there as its own "Coupons redeemed"
+  // row - paidTotal remains the full value of what went out the door.
+  couponTotal?: number;
   byMethod: Array<{ paymentMethodName: string; count: number; total: number }>;
 };
 
@@ -358,4 +371,71 @@ export type BillingExpense = {
   categoryName: string;
   note: string;
   voided: boolean;
+};
+
+// --- Coupons (gift vouchers) -------------------------------------------------
+// Stored value, not a discount. Someone paid for this - on Squarespace through
+// Stripe, or at the counter - so until it is spent the balance is money owed to
+// whoever holds the code. Deliberately separate from BillingDiscount, which is
+// only ever a label that reduces a price.
+
+export type CouponStatus = "active" | "redeemed" | "void";
+
+// Where the coupon came from. "stripe" = imported from a synced Stripe
+// purchase, "pos" = a voucher product sold at the till, "manual" = issued by hand.
+export type CouponSource = "stripe" | "pos" | "manual";
+
+export type BillingCoupon = {
+  id: string;
+  code: string;
+  status: CouponStatus;
+  // originalValue never changes, so a half-spent voucher still says what it was
+  // worth when it was bought.
+  originalValue: number;
+  remainingValue: number;
+  currency: string;
+  issuedToName: string;
+  issuedToEmail: string;
+  customerId: string;
+  source: CouponSource;
+  productId: string;
+  sourceLineId: string;
+  sourceInvoiceId: string;
+  expiresAt: string | null;
+  // Both derived by the backend so the till and the list can't disagree about
+  // whether a code is usable.
+  expired: boolean;
+  spendable: boolean;
+  note: string;
+  issuedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// Append-only. Negative amounts are value put back by a refunded or voided sale.
+export type CouponRedemption = {
+  id: string;
+  amount: number;
+  resultingBalance: number | null;
+  posTransactionId: string;
+  note: string;
+  createdAt: string;
+};
+
+// A Stripe purchase that looks like it bought a voucher but has no coupon yet.
+// Matching a line to a product is a heuristic (invoice lines carry a Stripe
+// price id, catalog rows are keyed by product id), so these are reviewed by a
+// human before anything is issued. matchedBy says how confident the match is.
+export type CouponImportCandidate = {
+  lineId: string;
+  invoiceId: string;
+  description: string;
+  value: number;
+  productId: string;
+  productName: string;
+  matchedBy: "price" | "name";
+  customerName: string;
+  customerEmail: string;
+  currency: string;
+  purchasedAt: string;
 };

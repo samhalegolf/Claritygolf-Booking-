@@ -10319,3 +10319,144 @@ button {
   background: var(--danger-soft, #fdecea);
   color: var(--danger, #a52e15);
 }
+
+/* --- Coupons (gift vouchers) ------------------------------------------------
+   The Billing > Coupons list and the redeem box on the till. */
+
+.coupon-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.coupon-import-actions {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+/* A price-id match is exact; a name match is a guess and has to look like one,
+   because agreeing to it mints money. */
+.coupon-match {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.coupon-match.exact {
+  color: var(--coach-primary, #1fd36d);
+}
+
+.coupon-match.guess {
+  color: var(--danger, #a52e15);
+}
+
+/* --- Redeeming at the till --- */
+
+.sell-coupon-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 0 10px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+.sell-coupon-entry input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sell-coupon-entry input:focus {
+  outline: none;
+}
+
+.sell-coupon-entry .outline-button {
+  margin: 5px 0;
+}
+
+.sell-coupon-applied {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--coach-primary, #1fd36d);
+  border-radius: 10px;
+}
+
+.sell-coupon-applied span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sell-coupon-applied strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.sell-coupon-applied em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sell-coupon-applied > button:last-child {
+  margin-left: auto;
+}
+
+.sell-coupon-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--danger, #a52e15);
+}
+
+.sell-total-row.coupon {
+  color: var(--coach-primary, #1fd36d);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sell-total-row.coupon span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Codes minted by the sale that just completed. They have to be legible enough
+   to copy onto a card by hand before it leaves the counter. */
+.sell-issued-coupons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px dashed var(--coach-primary, #1fd36d);
+  border-radius: 12px;
+}
+
+.sell-issued-coupons span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.sell-issued-coupons em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}

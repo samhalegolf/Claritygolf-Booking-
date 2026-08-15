@@ -188,6 +188,10 @@ function cleanProductPayload(raw: Record<string, unknown>) {
     cost_price: round2(cleanNumber(raw?.costPrice, 0, { min: 0 })),
     track_stock: stockableKind(kind) && raw?.trackStock !== false,
     low_stock_threshold: Math.round(cleanNumber(raw?.lowStockThreshold, 0, { min: 0, max: 1e6 })),
+    // Selling one of these issues a coupon rather than just taking money. Any
+    // kind can be a voucher - the ones sold on Squarespace come through as
+    // Stripe products of kind 'service'.
+    is_voucher: raw?.isVoucher === true,
   };
 }
 
@@ -213,6 +217,7 @@ function productRowToApi(row: Record<string, unknown>) {
     // any future reorder report all agree on what "low" means. A threshold of
     // 0 means "don't warn me", so only out-of-stock counts.
     lowStock: trackStock && (stockLevel <= 0 || (lowStockThreshold > 0 && stockLevel <= lowStockThreshold)),
+    isVoucher: row.is_voucher === true,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -2346,7 +2351,16 @@ const DEFAULT_PAYMENT_METHODS = [
   { name: "Cash", kind: "custom", settles_immediately: true, sort_order: 20 },
   { name: "Eftpos", kind: "custom", settles_immediately: true, sort_order: 30 },
   { name: "On account", kind: "custom", settles_immediately: false, sort_order: 40 },
+  // The method a sale lands on when a voucher covered the whole thing. It is an
+  // ordinary manual method as far as the table is concerned; what makes it a
+  // coupon payment is billing_pos_transactions.coupon_amount, and posSummary
+  // nets that off so the cash drawer never appears to hold voucher money.
+  { name: "Coupon", kind: "custom", settles_immediately: true, sort_order: 50 },
 ];
+
+// Name of the seeded method above. Matched by name because the row is seeded
+// per account and has no stable id.
+const COUPON_METHOD_NAME = "Coupon";
 
 function paymentMethodRowToApi(row: Record<string, unknown>) {
   return {
@@ -2447,6 +2461,8 @@ function posRowToApi(row: Record<string, unknown>) {
     bookingId: String(row.booking_id ?? ""),
     source: String(row.source ?? "counter"),
     note: String(row.note ?? ""),
+    couponId: String(row.coupon_id ?? ""),
+    couponAmount: Number(row.coupon_amount) || 0,
     paidAt: String(row.paid_at ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
@@ -2544,6 +2560,7 @@ async function resolvePosItems(accountId: string, raw: unknown) {
       name: String(product.name ?? ""),
       sku: String(product.sku ?? ""),
       trackStock: product.track_stock === true,
+      isVoucher: product.is_voucher === true,
       quantity: line.quantity,
       unitPrice,
       lineTotal: round2(unitPrice * line.quantity),
@@ -2644,6 +2661,91 @@ async function getPosTransaction(accountId: string, id: string) {
   return { ...posRowToApi(rows[0]), items };
 }
 
+// Selling a voucher product issues a coupon for it, so a voucher bought over
+// the counter is the same object as one bought on Squarespace. The code is
+// generated here and handed back for the till to read out or print.
+async function issueCouponsForSale(
+  accountId: string,
+  row: Record<string, unknown>,
+  items: ResolvedPosItem[],
+) {
+  const voucherItems = items.filter((item) => item.isVoucher && item.lineTotal > 0);
+  if (!voucherItems.length) return [] as unknown[];
+
+  const issued: unknown[] = [];
+  for (const item of voucherItems) {
+    // One coupon per unit, not one per line: two vouchers bought together are
+    // two gifts, and they need two codes.
+    for (let copy = 0; copy < item.quantity; copy += 1) {
+      try {
+        const coupon = await issueCoupon(accountId, {
+          value: item.unitPrice,
+          currency: String(row.currency ?? ""),
+          issuedToName: String(row.customer_name ?? ""),
+          issuedToEmail: String(row.customer_email ?? ""),
+          customerId: String(row.customer_id ?? ""),
+          source: "pos",
+          productId: item.productId,
+          note: `Sold on ${row.receipt_number}`,
+        });
+        if (coupon) issued.push(coupon);
+      } catch (error) {
+        // The money is already taken; a failed coupon write must not undo the
+        // sale. It shows up as a sale with no voucher, which is fixable by hand.
+        console.error("billing_api:coupon_issue_failed", row.id, item.productId, error);
+      }
+    }
+  }
+  return issued;
+}
+
+// Refunding or voiding a sale puts the voucher value back; re-paying it takes
+// it off again. Guarded by coupon_reversed with the same compare-and-swap as
+// stock_applied, so each hop moves the balance exactly once however many times
+// the status is flipped.
+async function syncPosCoupon(accountId: string, row: Record<string, unknown>, status: string) {
+  const couponId = cleanString(row?.coupon_id, "", 160);
+  const amount = round2(Number(row?.coupon_amount) || 0);
+  if (!couponId || amount <= 0) return;
+
+  const shouldReverse = status !== "paid";
+  const claimed = await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query:
+      `id=eq.${encodeFilter(String(row.id ?? ""))}&account_id=eq.${encodeFilter(accountId)}` +
+      `&coupon_reversed=is.${shouldReverse ? "false" : "true"}`,
+    body: { coupon_reversed: shouldReverse, updated_at: nowIso() },
+    prefer: "return=representation",
+  });
+  if (!claimed.length) return;
+
+  const balance = shouldReverse
+    ? await restoreCouponValue(accountId, couponId, amount)
+    : await redeemCouponValue(accountId, couponId, amount);
+
+  if (balance === null && !shouldReverse) {
+    // Re-charging a coupon that no longer has the value is not something to
+    // paper over: put the flag back so the state still says "not taken".
+    await supabase("billing_pos_transactions", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(String(row.id ?? ""))}&account_id=eq.${encodeFilter(accountId)}`,
+      body: { coupon_reversed: true, updated_at: nowIso() },
+      prefer: "return=minimal",
+    });
+    throw Object.assign(new Error("The coupon no longer has enough left to cover this sale."), {
+      status: 409,
+      code: "COUPON_UNAVAILABLE",
+    });
+  }
+
+  await writeCouponRedemption(accountId, couponId, {
+    amount: shouldReverse ? -amount : amount,
+    resultingBalance: balance,
+    posTransactionId: String(row.id ?? ""),
+    note: `${row.receipt_number ?? ""} ${status}`.trim(),
+  });
+}
+
 async function createPosTransaction(accountId: string, body: Record<string, unknown>) {
   // Prices come back off the product rows, not the request body, so a basket
   // can't be re-priced by whoever is holding the till's browser open.
@@ -2674,11 +2776,35 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   const listedAmountRaw = body?.listedAmount;
   const source = ["lesson", "client", "counter"].includes(String(body?.source)) ? String(body.source) : "counter";
 
+  // Reserve the coupon BEFORE the sale row exists. The reservation is the part
+  // that can legitimately fail (someone else just spent it, it expired between
+  // the till reading it and pressing pay), and failing then is a refused sale
+  // rather than a receipt that has to be unpicked.
+  const couponId = cleanString(body?.couponId, "", 160);
+  let couponAmount = 0;
+  let couponBalance: number | null = null;
+  if (couponId) {
+    const requested = round2(cleanNumber(body?.couponAmount, 0, { min: 0 }));
+    couponAmount = Math.min(requested > 0 ? requested : amount, amount);
+    if (couponAmount <= 0) {
+      throw Object.assign(new Error("The coupon amount must be greater than zero."), { status: 400 });
+    }
+    couponBalance = await redeemCouponValue(accountId, couponId, couponAmount);
+    if (couponBalance === null) {
+      throw Object.assign(new Error("That coupon can no longer cover this sale."), {
+        status: 409,
+        code: "COUPON_UNAVAILABLE",
+      });
+    }
+  }
+
   const row = {
     id: randomUUID(),
     account_id: accountId,
     receipt_number: (await nextReceiptNumber(accountId)).receiptNumber,
     status,
+    coupon_id: couponId || null,
+    coupon_amount: couponAmount,
     payment_method_id: method.id,
     payment_method_name: method.name,
     payment_method_kind: method.kind,
@@ -2716,16 +2842,34 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
         row.receipt_number = (await nextReceiptNumber(accountId)).receiptNumber;
         continue;
       }
+      // The sale is not going to exist, so the value reserved above has to go
+      // back on the coupon or it is lost with nothing to show for it.
+      if (couponId && couponAmount > 0) {
+        await restoreCouponValue(accountId, couponId, couponAmount).catch(() => null);
+      }
       throw error;
     }
   }
 
+  if (couponId && couponAmount > 0) {
+    await writeCouponRedemption(accountId, couponId, {
+      amount: couponAmount,
+      resultingBalance: couponBalance,
+      posTransactionId: String(row.id),
+      note: row.receipt_number,
+    });
+  }
+
   await insertPosItems(accountId, String(row.id), items);
+  // Selling a voucher product is what creates a voucher. Done after the sale
+  // exists so a coupon can never outlive a receipt that failed to write.
+  const issuedCoupons = await issueCouponsForSale(accountId, row, items);
   // Cash and Eftpos are paid the moment they are recorded, so the stock leaves
   // the shelf now. Clarity Pay and On account wait for their status change.
   if (status === "paid") await syncPosStock(accountId, String(row.id), status);
 
   return {
+    issuedCoupons,
     transaction: {
       ...posRowToApi(row),
       items: items.map((item) => ({
@@ -2760,8 +2904,10 @@ async function updatePosTransactionStatus(accountId: string, id: string, body: R
   // puts them back. movePosStock() is the thing that makes each of those happen
   // exactly once, however many times the status is flipped.
   await syncPosStock(accountId, id, status);
+  await syncPosCoupon(accountId, rows[0] as Record<string, unknown>, status);
   const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
-  return { transaction: { ...posRowToApi(rows[0]), items } };
+  const refreshed = (await getPosTransaction(accountId, id)) || { ...posRowToApi(rows[0]), items };
+  return { transaction: refreshed };
 }
 
 // Clarity Pay at the counter: create a Stripe Checkout session for this sale.
@@ -2830,6 +2976,7 @@ async function syncPosCheckout(accountId: string, id: string) {
     prefer: "return=representation",
   });
   await syncPosStock(accountId, id, "paid");
+  if (updated.length) await syncPosCoupon(accountId, updated[0] as Record<string, unknown>, "paid");
   const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
   return { transaction: updated.length ? { ...posRowToApi(updated[0]), items } : transaction, paid: true };
 }
@@ -2868,20 +3015,417 @@ async function posSummary(accountId: string, url: URL) {
   const { transactions } = await listPosTransactions(accountId, url);
   const paid = transactions.filter((entry) => entry.status === "paid");
   const byMethod = new Map<string, { paymentMethodName: string; count: number; total: number }>();
+  const addToMethod = (name: string, amount: number, countsAsSale: boolean) => {
+    if (amount <= 0 && !countsAsSale) return;
+    const bucket = byMethod.get(name) || { paymentMethodName: name, count: 0, total: 0 };
+    if (countsAsSale) bucket.count += 1;
+    bucket.total = round2(bucket.total + amount);
+    byMethod.set(name, bucket);
+  };
+
+  // A sale can be part voucher, part card. entry.amount is the whole sale, so
+  // the payment method only gets what was actually tendered on it - otherwise a
+  // $100 sale settled with a $60 voucher would show $100 in the cash drawer.
+  let couponTotal = 0;
   for (const entry of paid) {
-    const key = String(entry.paymentMethodName);
-    const bucket = byMethod.get(key) || { paymentMethodName: key, count: 0, total: 0 };
-    bucket.count += 1;
-    bucket.total = round2(bucket.total + entry.amount);
-    byMethod.set(key, bucket);
+    const couponAmount = round2(entry.couponAmount || 0);
+    couponTotal = round2(couponTotal + couponAmount);
+    addToMethod(String(entry.paymentMethodName), round2(entry.amount - couponAmount), true);
   }
+  if (couponTotal > 0) addToMethod("Coupons redeemed", couponTotal, false);
+
   return {
     currency: paid[0]?.currency || (await resolveDefaultCurrency()),
     paidCount: paid.length,
     pendingCount: transactions.filter((entry) => entry.status === "pending").length,
+    // The headline stays the full value of what went out the door; the method
+    // breakdown underneath is what reconciles against a till float.
     paidTotal: round2(paid.reduce((sum, entry) => sum + entry.amount, 0)),
+    couponTotal,
     byMethod: [...byMethod.values()].sort((a, b) => b.total - a.total),
   };
+}
+
+// --- Coupons (gift vouchers) -------------------------------------------------
+// Stored value, not a discount. Someone pays for a voucher - on Squarespace via
+// Stripe, or at the counter - and gets a code to spend later. The balance is
+// money owed to whoever holds the code, which is why every move of it goes
+// through the SQL functions in coupons-schema.sql rather than a read-then-write
+// here: two tills spending the same voucher at once would otherwise both
+// succeed.
+
+// Ambiguous characters left out on purpose - a code gets read off a printed
+// card and down a phone line, and 0/O and 1/I/L are where that goes wrong.
+// Mirrors generateCouponCode in src/modules/billing/couponMath.ts.
+const COUPON_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+function generateCouponCode() {
+  const block = (length: number) =>
+    Array.from({ length }, () => COUPON_ALPHABET[Math.floor(Math.random() * COUPON_ALPHABET.length)]).join("");
+  return `CG-${block(4)}-${block(4)}`;
+}
+
+function normaliseCouponCode(value: unknown) {
+  return cleanString(value, "", 40).toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function couponRowToApi(row: Record<string, unknown>) {
+  const remaining = Number(row.remaining_value) || 0;
+  const expiresAt = row.expires_at ? String(row.expires_at) : null;
+  const expired = Boolean(expiresAt && new Date(expiresAt).getTime() <= Date.now());
+  return {
+    id: String(row.id ?? ""),
+    code: String(row.code ?? ""),
+    status: String(row.status ?? "active"),
+    originalValue: Number(row.original_value) || 0,
+    remainingValue: remaining,
+    currency: String(row.currency ?? "NZD"),
+    issuedToName: String(row.issued_to_name ?? ""),
+    issuedToEmail: String(row.issued_to_email ?? ""),
+    customerId: String(row.customer_id ?? ""),
+    source: String(row.source ?? "manual"),
+    productId: String(row.product_id ?? ""),
+    sourceLineId: String(row.source_line_id ?? ""),
+    sourceInvoiceId: String(row.source_invoice_id ?? ""),
+    expiresAt,
+    // Derived so the till, the list and any future report all agree.
+    expired,
+    spendable: row.status === "active" && remaining > 0 && !expired,
+    note: String(row.note ?? ""),
+    issuedAt: String(row.issued_at ?? ""),
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: String(row.updated_at ?? ""),
+  };
+}
+
+// Insert with a fresh code, retrying on the unique-code index rather than
+// pre-checking - the check would be a race, the index is not.
+async function insertCouponRow(row: Record<string, unknown>) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await supabase("billing_coupons", { method: "POST", body: [row], prefer: "return=minimal" });
+      return row;
+    } catch (error) {
+      const status = (error as { supabaseStatus?: number })?.supabaseStatus;
+      if (status !== 409) throw error;
+      // A 409 is either a duplicate code (retry with a new one) or a duplicate
+      // source line, which means this purchase already has a coupon and must
+      // not get a second.
+      if (row.source_line_id) return null;
+      if (attempt >= 5) throw error;
+      row.code = generateCouponCode();
+    }
+  }
+}
+
+async function issueCoupon(
+  accountId: string,
+  input: {
+    value: number;
+    code?: string;
+    currency?: string;
+    issuedToName?: string;
+    issuedToEmail?: string;
+    customerId?: string;
+    source?: string;
+    productId?: string;
+    sourceLineId?: string;
+    sourceInvoiceId?: string;
+    expiresAt?: string | null;
+    note?: string;
+  },
+) {
+  const value = round2(cleanNumber(input.value, 0, { min: 0 }));
+  if (value <= 0) throw Object.assign(new Error("A coupon needs a value greater than zero."), { status: 400 });
+
+  const row: Record<string, unknown> = {
+    id: randomUUID(),
+    account_id: accountId,
+    code: normaliseCouponCode(input.code) ? String(input.code).toUpperCase().trim() : generateCouponCode(),
+    status: "active",
+    original_value: value,
+    remaining_value: value,
+    currency: cleanString(input.currency, await resolveDefaultCurrency(), 10),
+    issued_to_name: cleanString(input.issuedToName, "", 140) || null,
+    issued_to_email: cleanString(input.issuedToEmail, "", 180) || null,
+    customer_id: cleanString(input.customerId, "", 160) || null,
+    source: ["stripe", "pos", "manual"].includes(String(input.source)) ? String(input.source) : "manual",
+    product_id: cleanString(input.productId, "", 160) || null,
+    source_line_id: cleanString(input.sourceLineId, "", 200) || null,
+    source_invoice_id: cleanString(input.sourceInvoiceId, "", 200) || null,
+    expires_at: input.expiresAt ? new Date(String(input.expiresAt)).toISOString() : null,
+    note: cleanString(input.note, "", 400) || null,
+    issued_at: nowIso(),
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+
+  const inserted = await insertCouponRow(row);
+  return inserted ? couponRowToApi(inserted) : null;
+}
+
+async function listCoupons(accountId: string, url: URL) {
+  const limit = Math.max(1, Math.min(500, cleanNumber(url.searchParams.get("limit"), 200)));
+  const status = cleanString(url.searchParams.get("status"), "", 20);
+  const filters = [`account_id=eq.${encodeFilter(accountId)}`];
+  if (["active", "redeemed", "void"].includes(status)) filters.push(`status=eq.${encodeFilter(status)}`);
+  const rows = await supabase("billing_coupons", {
+    query: `select=*&${filters.join("&")}&order=issued_at.desc&limit=${limit}`,
+  });
+  return { coupons: (rows as Array<Record<string, unknown>>).map(couponRowToApi) };
+}
+
+async function getCouponRow(accountId: string, id: string) {
+  const rows = await supabase("billing_coupons", {
+    query: `select=*&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+  });
+  return rows.length ? (rows[0] as Record<string, unknown>) : null;
+}
+
+// What the till calls when a code is typed in. Codes are stored with hyphens
+// but compared without them, so the lookup normalises both sides. There is no
+// index on the normalised form, so this reads the account's codes and matches
+// in JS - fine at the scale of a pro shop's voucher book.
+async function lookupCoupon(accountId: string, rawCode: string) {
+  const needle = normaliseCouponCode(rawCode);
+  if (!needle) throw Object.assign(new Error("Enter a coupon code."), { status: 400 });
+  const rows = (await supabase("billing_coupons", {
+    query: `select=*&account_id=eq.${encodeFilter(accountId)}&limit=5000`,
+  })) as Array<Record<string, unknown>>;
+  const match = rows.find((row) => normaliseCouponCode(row.code) === needle);
+  if (!match) throw Object.assign(new Error("No coupon with that code."), { status: 404, code: "COUPON_NOT_FOUND" });
+  return { coupon: couponRowToApi(match) };
+}
+
+async function updateCoupon(accountId: string, id: string, body: Record<string, unknown>) {
+  const patch: Record<string, unknown> = { updated_at: nowIso() };
+  const status = String(body?.status || "");
+  // Only cancelling and un-cancelling are offered. "redeemed" is a consequence
+  // of spending, never something to be set by hand.
+  if (status === "void" || status === "active") patch.status = status;
+  if (body?.note !== undefined) patch.note = cleanString(body?.note, "", 400) || null;
+  if (body?.issuedToName !== undefined) patch.issued_to_name = cleanString(body?.issuedToName, "", 140) || null;
+  if (body?.issuedToEmail !== undefined) patch.issued_to_email = cleanString(body?.issuedToEmail, "", 180) || null;
+  if (body?.expiresAt !== undefined) {
+    patch.expires_at = body.expiresAt ? new Date(String(body.expiresAt)).toISOString() : null;
+  }
+  const rows = await supabase("billing_coupons", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: patch,
+    prefer: "return=representation",
+  });
+  if (!rows.length) throw Object.assign(new Error("Coupon not found."), { status: 404 });
+  return { coupon: couponRowToApi(rows[0]) };
+}
+
+async function writeCouponRedemption(
+  accountId: string,
+  couponId: string,
+  entry: { amount: number; resultingBalance: number | null; posTransactionId?: string; note?: string },
+) {
+  await supabase("billing_coupon_redemptions", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: [
+      {
+        id: randomUUID(),
+        account_id: accountId,
+        coupon_id: couponId,
+        amount: entry.amount,
+        resulting_balance: entry.resultingBalance,
+        pos_transaction_id: entry.posTransactionId || null,
+        note: cleanString(entry.note, "", 300) || null,
+        created_at: nowIso(),
+      },
+    ],
+  });
+}
+
+async function listCouponRedemptions(accountId: string, id: string, url: URL) {
+  const limit = Math.max(1, Math.min(200, cleanNumber(url.searchParams.get("limit"), 50)));
+  const rows = await supabase("billing_coupon_redemptions", {
+    query:
+      `select=*&account_id=eq.${encodeFilter(accountId)}&coupon_id=eq.${encodeFilter(id)}` +
+      `&order=created_at.desc&limit=${limit}`,
+  });
+  return {
+    redemptions: (rows as Array<Record<string, unknown>>).map((row) => ({
+      id: String(row.id ?? ""),
+      amount: Number(row.amount) || 0,
+      resultingBalance: row.resulting_balance === null || row.resulting_balance === undefined ? null : Number(row.resulting_balance),
+      posTransactionId: String(row.pos_transaction_id ?? ""),
+      note: String(row.note ?? ""),
+      createdAt: String(row.created_at ?? ""),
+    })),
+  };
+}
+
+// Take value off a coupon. Returns the new balance, or null when the coupon is
+// missing, cancelled, expired or short - the guard is in the SQL, so this is
+// safe against two tills racing on the same code.
+async function redeemCouponValue(accountId: string, couponId: string, amount: number) {
+  const result = await supabase("rpc/billing_redeem_coupon", {
+    method: "POST",
+    body: { p_account_id: accountId, p_coupon_id: couponId, p_amount: amount },
+  });
+  const balance = Array.isArray(result) ? result[0] : result;
+  return balance === null || balance === undefined ? null : Number(balance);
+}
+
+async function restoreCouponValue(accountId: string, couponId: string, amount: number) {
+  const result = await supabase("rpc/billing_restore_coupon", {
+    method: "POST",
+    body: { p_account_id: accountId, p_coupon_id: couponId, p_amount: amount },
+  });
+  const balance = Array.isArray(result) ? result[0] : result;
+  return balance === null || balance === undefined ? null : Number(balance);
+}
+
+// --- Importing vouchers bought through Stripe --------------------------------
+// Squarespace sells the voucher, Stripe takes the money, and the existing
+// billing sync already mirrors that purchase into billing_invoices /
+// billing_invoice_items. So the import reads what is already here rather than
+// re-querying Stripe for orders.
+//
+// Matching a line back to a voucher product is unavoidably a heuristic: an
+// invoice line carries a Stripe *price* id, while a catalog row is keyed by the
+// Stripe *product* id. So we resolve prices per voucher product where Stripe is
+// reachable, and fall back to matching the line description against the product
+// name. Because it is a heuristic, the result is a list of candidates for a
+// human to confirm - nothing is minted automatically.
+
+async function voucherProducts(accountId: string) {
+  const rows = await supabase("billing_products_services", {
+    query: `select=*&account_id=eq.${encodeFilter(accountId)}&is_voucher=is.true`,
+  });
+  return rows as Array<Record<string, unknown>>;
+}
+
+async function stripePriceIdsForProduct(productId: string) {
+  // Only Stripe-synced catalog rows have Stripe product ids; a hand-made one
+  // has a UUID and there is nothing to ask Stripe about.
+  if (!/^prod_/.test(productId)) return [];
+  try {
+    const response = (await stripeRequest("prices", {
+      method: "GET",
+      params: new URLSearchParams({ product: productId, limit: "100" }),
+    })) as { data?: Array<{ id?: string }> };
+    return (response.data || []).map((price) => String(price.id || "")).filter(Boolean);
+  } catch {
+    // Stripe unreachable or not configured: fall back to name matching.
+    return [];
+  }
+}
+
+async function stripeCouponCandidates(accountId: string, url: URL) {
+  const products = await voucherProducts(accountId);
+  if (!products.length) return { candidates: [], voucherProducts: [] as unknown[] };
+
+  const priceToProduct = new Map<string, Record<string, unknown>>();
+  const nameToProduct = new Map<string, Record<string, unknown>>();
+  for (const product of products) {
+    nameToProduct.set(String(product.name ?? "").trim().toLowerCase(), product);
+    for (const priceId of await stripePriceIdsForProduct(String(product.id ?? ""))) {
+      priceToProduct.set(priceId, product);
+    }
+  }
+
+  const limit = Math.max(1, Math.min(1000, cleanNumber(url.searchParams.get("limit"), 500)));
+  const lines = (await supabase("billing_invoice_items", {
+    query:
+      `select=id,invoice_id,description,line_total,source_id,created_at` +
+      `&account_id=eq.${encodeFilter(accountId)}&order=created_at.desc&limit=${limit}`,
+  })) as Array<Record<string, unknown>>;
+
+  const matched = lines
+    .map((line) => {
+      const bySource = priceToProduct.get(String(line.source_id ?? ""));
+      const byName = nameToProduct.get(String(line.description ?? "").trim().toLowerCase());
+      const product = bySource || byName;
+      if (!product) return null;
+      return {
+        lineId: String(line.id ?? ""),
+        invoiceId: String(line.invoice_id ?? ""),
+        description: String(line.description ?? ""),
+        value: round2(Number(line.line_total) || 0),
+        productId: String(product.id ?? ""),
+        productName: String(product.name ?? ""),
+        // How confident the match is, so the review list can say so.
+        matchedBy: bySource ? "price" : "name",
+        purchasedAt: String(line.created_at ?? ""),
+      };
+    })
+    .filter(Boolean) as Array<Record<string, unknown>>;
+
+  if (!matched.length) return { candidates: [], voucherProducts: products.map(productRowToApi) };
+
+  // Anything already issued is dropped rather than shown greyed out - the point
+  // of the list is "what still needs doing".
+  const existing = (await supabase("billing_coupons", {
+    query: `select=source_line_id&account_id=eq.${encodeFilter(accountId)}&source_line_id=not.is.null&limit=5000`,
+  })) as Array<{ source_line_id?: string }>;
+  const issued = new Set(existing.map((row) => String(row.source_line_id ?? "")));
+
+  // Invoice customer details make the voucher findable later by the person who
+  // bought it, so they are pulled in for the invoices that survived the filter.
+  const outstanding = matched.filter((entry) => !issued.has(String(entry.lineId)) && Number(entry.value) > 0);
+  const invoiceIds = [...new Set(outstanding.map((entry) => String(entry.invoiceId)).filter(Boolean))];
+  const invoices = new Map<string, Record<string, unknown>>();
+  for (let index = 0; index < invoiceIds.length; index += 150) {
+    const batch = invoiceIds.slice(index, index + 150);
+    const list = batch.map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+    const rows = (await supabase("billing_invoices", {
+      query:
+        `select=id,customer_name,customer_email,currency,issue_date&account_id=eq.${encodeFilter(accountId)}` +
+        `&id=in.(${encodeURIComponent(list)})`,
+    })) as Array<Record<string, unknown>>;
+    for (const row of rows) invoices.set(String(row.id ?? ""), row);
+  }
+
+  return {
+    voucherProducts: products.map(productRowToApi),
+    candidates: outstanding.map((entry) => {
+      const invoice = invoices.get(String(entry.invoiceId));
+      return {
+        ...entry,
+        customerName: String(invoice?.customer_name ?? ""),
+        customerEmail: String(invoice?.customer_email ?? ""),
+        currency: String(invoice?.currency ?? "NZD"),
+        purchasedAt: String(invoice?.issue_date ?? entry.purchasedAt ?? ""),
+      };
+    }),
+  };
+}
+
+// Issues one coupon per confirmed candidate. Re-running with the same ids is
+// harmless: the unique index on (account_id, source_line_id) turns a repeat into
+// a skip, not a duplicate voucher.
+async function importStripeCoupons(accountId: string, body: Record<string, unknown>, url: URL) {
+  const requested = Array.isArray(body?.lineIds) ? body.lineIds.map((id) => cleanString(id, "", 200)).filter(Boolean) : [];
+  const { candidates } = await stripeCouponCandidates(accountId, url);
+  const wanted = requested.length
+    ? (candidates as Array<Record<string, unknown>>).filter((entry) => requested.includes(String(entry.lineId)))
+    : (candidates as Array<Record<string, unknown>>);
+
+  const issued: unknown[] = [];
+  let skipped = 0;
+  for (const candidate of wanted) {
+    const coupon = await issueCoupon(accountId, {
+      value: Number(candidate.value) || 0,
+      currency: String(candidate.currency || ""),
+      issuedToName: String(candidate.customerName || ""),
+      issuedToEmail: String(candidate.customerEmail || ""),
+      source: "stripe",
+      productId: String(candidate.productId || ""),
+      sourceLineId: String(candidate.lineId || ""),
+      sourceInvoiceId: String(candidate.invoiceId || ""),
+      note: `Imported from ${candidate.description}`,
+    });
+    if (coupon) issued.push(coupon);
+    else skipped += 1;
+  }
+  return { issued, issuedCount: issued.length, skipped };
 }
 
 // --- Router ------------------------------------------------------------------
@@ -2906,6 +3450,30 @@ export default async function handler(req: Request) {
     }
     if (action.startsWith("products/") && (req.method === "PUT" || req.method === "PATCH")) {
       return json(await updateProduct(accountId, action.slice("products/".length), await parseBody(req)));
+    }
+
+    // Coupons (gift vouchers). Sub-actions before the generic :id handlers.
+    if (action === "coupons" && req.method === "GET") return json(await listCoupons(accountId, url));
+    if (action === "coupons" && req.method === "POST") {
+      const body = await parseBody(req);
+      const coupon = await issueCoupon(accountId, { ...body, source: "manual" });
+      if (!coupon) throw Object.assign(new Error("That coupon already exists."), { status: 409 });
+      return json({ coupon }, 201);
+    }
+    if (action === "coupons/lookup" && req.method === "GET") {
+      return json(await lookupCoupon(accountId, url.searchParams.get("code") || ""));
+    }
+    if (action === "coupons/stripe-candidates" && req.method === "GET") {
+      return json(await stripeCouponCandidates(accountId, url));
+    }
+    if (action === "coupons/import" && req.method === "POST") {
+      return json(await importStripeCoupons(accountId, await parseBody(req), url));
+    }
+    if (action.startsWith("coupons/") && action.endsWith("/redemptions") && req.method === "GET") {
+      return json(await listCouponRedemptions(accountId, action.slice("coupons/".length, -"/redemptions".length), url));
+    }
+    if (action.startsWith("coupons/") && (req.method === "PUT" || req.method === "PATCH")) {
+      return json(await updateCoupon(accountId, action.slice("coupons/".length), await parseBody(req)));
     }
 
     if (action === "discounts" && req.method === "GET") return json(await listDiscounts(accountId));

@@ -48,6 +48,7 @@ import {
   Sparkles,
   Sun,
   ShoppingCart,
+  Ticket,
   Trash2,
   Upload,
   User,
@@ -153,6 +154,9 @@ import type {
   PosSummary,
   PosCheckoutContext,
   StockMovement,
+  BillingCoupon,
+  CouponRedemption,
+  CouponImportCandidate,
 } from "./modules/billing/types";
 import { PosCheckoutModal } from "./modules/billing/PosCheckoutModal";
 import {
@@ -163,6 +167,8 @@ import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmo
 import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
 import { ProductsPanel } from "./modules/billing/ProductsPanel";
 import { SellScreen } from "./modules/billing/SellScreen";
+import { CouponsPanel } from "./modules/billing/CouponsPanel";
+import type { CouponIssueValues } from "./modules/billing/CouponsPanel";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
 import {
   presetRange,
@@ -974,6 +980,7 @@ type BillingSection =
   | "invoices"
   | "expenses"
   | "products"
+  | "coupons"
   | "reports"
   | "pos"
   | "settings";
@@ -4943,6 +4950,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // state. They start empty and are populated by loadBillingWorkspace().
   const [catalogItems, setCatalogItems] = useState<BillingCatalogItem[]>([]);
   const [catalogLoadState, setCatalogLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  // Gift vouchers. Separate from billing discounts on purpose: a coupon is money
+  // someone has already paid, a discount preset is just a label on a price.
+  const [coupons, setCoupons] = useState<BillingCoupon[]>([]);
+  const [couponsLoadState, setCouponsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [billingDataLoadState, setBillingDataLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [activeInvoiceId, setActiveInvoiceId] = useState("");
   // The number of the invoice currently open/saved (blank for a brand-new one,
@@ -13620,6 +13631,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             supplier: values.supplier.trim(),
             sku: values.sku.trim(),
             trackStock: values.trackStock,
+            isVoucher: values.isVoucher,
             lowStockThreshold: Math.max(0, Number(values.lowStockThreshold) || 0),
             // Ignored by the backend on an update - stock only moves through an
             // adjustment or a sale.
@@ -13660,6 +13672,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           supplier: product.supplier || "",
           sku: product.sku || "",
           trackStock: product.trackStock !== false,
+          isVoucher: product.isVoucher === true,
           lowStockThreshold: product.lowStockThreshold || 0,
           active,
         }),
@@ -14275,6 +14288,132 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       await fetchPosPaymentMethods();
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Could not update the payment method." });
+    }
+  }
+
+  // --- Coupons ---------------------------------------------------------------
+
+  async function fetchCoupons() {
+    setCouponsLoadState("loading");
+    try {
+      const response = await fetch("/api/billing/coupons?limit=500", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        setCouponsLoadState("error");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load coupons."));
+      const data = (await response.json()) as { coupons?: BillingCoupon[] };
+      setCoupons(Array.isArray(data.coupons) ? data.coupons : []);
+      setCouponsLoadState("loaded");
+    } catch (error) {
+      setCouponsLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load coupons." });
+    }
+  }
+
+  async function issueCoupon(values: CouponIssueValues) {
+    try {
+      const response = await fetch("/api/billing/coupons", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          value: values.value,
+          code: values.code.trim(),
+          issuedToName: values.issuedToName.trim(),
+          issuedToEmail: values.issuedToEmail.trim(),
+          // A blank date field means "never expires", which is the honest
+          // default for something already paid for.
+          expiresAt: values.expiresAt ? new Date(`${values.expiresAt}T23:59:59`).toISOString() : null,
+          note: values.note.trim(),
+        }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not issue the coupon."));
+      const data = (await response.json()) as { coupon?: BillingCoupon };
+      if (data.coupon) {
+        setCoupons((current) => [data.coupon as BillingCoupon, ...current]);
+        setToast({ message: `Coupon ${data.coupon.code} issued.` });
+      }
+      return true;
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not issue the coupon." });
+      return false;
+    }
+  }
+
+  async function setCouponVoid(coupon: BillingCoupon, isVoid: boolean) {
+    try {
+      const response = await fetch(`/api/billing/coupons/${encodeURIComponent(coupon.id)}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: isVoid ? "void" : "active" }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update the coupon."));
+      const data = (await response.json()) as { coupon?: BillingCoupon };
+      if (data.coupon) {
+        const saved = data.coupon;
+        setCoupons((current) => current.map((entry) => (entry.id === saved.id ? saved : entry)));
+      }
+      setToast({ message: `${coupon.code} ${isVoid ? "cancelled" : "restored"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update the coupon." });
+    }
+  }
+
+  async function fetchCouponRedemptions(couponId: string) {
+    try {
+      const response = await fetch(`/api/billing/coupons/${encodeURIComponent(couponId)}/redemptions`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error("history");
+      const data = (await response.json()) as { redemptions?: CouponRedemption[] };
+      return Array.isArray(data.redemptions) ? data.redemptions : [];
+    } catch {
+      // The history is context, not the point of the row.
+      return [];
+    }
+  }
+
+  async function findStripeCouponCandidates() {
+    try {
+      const response = await fetch("/api/billing/coupons/stripe-candidates", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not look through Stripe purchases."));
+      const data = (await response.json()) as { candidates?: CouponImportCandidate[] };
+      return Array.isArray(data.candidates) ? data.candidates : [];
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not look through Stripe purchases." });
+      return [];
+    }
+  }
+
+  async function importStripeCoupons(lineIds: string[]) {
+    try {
+      const response = await fetch("/api/billing/coupons/import", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lineIds }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not import the coupons."));
+      const data = (await response.json()) as { issuedCount?: number; skipped?: number };
+      const issued = data.issuedCount || 0;
+      await fetchCoupons();
+      setToast({
+        message: `${issued} coupon${issued === 1 ? "" : "s"} issued${data.skipped ? `, ${data.skipped} already had one` : ""}.`,
+      });
+      return issued;
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not import the coupons." });
+      return 0;
     }
   }
 
@@ -21762,6 +21901,19 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 Products
               </button>
               <button
+                className={billingSection === "coupons" ? "active" : ""}
+                onClick={() => {
+                  setBillingSection("coupons");
+                  void fetchCoupons();
+                }}
+                role="tab"
+                aria-selected={billingSection === "coupons"}
+                type="button"
+              >
+                <Ticket size={16} />
+                Coupons
+              </button>
+              <button
                 className={billingSection === "pos" ? "active" : ""}
                 onClick={() => {
                   setBillingSection("pos");
@@ -23611,6 +23763,21 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 onSetActive={setProductActive}
                 onAdjustStock={adjustProductStock}
                 onLoadMovements={fetchStockMovements}
+              />
+            )}
+
+            {billingSection === "coupons" && (
+              <CouponsPanel
+                coupons={coupons}
+                loadState={couponsLoadState}
+                currency={invoiceSettings.currency}
+                formatMoney={formatMoney}
+                onReload={() => void fetchCoupons()}
+                onIssue={issueCoupon}
+                onSetVoid={setCouponVoid}
+                onLoadRedemptions={fetchCouponRedemptions}
+                onFindStripeCandidates={findStripeCouponCandidates}
+                onImport={importStripeCoupons}
               />
             )}
 
