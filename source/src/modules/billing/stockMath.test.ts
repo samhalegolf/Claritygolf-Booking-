@@ -1,12 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  addCustomSellLine,
+  addSellLine,
   addToBasket,
+  cashSuggestions,
+  changeDue,
   basketTotal,
   describeBasket,
   isLowStock,
   lineTotal,
+  sellTaxIncluded,
+  sellTotal,
   setBasketQuantity,
+  setSellPrice,
+  setSellQuantity,
   stockAdjustmentDelta,
   stockAfterBasket,
 } from "./stockMath.ts";
@@ -92,4 +100,47 @@ test("a stocktake is stored as the correction, not the number typed", () => {
   assert.equal(stockAdjustmentDelta("setTo", 4, 4), 0);
   assert.equal(stockAdjustmentDelta("delta", 7, 6), 6);
   assert.equal(stockAdjustmentDelta("delta", 7, -2), -2);
+});
+
+test("docket lines merge catalog items but never custom ones", () => {
+  const once = addSellLine([], product());
+  assert.equal(addSellLine(once, product())[0].quantity, 2);
+  assert.equal(addSellLine(once, product({ id: "p2", name: "Balls" })).length, 2);
+
+  // Two $10 "custom" lines are two different things the customer is paying for.
+  const custom = addCustomSellLine(addCustomSellLine([], "Range balls", 10, 15), "Range balls", 10, 15);
+  assert.equal(custom.length, 2);
+  assert.equal(custom[0].productId, "");
+  assert.notEqual(custom[0].key, custom[1].key);
+});
+
+test("docket quantity and price edits", () => {
+  const lines = addSellLine([], product());
+  assert.equal(setSellQuantity(lines, "p1", 3)[0].quantity, 3);
+  assert.deepEqual(setSellQuantity(lines, "p1", 0), []);
+  assert.equal(setSellPrice(lines, "p1", 19.5)[0].unitPrice, 19.5);
+  // A negative price would be a refund by accident.
+  assert.equal(setSellPrice(lines, "p1", -5)[0].unitPrice, 0);
+});
+
+test("tax is what is already inside the total, not added on top", () => {
+  const lines = setSellQuantity(addSellLine([], product({ price: 23, taxRate: 15 })), "p1", 2);
+  assert.equal(sellTotal(lines), 46);
+  // 46 * 15 / 115 = 6.00
+  assert.equal(sellTaxIncluded(lines), 6);
+  // A zero-rated line contributes nothing.
+  assert.equal(sellTaxIncluded(addSellLine([], product({ id: "p3", price: 50, taxRate: 0 }))), 0);
+});
+
+test("change due goes negative until enough is handed over", () => {
+  assert.equal(changeDue(50, 46), 4);
+  assert.equal(changeDue(46, 46), 0);
+  assert.equal(changeDue(20, 46), -26);
+});
+
+test("cash suggestions offer the exact amount then the next round notes", () => {
+  assert.deepEqual(cashSuggestions(46), [46, 50, 60, 100]);
+  // Nothing between 20 and 50 is a note anyone carries, so it is skipped.
+  assert.deepEqual(cashSuggestions(20), [20, 50, 100]);
+  assert.deepEqual(cashSuggestions(0), []);
 });

@@ -1,0 +1,805 @@
+// Sell - the full-screen till.
+//
+// Two panes, the way every counter POS is laid out: the docket on the left
+// (what the customer is buying, and the Pay button), the catalog on the right
+// (search, category tabs, tiles). The small PosCheckoutModal still exists and
+// still makes sense from a lesson card or a client profile, where the sale is
+// already defined and a modal is less disruptive than changing screens. This is
+// for walk-ups, where nothing is known until someone puts a glove on the counter.
+//
+// Like PosCheckoutModal, this owns its own fetching: it is a self-contained
+// conversation with /api/billing/pos/* and /api/billing/products, and threading
+// a docket plus a payment state machine plus a poll timer through App.tsx would
+// add noise there without making anything reusable.
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  Check,
+  CreditCard,
+  ExternalLink,
+  Minus,
+  Package,
+  Plus,
+  Search,
+  Trash2,
+  User,
+  X,
+} from "lucide-react";
+import type { BillingCatalogItem, BillingCatalogKind, PosPaymentMethod, PosTransaction } from "./types";
+import {
+  addCustomSellLine,
+  addSellLine,
+  cashSuggestions,
+  changeDue,
+  isLowStock,
+  lineTotal,
+  sellTaxIncluded,
+  sellTotal,
+  setSellPrice,
+  setSellQuantity,
+} from "./stockMath";
+import type { SellLine } from "./stockMath";
+import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
+
+export type SellScreenProps = {
+  currency: string;
+  taxName: string;
+  defaultTaxRate: number;
+  formatMoney: (amount: number, currency?: string) => string;
+  clients: Array<{ id: string; name: string; email?: string }>;
+  onSaleCompleted: (transaction: PosTransaction) => void;
+  onToast: (message: string) => void;
+};
+
+type TabKey = "all" | BillingCatalogKind;
+
+const TAB_LABELS: Record<TabKey, string> = {
+  all: "All",
+  product: "Products",
+  service: "Services",
+  package: "Packages",
+  "lesson-type": "Lesson types",
+};
+
+const TAB_ORDER: TabKey[] = ["all", "product", "service", "package", "lesson-type"];
+
+// Parked dockets live on the till, not in the database. A parked sale is a
+// half-finished thought belonging to whoever is standing at this counter right
+// now; it does not need to survive a device change, and keeping it local means
+// no schema and no way for a stale park to reappear on someone else's screen.
+const PARKED_KEY = "clarity.sell.parked.v1";
+
+type ParkedSale = {
+  id: string;
+  label: string;
+  parkedAt: string;
+  lines: SellLine[];
+  customerName: string;
+  customerEmail: string;
+  customerId: string;
+};
+
+function readParked(): ParkedSale[] {
+  try {
+    const raw = window.localStorage.getItem(PARKED_KEY);
+    const parsed = raw ? (JSON.parse(raw) as ParkedSale[]) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeParked(sales: ParkedSale[]) {
+  try {
+    window.localStorage.setItem(PARKED_KEY, JSON.stringify(sales));
+  } catch {
+    // A full or disabled localStorage shouldn't take the till down; the sale on
+    // screen is unaffected, only the parking of it.
+  }
+}
+
+export function SellScreen({
+  currency,
+  taxName,
+  defaultTaxRate,
+  formatMoney,
+  clients,
+  onSaleCompleted,
+  onToast,
+}: SellScreenProps) {
+  const [catalog, setCatalog] = useState<BillingCatalogItem[]>([]);
+  const [catalogState, setCatalogState] = useState<"loading" | "loaded" | "error">("loading");
+  const [methods, setMethods] = useState<PosPaymentMethod[]>([]);
+
+  const [lines, setLines] = useState<SellLine[]>([]);
+  const [tab, setTab] = useState<TabKey>("product");
+  const [search, setSearch] = useState("");
+
+  const [customerId, setCustomerId] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [customerOpen, setCustomerOpen] = useState(false);
+
+  const [customName, setCustomName] = useState("");
+  const [customAmount, setCustomAmount] = useState("");
+  const [customOpen, setCustomOpen] = useState(false);
+
+  const [parked, setParked] = useState<ParkedSale[]>(() => (typeof window === "undefined" ? [] : readParked()));
+
+  // Payment overlay. "closed" -> "method" -> ("cash" for tendering) -> "qr" -> "done".
+  const [payStage, setPayStage] = useState<"closed" | "method" | "cash" | "qr" | "done">("closed");
+  const [methodId, setMethodId] = useState("");
+  const [tendered, setTendered] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [sale, setSale] = useState<PosTransaction | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState("");
+
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const total = sellTotal(lines);
+  const taxIncluded = sellTaxIncluded(lines);
+  const itemCount = lines.reduce((count, line) => count + line.quantity, 0);
+  const selectedMethod = methods.find((method) => method.id === methodId) || null;
+  const tenderedValue = Number(tendered);
+  const change = changeDue(tenderedValue, total);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [productsResponse, methodsResponse] = await Promise.all([
+          fetch("/api/billing/products", { credentials: "same-origin", cache: "no-store" }),
+          fetch("/api/billing/pos/payment-methods", { credentials: "same-origin", cache: "no-store" }),
+        ]);
+        if (cancelled) return;
+        if (!productsResponse.ok) throw new Error("Could not load the catalog.");
+        const productData = (await productsResponse.json()) as { products?: BillingCatalogItem[] };
+        setCatalog(Array.isArray(productData.products) ? productData.products : []);
+        setCatalogState("loaded");
+        if (methodsResponse.ok) {
+          const methodData = (await methodsResponse.json()) as { paymentMethods?: PosPaymentMethod[] };
+          setMethods((methodData.paymentMethods || []).filter((method) => method.active));
+        }
+      } catch {
+        if (!cancelled) setCatalogState("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const tiles = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return catalog
+      .filter((item) => item.active !== false)
+      .filter((item) => (tab === "all" ? true : item.kind === tab))
+      .filter((item) =>
+        needle
+          ? [item.name, item.sku, item.supplier].filter(Boolean).some((field) => String(field).toLowerCase().includes(needle))
+          : true,
+      )
+      .slice(0, 120);
+  }, [catalog, tab, search]);
+
+  const clientMatches = useMemo(() => {
+    const needle = customerSearch.trim().toLowerCase();
+    if (!needle) return [];
+    return clients
+      .filter((client) => !client.id.startsWith("appointment-"))
+      .filter((client) =>
+        [client.name, client.email].filter(Boolean).some((field) => String(field).toLowerCase().includes(needle)),
+      )
+      .slice(0, 6);
+  }, [clients, customerSearch]);
+
+  function resetSale() {
+    setLines([]);
+    setCustomerId("");
+    setCustomerName("");
+    setCustomerEmail("");
+    setCustomerSearch("");
+    setSale(null);
+    setCheckoutUrl("");
+    setTendered("");
+    setError("");
+    setPayStage("closed");
+    searchRef.current?.focus();
+  }
+
+  function addItem(item: BillingCatalogItem) {
+    setLines((current) => addSellLine(current, item));
+    setSearch("");
+    searchRef.current?.focus();
+  }
+
+  function addCustom() {
+    const amount = Number(customAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      onToast("Enter an amount for the custom item.");
+      return;
+    }
+    setLines((current) => addCustomSellLine(current, customName, amount, defaultTaxRate));
+    setCustomName("");
+    setCustomAmount("");
+    setCustomOpen(false);
+  }
+
+  // --- Parking ---------------------------------------------------------------
+
+  function parkSale() {
+    if (!lines.length) return;
+    const entry: ParkedSale = {
+      id: `park-${Date.now()}`,
+      label: customerName.trim() || lines.map((line) => line.name).join(", ").slice(0, 40),
+      parkedAt: new Date().toISOString(),
+      lines,
+      customerId,
+      customerName,
+      customerEmail,
+    };
+    const next = [entry, ...parked].slice(0, 12);
+    setParked(next);
+    writeParked(next);
+    resetSale();
+    onToast("Sale parked.");
+  }
+
+  function resumeSale(entry: ParkedSale) {
+    // Anything already on screen would be silently thrown away, so it gets
+    // parked first rather than lost.
+    if (lines.length) parkSale();
+    setLines(entry.lines);
+    setCustomerId(entry.customerId);
+    setCustomerName(entry.customerName);
+    setCustomerEmail(entry.customerEmail);
+    const next = parked.filter((item) => item.id !== entry.id);
+    setParked(next);
+    writeParked(next);
+  }
+
+  function discardParked(entry: ParkedSale) {
+    const next = parked.filter((item) => item.id !== entry.id);
+    setParked(next);
+    writeParked(next);
+  }
+
+  // --- Payment ---------------------------------------------------------------
+
+  function openPayment() {
+    if (!lines.length) return;
+    setError("");
+    setTendered("");
+    setMethodId((current) => current || methods[0]?.id || "");
+    setPayStage("method");
+  }
+
+  function chooseMethod(method: PosPaymentMethod) {
+    setMethodId(method.id);
+    setError("");
+    // Cash is the only method where the till needs to work out change, so it is
+    // the only one that gets a tender step.
+    if (method.kind === "custom" && /cash/i.test(method.name)) {
+      setTendered("");
+      setPayStage("cash");
+      return;
+    }
+    void takePayment(method);
+  }
+
+  async function takePayment(method: PosPaymentMethod) {
+    setBusy(true);
+    setError("");
+    try {
+      const description = lines
+        .map((line) => (line.quantity > 1 ? `${line.name} x${line.quantity}` : line.name))
+        .join(", ")
+        .slice(0, 300);
+
+      // Reuse an already-created sale if only the Stripe step failed - pressing
+      // Pay again must not mint a second receipt number.
+      const created =
+        sale ||
+        (
+          (await postPosJson("/api/billing/pos/transactions", {
+            description,
+            amount: total,
+            listedAmount: total,
+            items: lines
+              .filter((line) => line.productId)
+              .map((line) => ({ productId: line.productId, quantity: line.quantity, unitPrice: line.unitPrice })),
+            currency,
+            paymentMethodId: method.id,
+            customerId,
+            customerName: customerName.trim(),
+            customerEmail: customerEmail.trim(),
+            source: "counter",
+          })) as { transaction?: PosTransaction }
+        ).transaction;
+
+      if (!created) throw new Error("The sale could not be recorded.");
+      setSale(created);
+      onSaleCompleted(created);
+
+      if (method.kind !== "clarity_pay") {
+        setPayStage("done");
+        return;
+      }
+
+      const checkout = (await postPosJson(
+        `/api/billing/pos/transactions/${encodeURIComponent(created.id)}/checkout`,
+        {},
+      )) as { url?: string };
+      if (!checkout.url) throw new Error("Stripe did not return a checkout link.");
+      setCheckoutUrl(checkout.url);
+      setPayStage("qr");
+    } catch (paymentError) {
+      setError(paymentError instanceof Error ? paymentError.message : "The sale could not be recorded.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  usePosPaymentPoll(
+    payStage === "qr" ? sale?.id || "" : "",
+    (paid) => {
+      setSale(paid);
+      setPayStage("done");
+      onSaleCompleted(paid);
+    },
+    () => setError("Stopped checking for payment. Cancel the sale and start it again."),
+  );
+
+  // A Clarity Pay sale that never cleared has to be voided on the way out,
+  // otherwise a pending row and a live Stripe session are left behind with
+  // nothing watching them.
+  async function cancelPendingSale() {
+    if (!sale) {
+      setPayStage("closed");
+      return;
+    }
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/billing/pos/transactions/${encodeURIComponent(sale.id)}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "void" }),
+      });
+      if (response.ok) {
+        const data = (await response.json()) as { transaction?: PosTransaction };
+        if (data.transaction) onSaleCompleted(data.transaction);
+      }
+      onToast(`${sale.receiptNumber} cancelled.`);
+    } catch {
+      onToast("Could not cancel the sale - check the POS list.");
+    } finally {
+      setBusy(false);
+      setSale(null);
+      setCheckoutUrl("");
+      setPayStage("closed");
+    }
+  }
+
+  const qrMarkup = useMemo(() => (checkoutUrl ? renderQrSvg(checkoutUrl) : ""), [checkoutUrl]);
+
+  return (
+    <section className="sell-screen">
+      {/* --- Docket ---------------------------------------------------------- */}
+      <div className="sell-docket">
+        <div className="sell-docket-head">
+          <h2>Current sale</h2>
+          {lines.length > 0 && (
+            <button className="text-link-button" onClick={resetSale} type="button">
+              <Trash2 size={14} /> Discard
+            </button>
+          )}
+        </div>
+
+        <button className="sell-customer" onClick={() => setCustomerOpen((open) => !open)} type="button">
+          <User size={15} />
+          {customerName ? <strong>{customerName}</strong> : <span>Add a customer</span>}
+          {customerName && <em>{customerEmail || "no email"}</em>}
+        </button>
+        {customerOpen && (
+          <div className="sell-customer-panel">
+            <input
+              value={customerSearch}
+              onChange={(event) => setCustomerSearch(event.target.value)}
+              placeholder="Search clients, or type a name below"
+            />
+            {clientMatches.map((client) => (
+              <button
+                key={client.id}
+                className="sell-customer-match"
+                onClick={() => {
+                  setCustomerId(client.id);
+                  setCustomerName(client.name);
+                  setCustomerEmail(client.email || "");
+                  setCustomerSearch("");
+                  setCustomerOpen(false);
+                }}
+                type="button"
+              >
+                <strong>{client.name}</strong>
+                <em>{client.email || "no email"}</em>
+              </button>
+            ))}
+            <div className="settings-field-row">
+              <label className="settings-field">
+                <span>Name</span>
+                <input
+                  value={customerName}
+                  onChange={(event) => {
+                    // Typing over a matched client detaches it - the sale is for
+                    // whoever is named on it, not the row that was picked first.
+                    setCustomerId("");
+                    setCustomerName(event.target.value);
+                  }}
+                />
+              </label>
+              <label className="settings-field">
+                <span>Email</span>
+                <input value={customerEmail} onChange={(event) => setCustomerEmail(event.target.value)} type="email" />
+              </label>
+            </div>
+            <button className="outline-button" onClick={() => setCustomerOpen(false)} type="button">
+              Done
+            </button>
+          </div>
+        )}
+
+        <div className="sell-lines">
+          {!lines.length && (
+            <div className="sell-empty">
+              <Package size={26} />
+              <p>Nothing on the docket yet.</p>
+              <span>Tap an item on the right, or scan a barcode into the search box.</span>
+            </div>
+          )}
+          {lines.map((line) => (
+            <div key={line.key} className="sell-line">
+              <div className="sell-line-name">
+                <strong>{line.name}</strong>
+                <em>
+                  {line.sku ? `${line.sku} - ` : ""}
+                  {formatMoney(line.unitPrice, currency)} each
+                </em>
+              </div>
+              <div className="sell-line-qty">
+                <button
+                  className="icon-button small"
+                  onClick={() => setLines((current) => setSellQuantity(current, line.key, line.quantity - 1))}
+                  type="button"
+                  aria-label={`One fewer ${line.name}`}
+                >
+                  <Minus size={13} />
+                </button>
+                <b>{line.quantity}</b>
+                <button
+                  className="icon-button small"
+                  onClick={() => setLines((current) => setSellQuantity(current, line.key, line.quantity + 1))}
+                  type="button"
+                  aria-label={`One more ${line.name}`}
+                >
+                  <Plus size={13} />
+                </button>
+              </div>
+              <input
+                className="sell-line-price"
+                type="number"
+                min="0"
+                step="0.01"
+                value={line.unitPrice}
+                onChange={(event) => setLines((current) => setSellPrice(current, line.key, Number(event.target.value)))}
+                aria-label={`Price for ${line.name}`}
+              />
+              <strong className="sell-line-total">{formatMoney(lineTotal(line), currency)}</strong>
+              <button
+                className="icon-button small"
+                onClick={() => setLines((current) => setSellQuantity(current, line.key, 0))}
+                type="button"
+                aria-label={`Remove ${line.name}`}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="sell-totals">
+          {taxIncluded > 0 && (
+            <div className="sell-total-row muted">
+              <span>Includes {taxName || "tax"}</span>
+              <span>{formatMoney(taxIncluded, currency)}</span>
+            </div>
+          )}
+          <div className="sell-total-row grand">
+            <span>
+              Total
+              {itemCount > 0 && <em> {itemCount} item{itemCount === 1 ? "" : "s"}</em>}
+            </span>
+            <span>{formatMoney(total, currency)}</span>
+          </div>
+        </div>
+
+        <div className="sell-actions">
+          <button className="outline-button" disabled={!lines.length} onClick={parkSale} type="button">
+            Park
+          </button>
+          <button className="sell-pay-button" disabled={!lines.length} onClick={openPayment} type="button">
+            Pay {formatMoney(total, currency)}
+          </button>
+        </div>
+
+        {parked.length > 0 && (
+          <div className="sell-parked">
+            <h3>Parked ({parked.length})</h3>
+            {parked.map((entry) => (
+              <div key={entry.id} className="sell-parked-item">
+                <button onClick={() => resumeSale(entry)} type="button">
+                  <strong>{entry.label || "Parked sale"}</strong>
+                  <em>
+                    {entry.lines.length} line{entry.lines.length === 1 ? "" : "s"} -{" "}
+                    {formatMoney(sellTotal(entry.lines), currency)}
+                  </em>
+                </button>
+                <button
+                  className="icon-button small"
+                  onClick={() => discardParked(entry)}
+                  type="button"
+                  aria-label="Discard parked sale"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* --- Catalog --------------------------------------------------------- */}
+      <div className="sell-catalog">
+        <div className="sell-search">
+          <Search size={16} />
+          <input
+            ref={searchRef}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search or scan"
+            // A barcode scanner types the code and presses Enter. One exact SKU
+            // match on Enter rings it straight up, which is the whole point of
+            // having a scanner at the counter.
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              const needle = search.trim().toLowerCase();
+              if (!needle) return;
+              const exact = catalog.find((item) => (item.sku || "").toLowerCase() === needle);
+              if (exact) addItem(exact);
+              else if (tiles.length === 1) addItem(tiles[0]);
+            }}
+          />
+          {Boolean(search) && (
+            <button className="icon-button small" onClick={() => setSearch("")} type="button" aria-label="Clear search">
+              <X size={14} />
+            </button>
+          )}
+          <button className="outline-button" onClick={() => setCustomOpen((open) => !open)} type="button">
+            <Plus size={15} /> Custom
+          </button>
+        </div>
+
+        {customOpen && (
+          <div className="sell-custom-panel">
+            <label className="settings-field">
+              <span>What is it</span>
+              <input
+                value={customName}
+                onChange={(event) => setCustomName(event.target.value)}
+                placeholder="e.g. Range balls"
+              />
+            </label>
+            <label className="settings-field">
+              <span>Amount ({currency})</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={customAmount}
+                onChange={(event) => setCustomAmount(event.target.value)}
+              />
+            </label>
+            <button className="outline-button" onClick={addCustom} type="button">
+              Add to sale
+            </button>
+          </div>
+        )}
+
+        <div className="sell-tabs" role="tablist" aria-label="Catalog categories">
+          {TAB_ORDER.filter(
+            (key) => key === "all" || catalog.some((item) => item.kind === key && item.active !== false),
+          ).map((key) => (
+            <button
+              key={key}
+              className={tab === key ? "active" : ""}
+              onClick={() => setTab(key)}
+              role="tab"
+              aria-selected={tab === key}
+              type="button"
+            >
+              {TAB_LABELS[key]}
+            </button>
+          ))}
+        </div>
+
+        {catalogState === "loading" && <p className="field-help">Loading the catalog...</p>}
+        {catalogState === "error" && <p className="field-help">Could not load the catalog. Refresh the page.</p>}
+        {catalogState === "loaded" && !tiles.length && (
+          <p className="field-help">Nothing here. Try another category, or add items under Billing &gt; Products.</p>
+        )}
+
+        <div className="sell-grid">
+          {tiles.map((item) => {
+            const low = isLowStock(item);
+            return (
+              <button key={item.id} className="sell-tile" onClick={() => addItem(item)} type="button">
+                <span className="sell-tile-name">{item.name}</span>
+                <span className="sell-tile-price">{formatMoney(item.price, currency)}</span>
+                {item.trackStock && (
+                  <span className={`sell-tile-stock${low ? " low" : ""}`}>
+                    {low && <AlertTriangle size={11} />}
+                    {item.stockLevel ?? 0} left
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* --- Payment --------------------------------------------------------- */}
+      {payStage !== "closed" && (
+        <div className="details-overlay sell-pay-overlay" role="presentation">
+          <aside className="details-panel details-modal sell-pay-panel" role="dialog" aria-modal="true">
+            <div className="panel-header">
+              <span>Payment</span>
+              {payStage !== "qr" && (
+                <button
+                  className="icon-button small"
+                  onClick={() => (payStage === "done" ? resetSale() : setPayStage("closed"))}
+                  type="button"
+                  aria-label="Close payment"
+                >
+                  <X size={17} />
+                </button>
+              )}
+            </div>
+
+            {error && <p className="pos-error">{error}</p>}
+
+            {payStage === "method" && (
+              <>
+                <h2 className="sell-pay-total">{formatMoney(total, currency)}</h2>
+                <p className="field-help">How is this being paid?</p>
+                <div className="pos-method-grid">
+                  {methods.map((method) => (
+                    <button
+                      key={method.id}
+                      className="pos-method-button"
+                      disabled={busy}
+                      onClick={() => chooseMethod(method)}
+                      type="button"
+                    >
+                      {method.kind === "clarity_pay" && <CreditCard size={15} />}
+                      {method.name}
+                      {!method.settlesImmediately && <span className="pos-method-tag">owed</span>}
+                    </button>
+                  ))}
+                </div>
+                {!methods.length && <p className="field-help">No payment methods - add one under Billing &gt; Settings.</p>}
+              </>
+            )}
+
+            {payStage === "cash" && (
+              <>
+                <h2 className="sell-pay-total">{formatMoney(total, currency)}</h2>
+                <div className="settings-field">
+                  <label htmlFor="sell-tendered">Cash received</label>
+                  <input
+                    id="sell-tendered"
+                    className="sell-tendered"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={tendered}
+                    onChange={(event) => setTendered(event.target.value)}
+                    autoFocus
+                  />
+                </div>
+                <div className="sell-cash-suggestions">
+                  {cashSuggestions(total).map((value) => (
+                    <button key={value} onClick={() => setTendered(String(value))} type="button">
+                      {formatMoney(value, currency)}
+                    </button>
+                  ))}
+                </div>
+                <div className={`sell-change${change < 0 ? " short" : ""}`}>
+                  <span>{change < 0 ? "Still to pay" : "Change"}</span>
+                  <strong>{formatMoney(Math.abs(change), currency)}</strong>
+                </div>
+                <div className="panel-actions">
+                  <button className="outline-button" onClick={() => setPayStage("method")} type="button">
+                    Back
+                  </button>
+                  <button
+                    className="primary-button"
+                    disabled={busy || !selectedMethod || tendered === "" || change < 0}
+                    onClick={() => selectedMethod && void takePayment(selectedMethod)}
+                    type="button"
+                  >
+                    {busy ? "Working..." : "Complete sale"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {payStage === "qr" && sale && (
+              <>
+                <h2 className="sell-pay-total">{formatMoney(sale.amount, sale.currency)}</h2>
+                <p className="field-help">
+                  Customer scans this and pays with Apple Pay, Google Pay or a card. This screen updates on its own the
+                  moment it clears.
+                </p>
+                {qrMarkup && (
+                  <div className="pos-qr" aria-label="Payment QR code" dangerouslySetInnerHTML={{ __html: qrMarkup }} />
+                )}
+                <div className="panel-actions">
+                  <button className="outline-button" disabled={busy} onClick={() => void cancelPendingSale()} type="button">
+                    Cancel sale
+                  </button>
+                  <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
+                    <ExternalLink size={15} /> Pay on this device
+                  </a>
+                </div>
+              </>
+            )}
+
+            {payStage === "done" && sale && (
+              <>
+                <div className="pos-done">
+                  <Check size={22} />
+                  <div>
+                    <strong>{formatMoney(sale.amount, sale.currency)}</strong>
+                    <span>
+                      {sale.paymentMethodName} - {sale.receiptNumber}
+                    </span>
+                  </div>
+                </div>
+                {tendered !== "" && change > 0 && (
+                  <div className="sell-change">
+                    <span>Change</span>
+                    <strong>{formatMoney(change, currency)}</strong>
+                  </div>
+                )}
+                {sale.status === "pending" && (
+                  <p className="field-help">
+                    Recorded as owed on {sale.paymentMethodName}. Mark it paid from Billing &gt; POS Transactions once it
+                    is settled.
+                  </p>
+                )}
+                <div className="panel-actions">
+                  <button className="primary-button" onClick={resetSale} type="button">
+                    New sale
+                  </button>
+                </div>
+              </>
+            )}
+          </aside>
+        </div>
+      )}
+    </section>
+  );
+}

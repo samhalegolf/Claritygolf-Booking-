@@ -47,6 +47,7 @@ import {
   Settings,
   Sparkles,
   Sun,
+  ShoppingCart,
   Trash2,
   Upload,
   User,
@@ -161,6 +162,7 @@ import {
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
 import { ProductsPanel } from "./modules/billing/ProductsPanel";
+import { SellScreen } from "./modules/billing/SellScreen";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
 import {
   presetRange,
@@ -954,7 +956,17 @@ type Toast = {
   undo?: () => void;
 };
 
-type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video" | "players";
+type View =
+  | "calendar"
+  | "clients"
+  | "services"
+  | "availability"
+  | "booking"
+  | "sell"
+  | "billing"
+  | "settings"
+  | "video"
+  | "players";
 type BillingSection =
   | "none"
   | "dashboard"
@@ -2105,6 +2117,8 @@ function sectionTitle(view: View) {
       return "Availability";
     case "booking":
       return "Booking Page";
+    case "sell":
+      return "Sell";
     case "billing":
       return "Billing";
     case "settings":
@@ -2123,6 +2137,8 @@ function getInitialView(): View {
   const requestedView = new URLSearchParams(window.location.search).get("view");
   if (requestedView === "settings") return "settings";
   if (requestedView === "billing") return "billing";
+  // Worth bookmarking on a counter device: opens straight onto the till.
+  if (requestedView === "sell") return "sell";
   if (requestedView === "notes") return "players";
   if (requestedView === "players") return "players";
   if (requestedView === "video") return "video";
@@ -15373,10 +15389,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     });
   }
 
-  function openPosCheckoutCounter() {
-    setPosCheckout({ source: "counter", description: "", amount: 0, listedAmount: null });
-  }
-
   // Download the server-rendered PDF (opens the attachment endpoint in a new tab;
   // the admin session cookie rides along on the same-origin request).
   function downloadInvoicePdf() {
@@ -19508,6 +19520,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             Player Profiles
           </button>
           {billingWorkspaceEnabled && (
+            <button className={activeView === "sell" ? "active" : ""} onClick={() => switchView("sell")}>
+              <ShoppingCart size={18} />
+              Sell
+            </button>
+          )}
+          {billingWorkspaceEnabled && (
             <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
               <FileText size={18} />
               Billing
@@ -21638,6 +21656,18 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           </section>
         )}
 
+        {!isEmbedMode && adminWorkspaceReady && activeView === "sell" && (
+          <SellScreen
+            currency={invoiceSettings.currency}
+            taxName={invoiceSettings.taxName}
+            defaultTaxRate={invoiceSettings.taxRate}
+            formatMoney={formatMoney}
+            clients={clients}
+            onSaleCompleted={handlePosSaleChanged}
+            onToast={(message) => setToast({ message })}
+          />
+        )}
+
         {!isEmbedMode && adminWorkspaceReady && activeView === "billing" && (
           <section className="module-page billing-page">
             <div className="settings-tabs billing-tabs" role="tablist" aria-label="Billing sections">
@@ -23590,7 +23620,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <button className="outline-button" onClick={() => void fetchPosTransactions()} type="button">
                       Apply
                     </button>
-                    <button className="primary-button" onClick={openPosCheckoutCounter} type="button">
+                    <button className="primary-button" onClick={() => switchView("sell")} type="button">
                       <Plus size={16} />
                       New Sale
                     </button>

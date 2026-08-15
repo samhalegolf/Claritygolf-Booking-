@@ -9776,3 +9776,473 @@ button {
 .product-table td:first-child {
   width: 45%;
 }
+
+/* --- Sell screen ------------------------------------------------------------
+   The full-screen till. Two panes: the docket on the left (fixed width, the
+   thing being paid for), the catalog on the right (fluid, the thing being
+   chosen from). Deliberately denser and flatter than the rest of the admin -
+   a counter screen is used at arm's length with one hand. */
+
+.sell-screen {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) 1fr;
+  gap: 16px;
+  align-items: stretch;
+  /* Fill the panel rather than growing with the catalog: each pane scrolls on
+     its own, so the Pay button never leaves the screen. */
+  height: calc(100vh - 150px);
+  min-height: 480px;
+  padding: 0 4px 4px;
+}
+
+@media (max-width: 900px) {
+  .sell-screen {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}
+
+/* --- Docket --- */
+
+.sell-docket {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+}
+
+.sell-docket-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.sell-docket-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.sell-customer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-customer em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sell-customer-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.sell-customer-match {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-customer-match em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sell-lines {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 10px 0;
+}
+
+.sell-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 36px 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.sell-empty p {
+  margin: 4px 0 0;
+  font-weight: 600;
+}
+
+.sell-empty span {
+  font-size: 12px;
+}
+
+.sell-line {
+  display: grid;
+  grid-template-columns: 1fr auto 68px auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sell-line-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sell-line-name strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sell-line-name em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sell-line-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sell-line-qty b {
+  min-width: 16px;
+  text-align: center;
+  font-size: 13px;
+}
+
+/* Editable per line: a price overridden at the counter is a normal part of a
+   sale, and hiding it behind a menu means it gets done as a discount on the
+   total instead, where it stops being attributable to the item. */
+.sell-line-price {
+  width: 68px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.sell-line-total {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.sell-totals {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.sell-total-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+
+.sell-total-row.muted {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.sell-total-row.grand {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.sell-total-row.grand em {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.sell-actions {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* The one button on the screen that has to be findable without looking. */
+.sell-pay-button {
+  padding: 16px 12px;
+  border: none;
+  border-radius: 12px;
+  background: var(--coach-primary, #1fd36d);
+  color: #06210f;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.sell-pay-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sell-parked {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.sell-parked h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.sell-parked-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sell-parked-item > button:first-child {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-parked-item em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* --- Catalog --- */
+
+.sell-catalog {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface, #fff);
+}
+
+.sell-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+.sell-search input {
+  flex: 1;
+  padding: 11px 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 15px;
+}
+
+.sell-search input:focus {
+  outline: none;
+}
+
+.sell-search .outline-button {
+  margin: 5px 0;
+  white-space: nowrap;
+}
+
+.sell-custom-panel {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.sell-custom-panel .settings-field {
+  flex: 1;
+}
+
+.sell-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.sell-tabs button {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sell-tabs button.active {
+  border-color: #171717;
+  background: #171717;
+  color: #fff;
+}
+
+.sell-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+
+/* Fixed-height tiles so the grid stays a grid whatever the name lengths are -
+   a ragged tile wall is much harder to hit accurately at speed. */
+.sell-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 92px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-tile:hover {
+  border-color: var(--coach-primary, #1fd36d);
+}
+
+.sell-tile-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.sell-tile-price {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.sell-tile-stock {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sell-tile-stock.low {
+  color: var(--danger, #a52e15);
+  font-weight: 700;
+}
+
+/* --- Payment overlay --- */
+
+.sell-pay-panel {
+  width: min(420px, calc(100vw - 32px));
+}
+
+.sell-pay-total {
+  margin: 4px 0 10px;
+  font-size: 34px;
+}
+
+.sell-tendered {
+  font-size: 26px;
+  font-weight: 800;
+}
+
+.sell-cash-suggestions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.sell-cash-suggestions button {
+  padding: 12px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.sell-change {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 10px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--success-soft, #eaf8ed);
+}
+
+.sell-change strong {
+  font-size: 24px;
+}
+
+/* Not enough handed over yet - the confirm button is disabled and this says why. */
+.sell-change.short {
+  background: var(--danger-soft, #fdecea);
+  color: var(--danger, #a52e15);
+}

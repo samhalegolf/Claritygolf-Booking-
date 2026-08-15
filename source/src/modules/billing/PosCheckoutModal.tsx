@@ -14,8 +14,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, CreditCard, ExternalLink, Minus, Plus, RotateCcw, X } from "lucide-react";
-import qrcode from "qrcode-generator";
 import type { BillingCatalogItem, PosCheckoutContext, PosPaymentMethod, PosTransaction } from "./types";
+import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 import { addToBasket, basketTotal, describeBasket, isLowStock, lineTotal, round2, setBasketQuantity } from "./stockMath";
 import type { BasketLine } from "./stockMath";
 
@@ -29,21 +29,6 @@ export type PosCheckoutModalProps = {
   onCompleted: (transaction: PosTransaction) => void;
   onToast: (message: string) => void;
 };
-
-// Stripe checkout sessions live for 24h, but a customer standing at a counter
-// either pays within a couple of minutes or does not. Stop polling after that
-// rather than leaving a timer running behind a forgotten tab.
-const POLL_INTERVAL_MS = 3000;
-const POLL_TIMEOUT_MS = 5 * 60 * 1000;
-
-function renderQrSvg(value: string) {
-  // Error correction M: enough redundancy for a phone camera at counter
-  // distance without inflating the module count. Type 0 = auto-size.
-  const qr = qrcode(0, "M");
-  qr.addData(value);
-  qr.make();
-  return qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
-}
 
 export function PosCheckoutModal({
   context,
@@ -78,7 +63,6 @@ export function PosCheckoutModal({
   const [transaction, setTransaction] = useState<PosTransaction | null>(null);
   const [checkoutUrl, setCheckoutUrl] = useState("");
 
-  const pollStartedAt = useRef(0);
   const descriptionTouched = useRef(false);
 
   const amount = Number(amountInput);
@@ -163,68 +147,19 @@ export function PosCheckoutModal({
     }
   }
 
-  // onCompleted is a plain function from App.tsx, so it gets a new identity on
-  // every App render - and App re-renders on a timer (notification refresh,
-  // calendar clock). Holding it in a ref keeps it out of the poll effect's
-  // dependencies; otherwise the interval below is torn down and rebuilt every
-  // few seconds, which resets the timeout clock and delays each poll.
-  const onCompletedRef = useRef(onCompleted);
-  useEffect(() => {
-    onCompletedRef.current = onCompleted;
-  }, [onCompleted]);
-
-  // Poll Stripe while the QR is on screen. Asking our backend to re-read the
-  // session (rather than waiting on a webhook) means the till flips to Paid even
-  // if webhook delivery is slow or the endpoint was never configured.
-  const pollTransactionId = stage === "qr" ? transaction?.id || "" : "";
-  useEffect(() => {
-    if (!pollTransactionId) return;
-    pollStartedAt.current = Date.now();
-    let cancelled = false;
-
-    const timer = setInterval(async () => {
-      if (Date.now() - pollStartedAt.current > POLL_TIMEOUT_MS) {
-        clearInterval(timer);
-        if (!cancelled) setError("Stopped checking for payment. Cancel the sale and start it again.");
-        return;
-      }
-      try {
-        const response = await fetch(
-          `/api/billing/pos/transactions/${encodeURIComponent(pollTransactionId)}/checkout-status`,
-          { credentials: "same-origin", cache: "no-store" },
-        );
-        if (!response.ok) return;
-        const data = (await response.json()) as { transaction?: PosTransaction; paid?: boolean };
-        if (cancelled || !data.paid || !data.transaction) return;
-        clearInterval(timer);
-        setTransaction(data.transaction);
-        setStage("done");
-        onCompletedRef.current(data.transaction);
-      } catch {
-        // Transient network blips are expected on a till; the next tick retries.
-      }
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [pollTransactionId]);
-
-  async function postJson(path: string, body: unknown) {
-    const response = await fetch(path, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify(body ?? {}),
-    });
-    const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
-    if (!response.ok) {
-      throw new Error(typeof data?.message === "string" ? data.message : "Payment could not be recorded.");
-    }
-    return data || {};
-  }
+  // Poll Stripe while the QR is on screen. The hook holds both callbacks in refs
+  // - onCompleted is a plain function from App.tsx and gets a new identity on
+  // every App render, which would otherwise rebuild the interval every few
+  // seconds and reset the timeout clock.
+  usePosPaymentPoll(
+    stage === "qr" ? transaction?.id || "" : "",
+    (paid) => {
+      setTransaction(paid);
+      setStage("done");
+      onCompleted(paid);
+    },
+    () => setError("Stopped checking for payment. Cancel the sale and start it again."),
+  );
 
   async function takePayment() {
     if (!selectedMethod) {
@@ -247,7 +182,7 @@ export function PosCheckoutModal({
       const sale =
         transaction ||
         (
-          (await postJson("/api/billing/pos/transactions", {
+          (await postPosJson("/api/billing/pos/transactions", {
             description: description.trim(),
             amount,
             listedAmount,
@@ -276,7 +211,7 @@ export function PosCheckoutModal({
         return;
       }
 
-      const checkout = (await postJson(`/api/billing/pos/transactions/${encodeURIComponent(sale.id)}/checkout`, {})) as {
+      const checkout = (await postPosJson(`/api/billing/pos/transactions/${encodeURIComponent(sale.id)}/checkout`, {})) as {
         url?: string;
       };
       if (!checkout.url) throw new Error("Stripe did not return a checkout link.");
