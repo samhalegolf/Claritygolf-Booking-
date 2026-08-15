@@ -43,6 +43,13 @@ export type InvoiceSettings = {
 
 export type BillingCatalogKind = "service" | "product" | "package" | "lesson-type";
 
+// One row per thing you sell (billing_products_services). The stock fields only
+// mean anything when kind is "product" and trackStock is on - a service or a
+// lesson type has nothing on a shelf to count.
+//
+// stockLevel is read-only from the frontend's point of view: it is set by a
+// stock adjustment or a POS sale, never by saving the product form, so a save
+// can't quietly undo a sale that happened while the form was open.
 export type BillingCatalogItem = {
   id: string;
   kind: BillingCatalogKind;
@@ -52,6 +59,30 @@ export type BillingCatalogItem = {
   taxRate: number;
   sourceServiceId?: string;
   active?: boolean;
+  supplier?: string;
+  sku?: string;
+  costPrice?: number;
+  trackStock?: boolean;
+  stockLevel?: number;
+  lowStockThreshold?: number;
+  // Computed by the backend so the list, the checkout picker and any future
+  // reorder report all agree on what "low" means.
+  lowStock?: boolean;
+};
+
+// Why a stock level is what it is. Append-only; "sale"/"sale_reversal" rows
+// carry the receipt that caused them.
+export type StockMovementKind = "adjustment" | "stocktake" | "receipt" | "sale" | "sale_reversal";
+
+export type StockMovement = {
+  id: string;
+  productId: string;
+  delta: number;
+  resultingLevel: number | null;
+  kind: StockMovementKind;
+  posTransactionId: string;
+  note: string;
+  createdAt: string;
 };
 
 export type InvoiceLineSource = "manual" | "catalog" | "booking_snapshot" | "package_sale";
@@ -238,6 +269,19 @@ export type PosTransactionStatus = "pending" | "paid" | "refunded" | "void";
 // sale opened from a client profile; "counter" is a walk-up sale.
 export type PosTransactionSource = "lesson" | "client" | "counter";
 
+// A product line on a counter sale. Name, SKU and unit price are snapshots
+// taken when the sale was rung up, so an old receipt still reads correctly
+// after the product is renamed, repriced or retired.
+export type PosTransactionItem = {
+  id: string;
+  productId: string;
+  name: string;
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+};
+
 export type PosTransaction = {
   id: string;
   receiptNumber: string;
@@ -261,6 +305,9 @@ export type PosTransaction = {
   paidAt: string;
   createdAt: string;
   updatedAt: string;
+  // Empty for a plain lesson or free-form sale; populated when products were
+  // rung up. Stock moves off these lines, not off the amount.
+  items?: PosTransactionItem[];
 };
 
 // bookingId -> the paid sale that settled it. Drives the "paid at POS" badge on

@@ -13,9 +13,11 @@
 // POS-#### receipt number and is never summed into invoice revenue or aging.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CreditCard, ExternalLink, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, Check, CreditCard, ExternalLink, Minus, Plus, RotateCcw, X } from "lucide-react";
 import qrcode from "qrcode-generator";
-import type { PosCheckoutContext, PosPaymentMethod, PosTransaction } from "./types";
+import type { BillingCatalogItem, PosCheckoutContext, PosPaymentMethod, PosTransaction } from "./types";
+import { addToBasket, basketTotal, describeBasket, isLowStock, lineTotal, round2, setBasketQuantity } from "./stockMath";
+import type { BasketLine } from "./stockMath";
 
 export type PosCheckoutModalProps = {
   context: PosCheckoutContext;
@@ -63,6 +65,13 @@ export function PosCheckoutModal({
   const [customerEmail, setCustomerEmail] = useState(context.customerEmail || "");
   const [note, setNote] = useState("");
 
+  // The basket. Empty for a lesson or a free-form sale; a lesson can still have
+  // a glove added to it, which is why this sits alongside the amount rather
+  // than replacing it.
+  const [lines, setLines] = useState<BasketLine[]>([]);
+  const [products, setProducts] = useState<BillingCatalogItem[]>([]);
+  const [productSearch, setProductSearch] = useState("");
+
   const [stage, setStage] = useState<"form" | "qr" | "done">("form");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -70,12 +79,30 @@ export function PosCheckoutModal({
   const [checkoutUrl, setCheckoutUrl] = useState("");
 
   const pollStartedAt = useRef(0);
+  const descriptionTouched = useRef(false);
 
   const amount = Number(amountInput);
   const amountValid = Number.isFinite(amount) && amount > 0;
   const selectedMethod = methods.find((method) => method.id === methodId) || null;
-  const listedAmount = context.listedAmount;
+  const linesTotal = basketTotal(lines);
+  // Products are added *to* whatever opened the modal, not instead of it - a
+  // lesson card with a glove rung up owes the lesson plus the glove.
+  const baseAmount = context.amount > 0 ? context.amount : 0;
+  const listedAmount = lines.length ? round2((context.listedAmount ?? 0) + linesTotal) : context.listedAmount;
   const amountChanged = listedAmount !== null && amountValid && Math.abs(amount - listedAmount) > 0.005;
+
+  const productMatches = useMemo(() => {
+    const needle = productSearch.trim().toLowerCase();
+    const sellable = products.filter((product) => product.kind === "product" && product.active !== false);
+    if (!needle) return sellable.slice(0, 6);
+    return sellable
+      .filter((product) =>
+        [product.name, product.sku, product.supplier]
+          .filter(Boolean)
+          .some((field) => String(field).toLowerCase().includes(needle)),
+      )
+      .slice(0, 8);
+  }, [products, productSearch]);
 
   const qrMarkup = useMemo(() => (checkoutUrl ? renderQrSvg(checkoutUrl) : ""), [checkoutUrl]);
 
@@ -103,6 +130,38 @@ export function PosCheckoutModal({
       cancelled = true;
     };
   }, []);
+
+  // Products are optional to the flow, so a failed load leaves the picker empty
+  // rather than blocking a sale that may not involve any stock at all.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/billing/products", { credentials: "same-origin", cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as { products?: BillingCatalogItem[] };
+        if (!cancelled) setProducts(Array.isArray(data.products) ? data.products : []);
+      } catch {
+        // No products picker this time; the amount field still works.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Ringing an item up rewrites the amount. Anything typed afterwards stays put
+  // until the basket changes again - that is how a counter discount is given.
+  // The description follows the basket the same way, until someone types their
+  // own, at which point it is theirs and we stop touching it.
+  function applyLines(next: BasketLine[]) {
+    setLines(next);
+    const total = round2(baseAmount + basketTotal(next));
+    setAmountInput(total > 0 ? String(total) : "");
+    if (!descriptionTouched.current) {
+      setDescription([context.description, describeBasket(next)].filter(Boolean).join(", "));
+    }
+  }
 
   // onCompleted is a plain function from App.tsx, so it gets a new identity on
   // every App render - and App re-renders on a timer (notification refresh,
@@ -192,6 +251,11 @@ export function PosCheckoutModal({
             description: description.trim(),
             amount,
             listedAmount,
+            items: lines.map((line) => ({
+              productId: line.productId,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+            })),
             currency,
             paymentMethodId: selectedMethod.id,
             customerId: context.customerId || "",
@@ -295,11 +359,89 @@ export function PosCheckoutModal({
         {stage === "form" && (
           <>
             <div className="settings-field">
+              <label htmlFor="pos-product-search">Products</label>
+              <input
+                id="pos-product-search"
+                value={productSearch}
+                onChange={(event) => setProductSearch(event.target.value)}
+                placeholder="Search by name, SKU or supplier"
+              />
+              <div className="pos-product-options">
+                {productMatches.map((product) => (
+                  <button
+                    key={product.id}
+                    className="pos-product-option"
+                    onClick={() => applyLines(addToBasket(lines, product))}
+                    type="button"
+                  >
+                    <span>
+                      {product.name}
+                      {isLowStock(product) && <AlertTriangle size={12} />}
+                    </span>
+                    <em>
+                      {formatMoney(product.price, currency)}
+                      {product.trackStock ? ` - ${product.stockLevel ?? 0} left` : ""}
+                    </em>
+                  </button>
+                ))}
+                {!productMatches.length && (
+                  <p className="field-help">
+                    {productSearch.trim() ? "No product matches that." : "No products yet - add them under Billing > Products."}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {lines.length > 0 && (
+              <div className="pos-basket">
+                {lines.map((line) => (
+                  <div key={line.productId} className="pos-basket-line">
+                    <span>
+                      <strong>{line.name}</strong>
+                      <em>{formatMoney(line.unitPrice, currency)} each</em>
+                    </span>
+                    <div className="pos-basket-qty">
+                      <button
+                        className="icon-button small"
+                        onClick={() => applyLines(setBasketQuantity(lines, line.productId, line.quantity - 1))}
+                        type="button"
+                        aria-label={`One fewer ${line.name}`}
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <b>{line.quantity}</b>
+                      <button
+                        className="icon-button small"
+                        onClick={() => applyLines(setBasketQuantity(lines, line.productId, line.quantity + 1))}
+                        type="button"
+                        aria-label={`One more ${line.name}`}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                    <strong>{formatMoney(lineTotal(line), currency)}</strong>
+                    <button
+                      className="icon-button small"
+                      onClick={() => applyLines(setBasketQuantity(lines, line.productId, 0))}
+                      type="button"
+                      aria-label={`Remove ${line.name}`}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="settings-field">
               <label htmlFor="pos-description">Description</label>
               <input
                 id="pos-description"
                 value={description}
-                onChange={(event) => setDescription(event.target.value)}
+                onChange={(event) => {
+                  descriptionTouched.current = true;
+                  setDescription(event.target.value);
+                }}
                 placeholder="What is being paid for"
               />
             </div>

@@ -9515,3 +9515,219 @@ button {
   opacity: 0.6;
   text-decoration: none;
 }
+
+/* --- Products + stock ------------------------------------------------------
+   The Products tab and the counter basket inside the checkout modal. Composes
+   the existing billing vocabulary (.data-card, .settings-field,
+   .recent-invoices-table) rather than introducing a parallel one. */
+
+.product-search-row {
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.product-search-field {
+  flex: 1 1 220px;
+}
+
+.product-search-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--muted);
+}
+
+.product-search-input input {
+  flex: 1;
+  border: none;
+  background: none;
+  padding: 8px 0;
+  color: inherit;
+  font: inherit;
+}
+
+.product-search-input input:focus {
+  outline: none;
+}
+
+/* Two columns on anything wider than a phone: the form has a lot of short
+   fields and a single stack makes the save button a scroll away. */
+.product-editor {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.product-notes-field {
+  grid-column: 1 / -1;
+}
+
+.product-table td {
+  vertical-align: top;
+}
+
+.product-row-meta {
+  display: block;
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.product-row-inactive {
+  opacity: 0.55;
+}
+
+.product-row-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.product-stock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+}
+
+/* Low stock is the one number on this screen worth interrupting for. */
+.product-stock.low {
+  color: var(--danger, #a52e15);
+}
+
+.product-stock.untracked {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.product-stock-row td {
+  background: var(--surface-muted, #f7f7f5);
+}
+
+.product-stock-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 0 10px;
+}
+
+.product-stock-drawer .settings-field-row {
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.product-movement-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.product-movement {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.product-movement strong.negative {
+  color: var(--danger, #a52e15);
+}
+
+.product-movement strong.positive {
+  color: var(--coach-primary, #1fd36d);
+}
+
+.product-movement em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* --- Counter basket (checkout modal) --- */
+
+.pos-product-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.pos-product-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pos-product-option span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.pos-product-option em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pos-basket {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.pos-basket-line {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.pos-basket-line > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.pos-basket-line em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pos-basket-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pos-basket-qty b {
+  min-width: 18px;
+  text-align: center;
+}

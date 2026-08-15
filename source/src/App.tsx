@@ -151,6 +151,7 @@ import type {
   PosBookingPayment,
   PosSummary,
   PosCheckoutContext,
+  StockMovement,
 } from "./modules/billing/types";
 import { PosCheckoutModal } from "./modules/billing/PosCheckoutModal";
 import {
@@ -159,6 +160,8 @@ import {
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
+import { ProductsPanel } from "./modules/billing/ProductsPanel";
+import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
 import {
   presetRange,
   buildReportCsv,
@@ -952,7 +955,16 @@ type Toast = {
 };
 
 type View = "calendar" | "clients" | "services" | "availability" | "booking" | "billing" | "settings" | "video" | "players";
-type BillingSection = "none" | "dashboard" | "new-invoice" | "invoices" | "expenses" | "reports" | "pos" | "settings";
+type BillingSection =
+  | "none"
+  | "dashboard"
+  | "new-invoice"
+  | "invoices"
+  | "expenses"
+  | "products"
+  | "reports"
+  | "pos"
+  | "settings";
 
 // Which completed bookings the "ready to pull" lists show. "unpaid" hides
 // anything already invoiced or already paid at the counter (the normal
@@ -4914,15 +4926,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // billing_products_services / billing_invoices tables) rather than local
   // state. They start empty and are populated by loadBillingWorkspace().
   const [catalogItems, setCatalogItems] = useState<BillingCatalogItem[]>([]);
-  const [catalogEditor, setCatalogEditor] = useState<BillingCatalogItem>({
-    id: "",
-    kind: "service",
-    name: "",
-    description: "",
-    price: 0,
-    taxRate: defaultInvoiceSettings.taxRate,
-  });
-  const [catalogSaveState, setCatalogSaveState] = useState<"idle" | "saving">("idle");
+  const [catalogLoadState, setCatalogLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [billingDataLoadState, setBillingDataLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [activeInvoiceId, setActiveInvoiceId] = useState("");
   // The number of the invoice currently open/saved (blank for a brand-new one,
@@ -13550,14 +13554,146 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // touch any booking/calendar endpoint or table.
 
   async function fetchBillingProducts() {
-    const response = await fetch("/api/billing/products", { credentials: "same-origin", cache: "no-store" });
-    if (response.status === 401) {
-      setAuthStatus("guest");
-      return;
+    setCatalogLoadState("loading");
+    try {
+      const response = await fetch("/api/billing/products", { credentials: "same-origin", cache: "no-store" });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        setCatalogLoadState("error");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load products and services."));
+      const data = (await response.json()) as { products?: BillingCatalogItem[] };
+      setCatalogItems(Array.isArray(data.products) ? data.products : []);
+      setCatalogLoadState("loaded");
+    } catch (error) {
+      setCatalogLoadState("error");
+      throw error;
     }
-    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load products and services."));
-    const data = (await response.json()) as { products?: BillingCatalogItem[] };
-    setCatalogItems(Array.isArray(data.products) ? data.products : []);
+  }
+
+  // --- Products tab actions ---------------------------------------------------
+  // The panel owns its form; these own the requests. Each returns true only when
+  // the write landed, so the panel knows whether to clear itself.
+
+  function mergeCatalogItem(saved: BillingCatalogItem) {
+    setCatalogItems((current) =>
+      current.some((candidate) => candidate.id === saved.id)
+        ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
+        : [...current, saved],
+    );
+  }
+
+  async function saveProduct(values: ProductFormValues) {
+    const isUpdate = Boolean(values.id);
+    try {
+      const response = await fetch(
+        isUpdate ? `/api/billing/products/${encodeURIComponent(values.id)}` : "/api/billing/products",
+        {
+          method: isUpdate ? "PUT" : "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({
+            name: values.name,
+            kind: values.kind,
+            description: values.description.trim(),
+            price: Math.max(0, Number(values.price) || 0),
+            costPrice: Math.max(0, Number(values.costPrice) || 0),
+            taxRate: clamp(Number(values.taxRate) || 0, 0, 100),
+            supplier: values.supplier.trim(),
+            sku: values.sku.trim(),
+            trackStock: values.trackStock,
+            lowStockThreshold: Math.max(0, Number(values.lowStockThreshold) || 0),
+            // Ignored by the backend on an update - stock only moves through an
+            // adjustment or a sale.
+            stockLevel: isUpdate ? undefined : Math.round(Number(values.openingStock) || 0),
+            active: true,
+          }),
+        },
+      );
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not save the item."));
+      const data = (await response.json()) as { product?: BillingCatalogItem };
+      if (!data.product) throw new Error("Save response did not return the item.");
+      mergeCatalogItem(data.product);
+      setToast({ message: `${data.product.name} ${isUpdate ? "updated" : "added"}.` });
+      return true;
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save the item." });
+      return false;
+    }
+  }
+
+  async function setProductActive(product: BillingCatalogItem, active: boolean) {
+    try {
+      const response = await fetch(`/api/billing/products/${encodeURIComponent(product.id)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: product.name,
+          kind: product.kind,
+          description: product.description,
+          price: product.price,
+          costPrice: product.costPrice || 0,
+          taxRate: product.taxRate,
+          supplier: product.supplier || "",
+          sku: product.sku || "",
+          trackStock: product.trackStock !== false,
+          lowStockThreshold: product.lowStockThreshold || 0,
+          active,
+        }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update the item."));
+      const data = (await response.json()) as { product?: BillingCatalogItem };
+      if (data.product) mergeCatalogItem(data.product);
+      setToast({ message: `${product.name} ${active ? "restored" : "retired"}.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not update the item." });
+    }
+  }
+
+  async function adjustProductStock(product: BillingCatalogItem, input: StockAdjustInput) {
+    try {
+      const response = await fetch(`/api/billing/products/${encodeURIComponent(product.id)}/stock`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          input.mode === "setTo"
+            ? { setTo: input.value, note: input.note }
+            : { delta: input.value, note: input.note },
+        ),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not adjust stock."));
+      const data = (await response.json()) as { product?: BillingCatalogItem };
+      if (data.product) mergeCatalogItem(data.product);
+      setToast({ message: `${product.name} stock is now ${data.product?.stockLevel ?? "updated"}.` });
+      return true;
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not adjust stock." });
+      return false;
+    }
+  }
+
+  async function fetchStockMovements(productId: string) {
+    try {
+      const response = await fetch(`/api/billing/products/${encodeURIComponent(productId)}/stock-movements`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load stock history."));
+      const data = (await response.json()) as { movements?: StockMovement[] };
+      return Array.isArray(data.movements) ? data.movements : [];
+    } catch {
+      // The history is context, not the point of the drawer - a failed read
+      // shouldn't stop someone correcting a count.
+      return [];
+    }
   }
 
   async function fetchBillingDiscounts() {
@@ -14494,52 +14630,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     }));
     setShowInvoiceLinePicker(false);
     setBillingSection("new-invoice");
-  }
-
-  async function addCatalogItem() {
-    const name = catalogEditor.name.trim();
-    if (!name) {
-      setToast({ message: "Name the product or service before adding it." });
-      return;
-    }
-    const payload = {
-      name,
-      kind: catalogEditor.kind,
-      description: catalogEditor.description.trim(),
-      price: Math.max(0, Math.round(Number(catalogEditor.price) || 0)),
-      taxRate: clamp(Number(catalogEditor.taxRate) || 0, 0, 30),
-      active: true,
-    };
-    const isUpdate = Boolean(catalogEditor.id);
-    setCatalogSaveState("saving");
-    try {
-      const response = await fetch(isUpdate ? `/api/billing/products/${encodeURIComponent(catalogEditor.id)}` : "/api/billing/products", {
-        method: isUpdate ? "PUT" : "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify(payload),
-      });
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        throw new Error("Admin login required");
-      }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not save product or service."));
-      const data = (await response.json()) as { product?: BillingCatalogItem };
-      const saved = data.product;
-      if (!saved) throw new Error("Save response did not return the product.");
-      setCatalogItems((current) =>
-        current.some((candidate) => candidate.id === saved.id)
-          ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
-          : [...current, saved],
-      );
-      setCatalogEditor({ id: "", kind: "service", name: "", description: "", price: 0, taxRate: invoiceSettings.taxRate });
-      setToast({ message: `${saved.name} ${isUpdate ? "updated" : "added"}.` });
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not save product or service." });
-    } finally {
-      setCatalogSaveState("idle");
-    }
   }
 
   async function addDiscountPreset() {
@@ -21599,6 +21689,19 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 Expenses
               </button>
               <button
+                className={billingSection === "products" ? "active" : ""}
+                onClick={() => {
+                  setBillingSection("products");
+                  void fetchBillingProducts();
+                }}
+                role="tab"
+                aria-selected={billingSection === "products"}
+                type="button"
+              >
+                <Package size={16} />
+                Products
+              </button>
+              <button
                 className={billingSection === "pos" ? "active" : ""}
                 onClick={() => {
                   setBillingSection("pos");
@@ -21810,13 +21913,20 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <div className="data-card-header">
                       <div>
                         <span>Products & Services</span>
-                        <h2>{catalogItems.length} invoice-only items</h2>
+                        <h2>{catalogItems.length} items</h2>
                       </div>
                       <Package size={24} />
                     </div>
                     <p>These live in Billing and do not affect the public booking calendar.</p>
-                    <button className="outline-button" onClick={() => setBillingSection("new-invoice")} type="button">
-                      Manage in New Invoice
+                    <button
+                      className="outline-button"
+                      onClick={() => {
+                        setBillingSection("products");
+                        void fetchBillingProducts();
+                      }}
+                      type="button"
+                    >
+                      Manage Products
                     </button>
                   </article>
                 </div>
@@ -23429,6 +23539,21 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 the invoice figures above - a lesson can be paid at the counter
                 and also appear on an invoice, so combining them would
                 double-count. */}
+            {billingSection === "products" && (
+              <ProductsPanel
+                products={catalogItems}
+                loadState={catalogLoadState}
+                currency={invoiceSettings.currency}
+                defaultTaxRate={invoiceSettings.taxRate}
+                formatMoney={formatMoney}
+                onReload={() => void fetchBillingProducts()}
+                onSave={saveProduct}
+                onSetActive={setProductActive}
+                onAdjustStock={adjustProductStock}
+                onLoadMovements={fetchStockMovements}
+              />
+            )}
+
             {billingSection === "pos" && (
               <div className="billing-dashboard billing-pos">
                 <article className="data-card">

@@ -160,6 +160,17 @@ async function parseBody(req: Request) {
 }
 
 // --- Products / services ----------------------------------------------------
+// One table for everything a coach sells. A row with kind = 'product' can also
+// carry a supplier, a SKU and a stock level; a service never does. Stock is
+// only ever changed through adjustProductStock() or a POS sale, never by the
+// plain product save - otherwise two tills editing a product at the same time
+// would each write back the level they happened to load.
+
+// Stock only makes sense for something physical. Anything else has the flag
+// forced off so a service can't accumulate a phantom shelf count.
+function stockableKind(kind: string) {
+  return kind === "product";
+}
 
 function cleanProductPayload(raw: Record<string, unknown>) {
   const kind = ["service", "product", "package", "lesson-type"].includes(String(raw?.kind)) ? String(raw.kind) : "service";
@@ -170,10 +181,20 @@ function cleanProductPayload(raw: Record<string, unknown>) {
     default_price: round2(cleanNumber(raw?.price ?? raw?.defaultPrice, 0, { min: 0 })),
     tax_rate: round2(cleanNumber(raw?.taxRate, 0, { min: 0, max: 100 })),
     active: raw?.active !== false,
+    supplier: cleanString(raw?.supplier, "", 140) || null,
+    // Stored as typed but compared case-insensitively by the unique index, so
+    // "gl-01" and "GL-01" can't both exist.
+    sku: cleanString(raw?.sku, "", 60) || null,
+    cost_price: round2(cleanNumber(raw?.costPrice, 0, { min: 0 })),
+    track_stock: stockableKind(kind) && raw?.trackStock !== false,
+    low_stock_threshold: Math.round(cleanNumber(raw?.lowStockThreshold, 0, { min: 0, max: 1e6 })),
   };
 }
 
 function productRowToApi(row: Record<string, unknown>) {
+  const trackStock = row.track_stock === true;
+  const stockLevel = Number(row.stock_level) || 0;
+  const lowStockThreshold = Number(row.low_stock_threshold) || 0;
   return {
     id: row.id,
     name: row.name,
@@ -182,9 +203,30 @@ function productRowToApi(row: Record<string, unknown>) {
     price: Number(row.default_price) || 0,
     taxRate: Number(row.tax_rate) || 0,
     active: row.active !== false,
+    supplier: row.supplier || "",
+    sku: row.sku || "",
+    costPrice: Number(row.cost_price) || 0,
+    trackStock,
+    stockLevel,
+    lowStockThreshold,
+    // Derived here rather than in the UI so the list, the checkout picker and
+    // any future reorder report all agree on what "low" means. A threshold of
+    // 0 means "don't warn me", so only out-of-stock counts.
+    lowStock: trackStock && (stockLevel <= 0 || (lowStockThreshold > 0 && stockLevel <= lowStockThreshold)),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+// The unique SKU index is the only conflict these writes can hit.
+function rethrowProductConflict(error: unknown, sku: string | null): never {
+  if ((error as { supabaseStatus?: number })?.supabaseStatus === 409 && sku) {
+    throw Object.assign(new Error(`SKU "${sku}" is already used by another product.`), {
+      status: 409,
+      code: "PRODUCT_SKU_EXISTS",
+    });
+  }
+  throw error;
 }
 
 async function listProducts(accountId: string) {
@@ -194,26 +236,163 @@ async function listProducts(accountId: string) {
   return { products: rows.map(productRowToApi) };
 }
 
+async function getProductRow(accountId: string, id: string) {
+  const rows = await supabase("billing_products_services", {
+    query: `select=*&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+  });
+  return rows.length ? (rows[0] as Record<string, unknown>) : null;
+}
+
 async function createProduct(accountId: string, body: Record<string, unknown>) {
   const clean = cleanProductPayload(body);
   if (!clean.name) throw Object.assign(new Error("Product name is required."), { status: 400 });
-  const row = { id: randomUUID(), account_id: accountId, ...clean, created_at: nowIso(), updated_at: nowIso() };
-  await supabase("billing_products_services", { method: "POST", body: [row], prefer: "return=minimal" });
+  // Opening stock is allowed here because nothing else can have touched the row
+  // yet. Every later change goes through adjustProductStock().
+  const openingStock = clean.track_stock ? Math.round(cleanNumber(body?.stockLevel, 0, { min: -1e6, max: 1e6 })) : 0;
+  const row = {
+    id: randomUUID(),
+    account_id: accountId,
+    ...clean,
+    stock_level: openingStock,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  try {
+    await supabase("billing_products_services", { method: "POST", body: [row], prefer: "return=minimal" });
+  } catch (error) {
+    rethrowProductConflict(error, clean.sku);
+  }
+  if (openingStock !== 0) {
+    await writeStockMovement(accountId, String(row.id), {
+      delta: openingStock,
+      resultingLevel: openingStock,
+      kind: "receipt",
+      note: "Opening stock",
+    });
+  }
   return { product: productRowToApi(row) };
 }
 
 async function updateProduct(accountId: string, id: string, body: Record<string, unknown>) {
   const clean = cleanProductPayload(body);
   if (!clean.name) throw Object.assign(new Error("Product name is required."), { status: 400 });
+  // Note the absence of stock_level: a product save must not be able to undo a
+  // sale that landed while the form was open.
   const patch = { ...clean, updated_at: nowIso() };
-  const rows = await supabase("billing_products_services", {
-    method: "PATCH",
-    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
-    body: patch,
-    prefer: "return=representation",
-  });
+  let rows: Array<Record<string, unknown>> = [];
+  try {
+    rows = await supabase("billing_products_services", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+      body: patch,
+      prefer: "return=representation",
+    });
+  } catch (error) {
+    rethrowProductConflict(error, clean.sku);
+  }
   if (!rows.length) throw Object.assign(new Error("Product not found."), { status: 404 });
   return { product: productRowToApi(rows[0]) };
+}
+
+// --- Stock ------------------------------------------------------------------
+
+type StockMovementKind = "adjustment" | "stocktake" | "receipt" | "sale" | "sale_reversal";
+
+async function writeStockMovement(
+  accountId: string,
+  productId: string,
+  entry: {
+    delta: number;
+    resultingLevel: number | null;
+    kind: StockMovementKind;
+    note?: string;
+    posTransactionId?: string;
+  },
+) {
+  await supabase("billing_stock_movements", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: [
+      {
+        id: randomUUID(),
+        account_id: accountId,
+        product_id: productId,
+        delta: entry.delta,
+        resulting_level: entry.resultingLevel,
+        kind: entry.kind,
+        pos_transaction_id: entry.posTransactionId || null,
+        note: cleanString(entry.note, "", 300) || null,
+        created_at: nowIso(),
+      },
+    ],
+  });
+}
+
+// Adds delta to the level inside a single UPDATE (see billing_adjust_stock in
+// products-stock-schema.sql) and returns the new level. Returns null when the
+// product doesn't exist, isn't ours, or doesn't track stock.
+async function adjustStockLevel(accountId: string, productId: string, delta: number) {
+  if (!delta) return null;
+  const result = await supabase("rpc/billing_adjust_stock", {
+    method: "POST",
+    body: { p_account_id: accountId, p_product_id: productId, p_delta: delta },
+  });
+  const level = Array.isArray(result) ? result[0] : result;
+  return level === null || level === undefined ? null : Number(level);
+}
+
+// Manual stock change from the Products tab: either a relative delta ("+6
+// arrived") or an absolute count ("the shelf says 4"). A stocktake is sent as
+// setTo so the ledger records the correction, not the number typed.
+async function adjustProductStock(accountId: string, id: string, body: Record<string, unknown>) {
+  const product = await getProductRow(accountId, id);
+  if (!product) throw Object.assign(new Error("Product not found."), { status: 404 });
+  if (product.track_stock !== true) {
+    throw Object.assign(new Error(`${product.name} does not track stock.`), { status: 400 });
+  }
+
+  const hasSetTo = body?.setTo !== undefined && body?.setTo !== null && body?.setTo !== "";
+  const current = Number(product.stock_level) || 0;
+  const delta = hasSetTo
+    ? Math.round(cleanNumber(body?.setTo, current, { min: -1e6, max: 1e6 })) - current
+    : Math.round(cleanNumber(body?.delta, 0, { min: -1e6, max: 1e6 }));
+
+  if (!delta) {
+    return { product: productRowToApi(product), movement: null };
+  }
+
+  const resultingLevel = await adjustStockLevel(accountId, id, delta);
+  const kind: StockMovementKind = hasSetTo ? "stocktake" : delta > 0 ? "receipt" : "adjustment";
+  await writeStockMovement(accountId, id, {
+    delta,
+    resultingLevel,
+    kind,
+    note: cleanString(body?.note, "", 300),
+  });
+
+  const updated = await getProductRow(accountId, id);
+  return { product: productRowToApi(updated || { ...product, stock_level: resultingLevel }) };
+}
+
+async function listStockMovements(accountId: string, id: string, url: URL) {
+  const limit = Math.max(1, Math.min(200, cleanNumber(url.searchParams.get("limit"), 50)));
+  const rows = await supabase("billing_stock_movements", {
+    query:
+      `select=*&account_id=eq.${encodeFilter(accountId)}&product_id=eq.${encodeFilter(id)}` +
+      `&order=created_at.desc&limit=${limit}`,
+  });
+  return {
+    movements: (rows as Array<Record<string, unknown>>).map((row) => ({
+      id: String(row.id ?? ""),
+      productId: String(row.product_id ?? ""),
+      delta: Number(row.delta) || 0,
+      resultingLevel: row.resulting_level === null || row.resulting_level === undefined ? null : Number(row.resulting_level),
+      kind: String(row.kind ?? "adjustment"),
+      posTransactionId: String(row.pos_transaction_id ?? ""),
+      note: String(row.note ?? ""),
+      createdAt: String(row.created_at ?? ""),
+    })),
+  };
 }
 
 // --- Discount presets --------------------------------------------------------
@@ -2294,6 +2473,152 @@ async function nextReceiptNumber(accountId: string) {
   return { sequence, receiptNumber: `${POS_RECEIPT_PREFIX}-${String(sequence).padStart(4, "0")}` };
 }
 
+// --- POS line items + stock ---------------------------------------------------
+// A counter sale can be several products at once. The item rows snapshot name,
+// SKU and unit price, so a receipt keeps saying what was sold even after the
+// product is renamed, repriced or retired.
+
+function posItemRowToApi(row: Record<string, unknown>) {
+  return {
+    id: String(row.id ?? ""),
+    productId: String(row.product_id ?? ""),
+    name: String(row.name ?? ""),
+    sku: String(row.sku ?? ""),
+    quantity: Number(row.quantity) || 0,
+    unitPrice: Number(row.unit_price) || 0,
+    lineTotal: Number(row.line_total) || 0,
+  };
+}
+
+async function posItemsForTransactions(accountId: string, transactionIds: string[]) {
+  const grouped: Record<string, ReturnType<typeof posItemRowToApi>[]> = {};
+  if (!transactionIds.length) return grouped;
+  // Same batching ceiling as the booking-link lookups: a query string is not an
+  // unbounded place to put ids.
+  for (let index = 0; index < transactionIds.length; index += 150) {
+    const batch = transactionIds.slice(index, index + 150);
+    const list = batch.map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+    const rows = await supabase("billing_pos_transaction_items", {
+      query:
+        `select=*&account_id=eq.${encodeFilter(accountId)}` +
+        `&transaction_id=in.(${encodeURIComponent(list)})&order=created_at.asc`,
+    });
+    for (const row of rows as Array<Record<string, unknown>>) {
+      const key = String(row.transaction_id ?? "");
+      (grouped[key] ||= []).push(posItemRowToApi(row));
+    }
+  }
+  return grouped;
+}
+
+// Turns the basket sent by the checkout modal into rows we are willing to
+// store: every line has to name a product that belongs to this account, and the
+// prices are re-read from the product rather than trusted from the client.
+async function resolvePosItems(accountId: string, raw: unknown) {
+  if (!Array.isArray(raw) || !raw.length) return [];
+  const requested = raw.slice(0, 50).map((entry) => {
+    const line = (entry || {}) as Record<string, unknown>;
+    return {
+      productId: cleanString(line.productId, "", 160),
+      quantity: Math.round(cleanNumber(line.quantity, 1, { min: 1, max: 9999 })),
+      // A price may be overridden at the counter, but only downward-or-upward
+      // as an explicit number; an absent one falls back to the list price.
+      unitPrice: line.unitPrice === undefined || line.unitPrice === "" ? null : round2(cleanNumber(line.unitPrice, 0, { min: 0 })),
+    };
+  });
+
+  const ids = [...new Set(requested.map((line) => line.productId).filter(Boolean))];
+  if (!ids.length) throw Object.assign(new Error("A sale item must name a product."), { status: 400 });
+  const list = ids.map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+  const rows = await supabase("billing_products_services", {
+    query: `select=*&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
+  });
+  const byId = new Map((rows as Array<Record<string, unknown>>).map((row) => [String(row.id ?? ""), row]));
+
+  return requested.map((line) => {
+    const product = byId.get(line.productId);
+    if (!product) throw Object.assign(new Error("One of the items is no longer available."), { status: 400 });
+    const unitPrice = line.unitPrice === null ? round2(Number(product.default_price) || 0) : line.unitPrice;
+    return {
+      productId: String(product.id ?? ""),
+      name: String(product.name ?? ""),
+      sku: String(product.sku ?? ""),
+      trackStock: product.track_stock === true,
+      quantity: line.quantity,
+      unitPrice,
+      lineTotal: round2(unitPrice * line.quantity),
+    };
+  });
+}
+
+type ResolvedPosItem = Awaited<ReturnType<typeof resolvePosItems>>[number];
+
+async function insertPosItems(accountId: string, transactionId: string, items: ResolvedPosItem[]) {
+  if (!items.length) return;
+  await supabase("billing_pos_transaction_items", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: items.map((item) => ({
+      id: randomUUID(),
+      account_id: accountId,
+      transaction_id: transactionId,
+      product_id: item.productId,
+      name: item.name,
+      sku: item.sku || null,
+      quantity: item.quantity,
+      unit_price: item.unitPrice,
+      line_total: item.lineTotal,
+      created_at: nowIso(),
+    })),
+  });
+}
+
+// Move a sale's stock exactly once, in either direction.
+//
+// The guard is the stock_applied flag on the transaction, not its status: a
+// sale can go paid -> refunded -> paid, and each hop has to move stock once. The
+// flag is flipped with a conditional PATCH (`stock_applied=is.false`), so two
+// requests arriving together produce one winner - the loser gets no rows back
+// and does nothing.
+async function movePosStock(accountId: string, transactionId: string, direction: "apply" | "reverse") {
+  const applying = direction === "apply";
+  const claimed = await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query:
+      `id=eq.${encodeFilter(transactionId)}&account_id=eq.${encodeFilter(accountId)}` +
+      `&stock_applied=is.${applying ? "false" : "true"}`,
+    body: { stock_applied: applying, updated_at: nowIso() },
+    prefer: "return=representation",
+  });
+  if (!claimed.length) return;
+
+  const items = (await posItemsForTransactions(accountId, [transactionId]))[transactionId] || [];
+  for (const item of items) {
+    if (!item.productId || !item.quantity) continue;
+    const delta = applying ? -item.quantity : item.quantity;
+    try {
+      // Returns null when the product stopped tracking stock (or was deleted),
+      // in which case there is nothing to record.
+      const resultingLevel = await adjustStockLevel(accountId, item.productId, delta);
+      if (resultingLevel === null) continue;
+      await writeStockMovement(accountId, item.productId, {
+        delta,
+        resultingLevel,
+        kind: applying ? "sale" : "sale_reversal",
+        posTransactionId: transactionId,
+      });
+    } catch (error) {
+      // A stock write must never fail the sale itself - the money is already
+      // taken. Log it and carry on; a stocktake corrects the count.
+      console.error("billing_api:stock_move_failed", transactionId, item.productId, error);
+    }
+  }
+}
+
+async function syncPosStock(accountId: string, transactionId: string, status: string) {
+  await movePosStock(accountId, transactionId, status === "paid" ? "apply" : "reverse");
+}
+
 async function listPosTransactions(accountId: string, url: URL) {
   const limit = Math.max(1, Math.min(500, cleanNumber(url.searchParams.get("limit"), 100)));
   const from = cleanString(url.searchParams.get("from"), "", 20);
@@ -2305,21 +2630,35 @@ async function listPosTransactions(accountId: string, url: URL) {
   const rows = await supabase("billing_pos_transactions", {
     query: `select=*&${filters.join("&")}&order=created_at.desc&limit=${limit}`,
   });
-  return { transactions: rows.map(posRowToApi) };
+  const transactions = rows.map(posRowToApi);
+  const itemsByTransaction = await posItemsForTransactions(accountId, transactions.map((entry) => entry.id));
+  return { transactions: transactions.map((entry) => ({ ...entry, items: itemsByTransaction[entry.id] || [] })) };
 }
 
 async function getPosTransaction(accountId: string, id: string) {
   const rows = await supabase("billing_pos_transactions", {
     query: `select=*&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
   });
-  return rows.length ? posRowToApi(rows[0]) : null;
+  if (!rows.length) return null;
+  const items = (await posItemsForTransactions(accountId, [String(rows[0].id ?? "")]))[String(rows[0].id ?? "")] || [];
+  return { ...posRowToApi(rows[0]), items };
 }
 
 async function createPosTransaction(accountId: string, body: Record<string, unknown>) {
-  const amount = round2(cleanNumber(body?.amount, 0, { min: 0 }));
+  // Prices come back off the product rows, not the request body, so a basket
+  // can't be re-priced by whoever is holding the till's browser open.
+  const items = await resolvePosItems(accountId, body?.items);
+  const itemsTotal = round2(items.reduce((total, item) => total + item.lineTotal, 0));
+
+  // An explicit amount still wins - that is how a discount at the counter is
+  // given - but a basket no longer needs one typed in.
+  const requestedAmount = round2(cleanNumber(body?.amount, 0, { min: 0 }));
+  const amount = requestedAmount > 0 ? requestedAmount : itemsTotal;
   if (amount <= 0) throw Object.assign(new Error("Enter an amount greater than zero."), { status: 400 });
 
-  const description = cleanString(body?.description, "", 300);
+  const description =
+    cleanString(body?.description, "", 300) ||
+    (items.length ? items.map((item) => (item.quantity > 1 ? `${item.name} x${item.quantity}` : item.name)).join(", ").slice(0, 300) : "");
   if (!description) throw Object.assign(new Error("A description is required."), { status: 400 });
 
   const methodId = cleanString(body?.paymentMethodId, "", 160);
@@ -2345,8 +2684,12 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
     payment_method_kind: method.kind,
     description,
     amount,
+    // For a basket the list price is what the items add up to, so a counter
+    // discount on a bag of gear stays visible the same way it does on a lesson.
     listed_amount: listedAmountRaw === null || listedAmountRaw === undefined || listedAmountRaw === ""
-      ? null
+      ? itemsTotal > 0
+        ? itemsTotal
+        : null
       : round2(cleanNumber(listedAmountRaw, 0, { min: 0 })),
     currency: cleanString(body?.currency, await resolveDefaultCurrency(), 10),
     customer_id: cleanString(body?.customerId, "", 160) || null,
@@ -2377,7 +2720,25 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
     }
   }
 
-  return { transaction: posRowToApi(row) };
+  await insertPosItems(accountId, String(row.id), items);
+  // Cash and Eftpos are paid the moment they are recorded, so the stock leaves
+  // the shelf now. Clarity Pay and On account wait for their status change.
+  if (status === "paid") await syncPosStock(accountId, String(row.id), status);
+
+  return {
+    transaction: {
+      ...posRowToApi(row),
+      items: items.map((item) => ({
+        id: "",
+        productId: item.productId,
+        name: item.name,
+        sku: item.sku,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        lineTotal: item.lineTotal,
+      })),
+    },
+  };
 }
 
 async function updatePosTransactionStatus(accountId: string, id: string, body: Record<string, unknown>) {
@@ -2395,7 +2756,12 @@ async function updatePosTransactionStatus(accountId: string, id: string, body: R
     prefer: "return=representation",
   });
   if (!rows.length) throw Object.assign(new Error("Transaction not found."), { status: 404 });
-  return { transaction: posRowToApi(rows[0]) };
+  // Marking a sale paid takes its items off the shelf; refunding or voiding it
+  // puts them back. movePosStock() is the thing that makes each of those happen
+  // exactly once, however many times the status is flipped.
+  await syncPosStock(accountId, id, status);
+  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
+  return { transaction: { ...posRowToApi(rows[0]), items } };
 }
 
 // Clarity Pay at the counter: create a Stripe Checkout session for this sale.
@@ -2463,7 +2829,9 @@ async function syncPosCheckout(accountId: string, id: string) {
     },
     prefer: "return=representation",
   });
-  return { transaction: updated.length ? posRowToApi(updated[0]) : transaction, paid: true };
+  await syncPosStock(accountId, id, "paid");
+  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
+  return { transaction: updated.length ? { ...posRowToApi(updated[0]), items } : transaction, paid: true };
 }
 
 // bookingId -> the sale that settled it. Drives the "paid at POS" badge on
@@ -2528,6 +2896,14 @@ export default async function handler(req: Request) {
 
     if (action === "products" && req.method === "GET") return json(await listProducts(accountId));
     if (action === "products" && req.method === "POST") return json(await createProduct(accountId, await parseBody(req)));
+    // Stock sub-actions come first: the generic products/:id handler below would
+    // otherwise read "id/stock" as the id.
+    if (action.startsWith("products/") && action.endsWith("/stock") && req.method === "POST") {
+      return json(await adjustProductStock(accountId, action.slice("products/".length, -"/stock".length), await parseBody(req)));
+    }
+    if (action.startsWith("products/") && action.endsWith("/stock-movements") && req.method === "GET") {
+      return json(await listStockMovements(accountId, action.slice("products/".length, -"/stock-movements".length), url));
+    }
     if (action.startsWith("products/") && (req.method === "PUT" || req.method === "PATCH")) {
       return json(await updateProduct(accountId, action.slice("products/".length), await parseBody(req)));
     }
