@@ -1,8 +1,8 @@
 // Sell - the full-screen till.
 //
-// Two panes, the way every counter POS is laid out: the docket on the left
-// (what the customer is buying, and the Pay button), the catalog on the right
-// (search, category tabs, tiles). The small PosCheckoutModal still exists and
+// Two panes: the catalog on the left (search, category tabs, tiles) taking the
+// room, the docket on the right (what is being bought, the customer, and the Pay
+// button) as a fixed column. The small PosCheckoutModal still exists and
 // still makes sense from a lesson card or a client profile, where the sale is
 // already defined and a modal is less disruptive than changing screens. This is
 // for walk-ups, where nothing is known until someone puts a glove on the counter.
@@ -48,6 +48,9 @@ export type SellScreenProps = {
   defaultTaxRate: number;
   formatMoney: (amount: number, currency?: string) => string;
   clients: Array<{ id: string; name: string; email?: string }>;
+  // Creates a client record from the till and returns it attached. Null means
+  // the write failed and the caller has already said so.
+  onCreateClient: (name: string) => Promise<{ id: string; name: string; email?: string } | null>;
   onSaleCompleted: (transaction: PosTransaction) => void;
   onToast: (message: string) => void;
 };
@@ -105,6 +108,7 @@ export function SellScreen({
   defaultTaxRate,
   formatMoney,
   clients,
+  onCreateClient,
   onSaleCompleted,
   onToast,
 }: SellScreenProps) {
@@ -120,7 +124,7 @@ export function SellScreen({
   const [customerName, setCustomerName] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
-  const [customerOpen, setCustomerOpen] = useState(false);
+  const [customerSaving, setCustomerSaving] = useState(false);
 
   const [customName, setCustomName] = useState("");
   const [customAmount, setCustomAmount] = useState("");
@@ -195,6 +199,27 @@ export function SellScreen({
       )
       .slice(0, 6);
   }, [clients, customerSearch]);
+
+  function attachCustomer(client: { id: string; name: string; email?: string }) {
+    setCustomerId(client.id);
+    setCustomerName(client.name);
+    setCustomerEmail(client.email || "");
+    setCustomerSearch("");
+  }
+
+  // The "+ Add" row under the suggestions. Creates a real client record rather
+  // than pinning a loose name to the sale, so the next visit finds them.
+  async function addCustomer() {
+    const name = customerSearch.trim();
+    if (!name) return;
+    setCustomerSaving(true);
+    try {
+      const created = await onCreateClient(name);
+      if (created) attachCustomer(created);
+    } finally {
+      setCustomerSaving(false);
+    }
+  }
 
   function resetSale() {
     setLines([]);
@@ -388,6 +413,105 @@ export function SellScreen({
 
   return (
     <section className="sell-screen">
+      {/* --- Catalog --------------------------------------------------------- */}
+      <div className="sell-catalog">
+        <div className="sell-search">
+          <Search size={16} />
+          <input
+            ref={searchRef}
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search or scan"
+            // A barcode scanner types the code and presses Enter. One exact SKU
+            // match on Enter rings it straight up, which is the whole point of
+            // having a scanner at the counter.
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              const needle = search.trim().toLowerCase();
+              if (!needle) return;
+              const exact = catalog.find((item) => (item.sku || "").toLowerCase() === needle);
+              if (exact) addItem(exact);
+              else if (tiles.length === 1) addItem(tiles[0]);
+            }}
+          />
+          {Boolean(search) && (
+            <button className="icon-button small" onClick={() => setSearch("")} type="button" aria-label="Clear search">
+              <X size={14} />
+            </button>
+          )}
+          <button className="outline-button" onClick={() => setCustomOpen((open) => !open)} type="button">
+            <Plus size={15} /> Custom
+          </button>
+        </div>
+
+        {customOpen && (
+          <div className="sell-custom-panel">
+            <label className="settings-field">
+              <span>What is it</span>
+              <input
+                value={customName}
+                onChange={(event) => setCustomName(event.target.value)}
+                placeholder="e.g. Range balls"
+              />
+            </label>
+            <label className="settings-field">
+              <span>Amount ({currency})</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={customAmount}
+                onChange={(event) => setCustomAmount(event.target.value)}
+              />
+            </label>
+            <button className="outline-button" onClick={addCustom} type="button">
+              Add to sale
+            </button>
+          </div>
+        )}
+
+        <div className="sell-tabs" role="tablist" aria-label="Catalog categories">
+          {TAB_ORDER.filter(
+            (key) => key === "all" || catalog.some((item) => item.kind === key && item.active !== false),
+          ).map((key) => (
+            <button
+              key={key}
+              className={tab === key ? "active" : ""}
+              onClick={() => setTab(key)}
+              role="tab"
+              aria-selected={tab === key}
+              type="button"
+            >
+              {TAB_LABELS[key]}
+            </button>
+          ))}
+        </div>
+
+        {catalogState === "loading" && <p className="field-help">Loading the catalog...</p>}
+        {catalogState === "error" && <p className="field-help">Could not load the catalog. Refresh the page.</p>}
+        {catalogState === "loaded" && !tiles.length && (
+          <p className="field-help">Nothing here. Try another category, or add items under Billing &gt; Products.</p>
+        )}
+
+        <div className="sell-grid">
+          {tiles.map((item) => {
+            const low = isLowStock(item);
+            return (
+              <button key={item.id} className="sell-tile" onClick={() => addItem(item)} type="button">
+                <span className="sell-tile-name">{item.name}</span>
+                <span className="sell-tile-price">{formatMoney(item.price, currency)}</span>
+                {item.trackStock && (
+                  <span className={`sell-tile-stock${low ? " low" : ""}`}>
+                    {low && <AlertTriangle size={11} />}
+                    {item.stockLevel ?? 0} left
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* --- Docket ---------------------------------------------------------- */}
       <div className="sell-docket">
         <div className="sell-docket-head">
@@ -399,56 +523,59 @@ export function SellScreen({
           )}
         </div>
 
-        <button className="sell-customer" onClick={() => setCustomerOpen((open) => !open)} type="button">
-          <User size={15} />
-          {customerName ? <strong>{customerName}</strong> : <span>Add a customer</span>}
-          {customerName && <em>{customerEmail || "no email"}</em>}
-        </button>
-        {customerOpen && (
-          <div className="sell-customer-panel">
+        {customerName ? (
+          <div className="sell-customer-chip">
+            <User size={15} />
+            <span>
+              <strong>{customerName}</strong>
+              {customerEmail && <em>{customerEmail}</em>}
+            </span>
+            <button
+              className="icon-button small"
+              onClick={() => {
+                setCustomerId("");
+                setCustomerName("");
+                setCustomerEmail("");
+              }}
+              type="button"
+              aria-label="Remove customer"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        ) : (
+          <div className="sell-customer-search">
+            <Search size={15} />
             <input
               value={customerSearch}
               onChange={(event) => setCustomerSearch(event.target.value)}
-              placeholder="Search clients, or type a name below"
+              placeholder="Search customers"
             />
-            {clientMatches.map((client) => (
-              <button
-                key={client.id}
-                className="sell-customer-match"
-                onClick={() => {
-                  setCustomerId(client.id);
-                  setCustomerName(client.name);
-                  setCustomerEmail(client.email || "");
-                  setCustomerSearch("");
-                  setCustomerOpen(false);
-                }}
-                type="button"
-              >
-                <strong>{client.name}</strong>
-                <em>{client.email || "no email"}</em>
-              </button>
-            ))}
-            <div className="settings-field-row">
-              <label className="settings-field">
-                <span>Name</span>
-                <input
-                  value={customerName}
-                  onChange={(event) => {
-                    // Typing over a matched client detaches it - the sale is for
-                    // whoever is named on it, not the row that was picked first.
-                    setCustomerId("");
-                    setCustomerName(event.target.value);
-                  }}
-                />
-              </label>
-              <label className="settings-field">
-                <span>Email</span>
-                <input value={customerEmail} onChange={(event) => setCustomerEmail(event.target.value)} type="email" />
-              </label>
-            </div>
-            <button className="outline-button" onClick={() => setCustomerOpen(false)} type="button">
-              Done
-            </button>
+            {Boolean(customerSearch.trim()) && (
+              <div className="sell-customer-results">
+                {clientMatches.map((client) => (
+                  <button
+                    key={client.id}
+                    className="sell-customer-match"
+                    onClick={() => attachCustomer(client)}
+                    type="button"
+                  >
+                    <strong>{client.name}</strong>
+                    <em>{client.email || "no email"}</em>
+                  </button>
+                ))}
+                {!clientMatches.length && <p className="field-help">No client by that name.</p>}
+                <button
+                  className="sell-customer-add"
+                  disabled={customerSaving}
+                  onClick={() => void addCustomer()}
+                  type="button"
+                >
+                  <Plus size={14} />
+                  {customerSaving ? "Adding..." : `Add "${customerSearch.trim()}" as a new client`}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -559,105 +686,6 @@ export function SellScreen({
             ))}
           </div>
         )}
-      </div>
-
-      {/* --- Catalog --------------------------------------------------------- */}
-      <div className="sell-catalog">
-        <div className="sell-search">
-          <Search size={16} />
-          <input
-            ref={searchRef}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search or scan"
-            // A barcode scanner types the code and presses Enter. One exact SKU
-            // match on Enter rings it straight up, which is the whole point of
-            // having a scanner at the counter.
-            onKeyDown={(event) => {
-              if (event.key !== "Enter") return;
-              const needle = search.trim().toLowerCase();
-              if (!needle) return;
-              const exact = catalog.find((item) => (item.sku || "").toLowerCase() === needle);
-              if (exact) addItem(exact);
-              else if (tiles.length === 1) addItem(tiles[0]);
-            }}
-          />
-          {Boolean(search) && (
-            <button className="icon-button small" onClick={() => setSearch("")} type="button" aria-label="Clear search">
-              <X size={14} />
-            </button>
-          )}
-          <button className="outline-button" onClick={() => setCustomOpen((open) => !open)} type="button">
-            <Plus size={15} /> Custom
-          </button>
-        </div>
-
-        {customOpen && (
-          <div className="sell-custom-panel">
-            <label className="settings-field">
-              <span>What is it</span>
-              <input
-                value={customName}
-                onChange={(event) => setCustomName(event.target.value)}
-                placeholder="e.g. Range balls"
-              />
-            </label>
-            <label className="settings-field">
-              <span>Amount ({currency})</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={customAmount}
-                onChange={(event) => setCustomAmount(event.target.value)}
-              />
-            </label>
-            <button className="outline-button" onClick={addCustom} type="button">
-              Add to sale
-            </button>
-          </div>
-        )}
-
-        <div className="sell-tabs" role="tablist" aria-label="Catalog categories">
-          {TAB_ORDER.filter(
-            (key) => key === "all" || catalog.some((item) => item.kind === key && item.active !== false),
-          ).map((key) => (
-            <button
-              key={key}
-              className={tab === key ? "active" : ""}
-              onClick={() => setTab(key)}
-              role="tab"
-              aria-selected={tab === key}
-              type="button"
-            >
-              {TAB_LABELS[key]}
-            </button>
-          ))}
-        </div>
-
-        {catalogState === "loading" && <p className="field-help">Loading the catalog...</p>}
-        {catalogState === "error" && <p className="field-help">Could not load the catalog. Refresh the page.</p>}
-        {catalogState === "loaded" && !tiles.length && (
-          <p className="field-help">Nothing here. Try another category, or add items under Billing &gt; Products.</p>
-        )}
-
-        <div className="sell-grid">
-          {tiles.map((item) => {
-            const low = isLowStock(item);
-            return (
-              <button key={item.id} className="sell-tile" onClick={() => addItem(item)} type="button">
-                <span className="sell-tile-name">{item.name}</span>
-                <span className="sell-tile-price">{formatMoney(item.price, currency)}</span>
-                {item.trackStock && (
-                  <span className={`sell-tile-stock${low ? " low" : ""}`}>
-                    {low && <AlertTriangle size={11} />}
-                    {item.stockLevel ?? 0} left
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {/* --- Payment --------------------------------------------------------- */}

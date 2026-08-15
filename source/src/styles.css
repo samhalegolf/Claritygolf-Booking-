@@ -9785,7 +9785,9 @@ button {
 
 .sell-screen {
   display: grid;
-  grid-template-columns: minmax(300px, 360px) 1fr;
+  /* Catalog first: choosing is what you do most, and it wants the room. The
+     docket is a fixed-width column on the right where the eye ends up. */
+  grid-template-columns: 1fr minmax(300px, 380px);
   gap: 16px;
   align-items: stretch;
   /* Fill the panel rather than growing with the catalog: each pane scrolls on
@@ -9826,43 +9828,91 @@ button {
   font-size: 16px;
 }
 
-.sell-customer {
+/* Attached customer. A chip, not a form - at a till the customer is either
+   known or they aren't, and the fields for spelling one out belong in Clients. */
+.sell-customer-chip {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
   padding: 9px 10px;
-  border: 1px dashed var(--border);
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
 }
 
-.sell-customer em {
-  margin-left: auto;
+.sell-customer-chip span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sell-customer-chip strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sell-customer-chip em {
   font-style: normal;
   font-size: 11px;
   color: var(--muted);
 }
 
-.sell-customer-panel {
+.sell-customer-chip > button:last-child {
+  margin-left: auto;
+}
+
+.sell-customer-search {
+  position: relative;
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 8px;
-  margin-top: 8px;
-  padding: 10px;
+  padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
+  color: var(--muted);
+}
+
+.sell-customer-search input {
+  flex: 1;
+  padding: 10px 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+.sell-customer-search input:focus {
+  outline: none;
+}
+
+/* Floats over the docket rather than pushing the lines down, so the list
+   doesn't shuffle under your hand while you're typing a name. */
+.sell-customer-results {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
+}
+
+.sell-customer-results .field-help {
+  margin: 2px 6px;
 }
 
 .sell-customer-match {
   display: flex;
   flex-direction: column;
   padding: 6px 8px;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 8px;
   background: none;
   color: inherit;
@@ -9871,10 +9921,33 @@ button {
   cursor: pointer;
 }
 
+.sell-customer-match:hover {
+  background: var(--surface-muted, #f7f7f5);
+}
+
 .sell-customer-match em {
   font-style: normal;
   font-size: 11px;
   color: var(--muted);
+}
+
+/* Always last, always present: not finding someone is the normal case for a
+   walk-up, and the fix should be one tap away rather than another screen. */
+.sell-customer-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 6px 6px;
+  background: none;
+  color: var(--coach-primary, #1fd36d);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
 }
 
 .sell-lines {

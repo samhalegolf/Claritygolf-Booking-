@@ -14278,6 +14278,35 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     }
   }
 
+  // "+ Add" on the Sell screen's customer search. Same PUT /api/people write the
+  // rest of the app uses; the till only ever has a name to go on, so email and
+  // phone are filled in later from Clients.
+  async function createClientFromTill(name: string) {
+    const cleanName = name.trim();
+    if (!cleanName) return null;
+    try {
+      const response = await fetch("/api/people", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ person: { name: cleanName, email: "", phone: "", notes: "", caddyProfileUrl: "" } }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        throw new Error("Admin login required");
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not add the client."));
+      const result = (await response.json()) as PeopleUpdateResult;
+      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
+      if (!result.person?.id) throw new Error("Could not add the client.");
+      setToast({ message: `${result.person.name} added to clients.` });
+      return { id: result.person.id, name: result.person.name, email: result.person.email || "" };
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not add the client." });
+      return null;
+    }
+  }
+
   async function loadBillingWorkspace() {
     setBillingDataLoadState("loading");
     try {
@@ -21663,6 +21692,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             defaultTaxRate={invoiceSettings.taxRate}
             formatMoney={formatMoney}
             clients={clients}
+            onCreateClient={createClientFromTill}
             onSaleCompleted={handlePosSaleChanged}
             onToast={(message) => setToast({ message })}
           />
