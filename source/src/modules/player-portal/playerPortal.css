@@ -1,10 +1,73 @@
+/* The Player Terminal's palette.
+ *
+ * Every surface below is written against these tokens rather than literal
+ * colours, so light and dark are the same stylesheet with one block swapped.
+ * Which block applies is the reader's call, not a setting saved on somebody
+ * else's device -- the same reasoning that took the dark/light toggle off the
+ * booking cards. */
+.player-terminal,
+.player-portal {
+  --pt-page: #eef0ea;
+  --pt-surface: #ffffff;
+  --pt-surface-soft: #fbfbf8;
+  --pt-border: #deded8;
+  --pt-border-soft: #ecebe5;
+  --pt-text: #171717;
+  --pt-text-body: #33312c;
+  --pt-text-soft: #57544d;
+  --pt-muted: #77746d;
+  --pt-hover: #f4f3ef;
+  --pt-active: #f1f0ec;
+  --pt-accent: #171717;
+  --pt-accent-text: #ffffff;
+  --pt-error-border: #e4b4b4;
+  --pt-error-bg: #fff4f4;
+  --pt-error-text: #6f1d1d;
+}
+
+@media (prefers-color-scheme: dark) {
+  .player-terminal,
+  .player-portal {
+    --pt-page: #0b0d0a;
+    --pt-surface: #141712;
+    --pt-surface-soft: #1a1e18;
+    --pt-border: rgba(244, 247, 242, 0.14);
+    --pt-border-soft: rgba(244, 247, 242, 0.09);
+    --pt-text: #f4f7f2;
+    --pt-text-body: rgba(244, 247, 242, 0.88);
+    --pt-text-soft: rgba(244, 247, 242, 0.76);
+    --pt-muted: rgba(244, 247, 242, 0.56);
+    --pt-hover: rgba(244, 247, 242, 0.08);
+    --pt-active: rgba(244, 247, 242, 0.13);
+    /* Inverted: on a dark card the filled button is the light one. */
+    --pt-accent: #f0f3ee;
+    --pt-accent-text: #12140f;
+    --pt-error-border: rgba(255, 138, 138, 0.42);
+    --pt-error-bg: rgba(94, 26, 26, 0.34);
+    --pt-error-text: #ffd9d9;
+  }
+}
+
+/* The terminal fills the page, so the document behind it has to agree --
+   otherwise overscrolling on a phone flashes the light default through. */
+:root:has(.player-terminal) {
+  color-scheme: light dark;
+  background: #eef0ea;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:has(.player-terminal) {
+    background: #0b0d0a;
+  }
+}
+
 .player-portal {
   min-height: 100vh;
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: 48px 16px;
-  background: #eef0ea;
+  background: var(--pt-page);
   box-sizing: border-box;
 }
 
@@ -17,11 +80,11 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: #fff;
-  border: 1px solid #deded8;
+  background: var(--pt-surface);
+  border: 1px solid var(--pt-border);
   border-radius: 16px;
   padding: 28px;
-  color: #171717;
+  color: var(--pt-text);
 }
 
 .player-portal-brand {
@@ -39,7 +102,7 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
-  color: #77746d;
+  color: var(--pt-muted);
 }
 
 .player-portal-card h1 {
@@ -50,7 +113,7 @@
 
 .player-portal-lead {
   margin: 0;
-  color: #57544d;
+  color: var(--pt-text-soft);
   font-size: 14px;
 }
 
@@ -64,31 +127,31 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 700;
-  color: #77746d;
+  color: var(--pt-muted);
 }
 
 .player-portal-field input {
   min-height: 44px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--pt-border);
   border-radius: 9px;
   padding: 0 12px;
-  background: #fbfbf8;
-  color: #171717;
+  background: var(--pt-surface-soft);
+  color: var(--pt-text);
   font: inherit;
 }
 
 .player-portal-field input:focus {
   outline: none;
-  border-color: #171717;
-  background: #fff;
+  border-color: var(--pt-text);
+  background: var(--pt-surface);
 }
 
 .player-portal-primary {
   min-height: 46px;
   border: 0;
   border-radius: 10px;
-  background: #171717;
-  color: #fff;
+  background: var(--pt-accent);
+  color: var(--pt-accent-text);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -101,11 +164,11 @@
 }
 
 .player-portal-ghost {
-  border: 1px solid #deded8;
+  border: 1px solid var(--pt-border);
   border-radius: 999px;
   padding: 7px 14px;
-  background: #fff;
-  color: #171717;
+  background: var(--pt-surface);
+  color: var(--pt-text);
   font: inherit;
   font-weight: 600;
   font-size: 13px;
@@ -113,16 +176,16 @@
 }
 
 .player-portal-ghost:hover {
-  background: #f6f6f2;
+  background: var(--pt-hover);
 }
 
 .player-portal-error {
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid #e4b4b4;
+  border: 1px solid var(--pt-error-border);
   border-radius: 9px;
-  background: #fff4f4;
-  color: #6f1d1d;
+  background: var(--pt-error-bg);
+  color: var(--pt-error-text);
   font-size: 13px;
 }
 
@@ -138,7 +201,7 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-weight: 800;
-  color: #77746d;
+  color: var(--pt-muted);
 }
 
 .player-portal-list {
@@ -152,10 +215,10 @@
 
 .player-portal-booking,
 .player-portal-note {
-  border: 1px solid #ecebe5;
+  border: 1px solid var(--pt-border-soft);
   border-radius: 10px;
   padding: 12px 14px;
-  background: #fbfbf8;
+  background: var(--pt-surface-soft);
 }
 
 .player-portal-booking {
@@ -177,12 +240,12 @@
 
 .player-portal-booking-main span {
   font-size: 13px;
-  color: #57544d;
+  color: var(--pt-text-soft);
 }
 
 .player-portal-booking-loc {
   font-size: 12px;
-  color: #77746d;
+  color: var(--pt-muted);
   text-align: right;
   flex-shrink: 0;
 }
@@ -201,35 +264,35 @@
 
 .player-portal-note-head span {
   font-size: 12px;
-  color: #77746d;
+  color: var(--pt-muted);
   flex-shrink: 0;
 }
 
 .player-portal-note p {
   margin: 0;
   font-size: 14px;
-  color: #33312c;
+  color: var(--pt-text-body);
   white-space: pre-wrap;
 }
 
 .player-portal-empty {
   margin: 0;
   font-size: 13px;
-  color: #77746d;
+  color: var(--pt-muted);
 }
 
 .player-portal-loading {
   align-items: center;
   text-align: center;
-  color: #57544d;
+  color: var(--pt-text-soft);
 }
 
 .player-portal-spinner {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  border: 3px solid #deded8;
-  border-top-color: #171717;
+  border: 3px solid var(--pt-border);
+  border-top-color: var(--pt-text);
   animation: player-portal-spin 700ms linear infinite;
 }
 
@@ -247,9 +310,9 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border: 1px solid #e4e3dd;
+  border: 1px solid var(--pt-border);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--pt-surface-soft);
   flex-wrap: wrap;
 }
 
@@ -262,7 +325,7 @@
 
 .player-portal-video-main strong {
   font-size: 14px;
-  color: #171717;
+  color: var(--pt-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -270,7 +333,7 @@
 
 .player-portal-video-main span {
   font-size: 12px;
-  color: #77746d;
+  color: var(--pt-muted);
 }
 
 .player-portal-video-status {
@@ -296,7 +359,9 @@
   cursor: default;
 }
 
-/* The video workspace takes the whole screen -- the portal card would crop it. */
+/* The video workspace takes the whole screen -- the portal card would crop it.
+   It paints its own dark surface in either scheme; that is the swing analysis
+   convention and it does not follow the terminal. */
 .player-portal-video-host {
   padding: 0;
   display: block;
@@ -312,7 +377,7 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #eef0ea;
+  background: var(--pt-page);
 }
 
 .player-terminal * {
@@ -329,14 +394,30 @@
   padding-top: 28px;
 }
 
+/* Booking renders in the same column the portal card occupies, so moving
+   between Lessons and Book reads as changing panel, not leaving the app. */
+.player-terminal-booking {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  padding: 28px 16px;
+}
+
+.player-terminal-booking .app-shell {
+  width: min(760px, 100%);
+  padding: 0;
+}
+
 /* Sticky rather than fixed: it stays reachable while a long list scrolls, and
    a phone in landscape gets its height back as soon as the page moves. */
 .player-terminal-nav {
   position: sticky;
   top: 0;
   z-index: 20;
-  border-bottom: 1px solid #deded8;
-  background: #fff;
+  border-bottom: 1px solid var(--pt-border);
+  background: var(--pt-surface);
+  color: var(--pt-text);
 }
 
 .player-terminal-nav-inner {
@@ -358,10 +439,10 @@
   gap: 8px;
   min-height: 40px;
   padding: 0 14px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--pt-border);
   border-radius: 999px;
-  background: #fff;
-  color: #171717;
+  background: var(--pt-surface);
+  color: var(--pt-text);
   font: inherit;
   font-weight: 700;
   font-size: 14px;
@@ -369,7 +450,7 @@
 }
 
 .player-terminal-nav-back:hover {
-  background: #f1f0ec;
+  background: var(--pt-hover);
 }
 
 .player-terminal-nav-links {
@@ -396,7 +477,7 @@
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: #57544d;
+  color: var(--pt-text-soft);
   font: inherit;
   font-size: 14px;
   font-weight: 600;
@@ -405,13 +486,13 @@
 }
 
 .player-terminal-nav-links button:hover {
-  background: #f4f3ef;
-  color: #171717;
+  background: var(--pt-hover);
+  color: var(--pt-text);
 }
 
 .player-terminal-nav-links button.active {
-  background: #f1f0ec;
-  color: #171717;
+  background: var(--pt-active);
+  color: var(--pt-text);
 }
 
 .player-terminal-nav-menu {
@@ -446,7 +527,8 @@
     font-size: 13px;
   }
 
-  .player-terminal .player-portal {
+  .player-terminal .player-portal,
+  .player-terminal-booking {
     padding: 20px 12px;
   }
 }
@@ -458,9 +540,9 @@
   flex-direction: column;
   gap: 3px;
   padding: 16px;
-  border: 1px solid #d8d7cf;
+  border: 1px solid var(--pt-border);
   border-radius: 12px;
-  background: #fbfbf8;
+  background: var(--pt-surface-soft);
 }
 
 .player-portal-next strong {
@@ -469,26 +551,26 @@
 
 .player-portal-next span {
   font-size: 14px;
-  color: #33312c;
+  color: var(--pt-text-body);
 }
 
 .player-portal-next em {
   font-size: 13px;
   font-style: normal;
-  color: #77746d;
+  color: var(--pt-muted);
 }
 
 .player-portal-past {
-  border: 1px solid #ecebe5;
+  border: 1px solid var(--pt-border-soft);
   border-radius: 10px;
-  background: #fbfbf8;
+  background: var(--pt-surface-soft);
   padding: 10px 14px;
 }
 
 .player-portal-past summary {
   font-size: 13px;
   font-weight: 700;
-  color: #57544d;
+  color: var(--pt-text-soft);
   cursor: pointer;
 }
 
@@ -505,13 +587,13 @@
   gap: 12px;
   flex-wrap: wrap;
   padding: 12px 14px;
-  border: 1px solid #ecebe5;
+  border: 1px solid var(--pt-border-soft);
   border-radius: 10px;
-  background: #fbfbf8;
+  background: var(--pt-surface-soft);
 }
 
 .player-portal-caddy-access {
   font-size: 14px;
   font-weight: 600;
-  color: #33312c;
+  color: var(--pt-text-body);
 }

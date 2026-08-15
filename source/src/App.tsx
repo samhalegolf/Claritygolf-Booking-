@@ -73,7 +73,6 @@ import {
   BOOKING_EMBED_VALUE,
   BOOKING_LOGIN_STORAGE_KEY,
   PUBLIC_BOOKING_HOST,
-  closePlayerBooking,
   isBookingEmbedMode,
   type BookingEntryMode,
 } from "./modules/shared/bookingHandoff";
@@ -4611,6 +4610,37 @@ const emptyClientEditor: ClientEditor = {
   caddyProfileUrl: "",
 };
 
+/**
+ * Which palette the booking cards wear.
+ *
+ * This used to be a coach setting, which meant the cards were dark or light
+ * according to a value saved on the coach's machine -- so changing it there did
+ * nothing for a player on their own phone, and every visitor got one coach's
+ * preference regardless of their own. The person looking at the page is the
+ * only one who knows which they want, and their browser already says.
+ */
+function useBookingCardScheme(): ThemeMode {
+  const query = "(prefers-color-scheme: dark)";
+  const read = (): ThemeMode =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(query).matches
+      ? "dark"
+      : "light";
+  const [scheme, setScheme] = useState<ThemeMode>(read);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia(query);
+    const update = () => setScheme(media.matches ? "dark" : "light");
+    media.addEventListener("change", update);
+    update();
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  return scheme;
+}
+
 type AppProps = {
   /**
    * Called when the coach session goes away underneath the workspace. The entry
@@ -4630,6 +4660,7 @@ type AppProps = {
 function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const isEmbedMode = isBookingWidgetMode();
   const isPlayerBooking = isEmbedMode && bookingEntry === "player";
+  const bookingCardScheme = useBookingCardScheme();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
   // Contact matching and phone formatting resolve bare national numbers against
@@ -16289,15 +16320,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     }
   }
 
-  function setBookingCardTheme(nextTheme: ThemeMode) {
-    const nextBrand = cleanBrandSettings({ ...brandSettings, bookingTheme: nextTheme });
-    setBrandSaveState("idle");
-    setBrandSettings(nextBrand);
-    if (!isEmbedMode && authStatus === "authenticated") {
-      void saveBrandSettings(nextBrand, { silent: true });
-    }
-  }
-
   function setBookingLogoVisible(showLogo: boolean) {
     const nextBrand = cleanBrandSettings({ ...brandSettings, showLogo });
     setBrandSaveState("idle");
@@ -18209,10 +18231,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           <Eye size={18} />
           <div>
             <span>Preview</span>
-            <strong>{brandSettings.bookingTheme === "dark" ? "Dark branded cards" : "Light branded cards"}</strong>
+            <strong>As your device shows it</strong>
           </div>
         </summary>
-        <div className={`public-booking booking-theme-${brandSettings.bookingTheme}`}>
+        <div className={`public-booking booking-theme-${bookingCardScheme}`}>
       <div className={`booking-brand ${showBookingBrandLogo ? "" : "booking-brand-subtle"}`}>
         {showBookingBrandLogo && brandSettings.logoPreview ? (
           <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
@@ -23888,22 +23910,14 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         )}
 
         {isEmbedMode && activeView === "booking" && (
-          <section className={`public-booking booking-theme-${brandSettings.bookingTheme} module-page`}>
-            {isPlayerBooking && (
+          <section className={`public-booking booking-theme-${bookingCardScheme} module-page`}>
+            {/* No back control here: booking renders inside the Player
+                Terminal, and the terminal's own navigation owns the way out. */}
+            {isPlayerBooking && playerBookingIdentity && (
               <div className="booking-player-bar">
-                <button
-                  className="booking-player-back"
-                  onClick={() => closePlayerBooking()}
-                  type="button"
-                >
-                  <ArrowLeft size={15} />
-                  <span>Player Portal</span>
-                </button>
-                {playerBookingIdentity && (
-                  <span className="booking-player-identity">
-                    Booking as <strong>{playerBookingIdentity.name || playerBookingIdentity.email}</strong>
-                  </span>
-                )}
+                <span className="booking-player-identity">
+                  Booking as <strong>{playerBookingIdentity.name || playerBookingIdentity.email}</strong>
+                </span>
               </div>
             )}
             <div className={`booking-brand ${showBookingBrandLogo ? "" : "booking-brand-subtle"}`}>
@@ -26478,30 +26492,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <Eye size={18} />
                     <div>
                       <span>Booking surface</span>
-                      <strong>{brandSettings.bookingTheme === "dark" ? "Dark branded cards" : "Light branded cards"}</strong>
+                      <strong>Follows each visitor's device</strong>
                     </div>
                   </summary>
-                  <div className="booking-surface-setting">
-                    <div>
-                      <span>Booking surface</span>
-                      <strong>{brandSettings.bookingTheme === "dark" ? "Dark branded cards" : "Light branded cards"}</strong>
-                    </div>
-                    <button
-                      aria-label={`Switch booking cards to ${brandSettings.bookingTheme === "dark" ? "light" : "dark"}`}
-                      aria-pressed={brandSettings.bookingTheme === "dark"}
-                      className={`theme-switch theme-toggle ${brandSettings.bookingTheme === "dark" ? "is-dark" : "is-light"}`}
-                      data-testid="booking-theme-switch"
-                      onClick={() => setBookingCardTheme(brandSettings.bookingTheme === "dark" ? "light" : "dark")}
-                      type="button"
-                    >
-                      <span className={brandSettings.bookingTheme === "light" ? "active" : ""} aria-hidden="true">
-                        <Sun size={15} />
-                      </span>
-                      <span className={brandSettings.bookingTheme === "dark" ? "active" : ""} aria-hidden="true">
-                        <Moon size={15} />
-                      </span>
-                    </button>
-                  </div>
+                  {/* The dark/light choice used to live here. It was one
+                      machine's preference applied to everyone who opened the
+                      booking page, so the cards now follow the reader's own
+                      browser instead. */}
                   <div className="booking-surface-setting">
                     <div>
                       <span>Booking logo</span>

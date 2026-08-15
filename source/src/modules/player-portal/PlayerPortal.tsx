@@ -2,7 +2,12 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 
 import "./playerPortal.css";
 import { signOut, type Session } from "../auth/session";
-import { openPlayerBooking, slotDate } from "../shared/bookingHandoff";
+import {
+  closePlayerBooking,
+  isPlayerBookingMode,
+  openPlayerBooking,
+  slotDate,
+} from "../shared/bookingHandoff";
 import {
   PlayerTerminalNav,
   type PlayerTerminalDestination,
@@ -27,6 +32,11 @@ const VideoAnalysisPage = lazy(() =>
   })),
 );
 
+// The booking widget is the same component the public site embeds -- one
+// booking flow, not a player-shaped copy of it. It renders inside the terminal
+// here, so the navigation bar stays where the player left it.
+const BookingWidget = lazy(() => import("../../App"));
+
 type Booking = {
   id: string;
   serviceName?: string;
@@ -47,8 +57,6 @@ type Note = {
   updatedAt?: string;
 };
 
-// Book is a destination rather than a tab: it navigates into authenticated
-// booking rather than swapping the panel below.
 type PortalTab = "lessons" | "notes" | "videos";
 
 type CaddyAccess = {
@@ -123,6 +131,9 @@ export type PlayerPortalProps = {
 };
 
 export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps) {
+  // Booking is a view of the terminal alongside the tabs, and it is the one
+  // view the URL can name -- so a booking link opens straight into it.
+  const [booking, setBooking] = useState(isPlayerBookingMode);
   const [tab, setTab] = useState<PortalTab>("lessons");
   const [playerEmail, setPlayerEmail] = useState(session.email);
   const [playerName, setPlayerName] = useState(session.name);
@@ -244,19 +255,30 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
 
   const navigateTerminal = useCallback(
     (destination: PlayerTerminalDestination) => {
+      setRecording(false);
+      setOpenVideoId("");
       // Booking is part of the terminal, not a separate front door. The session
       // travels with the player, so nothing is copied into localStorage and no
       // personal data goes into the URL -- booking asks the server who this is.
       if (destination === "book") {
         openPlayerBooking();
+        setBooking(true);
         return;
       }
-      setRecording(false);
-      setOpenVideoId("");
+      closePlayerBooking();
+      setBooking(false);
       setTab(destination);
     },
     [],
   );
+
+  // The address bar and the terminal have to agree, or Back leaves a player
+  // looking at booking on a URL that says otherwise.
+  useEffect(() => {
+    const sync = () => setBooking(isPlayerBookingMode());
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
 
   const sendToCoach = useCallback(
     async (savedVideoId: string) => {
@@ -359,6 +381,19 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
       onSignOut={() => void handleSignOut()}
     />
   );
+
+  if (booking) {
+    return (
+      <div className="player-terminal">
+        {renderNav("book")}
+        <div className="player-terminal-booking">
+          <Suspense fallback={<div className="player-portal-card">Loading booking…</div>}>
+            <BookingWidget bookingEntry="player" />
+          </Suspense>
+        </div>
+      </div>
+    );
+  }
 
   if (recording || openVideoId) {
     return (

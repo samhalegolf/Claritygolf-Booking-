@@ -89,13 +89,24 @@ function Root() {
 
   if (!session) return <Splash label="Checking session…" />;
 
-  // Player booking. The parameter asked for it; the session decides. Anyone who
-  // is not a signed-in player -- a shared link, an expired cookie -- falls
-  // through to the ordinary public widget rather than a login wall.
+  // A player always gets the terminal, booking included. The portal renders
+  // booking inside its own shell rather than handing the page over, so the
+  // navigation bar survives the trip.
+  if (session.role === "player") {
+    return (
+      <Suspense fallback={<Splash label="Loading your profile…" />}>
+        <PlayerPortal session={session} onSignedOut={handleSessionLost} />
+      </Suspense>
+    );
+  }
+
+  // Everyone else who lands on the player-booking URL -- a shared link, an
+  // expired cookie, a coach -- gets the ordinary public widget rather than a
+  // login wall. The parameter asked; the session decided.
   if (bookingEmbed) {
     return (
       <Suspense fallback={<Splash label="Loading booking…" />}>
-        <App bookingEntry={session.role === "player" ? "player" : "public"} />
+        <App />
       </Suspense>
     );
   }
@@ -104,14 +115,6 @@ function Root() {
     return (
       <Suspense fallback={<Splash label="Loading your workspace…" />}>
         <App onSessionLost={handleSessionLost} />
-      </Suspense>
-    );
-  }
-
-  if (session.role === "player") {
-    return (
-      <Suspense fallback={<Splash label="Loading your profile…" />}>
-        <PlayerPortal session={session} onSignedOut={handleSessionLost} />
       </Suspense>
     );
   }
