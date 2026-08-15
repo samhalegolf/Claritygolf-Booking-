@@ -453,87 +453,18 @@ export async function syncChargesSince(sinceEpoch: number, accountId: string, un
   };
 }
 
-// --- Product mapping ----------------------------------------------------------
-
-// billing_products_services.kind is CHECK-constrained. Honour an explicit
-// per-product override via Stripe metadata (clarity_kind), otherwise map
-// Stripe's type loosely: goods → product, everything else → service.
-function productKind(product: Record<string, any>) {
-  const allowed = ["service", "product", "package", "lesson-type"];
-  const override = String(product.metadata?.clarity_kind || product.metadata?.kind || "").trim().toLowerCase();
-  if (allowed.includes(override)) return override;
-  return String(product.type || "").toLowerCase() === "good" ? "product" : "service";
-}
-
-function defaultPriceAmount(product: Record<string, any>) {
-  const price = product.default_price;
-  if (!price || typeof price !== "object") return 0;
-  if (Number.isFinite(Number(price.unit_amount))) return fromCents(price.unit_amount);
-  if (price.unit_amount_decimal) return round2(Number(price.unit_amount_decimal) / 100);
-  return 0;
-}
-
-function mapProduct(product: Record<string, any>, accountId: string) {
-  return {
-    id: product.id,
-    account_id: accountId,
-    name: cleanString(product.name, "", 140) || product.id,
-    kind: productKind(product),
-    description: cleanString(product.description, "", 600) || null,
-    default_price: defaultPriceAmount(product),
-    tax_rate: 0,
-    active: product.active !== false,
-    updated_at: nowIso(),
-  };
-}
-
-/** Sync one Stripe product; refetches when the payload lacks an expanded default_price. */
-export async function syncStripeProduct(product: Record<string, any>, accountId: string) {
-  if (!product?.id) return null;
-  let full = product;
-  if (!product.default_price || typeof product.default_price === "string") {
-    try {
-      full = await stripe(`/v1/products/${product.id}`, { "expand[]": "default_price" });
-    } catch {
-      full = product;
-    }
-  }
-  await supabase("billing_products_services", {
-    method: "POST",
-    query: "on_conflict=id",
-    prefer: "resolution=merge-duplicates",
-    body: mapProduct(full, accountId),
-  });
-  return { productId: product.id as string };
-}
-
-/** Stripe product deleted: keep the row (items may reference it), mark inactive. */
-export async function deactivateStripeProduct(productId: string) {
-  if (!productId) return null;
-  await supabase("billing_products_services", {
-    method: "PATCH",
-    query: `id=eq.${encodeFilter(productId)}`,
-    body: { active: false, updated_at: nowIso() },
-  });
-  return { productId, deactivated: true };
-}
-
-/** Backfill every Stripe product — active and archived, deliberately unfiltered. */
-export async function syncAllProducts(accountId: string) {
-  const products = await stripePageAll("/v1/products", { "expand[]": "data.default_price" });
-  let synced = 0;
-  const failures: { productId: string; name: string | null; error: string }[] = [];
-  for (const product of products) {
-    try {
-      await syncStripeProduct(product, accountId);
-      synced += 1;
-    } catch (error) {
-      failures.push({
-        productId: product.id,
-        name: product.name || null,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  return { ok: failures.length === 0, productsFound: products.length, productsSynced: synced, failures };
-}
+// --- Products are deliberately NOT synced from Stripe --------------------------
+//
+// There used to be syncStripeProduct/syncAllProducts/deactivateStripeProduct
+// here, mirroring every Stripe product into billing_products_services. It was
+// removed on 2026-08-16 and must not come back.
+//
+// The reason: a Stripe product is created for every ad-hoc invoice line, so the
+// backfill imported 97 rows - "Golf Coaching" at nine different prices, "1 Hour
+// Lesson - Andrew Lane" twice - and the catalog stopped being a list of what is
+// for sale. Nothing needed them: an invoice line stores a Stripe *price* id in
+// source_id and its own description and amount, so history renders without a
+// product row.
+//
+// The catalog is now owned by Clarity: products are entered in Billing >
+// Products, and services/packages are the lesson types from servicesJson.

@@ -1,20 +1,27 @@
-// Products tab - the shop side of Billing.
+// Products tab - the shop side of Billing, and the first screen Billing opens.
 //
-// Presentational, like BillingReportsPanel: App.tsx owns the product list and
-// every request. What lives here is form state, which is UI and nothing else.
+// Presentational, like BillingReportsPanel: App.tsx owns the list and every
+// request. What lives here is form state, which is UI and nothing else.
 //
-// The list it edits is billing_products_services - the same rows the invoice
-// line picker reads. There is deliberately no separate "stock item": a glove is
-// one product whether it is sold at the counter or added to an invoice.
+// Two kinds of thing appear in the list and they come from different places:
+//
+//   Products  - rows in billing_products_services, added and edited here.
+//   Services  - the coach's lesson types, read-only (readOnly on the item).
+//   Packages    A lesson price is changed on the lesson type, under Settings,
+//               so it can never disagree with what the booking screen charges.
+//
+// The panel is built around adding something fast: one row of fields at the
+// top, Enter saves, focus returns to the name. The full set of fields only
+// appears once you ask for it, or when you click an existing product to edit.
 
-import { Fragment, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, Package, Plus, Search, X } from "lucide-react";
+import { Fragment, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { AlertTriangle, ChevronDown, ChevronRight, Lock, Package, Plus, Search, X } from "lucide-react";
 import type { BillingCatalogItem, BillingCatalogKind, StockMovement } from "./types";
 import { isLowStock } from "./stockMath";
 
 export type ProductFormValues = {
   id: string;
-  kind: BillingCatalogKind;
   name: string;
   supplier: string;
   sku: string;
@@ -60,26 +67,20 @@ export type ProductsPanelProps = {
   onSetActive: (product: BillingCatalogItem, active: boolean) => Promise<void>;
   onAdjustStock: (product: BillingCatalogItem, input: StockAdjustInput) => Promise<boolean>;
   onLoadMovements: (productId: string) => Promise<StockMovement[]>;
-};
-
-const KIND_LABELS: Record<BillingCatalogKind, string> = {
-  product: "Product",
-  service: "Service",
-  package: "Package",
-  "lesson-type": "Lesson type",
+  // Takes the coach to where lesson types are edited. Services in this list
+  // are only shown here; they belong to that screen.
+  onEditLessonTypes: () => void;
 };
 
 const KIND_PLURALS: Record<BillingCatalogKind, string> = {
   product: "Products",
   service: "Services",
   package: "Packages",
-  "lesson-type": "Lesson types",
 };
 
-// Products first: they are the only group with stock to watch, and the only one
-// worth opening the tab for. The others are mostly imported lesson types, and on
-// a real account there are a hundred of them.
-const KIND_ORDER: BillingCatalogKind[] = ["product", "package", "service", "lesson-type"];
+// Products first: they are the only group you can edit here, and the only one
+// with stock to watch.
+const KIND_ORDER: BillingCatalogKind[] = ["product", "package", "service"];
 
 const MOVEMENT_LABELS: Record<StockMovement["kind"], string> = {
   adjustment: "Adjusted",
@@ -92,7 +93,6 @@ const MOVEMENT_LABELS: Record<StockMovement["kind"], string> = {
 function emptyForm(taxRate: number): ProductFormDraft {
   return {
     id: "",
-    kind: "product",
     name: "",
     supplier: "",
     sku: "",
@@ -110,7 +110,6 @@ function emptyForm(taxRate: number): ProductFormDraft {
 function toForm(product: BillingCatalogItem, fallbackTaxRate: number): ProductFormDraft {
   return {
     id: product.id,
-    kind: product.kind,
     name: product.name,
     supplier: product.supplier || "",
     sku: product.sku || "",
@@ -145,18 +144,18 @@ export function ProductsPanel({
   onSetActive,
   onAdjustStock,
   onLoadMovements,
+  onEditLessonTypes,
 }: ProductsPanelProps) {
   const [form, setForm] = useState<ProductFormDraft>(() => emptyForm(defaultTaxRate));
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
-  // Everything except Products starts closed - a real account has ~100 imported
-  // lesson types and services, and none of them have stock to look at.
-  const [collapsed, setCollapsed] = useState<Partial<Record<BillingCatalogKind, boolean>>>({
-    service: true,
-    package: true,
-    "lesson-type": true,
-  });
+  // The quick row is four fields. Everything else - cost, tax, SKU, supplier,
+  // voucher, notes - is behind "More", because on the run you are adding a name
+  // and a price and nothing else. Editing an existing product opens it.
+  const [showDetail, setShowDetail] = useState(false);
+  const nameRef = useRef<HTMLInputElement | null>(null);
+  const [collapsed, setCollapsed] = useState<Partial<Record<BillingCatalogKind, boolean>>>({});
 
   // Which product's stock drawer is open, plus that drawer's form.
   const [stockFor, setStockFor] = useState("");
@@ -168,6 +167,7 @@ export function ProductsPanel({
   const [movementsLoading, setMovementsLoading] = useState(false);
 
   const searching = search.trim().length > 0;
+  const editing = Boolean(form.id);
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -206,6 +206,11 @@ export function ProductsPanel({
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function resetForm() {
+    setForm(emptyForm(defaultTaxRate));
+    setShowDetail(false);
+  }
+
   async function submit() {
     if (!form.name.trim()) return;
     setSaving(true);
@@ -219,10 +224,30 @@ export function ProductsPanel({
         lowStockThreshold: toNumber(form.lowStockThreshold),
         openingStock: toNumber(form.openingStock),
       };
-      if (await onSave(values)) setForm(emptyForm(defaultTaxRate));
+      if (await onSave(values)) {
+        resetForm();
+        // Straight back to the name box: adding one thing usually means adding
+        // the next thing off the same delivery docket.
+        nameRef.current?.focus();
+      }
     } finally {
       setSaving(false);
     }
+  }
+
+  // Enter anywhere in the quick row saves. A textarea is deliberately excluded -
+  // Enter there is a new line.
+  function onQuickKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Enter") return;
+    if ((event.target as HTMLElement)?.tagName === "TEXTAREA") return;
+    event.preventDefault();
+    void submit();
+  }
+
+  function startEdit(product: BillingCatalogItem) {
+    setForm(toForm(product, defaultTaxRate));
+    setShowDetail(true);
+    nameRef.current?.focus();
   }
 
   async function openStockDrawer(product: BillingCatalogItem) {
@@ -263,34 +288,180 @@ export function ProductsPanel({
     }
   }
 
-  const isProduct = form.kind === "product";
-
   return (
     <div className="billing-dashboard billing-products">
-      <article className="data-card">
+      {/* Add first, list second. This is the screen Billing opens on, and the
+          most common reason to be here is putting something new in. */}
+      <article className="data-card wide product-quick-card">
         <div className="data-card-header">
           <div>
-            <span>Shop</span>
+            <span>{editing ? "Editing product" : "Add a product"}</span>
+            <h2>{editing ? form.name || "Product" : "What are you selling?"}</h2>
+          </div>
+          <Plus size={24} />
+        </div>
+        <div className="product-quick-row" onKeyDown={onQuickKeyDown}>
+          <label className="settings-field product-quick-name">
+            <span>Name</span>
+            <input
+              ref={nameRef}
+              value={form.name}
+              onChange={(event) => updateForm("name", event.target.value)}
+              placeholder="e.g. Titleist Players glove"
+            />
+          </label>
+          <label className="settings-field">
+            <span>Sell price ({currency})</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              value={form.price}
+              onChange={(event) => updateForm("price", event.target.value)}
+            />
+          </label>
+          {form.trackStock && !editing && (
+            <label className="settings-field product-quick-stock">
+              <span>In stock</span>
+              <input
+                type="number"
+                step="1"
+                value={form.openingStock}
+                onChange={(event) => updateForm("openingStock", event.target.value)}
+                placeholder="0"
+              />
+            </label>
+          )}
+          <button
+            className="primary-button product-quick-save"
+            disabled={saving || !form.name.trim()}
+            onClick={() => void submit()}
+            type="button"
+          >
+            {saving ? "Saving..." : editing ? "Save" : "Add"}
+          </button>
+          <button className="outline-button" onClick={() => setShowDetail((open) => !open)} type="button">
+            {showDetail ? "Less" : "More"}
+          </button>
+          {editing && (
+            <button className="text-link-button" onClick={resetForm} type="button">
+              Cancel
+            </button>
+          )}
+        </div>
+
+        {showDetail && (
+          <div className="billing-catalog-editor product-editor" onKeyDown={onQuickKeyDown}>
+            <label className="settings-field">
+              <span>Supplier</span>
+              <input
+                value={form.supplier}
+                onChange={(event) => updateForm("supplier", event.target.value)}
+                placeholder="Who you buy it from"
+              />
+            </label>
+            <label className="settings-field">
+              <span>SKU</span>
+              <input
+                value={form.sku}
+                onChange={(event) => updateForm("sku", event.target.value)}
+                placeholder="Optional - must be unique"
+              />
+            </label>
+            <label className="settings-field">
+              <span>Cost price ({currency})</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                value={form.costPrice}
+                onChange={(event) => updateForm("costPrice", event.target.value)}
+              />
+            </label>
+            <label className="settings-field">
+              <span>Tax rate %</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.5"
+                value={form.taxRate}
+                onChange={(event) => updateForm("taxRate", event.target.value)}
+              />
+            </label>
+            <label className="settings-field pos-settles-toggle">
+              <input
+                checked={form.trackStock}
+                onChange={(event) => updateForm("trackStock", event.target.checked)}
+                type="checkbox"
+              />
+              <span>Count stock for this item</span>
+            </label>
+            {form.trackStock && (
+              <label className="settings-field">
+                <span>Warn me at</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.lowStockThreshold}
+                  onChange={(event) => updateForm("lowStockThreshold", event.target.value)}
+                />
+              </label>
+            )}
+            <label className="settings-field pos-settles-toggle">
+              <input
+                checked={form.isVoucher}
+                onChange={(event) => updateForm("isVoucher", event.target.checked)}
+                type="checkbox"
+              />
+              <span>This is a gift voucher</span>
+            </label>
+            <label className="settings-field product-notes-field">
+              <span>Notes</span>
+              <textarea
+                value={form.description}
+                onChange={(event) => updateForm("description", event.target.value)}
+                rows={2}
+                placeholder="Optional - shows on the invoice line"
+              />
+            </label>
+          </div>
+        )}
+
+        {form.isVoucher && (
+          <p className="field-help">
+            Selling this issues a coupon with a code for the amount paid, and it turns up under Billing &gt; Coupons.
+            Tick it on the products people buy on Squarespace so those purchases can be imported too.
+          </p>
+        )}
+        {showDetail && !form.trackStock && (
+          <p className="field-help">
+            Not counted - use this for something like a fitting fee that you sell but never have on a shelf.
+          </p>
+        )}
+        {editing && <p className="field-help">Stock is changed from the list below, not here, so a save can't undo a sale.</p>}
+        {!editing && !showDetail && (
+          <p className="field-help">
+            Name and price is enough to start selling it. Press Enter to save. Lessons don't belong here - they come
+            from your lesson types.
+          </p>
+        )}
+      </article>
+
+      <article className="data-card wide recent-invoices-card">
+        <div className="data-card-header">
+          <div>
+            <span>Catalog</span>
             <h2>
-              {products.filter((product) => product.active !== false).length} items
-              {lowStockCount > 0 && (
-                <span className="unpaid-count-badge">
-                  {lowStockCount} low
-                </span>
-              )}
+              {visible.length} shown
+              {lowStockCount > 0 && <span className="unpaid-count-badge">{lowStockCount} low</span>}
             </h2>
           </div>
           <Package size={24} />
         </div>
-        <p className="field-help">
-          Everything you sell, in one list - the same items the invoice line picker offers. Products can also carry a
-          supplier, a SKU and a stock level that counts down as they sell at the counter.
-        </p>
-        {stockValueTotal > 0 && (
-          <p className="field-help">
-            Stock on hand is worth about {formatMoney(stockValueTotal, currency)} at cost.
-          </p>
-        )}
         <div className="settings-field-row product-search-row">
           <div className="settings-field product-search-field">
             <label htmlFor="product-search">Search</label>
@@ -317,190 +488,21 @@ export function ProductsPanel({
             Refresh
           </button>
         </div>
-      </article>
+        {stockValueTotal > 0 && (
+          <p className="field-help">Stock on hand is worth about {formatMoney(stockValueTotal, currency)} at cost.</p>
+        )}
 
-      <article className="data-card wide">
-        <div className="data-card-header">
-          <div>
-            <span>{form.id ? "Editing" : "Add"}</span>
-            <h2>{form.id ? form.name || "Product" : "New item"}</h2>
-          </div>
-          <Plus size={24} />
-        </div>
-        <div className="billing-catalog-editor product-editor">
-          <label className="settings-field">
-            <span>Name</span>
-            <input
-              value={form.name}
-              onChange={(event) => updateForm("name", event.target.value)}
-              placeholder="e.g. Titleist Players glove"
-            />
-          </label>
-          <label className="settings-field">
-            <span>Type</span>
-            <select
-              value={form.kind}
-              onChange={(event) => updateForm("kind", event.target.value as BillingCatalogKind)}
-            >
-              {(Object.keys(KIND_LABELS) as BillingCatalogKind[]).map((kind) => (
-                <option key={kind} value={kind}>
-                  {KIND_LABELS[kind]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="settings-field">
-            <span>Supplier</span>
-            <input
-              value={form.supplier}
-              onChange={(event) => updateForm("supplier", event.target.value)}
-              placeholder="Who you buy it from"
-            />
-          </label>
-          <label className="settings-field">
-            <span>SKU</span>
-            <input
-              value={form.sku}
-              onChange={(event) => updateForm("sku", event.target.value)}
-              placeholder="Optional - must be unique"
-            />
-          </label>
-          <label className="settings-field">
-            <span>Sell price ({currency})</span>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              value={form.price}
-              onChange={(event) => updateForm("price", event.target.value)}
-            />
-          </label>
-          <label className="settings-field">
-            <span>Cost price ({currency})</span>
-            <input
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              value={form.costPrice}
-              onChange={(event) => updateForm("costPrice", event.target.value)}
-            />
-          </label>
-          <label className="settings-field">
-            <span>Tax rate %</span>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              step="0.5"
-              value={form.taxRate}
-              onChange={(event) => updateForm("taxRate", event.target.value)}
-            />
-          </label>
-          {isProduct && (
-            <label className="settings-field pos-settles-toggle">
-              <input
-                checked={form.trackStock}
-                onChange={(event) => updateForm("trackStock", event.target.checked)}
-                type="checkbox"
-              />
-              <span>Count stock for this item</span>
-            </label>
-          )}
-          {isProduct && form.trackStock && (
-            <>
-              {!form.id && (
-                <label className="settings-field">
-                  <span>Opening stock</span>
-                  <input
-                    type="number"
-                    step="1"
-                    value={form.openingStock}
-                    onChange={(event) => updateForm("openingStock", event.target.value)}
-                  />
-                </label>
-              )}
-              <label className="settings-field">
-                <span>Warn me at</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={form.lowStockThreshold}
-                  onChange={(event) => updateForm("lowStockThreshold", event.target.value)}
-                />
-              </label>
-            </>
-          )}
-          <label className="settings-field pos-settles-toggle">
-            <input
-              checked={form.isVoucher}
-              onChange={(event) => updateForm("isVoucher", event.target.checked)}
-              type="checkbox"
-            />
-            <span>This is a gift voucher</span>
-          </label>
-          <label className="settings-field product-notes-field">
-            <span>Notes</span>
-            <textarea
-              value={form.description}
-              onChange={(event) => updateForm("description", event.target.value)}
-              rows={2}
-              placeholder="Optional - shows on the invoice line"
-            />
-          </label>
-        </div>
-        {form.isVoucher && (
-          <p className="field-help">
-            Selling this issues a coupon with a code for the amount paid, and it turns up under Billing &gt; Coupons.
-            Tick it on the products people buy on Squarespace so those purchases can be imported too.
-          </p>
-        )}
-        {isProduct && !form.trackStock && (
-          <p className="field-help">
-            Not counted - use this for things like a fitting fee that you sell but never have on a shelf.
-          </p>
-        )}
-        {form.id && (
-          <p className="field-help">Stock is changed from the list below, not here, so a save can't undo a sale.</p>
-        )}
-        <div className="panel-actions">
-          {Boolean(form.id) && (
-            <button className="outline-button" onClick={() => setForm(emptyForm(defaultTaxRate))} type="button">
-              Cancel Edit
-            </button>
-          )}
-          <button
-            className="primary-button"
-            disabled={saving || !form.name.trim()}
-            onClick={() => void submit()}
-            type="button"
-          >
-            {saving ? "Saving..." : form.id ? "Save Changes" : "Add Item"}
-          </button>
-        </div>
-      </article>
-
-      <article className="data-card wide recent-invoices-card">
-        <div className="data-card-header">
-          <div>
-            <span>Inventory</span>
-            <h2>{visible.length} shown</h2>
-          </div>
-          <Package size={24} />
-        </div>
-        {loadState === "loading" && <p>Loading products...</p>}
+        {loadState === "loading" && <p>Loading catalog...</p>}
         {loadState === "error" && (
           <p>
-            Could not load products.{" "}
+            Could not load the catalog.{" "}
             <button className="link-button" onClick={onReload} type="button">
               Retry
             </button>
           </p>
         )}
         {loadState !== "loading" && !visible.length && (
-          <p>{products.length ? "Nothing matches that search." : "No products yet - add your first one above."}</p>
+          <p>{products.length ? "Nothing matches that search." : "Nothing here yet - add your first product above."}</p>
         )}
         {groups.map((group) => {
           const stocked = group.kind === "product";
@@ -508,13 +510,12 @@ export function ProductsPanel({
           // like a search that found nothing, so searching opens everything.
           const open = Boolean(searching || !collapsed[group.kind]);
           const groupLow = group.items.filter((product) => isLowStock(product)).length;
+          const lessons = group.kind !== "product";
           return (
             <section className="product-group" key={group.kind}>
               <button
                 className="product-group-header"
-                onClick={() =>
-                  setCollapsed((current) => ({ ...current, [group.kind]: !current[group.kind] }))
-                }
+                onClick={() => setCollapsed((current) => ({ ...current, [group.kind]: !current[group.kind] }))}
                 aria-expanded={open}
                 type="button"
               >
@@ -522,7 +523,16 @@ export function ProductsPanel({
                 <strong>{KIND_PLURALS[group.kind]}</strong>
                 <em>{group.items.length}</em>
                 {groupLow > 0 && <span className="unpaid-count-badge">{groupLow} low</span>}
+                {lessons && <Lock className="product-group-lock" size={13} />}
               </button>
+              {open && lessons && (
+                <p className="field-help product-group-note">
+                  Your lesson types, priced where they are booked.{" "}
+                  <button className="link-button" onClick={onEditLessonTypes} type="button">
+                    Edit lesson types
+                  </button>
+                </p>
+              )}
               {open && (
                 <table className="recent-invoices-table product-table">
                   <thead>
@@ -539,17 +549,18 @@ export function ProductsPanel({
                     {group.items.map((product) => {
                       const low = isLowStock(product);
                       const drawerOpen = stockFor === product.id;
+                      const readOnly = product.readOnly === true;
                       return (
                         <Fragment key={product.id}>
                           <tr className={product.active === false ? "product-row-inactive" : ""}>
                             <td>
-                              <button
-                                className="link-button"
-                                onClick={() => setForm(toForm(product, defaultTaxRate))}
-                                type="button"
-                              >
-                                {product.name}
-                              </button>
+                              {readOnly ? (
+                                <span className="product-row-name">{product.name}</span>
+                              ) : (
+                                <button className="link-button" onClick={() => startEdit(product)} type="button">
+                                  {product.name}
+                                </button>
+                              )}
                               {(product.active === false ||
                                 product.isVoucher ||
                                 marginLabel(product) ||
@@ -587,13 +598,15 @@ export function ProductsPanel({
                                   {drawerOpen ? "Close" : "Stock"}
                                 </button>
                               )}
-                              <button
-                                className="text-link-button"
-                                onClick={() => void onSetActive(product, product.active === false)}
-                                type="button"
-                              >
-                                {product.active === false ? "Restore" : "Retire"}
-                              </button>
+                              {!readOnly && (
+                                <button
+                                  className="text-link-button"
+                                  onClick={() => void onSetActive(product, product.active === false)}
+                                  type="button"
+                                >
+                                  {product.active === false ? "Restore" : "Retire"}
+                                </button>
+                              )}
                             </td>
                           </tr>
                           {drawerOpen && (

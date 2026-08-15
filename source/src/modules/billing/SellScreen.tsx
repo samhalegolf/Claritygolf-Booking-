@@ -64,10 +64,9 @@ const TAB_LABELS: Record<TabKey, string> = {
   product: "Products",
   service: "Services",
   package: "Packages",
-  "lesson-type": "Lesson types",
 };
 
-const TAB_ORDER: TabKey[] = ["all", "product", "service", "package", "lesson-type"];
+const TAB_ORDER: TabKey[] = ["all", "product", "service", "package"];
 
 // Parked dockets live on the till, not in the database. A parked sale is a
 // half-finished thought belonging to whoever is standing at this counter right

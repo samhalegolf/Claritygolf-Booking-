@@ -4902,7 +4902,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   }, [activeView, authStatus, people.length]);
 
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
-  const [billingSection, setBillingSection] = useState<BillingSection>("dashboard");
+  // Products first: adding something you sell is the most common reason to open
+  // Billing, and it is the one screen that is useless if you have to find it.
+  const [billingSection, setBillingSection] = useState<BillingSection>("products");
   const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
     emptyInvoiceDraft(getStoredCoachAccount().invoiceSettings),
   );
@@ -6249,21 +6251,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     invoiceDraft.payerEmail,
   )}&su=${encodeURIComponent(invoiceEmailSubject)}&body=${encodeURIComponent(invoiceEmailBody)}`;
   const invoiceSearchTerm = invoiceDraft.lineSearch.trim().toLowerCase();
-  const invoiceCatalogOptions = useMemo(() => {
-    const lessonOptions: BillingCatalogItem[] = services
-      .filter((service) => service.active)
-      .map((service) => ({
-        id: `service-${service.id}`,
-        kind: service.lessonFormat === "package" ? "package" : "lesson-type",
-        name: service.name,
-        description: service.description || service.lessonNote || service.location,
-        price: service.price,
-        taxRate: invoiceSettings.taxRate,
-        sourceServiceId: service.id,
-      }));
-    return [...lessonOptions, ...catalogItems];
-  }, [catalogItems, invoiceSettings.taxRate, services]);
-  const visibleInvoiceCatalogOptions = invoiceCatalogOptions
+  // The lesson types used to be merged in here as well as being fetched from
+  // the catalog API, which is how a lesson could be offered at two prices in
+  // the same picker. /api/billing/products is now the only place the catalog is
+  // assembled, and it reads the lesson types itself.
+  const visibleInvoiceCatalogOptions = catalogItems
     .filter((item) => {
       if (!invoiceSearchTerm) return false;
       return [item.name, item.description, item.kind].join(" ").toLowerCase().includes(invoiceSearchTerm);
@@ -9028,6 +9020,15 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     );
   }
 
+  // A granular upsert can only stand in for the whole-array autosave when the
+  // change touched exactly one item. Carving a busy block around a lesson
+  // rewrites its neighbours too, and those edits still need the full save.
+  function isSimpleChangeToItem(previousItems: CalendarItem[], nextItems: CalendarItem[], itemId: string) {
+    const before = new Set(previousItems.filter((item) => item.id !== itemId).map((item) => item.id));
+    const after = new Set(nextItems.filter((item) => item.id !== itemId).map((item) => item.id));
+    return before.size === after.size && [...before].every((id) => after.has(id));
+  }
+
   async function persistUpsertItem(item: CalendarItem, previousItems: CalendarItem[], optimisticItems: CalendarItem[]) {
     beginAdminSave("upsert_item");
     try {
@@ -9956,7 +9957,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       setDraftState({
         mode: "place",
         ...candidate,
-        valid: isValidAppointmentSlot(candidate, undefined, bookingService),
+        valid: isValidAppointmentSlot(candidate, session.booking.sourceItemId || undefined, bookingService),
       });
       return;
     }
@@ -10079,54 +10080,19 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     }
 
     if (activeDraft.mode === "place" && session.mode === "place") {
-      const service = services.find((candidate) => candidate.id === session.booking.serviceId);
-      if (!service) {
-        clearGesture();
-        return;
-      }
-      if (!confirmPastAdminLesson(activeDraft)) {
-        clearGesture();
-        return;
-      }
-      const coachId = service.coachId || selectedCalendarCoachId || defaultCoachId(coachProfiles);
-      const location = bookingLocationSnapshotFor(service, locations, coachAccount);
-      const item: CalendarItem = {
-        id: newCalendarItemId("appt"),
-        kind: "appointment",
-      accountId: activeAccountId,
+      // Dropping a shelved lesson is the same operation as tapping it into a
+      // slot, so it goes through the same function. It used to build its own
+      // item here with a fresh id, which turned every drag off the shelf into a
+      // second booking: the original row stayed in the database and reappeared
+      // on the next reload, and the client got a "new booking" email instead of
+      // a reschedule.
+      clearGesture();
+      placeDockBookingAtCandidate(session.booking, {
         week: activeDraft.week,
         day: activeDraft.day,
         start: activeDraft.start,
         duration: activeDraft.duration,
-        title: session.booking.title,
-        client: session.booking.client,
-        serviceId: session.booking.serviceId,
-        coachId,
-        locationId: location.locationId,
-        coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
-        phone: session.booking.phone,
-        email: session.booking.email,
-        note: session.booking.note ?? "Placed from dock.",
-        location,
-        customGroup: session.booking.customGroup,
-        attendees: session.booking.attendees,
-        calculatedPrice: session.booking.calculatedPrice,
-      };
-      const previousItems = items;
-      const carvedItems = carveBusyBlocksForAppointment([...items, item], itemSlot(item));
-      const previousOtherIds = new Set(previousItems.map((candidate) => candidate.id));
-      const carvedOtherIds = new Set(carvedItems.filter((candidate) => candidate.id !== item.id).map((candidate) => candidate.id));
-      const isSimpleInsert =
-        previousOtherIds.size === carvedOtherIds.size && [...previousOtherIds].every((id) => carvedOtherIds.has(id));
-      setItems(carvedItems);
-      setDockBookings(dockBookings.filter((booking) => booking.id !== session.booking.id));
-      setActiveDockBookingId((current) => (current === session.booking.id ? "" : current));
-      closeCalendarDetails();
-      setToast({ message: `Placed ${session.booking.client} on ${weekDays[item.day].short} at ${formatTime(item.start)}.` });
-      clearGesture();
-      if (isSimpleInsert) {
-        void persistUpsertItem(item, previousItems, carvedItems);
-      }
+      });
       return;
     }
 
@@ -10158,14 +10124,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     const nextItems = items.map((item) => (item.id === activeDraft.itemId ? movedUpdatedItem : item));
     const previousItems = items;
     const finalItems = movedItem.kind === "appointment" ? carveBusyBlocksForAppointment(nextItems, activeDraft) : nextItems;
-    const previousOtherIds = new Set(previousItems.filter((candidate) => candidate.id !== activeDraft.itemId).map((candidate) => candidate.id));
-    const finalOtherIds = new Set(finalItems.filter((candidate) => candidate.id !== activeDraft.itemId).map((candidate) => candidate.id));
-    const isSimpleUpdate =
-      previousOtherIds.size === finalOtherIds.size && [...previousOtherIds].every((id) => finalOtherIds.has(id));
     setItems(finalItems);
     closeCalendarDetails();
     clearGesture();
-    if (isSimpleUpdate) {
+    if (isSimpleChangeToItem(previousItems, finalItems, activeDraft.itemId)) {
       void persistUpsertItem(movedUpdatedItem, previousItems, finalItems);
     }
   }
@@ -10543,12 +10505,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       const animation = options.animateFromDock
         ? buildDockPlacementAnimation(booking.id, movedItem.id, candidate)
         : null;
-      setItems(
-        carveBusyBlocksForAppointment(
-          items.map((item) => (item.id === movedItem.id ? movedItem : item)),
-          itemSlot(movedItem),
-        ),
+      const previousItems = items;
+      const nextItems = carveBusyBlocksForAppointment(
+        items.map((item) => (item.id === movedItem.id ? movedItem : item)),
+        itemSlot(movedItem),
       );
+      setItems(nextItems);
       setShelvedItemIds((current) => current.filter((id) => id !== movedItem.id));
       setDockBookings(dockBookings.filter((dockBooking) => dockBooking.id !== booking.id));
       setActiveDockBookingId("");
@@ -10563,6 +10525,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       setToast({
         message: `Moved ${booking.client} to ${weekDays[movedItem.day].short} at ${formatTime(movedItem.start)}.`,
       });
+      if (isSimpleChangeToItem(previousItems, nextItems, movedItem.id)) {
+        void persistUpsertItem(movedItem, previousItems, nextItems);
+      }
       return true;
     }
 
@@ -10592,7 +10557,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     };
     const animation = options.animateFromDock ? buildDockPlacementAnimation(booking.id, item.id, candidate) : null;
 
-    setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
+    const previousItems = items;
+    const nextItems = carveBusyBlocksForAppointment([...items, item], itemSlot(item));
+    setItems(nextItems);
     setDockBookings(dockBookings.filter((dockBooking) => dockBooking.id !== booking.id));
     setActiveDockBookingId("");
     closeCalendarDetails();
@@ -10604,6 +10571,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       }, 620);
     }
     setToast({ message: `Placed ${booking.client} on ${weekDays[item.day].short} at ${formatTime(item.start)}.` });
+    if (isSimpleChangeToItem(previousItems, nextItems, item.id)) {
+      void persistUpsertItem(item, previousItems, nextItems);
+    }
     return true;
   }
 
@@ -10651,7 +10621,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     setActiveView(view);
     setQuickCreate(null);
     if (view === "settings") setSettingsTab("services");
-    if (view === "billing") setBillingSection("dashboard");
+    if (view === "billing") setBillingSection("products");
     // Opening Video from the nav is the general workspace (no player context).
     if (view === "video") setVideoContext(null);
     if (view !== "calendar") closeCalendarDetails();
@@ -13623,7 +13593,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           cache: "no-store",
           body: JSON.stringify({
             name: values.name,
-            kind: values.kind,
             description: values.description.trim(),
             price: Math.max(0, Number(values.price) || 0),
             costPrice: Math.max(0, Number(values.costPrice) || 0),
@@ -13664,7 +13633,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: product.name,
-          kind: product.kind,
           description: product.description,
           price: product.price,
           costPrice: product.costPrice || 0,
@@ -15701,6 +15669,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       }
       if (serviceSaveVersionRef.current !== saveVersion) return;
       setServices(persistedServices);
+      // Lesson types ARE the services in the billing catalog, so a price change
+      // here has to reach the till and the invoice picker. Failures are
+      // swallowed: the lesson type saved, and the catalog reloads on its own the
+      // next time Billing opens.
+      if (catalogLoadState !== "idle") void fetchBillingProducts().catch(() => {});
       if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
       if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
       if (Array.isArray(data.warnings) && data.warnings.length) {
@@ -17368,7 +17341,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         setCalendarSaveStatus("saved");
         setCalendarSaveError("");
         closeCalendarDetails();
-        setToast({ message: `${selected.kind === "block" ? "Block" : "Appointment"} removed.` });
+        const deleteWarning = Array.isArray(verifyData.warnings)
+          ? verifyData.warnings.find((warning) => typeof warning === "string" && warning.trim()) ?? ""
+          : "";
+        setToast({
+          message: deleteWarning || `${selected.kind === "block" ? "Block" : "Appointment"} removed.`,
+        });
         window.setTimeout(() => {
           if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
         }, 1800);
@@ -23763,6 +23741,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 onSetActive={setProductActive}
                 onAdjustStock={adjustProductStock}
                 onLoadMovements={fetchStockMovements}
+                onEditLessonTypes={() => {
+                  setActiveView("settings");
+                  setSettingsTab("services");
+                }}
               />
             )}
 

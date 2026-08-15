@@ -2243,8 +2243,19 @@ function rowToItem(row) {
 	  };
 	}
 
+// An upstream status must never become this API's status. Optix answers a
+// failed bay call with HTTP 200 and a GraphQL error body, and passing that 200
+// straight through made a failed request look like a success to the browser:
+// response.ok was true but the payload carried an error instead of calendar
+// items, so the app reported a confusing reload failure while the change had
+// silently not happened. Anything that is not a real 4xx/5xx becomes a 500.
+function responseStatusFromError(error) {
+  const status = Number(error?.status);
+  return Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
+}
+
 function lessonCompleteActionFailure(error, baseDetails, durationMs) {
-  const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+  const status = responseStatusFromError(error);
   const code = cleanString(error?.code, "BOOKING_COMPLETE_FAILED", 120);
   const details = cleanString(error?.details, "", 1200);
   const hint = cleanString(error?.hint, "", 1200);
@@ -2582,7 +2593,7 @@ async function completeCalendarItemById(currentState, itemId, requestContext) {
     };
   } catch (error) {
     const durationMs = Date.now() - startedAt;
-    const errorStatus = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    const errorStatus = responseStatusFromError(error);
     const errorCode = cleanString(error?.code, "BOOKING_COMPLETE_FAILED", 120);
     const backendMessage = error instanceof Error ? error.message : String(error || "Lesson completion failed.");
     const errorDetails = cleanString(error?.details, "", 1200);
@@ -5083,7 +5094,7 @@ function deleteUserMessage(operationOwner, code) {
 function deleteFailureDiagnostics(error, baseDetails, durationMs) {
   const operationOwner = deleteErrorOperationOwner(error);
   const code = deleteErrorCode(error, operationOwner);
-  const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+  const status = responseStatusFromError(error);
   const backendMessage = error instanceof Error ? error.message : String(error?.message || error || "Calendar delete failed.");
   const details = error?.details && typeof error.details === "object" ? error.details : {};
   const route = cleanString(error?.route, "", 120) || baseDetails.route;
@@ -5114,8 +5125,24 @@ async function deleteCalendarItemById(id, context = null, netlifyContext = null)
   const current = await readCalendarState();
   if (context) assertAccountFeature(context.account, "coachCalendar");
   const existingItem = current.items.find((item) => item.id === cleanId);
+  let optixBayWarning = "";
   if (existingItem?.kind === "appointment") {
-    await cancelOptixBayForCalendarItem(cleanId);
+    try {
+      await cancelOptixBayForCalendarItem(cleanId);
+    } catch (error) {
+      // A bay Optix will not release must not strand the lesson in Clarity.
+      // Blocking the delete here is what left an undeletable ghost on the
+      // calendar when Optix answered a release with an internal server error.
+      // cancelOptixBayForCalendarItem has already marked the sync row failed,
+      // so the delete goes ahead and the coach is told to clear the bay there.
+      const detail = cleanString(
+        error?.cause?.message || (error instanceof Error ? error.message : String(error || "")),
+        "Optix did not confirm the release.",
+        400,
+      );
+      optixBayWarning = `The lesson was removed from Clarity, but its Optix bay booking was not released: ${detail} Cancel the bay in Optix so the slot is not held.`;
+      console.error("calendar_delete:optix_bay_release_failed", { calendarItemId: cleanId, detail });
+    }
   }
   if (context) {
     if (!existingItem) {
@@ -5182,6 +5209,7 @@ async function deleteCalendarItemById(id, context = null, netlifyContext = null)
     items: context ? nextState.items.filter((item) => canReadCalendarItem(context, item, nextState)) : nextState.items,
     updatedAt,
     googleCalendarSync,
+    ...(optixBayWarning ? { warnings: [optixBayWarning] } : {}),
   };
 }
 
@@ -9465,7 +9493,7 @@ export async function handleBookingApiRoute(
           });
         } catch (error) {
           const durationMs = Date.now() - startAt;
-          const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+          const status = responseStatusFromError(error);
           const errorCode = cleanString(error?.code, "BOOKING_UPSERT_FAILED", 120);
           const backendMessage = error instanceof Error ? error.message : String(error || "Calendar item could not be saved.");
           console.error("upsert_item_failed", {
@@ -9575,6 +9603,7 @@ export async function handleBookingApiRoute(
             notifications: nextState.notifications,
           }),
           notificationResults,
+          ...(nextState.warnings?.length ? { warnings: nextState.warnings } : {}),
           diagnostics: {
             code: "BOOKING_DELETE_VERIFY_COMPLETED",
             ...baseDetails,

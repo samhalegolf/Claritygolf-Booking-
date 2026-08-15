@@ -2,25 +2,26 @@ import type { Config } from "@netlify/functions";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { defaultAccountId } from "./_shared/account.mts";
 import {
-  deactivateStripeProduct,
   deleteStripeInvoice,
   syncStripeCharge,
   syncStripeInvoice,
-  syncStripeProduct,
 } from "./_shared/stripe-billing.mts";
 
-// Stripe webhook: keeps billing_invoices / billing_invoice_items /
-// billing_products_services live-mirrored from Stripe. All operations are
-// idempotent upserts keyed on Stripe ids, so Stripe's at-least-once delivery
-// and retries are harmless. Failures return 500 so Stripe retries them.
+// Stripe webhook: keeps billing_invoices / billing_invoice_items live-mirrored
+// from Stripe. All operations are idempotent upserts keyed on Stripe ids, so
+// Stripe's at-least-once delivery and retries are harmless. Failures return 500
+// so Stripe retries them.
+//
+// Products are deliberately not mirrored - see the note in
+// _shared/stripe-billing.mts. product.* events are acknowledged and ignored.
 //
 // Setup: point a Stripe webhook endpoint at /api/stripe-billing-webhook with
 // events invoice.created, invoice.updated, invoice.finalized, invoice.sent,
 // invoice.paid, invoice.payment_failed, invoice.voided,
-// invoice.marked_uncollectible, invoice.deleted, product.created,
-// product.updated, product.deleted, charge.succeeded, charge.updated,
-// charge.captured, charge.refunded — and set STRIPE_BILLING_WEBHOOK_SECRET
-// (falls back to STRIPE_WEBHOOK_SECRET) to that endpoint's signing secret.
+// invoice.marked_uncollectible, invoice.deleted, charge.succeeded,
+// charge.updated, charge.captured, charge.refunded — and set
+// STRIPE_BILLING_WEBHOOK_SECRET (falls back to STRIPE_WEBHOOK_SECRET) to that
+// endpoint's signing secret.
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -100,11 +101,6 @@ export default async function handler(req: Request) {
       case "charge.captured":
       case "charge.refunded":
         return json({ received: true, result: await syncStripeCharge(object, accountId()) });
-      case "product.created":
-      case "product.updated":
-        return json({ received: true, result: await syncStripeProduct(object, accountId()) });
-      case "product.deleted":
-        return json({ received: true, result: await deactivateStripeProduct(String(object?.id || "")) });
       default:
         // Unhandled event types are acknowledged so Stripe doesn't retry them.
         return json({ received: true, ignored: event?.type || "unknown" });

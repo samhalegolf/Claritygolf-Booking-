@@ -9555,6 +9555,42 @@ button {
   outline: none;
 }
 
+/* The quick add row: name, price, stock, save, on one line. Adding a product is
+   the most common thing done on this screen and it is the screen Billing opens
+   on, so it must not start with a form to read. Everything else is behind
+   "More". */
+.product-quick-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.product-quick-row .settings-field {
+  flex: 0 1 150px;
+}
+
+.product-quick-name {
+  flex: 3 1 260px;
+}
+
+.product-quick-stock {
+  flex: 0 1 110px;
+}
+
+/* The buttons sit on the text baseline of the inputs, not the label above. */
+.product-quick-row .primary-button,
+.product-quick-row .outline-button,
+.product-quick-row .text-link-button {
+  margin-bottom: 1px;
+}
+
+.product-quick-card .product-editor {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
 /* Two columns on anything wider than a phone: the form has a lot of short
    fields and a single stack makes the save button a scroll away. */
 .product-editor {
@@ -9576,6 +9612,11 @@ button {
   font-style: normal;
   font-size: 11px;
   color: var(--muted);
+}
+
+/* A lesson type reads as plain text, not a link: there is nothing to open. */
+.product-row-name {
+  font-weight: 600;
 }
 
 .product-row-inactive {
@@ -9732,11 +9773,20 @@ button {
   text-align: center;
 }
 
-/* Inventory is grouped by kind and each group folds away. On a real account
-   the Services group is ~100 imported lesson types with no stock, no SKU and no
-   supplier - useful to have, useless to scroll past every time. */
+/* The catalog is grouped by kind and each group folds away. Products are yours
+   to edit; Services and Packages are the lesson types, shown so the list is the
+   whole truth about what can be sold, and marked with a padlock because they
+   are changed under Settings. */
 .product-group + .product-group {
   margin-top: 10px;
+}
+
+.product-group-lock {
+  color: var(--muted);
+}
+
+.product-group-note {
+  margin: 0 0 6px 4px;
 }
 
 .product-group-header {

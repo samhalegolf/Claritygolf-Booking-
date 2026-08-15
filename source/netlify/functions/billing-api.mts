@@ -160,23 +160,27 @@ async function parseBody(req: Request) {
 }
 
 // --- Products / services ----------------------------------------------------
-// One table for everything a coach sells. A row with kind = 'product' can also
-// carry a supplier, a SKU and a stock level; a service never does. Stock is
-// only ever changed through adjustProductStock() or a POS sale, never by the
-// plain product save - otherwise two tills editing a product at the same time
-// would each write back the level they happened to load.
-
-// Stock only makes sense for something physical. Anything else has the flag
-// forced off so a service can't accumulate a phantom shelf count.
-function stockableKind(kind: string) {
-  return kind === "product";
-}
+// billing_products_services holds PRODUCTS: things with a shelf, a supplier and
+// a price. Services and packages are not stored here at all - they are the
+// coach's lesson types, read from the servicesJson setting by lessonTypeItems()
+// below and merged into the catalog on the way out.
+//
+// That split is the whole point. A lesson price used to exist in two places
+// (the lesson type and a catalog row), which is how the account ended up with
+// nine "Golf Coaching" rows at nine different prices. Now the lesson type is
+// the only place a lesson price is written.
+//
+// Stock is only ever changed through adjustProductStock() or a POS sale, never
+// by the plain product save - otherwise two tills editing a product at the same
+// time would each write back the level they happened to load.
 
 function cleanProductPayload(raw: Record<string, unknown>) {
-  const kind = ["service", "product", "package", "lesson-type"].includes(String(raw?.kind)) ? String(raw.kind) : "service";
   return {
     name: cleanString(raw?.name, "", 140),
-    kind,
+    // Only products live in this table. A service or package arriving here
+    // would be a second copy of a lesson type, which is exactly what was
+    // removed - so the kind is not taken from the request at all.
+    kind: "product",
     description: cleanString(raw?.description, "", 600) || null,
     default_price: round2(cleanNumber(raw?.price ?? raw?.defaultPrice, 0, { min: 0 })),
     tax_rate: round2(cleanNumber(raw?.taxRate, 0, { min: 0, max: 100 })),
@@ -186,11 +190,10 @@ function cleanProductPayload(raw: Record<string, unknown>) {
     // "gl-01" and "GL-01" can't both exist.
     sku: cleanString(raw?.sku, "", 60) || null,
     cost_price: round2(cleanNumber(raw?.costPrice, 0, { min: 0 })),
-    track_stock: stockableKind(kind) && raw?.trackStock !== false,
+    // Off for a fitting fee or a gift voucher: sold, but never on a shelf.
+    track_stock: raw?.trackStock !== false,
     low_stock_threshold: Math.round(cleanNumber(raw?.lowStockThreshold, 0, { min: 0, max: 1e6 })),
-    // Selling one of these issues a coupon rather than just taking money. Any
-    // kind can be a voucher - the ones sold on Squarespace come through as
-    // Stripe products of kind 'service'.
+    // Selling one of these issues a coupon rather than just taking money.
     is_voucher: raw?.isVoucher === true,
   };
 }
@@ -234,11 +237,84 @@ function rethrowProductConflict(error: unknown, sku: string | null): never {
   throw error;
 }
 
-async function listProducts(accountId: string) {
-  const rows = await supabase("billing_products_services", {
-    query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=active.desc,name.asc`,
+// --- Lesson types are the services ------------------------------------------
+// Read-only against the same settings key booking-core.mts writes when a coach
+// saves a lesson type. Billing never writes it: a lesson price is changed in
+// one place, on the lesson type itself.
+
+// Catalog ids for lesson types are prefixed so the till can tell at a glance
+// whether an id names a row in the products table or a lesson type. Nothing
+// else in the system produces an id starting "lesson:".
+const LESSON_ITEM_PREFIX = "lesson:";
+
+function lessonTypeToCatalogItem(service: Record<string, unknown>, taxRate: number) {
+  const format = String(service.lessonFormat || "");
+  return {
+    id: `${LESSON_ITEM_PREFIX}${String(service.id ?? "")}`,
+    // The invoice line records the bare lesson-type id, the way it always has.
+    sourceServiceId: String(service.id ?? ""),
+    name: String(service.name ?? ""),
+    // A package of lessons is still a package on the docket; everything else a
+    // coach teaches is a service.
+    kind: format === "package" ? "package" : "service",
+    description: cleanString(service.description || service.lessonNote || service.location, "", 600),
+    price: round2(cleanNumber(service.price, 0, { min: 0 })),
+    taxRate,
+    active: true,
+    // A lesson has no shelf, no supplier and no barcode. These are here so the
+    // shape matches a product row and the UI needs no special case.
+    supplier: "",
+    sku: "",
+    costPrice: 0,
+    trackStock: false,
+    stockLevel: 0,
+    lowStockThreshold: 0,
+    lowStock: false,
+    isVoucher: false,
+    // Tells the Products screen to list it without an edit link - a lesson
+    // type is changed under Settings, not here.
+    readOnly: true,
+  };
+}
+
+async function lessonTypeItems(taxRate: number) {
+  const rows = await supabase("settings", {
+    query: `select=value&key=eq.${encodeFilter("servicesJson")}&limit=1`,
   });
-  return { products: rows.map(productRowToApi) };
+  let parsed: unknown = null;
+  try {
+    parsed = rows[0]?.value ? JSON.parse(rows[0].value) : null;
+  } catch {
+    // A corrupt setting must not take the till down - better an empty lesson
+    // list than a 500 on every catalog read.
+    console.error("billing_api:services_json_unparseable");
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((service): service is Record<string, unknown> => Boolean(service) && typeof service === "object")
+    .filter((service) => service.active !== false && service.archived !== true)
+    .map((service) => lessonTypeToCatalogItem(service, taxRate))
+    .filter((item) => item.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function findLessonTypeItem(id: string) {
+  if (!id.startsWith(LESSON_ITEM_PREFIX)) return null;
+  const { taxRate } = await resolveReportTaxConfig();
+  const items = await lessonTypeItems(taxRate);
+  return items.find((item) => item.id === id) || null;
+}
+
+async function listProducts(accountId: string) {
+  const [rows, tax] = await Promise.all([
+    supabase("billing_products_services", {
+      query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=active.desc,name.asc`,
+    }),
+    resolveReportTaxConfig(),
+  ]);
+  const lessons = await lessonTypeItems(tax.taxRate);
+  return { products: [...rows.map(productRowToApi), ...lessons] };
 }
 
 async function getProductRow(accountId: string, id: string) {
@@ -2545,22 +2621,47 @@ async function resolvePosItems(accountId: string, raw: unknown) {
 
   const ids = [...new Set(requested.map((line) => line.productId).filter(Boolean))];
   if (!ids.length) throw Object.assign(new Error("A sale item must name a product."), { status: 400 });
-  const list = ids.map((id) => `"${id.replace(/"/g, "")}"`).join(",");
-  const rows = await supabase("billing_products_services", {
-    query: `select=*&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
-  });
-  const byId = new Map((rows as Array<Record<string, unknown>>).map((row) => [String(row.id ?? ""), row]));
+
+  // A basket can mix a glove with a lesson, and the two are stored in different
+  // places, so each id is looked up against the source its prefix names.
+  const productIds = ids.filter((id) => !id.startsWith(LESSON_ITEM_PREFIX));
+  const byId = new Map<string, { name: string; price: number; sku: string; trackStock: boolean; isVoucher: boolean }>();
+
+  if (productIds.length) {
+    const list = productIds.map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+    const rows = await supabase("billing_products_services", {
+      query: `select=*&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
+    });
+    for (const row of rows as Array<Record<string, unknown>>) {
+      byId.set(String(row.id ?? ""), {
+        name: String(row.name ?? ""),
+        price: round2(Number(row.default_price) || 0),
+        sku: String(row.sku ?? ""),
+        trackStock: row.track_stock === true,
+        isVoucher: row.is_voucher === true,
+      });
+    }
+  }
+
+  if (ids.length > productIds.length) {
+    const { taxRate } = await resolveReportTaxConfig();
+    for (const item of await lessonTypeItems(taxRate)) {
+      // A lesson has no shelf and issues no voucher, so nothing here can move
+      // stock or mint a coupon.
+      byId.set(item.id, { name: item.name, price: item.price, sku: "", trackStock: false, isVoucher: false });
+    }
+  }
 
   return requested.map((line) => {
     const product = byId.get(line.productId);
     if (!product) throw Object.assign(new Error("One of the items is no longer available."), { status: 400 });
-    const unitPrice = line.unitPrice === null ? round2(Number(product.default_price) || 0) : line.unitPrice;
+    const unitPrice = line.unitPrice === null ? product.price : line.unitPrice;
     return {
-      productId: String(product.id ?? ""),
-      name: String(product.name ?? ""),
-      sku: String(product.sku ?? ""),
-      trackStock: product.track_stock === true,
-      isVoucher: product.is_voucher === true,
+      productId: line.productId,
+      name: product.name,
+      sku: product.sku,
+      trackStock: product.trackStock,
+      isVoucher: product.isVoucher,
       quantity: line.quantity,
       unitPrice,
       lineTotal: round2(unitPrice * line.quantity),

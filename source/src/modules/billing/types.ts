@@ -41,11 +41,13 @@ export type InvoiceSettings = {
   unpaidLoudness: 1 | 2 | 3;
 };
 
-export type BillingCatalogKind = "service" | "product" | "package" | "lesson-type";
+export type BillingCatalogKind = "service" | "product" | "package";
 
-// One row per thing you sell (billing_products_services). The stock fields only
-// mean anything when kind is "product" and trackStock is on - a service or a
-// lesson type has nothing on a shelf to count.
+// One entry per thing you sell. Products come from billing_products_services;
+// services and packages are the coach's lesson types, merged in by the API
+// (they carry readOnly, and are edited under Settings > Services). The stock
+// fields only mean anything for a product with trackStock on - a lesson has
+// nothing on a shelf to count.
 //
 // stockLevel is read-only from the frontend's point of view: it is set by a
 // stock adjustment or a POS sale, never by saving the product form, so a save
@@ -68,10 +70,11 @@ export type BillingCatalogItem = {
   // Computed by the backend so the list, the checkout picker and any future
   // reorder report all agree on what "low" means.
   lowStock?: boolean;
-  // Selling this issues a gift voucher rather than just taking money. Any kind
-  // can be one - the vouchers sold on Squarespace arrive as Stripe products of
-  // kind "service".
+  // Selling this issues a gift voucher rather than just taking money.
   isVoucher?: boolean;
+  // A lesson type, shown in the catalog but owned by Settings > Services. It
+  // can be sold and invoiced; it cannot be edited or retired from Billing.
+  readOnly?: boolean;
 };
 
 // Why a stock level is what it is. Append-only; "sale"/"sale_reversal" rows

@@ -1,15 +1,17 @@
 import type { Config } from "@netlify/functions";
 import { createHash } from "node:crypto";
 import { defaultAccountId } from "./_shared/account.mts";
-import { DEFAULT_SINCE_EPOCH, syncAllProducts, syncChargesSince, syncInvoicesSince } from "./_shared/stripe-billing.mts";
+import { DEFAULT_SINCE_EPOCH, syncChargesSince, syncInvoicesSince } from "./_shared/stripe-billing.mts";
 
-// Admin backfill endpoint: pulls Stripe invoices, charges (card payments from
-// the booking site) and ALL Stripe products into the billing tables. Safe to
-// re-run — everything upserts on Stripe ids. Live updates arrive separately via
+// Admin backfill endpoint: pulls Stripe invoices and charges (card payments
+// from the booking site) into the billing tables. Safe to re-run — everything
+// upserts on Stripe ids. Live updates arrive separately via
 // stripe-billing-webhook.mts; this endpoint is the manual catch-up/backfill.
 //
+// Products are NOT pulled — see _shared/stripe-billing.mts for why.
+//
 // POST /api/billing-stripe-sync
-//   { action?: "syncAll" | "syncInvoices" | "syncCharges" | "syncProducts",
+//   { action?: "syncAll" | "syncInvoices" | "syncCharges",
 //     since?: string | number }   // since "all" (or 0) backfills full history
 
 const sessionCookieName = "clarity_session";
@@ -125,15 +127,20 @@ export default async function handler(req: Request) {
     if (action === "syncCharges") {
       return json({ charges: await syncChargesSince(normaliseSince(body?.since), accountId, until) });
     }
+    // "syncProducts" is gone on purpose: it imported every Stripe product ever
+    // created into the catalog. See _shared/stripe-billing.mts. It is answered
+    // rather than 400'd so an old bookmark gets an explanation.
     if (action === "syncProducts") {
-      return json({ products: await syncAllProducts(accountId) });
+      return json({
+        error: "products_not_synced",
+        message: "Stripe products are no longer imported. Products are managed in Billing > Products.",
+      }, 410);
     }
     if (action === "syncAll") {
       const since = normaliseSince(body?.since);
-      const products = await syncAllProducts(accountId);
       const invoices = await syncInvoicesSince(since, accountId, until);
       const charges = await syncChargesSince(since, accountId, until);
-      return json({ ok: products.ok && invoices.ok && charges.ok, products, invoices, charges });
+      return json({ ok: invoices.ok && charges.ok, invoices, charges });
     }
 
     return json({ error: "unknown_action", message: "Unknown billing sync action." }, 400);
