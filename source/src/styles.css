@@ -2488,8 +2488,8 @@ button {
   }
 }
 
-.booking-login-clear {
-  margin-top: 10px;
+.booking-login-error em {
+  font-style: normal;
 }
 
 .embed-panel {
@@ -5499,6 +5499,7 @@ button {
   --booking-control: rgba(255, 255, 255, 0.82);
   --booking-control-hover: color-mix(in srgb, var(--coach-primary) 4%, #ffffff);
   --booking-shadow: 0 18px 40px rgba(6, 17, 10, 0.1);
+  --booking-danger: #b4302f;
 }
 
 .public-booking.booking-theme-dark {
@@ -5512,6 +5513,7 @@ button {
   --booking-control: rgba(255, 255, 255, 0.055);
   --booking-control-hover: rgba(255, 255, 255, 0.075);
   --booking-shadow: 0 22px 58px rgba(0, 0, 0, 0.36);
+  --booking-danger: #ff9b9b;
 }
 
 .app-shell .public-booking {
@@ -5564,6 +5566,12 @@ button {
 
 .app-shell .public-booking .booking-login-copy em {
   color: var(--booking-muted);
+}
+
+/* Same specificity as the muted rule above, and after it, so a failed sign-in
+   reads as a failure rather than as more small print. */
+.app-shell .public-booking .booking-login-error em {
+  color: var(--booking-danger);
 }
 
 .app-shell .public-booking .booking-card {

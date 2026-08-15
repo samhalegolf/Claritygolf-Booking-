@@ -74,6 +74,7 @@ import {
   BOOKING_LOGIN_STORAGE_KEY,
   PUBLIC_BOOKING_HOST,
   isBookingEmbedMode,
+  playerBookingUrl,
   type BookingEntryMode,
 } from "./modules/shared/bookingHandoff";
 import type {
@@ -5102,6 +5103,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       },
   );
   const [playerBookingIdentity, setPlayerBookingIdentity] = useState<{ name: string; email: string } | null>(null);
+  const [bookingSignIn, setBookingSignIn] = useState({ email: "", password: "" });
+  const [bookingSignInState, setBookingSignInState] = useState<"idle" | "checking">("idle");
+  const [bookingSignInError, setBookingSignInError] = useState("");
+  const playerBookingsLoadedRef = useRef(false);
   const [customGroupAttendees, setCustomGroupAttendees] = useState<CustomGroupAttendee[]>([]);
   const [customGroupAttendeeDraft, setCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
   const [selectedCustomGroupAttendeeDraft, setSelectedCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
@@ -6020,14 +6025,28 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       ? `Location Calendar · ${locationById(locations, selectedCalendarLocationId)?.shortName || locationById(locations, selectedCalendarLocationId)?.name || defaultLocation.shortName || defaultLocation.name}`
       : `Coach Calendar · ${selectedCalendarCoach.displayName || selectedCalendarCoach.name}`;
   const settingsLocationLine = `${coachAccount.venueName} · ${coachAccount.timezone}`;
-  const hasSavedRescheduleLogin = Boolean(rescheduleForm.email.trim() && rescheduleForm.phone.trim());
   const isEmailLinkReschedule = Boolean(
     bookingMode === "reschedule" &&
       initialRescheduleLoginRef.current?.appointmentId &&
       rescheduleForm.email.trim() &&
       rescheduleForm.phone.trim(),
   );
-  const showRescheduleLoginPanel = bookingMode === "reschedule" && (forceRescheduleLogin || !isEmailLinkReschedule);
+  /**
+   * How the Manage-booking step establishes who is asking.
+   *
+   * "bookings" -- a signed-in player. Their session already answered the
+   *   question, so they get their bookings, not a form.
+   * "link"     -- arrived from the link in a confirmation email, which carries
+   *   the booking with it. Still the path for a guest with no account.
+   * "sign-in"  -- everyone else, who signs in with their Clarity Golf account.
+   *   This replaced an email-plus-phone booking lookup that was a second,
+   *   parallel notion of identity with no relationship to a real login.
+   */
+  const rescheduleIdentityStep: "bookings" | "link" | "sign-in" = isPlayerBooking
+    ? "bookings"
+    : forceRescheduleLogin || !isEmailLinkReschedule
+      ? "sign-in"
+      : "link";
   const bookingLoginUrl = bookingConfirmation
     ? buildRescheduleLink(coachAccount.bookingUrl, {
         appointmentId: bookingConfirmation.appointmentId,
@@ -6290,6 +6309,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    // A signed-in player's details came from their session and are already
+    // theirs on every device. Caching them here would only leave a copy behind
+    // on a shared browser for no gain.
+    if (isPlayerBooking) return;
     const hasCredentials = Boolean(rescheduleForm.email.trim() && rescheduleForm.phone.trim());
     if (hasCredentials) {
       const nextSaved: SavedRescheduleLogin = {
@@ -6303,7 +6326,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     if (bookingMode === "book" && !selectedRescheduleId) {
       window.localStorage.removeItem(RESCHEDULE_LOGIN_STORAGE_KEY);
     }
-  }, [bookingMode, rescheduleForm.email, rescheduleForm.phone, selectedRescheduleId]);
+  }, [bookingMode, isPlayerBooking, rescheduleForm.email, rescheduleForm.phone, selectedRescheduleId]);
 
   useEffect(() => {
     // Player booking has no use for the cached copy: the session is the
@@ -6322,6 +6345,17 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       }),
     );
   }, [bookingForm.email, bookingForm.firstName, bookingForm.lastName, bookingForm.phone, isEmbedMode, isPlayerBooking]);
+
+  // A signed-in player never asks to find their own bookings -- the session
+  // already knows the details the old lookup form was collecting, so the
+  // lookup runs itself the moment they open Manage booking.
+  useEffect(() => {
+    if (!isPlayerBooking || bookingMode !== "reschedule") return;
+    if (playerBookingsLoadedRef.current || rescheduleState === "checking") return;
+    if (!rescheduleForm.email.trim() || !rescheduleForm.phone.trim()) return;
+    playerBookingsLoadedRef.current = true;
+    void lookupPublicReschedule(true);
+  }, [bookingMode, isPlayerBooking, rescheduleForm.email, rescheduleForm.phone, rescheduleState]);
 
   // Who is booking, answered by the server rather than by the browser. This is
   // what replaces the old handoff: the player crosses from the portal into
@@ -11341,11 +11375,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     setCustomGroupAttendees((current) => current.filter((attendee) => attendee.id !== attendeeId));
   }
 
-  function updateRescheduleForm(field: keyof RescheduleForm, value: string) {
-    setBookingConfirmation(null);
-    setRescheduleForm((current) => ({ ...current, [field]: value }));
-  }
-
   function changeBookingMode(nextMode: BookingMode, showLogin = false) {
     setBookingMode(nextMode);
     setBookingConfirmation(null);
@@ -11478,6 +11507,47 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     URL.revokeObjectURL(url);
   }
 
+  /**
+   * Signing in on the public booking page.
+   *
+   * The same account and the same endpoint as the Player Portal -- there is one
+   * login for the product, and booking is not allowed a second one. On success
+   * the page reloads into the terminal, because from that moment this visitor
+   * is a player and the portal is where their bookings live.
+   */
+  async function signInFromBooking() {
+    const email = bookingSignIn.email.trim();
+    const password = bookingSignIn.password;
+    if (!email || !password) {
+      setBookingSignInError("Enter your email and password.");
+      return;
+    }
+    setBookingSignInState("checking");
+    setBookingSignInError("");
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        authenticated?: boolean;
+        message?: string;
+      };
+      if (!response.ok || !data.authenticated) {
+        throw new Error(data.message || "Email or password is incorrect.");
+      }
+      setBookingSignIn({ email: "", password: "" });
+      window.location.href = playerBookingUrl();
+    } catch (error) {
+      setBookingSignInState("idle");
+      setBookingSignInError(
+        error instanceof Error ? error.message : "Could not reach the sign-in service.",
+      );
+    }
+  }
+
   async function lookupPublicReschedule(silent = false, credentials: RescheduleLookupCredentials = rescheduleForm) {
     const lookupCredentials = {
       email: credentials.email.trim(),
@@ -11513,7 +11583,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         selectRescheduleMatch(matches[0]);
       }
       if (!matches.length && !silent) setToast({ message: "No booking matched those details." });
-      if (matches.length) {
+      if (matches.length && !isPlayerBooking) {
         const nextSaved: SavedRescheduleLogin = {
           email: lookupCredentials.email,
           phone: lookupCredentials.phone,
@@ -24330,74 +24400,89 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </>
               ) : (
                 <>
-                  {showRescheduleLoginPanel ? (
+                  {rescheduleIdentityStep === "bookings" ? (
                   <div className="booking-card">
-                    <span>Booking Login</span>
+                    <span>Your bookings</span>
+                    {rescheduleState === "checking" && !rescheduleMatches.length ? (
+                      <div className="booking-login-copy">
+                        <strong>Loading your bookings…</strong>
+                      </div>
+                    ) : rescheduleMatches.length ? (
+                      <>
+                        <div className="booking-login-copy">
+                          <strong>Choose the booking you want to move.</strong>
+                        </div>
+                        <div className="service-picker reschedule-list">
+                          {rescheduleMatches.map((match) => (
+                            <button
+                              className={selectedRescheduleId === match.id ? "selected-service" : ""}
+                              key={match.id}
+                              onClick={() => selectRescheduleMatch(match)}
+                              type="button"
+                            >
+                              <strong>{match.serviceName}</strong>
+                              <em>{describeRescheduleMatch(match)}</em>
+                              <small>{match.client}</small>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="booking-login-copy">
+                        <strong>Nothing booked to change yet.</strong>
+                        <em>Book a lesson first and it will show up here.</em>
+                      </div>
+                    )}
+                  </div>
+                  ) : rescheduleIdentityStep === "sign-in" ? (
+                  <div className="booking-card">
+                    <span>Sign In</span>
                     <div className="booking-login-copy">
-                      <strong>Use the link from your email, or enter the original details once.</strong>
-                      <em>Your browser can keep this saved for next time.</em>
+                      <strong>Sign in to see and change your bookings.</strong>
+                      <em>Use the Clarity Golf login your coach set up for you.</em>
                     </div>
                     <div className="booking-form">
                       <input
-                        value={rescheduleForm.email}
+                        value={bookingSignIn.email}
                         autoComplete="email"
                         inputMode="email"
-                        onChange={(event) => updateRescheduleForm("email", event.target.value)}
+                        onChange={(event) =>
+                          setBookingSignIn((current) => ({ ...current, email: event.target.value }))
+                        }
                         placeholder="Email"
                         type="email"
                       />
                       <input
-                        value={rescheduleForm.phone}
-                        autoComplete="tel"
-                        inputMode="tel"
-                        onChange={(event) => updateRescheduleForm("phone", event.target.value)}
-                        placeholder="Phone"
-                        type="tel"
+                        value={bookingSignIn.password}
+                        autoComplete="current-password"
+                        onChange={(event) =>
+                          setBookingSignIn((current) => ({ ...current, password: event.target.value }))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void signInFromBooking();
+                        }}
+                        placeholder="Password"
+                        type="password"
                       />
                     </div>
-                    {hasSavedRescheduleLogin && (
-                      <button
-                        className="outline-button booking-login-clear"
-                        onClick={() => {
-                          window.localStorage.removeItem(RESCHEDULE_LOGIN_STORAGE_KEY);
-                          initialRescheduleLoginRef.current = null;
-                          setForceRescheduleLogin(true);
-                          setRescheduleForm({ email: "", phone: "" });
-                          setRescheduleMatches([]);
-                          setSelectedRescheduleId("");
-                          setBookingStart(null);
-                        }}
-                        type="button"
-                      >
-                        Forget saved login
-                      </button>
+                    {bookingSignInError && (
+                      <div className="booking-login-copy booking-login-error" role="alert">
+                        <em>{bookingSignInError}</em>
+                      </div>
                     )}
                     <button
                       className="primary-button confirm-booking"
-                      disabled={rescheduleState === "checking"}
-                      onClick={() => {
-                        void lookupPublicReschedule();
-                      }}
+                      disabled={bookingSignInState === "checking"}
+                      onClick={() => void signInFromBooking()}
                       type="button"
                     >
-                      {rescheduleState === "checking" ? "Checking..." : "Find Booking"}
+                      {bookingSignInState === "checking" ? "Signing in..." : "Sign in"}
                     </button>
-                    {rescheduleMatches.length > 0 && (
-                      <div className="service-picker reschedule-list">
-                        {rescheduleMatches.map((match) => (
-                          <button
-                            className={selectedRescheduleId === match.id ? "selected-service" : ""}
-                            key={match.id}
-                            onClick={() => selectRescheduleMatch(match)}
-                            type="button"
-                          >
-                            <strong>{match.serviceName}</strong>
-                            <em>{describeRescheduleMatch(match)}</em>
-                            <small>{match.client}</small>
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    <div className="booking-login-copy">
+                      <em>
+                        Booked as a guest? Use the manage-booking link in your confirmation email.
+                      </em>
+                    </div>
                   </div>
                   ) : (
                     <div className="booking-card reschedule-link-state">
