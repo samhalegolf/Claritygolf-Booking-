@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { EXTERNAL_BOOKING_SERVICE_ID, assertProcessableEvent, createCalendarItemFromOptixBooking, externalBookingNote, findDuplicateBooking, normalizeOptixLessonEvent, updateCalendarItemFromOptixBooking, type OptixLessonMapping } from "./optix-origin.mts";
+import { EXTERNAL_BOOKING_SERVICE_ID, assertProcessableEvent, createCalendarItemFromOptixBooking, externalBookingNote, findDuplicateBooking, isDeletedInClarityLink, normalizeOptixLessonEvent, updateCalendarItemFromOptixBooking, type OptixLessonMapping } from "./optix-origin.mts";
 import { matchPersonByEmail } from "./optix-db.mts";
 import { buildOptixAppointmentInput } from "./optix-reconcile.mts";
 
@@ -196,4 +196,17 @@ test("external metadata is additive to normal lesson fields", () => {
   const canonical = ["id", "account_id", "kind", "week", "day", "start", "duration", "coach_id", "location_id", "service_id", "client", "title", "phone", "email", "person_id", "note", "status", "coach", "location", "custom_group"];
   for (const field of canonical) assert.ok(field in item, `missing canonical field ${field}`);
   assert.equal(item.origin, "optix");
+});
+
+test("a tombstoned booking is recognised whatever event arrives about it", () => {
+  // Deleting an imported lesson leaves a 'deleted_in_clarity' link row with no
+  // calendar item. The importer must treat that as final: a redelivered
+  // creation, an update, or Optix's own cancellation may not resurrect the
+  // lesson — and must be recognised BEFORE the safe-link assertion, which
+  // would throw on the tombstone's missing clarity_item_id.
+  assert.equal(isDeletedInClarityLink({ processing_status: "deleted_in_clarity", clarity_item_id: null }), true);
+  assert.equal(isDeletedInClarityLink({ processing_status: "bay_required", clarity_item_id: "optix-1" }), false);
+  assert.equal(isDeletedInClarityLink({ processing_status: "cancelled", clarity_item_id: "optix-1" }), false);
+  assert.equal(isDeletedInClarityLink(null), false);
+  assert.equal(isDeletedInClarityLink(undefined), false);
 });

@@ -253,6 +253,15 @@ async function findExistingBookingForEvent(event: OptixLessonEvent, mapping: Opt
   return findDuplicateBooking(rowsOf(rows), event, { start: slot.start, duration: duration || 60 });
 }
 
+/**
+ * A tombstone: the link row left behind when an admin deletes an imported
+ * lesson. It has no calendar item, and its meaning is "never import this
+ * booking again" — whatever event Optix sends about it later.
+ */
+export function isDeletedInClarityLink(link: any): boolean {
+  return Boolean(link) && text(link?.processing_status) === "deleted_in_clarity";
+}
+
 export async function findOptixLink(externalBookingId: string, purpose = "lesson") {
   const rows = await optixOriginRequest(`external_booking_links?provider=eq.optix&purpose=eq.${purpose}&external_booking_id=eq.${encodeURIComponent(externalBookingId)}&limit=1`);
   return Array.isArray(rows) ? rows[0] || null : null;
@@ -392,6 +401,20 @@ export async function processStoredOptixEvent(eventKey: string, payload: unknown
       return { status: "ignored", reason };
     }
     const existing = await findOptixLink(event.bookingId);
+    // A tombstone means an admin deliberately deleted this booking in Clarity.
+    // Whatever Optix says about it later — a redelivered creation, an update,
+    // even its own cancellation — the booking is not allowed to reappear on
+    // the calendar. Checked before assertSafeExistingLink, which would choke
+    // on the tombstone's NULL clarity_item_id.
+    if (isDeletedInClarityLink(existing)) {
+      await updateEvent(eventKey, {
+        processing_status: "ignored",
+        failure_code: "deleted_in_clarity",
+        error_message: "This booking was deleted in Clarity by an admin, so the event was not re-imported.",
+        processed_at: new Date().toISOString(),
+      });
+      return { status: "ignored", reason: "deleted_in_clarity" };
+    }
     if (!existing && event.eventType !== "new_member_booking") {
       await updateEvent(eventKey, { processing_status: "ignored", failure_code: "missing_lesson_link", processed_at: new Date().toISOString() });
       return { status: "ignored", reason: "missing_lesson_link" };

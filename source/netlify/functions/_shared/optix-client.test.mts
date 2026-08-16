@@ -122,3 +122,49 @@ test("keeps generic server failures retryable", () => {
   assert.equal(error.code, "remote_error");
   assert.equal(error.retryable, true);
 });
+
+// -- Cancelling an existing booking (delete-in-Clarity → cancel-in-Optix) ----
+
+const cancelInput = {
+  memberId: "", ownerUserId: "", resourceIds: [] as string[],
+  startTimestamp: 1_760_000_000, endTimestamp: 1_760_003_600,
+  externalId: "", bookingId: "optix-booking-99", isCanceled: true,
+  title: "Ada Lovelace",
+};
+
+test("a cancel of an existing booking needs no resource, identity or external id", () => {
+  // An imported lesson knows only the Optix booking_id — the webhook that
+  // created it carries no resource id, and the booking belongs to the
+  // customer, not to Clarity's configured identity. Requiring any of those
+  // would make customer bookings uncancellable.
+  const payload: any = buildBookingSetInput(cancelInput);
+  assert.equal(payload.bookings[0].booking_id, "optix-booking-99");
+  assert.equal(payload.bookings[0].is_canceled, true);
+  assert.ok(!("resource_id" in payload.bookings[0]), "no resource id may be invented for a cancel");
+  assert.ok(!("external_id" in payload.bookings[0]), "no external id may be rewritten by a cancel");
+  assert.ok(!("account" in payload) && !("owner_user_id" in payload), "a cancel must not assert an identity");
+});
+
+test("a cancel never asserts Clarity's identity even when one is configured", () => {
+  // Sending account/owner on someone else's booking is how a cancel could
+  // turn into a reassignment.
+  const payload: any = buildBookingSetInput({ ...cancelInput, memberId: "member-123", ownerUserId: "user-456" });
+  assert.ok(!("account" in payload));
+  assert.ok(!("owner_user_id" in payload));
+});
+
+test("a cancel without a booking id still validates like a creation", () => {
+  // is_canceled alone is not a licence to skip validation — only a targeted
+  // cancel of a known booking is exempt.
+  assert.throws(
+    () => buildBookingSetInput({ ...cancelInput, bookingId: "" }),
+    (error: any) => error instanceof OptixSyncError && error.code === "validation_failed",
+  );
+});
+
+test("creation validation is unchanged by the cancel exemption", () => {
+  assert.throws(
+    () => buildBookingSetInput({ ...cancelInput, isCanceled: false }),
+    (error: any) => error instanceof OptixSyncError,
+  );
+});

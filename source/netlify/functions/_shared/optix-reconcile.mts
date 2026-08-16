@@ -82,7 +82,7 @@ export function readOptixReconcileConfig(
   };
 }
 
-function datePartsForSlot(week: number, day: number) {
+export function datePartsForSlot(week: number, day: number) {
   const base = new Date(Date.UTC(2026, 5, 1));
   base.setUTCDate(base.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
   return {

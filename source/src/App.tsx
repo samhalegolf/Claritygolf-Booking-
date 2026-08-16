@@ -5174,6 +5174,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const [publicBookingSlotStatuses, setPublicBookingSlotStatuses] = useState<Record<string, PublicBookingSlotStatus>>({});
   const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
   const [calendarSaveError, setCalendarSaveError] = useState("");
+  // Which kind of change the "failed" banner is describing. An autosave failure
+  // really is retried on the next change; a failed delete is rolled back and
+  // must be clicked again, so the banner has to say different things.
+  const [calendarSaveFailureKind, setCalendarSaveFailureKind] = useState<"change" | "delete">("change");
   const [deleteInFlightId, setDeleteInFlightId] = useState("");
   const [resendConfirmationState, setResendConfirmationState] = useState<Record<string, "sending" | "sent" | "failed">>({});
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
@@ -6927,6 +6931,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             : message || "Your latest calendar change was not saved. Please try again.";
           setCalendarFeedStatus(sessionExpired ? "offline" : "connected");
           setCalendarSaveStatus("failed");
+          setCalendarSaveFailureKind("change");
           setCalendarSaveError(calmMessage);
           finishDiagnosticTimer(timer, "failed", {
             errorCode: sessionExpired ? "AUTH_SESSION_MISSING" : "BOOKING_UPDATE_FAILED",
@@ -7909,6 +7914,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     }
     if (!hasLoadedCalendarApiRef.current) {
       setCalendarSaveStatus("failed");
+      setCalendarSaveFailureKind("change");
       setCalendarSaveError("Calendar is not connected to the live database.");
       setToast({ message: `Cannot ${action}: the live database is not connected. Reload and sign in again.` });
       return false;
@@ -13336,6 +13342,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         humanMessage: lessonCompleteDiagnosticText(diagnostic),
       });
       setCalendarSaveStatus("failed");
+      setCalendarSaveFailureKind("change");
       setCalendarSaveError(lessonCompleteDiagnosticText(diagnostic));
       setLessonCompleteErrors((current) => ({ ...current, [itemId]: diagnostic }));
       setToast({ message });
@@ -17245,20 +17252,24 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   async function removeSelected() {
     if (!selected) return;
     if (!requireLiveDatabase("remove calendar items")) return;
-    // Removing an externally owned lesson only clears it from Clarity -- the
-    // booking is still live in the system that owns it, and Clarity has no way
-    // to cancel it there. Say so plainly before it disappears, or the calendar
-    // looks like it cancelled something it did not.
+    // Removing an externally owned lesson also asks the owning system to cancel
+    // its booking. That cancellation is attempted server-side and is not
+    // guaranteed (Optix can refuse), so the confirm still names the risk.
     if (isExternallyOwned(selected)) {
       const provider = externalProviderLabel(selected);
       const confirmed = window.confirm(
-        `Remove this lesson from Clarity only?\n\n` +
-          `${selected.client ?? selected.title} stays booked in ${provider}. This does not cancel it there — ` +
-          `cancel it in ${provider} too, or the customer keeps the booking.`,
+        `Remove this lesson and cancel it in ${provider}?\n\n` +
+          `Clarity will ask ${provider} to cancel ${selected.client ?? selected.title}'s booking too. ` +
+          `If ${provider} refuses, the booking stays live there — check the Optix panel after deleting.`,
       );
       if (!confirmed) return;
     }
     const calendarItemId = selected.id;
+    const selectedKind = selected.kind;
+    // Optimistic removal: the lesson disappears now, and comes back only if the
+    // server refuses the delete. The autosave effect cannot race this into a
+    // full-state PUT because hasActiveAdminSave() is true until the finally.
+    const itemsBeforeDelete = items;
     const saveVersion = beginAdminSave("calendar_delete");
     const timer = startDiagnosticTimer({
       system: "save",
@@ -17276,6 +17287,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     setDeleteInFlightId(calendarItemId);
     setCalendarSaveStatus("saving");
     setCalendarSaveError("");
+    setItems((current) => current.filter((item) => item.id !== calendarItemId));
+    closeCalendarDetails();
+    setToast({ message: `${selectedKind === "block" ? "Block" : "Appointment"} removed.` });
     try {
       const response = await fetch(`/api/calendar-state?id=${encodeURIComponent(calendarItemId)}`, {
         method: "DELETE",
@@ -17346,8 +17360,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         setCalendarFeedStatus("connected");
         setCalendarSaveStatus("saved");
         setCalendarSaveError("");
-        closeCalendarDetails();
-        setToast({ message: `${selected.kind === "block" ? "Block" : "Appointment"} removed.` });
         window.setTimeout(() => {
           if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
         }, 1800);
@@ -17417,7 +17429,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             ? "Deleted booking reappeared after backend refetch. Stale cache or persistence verification failed."
             : code === "BOOKING_DELETE_RELOAD_FAILED"
               ? "The booking delete could not be verified because the calendar reload failed."
-              : "The booking was not deleted. Please try again.";
+              : "The delete didn't reach the server, so the lesson is back on the calendar. Delete it again to retry.";
+      // Roll the optimistic removal back: the server still has the lesson, so
+      // the calendar must show it again. Guarded on the save version so a
+      // newer change is never clobbered by this stale snapshot.
+      if (calendarSaveVersionRef.current === saveVersion) {
+        setItems(itemsBeforeDelete);
+      }
       finishDiagnosticTimer(timer, "failed", {
         httpStatus,
         errorCode: code,
@@ -17460,6 +17478,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       });
       setCalendarFeedStatus(code === "AUTH_SESSION_MISSING" ? "offline" : "connected");
       setCalendarSaveStatus("failed");
+      setCalendarSaveFailureKind("delete");
       setCalendarSaveError(deleteFailureMessage);
       setToast({ message: deleteFailureMessage });
     } finally {
@@ -20012,7 +20031,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             </div>
             {calendarSaveStatus === "failed" && (
               <div className="calendar-save-warning">
-                Your latest change was not saved. Please try again; the app will retry when you make another change.
+                {calendarSaveFailureKind === "delete"
+                  ? "The delete didn't go through, so the lesson was put back on the calendar. Delete it again to retry."
+                  : "Your latest change was not saved. Please try again; the app will retry when you make another change."}
               </div>
             )}
             {calendarViewEmptyMessage ? (

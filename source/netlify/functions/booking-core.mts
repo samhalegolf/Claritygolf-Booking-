@@ -14,7 +14,7 @@ import {
   syncGoogleCalendarNow,
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
-import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";
+import { cancelOptixBayForCalendarItem, cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
 import { autoBookResourceForNewBooking } from "./_shared/optix-book-resource.mts";
 import { planExternalReschedule } from "./_shared/external-reschedule.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
@@ -5152,6 +5152,37 @@ async function deleteCalendarItemById(id, context = null, netlifyContext = null)
       console.error("calendar_delete:optix_bay_release_failed", { calendarItemId: cleanId, detail });
     }
   }
+  // An imported Optix lesson is the CUSTOMER's booking in Optix, which the bay
+  // release above never touches (there is no optix_booking_sync row for it).
+  // Ask Optix to cancel it too, so deleting in Clarity no longer strands a
+  // live booking on the customer. Failure is a warning, never a blocker: the
+  // admin decided this lesson goes, and is told plainly if Optix kept it.
+  let optixCustomerCancelWarning = "";
+  if (
+    existingItem?.kind === "appointment" &&
+    existingItem.origin === "optix" &&
+    cleanString(existingItem.externalBookingId, "", 140)
+  ) {
+    try {
+      await cancelOptixCustomerBooking({
+        externalBookingId: existingItem.externalBookingId,
+        week: existingItem.week,
+        day: existingItem.day,
+        start: existingItem.start,
+        duration: existingItem.duration,
+        timezone: existingItem.location?.timezone || "",
+        clientName: existingItem.client || existingItem.title || "",
+      });
+    } catch (error) {
+      const detail = cleanString(
+        error?.cause?.message || (error instanceof Error ? error.message : String(error || "")),
+        "Optix did not confirm the cancellation.",
+        400,
+      );
+      optixCustomerCancelWarning = `The lesson was removed from Clarity, but Optix did not confirm cancelling the customer's booking: ${detail} Cancel it in Optix or the customer stays booked there.`;
+      console.error("calendar_delete:optix_customer_cancel_failed", { calendarItemId: cleanId, optixBookingId: existingItem.externalBookingId, detail });
+    }
+  }
   if (context) {
     if (!existingItem) {
       throw Object.assign(new Error("Booking was not found in this workspace."), {
@@ -5178,6 +5209,25 @@ async function deleteCalendarItemById(id, context = null, netlifyContext = null)
         operationOwner: "calendar_delete_verify",
         route: "DELETE /api/calendar-state",
       });
+    }
+    // Tombstone for externally-imported bookings. The DELETE above cascades
+    // away the external_booking_links row, which is the dedupe anchor the
+    // webhook importer uses — without a replacement, a redelivered
+    // new_member_booking event would quietly re-import a lesson the admin
+    // deliberately deleted. clarity_item_id is NULL because the lesson no
+    // longer exists; the importer treats processing_status
+    // 'deleted_in_clarity' as "never import this booking again".
+    const externalBookingId = cleanString(existingItem?.externalBookingId, "", 140);
+    const externalProvider = cleanString(existingItem?.externalProvider, "", 40) || "optix";
+    if (existingItem && existingItem.origin && existingItem.origin !== "clarity" && externalBookingId) {
+      await client.query(
+        `INSERT INTO external_booking_links
+           (provider, purpose, external_booking_id, clarity_item_id, origin, processing_status, email_status, created_at, updated_at)
+         VALUES ($1, 'lesson', $2, NULL, $3, 'deleted_in_clarity', 'suppressed', NOW(), NOW())
+         ON CONFLICT (provider, purpose, external_booking_id)
+         DO UPDATE SET clarity_item_id = NULL, processing_status = 'deleted_in_clarity', updated_at = NOW()`,
+        [externalProvider, externalBookingId, existingItem.origin],
+      );
     }
     await client.query("COMMIT");
   } catch (error) {
@@ -5212,12 +5262,13 @@ async function deleteCalendarItemById(id, context = null, netlifyContext = null)
       },
     );
   }
+  const deleteWarnings = [optixBayWarning, optixCustomerCancelWarning].filter(Boolean);
   return {
     ...nextState,
     items: context ? nextState.items.filter((item) => canReadCalendarItem(context, item, nextState)) : nextState.items,
     updatedAt,
     googleCalendarSync,
-    ...(optixBayWarning ? { warnings: [optixBayWarning] } : {}),
+    ...(deleteWarnings.length ? { warnings: deleteWarnings } : {}),
   };
 }
 

@@ -283,17 +283,24 @@ async function optixGraphQL<T>(
 }
 
 export function buildBookingSetInput(input: OptixBookingInput, tokenKind?: OptixClientConfig["tokenKind"]) {
-  if (!input.externalId.trim()) {
+  // Cancelling an existing booking by its Optix booking_id is a different
+  // shape from creating one: the booking already carries its resource, owner
+  // and external id in Optix, so none of those are required — or even known —
+  // for a lesson that was imported from an Optix webhook. Everything below
+  // that names a resource, identity, or external id is therefore only
+  // enforced when this input can create or move a booking.
+  const cancelOfExistingBooking = Boolean(input.isCanceled && input.bookingId);
+  if (!cancelOfExistingBooking && !input.externalId.trim()) {
     throw new OptixSyncError("validation_failed", "An Optix external ID is required.");
   }
-  if (!input.resourceIds.length) {
+  if (!cancelOfExistingBooking && !input.resourceIds.length) {
     throw new OptixSyncError("validation_failed", "At least one Optix resource ID is required.");
   }
   if (!input.isCanceled && input.endTimestamp <= input.startTimestamp) {
     throw new OptixSyncError("validation_failed", "The Optix booking end time must be after its start time.");
   }
 
-  if (!input.memberId && !input.ownerUserId) {
+  if (!cancelOfExistingBooking && !input.memberId && !input.ownerUserId) {
     throw new OptixSyncError(
       "not_configured",
       "Optix needs an identity for the booking. Set OPTIX_MEMBER_ID or OPTIX_OWNER_USER_ID.",
@@ -308,8 +315,12 @@ export function buildBookingSetInput(input: OptixBookingInput, tokenKind?: Optix
     // even when unset, and owner_user_id was tied to the token kind, so the
     // combination that Optix accepts -- one id, not both -- could not be
     // expressed no matter what the environment said.
-    ...(input.memberId ? { account: { member_id: input.memberId } } : {}),
-    ...(input.ownerUserId ? { owner_user_id: input.ownerUserId } : {}),
+    // On a cancel of an existing booking neither identity is sent even when
+    // configured: the booking belongs to whoever made it (often the customer),
+    // and asserting Clarity's own identity on someone else's booking is how a
+    // cancel could turn into a reassignment.
+    ...(input.memberId && !cancelOfExistingBooking ? { account: { member_id: input.memberId } } : {}),
+    ...(input.ownerUserId && !cancelOfExistingBooking ? { owner_user_id: input.ownerUserId } : {}),
     source: input.source || "Clarity Booking",
     title,
     // Keep the Optix note intentionally simple: only the person on the
@@ -320,8 +331,8 @@ export function buildBookingSetInput(input: OptixBookingInput, tokenKind?: Optix
         ...(input.bookingId ? { booking_id: input.bookingId } : {}),
         start_timestamp: input.startTimestamp,
         end_timestamp: input.endTimestamp,
-        resource_id: input.resourceIds,
-        external_id: input.externalId,
+        ...(input.resourceIds.length ? { resource_id: input.resourceIds } : {}),
+        ...(input.externalId.trim() ? { external_id: input.externalId } : {}),
         ...(input.isCanceled ? { is_canceled: true } : {}),
       },
     ],

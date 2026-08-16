@@ -2,8 +2,10 @@ import { getDatabase } from "@netlify/database";
 
 import {
   buildOptixAppointmentInput,
+  datePartsForSlot,
   optixAppointmentFingerprint,
   readOptixReconcileConfig,
+  wallClockToUnixSeconds,
   type ClarityOptixAppointment,
   type OptixSyncRecord,
 } from "./optix-reconcile.mts";
@@ -70,6 +72,58 @@ export type OptixBayCancellationResult = {
  * continue. Once a bay booking ID exists, failure is deliberately surfaced and
  * the Clarity lesson must remain present for a safe retry.
  */
+export type OptixCustomerCancellationInput = {
+  /** The Optix booking_id from calendar_items.external_booking_id. */
+  externalBookingId: string;
+  week: number;
+  day: number;
+  start: number;
+  duration: number;
+  timezone?: string;
+  clientName?: string;
+};
+
+/**
+ * Cancel a booking the CUSTOMER made in Optix, identified by the booking_id an
+ * inbound webhook delivered. This is the counterpart of the bay release above,
+ * which only covers bookings Clarity itself created (tracked in
+ * optix_booking_sync). An imported lesson has no sync row — its Optix side is
+ * the customer's own booking, and cancelling it is the same bookingsCommit
+ * mutation as booking, carrying booking_id + is_canceled and nothing that
+ * could reassign the booking (no identity, no resource, no external id).
+ *
+ * Callers treat failure as a warning, not a blocker: the Clarity delete
+ * proceeds either way, so a refusal here must be surfaced to the admin rather
+ * than thrown away.
+ */
+export async function cancelOptixCustomerBooking(
+  input: OptixCustomerCancellationInput,
+): Promise<{ ok: true; optixBookingId: string }> {
+  const bookingId = String(input.externalBookingId || "").trim();
+  if (!bookingId) {
+    throw new OptixSyncError("validation_failed", "An Optix booking ID is required to cancel the customer's booking.");
+  }
+  const config = readOptixReconcileConfig(env);
+  const timeZone = String(input.timezone || "").trim() || config.defaultTimeZone;
+  const date = datePartsForSlot(input.week, input.day);
+  const startTimestamp = wallClockToUnixSeconds({ ...date, minutes: input.start, timeZone });
+  const endTimestamp = wallClockToUnixSeconds({ ...date, minutes: input.start + input.duration, timeZone });
+  // Draft-then-commit, the same sequence the production bay cancellation uses.
+  await syncOptixBooking({
+    memberId: "",
+    ownerUserId: "",
+    bookingId,
+    resourceIds: [],
+    startTimestamp,
+    endTimestamp,
+    externalId: "",
+    title: input.clientName || "Clarity Booking",
+    source: "Clarity Booking",
+    isCanceled: true,
+  });
+  return { ok: true, optixBookingId: bookingId };
+}
+
 export async function cancelOptixBayForCalendarItem(
   calendarItemId: string,
 ): Promise<OptixBayCancellationResult> {

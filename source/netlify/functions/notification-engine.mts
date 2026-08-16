@@ -849,6 +849,34 @@ export async function notifyBookingEvent(input: NotifyInput) {
     }
   }
 
+  // Group attendees were invited to the lesson, so they hear when it is
+  // cancelled. Invites above cover booking/updated only, and the cancellation
+  // channels stop at client/coach/admin — attendees were the one audience a
+  // cancellation never reached. Like the other cancellation sends this is
+  // deliberately not gated on sendClientEmail. The booker's address is
+  // deduped: they already got the client cancellation email.
+  if (action === "cancelled" && appt.customGroup) {
+    const notified = new Set([cleanEmail(appt.email, "")].filter(Boolean));
+    for (const attendee of appt.attendees || []) {
+      const recipient = cleanEmail(attendee?.email, "");
+      if (!recipient || notified.has(recipient)) continue;
+      notified.add(recipient);
+      const body = bodyFor(action, appt, previous, serviceName, settings, variables, "client");
+      const kind = "cancelled_attendee_email";
+      const result = await sendEmail({
+        to: recipient,
+        subject: subjects.client,
+        html: body.html,
+        text: body.text,
+        replyTo: settings.replyToEmail || settings.contactEmail,
+        idempotencyKey: `${kind}-${appt.id}-${hash(recipient).slice(0, 24)}-${signature}`,
+      });
+      const status = result.sent ? "sent" : "failed";
+      results.push({ channel: "custom_group_invite", recipient, subject: subjects.client, kind, status, ...result });
+      await recordNotification({ personKey, calendarItemId: appt.id, recipient, subject: subjects.client, kind, status, provider: "resend", providerId: result.id || "", error: [result.reason, result.error].filter(Boolean).join(": ") });
+    }
+  }
+
   return results;
 }
 

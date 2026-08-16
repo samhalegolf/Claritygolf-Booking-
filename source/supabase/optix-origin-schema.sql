@@ -23,7 +23,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS calendar_items_external_booking_unique
 CREATE TABLE IF NOT EXISTS external_booking_links (
   provider TEXT NOT NULL,
   external_booking_id TEXT NOT NULL,
-  clarity_item_id TEXT NOT NULL REFERENCES calendar_items(id) ON DELETE RESTRICT,
+  -- NULLABLE: a tombstone row (processing_status 'deleted_in_clarity') outlives
+  -- its deleted lesson so webhook redeliveries cannot re-import it.
+  clarity_item_id TEXT REFERENCES calendar_items(id) ON DELETE RESTRICT,
   origin TEXT NOT NULL CHECK (origin IN ('clarity', 'optix')),
   external_booking_session_id TEXT,
   external_resource_id TEXT,
@@ -37,6 +39,9 @@ CREATE TABLE IF NOT EXISTS external_booking_links (
 
 CREATE INDEX IF NOT EXISTS external_booking_links_clarity_item_idx
   ON external_booking_links (clarity_item_id);
+
+-- Applied to production 2026-08-17 (migration external_booking_links_tombstones):
+ALTER TABLE external_booking_links ALTER COLUMN clarity_item_id DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS optix_webhook_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
