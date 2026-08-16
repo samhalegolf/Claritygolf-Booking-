@@ -1653,7 +1653,10 @@ async function getSetting(key) {
 }
 
 async function readSettingsMap() {
-  const rows = await db().sql`SELECT key, value FROM settings`;
+  // Excludes the bulk-excluded keys (see _shared/settings-keys.mts): this read
+  // runs on nearly every request and was shipping a 34 kB Google sync debug log
+  // with it. Read those keys individually via getSetting() when needed.
+  const rows = await db().sql`SELECT key, value FROM settings WHERE key <> 'googleCalendarDebugLogJson'`;
   return Object.fromEntries(rows.map((row) => [row.key, row.value || ""]));
 }
 
@@ -4504,12 +4507,17 @@ async function readColdSetupState() {
 }
 
 async function readPublicCalendarState() {
-  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot();
+  // The settings snapshot and the calendar items are independent reads, and
+  // this runs on the public booking path where the customer is watching a
+  // spinner. Netlify (US) to Supabase (Mumbai) is ~217 ms at best, so running
+  // them in sequence cost a full extra round trip for nothing.
+  const [snapshot, items] = await Promise.all([readStateSettingsSnapshot(), readItems()]);
+  const { settings: settingsMap, syncKey, updatedAt } = snapshot;
   const account = coachAccountFromSettings(settingsMap);
   return {
     syncKey,
     updatedAt,
-    items: await readItems(),
+    items,
     services: servicesFromSettings(settingsMap),
     workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
     coaches: coachProfilesFromSettings(settingsMap, account),

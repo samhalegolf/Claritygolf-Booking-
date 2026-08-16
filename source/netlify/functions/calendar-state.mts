@@ -651,7 +651,9 @@ function publicCalendarState(state: Record<string, unknown>) {
 }
 
 async function readSettingsMap() {
-  const rows = await db().sql`SELECT key, value FROM settings`;
+  // See _shared/settings-keys.mts: the bulk read deliberately leaves the heavy
+  // diagnostic keys behind. This one runs on every calendar shell load.
+  const rows = await db().sql`SELECT key, value FROM settings WHERE key <> 'googleCalendarDebugLogJson'`;
   return Object.fromEntries(rows.map((row: Record<string, string>) => [row.key, row.value || ""]));
 }
 

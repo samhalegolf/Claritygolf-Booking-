@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { activeLocale } from "./_shared/locale.mts";
 import { setActivePhoneCountry } from "./_shared/phone.mts";
+import { SETTINGS_BULK_SELECT_QUERY } from "./_shared/settings-keys.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
@@ -150,7 +151,7 @@ async function supabase(table: string, options: { method?: string; query?: strin
 }
 
 async function settingRows() {
-  return supabase("settings", { query: "select=key,value" }).catch(() => []);
+  return supabase("settings", { query: SETTINGS_BULK_SELECT_QUERY }).catch(() => []);
 }
 
 async function readSettings() {

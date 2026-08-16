@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import { getClarityCloudGoogleConfig } from "./clarity-cloud-google-config.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./account.mts";
+import { SETTINGS_BULK_SELECT_QUERY } from "./settings-keys.mts";
 
 export const googleCalendarScopes = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -192,7 +193,7 @@ async function supabase(table: string, options: { method?: string; query?: strin
 }
 
 export async function readSettings() {
-  const rows = await supabase("settings", { query: "select=key,value" });
+  const rows = await supabase("settings", { query: SETTINGS_BULK_SELECT_QUERY });
   return Object.fromEntries(rows.map((row: { key: string; value: string }) => [row.key, row.value || ""]));
 }
 

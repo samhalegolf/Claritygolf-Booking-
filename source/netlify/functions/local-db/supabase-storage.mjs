@@ -16,6 +16,11 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+// Mirrors BULK_EXCLUDED_SETTING_KEYS in ../_shared/settings-keys.mts. Duplicated
+// rather than imported because this adapter is a separate `file:` package that
+// cannot resolve the functions' .mts sources. Keep the two in step.
+const BULK_EXCLUDED_SETTING_KEYS = ["googleCalendarDebugLogJson"];
+
 function normalizeSql(sql) {
   return String(sql || "").replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -379,6 +384,20 @@ class SupabaseRestStore {
       const [key, value] = values;
       await this.upsert("settings", [{ key, value: String(value ?? ""), updated_at: nowIso() }], "key", { ignore: sql.includes("do nothing") });
       return [];
+    }
+    // Bulk settings read with the heavy diagnostic keys excluded. Must be
+    // matched before the unfiltered form below, which is a prefix of it.
+    //
+    // The key is resolved through BULK_EXCLUDED_SETTING_KEYS rather than read
+    // out of the SQL: normalizeSql() lowercases everything, and PostgREST's
+    // filters are case-sensitive, so a key lifted from `sql` arrives as
+    // "googlecalendardebuglogjson" and matches no row — the exclusion would
+    // silently do nothing and the payload would come back in full.
+    if (sql.startsWith("select key, value from settings where key <> ")) {
+      const wanted = sql.slice(sql.indexOf("where key <> ") + "where key <> ".length).replace(/'/g, "").trim();
+      const excluded = BULK_EXCLUDED_SETTING_KEYS.find((key) => key.toLowerCase() === wanted);
+      if (!excluded) throw new Error(`Unknown excluded settings key in bulk read: ${wanted}`);
+      return this.select("settings", `select=key,value&key=not.in.(${encodeFilter(excluded)})`);
     }
     if (sql.startsWith("select key, value from settings")) return this.select("settings", "select=key,value");
     if (sql.startsWith("select value from settings")) return this.select("settings", `select=value&key=eq.${encodeFilter(values[0])}`);
