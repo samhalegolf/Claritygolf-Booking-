@@ -6257,6 +6257,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // assembled, and it reads the lesson types itself.
   const visibleInvoiceCatalogOptions = catalogItems
     .filter((item) => {
+      // Retiring something is meant to take it out of circulation. It stayed
+      // offered here, at whatever price it was retired on.
+      if (item.active === false) return false;
       if (!invoiceSearchTerm) return false;
       return [item.name, item.description, item.kind].join(" ").toLowerCase().includes(invoiceSearchTerm);
     })
@@ -13605,7 +13608,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             // Ignored by the backend on an update - stock only moves through an
             // adjustment or a sale.
             stockLevel: isUpdate ? undefined : Math.round(Number(values.openingStock) || 0),
-            active: true,
+            // Carried through from the row being edited. Hardcoding true here
+            // meant fixing a typo on a retired product quietly put it back on
+            // the till.
+            active: values.active,
           }),
         },
       );
@@ -17341,12 +17347,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         setCalendarSaveStatus("saved");
         setCalendarSaveError("");
         closeCalendarDetails();
-        const deleteWarning = Array.isArray(verifyData.warnings)
-          ? verifyData.warnings.find((warning) => typeof warning === "string" && warning.trim()) ?? ""
-          : "";
-        setToast({
-          message: deleteWarning || `${selected.kind === "block" ? "Block" : "Appointment"} removed.`,
-        });
+        setToast({ message: `${selected.kind === "block" ? "Block" : "Appointment"} removed.` });
         window.setTimeout(() => {
           if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
         }, 1800);
@@ -21807,6 +21808,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             currency={invoiceSettings.currency}
             taxName={invoiceSettings.taxName}
             defaultTaxRate={invoiceSettings.taxRate}
+            catalog={catalogItems}
+            catalogState={catalogLoadState}
+            onReloadCatalog={() => void fetchBillingProducts().catch(() => {})}
             formatMoney={formatMoney}
             clients={clients}
             onCreateClient={createClientFromTill}

@@ -247,8 +247,36 @@ function rethrowProductConflict(error: unknown, sku: string | null): never {
 // else in the system produces an id starting "lesson:".
 const LESSON_ITEM_PREFIX = "lesson:";
 
+// What one booking of this lesson type costs, which is not always `price`.
+//
+// A custom group charges basePrice for the base head count and extraPersonPrice
+// per head above it, and the editor writes those fields without touching
+// `price` - so the two drift apart the moment a base price is edited. Selling
+// the base price at the counter is the honest floor; the per-head part is a
+// counter override, the same as any other.
+//
+// A per-person lesson type prices per head, so `price` is right but the number
+// on its own is misleading. It is labelled rather than multiplied: the till has
+// no idea how many people turned up.
+function lessonTypeUnitPrice(service: Record<string, unknown>) {
+  const customGroup = service.customGroup === true || service.customGroupEnabled === true;
+  const raw = customGroup ? (service.basePrice ?? service.price) : service.price;
+  return round2(cleanNumber(raw, 0, { min: 0 }));
+}
+
+function lessonTypePriceNote(service: Record<string, unknown>) {
+  if (service.customGroup === true || service.customGroupEnabled === true) {
+    const base = Math.max(1, Math.round(cleanNumber(service.baseParticipants, 3, { min: 1, max: 50 })));
+    const extra = round2(cleanNumber(service.extraPersonPrice, 0, { min: 0 }));
+    return extra > 0 ? `Up to ${base} people, then ${extra} each` : `Up to ${base} people`;
+  }
+  if (String(service.priceMode || "") === "per-person") return "Price is per person";
+  return "";
+}
+
 function lessonTypeToCatalogItem(service: Record<string, unknown>, taxRate: number) {
   const format = String(service.lessonFormat || "");
+  const priceNote = lessonTypePriceNote(service);
   return {
     id: `${LESSON_ITEM_PREFIX}${String(service.id ?? "")}`,
     // The invoice line records the bare lesson-type id, the way it always has.
@@ -257,8 +285,10 @@ function lessonTypeToCatalogItem(service: Record<string, unknown>, taxRate: numb
     // A package of lessons is still a package on the docket; everything else a
     // coach teaches is a service.
     kind: format === "package" ? "package" : "service",
-    description: cleanString(service.description || service.lessonNote || service.location, "", 600),
-    price: round2(cleanNumber(service.price, 0, { min: 0 })),
+    description: [priceNote, cleanString(service.description || service.lessonNote || service.location, "", 500)]
+      .filter(Boolean)
+      .join(" - "),
+    price: lessonTypeUnitPrice(service),
     taxRate,
     active: true,
     // A lesson has no shelf, no supplier and no barcode. These are here so the
@@ -297,13 +327,6 @@ async function lessonTypeItems(taxRate: number) {
     .map((service) => lessonTypeToCatalogItem(service, taxRate))
     .filter((item) => item.name)
     .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-async function findLessonTypeItem(id: string) {
-  if (!id.startsWith(LESSON_ITEM_PREFIX)) return null;
-  const { taxRate } = await resolveReportTaxConfig();
-  const items = await lessonTypeItems(taxRate);
-  return items.find((item) => item.id === id) || null;
 }
 
 async function listProducts(accountId: string) {
@@ -2614,8 +2637,13 @@ async function resolvePosItems(accountId: string, raw: unknown) {
       productId: cleanString(line.productId, "", 160),
       quantity: Math.round(cleanNumber(line.quantity, 1, { min: 1, max: 9999 })),
       // A price may be overridden at the counter, but only downward-or-upward
-      // as an explicit number; an absent one falls back to the list price.
-      unitPrice: line.unitPrice === undefined || line.unitPrice === "" ? null : round2(cleanNumber(line.unitPrice, 0, { min: 0 })),
+      // as an explicit number; an absent one falls back to the list price. A
+      // null has to count as absent - it used to fall through and sell the line
+      // for zero.
+      unitPrice:
+        line.unitPrice === undefined || line.unitPrice === null || line.unitPrice === ""
+          ? null
+          : round2(cleanNumber(line.unitPrice, 0, { min: 0 })),
     };
   });
 
@@ -2713,6 +2741,9 @@ async function movePosStock(accountId: string, transactionId: string, direction:
   const items = (await posItemsForTransactions(accountId, [transactionId]))[transactionId] || [];
   for (const item of items) {
     if (!item.productId || !item.quantity) continue;
+    // A lesson has no shelf. The RPC would return null for it anyway, but
+    // asking is a round-trip per lesson line on every sale.
+    if (item.productId.startsWith(LESSON_ITEM_PREFIX)) continue;
     const delta = applying ? -item.quantity : item.quantity;
     try {
       // Returns null when the product stopped tracking stock (or was deleted),

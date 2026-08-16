@@ -22,6 +22,9 @@ import { isLowStock } from "./stockMath";
 
 export type ProductFormValues = {
   id: string;
+  // Carried, not chosen: editing a retired product must not restore it. Retire
+  // and Restore are the buttons in the list.
+  active: boolean;
   name: string;
   supplier: string;
   sku: string;
@@ -93,6 +96,7 @@ const MOVEMENT_LABELS: Record<StockMovement["kind"], string> = {
 function emptyForm(taxRate: number): ProductFormDraft {
   return {
     id: "",
+    active: true,
     name: "",
     supplier: "",
     sku: "",
@@ -110,6 +114,7 @@ function emptyForm(taxRate: number): ProductFormDraft {
 function toForm(product: BillingCatalogItem, fallbackTaxRate: number): ProductFormDraft {
   return {
     id: product.id,
+    active: product.active !== false,
     name: product.name,
     supplier: product.supplier || "",
     sku: product.sku || "",
@@ -165,6 +170,10 @@ export function ProductsPanel({
   const [stockBusy, setStockBusy] = useState(false);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
+  // Opening B's drawer while A's history is still in flight used to let A's
+  // late response land under B's name, with no sign anything was wrong. Every
+  // load carries the product it was for, and a stale one is dropped.
+  const movementsForRef = useRef("");
 
   const searching = search.trim().length > 0;
   const editing = Boolean(form.id);
@@ -250,9 +259,22 @@ export function ProductsPanel({
     nameRef.current?.focus();
   }
 
+  async function loadMovementsFor(productId: string) {
+    movementsForRef.current = productId;
+    setMovementsLoading(true);
+    try {
+      const loaded = await onLoadMovements(productId);
+      if (movementsForRef.current !== productId) return;
+      setMovements(loaded);
+    } finally {
+      if (movementsForRef.current === productId) setMovementsLoading(false);
+    }
+  }
+
   async function openStockDrawer(product: BillingCatalogItem) {
     if (stockFor === product.id) {
       setStockFor("");
+      movementsForRef.current = "";
       return;
     }
     setStockFor(product.id);
@@ -260,12 +282,7 @@ export function ProductsPanel({
     setStockValue("");
     setStockNote("");
     setMovements([]);
-    setMovementsLoading(true);
-    try {
-      setMovements(await onLoadMovements(product.id));
-    } finally {
-      setMovementsLoading(false);
-    }
+    await loadMovementsFor(product.id);
   }
 
   async function submitStock(product: BillingCatalogItem) {
@@ -276,12 +293,7 @@ export function ProductsPanel({
       if (await onAdjustStock(product, { mode: stockMode, value, note: stockNote.trim() })) {
         setStockValue("");
         setStockNote("");
-        setMovementsLoading(true);
-        try {
-          setMovements(await onLoadMovements(product.id));
-        } finally {
-          setMovementsLoading(false);
-        }
+        await loadMovementsFor(product.id);
       }
     } finally {
       setStockBusy(false);
@@ -440,6 +452,11 @@ export function ProductsPanel({
         {showDetail && !form.trackStock && (
           <p className="field-help">
             Not counted - use this for something like a fitting fee that you sell but never have on a shelf.
+          </p>
+        )}
+        {editing && !form.active && (
+          <p className="field-help">
+            This one is retired. Saving leaves it retired - use Restore in the list to bring it back.
           </p>
         )}
         {editing && <p className="field-help">Stock is changed from the list below, not here, so a save can't undo a sale.</p>}

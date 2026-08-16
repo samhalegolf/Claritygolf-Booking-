@@ -48,6 +48,13 @@ export type SellScreenProps = {
   currency: string;
   taxName: string;
   defaultTaxRate: number;
+  // The catalog comes from App, which already fetches and owns it. The till
+  // used to fetch its own copy on mount and then never refresh it, so a lesson
+  // price changed elsewhere left the counter selling the old one until the tab
+  // was reloaded. One copy, one refresh.
+  catalog: BillingCatalogItem[];
+  catalogState: "idle" | "loading" | "loaded" | "error";
+  onReloadCatalog: () => void;
   formatMoney: (amount: number, currency?: string) => string;
   clients: Array<{ id: string; name: string; email?: string }>;
   // Creates a client record from the till and returns it attached. Null means
@@ -107,14 +114,15 @@ export function SellScreen({
   currency,
   taxName,
   defaultTaxRate,
+  catalog,
+  catalogState,
+  onReloadCatalog,
   formatMoney,
   clients,
   onCreateClient,
   onSaleCompleted,
   onToast,
 }: SellScreenProps) {
-  const [catalog, setCatalog] = useState<BillingCatalogItem[]>([]);
-  const [catalogState, setCatalogState] = useState<"loading" | "loaded" | "error">("loading");
   const [methods, setMethods] = useState<PosPaymentMethod[]>([]);
 
   const [lines, setLines] = useState<SellLine[]>([]);
@@ -165,25 +173,29 @@ export function SellScreen({
   const tenderedValue = Number(tendered);
   const change = changeDue(tenderedValue, dueNow);
 
+  // Opening the till is a good moment to make sure the prices on the tiles are
+  // the ones in the database - somebody may have changed a lesson price while
+  // this tab sat on the counter.
+  useEffect(() => {
+    onReloadCatalog();
+    // Deliberately on mount only; onReloadCatalog is a plain function from App
+    // and gets a new identity on every App render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [productsResponse, methodsResponse] = await Promise.all([
-          fetch("/api/billing/products", { credentials: "same-origin", cache: "no-store" }),
-          fetch("/api/billing/pos/payment-methods", { credentials: "same-origin", cache: "no-store" }),
-        ]);
-        if (cancelled) return;
-        if (!productsResponse.ok) throw new Error("Could not load the catalog.");
-        const productData = (await productsResponse.json()) as { products?: BillingCatalogItem[] };
-        setCatalog(Array.isArray(productData.products) ? productData.products : []);
-        setCatalogState("loaded");
-        if (methodsResponse.ok) {
-          const methodData = (await methodsResponse.json()) as { paymentMethods?: PosPaymentMethod[] };
-          setMethods((methodData.paymentMethods || []).filter((method) => method.active));
-        }
+        const response = await fetch("/api/billing/pos/payment-methods", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (cancelled || !response.ok) return;
+        const methodData = (await response.json()) as { paymentMethods?: PosPaymentMethod[] };
+        setMethods((methodData.paymentMethods || []).filter((method) => method.active));
       } catch {
-        if (!cancelled) setCatalogState("error");
+        // No methods means the Pay button explains itself; nothing to do here.
       }
     })();
     return () => {
@@ -551,8 +563,15 @@ export function SellScreen({
           ))}
         </div>
 
-        {catalogState === "loading" && <p className="field-help">Loading the catalog...</p>}
-        {catalogState === "error" && <p className="field-help">Could not load the catalog. Refresh the page.</p>}
+        {(catalogState === "loading" || catalogState === "idle") && <p className="field-help">Loading the catalog...</p>}
+        {catalogState === "error" && (
+          <p className="field-help">
+            Could not load the catalog.{" "}
+            <button className="link-button" onClick={onReloadCatalog} type="button">
+              Retry
+            </button>
+          </p>
+        )}
         {catalogState === "loaded" && !tiles.length && (
           <p className="field-help">Nothing here. Try another category, or add items under Billing &gt; Products.</p>
         )}
