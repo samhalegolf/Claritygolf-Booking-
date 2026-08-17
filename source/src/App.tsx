@@ -202,6 +202,8 @@ import {
 import type { CalendarAxisMode } from "./calendar-axis";
 import { clamp } from "./lib/number";
 import { dateInputValue } from "./lib/date";
+import { OPTIX_RECONCILE_EVENT } from "./optix-booking-feedback";
+import type { OptixReconcileCompleteDetail } from "./optix-booking-feedback";
 import type {
   ChangeEvent,
   CSSProperties,
@@ -8091,6 +8093,29 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       setCalendarNowMinutes(now.getHours() * 60 + now.getMinutes());
     }, 60_000);
     return () => window.clearInterval(tick);
+  }, []);
+
+  // The Book bay button lives in the non-React panel injected by
+  // optix-booking-feedback.ts, so pressing it used to leave the calendar card
+  // with a stale bayBooked and no orange outline until the next hydration.
+  // bayBooked is derived server-side from optix_booking_sync and is never read
+  // back off a PUT, and it is not part of calendarItemsFingerprint — so
+  // patching it here cannot trigger an autosave or be written back wrongly.
+  useEffect(() => {
+    const onBayBooked = (event: Event) => {
+      const detail = (event as CustomEvent<OptixReconcileCompleteDetail>).detail;
+      const calendarItemId = detail?.calendarItemId;
+      if (!calendarItemId) return;
+      setItems((current) =>
+        current.map((item) =>
+          item.id === calendarItemId
+            ? { ...item, bayBooked: true, bayResourceId: detail.bayResourceId || item.bayResourceId }
+            : item,
+        ),
+      );
+    };
+    window.addEventListener(OPTIX_RECONCILE_EVENT, onBayBooked);
+    return () => window.removeEventListener(OPTIX_RECONCILE_EVENT, onBayBooked);
   }, []);
 
   // Whatever moved the week — a swipe that landed on a neighbour, the toolbar

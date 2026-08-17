@@ -18,7 +18,19 @@ type OptixStatusRecord = {
   updatedAt: string | null;
 };
 
-const OPTIX_RECONCILE_EVENT = "clarity:optix-reconcile-complete";
+/**
+ * Fired on `window` the moment Optix confirms a bay for a lesson, with
+ * `detail: { calendarItemId, bayResourceId }`. This panel is injected into the
+ * DOM outside React, so it is the only thing that knows a booking just
+ * succeeded — the React calendar listens for this and paints the orange
+ * "bay held" outline straight away instead of waiting for the next hydration.
+ */
+export const OPTIX_RECONCILE_EVENT = "clarity:optix-reconcile-complete";
+
+export type OptixReconcileCompleteDetail = {
+  calendarItemId: string;
+  bayResourceId: string;
+};
 
 const ERROR_LABELS: Record<string, string> = {
   timeout: "Optix did not respond",
@@ -248,9 +260,21 @@ async function bookResource(button: HTMLButtonElement) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ forceRetry: true, calendarItemId, source: "manual-book-resource" }),
     });
+    const payload = await response.json().catch(() => ({}) as any);
     if (!response.ok && response.status !== 207) {
-      const payload = await response.json().catch(() => ({}));
       throw new Error(payload?.message || "Optix resource booking failed.");
+    }
+    // 207 means the attempt ran but Optix said no, so only a true `ok` means a
+    // bay is actually held. The reconcile call is synchronous — by the time it
+    // returns, optix_booking_sync is already 'synced', which is exactly what
+    // the calendar's bay_booked column reads. So the outline can be painted now
+    // without a refetch.
+    if (payload?.ok === true) {
+      const detail: OptixReconcileCompleteDetail = {
+        calendarItemId,
+        bayResourceId: String(payload?.result?.resourceId || ""),
+      };
+      window.dispatchEvent(new CustomEvent(OPTIX_RECONCILE_EVENT, { detail }));
     }
   } catch (error) {
     button.disabled = false;
@@ -284,6 +308,5 @@ export function installOptixBookingFeedback() {
     const book = target.closest<HTMLButtonElement>("[data-optix-book]");
     if (book) void bookResource(book);
   });
-  window.addEventListener(OPTIX_RECONCILE_EVENT, () => void refreshPanels());
   void refreshPanels();
 }
