@@ -12,8 +12,14 @@ import { flushAdminNotificationQueue } from "./booking-core.mts";
 // by the staleness checks when it finally flushed. Live notification_history
 // showed 2 reschedule emails ever sent against ~100 bookings/cancellations.
 //
-// Runs every minute on Netlify's scheduler; not a public endpoint, no auth
+// Runs every 5 minutes on Netlify's scheduler; not a public endpoint, no auth
 // surface. Exits cheaply (one settings read) when the queue is empty.
+//
+// Was "* * * * *", but production showed the every-minute schedule never
+// invoking at all (no per-minute DB activity, while lesson-reminders' */5
+// pattern ran reliably) — a Josh Bowe booking confirmation queued at 7:11pm
+// sat unsent until a browser flush at 8:27am. */5 matches the schedule that
+// demonstrably fires; worst case an email waits 5 minutes instead of 1.
 
 export default async function handler() {
   try {
@@ -32,5 +38,5 @@ export default async function handler() {
 }
 
 export const config: Config = {
-  schedule: "* * * * *",
+  schedule: "*/5 * * * *",
 };
