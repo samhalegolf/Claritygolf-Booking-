@@ -8666,6 +8666,14 @@ button {
   font-style: normal;
 }
 
+/* "Paid at POS" on a pull row. Information only - the row is still clickable,
+   because a counter payment does not stop the lesson being invoiced. */
+.completed-booking-list .pull-paid-flag {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 12px;
+}
+
 .recent-invoices-card {
   overflow-x: auto;
 }
@@ -9478,12 +9486,31 @@ button {
 }
 
 /* Checkout is the one action with money attached, so it keeps full weight.
-   Targeted by its own class, not :first-child - the button is hidden once a
-   lesson is paid, which would otherwise promote Book Next in its place. */
+   Targeted by its own class, not :first-child - it is swapped for the Paid
+   marker once a lesson is settled, which would otherwise promote Book Next
+   into a :first-child rule. */
 .booking-panel-actions .booking-checkout-button {
   height: 40px;
   padding: 0 16px;
   font-size: 14px;
+}
+
+/* What Checkout becomes once the lesson has been paid at the counter. Same
+   footprint as the button it replaces so the action row does not reflow, but
+   deliberately not a button: there is nothing left to click, and a disabled
+   button reads as "temporarily unavailable" rather than "done". */
+.booking-panel-actions .booking-paid-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  background: var(--success-soft, #eaf8ed);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: default;
 }
 
 /* Cancel Lesson / Remove Block / Remove from Clarity. */

@@ -988,17 +988,26 @@ type BillingSection =
   | "pos"
   | "settings";
 
-// Which completed bookings the "ready to pull" lists show. "unpaid" hides
-// anything already invoiced or already paid at the counter (the normal
-// workflow); "paid" is for looking back at what has been settled; "all" is the
-// original behaviour, everything with already-settled rows disabled.
+// Which completed bookings the "ready to pull" lists show.
+//
+// "all" is the default because a counter payment no longer settles a lesson for
+// invoicing purposes - see addCompletedBookingLine. Taking payment at the till
+// and invoicing the range for the same lesson are two different transactions,
+// so a paid lesson has to stay in the working list.
+//
+// "unpaid" is for the other way of working: treat a counter payment as the end
+// of it and only ever invoice what has not been paid. "paid" is for looking
+// back at what has been settled.
 type BookingPullFilter = "unpaid" | "all" | "paid";
-const BOOKING_PULL_FILTER_STORAGE_KEY = "clarity.billing.pullFilter";
+// v2: the stored value is deliberately re-keyed. Everyone currently has
+// "unpaid" saved from when that was the default, and reusing the old key would
+// leave them with paid lessons hidden from a list that now expects to show them.
+const BOOKING_PULL_FILTER_STORAGE_KEY = "clarity.billing.pullFilter.v2";
 
 function readStoredPullFilter(): BookingPullFilter {
-  if (typeof window === "undefined") return "unpaid";
+  if (typeof window === "undefined") return "all";
   const stored = window.localStorage.getItem(BOOKING_PULL_FILTER_STORAGE_KEY);
-  return stored === "all" || stored === "paid" ? stored : "unpaid";
+  return stored === "unpaid" || stored === "paid" ? stored : "all";
 }
 // A money-out bank transaction (Akahu) awaiting review as an expense.
 type BankExpenseCandidate = {
@@ -6118,15 +6127,27 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start),
     [coachAccount, coachProfiles, isAdminUser, items, services, serviceScopeCoachId],
   );
-  // A lesson is "settled" once it has been either pulled onto an invoice or paid
-  // at the counter. The two are independent - a lesson can end up on both - so
-  // the pull lists check for either rather than assuming an invoice is the only
-  // way money arrives.
+  // Neither invoiced nor paid at the counter. This backs the "Unpaid only"
+  // filter and the dashboard count only - it is NOT an eligibility rule. A paid
+  // lesson can still be invoiced; the one thing that blocks a pull is already
+  // being on an invoice.
   const unsettledCompletedAppointments = useMemo(
     () => completedAppointments.filter((item) => !invoicedBookingIds[item.id] && !posPaidBookings[item.id]),
     [completedAppointments, invoicedBookingIds, posPaidBookings],
   );
-  const completedUninvoicedCount = unsettledCompletedAppointments.length;
+  // Which lessons to look up counter payments for. Deliberately wider than
+  // completedAppointments: a lesson is usually paid on the day, before anyone
+  // marks it completed, and until the payment is known the card still offers
+  // Checkout on a lesson that has already been charged. Cancelled lessons are
+  // excluded - nothing is owed on them.
+  const payableAppointmentIds = useMemo(
+    () =>
+      items
+        .filter((item) => item.kind === "appointment" && item.status !== "cancelled")
+        .filter(itemInCoachScope)
+        .map((item) => item.id),
+    [coachAccount, coachProfiles, isAdminUser, items, services, serviceScopeCoachId],
+  );
   // "Ready to Pull" with an adjustable date range, per the billing build plan.
   // itemDateValue converts a calendar item's week/day slot back into a real
   // calendar date the same way the rest of the app already does (dateForSlot),
@@ -14478,13 +14499,15 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEmbedMode, authStatus, billingWorkspaceEnabled, completedAppointments.map((item) => item.id).join(",")]);
 
-  // Same idea for counter sales: which completed bookings were paid at the
-  // till. Separate call so a POS failure can never break the invoice pull list.
+  // Same idea for counter sales: which bookings were paid at the till. Separate
+  // call so a POS failure can never break the invoice pull list. Runs over
+  // payableAppointmentIds rather than completed ones so the Paid marker appears
+  // on a lesson paid before it was marked completed.
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
-    void fetchPosBookingPayments(completedAppointments.map((item) => item.id));
+    void fetchPosBookingPayments(payableAppointmentIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, completedAppointments.map((item) => item.id).join(",")]);
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, payableAppointmentIds.join(",")]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -14783,17 +14806,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       setToast({ message: "This booking has already been invoiced." });
       return;
     }
-    // A counter sale settles the lesson exactly as an invoice does. This is the
-    // single guard that stops a paid lesson being billed a second time - the
-    // pull lists also disable those rows, but the filter can be set to show
-    // them, so the check has to live here too.
-    const posPayment = posPaidBookings[item.id];
-    if (posPayment) {
-      setToast({
-        message: `Already paid at the counter (${posPayment.receiptNumber}, ${formatMoney(posPayment.amount, posPayment.currency)}).`,
-      });
-      return;
-    }
+    // A counter payment deliberately does NOT block this. Paying at the till and
+    // invoicing for the same lesson are two different transactions - the
+    // customer settles their lesson at the counter, and the range is still
+    // invoiced for having hosted it. Anyone who instead treats a counter payment
+    // as the end of it sets the pull filter to "Unpaid only"; that is what the
+    // filter is for. Being already on an invoice is the only real double-bill,
+    // and it is caught above (and by a unique index server-side).
     const service = itemService(item, services);
     markInvoiceDraftDirty();
     // Pulling a lesson only adds the line item. The billing customer is never
@@ -19435,20 +19454,36 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       )}
 
       <div className="panel-actions booking-panel-actions">
-        {/* Take payment for this lesson at the counter. Hidden once a sale has
-            already settled it, so the same lesson can't be charged twice by
-            accident, and hidden for externally-owned bookings (Optix) - their
-            money is collected over there and they carry a placeholder lesson
-            type with no meaningful price. */}
-        {selected.kind === "appointment" && billingWorkspaceEnabled && !selectedPosPayment && !isExternallyOwned(selected) && (
-          <button
-            className="primary-button booking-checkout-button"
-            onClick={() => openPosCheckoutForLesson(selected)}
-            type="button"
-          >
-            <CreditCard size={16} />
-            Checkout
-          </button>
+        {/* Take payment for this lesson at the counter.
+
+            Once a sale has settled it the button becomes a plain Paid marker in
+            the same position rather than disappearing: the coach needs to see at
+            a glance that money was taken, and an inert marker cannot take it
+            twice. What was actually taken, and by which method, is on the price
+            row above.
+
+            Hidden entirely for externally-owned bookings (Optix) - their money
+            is collected over there and they carry a placeholder lesson type with
+            no meaningful price. */}
+        {selected.kind === "appointment" && billingWorkspaceEnabled && !isExternallyOwned(selected) && (
+          selectedPosPayment ? (
+            <span
+              className="booking-paid-marker"
+              title={`${selectedPosPayment.paymentMethodName} - ${selectedPosPayment.receiptNumber}`}
+            >
+              <Check size={16} />
+              Paid {formatMoney(selectedPosPayment.amount, selectedPosPayment.currency)}
+            </span>
+          ) : (
+            <button
+              className="primary-button booking-checkout-button"
+              onClick={() => openPosCheckoutForLesson(selected)}
+              type="button"
+            >
+              <CreditCard size={16} />
+              Checkout
+            </button>
+          )
         )}
         {selected.kind === "appointment" && (
           <button className="primary-button" onClick={bookNextFromSelected}>
@@ -19623,8 +19658,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         value={bookingPullFilter}
         onChange={(event) => setBookingPullFilter(event.target.value as BookingPullFilter)}
       >
-        <option value="unpaid">Unpaid only</option>
         <option value="all">All completed</option>
+        <option value="unpaid">Unpaid only</option>
         <option value="paid">Already paid</option>
       </select>
     </label>
@@ -22103,16 +22138,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                         pullableCompletedAppointments.slice(0, 6).map((item) => {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
-                          // The filter can be set to show already-settled
-                          // lessons, so this list has to mark them the same way
-                          // the New Invoice panel does.
+                          // Already on an invoice is the only thing that
+                          // disables a row. A counter payment is shown but stays
+                          // pullable - see addCompletedBookingLine.
                           const posPayment = posPaidBookings[item.id];
-                          const settled = Boolean(invoicedBookingIds[item.id] || posPayment);
+                          const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
                           return (
                             <button
                               key={item.id}
-                              className={settled ? "already-invoiced" : undefined}
-                              disabled={settled}
+                              className={alreadyInvoiced ? "already-invoiced" : undefined}
+                              disabled={alreadyInvoiced}
                               onClick={() => addCompletedBookingLine(item)}
                               type="button"
                             >
@@ -22122,12 +22157,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                   {service?.name ?? "Lesson"} - {days[item.day].label}, {formatTime(item.start)}
                                 </em>
                               </span>
-                              {posPayment ? (
-                                <em>Paid at POS</em>
-                              ) : settled ? (
+                              {alreadyInvoiced ? (
                                 <em>Already invoiced</em>
                               ) : (
-                                <Plus size={16} />
+                                <>
+                                  {posPayment && <em className="pull-paid-flag">Paid at POS</em>}
+                                  <Plus size={16} />
+                                </>
                               )}
                             </button>
                           );
@@ -23159,17 +23195,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           const service = itemService(item, services);
                           const days = buildWeekDays(itemWeek(item));
                           const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
-                          // A counter sale settles the lesson just as an invoice
-                          // does - pulling it onto an invoice as well would bill
-                          // the same lesson twice.
+                          // A counter payment is flagged but does not disable the
+                          // row - the lesson can be paid at the till and still be
+                          // invoiced. See addCompletedBookingLine.
                           const posPayment = posPaidBookings[item.id];
-                          const settled = alreadyInvoiced || Boolean(posPayment);
                           const matchesPayer = invoicePayerBookingIds.has(item.id);
                           return (
                             <button
                               key={item.id}
-                              className={`${settled ? "already-invoiced" : ""}${matchesPayer ? " for-billing-client" : ""}`.trim()}
-                              disabled={settled}
+                              className={`${alreadyInvoiced ? "already-invoiced" : ""}${matchesPayer ? " for-billing-client" : ""}`.trim()}
+                              disabled={alreadyInvoiced}
                               onClick={() => addCompletedBookingLine(item)}
                               type="button"
                             >
@@ -23182,12 +23217,17 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                   {service?.name ?? "Lesson"} - {days[item.day].label}, {formatRange(item.start, item.duration)}
                                 </em>
                               </span>
-                              {posPayment ? (
-                                <em>Paid at POS - {formatMoney(posPayment.amount, posPayment.currency)}</em>
-                              ) : alreadyInvoiced ? (
+                              {alreadyInvoiced ? (
                                 <em>Already invoiced</em>
                               ) : (
-                                <Plus size={16} />
+                                <>
+                                  {posPayment && (
+                                    <em className="pull-paid-flag">
+                                      Paid at POS - {formatMoney(posPayment.amount, posPayment.currency)}
+                                    </em>
+                                  )}
+                                  <Plus size={16} />
+                                </>
                               )}
                             </button>
                           );
