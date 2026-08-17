@@ -2790,19 +2790,24 @@ async function listPosTransactions(accountId: string, url: URL) {
   return { transactions: merged };
 }
 
-// Optix product sales, merged into the POS list as read-only records.
+// Optix lesson-pass sales, merged into the POS list as read-only records.
 //
 // They live in optix_pass_purchases (written by the Optix webhook), not in
 // billing_pos_transactions: the money was taken inside Optix, not at the till,
 // so they consume no POS receipt number and get no Mark paid / Refund actions
 // (source "optix" is what the frontend gates on). The receipt column shows the
-// Optix sale number instead (OPTIX-00652). isLessonPass marks the sales whose
-// product is a lesson pass/package — a lesson paid for through Optix.
+// Optix sale number instead (OPTIX-00652).
+//
+// Only sales classified as a lesson pass (is_pass) are merged. Every Optix
+// new_sale still lands raw in optix_pass_purchases — that table is the full
+// feed — but the POS list is the lessons picked out of it, so a bay-time
+// top-up like "1 x Extra Hour" stays in the feed and off the POS list (and
+// out of the POS summary's Optix tile, which is computed from this list).
 //
 // A sale is paid at purchase: Optix takes the money when new_sale fires, and
 // the payload carries no invoice_id, so there is no later settlement signal.
 async function listOptixPosRecords(accountId: string, range: { from: string; to: string; limit: number }) {
-  const filters = [`account_id=eq.${encodeFilter(accountId)}`, "event_type=eq.new_sale"];
+  const filters = [`account_id=eq.${encodeFilter(accountId)}`, "event_type=eq.new_sale", "is_pass=eq.true"];
   if (range.from) filters.push(`purchased_at=gte.${encodeFilter(`${range.from}T00:00:00.000Z`)}`);
   if (range.to) filters.push(`purchased_at=lte.${encodeFilter(`${range.to}T23:59:59.999Z`)}`);
   // The table is created by the Optix migration; absent (or any read failure)
