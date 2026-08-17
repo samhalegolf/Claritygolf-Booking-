@@ -47,7 +47,7 @@ async function getState() {
     // without pulling their payloads.
     optixOriginRequest(`optix_webhook_events?processing_status=in.(${UNPROCESSED_STATUSES})&select=event_key,received_at&order=received_at.asc&limit=2000`).catch(() => []),
     // Recorded pass purchases, newest first. Absent until the migration runs.
-    optixOriginRequest("optix_pass_purchases?select=id,event_type,external_purchase_id,member_email,member_name,person_id,item_name,amount_cents,currency,purchased_at,is_pass,classification,payload_json&order=purchased_at.desc&limit=100").catch(() => []),
+    optixOriginRequest("optix_pass_purchases?select=id,event_type,external_purchase_id,external_invoice_id,member_email,member_name,person_id,item_name,quantity,amount_cents,currency,purchased_at,paid_at,is_pass,classification,payload_json&order=purchased_at.desc&limit=100").catch(() => []),
     optixOriginRequest("external_booking_links?provider=eq.optix&purpose=eq.lesson&select=external_booking_id,clarity_item_id,processing_status,email_status,confirmation_sent_at,workspace_id&order=updated_at.desc&limit=100"),
     optixOriginRequest("optix_booking_sync?select=calendar_item_id,optix_booking_id,resource_id,sync_status,last_synced_at&order=updated_at.desc&limit=100").catch(() => []),
     catalogue(),

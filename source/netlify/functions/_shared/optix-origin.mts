@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import { matchPersonByEmail, optixOriginRequest, rowsOf } from "./optix-db.mts";
-import { isOptixPurchaseEvent, recordOptixPassPurchase } from "./optix-passes.mts";
+import { isOptixInvoicePaidEvent, isOptixPurchaseEvent, markOptixInvoicePaid, recordOptixPassPurchase } from "./optix-passes.mts";
 import { iso, pick, text } from "./optix-payload.mts";
 import { canonicalPhoneKey } from "./phone.mts";
 
@@ -373,6 +373,31 @@ export async function processStoredOptixEvent(eventKey: string, payload: unknown
         processing_status: "failed",
         failure_code: String(error?.code || "purchase_record_failed"),
         error_message: error instanceof Error ? error.message.slice(0, 1000) : "Purchase could not be recorded.",
+      }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  // invoice_paid describes nothing that was bought — it only says an invoice
+  // settled. It stamps the sale on that invoice rather than recording a
+  // purchase of its own. Matching nothing is normal, not a failure: the
+  // invoice may predate the events we record, or its new_sale may not have
+  // arrived yet, in which case the sale picks the paid time up on arrival.
+  if (isOptixInvoicePaidEvent(rawEventType)) {
+    try {
+      const settled = await markOptixInvoicePaid(payload);
+      await updateEvent(eventKey, {
+        processing_status: "processed",
+        failure_code: settled.matched ? null : "no_matching_sale",
+        error_message: null,
+        processed_at: new Date().toISOString(),
+      });
+      return { status: "processed", purpose: "invoice_paid", ...settled };
+    } catch (error: any) {
+      await updateEvent(eventKey, {
+        processing_status: "failed",
+        failure_code: String(error?.code || "invoice_paid_failed"),
+        error_message: error instanceof Error ? error.message.slice(0, 1000) : "Invoice payment could not be applied.",
       }).catch(() => undefined);
       throw error;
     }

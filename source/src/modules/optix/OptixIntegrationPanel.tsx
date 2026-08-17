@@ -4,10 +4,11 @@ type Tab = "setup" | "resources" | "passes" | "feed" | "diagnostics";
 type ResourceProfile = { id: string; name: string; handedness: "standard" | "left"; resourceIds: string[]; serviceIds: string[] };
 type PendingSummary = { count: number; oldest: string | null; newest: string | null };
 type PassPurchase = {
-  id: string; event_type: string; external_purchase_id: string | null;
+  id: string; event_type: string; external_purchase_id: string | null; external_invoice_id: string | null;
   member_email: string | null; member_name: string | null; person_id: string | null;
-  item_name: string | null; amount_cents: number | null; currency: string | null;
-  purchased_at: string; is_pass: boolean; classification: "pass" | "not_pass" | "unknown"; rawPayload: unknown;
+  item_name: string | null; quantity: number | string | null; amount_cents: number | null; currency: string | null;
+  purchased_at: string; paid_at: string | null;
+  is_pass: boolean; classification: "pass" | "not_pass" | "unknown"; rawPayload: unknown;
 };
 type IntegrationState = { mappings: any[]; catalog: { services: any[]; locations: any[]; coaches: any[] }; events: any[]; pending?: PendingSummary; purchases?: PassPurchase[] };
 
@@ -25,7 +26,27 @@ const newProfile = (number = 1): ResourceProfile => ({ id: `resource-${Date.now(
 function formatAmount(row: { amount_cents: number | null; currency: string | null }) {
   if (row.amount_cents == null) return "Amount unknown";
   const amount = (row.amount_cents / 100).toFixed(2);
+  // new_sale sends no currency, so a bare amount is normal rather than missing.
   return row.currency ? `${row.currency} ${amount}` : amount;
+}
+
+/** "2 x" for a multi-quantity sale; nothing at all for a single one. */
+function formatQuantity(quantity: number | string | null) {
+  const value = Number(quantity);
+  return Number.isFinite(value) && value > 1 ? `${value % 1 === 0 ? value : value.toFixed(2)} x ` : "";
+}
+
+/**
+ * Why a purchase has no Clarity client against it.
+ *
+ * A product sale carries no email — only the buyer's display name — so it can
+ * never auto-link, and saying "Not matched" would read as a fault. Only a plan
+ * subscription has an email to match on.
+ */
+function clientLabel(row: PassPurchase) {
+  if (row.person_id) return "Linked";
+  if (row.member_email) return "Not matched";
+  return "No email in payload";
 }
 
 function safeJson(value: unknown) {
@@ -200,11 +221,11 @@ export default function OptixIntegrationPanel() {
         {tab === "passes" ? <>
           {integrationError ? <div className="optix-native-error"><strong>Pass purchases are unavailable</strong>{integrationError}</div> : null}
           <div className="optix-feed-toolbar"><div><h3>Pass purchases</h3><p>Recorded from Optix payment webhooks, newest first.</p></div><button onClick={() => void loadIntegration()} type="button">Refresh</button></div>
-          {purchases.length ? null : <div className="optix-native-note"><strong>Nothing recorded yet</strong><span>Subscribe to <code>invoice_paid</code>, <code>new_sale</code> and <code>new_plan_subscription</code> in your Optix app, then buy a Pass. Whichever event fires will land here with its raw payload.</span></div>}
-          {passes.length ? passes.map((row) => <details className="optix-native-event" key={row.id}><summary><strong>{row.item_name || "Pass"}</strong><span>{row.member_name || row.member_email || "No customer"}</span><time>{new Date(row.purchased_at).toLocaleString()}</time><em>{formatAmount(row)}</em></summary><div className="event-facts"><span>Event <b>{row.event_type}</b></span><span>Purchase ID <b>{row.external_purchase_id || "—"}</b></span><span>Email <b>{row.member_email || "—"}</b></span><span>Client <b>{row.person_id ? "Linked" : "Not matched"}</b></span></div><pre>{safeJson(row.rawPayload)}</pre></details>) : purchases.length ? <div className="optix-native-empty">No purchases have been classified as a Pass yet.</div> : null}
+          {purchases.length ? null : <div className="optix-native-note"><strong>Nothing recorded yet</strong><span>Subscribe to <code>new_sale</code> and <code>new_plan_subscription</code> in your Optix app — those are the only events that say what was bought. <code>invoice_paid</code> carries no purchase detail; it only marks a sale as paid.</span></div>}
+          {passes.length ? passes.map((row) => <details className="optix-native-event" key={row.id}><summary><strong>{formatQuantity(row.quantity)}{row.item_name || "Pass"}</strong><span>{row.member_name || row.member_email || "No customer"}</span><time>{new Date(row.purchased_at).toLocaleString()}</time><em>{formatAmount(row)}</em></summary><div className="event-facts"><span>Event <b>{row.event_type}</b></span><span>Purchase ID <b>{row.external_purchase_id || "—"}</b></span><span>Paid <b>{row.paid_at ? new Date(row.paid_at).toLocaleString() : "Not confirmed"}</b></span><span>Invoice <b>{row.external_invoice_id || "—"}</b></span><span>Email <b>{row.member_email || "—"}</b></span><span>Client <b>{clientLabel(row)}</b></span></div><pre>{safeJson(row.rawPayload)}</pre></details>) : purchases.length ? <div className="optix-native-empty">No purchases have been classified as a Pass yet.</div> : null}
           {unclassified.length ? <>
-            <div className="optix-feed-toolbar"><div><h3>Unclassified purchases</h3><p>Payment events that matched neither a Pass nor a recurring plan. If a Pass is in here, its wording is the fix.</p></div><button onClick={() => setShowUnclassified((current) => !current)} type="button">{showUnclassified ? "Hide" : `Show ${unclassified.length}`}</button></div>
-            {showUnclassified ? unclassified.map((row) => <details className="optix-native-event" key={row.id}><summary><strong>{row.item_name || "Unnamed purchase"}</strong><span>{row.member_name || row.member_email || "No customer"}</span><time>{new Date(row.purchased_at).toLocaleString()}</time><em>{row.event_type}</em></summary><pre>{safeJson(row.rawPayload)}</pre></details>) : null}
+            <div className="optix-feed-toolbar"><div><h3>Unclassified purchases</h3><p>Product sales whose name does not say "Pass". If a Pass is in here, renaming the product in Optix is the fix.</p></div><button onClick={() => setShowUnclassified((current) => !current)} type="button">{showUnclassified ? "Hide" : `Show ${unclassified.length}`}</button></div>
+            {showUnclassified ? unclassified.map((row) => <details className="optix-native-event" key={row.id}><summary><strong>{formatQuantity(row.quantity)}{row.item_name || "Unnamed purchase"}</strong><span>{row.member_name || row.member_email || "No customer"}</span><time>{new Date(row.purchased_at).toLocaleString()}</time><em>{formatAmount(row)}</em></summary><pre>{safeJson(row.rawPayload)}</pre></details>) : null}
           </> : null}
         </> : null}
 
