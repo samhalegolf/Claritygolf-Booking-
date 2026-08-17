@@ -18,12 +18,18 @@ import { amountInCents, iso, pick, text } from "./optix-payload.mts";
  * is most easily confused with and seeing both side by side is what makes a
  * misclassification obvious.
  *
- * invoice_paid is NOT here. Its payload is six keys — event, client_id,
- * invoice_id, organization_id, created_timestamp, request_signature — and
- * carries nothing about the purchase. It is handled separately, as the signal
- * that a sale settled: see markOptixInvoicePaid().
+ * The real new_sale payload (first seen 18 Aug 2026, Sam's test purchase of
+ * "30 Minute Golf Lesson Package") carries NO invoice_id, no email and no
+ * currency — despite Optix's docs listing invoice_id. What it does carry:
+ * product, quantity, unit_amount, tax, total, product_sale_id, number (the
+ * Optix sale number, "00652"), account (the buyer's Optix account id) and
+ * user_name. Money changes hands inside Optix at the moment this event fires,
+ * so a sale is recorded as paid at its purchase time.
  *
- * invoice_updated is ignored entirely: a modification, not a purchase.
+ * invoice_paid is NOT handled here or anywhere any more: its six keys carry no
+ * purchase detail, and with no invoice_id on the sale there is nothing to join
+ * it to. It now falls through with the other unsupported events and is stored
+ * as ignored.
  */
 export const OPTIX_PURCHASE_EVENT_TYPES = ["new_sale", "new_plan_subscription"] as const;
 
@@ -33,15 +39,11 @@ export function isOptixPurchaseEvent(eventType: string): eventType is OptixPurch
   return (OPTIX_PURCHASE_EVENT_TYPES as readonly string[]).includes(text(eventType));
 }
 
-export function isOptixInvoicePaidEvent(eventType: string) {
-  return text(eventType) === "invoice_paid";
-}
-
 export type OptixPurchase = {
   eventType: string;
   purchaseId: string;
-  /** The invoice this purchase sits on, which invoice_paid later settles. */
-  invoiceId: string;
+  /** The Optix sale number ("00652") — the receipt reference a buyer sees. */
+  saleNumber: string;
   memberEmail: string;
   memberName: string;
   itemName: string;
@@ -49,6 +51,7 @@ export type OptixPurchase = {
   descriptor: string;
   quantity: number | null;
   amountCents: number | null;
+  unitAmountCents: number | null;
   currency: string;
   purchasedAt: string;
 };
@@ -56,9 +59,10 @@ export type OptixPurchase = {
 /**
  * Reads a purchase event into a common shape.
  *
- * Field names are the documented ones for each event, not guesses. The two
- * payloads share almost nothing, so each name is listed once against the event
- * that sends it and the reader takes the first that resolves.
+ * Field names are the ones seen in real payloads (new_sale) or documented
+ * (new_plan_subscription, still unseen in the wild). The two payloads share
+ * almost nothing, so each name is listed once against the event that sends it
+ * and the reader takes the first that resolves.
  *
  * Worth knowing about new_sale: it carries no email and no currency. The buyer
  * is a display name only (user_name), so a sale cannot be auto-linked to a
@@ -82,7 +86,7 @@ export function normalizeOptixPurchaseEvent(payload: any): OptixPurchase {
   return {
     eventType: text(pick(payload, "event")),
     purchaseId: text(pick(payload, "product_sale_id", "account_plan_id")),
-    invoiceId: text(pick(payload, "invoice_id")),
+    saleNumber: text(pick(payload, "number")),
     // Only new_plan_subscription identifies the buyer by email.
     memberEmail: text(pick(subscriber || {}, "email")).toLowerCase(),
     memberName: text(pick(payload, "user_name")) || text(pick(subscriber || {}, "user_fullname")),
@@ -92,6 +96,7 @@ export function normalizeOptixPurchaseEvent(payload: any): OptixPurchase {
     // new_sale totals include tax; a plan's price does not, but Optix sends no
     // tax on a plan either, so total is the best each event has.
     amountCents: amountInCents(pick(payload, "total", "price")),
+    unitAmountCents: amountInCents(pick(payload, "unit_amount")),
     currency: text(pick(payload, "currency")).toUpperCase(),
     purchasedAt: iso(pick(payload, "created_timestamp")),
   };
@@ -108,21 +113,26 @@ function quantityOf(value: unknown) {
 export type PassClassification = "pass" | "not_pass" | "unknown";
 
 /**
- * Is this purchase a Pass?
+ * Is this purchase a lesson Pass?
  *
  * A plan recurs by definition, and a Pass never does, so new_plan_subscription
  * is settled by its event type alone. That leaves product sales, where the only
- * signal is the wording of the product — so a sale whose name says nothing is
- * left "unknown" rather than discarded. Silently dropping the very purchase we
- * are trying to capture is the one failure that would look like nothing
- * arriving at all.
+ * signal is the wording of the product.
  *
- * If Passes turn out to be named without the word "pass", this is the one place
- * to widen.
+ * The real catalogue settled the words: Sam's passes are named like
+ * "30 Minute Golf Lesson Package" — "lesson", not "pass" — so both words
+ * classify. "1 x Extra Hour" (a bay-time top-up) matches neither and stays
+ * unknown, which is correct: it is a sale, just not a lesson. A sale whose
+ * name says nothing is left "unknown" rather than discarded — silently
+ * dropping the very purchase we are trying to capture is the one failure that
+ * would look like nothing arriving at all.
+ *
+ * If a lesson product is ever named without "lesson" or "pass", this is the
+ * one place to widen (or rename the product in Optix).
  */
 export function classifyPassPurchase(purchase: Pick<OptixPurchase, "eventType" | "descriptor">): PassClassification {
   if (purchase.eventType === "new_plan_subscription") return "not_pass";
-  if (/\bpass(es)?\b/i.test(purchase.descriptor)) return "pass";
+  if (/\b(pass(es)?|lesson(s)?)\b/i.test(purchase.descriptor)) return "pass";
   return "unknown";
 }
 
@@ -145,10 +155,10 @@ export async function optixPurchaseAccountId() {
  * The client this purchase belongs to, by email only — same rule as bookings.
  *
  * Only new_plan_subscription carries an email, so a product sale is always
- * left unlinked and shows its buyer name in the Passes tab instead. Matching a
- * sale on name was considered and rejected: two clients sharing a name would
- * silently attach a purchase to the wrong person, and there is no signal in the
- * payload that would let anyone notice.
+ * left unlinked and shows its buyer name instead. Matching a sale on name was
+ * considered and rejected: two clients sharing a name would silently attach a
+ * purchase to the wrong person, and there is no signal in the payload that
+ * would let anyone notice.
  */
 async function resolvePurchasePerson(purchase: OptixPurchase, accountId: string) {
   if (!purchase.memberEmail) return null;
@@ -159,34 +169,22 @@ async function resolvePurchasePerson(purchase: OptixPurchase, accountId: string)
 }
 
 /**
- * When this invoice was paid, if its invoice_paid already arrived.
- *
- * Optix does not guarantee the order of new_sale and invoice_paid, so the join
- * is made from both ends: this covers paid-arrived-first, and
- * markOptixInvoicePaid() covers sale-arrived-first.
- */
-async function paidAtForInvoice(invoiceId: string) {
-  if (!invoiceId) return null;
-  const rows = await optixOriginRequest(
-    `optix_webhook_events?event_type=eq.invoice_paid&payload_json->>invoice_id=eq.${encodeURIComponent(invoiceId)}&select=received_at&order=received_at.asc&limit=1`,
-  ).catch(() => []);
-  return text(rowsOf(rows)[0]?.["received_at" as keyof object]) || null;
-}
-
-/**
  * Stores a purchase event as a pass purchase record.
  *
  * Keyed on event_key so a redelivered webhook updates its row rather than
  * adding a second one. The raw payload is kept on the row as well as in
  * optix_webhook_events, so the Passes tab can show what actually arrived
  * without joining back to the event log.
+ *
+ * paid_at is the purchase time: Optix takes the money when the sale is made,
+ * and the payload offers no later settlement signal to wait for (no
+ * invoice_id, so invoice_paid can never be tied back to a sale).
  */
 export async function recordOptixPassPurchase(eventKey: string, payload: unknown, accountId?: string) {
   const account = accountId || await optixPurchaseAccountId();
   const purchase = normalizeOptixPurchaseEvent(payload);
   const classification = classifyPassPurchase(purchase);
   const personId = await resolvePurchasePerson(purchase, account);
-  const paidAt = await paidAtForInvoice(purchase.invoiceId);
   const now = new Date().toISOString();
   await optixOriginRequest("optix_pass_purchases?on_conflict=event_key", {
     method: "POST",
@@ -198,7 +196,7 @@ export async function recordOptixPassPurchase(eventKey: string, payload: unknown
       event_key: eventKey,
       event_type: purchase.eventType,
       external_purchase_id: purchase.purchaseId || null,
-      external_invoice_id: purchase.invoiceId || null,
+      sale_number: purchase.saleNumber || null,
       member_email: purchase.memberEmail || null,
       member_name: purchase.memberName || null,
       person_id: personId,
@@ -207,36 +205,12 @@ export async function recordOptixPassPurchase(eventKey: string, payload: unknown
       amount_cents: purchase.amountCents,
       currency: purchase.currency || null,
       purchased_at: purchase.purchasedAt || now,
-      paid_at: paidAt,
+      paid_at: purchase.purchasedAt || now,
       is_pass: classification === "pass",
       classification,
       payload_json: payload,
       updated_at: now,
     }]),
   });
-  return { classification, isPass: classification === "pass", personId, paidAt, purchase };
-}
-
-/**
- * invoice_paid: stamp the sale sitting on this invoice as settled.
- *
- * The payload has no purchase detail, so it creates nothing — it only confirms
- * that a sale we already know about was paid. An invoice_paid with no matching
- * sale is normal and not an error: it is either an invoice raised outside the
- * events we record, or the paid notice beating its own new_sale, which
- * paidAtForInvoice() then picks up from the event log.
- */
-export async function markOptixInvoicePaid(payload: unknown) {
-  const invoiceId = text(pick(payload, "invoice_id"));
-  const paidAt = iso(pick(payload, "created_timestamp")) || new Date().toISOString();
-  if (!invoiceId) return { matched: 0, invoiceId: "", paidAt };
-  const rows = await optixOriginRequest(
-    `optix_pass_purchases?external_invoice_id=eq.${encodeURIComponent(invoiceId)}&paid_at=is.null`,
-    {
-      method: "PATCH",
-      headers: { prefer: "return=representation" },
-      body: JSON.stringify({ paid_at: paidAt, updated_at: new Date().toISOString() }),
-    },
-  );
-  return { matched: rowsOf(rows).length, invoiceId, paidAt };
+  return { classification, isPass: classification === "pass", personId, purchase };
 }

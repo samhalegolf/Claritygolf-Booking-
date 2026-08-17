@@ -2781,7 +2781,69 @@ async function listPosTransactions(accountId: string, url: URL) {
   });
   const transactions = rows.map(posRowToApi);
   const itemsByTransaction = await posItemsForTransactions(accountId, transactions.map((entry) => entry.id));
-  return { transactions: transactions.map((entry) => ({ ...entry, items: itemsByTransaction[entry.id] || [] })) };
+  const counter = transactions.map((entry) => ({ ...entry, items: itemsByTransaction[entry.id] || [] }));
+  const optix = await listOptixPosRecords(accountId, { from, to, limit });
+  // Newest first across both sources, held to the same limit as before.
+  const merged = [...counter, ...optix]
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, limit);
+  return { transactions: merged };
+}
+
+// Optix product sales, merged into the POS list as read-only records.
+//
+// They live in optix_pass_purchases (written by the Optix webhook), not in
+// billing_pos_transactions: the money was taken inside Optix, not at the till,
+// so they consume no POS receipt number and get no Mark paid / Refund actions
+// (source "optix" is what the frontend gates on). The receipt column shows the
+// Optix sale number instead (OPTIX-00652). isLessonPass marks the sales whose
+// product is a lesson pass/package — a lesson paid for through Optix.
+//
+// A sale is paid at purchase: Optix takes the money when new_sale fires, and
+// the payload carries no invoice_id, so there is no later settlement signal.
+async function listOptixPosRecords(accountId: string, range: { from: string; to: string; limit: number }) {
+  const filters = [`account_id=eq.${encodeFilter(accountId)}`, "event_type=eq.new_sale"];
+  if (range.from) filters.push(`purchased_at=gte.${encodeFilter(`${range.from}T00:00:00.000Z`)}`);
+  if (range.to) filters.push(`purchased_at=lte.${encodeFilter(`${range.to}T23:59:59.999Z`)}`);
+  // The table is created by the Optix migration; absent (or any read failure)
+  // just means no Optix records to merge, never a broken POS list.
+  const rows = (await supabase("optix_pass_purchases", {
+    query:
+      `select=id,sale_number,external_purchase_id,member_name,person_id,item_name,quantity,amount_cents,currency,purchased_at,paid_at,is_pass` +
+      `&${filters.join("&")}&order=purchased_at.desc&limit=${range.limit}`,
+  }).catch(() => [])) as Array<Record<string, unknown>>;
+  if (!rows.length) return [];
+  const defaultCurrency = await resolveDefaultCurrency();
+  return rows.map((row) => {
+    const quantity = Number(row.quantity) || 1;
+    const name = String(row.item_name ?? "") || "Optix sale";
+    const amount = round2((Number(row.amount_cents) || 0) / 100);
+    return {
+      id: `optix-${String(row.id ?? "")}`,
+      receiptNumber: row.sale_number ? `OPTIX-${String(row.sale_number)}` : `OPTIX-${String(row.external_purchase_id ?? "")}`,
+      status: "paid",
+      paymentMethodId: "",
+      paymentMethodName: "Optix",
+      paymentMethodKind: "custom",
+      description: quantity > 1 ? `${name} x${quantity}` : name,
+      amount,
+      listedAmount: null as number | null,
+      currency: String(row.currency ?? "") || defaultCurrency,
+      customerId: String(row.person_id ?? ""),
+      customerName: String(row.member_name ?? ""),
+      customerEmail: "",
+      bookingId: "",
+      source: "optix",
+      note: "",
+      couponId: "",
+      couponAmount: 0,
+      paidAt: String(row.paid_at ?? row.purchased_at ?? ""),
+      createdAt: String(row.purchased_at ?? ""),
+      updatedAt: String(row.purchased_at ?? ""),
+      isLessonPass: row.is_pass === true,
+      items: [] as ReturnType<typeof posItemRowToApi>[],
+    };
+  });
 }
 
 async function getPosTransaction(accountId: string, id: string) {

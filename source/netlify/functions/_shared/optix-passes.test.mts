@@ -1,36 +1,56 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyPassPurchase, isOptixInvoicePaidEvent, isOptixPurchaseEvent, normalizeOptixPurchaseEvent } from "./optix-passes.mts";
+import { classifyPassPurchase, isOptixPurchaseEvent, normalizeOptixPurchaseEvent } from "./optix-passes.mts";
 import { amountInCents } from "./optix-payload.mts";
 
-// The documented Optix payloads, verbatim in shape: form-encoded, almost
-// everything a string. These are the real field names, not plausible ones.
+// A real new_sale, verbatim: Sam's test purchase of a lesson pass on
+// 18 Aug 2026. This replaced the fixture built from Optix's docs — the docs
+// promised invoice_id and invoice_number, and the real payload carries
+// neither. What it does carry: number (the Optix sale number), account (the
+// buyer's Optix account id), and inclusive_tax_rate. Still no email, no
+// currency.
 const newSale = {
-  product_sale_id: "102024",
-  product: "10 Lesson Pass",
-  account: "1701",
-  account_name: "The Cube Team",
-  number: "100778",
-  user_name: "Richard Johnson",
-  invoice_item_name: "Sale of 10 Lesson Pass (#102024)",
-  description: "Product sale",
-  quantity: "1.0000",
-  unit_amount: "450.0000",
-  tax_rate: "0.15",
-  tax: "67.50",
-  total: "517.50",
-  notes: null,
-  created_datetime: "2026-08-13 16:00",
-  invoice_id: "298448",
-  invoice_number: "71312",
-  client_id: "ce81e1fbf3d7ba561d5d",
-  created_timestamp: 1786593600,
-  organization_id: 3568,
+  tax: "0.00",
+  name: "Sam Hale",
   event: "new_sale",
-  request_signature: "1207e01d133aa4329c48ff0f",
+  notes: "",
+  total: "90.00",
+  number: "00652",
+  account: "396748",
+  product: "30 Minute Golf Lesson Package",
+  quantity: "1",
+  tax_rate: "0.0000",
+  client_id: "43d003fcf1eeb158ba6bd17e69cf8331faf11e30",
+  user_name: "Sam Hale",
+  description: "",
+  unit_amount: "90.0000",
+  account_name: "Sam Hale",
+  organization_id: "25282",
+  product_sale_id: "400324",
+  created_datetime: "2026-08-18 08:41",
+  created_timestamp: "1786999307",
+  invoice_item_name: "Sale of 30 Minute Golf Lesson Package on August 18, 2026 at 8:41am (#400324)",
+  request_signature: "35677519ff7b4035a6a078ac2dd94d176022a441",
+  inclusive_tax_rate: "15.0000",
+  invoice_item_quantity: "1.0000",
 };
 
+// Also real (17 Aug 2026): a bay-time top-up bought by a customer. The
+// negative case — a sale, but not a lesson.
+const extraHour = {
+  event: "new_sale",
+  product: "1 x Extra Hour",
+  total: "10.00",
+  quantity: "1",
+  number: "00651",
+  product_sale_id: "400145",
+  user_name: "Ben Healy",
+  created_timestamp: "1786982794",
+  invoice_item_name: "Sale of 1 x Extra Hour on August 18, 2026 at 4:06am (#400145)",
+};
+
+// Still the documented shape — no real plan subscription has arrived yet.
 const newPlanSubscription = {
   plan_template_id: "916",
   plan_template_name: "Gold Membership",
@@ -52,51 +72,40 @@ const newPlanSubscription = {
   request_signature: "db2fdf29744bd5d61dfed00",
 };
 
-// Every invoice_paid we have received has exactly these six keys. There is
-// nothing else in it — no amount, no product, no buyer.
-const invoicePaid = {
-  event: "invoice_paid",
-  client_id: "43d003fcf1eeb158ba6bd17e69cf8331faf11e30",
-  invoice_id: "298448",
-  organization_id: "25282",
-  created_timestamp: "1786921226",
-  request_signature: "6091ccc960fbbfd6680ad116378643c8271a0ffe",
-};
-
 test("only the events that describe a purchase are treated as purchases", () => {
   assert.equal(isOptixPurchaseEvent("new_sale"), true);
   assert.equal(isOptixPurchaseEvent("new_plan_subscription"), true);
-  // invoice_paid settles a sale, it does not describe one.
+  // invoice_paid settles an invoice somewhere in Optix; with no invoice_id on
+  // a sale it can never be tied to one, so it is not a purchase event and is
+  // left to fall through as unsupported.
   assert.equal(isOptixPurchaseEvent("invoice_paid"), false);
-  assert.equal(isOptixInvoicePaidEvent("invoice_paid"), true);
   // Bookings keep going down the booking path.
   assert.equal(isOptixPurchaseEvent("new_member_booking"), false);
   // A modification is neither.
   assert.equal(isOptixPurchaseEvent("invoice_updated"), false);
-  assert.equal(isOptixInvoicePaidEvent("invoice_updated"), false);
   assert.equal(isOptixPurchaseEvent(""), false);
-  assert.equal(isOptixInvoicePaidEvent(""), false);
 });
 
-test("a product sale is normalised from its real field names", () => {
+test("a real product sale is normalised from its real field names", () => {
   const purchase = normalizeOptixPurchaseEvent(newSale);
   assert.equal(purchase.eventType, "new_sale");
-  // product_sale_id, not the invoice it happens to sit on.
-  assert.equal(purchase.purchaseId, "102024");
-  assert.equal(purchase.invoiceId, "298448");
-  // The product itself, not invoice_item_name ("Sale of X (#102024)") and not
-  // description ("Product sale"), both of which say nothing useful.
-  assert.equal(purchase.itemName, "10 Lesson Pass");
-  assert.equal(purchase.memberName, "Richard Johnson");
+  // product_sale_id identifies the sale; number is the receipt the buyer sees.
+  assert.equal(purchase.purchaseId, "400324");
+  assert.equal(purchase.saleNumber, "00652");
+  // The product itself, not invoice_item_name ("Sale of X on … (#400324)").
+  assert.equal(purchase.itemName, "30 Minute Golf Lesson Package");
+  assert.equal(purchase.memberName, "Sam Hale");
   assert.equal(purchase.quantity, 1);
-  // total, so tax is included — 450.00 + 67.50.
-  assert.equal(purchase.amountCents, 51_750);
-  assert.equal(purchase.purchasedAt, "2026-08-13T04:00:00.000Z");
+  assert.equal(purchase.amountCents, 9_000);
+  assert.equal(purchase.unitAmountCents, 9_000);
+  // created_timestamp 1786999307 = 2026-08-17 20:41:47 UTC (8:41am NZ next day).
+  assert.equal(purchase.purchasedAt, "2026-08-17T20:41:47.000Z");
 });
 
-test("a product sale carries no email, so it cannot be auto-linked", () => {
-  // This is the limitation, asserted so it is not mistaken for a bug later:
-  // Optix identifies the buyer of a sale by display name only.
+test("a product sale carries no email and no currency", () => {
+  // The limitation, asserted so it is not mistaken for a bug later: Optix
+  // identifies the buyer of a sale by display name only, so a sale cannot be
+  // auto-linked to a Clarity client.
   assert.equal(normalizeOptixPurchaseEvent(newSale).memberEmail, "");
   assert.equal(normalizeOptixPurchaseEvent(newSale).currency, "");
 });
@@ -125,11 +134,23 @@ test("money is read whether it arrives in major or minor units", () => {
   assert.equal(amountInCents("45.00", true), 4500);
 });
 
-test("a sale naming a Pass classifies as a Pass", () => {
+test("the real lesson package classifies as a pass", () => {
+  // The word that settled the classifier: Sam's passes say "Lesson", not
+  // "Pass" — "30 Minute Golf Lesson Package" was filed unknown until this.
   assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent(newSale)), "pass");
+});
+
+test("a sale naming a Pass still classifies as a pass", () => {
+  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "10 Lesson Pass" })), "pass");
   assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "5x Range Pass" })), "pass");
   // Case does not matter, and the wording may only be in the invoice line.
   assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "Ten pack", invoice_item_name: "Sale of Ten pack (pass)" })), "pass");
+});
+
+test("a bay top-up is a sale but not a lesson", () => {
+  // Real payload: says neither "lesson" nor "pass", so it stays unknown —
+  // visible in the POS list as an Optix sale, just not tagged as a lesson.
+  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent(extraHour)), "unknown");
 });
 
 test("a plan is never a Pass, whatever it is called", () => {
@@ -139,27 +160,12 @@ test("a plan is never a Pass, whatever it is called", () => {
 });
 
 test("a sale we cannot call is kept as unknown, never silently dropped", () => {
-  // The case that matters: if a Pass is named without the word, it has to stay
-  // visible so the classifier can be corrected against it.
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "10 Lesson Bundle" })), "unknown");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "10 Session Bundle" })), "unknown");
 });
 
-test("'pass' inside another word does not count as a Pass", () => {
+test("'pass' or 'lesson' inside another word does not count", () => {
   assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "Compass Golf Club" })), "unknown");
   assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "Passenger seat hire" })), "unknown");
-});
-
-test("an invoice_paid payload holds nothing worth recording as a purchase", () => {
-  // Documents why invoice_paid no longer creates a row: the normaliser finds
-  // no product, no buyer and no amount in it, because none are sent.
-  const purchase = normalizeOptixPurchaseEvent(invoicePaid);
-  assert.equal(purchase.itemName, "");
-  assert.equal(purchase.memberName, "");
-  assert.equal(purchase.memberEmail, "");
-  assert.equal(purchase.amountCents, null);
-  // The invoice id is the one useful thing, and it joins to the sale.
-  assert.equal(purchase.invoiceId, "298448");
-  assert.equal(purchase.invoiceId, normalizeOptixPurchaseEvent(newSale).invoiceId);
 });
 
 test("a sale with no usable time still records, defaulting at the caller", () => {
@@ -167,4 +173,5 @@ test("a sale with no usable time still records, defaulting at the caller", () =>
   assert.equal(purchase.purchasedAt, "");
   assert.equal(purchase.amountCents, null);
   assert.equal(purchase.quantity, null);
+  assert.equal(purchase.saleNumber, "");
 });

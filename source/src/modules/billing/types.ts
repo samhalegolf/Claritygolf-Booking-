@@ -273,8 +273,10 @@ export type PosPaymentMethod = {
 export type PosTransactionStatus = "pending" | "paid" | "refunded" | "void";
 
 // Where the sale was started from. "lesson" carries a bookingId; "client" is a
-// sale opened from a client profile; "counter" is a walk-up sale.
-export type PosTransactionSource = "lesson" | "client" | "counter";
+// sale opened from a client profile; "counter" is a walk-up sale. "optix" is a
+// read-only record merged in from Optix product sales — money Optix already
+// took, so it has no POS receipt number and no Mark paid / Refund actions.
+export type PosTransactionSource = "lesson" | "client" | "counter" | "optix";
 
 // A product line on a counter sale. Name, SKU and unit price are snapshots
 // taken when the sale was rung up, so an old receipt still reads correctly
@@ -317,6 +319,9 @@ export type PosTransaction = {
   paidAt: string;
   createdAt: string;
   updatedAt: string;
+  // Only on source "optix": the product is a lesson pass/package, i.e. a
+  // lesson paid for through Optix.
+  isLessonPass?: boolean;
   // Empty for a plain lesson or free-form sale; populated when products were
   // rung up. Stock moves off these lines, not off the amount.
   items?: PosTransactionItem[];

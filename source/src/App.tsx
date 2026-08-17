@@ -24013,8 +24013,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <CreditCard size={24} />
                   </div>
                   <p className="field-help">
-                    Counter takings, kept separate from invoicing. These totals are not included in Revenue, Reports or
-                    accounts receivable.
+                    Counter takings plus Optix sales, kept separate from invoicing. These totals are not included in
+                    Revenue, Reports or accounts receivable. Optix records are read-only — that money was taken in Optix.
                   </p>
                   <div className="settings-field-row pos-range-row">
                     <div className="settings-field">
@@ -24096,6 +24096,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             <td>{transaction.receiptNumber}</td>
                             <td>
                               {transaction.description}
+                              {transaction.isLessonPass && <span className="pos-lesson-tag">Lesson pass</span>}
                               {transaction.listedAmount !== null &&
                                 Math.abs(transaction.listedAmount - transaction.amount) > 0.005 && (
                                   <em className="pos-adjusted-note">
@@ -24110,7 +24111,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                               <span className={`invoice-status-pill invoice-status-${transaction.status === "paid" ? "paid" : transaction.status === "void" ? "void" : "published"}`}>
                                 {transaction.status}
                               </span>
-                              {transaction.status === "pending" && (
+                              {/* Optix records are read-only: that money lives
+                                  in Optix, so there is nothing here to mark
+                                  paid or refund. */}
+                              {transaction.source !== "optix" && transaction.status === "pending" && (
                                 <button
                                   className="link-button"
                                   onClick={() => void setPosTransactionStatus(transaction.id, "paid")}
@@ -24119,7 +24123,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                   Mark paid
                                 </button>
                               )}
-                              {transaction.status === "paid" && (
+                              {transaction.source !== "optix" && transaction.status === "paid" && (
                                 <button
                                   className="link-button"
                                   onClick={() => void setPosTransactionStatus(transaction.id, "refunded")}
