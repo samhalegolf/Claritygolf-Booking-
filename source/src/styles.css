@@ -3611,7 +3611,13 @@ button {
   overflow: hidden;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.14);
   cursor: grab;
-  touch-action: none;
+  /* pan-y, not none: a finger swiping over a card scrolls the week like the
+     grid behind it. Dragging is armed by a hold in App.tsx instead, which is
+     what stops an ordinary swipe picking a lesson up. */
+  touch-action: pan-y;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .calendar-item.block {
@@ -3725,7 +3731,8 @@ button {
   border-radius: 0;
   background: transparent;
   cursor: ns-resize;
-  touch-action: none;
+  /* Same reason as the card: the hold decides, not the touch. */
+  touch-action: pan-y;
 }
 
 .resize-handle::after {
@@ -6503,8 +6510,53 @@ button {
   transform: translateY(-1px);
 }
 
-.calendar-item.appointment.is-lifted {
+/* The half second of the hold, made visible: the card sinks slightly under the
+   finger, so the wait reads as something loading rather than as nothing
+   happening. */
+.calendar-item.is-holding,
+.calendar-item.appointment.is-holding {
+  transform: scale(0.975);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.22);
+  transition:
+    transform 500ms cubic-bezier(0.35, 0, 0.3, 1),
+    box-shadow 500ms ease;
+}
+
+/* Armed. Deliberately more than a nudge — it is the only signal that the lesson
+   is now loose and the next movement will reschedule it. */
+.calendar-item.is-lifted,
+.calendar-item.appointment.is-lifted,
+.calendar-item.appointment.is-lifted:hover {
+  z-index: 8;
   animation: cardGrabFlex 340ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.32);
+  outline: 2px solid rgba(255, 255, 255, 0.72);
+  outline-offset: -2px;
+}
+
+/* Resizing gets the ring but not the scale: the point of the gesture is the
+   card's height, and growing it under a scale animation would say two things
+   about the size at once. */
+.calendar-item.is-resizing,
+.calendar-item.appointment.is-resizing {
+  z-index: 8;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.32);
+  outline: 2px solid rgba(255, 255, 255, 0.72);
+  outline-offset: -2px;
+}
+
+.calendar-item.block.is-lifted,
+.calendar-item.block.is-resizing {
+  outline-color: rgba(31, 31, 31, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-item,
+  .calendar-item.is-holding,
+  .calendar-item.appointment.is-holding {
+    transition: none;
+    transform: none;
+  }
 }
 
 .item-email-indicators {
@@ -6744,7 +6796,7 @@ button {
     transform: translateY(-3px) scale(1.018) skewY(-1.8deg);
   }
   100% {
-    transform: translateY(-1px) scale(1.006) skewY(0deg);
+    transform: translateY(-2px) scale(1.03) skewY(0deg);
   }
 }
 

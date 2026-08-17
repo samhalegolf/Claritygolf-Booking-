@@ -1704,6 +1704,17 @@ const LAST_TIME_SLOT_MINUTES = DAY_END_MINUTES - SNAP_MINUTES;
 const MAX_GROUP_OCCURRENCE_COUNT = 52;
 const MOUSE_DRAG_THRESHOLD = 10;
 const TOUCH_DRAG_THRESHOLD = 16;
+// A finger that lands on a lesson is usually scrolling the week, not
+// rescheduling. Touch drags therefore arm on a deliberate hold instead of on
+// contact: hold still for TOUCH_HOLD_MS and the card lifts; move more than
+// TOUCH_HOLD_TOLERANCE before then and the hold is abandoned and the touch goes
+// back to being an ordinary scroll. A distance threshold alone could not tell
+// those two apart, which is why any swipe starting on a card used to pick it up.
+const TOUCH_HOLD_MS = 500;
+const TOUCH_HOLD_TOLERANCE = 10;
+// Post-hold, intent is settled, so the card follows the finger almost at once
+// rather than making the coach drag through the accident threshold twice.
+const ARMED_TOUCH_DRAG_THRESHOLD = 6;
 const EDGE_NAV_ZONE = 26;
 const BOOKING_LOGO_PARAM = "logo";
 const CLARITY_BOOKING_HOSTS = new Set(["claritygolf.app", "booking.claritygolf.app", PUBLIC_BOOKING_HOST]);
@@ -5114,6 +5125,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const [pullRangeEditing, setPullRangeEditing] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [pointerSession, setPointerSession] = useState<PointerSession>(null);
+  // The card a finger is currently resting on, waiting out the hold. Drives
+  // the press-in cue so the wait is visible rather than a dead half second.
+  const [holdingItemId, setHoldingItemId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [quickCreate, setQuickCreate] = useState<QuickCreateState | null>(null);
   const [quickClientSearch, setQuickClientSearch] = useState("");
@@ -5499,6 +5513,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const suppressBlankGestureUntilRef = useRef(0);
   const edgeCueTimerRef = useRef<number | null>(null);
   const gestureCleanupRef = useRef<null | (() => void)>(null);
+  // The touch hold that has to complete before a card can be dragged.
+  const touchHoldTimerRef = useRef<number | null>(null);
+  const touchHoldCleanupRef = useRef<null | (() => void)>(null);
   const brandSaveVersionRef = useRef(0);
   const serviceSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
@@ -9241,7 +9258,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   function hasPointerMovedPastThreshold(clientX: number, clientY: number) {
     const deltaX = clientX - pointerStartRef.current.x;
     const deltaY = clientY - pointerStartRef.current.y;
-    const threshold = pointerKindRef.current === "touch" ? TOUCH_DRAG_THRESHOLD : MOUSE_DRAG_THRESHOLD;
+    const threshold =
+      pointerKindRef.current === "touch"
+        ? pointerSessionRef.current
+          ? ARMED_TOUCH_DRAG_THRESHOLD
+          : TOUCH_DRAG_THRESHOLD
+        : MOUSE_DRAG_THRESHOLD;
     return Math.hypot(deltaX, deltaY) >= threshold;
   }
 
@@ -9481,6 +9503,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   }
 
   function clearGesture(options: { preserveQuickCreate?: boolean } = {}) {
+    cancelTouchHold();
     gestureCleanupRef.current?.();
     gestureCleanupRef.current = null;
     clickPlaceRef.current = null;
@@ -9796,8 +9819,19 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     return { candidate, valid: false };
   }
 
-  function attachGestureListeners() {
+  function attachGestureListeners(options: { blockTouchScroll?: boolean } = {}) {
     gestureCleanupRef.current?.();
+
+    // Cards allow vertical panning so the week scrolls under a finger, which
+    // means an armed touch drag has to refuse the scroll itself. Safe to do
+    // here and nowhere else: the hold only completes while the finger is
+    // still, so no scroll has started that the browser would refuse to give up.
+    const blockTouchScroll = (event: TouchEvent) => {
+      if (event.cancelable) event.preventDefault();
+    };
+    if (options.blockTouchScroll) {
+      window.addEventListener("touchmove", blockTouchScroll, { passive: false });
+    }
 
     const movePointer = (event: globalThis.PointerEvent) => {
       updatePointerAt(event.clientX, event.clientY);
@@ -9824,29 +9858,92 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       window.removeEventListener("pointercancel", finish);
       window.removeEventListener("mousemove", moveMouse);
       window.removeEventListener("mouseup", finish);
+      window.removeEventListener("touchmove", blockTouchScroll);
     };
   }
 
-  function beginMove(event: ReactPointerEvent<HTMLElement>, item: CalendarItem) {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!requireLiveDatabase("move appointments")) return;
-    if (isExternallyOwned(item)) {
-      setToast({ message: externalRescheduleMessage(item) });
-      return;
+  // --- Touch hold ----------------------------------------------------------
+  // Arming a drag is split from starting one. A mouse arms on press, because a
+  // press with a mouse is unambiguous; a finger arms only after TOUCH_HOLD_MS
+  // of stillness. Everything below the arm point is shared, so a touch drag and
+  // a mouse drag are the same gesture once running.
+
+  function cancelTouchHold() {
+    if (touchHoldTimerRef.current !== null) {
+      window.clearTimeout(touchHoldTimerRef.current);
+      touchHoldTimerRef.current = null;
     }
-    const slot = slotFromPointer(event);
+    touchHoldCleanupRef.current?.();
+    touchHoldCleanupRef.current = null;
+    setHoldingItemId(null);
+  }
+
+  // Android and desktop Chrome buzz; iOS Safari has no web haptic, which is why
+  // the lift also has to read visually rather than relying on this.
+  function pulseHoldFeedback() {
+    try {
+      navigator.vibrate?.(12);
+    } catch {
+      // A blocked or unsupported vibrate must never take the drag down with it.
+    }
+  }
+
+  function waitForTouchHold(event: ReactPointerEvent<HTMLElement>, itemId: string, arm: () => void) {
+    cancelTouchHold();
+    const startX = event.clientX;
+    const startY = event.clientY;
+
+    const abandon = (moveEvent: globalThis.PointerEvent) => {
+      if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < TOUCH_HOLD_TOLERANCE) return;
+      cancelTouchHold();
+    };
+    const release = () => cancelTouchHold();
+
+    window.addEventListener("pointermove", abandon);
+    window.addEventListener("pointerup", release);
+    // The browser fires pointercancel the moment it decides the touch is a
+    // scroll, which is the cleanest signal that this was never a drag.
+    window.addEventListener("pointercancel", release);
+    window.addEventListener("scroll", release, true);
+
+    touchHoldCleanupRef.current = () => {
+      window.removeEventListener("pointermove", abandon);
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+      window.removeEventListener("scroll", release, true);
+    };
+
+    setHoldingItemId(itemId);
+    touchHoldTimerRef.current = window.setTimeout(() => {
+      touchHoldTimerRef.current = null;
+      touchHoldCleanupRef.current?.();
+      touchHoldCleanupRef.current = null;
+      setHoldingItemId(null);
+      pulseHoldFeedback();
+      arm();
+    }, TOUCH_HOLD_MS);
+  }
+
+  function startMoveSession(
+    target: HTMLElement,
+    pointerId: number,
+    pointerType: string,
+    clientX: number,
+    clientY: number,
+    item: CalendarItem,
+  ) {
+    const slot = slotFromClient(clientX, clientY);
     if (!slot) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    pointerStartRef.current = { x: event.clientX, y: event.clientY };
-    pointerClientRef.current = { x: event.clientX, y: event.clientY };
-    resetPointerTrail(event.clientX, event.clientY);
-    pointerKindRef.current = event.pointerType || "mouse";
+    const rect = target.getBoundingClientRect();
+    pointerStartRef.current = { x: clientX, y: clientY };
+    pointerClientRef.current = { x: clientX, y: clientY };
+    resetPointerTrail(clientX, clientY);
+    pointerKindRef.current = pointerType || "mouse";
     dragPreviewMetaRef.current = {
       width: rect.width,
       height: rect.height,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
+      offsetX: clientX - rect.left,
+      offsetY: clientY - rect.top,
     };
     setFloatingDrag(null);
     setMovedState(false);
@@ -9857,13 +9954,55 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       offsetMinutes: slot.start - item.start,
       origin: item,
     });
-    event.currentTarget.setPointerCapture(event.pointerId);
-    attachGestureListeners();
+    if (target.isConnected) target.setPointerCapture(pointerId);
+    attachGestureListeners({ blockTouchScroll: pointerType === "touch" });
+  }
+
+  function startResizeSession(
+    target: HTMLElement,
+    pointerId: number,
+    pointerType: string,
+    clientX: number,
+    clientY: number,
+    item: CalendarItem,
+  ) {
+    pointerStartRef.current = { x: clientX, y: clientY };
+    pointerClientRef.current = { x: clientX, y: clientY };
+    resetPointerTrail(clientX, clientY);
+    pointerKindRef.current = pointerType || "mouse";
+    dragPreviewMetaRef.current = null;
+    setFloatingDrag(null);
+    setMovedState(false);
+    setQuickCreate(null);
+    setPointerSessionState({ mode: "resize", itemId: item.id, origin: item });
+    if (target.isConnected) target.setPointerCapture(pointerId);
+    attachGestureListeners({ blockTouchScroll: pointerType === "touch" });
+  }
+
+  function beginMove(event: ReactPointerEvent<HTMLElement>, item: CalendarItem) {
+    if (!requireLiveDatabase("move appointments")) return;
+    if (isExternallyOwned(item)) {
+      setToast({ message: externalRescheduleMessage(item) });
+      return;
+    }
+    const target = event.currentTarget;
+    const { pointerId, pointerType, clientX, clientY } = event;
+    if (pointerType === "touch") {
+      // stopPropagation, but no preventDefault: the grid must not read this as
+      // a blank-space gesture, while the browser keeps the touch until the hold
+      // completes so the week still scrolls under the finger.
+      event.stopPropagation();
+      waitForTouchHold(event, item.id, () =>
+        startMoveSession(target, pointerId, pointerType, clientX, clientY, item),
+      );
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    startMoveSession(target, pointerId, pointerType, clientX, clientY, item);
   }
 
   function beginResize(event: ReactPointerEvent<HTMLElement>, item: CalendarItem) {
-    event.preventDefault();
-    event.stopPropagation();
     if (!requireLiveDatabase("resize appointments")) return;
     // Resizing moves the end time, which the external system owns just as much
     // as the start. Gating the drag but not this would leave the same drift
@@ -9872,17 +10011,22 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       setToast({ message: externalRescheduleMessage(item) });
       return;
     }
-    pointerStartRef.current = { x: event.clientX, y: event.clientY };
-    pointerClientRef.current = { x: event.clientX, y: event.clientY };
-    resetPointerTrail(event.clientX, event.clientY);
-    pointerKindRef.current = event.pointerType || "mouse";
-    dragPreviewMetaRef.current = null;
-    setFloatingDrag(null);
-    setMovedState(false);
-    setQuickCreate(null);
-    setPointerSessionState({ mode: "resize", itemId: item.id, origin: item });
-    event.currentTarget.setPointerCapture(event.pointerId);
-    attachGestureListeners();
+    const target = event.currentTarget;
+    const { pointerId, pointerType, clientX, clientY } = event;
+    if (pointerType === "touch") {
+      // The handle is a 9px strip along the bottom edge — the easiest thing on
+      // the calendar to catch by accident, so it waits out the same hold. The
+      // stop matters here: without it the card behind would start its own hold
+      // and a resize would turn into a move.
+      event.stopPropagation();
+      waitForTouchHold(event, item.id, () =>
+        startResizeSession(target, pointerId, pointerType, clientX, clientY, item),
+      );
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    startResizeSession(target, pointerId, pointerType, clientX, clientY, item);
   }
 
   function beginBlankGesture(event: ReactPointerEvent<HTMLDivElement>) {
@@ -20346,7 +20490,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                         invalid ? "invalid" : ""
 	                      } ${flyAnimation ? "just-placed-from-dock" : ""} ${
 	                        pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
-	                      } ${item.kind === "appointment" && item.status ? `status-${item.status}` : ""} ${
+	                      } ${
+	                        pointerSession?.mode === "resize" && pointerSession.itemId === item.id ? "is-resizing" : ""
+	                      } ${holdingItemId === item.id ? "is-holding" : ""} ${
+	                        item.kind === "appointment" && item.status ? `status-${item.status}` : ""
+	                      } ${
                         item.kind === "appointment" && item.bayBooked ? "has-bay" : ""
                       } ${isPastItem ? "is-past" : ""}`}
 
