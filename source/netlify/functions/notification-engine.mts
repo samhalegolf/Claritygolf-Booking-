@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import { defaultAccountId } from "./_shared/account.mts";
 import { activeLocale } from "./_shared/locale.mts";
 import { setActivePhoneCountry } from "./_shared/phone.mts";
+import { sendCoachPush, type CoachPushMessage } from "./_shared/push-notify.mts";
 import { SETTINGS_BULK_SELECT_QUERY } from "./_shared/settings-keys.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
@@ -14,6 +16,15 @@ type NotifyInput = {
   previousAppointment?: any;
   source?: string;
   testRecipient?: string;
+  /**
+   * Also pop a browser notification on the coach's devices.
+   *
+   * Opt-in per call site rather than inferred from `source`, because the thing
+   * that decides is "did somebody other than the coach cause this" — and a
+   * string match on source would silently start pushing (or silently stop) the
+   * next time a call site is added.
+   */
+  coachPush?: boolean;
 };
 
 function env(name: string, fallback = "") {
@@ -698,6 +709,88 @@ function bodyFor(
   return { html, text };
 }
 
+/**
+ * "Tue 18 Aug, 10:00 AM-11:00 AM" — short enough for a notification body,
+ * built from the same slotDate/rangeLabel the emails use so the pop-up and the
+ * confirmation email can never disagree about when a lesson is.
+ */
+function pushWhenLabel(week = 0, day = 0, start = 0, duration = 0) {
+  const date = slotDate(week, day).toLocaleDateString(activeLocale(), {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+  return `${date}, ${rangeLabel(start, duration)}`;
+}
+
+/**
+ * Compose and send the coach's browser pop-up for a booking event.
+ *
+ * Exported because the new-public-booking path sends its confirmation through
+ * booking-core's own sender rather than notifyBookingEvent, and both paths must
+ * produce the same pop-up.
+ */
+export function composeCoachPushMessage(input: {
+  action: BookingAction;
+  appointment: any;
+  previousAppointment?: any;
+  serviceName: string;
+  source?: string;
+}): CoachPushMessage | null {
+  const { action } = input;
+  if (action !== "booking" && action !== "rescheduled" && action !== "cancelled") return null;
+
+  const appt = normaliseAppointment(input.appointment);
+  const previous = input.previousAppointment ? normaliseAppointment(input.previousAppointment) : null;
+  const serviceName = cleanText(input.serviceName, "Golf Lesson", 160);
+  const fromOptix = String(input.source || "").startsWith("optix");
+  const when = pushWhenLabel(appt.week, appt.day, appt.start, appt.duration);
+
+  const title =
+    action === "cancelled"
+      ? `Booking cancelled · ${appt.client}`
+      : action === "rescheduled"
+        ? `Booking moved · ${appt.client}`
+        : fromOptix
+          ? `New Optix booking · ${appt.client}`
+          : `New booking · ${appt.client}`;
+
+  const body =
+    action === "rescheduled" && previous
+      ? `${serviceName}\nNow ${when}\nWas ${pushWhenLabel(previous.week, previous.day, previous.start, previous.duration)}`
+      : `${serviceName}\n${when}`;
+
+  return {
+    title,
+    body,
+    url: "/",
+    // Same lesson, same slot in the tray: a cancellation replaces the booking
+    // pop-up rather than sitting under it.
+    tag: `clarity-booking-${appt.id}`,
+  };
+}
+
+export async function sendCoachPushForBooking(input: {
+  action: BookingAction;
+  appointment: any;
+  previousAppointment?: any;
+  source?: string;
+}) {
+  try {
+    const services = await readServices();
+    const serviceId = cleanText(input.appointment?.serviceId || input.appointment?.service_id, "", 160);
+    const service = services.find((candidate: any) => candidate.id === serviceId);
+    const message = composeCoachPushMessage({ ...input, serviceName: cleanText(service?.name, "Golf Lesson", 160) });
+    if (!message) return;
+
+    const accountId = cleanText(input.appointment?.accountId, "", 120) || defaultAccountId();
+    await sendCoachPush(accountId, message);
+  } catch (error) {
+    console.error("notification_engine:coach_push_failed", input.appointment?.id, error);
+  }
+}
+
 export async function notifyBookingEvent(input: NotifyInput) {
   const action = input.action || "booking";
   const settings = await readSettings();
@@ -711,6 +804,18 @@ export async function notifyBookingEvent(input: NotifyInput) {
   const personKey = appt.email ? `email:${appt.email}` : appt.phone ? `phone:${appt.phone}` : `name:${appt.client.toLowerCase()}`;
   const signature = hash({ action, appt, previous, source: input.source }).slice(0, 24);
   const results: any[] = [];
+
+  // Awaited on purpose: these calls already run inside a waitUntil task, and a
+  // fire-and-forget promise here would be killed when the function instance is
+  // torn down at the end of the request.
+  if (input.coachPush) {
+    await sendCoachPushForBooking({
+      action,
+      appointment: input.appointment,
+      previousAppointment: input.previousAppointment,
+      source: input.source,
+    });
+  }
 
   async function sendAndRecord(channel: NotificationChannel, recipient: string, subject: string) {
     const kind = `${action}_${channel}_email`;

@@ -2,7 +2,7 @@ import type { Config } from "@netlify/functions";
 
 import { processStoredOptixEvent, storeOptixWebhookEvent, webhookEventKey } from "./_shared/optix-origin.mts";
 import { optixOriginRequest } from "./_shared/optix-db.mts";
-import { notifyBookingEvent } from "./notification-engine.mts";
+import { notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
 import { validateOptixWebhook } from "./_shared/optix-webhook-auth.mts";
 
 function env(name: string) {
@@ -68,12 +68,19 @@ export default async function handler(req: Request) {
     if (stored.inserted) {
       try {
         const processed: any = await processStoredOptixEvent(eventKey, payload);
-        if (processed?.status === "processed" && processed?.mapping?.emailBehaviour === "immediate" && processed?.created) {
-          await notifyBookingEvent({ action: "booking", appointment: processed.item, source: `optix:${eventKey}` });
-          await optixOriginRequest(`external_booking_links?provider=eq.optix&purpose=eq.lesson&external_booking_id=eq.${encodeURIComponent(externalBookingId)}`, {
-            method: "PATCH",
-            body: JSON.stringify({ email_status: "sent", confirmation_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
-          });
+        if (processed?.status === "processed" && processed?.created) {
+          // The coach's pop-up is not tied to the client's email behaviour —
+          // a booking landing on the calendar is worth knowing about whether
+          // or not this mapping sends the customer a confirmation.
+          await sendCoachPushForBooking({ action: "booking", appointment: processed.item, source: `optix:${eventKey}` });
+
+          if (processed?.mapping?.emailBehaviour === "immediate") {
+            await notifyBookingEvent({ action: "booking", appointment: processed.item, source: `optix:${eventKey}` });
+            await optixOriginRequest(`external_booking_links?provider=eq.optix&purpose=eq.lesson&external_booking_id=eq.${encodeURIComponent(externalBookingId)}`, {
+              method: "PATCH",
+              body: JSON.stringify({ email_status: "sent", confirmation_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
+            });
+          }
         }
       } catch (error) {
         // The event is stored and marked failed by processStoredOptixEvent, so

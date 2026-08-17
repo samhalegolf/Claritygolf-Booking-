@@ -62,6 +62,7 @@ export const config: Config = {
     "/api/public-reschedule",
     "/api/public-reschedule-lookup",
     "/api/public-reschedule/lookup",
+    "/api/push-subscriptions",
     "/api/resend-webhook",
     "/api/system-smoke",
     "/api/test-email",

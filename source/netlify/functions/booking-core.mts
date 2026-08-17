@@ -13,7 +13,7 @@ import {
   syncGoogleCalendarChangesIfEnabled,
   syncGoogleCalendarNow,
 } from "./google-calendar-sync.mts";
-import { inferBookingAction, notifyBookingEvent } from "./notification-engine.mts";
+import { inferBookingAction, notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
 import { cancelOptixBayForCalendarItem, cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
 import { autoBookResourceForNewBooking } from "./_shared/optix-book-resource.mts";
 import { planExternalReschedule } from "./_shared/external-reschedule.mts";
@@ -5361,6 +5361,13 @@ function schedulePublicBookingSideEffects(context, appointment, options = {}) {
     if (options.autoBookResource === true) {
       await autoBookResourceForNewBooking(appointment.id, appointment.serviceId);
     }
+    // A client just booked. This path sends its confirmation through
+    // sendBookingNotifications above rather than notifyBookingEvent, so the
+    // coach's browser pop-up is sent explicitly here — same composer, so the
+    // wording matches the cancel and reschedule pop-ups.
+    if (options.coachPush === true) {
+      await sendCoachPushForBooking({ action: "booking", appointment, source: "public-booking" });
+    }
   })().catch((error) => console.error("public_booking:side_effects_failed", appointment?.id, error));
 
   if (context && typeof context.waitUntil === "function") {
@@ -8234,6 +8241,7 @@ async function createPublicBooking(payload, context = null) {
   const nextState = await writePublicBookingAppointment(state, appointment, context, {
     autoBookResource: true,
     sendConfirmation: true,
+    coachPush: true,
   });
   return { appointment, notifications: [], state: nextState };
 }
@@ -8707,6 +8715,7 @@ async function reschedulePublicBooking(payload, context = null) {
       appointment: updatedAppointment,
       previousAppointment: appointment,
       source: "public-reschedule",
+      coachPush: true,
     });
   } catch (error) {
     console.error("public_reschedule:notification_failed", error);
@@ -8746,6 +8755,7 @@ async function cancelPublicBooking(payload) {
     appointment,
     previousAppointment: appointment,
     source: "public-cancel",
+    coachPush: true,
   }).catch((error) => {
     console.error("public_cancel:notification_failed", error);
     return [];

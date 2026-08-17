@@ -10510,3 +10510,24 @@ button {
   font-size: 11px;
   color: var(--muted);
 }
+
+/* Settings → Email → Browser notifications. The card follows the notification
+   card's spacing; only the on/off row and the button pair need their own rules. */
+.browser-push-state {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 12px 0 10px;
+}
+
+.browser-push-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.browser-push-error {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: #8e1d0c;
+}

@@ -260,6 +260,7 @@ function schedulePublicCancelSideEffects(context: Context | undefined, appointme
         appointment,
         previousAppointment: appointment,
         source: "public-cancel",
+        coachPush: true,
       });
     } catch (error) {
       console.error("public_cancel:notification_failed", error);

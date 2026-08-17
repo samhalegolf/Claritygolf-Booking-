@@ -204,6 +204,7 @@ import { clamp } from "./lib/number";
 import { dateInputValue } from "./lib/date";
 import { OPTIX_RECONCILE_EVENT } from "./optix-booking-feedback";
 import type { OptixReconcileCompleteDetail } from "./optix-booking-feedback";
+import BrowserNotificationsPanel from "./modules/notifications/BrowserNotificationsPanel";
 import type {
   ChangeEvent,
   CSSProperties,
@@ -25126,6 +25127,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
             <div className={`settings-grid settings-tab-${settingsTab}`}>
               {settingsTab === "integrations" ? <OptixIntegrationPanel /> : null}
+              {isAdminUser ? <BrowserNotificationsPanel /> : null}
               {servicesSettingsPanel}
               {isAdminUser ? coachesSettingsPanel : null}
               {isAdminUser ? locationsSettingsPanel : null}

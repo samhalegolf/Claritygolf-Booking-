@@ -22,13 +22,15 @@
     "qrcode-generator": "^2.0.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
-    "vite": "^7.2.7"
+    "vite": "^7.2.7",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/web-push": "^3.6.4",
     "tsx": "^4.23.0",
     "typescript": "^5.9.3"
   }
