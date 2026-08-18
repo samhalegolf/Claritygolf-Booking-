@@ -126,24 +126,36 @@ test("both dark triggers map the same set of tokens", () => {
 /**
  * A field is as wide as its content (Rule 05).
  *
- * `width: 100%` on a field is the regression that keeps coming back, so it is
- * counted rather than banned: notes and search legitimately fill their row,
- * and --c-w-prose exists to say so out loud. Everything else should be a
- * min(Nch, 100%).
+ * Only fields are counted. The first version of this counted every
+ * `width: 100%` in the stylesheet and immediately flagged a full-width button
+ * header, which is not what the rule is about — and a check that cries wolf
+ * gets its baseline bumped instead of its finding fixed, which is worse than
+ * not having it.
+ *
+ * Notes and search legitimately fill their row; --c-w-prose exists so that
+ * exception is written down rather than remembered.
  */
-test("bare width:100% is not spreading", () => {
-  const BASELINE = 60;
-  let count = 0;
+test("bare width:100% is not spreading on fields", () => {
+  const BASELINE = 10;
+  const offenders: string[] = [];
   for (const file of files) {
-    count += [...read(file).matchAll(/^\s*width:\s*100%\s*;/gm)].length;
+    const text = read(file);
+    for (const match of text.matchAll(/^\s*width:\s*100%\s*;/gm)) {
+      const brace = text.lastIndexOf("{", match.index);
+      if (brace < 0) continue;
+      const start = Math.max(text.lastIndexOf("}", brace), text.lastIndexOf("{", brace - 1), text.lastIndexOf("*/", brace));
+      const selector = text.slice(start + 1, brace);
+      if (!/input|select|textarea|\bfield\b|\.w-/.test(selector)) continue;
+      offenders.push(`${rel(file)}: ${selector.trim().replace(/\s+/g, " ").slice(0, 70)}`);
+    }
   }
   assert.ok(
-    count <= BASELINE,
-    `width:100% went from ${BASELINE} to ${count}. Use a --c-w-* width, or ` +
-      "--c-w-prose if this really is notes or search — then lower the baseline.",
+    offenders.length <= BASELINE,
+    `Fields at width:100% went from ${BASELINE} to ${offenders.length}. Use a ` +
+      `--c-w-* width, or --c-w-prose if this really is notes or search.\n  ${offenders.join("\n  ")}`,
   );
-  if (count < BASELINE) {
-    console.log(`  ↓ width:100% is down to ${count} (baseline ${BASELINE}) — lower it.`);
+  if (offenders.length < BASELINE) {
+    console.log(`  ↓ fields at width:100% down to ${offenders.length} (baseline ${BASELINE}) — lower it.`);
   }
 });
 

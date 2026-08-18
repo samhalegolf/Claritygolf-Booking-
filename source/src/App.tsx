@@ -58,7 +58,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   canonicalPhoneKey as sharedCanonicalPhoneKey,
   cleanPhoneCountry,
@@ -1101,6 +1101,77 @@ function bankCandidateSortText(value: string | null | undefined) {
  * live inside the Coach Account panel today, and pulling them out is a job
  * about that panel rather than about the filing.
  */
+/**
+ * A collapsible settings group.
+ *
+ * Settings used to show everything at once: eleven tabs, and every panel on the
+ * open one expanded. Six sections fixed half of that; this fixes the rest.
+ *
+ * The header holds a title and a caret and nothing else — no summary line, no
+ * count. A count in a header is information you cannot act on, placed where you
+ * click, and it makes every header a different width.
+ *
+ * `inert` while closed is the part that is easy to leave out and expensive to
+ * omit: without it a collapsed Account section keeps a tabbable Change
+ * Password, Export and Close account in the DOM, so a keyboard user tabs
+ * through controls nobody can see.
+ */
+const SettingsGroupContext = createContext<{
+  openGroup: string;
+  setOpenGroup: (id: string) => void;
+} | null>(null);
+
+function SettingsGroups({ children }: { children: ReactNode }) {
+  // One value. Which group is open and which header is highlighted are the same
+  // fact, so they cannot disagree.
+  const [openGroup, setOpenGroup] = useState("");
+  const value = useMemo(() => ({ openGroup, setOpenGroup }), [openGroup]);
+  return <SettingsGroupContext.Provider value={value}>{children}</SettingsGroupContext.Provider>;
+}
+
+function SettingsGroup({
+  id,
+  section,
+  title,
+  className = "",
+  defaultOpen,
+  children,
+}: {
+  id: string;
+  section: string;
+  title: string;
+  className?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const context = useContext(SettingsGroupContext);
+  // Before anything has been clicked, the first group of each section is open —
+  // an accordion that opens onto six shut boxes reads as broken.
+  const open = context
+    ? context.openGroup === ""
+      ? Boolean(defaultOpen)
+      : context.openGroup === id
+    : true;
+  return (
+    <article
+      className={`data-card settings-section settings-${section} settings-group${open ? " is-open" : ""}${className ? ` ${className}` : ""}`}
+    >
+      <button
+        className="settings-group-header"
+        aria-expanded={open}
+        onClick={() => context?.setOpenGroup(open ? `${id}:closed` : id)}
+        type="button"
+      >
+        <span>{title}</span>
+        <span className="settings-group-caret" aria-hidden="true">▾</span>
+      </button>
+      <div className="settings-group-wrap" inert={!open}>
+        <div className="settings-group-body">{children}</div>
+      </div>
+    </article>
+  );
+}
+
 /**
  * The sub-nav, as data.
  *
@@ -18474,11 +18545,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     pendingServiceAction ? services.find((service) => service.id === pendingServiceAction.serviceId) ?? null : null;
 
   const locationsSettingsPanel = (
-    <div className="settings-section settings-business">
+    <SettingsGroup id="locations" section="business" title="Locations">
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
-            <span>Locations</span>
             <h2>{activeLocationList.length} active place{activeLocationList.length === 1 ? "" : "s"}</h2>
           </div>
           <button className="primary-button" onClick={startNewLocation} type="button">
@@ -18632,15 +18702,14 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           ))}
         </div>
       </div>
-    </div>
+    </SettingsGroup>
   );
 
   const coachesSettingsPanel = (
-    <div className="settings-section settings-business">
+    <SettingsGroup id="coaches" section="business" title="Coaches" defaultOpen>
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
-            <span>Coaches</span>
             <h2>{activeCoachList.length} active coach{activeCoachList.length === 1 ? "" : "es"}</h2>
           </div>
           <button className="primary-button" onClick={startNewCoach} type="button">
@@ -18820,16 +18889,15 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           ))}
         </div>
       </div>
-    </div>
+    </SettingsGroup>
   );
 
   const availabilitySettingsPanel = (
-    <div className="settings-section settings-booking">
+    <SettingsGroup id="availability" section="booking" title="Availability" defaultOpen>
       <div className="availability-layout">
         <div className="data-card wide">
           <div className="data-card-header">
             <div>
-              <span>Availability</span>
               <h2>{coachAccount.venueName}</h2>
             </div>
             <button className="primary-button" onClick={saveAvailability}>
@@ -18940,18 +19008,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           </div>
         </div>
       </div>
-    </div>
+    </SettingsGroup>
   );
 
   const bookingSettingsPanel = (
-    <article className="data-card settings-section settings-booking booking-page-settings">
-      <div className="data-card-header">
-        <div>
-          <span>Booking Page</span>
-          <h2>Public booking surface</h2>
-        </div>
-        <Eye size={24} />
-      </div>
+    <SettingsGroup id="booking-page" section="booking" title="Booking page" className="booking-page-settings">
       <details className="settings-subsection">
         <summary className="settings-subsection-title">
           <Eye size={18} />
@@ -19418,7 +19479,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               </div>
       </details>
       </EditableSettingsBlock>
-    </article>
+    </SettingsGroup>
   );
 
   const quickCreateIsCustomGroup = Boolean(quickCreate && quickCreateService && isCustomGroupService(quickCreateService));
@@ -25459,6 +25520,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               ))}
             </nav>
 
+            <SettingsGroups>
             <div className={`settings-grid settings-tab-${settingsTab}`}>
               {settingsTab === "developer" ? <IntegrationPanel /> : null}
               {isAdminUser ? <BrowserNotificationsPanel /> : null}
@@ -25467,14 +25529,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               {isAdminUser ? locationsSettingsPanel : null}
               {availabilitySettingsPanel}
               {bookingSettingsPanel}
-              <article className="data-card notification-card account-card settings-section settings-account">
-                <div className="data-card-header">
-                  <div>
-                    <span>Coach Account</span>
-                    <h2>{coachAccount.businessName}</h2>
-                  </div>
-                  <User size={24} />
-                </div>
+              <SettingsGroup id="coach-account" section="account" title="Coach account" className="notification-card account-card" defaultOpen>
                 <details className="settings-subsection" open>
                   <summary className="settings-subsection-title">
                     <KeyRound size={18} />
@@ -25924,16 +25979,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   </details>
                   </EditableSettingsBlock>
                 </div>
-              </article>
+              </SettingsGroup>
 
-              <article className="data-card sync-card settings-section settings-developer">
-                <div className="data-card-header">
-                  <div>
-                    <span>Google Calendar Sync</span>
-                    <h2>Direct API and iCal fallback</h2>
-                  </div>
-                  <KeyRound size={24} />
-                </div>
+              <SettingsGroup id="google-calendar" section="developer" title="Google Calendar sync" className="sync-card" defaultOpen>
 
                 <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
                   <span>Direct Google API</span>
@@ -26690,11 +26738,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     </a>
                   </div>
                 </details>
-              </article>
+              </SettingsGroup>
 
-              <article className="data-card notification-card settings-section settings-notifications">
-                <span>Email Notifications</span>
-                <h2>Confirmation emails</h2>
+              <SettingsGroup id="email-notifications" section="notifications" title="Email notifications" className="notification-card" defaultOpen>
                 <EditableSettingsBlock
                   id="email-notifications-block"
                   title="Email Notifications"
@@ -26907,11 +26953,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   </p>
                 </details>
                 </EditableSettingsBlock>
-              </article>
+              </SettingsGroup>
 
-              <article className="data-card notification-card settings-section settings-notifications">
-                <span>Text Machine</span>
-                <h2>SMS/webhook hook</h2>
+              <SettingsGroup id="text-machine" section="notifications" title="SMS and webhooks" className="notification-card">
                 <EditableSettingsBlock
                   id="text-machine-block"
                   title="Text Machine"
@@ -27004,11 +27048,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   </label>
                 </details>
                 </EditableSettingsBlock>
-              </article>
+              </SettingsGroup>
 
-              <article className="data-card notification-card email-template-card settings-section settings-notifications">
-                <span>Email Template</span>
-                <h2>Customer experience</h2>
+              <SettingsGroup id="email-template" section="notifications" title="Email template" className="notification-card email-template-card">
                 <div className="email-preview">
                   <span>Example</span>
                   <strong>{emailTemplateExample.clientSubject}</strong>
@@ -27257,11 +27299,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   </div>
                 </details>
                 </EditableSettingsBlock>
-              </article>
+              </SettingsGroup>
 
-              <article className="data-card notification-card settings-section settings-business">
-                <span>Theme</span>
-                <h2>Light and dark surfaces</h2>
+              <SettingsGroup id="theme" section="business" title="Theme" className="notification-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Settings size={18} />
@@ -27325,16 +27365,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     </button>
                   </div>
                 </details>
-              </article>
+              </SettingsGroup>
 
-              <article className="data-card brand-vein-card settings-section settings-business">
-                <div className="data-card-header">
-                  <div>
-                    <span>Coach Branding</span>
-                    <h2>Coach branding</h2>
-                  </div>
-                  <Palette size={24} />
-                </div>
+              <SettingsGroup id="coach-branding" section="business" title="Coach branding" className="brand-vein-card">
 
                 <div className="brand-vein-preview">
                   <div className="brand-vein-logo">
@@ -27454,16 +27487,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     </button>
                   </div>
                 </details>
-              </article>
+              </SettingsGroup>
 
-              <article className="data-card import-card settings-section settings-account">
-                <div className="data-card-header">
-                  <div>
-                    <span>Clients</span>
-                    <h2>Import clients</h2>
-                  </div>
-                  <Upload size={24} />
-                </div>
+              <SettingsGroup id="import-clients" section="account" title="Import clients" className="import-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Upload size={18} />
@@ -27513,8 +27539,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       </div>
                     )}
 	                </details>
-              </article>
+              </SettingsGroup>
             </div>
+            </SettingsGroups>
           </section>
         )}
       </main>

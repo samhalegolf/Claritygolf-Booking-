@@ -11119,3 +11119,94 @@ button {
 .text-button.danger {
   color: var(--c-danger);
 }
+
+/* --- Settings groups (accordions) -----------------------------------------
+   The handoff's worked screen. A 52px header of title-and-caret, and a body
+   that opens on grid-template-rows rather than max-height — max-height needs a
+   guessed number, and the guess is either short (content clipped) or long
+   (a pause before anything moves). */
+
+.settings-group {
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-group-header {
+  width: 100%;
+  height: var(--c-h-accordion);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  padding: 0 16px;
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-accordion);
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--c-t-hover);
+}
+
+.settings-group-header:hover {
+  background: var(--c-surface-soft);
+}
+
+.settings-group-header:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: -2px;
+}
+
+.settings-group-caret {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  color: var(--c-muted);
+  font-size: 15px;
+  transition: transform var(--c-t-expand);
+}
+
+.settings-group.is-open .settings-group-caret {
+  transform: rotate(180deg);
+}
+
+.settings-group-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--c-t-expand),
+    opacity 160ms ease,
+    visibility var(--c-t-expand);
+}
+
+.settings-group.is-open .settings-group-wrap {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+}
+
+.settings-group-body {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.settings-group.is-open .settings-group-body {
+  border-top: 1px solid var(--c-border-soft);
+  padding: var(--c-space-6);
+}
+
+/* The nesting law, applied where it bites hardest. A panel that used to be the
+   card is now the contents of one, so it stops drawing its own outline — three
+   nested borders was how a three-value group came to be 236px tall. */
+.settings-group .data-card,
+.settings-group .settings-section {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
