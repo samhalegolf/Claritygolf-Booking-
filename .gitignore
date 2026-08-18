@@ -27,3 +27,4 @@ apply-integration-decoupling.sh
 _transfer.tgz
 frontend-decoupling.tgz
 ui-rearrange.tgz
+ui-tokens.tgz

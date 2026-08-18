@@ -1,0 +1,200 @@
+/* Clarity global UI tokens.
+ *
+ * One palette, one type scale, one set of geometry — the layer every other
+ * stylesheet reads from. Loaded first, before styles.css.
+ *
+ * The values are the player terminal's, promoted. They were the most recent
+ * and the most deliberate of the four systems that shipped before this file,
+ * so rather than inventing a fifth palette to unify the others, the best of
+ * the four became the standard and the rest now alias onto it.
+ *
+ * WHAT THIS CHANGES ON SCREEN: the coach app's greens go neutral. Its page was
+ * #f3f5ef and its accent #06100a — both very slightly green — against #eef0ea
+ * and #171717 here. Deliberate, and the whole point of one palette, but it is
+ * a visible shift across every coach screen rather than a no-op.
+ *
+ * HOW TO USE IT: read --c-*. Never a literal hex outside this file, and never
+ * --dark-* directly — those are the parked dark values, wired up below.
+ */
+
+:root {
+  /* --- Light: the live values ------------------------------------------- */
+  --c-page: #eef0ea;
+  --c-surface: #ffffff;
+  --c-surface-soft: #fbfbf8;
+  --c-border: #deded8;
+  --c-border-soft: #ecebe5;
+  --c-text: #171717;
+  --c-text-body: #33312c;
+  --c-text-soft: #57544d;
+  --c-muted: #77746d;
+  --c-hover: #f4f3ef;
+  --c-active: #f1f0ec;
+  --c-accent: #171717;
+  --c-accent-text: #ffffff;
+  --c-danger: #a52e15;
+  --c-error-text: #6f1d1d;
+  --c-success-text: #225b2f;
+  --c-pencil: #8f8c86;
+  --c-pencil-hover: #57544d;
+
+  /* --- Dark: parked until a trigger asks for it -------------------------- */
+  /* Held as their own names rather than repeated inside each trigger block,
+     so a colour is written down exactly once. The two trigger blocks below
+     are pure plumbing — no hex in either. */
+  --dark-page: #0b0d0a;
+  --dark-surface: #141712;
+  --dark-surface-soft: #1a1e18;
+  --dark-border: rgba(244, 247, 242, 0.14);
+  --dark-border-soft: rgba(244, 247, 242, 0.09);
+  --dark-text: #f4f7f2;
+  --dark-text-body: rgba(244, 247, 242, 0.88);
+  --dark-text-soft: rgba(244, 247, 242, 0.76);
+  --dark-muted: rgba(244, 247, 242, 0.56);
+  --dark-hover: rgba(244, 247, 242, 0.08);
+  --dark-active: rgba(244, 247, 242, 0.13);
+  /* Inverted: on a dark card the filled button is the light one. */
+  --dark-accent: #f0f3ee;
+  --dark-accent-text: #12140f;
+  --dark-danger: #ff8a8a;
+  --dark-error-text: #ffd9d9;
+  --dark-success-text: #b7e0bd;
+  --dark-pencil: rgba(244, 247, 242, 0.5);
+  --dark-pencil-hover: rgba(244, 247, 242, 0.76);
+
+  /* --- Geometry ---------------------------------------------------------- */
+  --c-radius-control: 9px;
+  --c-radius-card: 12px;
+  --c-radius-page: 16px;
+  --c-radius-pill: 999px;
+
+  --c-space-1: 4px;
+  --c-space-2: 6px;
+  --c-space-3: 8px;
+  --c-space-4: 10px;
+  --c-space-5: 12px;
+  --c-space-6: 16px;
+  --c-space-7: 24px;
+  --c-space-8: 28px;
+
+  /* Control heights. Coach and player are two densities of one component set,
+     never two designs — see --c-density below. */
+  --c-h-pill: 34px;
+  --c-h-control: 40px;
+  --c-h-touch: 44px;
+  --c-h-primary-player: 46px;
+  --c-h-subnav-row: 38px;
+  --c-h-nav-row: 42px;
+  --c-h-accordion: 52px;
+  --c-h-row: 54px;
+  --c-h-row-dense: 48px;
+
+  /* --- Motion ------------------------------------------------------------ */
+  /* Nothing animates position or size on hover, and nothing transforms on
+     press. Hover and border changes only. */
+  --c-t-hover: 140ms ease;
+  --c-t-fade: 120ms ease;
+  --c-t-expand: 200ms ease;
+  --c-t-spin: 700ms linear;
+
+  /* --- Type -------------------------------------------------------------- */
+  --c-font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+
+  --c-size-page-title: 40px;
+  --c-size-screen-title: 26px;
+  --c-size-card-heading: 18px;
+  --c-size-accordion: 16px;
+  --c-size-body: 15px;
+  --c-size-secondary: 14px;
+  --c-size-meta: 13px;
+  --c-size-group: 12px;
+
+  /* --- Field widths (Rule 05) -------------------------------------------- */
+  /* A field is as wide as its content. A bare width:100% is a bug — only
+     notes and search get it, and they have their own token so the exception
+     is written down rather than remembered. */
+  --c-w-time: min(7ch, 100%);
+  --c-w-price: min(9ch, 100%);
+  --c-w-date: min(16ch, 100%);
+  --c-w-name: min(26ch, 100%);
+  --c-w-email: min(36ch, 100%);
+  --c-w-prose: 100%;
+}
+
+/* --- Dark, trigger one: the coach app's explicit toggle --------------------
+ * A saved preference, because the coach is on their own machine all day and
+ * chose it. */
+.app-shell.theme-dark,
+.login-shell.theme-dark {
+  --c-page: var(--dark-page);
+  --c-surface: var(--dark-surface);
+  --c-surface-soft: var(--dark-surface-soft);
+  --c-border: var(--dark-border);
+  --c-border-soft: var(--dark-border-soft);
+  --c-text: var(--dark-text);
+  --c-text-body: var(--dark-text-body);
+  --c-text-soft: var(--dark-text-soft);
+  --c-muted: var(--dark-muted);
+  --c-hover: var(--dark-hover);
+  --c-active: var(--dark-active);
+  --c-accent: var(--dark-accent);
+  --c-accent-text: var(--dark-accent-text);
+  --c-danger: var(--dark-danger);
+  --c-error-text: var(--dark-error-text);
+  --c-success-text: var(--dark-success-text);
+  --c-pencil: var(--dark-pencil);
+  --c-pencil-hover: var(--dark-pencil-hover);
+}
+
+/* --- Dark, trigger two: the player's own device setting --------------------
+ * Deliberately NOT the same mechanism. A client opens the portal once on a
+ * phone we know nothing about, so the reader's OS preference decides — not a
+ * setting saved on somebody else's device. Same values, different question. */
+@media (prefers-color-scheme: dark) {
+  .player-terminal,
+  .player-portal {
+    --c-page: var(--dark-page);
+    --c-surface: var(--dark-surface);
+    --c-surface-soft: var(--dark-surface-soft);
+    --c-border: var(--dark-border);
+    --c-border-soft: var(--dark-border-soft);
+    --c-text: var(--dark-text);
+    --c-text-body: var(--dark-text-body);
+    --c-text-soft: var(--dark-text-soft);
+    --c-muted: var(--dark-muted);
+    --c-hover: var(--dark-hover);
+    --c-active: var(--dark-active);
+    --c-accent: var(--dark-accent);
+    --c-accent-text: var(--dark-accent-text);
+    --c-danger: var(--dark-danger);
+    --c-error-text: var(--dark-error-text);
+    --c-success-text: var(--dark-success-text);
+    --c-pencil: var(--dark-pencil);
+    --c-pencil-hover: var(--dark-pencil-hover);
+  }
+}
+
+/* --- Density ---------------------------------------------------------------
+ * Two densities of one component set. Coach is compact because it is used all
+ * day with a mouse; player is roomier because it is used on a phone with a
+ * thumb. The embed booking widget is the player density with the chrome
+ * removed — a customer is a customer whether the page is ours or not.
+ *
+ * Consumers read --c-control-h and --c-row-h, never the raw heights. */
+.app-shell,
+.login-shell {
+  --c-control-h: var(--c-h-control);
+  --c-row-h: var(--c-h-row);
+  --c-gutter: var(--c-space-5);
+  --c-card-pad: var(--c-space-6);
+}
+
+.player-terminal,
+.player-portal,
+.app-shell.embed-mode {
+  --c-control-h: var(--c-h-touch);
+  --c-row-h: var(--c-h-touch);
+  --c-gutter: var(--c-space-6);
+  --c-card-pad: var(--c-space-7);
+}

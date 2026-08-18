@@ -4289,21 +4289,28 @@ button {
 
 .app-shell,
 .login-shell {
-  --coach-neutral: #ffffff;
-  --page: #f3f5ef;
-  --panel: #ffffff;
-  --panel-soft: #f8faf4;
+  /* Compatibility layer. These names are what the rest of this stylesheet
+     was written against; the values now come from tokens.css, so a colour is
+     defined once and the four old systems converge without a rewrite.
+     New rules should read --c-* directly and let this list shrink. */
+  --coach-neutral: var(--c-surface);
+  --page: var(--c-page);
+  --panel: var(--c-surface);
+  --panel-soft: var(--c-surface-soft);
   --panel-glass: rgba(255, 255, 255, 0.86);
-  --text: #111612;
-  --heading: #07100a;
-  --muted: #6d746c;
-  --quiet: #878d84;
-  --border: #dfe5d8;
-  --border-strong: #bfcbbd;
-  --primary: #06100a;
+  --text: var(--c-text-body);
+  --heading: var(--c-text);
+  /* --muted and --quiet were two greys a shade apart. One palette means one
+     grey: both resolve to --c-muted, and anywhere that genuinely needed the
+     lighter of the two should say so with opacity rather than a fifth grey. */
+  --muted: var(--c-muted);
+  --quiet: var(--c-muted);
+  --border: var(--c-border);
+  --border-strong: var(--c-border);
+  --primary: var(--c-accent);
   --primary-soft: #142019;
-  --primary-text: #f7fff9;
-  --danger: #b52f1f;
+  --primary-text: var(--c-accent-text);
+  --danger: var(--c-danger);
   --danger-soft: #fff1ed;
   --success-soft: #eaf8ed;
   --grid-bg: #eef1ea;
@@ -4349,20 +4356,13 @@ button {
 
 .app-shell.theme-dark,
 .login-shell.theme-dark {
-  --page: #050806;
-  --panel: #0a100c;
-  --panel-soft: #101813;
+  /* The palette half of this block is gone, not moved: .theme-dark now swaps
+     --c-* in tokens.css, and every name above follows on its own. What is
+     left is only what dark genuinely needs beyond a different palette —
+     shadows that have to be heavier, gradients, and the lesson-colour
+     fallbacks that read as holes rather than cards against near-black. */
   --panel-glass: rgba(9, 17, 12, 0.9);
-  --text: #f7fff9;
-  --heading: #ffffff;
-  --muted: rgba(239, 255, 244, 0.64);
-  --quiet: rgba(239, 255, 244, 0.42);
-  --border: rgba(255, 255, 255, 0.12);
-  --border-strong: rgba(31, 211, 109, 0.35);
-  --primary: #07100a;
   --primary-soft: #101b14;
-  --primary-text: #f7fff9;
-  --danger: #ff7d6f;
   --danger-soft: rgba(255, 98, 80, 0.13);
   --success-soft: rgba(31, 211, 109, 0.08);
   --grid-bg: #0d140f;
