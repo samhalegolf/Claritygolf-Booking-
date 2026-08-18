@@ -121,6 +121,40 @@ test("both dark triggers map the same set of tokens", () => {
   assert.deepEqual(missing, [], missing.join("\n  "));
 });
 
+/**
+ * Every dedicated API function is excluded from the /api/* wildcard.
+ *
+ * booking-api.mts owns /api/* and lists the routes it must not swallow. A
+ * function added without its exclusion still deploys, still typechecks, and
+ * still 404s at runtime with "Route not found" from a completely different
+ * file — which is exactly what happened to /api/integration-setup.
+ */
+test("every dedicated /api route is excluded from the wildcard", () => {
+  const fnDir = path.join(SRC, "..", "netlify", "functions");
+  const wildcard = readFileSync(path.join(fnDir, "booking-api.mts"), "utf8");
+  // Only what is inside excludedPath[]. Reading every "/api/..." string in the
+  // file also picks up the wildcard's own path: "/api/*", which collapses to
+  // "/api" and then makes every route look covered by the prefix check below.
+  // The first version of this test did that and passed while the bug was live.
+  const block = wildcard.slice(wildcard.indexOf("excludedPath"), wildcard.indexOf("],", wildcard.indexOf("excludedPath")));
+  const excluded = new Set(
+    [...block.matchAll(/"(\/api\/[^"]+)"/g)].map((m) => m[1].replace(/\/\*$/, "")),
+  );
+  assert.ok(excluded.size > 20, "excludedPath list not found — has booking-api.mts been restructured?");
+  const missing: string[] = [];
+  for (const entry of readdirSync(fnDir)) {
+    if (!entry.endsWith(".mts") || entry === "booking-api.mts" || entry.endsWith(".test.mts")) continue;
+    const text = readFileSync(path.join(fnDir, entry), "utf8");
+    for (const match of text.matchAll(/path:\s*"(\/api\/[^"]+)"/g)) {
+      const route = match[1].replace(/\/\*$/, "");
+      if (route === "/api" || excluded.has(route)) continue;
+      if ([...excluded].some((e) => route.startsWith(`${e}/`))) continue;
+      missing.push(`${entry} owns ${match[1]} but booking-api.mts does not exclude it`);
+    }
+  }
+  assert.deepEqual(missing, [], missing.join("\n  "));
+});
+
 /* --- Ratchets ------------------------------------------------------------ */
 
 /**

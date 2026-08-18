@@ -253,7 +253,11 @@ export default function IntegrationPanel() {
   const purchases = integration?.purchases || [];
   const workspaces = integration?.workspaces || [];
 
-  const providerLabel = setup?.provider?.label || "Integration";
+  // Falls back to a noun that reads correctly inside a sentence. It used to be
+  // "Integration", which turned the API tab's hint into "What we send
+  // Integration" any time the descriptor had not loaded — which is exactly when
+  // somebody is looking at this screen.
+  const providerLabel = setup?.provider?.label || "this connection";
   const words = setup?.provider?.vocabulary || { workspace: "workspace", resource: "resource" };
   const resourceWord = words.resource;
 
@@ -437,7 +441,7 @@ export default function IntegrationPanel() {
       <header className="integration-header">
         <div>
           <span>Connection</span>
-          <h2>{providerLabel}</h2>
+          <h2>{setup?.provider?.label || "Not connected"}</h2>
           <p>{TAB_HINTS[tab]}</p>
         </div>
         <strong className={attention ? "needs-attention" : ""}>{attention ? "Needs attention" : "Ready"}</strong>

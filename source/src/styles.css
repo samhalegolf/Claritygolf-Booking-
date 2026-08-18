@@ -456,6 +456,11 @@ button {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   align-items: start;
+  /* start, not the default stretch. The pane is a grid item stretched to the
+     height of the page card, so any space left over was being handed to the
+     rows — which put a 130px hole under every collapsed group. align-items
+     stops the *item* stretching; only align-content stops the *row*. */
+  align-content: start;
   gap: 14px;
   /* The pane, per the handoff's worked screen. Padding here rather than on the
      panels so nothing inside the card touches its edge. */
@@ -11129,6 +11134,14 @@ button {
 .settings-group {
   padding: 0;
   overflow: hidden;
+  /* The show rules force display:grid on every panel, and several cards
+     (.notification-card, .brand-vein-card) carry a gap meant for their own
+     contents. With those contents now inside the body, that gap landed between
+     the header and a collapsed wrapper — so a closed Theme was 12px taller
+     than a closed Locations for no visible reason. The contents keep their
+     spacing on .settings-group-body below. */
+  gap: 0;
+  grid-column: 1 / -1;
 }
 
 .settings-group-header {
@@ -11195,6 +11208,9 @@ button {
 }
 
 .settings-group.is-open .settings-group-body {
+  display: grid;
+  align-content: start;
+  gap: var(--c-space-5);
   border-top: 1px solid var(--c-border-soft);
   padding: var(--c-space-6);
 }
