@@ -7,57 +7,46 @@
  * booking cards. */
 .player-terminal,
 .player-portal {
-  --pt-page: #eef0ea;
-  --pt-surface: #ffffff;
-  --pt-surface-soft: #fbfbf8;
-  --pt-border: #deded8;
-  --pt-border-soft: #ecebe5;
-  --pt-text: #171717;
-  --pt-text-body: #33312c;
-  --pt-text-soft: #57544d;
-  --pt-muted: #77746d;
-  --pt-hover: #f4f3ef;
-  --pt-active: #f1f0ec;
-  --pt-accent: #171717;
-  --pt-accent-text: #ffffff;
+  /* These values became the global palette. They now come back from
+     tokens.css rather than being declared here, so the portal and the coach
+     app cannot drift apart again. */
+  --pt-page: var(--c-page);
+  --pt-surface: var(--c-surface);
+  --pt-surface-soft: var(--c-surface-soft);
+  --pt-border: var(--c-border);
+  --pt-border-soft: var(--c-border-soft);
+  --pt-text: var(--c-text);
+  --pt-text-body: var(--c-text-body);
+  --pt-text-soft: var(--c-text-soft);
+  --pt-muted: var(--c-muted);
+  --pt-hover: var(--c-hover);
+  --pt-active: var(--c-active);
+  --pt-accent: var(--c-accent);
+  --pt-accent-text: var(--c-accent-text);
+  --pt-error-text: var(--c-error-text);
+  /* Rule 09: feedback is one line of coloured text, not a box. These two are
+     the box — kept only until the surfaces reading them are converted, and
+     they should go with it. */
   --pt-error-border: #e4b4b4;
   --pt-error-bg: #fff4f4;
-  --pt-error-text: #6f1d1d;
 }
 
-@media (prefers-color-scheme: dark) {
-  .player-terminal,
-  .player-portal {
-    --pt-page: #0b0d0a;
-    --pt-surface: #141712;
-    --pt-surface-soft: #1a1e18;
-    --pt-border: rgba(244, 247, 242, 0.14);
-    --pt-border-soft: rgba(244, 247, 242, 0.09);
-    --pt-text: #f4f7f2;
-    --pt-text-body: rgba(244, 247, 242, 0.88);
-    --pt-text-soft: rgba(244, 247, 242, 0.76);
-    --pt-muted: rgba(244, 247, 242, 0.56);
-    --pt-hover: rgba(244, 247, 242, 0.08);
-    --pt-active: rgba(244, 247, 242, 0.13);
-    /* Inverted: on a dark card the filled button is the light one. */
-    --pt-accent: #f0f3ee;
-    --pt-accent-text: #12140f;
-    --pt-error-border: rgba(255, 138, 138, 0.42);
-    --pt-error-bg: rgba(94, 26, 26, 0.34);
-    --pt-error-text: #ffd9d9;
-  }
-}
+/* Dark lives in tokens.css now, on the same selectors and by the same rule:
+ * the reader's OS preference, never a setting saved on somebody else's
+ * device. Deleted here rather than left as a duplicate. */
 
 /* The terminal fills the page, so the document behind it has to agree --
-   otherwise overscrolling on a phone flashes the light default through. */
+   otherwise overscrolling on a phone flashes the light default through.
+   This one reads --dark-page rather than --c-page because it sits on :root,
+   outside the .player-terminal selector the dark swap applies to. */
 :root:has(.player-terminal) {
   color-scheme: light dark;
-  background: #eef0ea;
+  background: var(--c-page);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:has(.player-terminal) {
-    background: #0b0d0a;
+    background: var(--dark-page);
   }
 }
 

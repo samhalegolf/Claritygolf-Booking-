@@ -26,10 +26,16 @@
   display: block;
 }
 
+/* Rule 08: one border around the list, hairlines between. Was a 10px-gapped
+   stack of rounded cards -- which is how a browsing list of people ends up
+   reading as a pile of unrelated things. */
 .player-profiles-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  overflow: hidden;
 }
 
 .player-profile-entry {
@@ -41,31 +47,35 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: var(--c-h-row);
   padding: 12px 14px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border-bottom: 1px solid var(--c-border-soft);
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: background var(--c-t-hover);
 }
 
+.player-profile-card:last-child {
+  border-bottom: 0;
+}
+
+/* Rule 11: nothing animates position or size on hover. The old rule faded a
+   shadow in, which nudged the rows below it. */
 .player-profile-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+  background: var(--c-hover);
 }
 
+/* Selected, not "outlined in blue". A row has no border to colour any more,
+   so the state is carried by the tint plus a left bar -- which also survives
+   being read by someone who cannot separate the two by hue. */
 .player-profile-card.active {
-  border-color: rgba(25, 118, 210, 0.45);
-  background: rgba(25, 118, 210, 0.06);
+  background: var(--c-active);
+  box-shadow: inset 3px 0 0 var(--c-accent);
 }
 
+/* The expanded row keeps the hairline every other row has -- the panel below
+   is what says it is open, not a change of border colour. */
 .player-profile-entry.is-expanded .player-profile-card {
-  border-bottom-color: rgba(25, 118, 210, 0.12);
-  border-radius: 12px 12px 0 0;
-}
-
-.player-profile-entry.is-collapsed .player-profile-card {
-  border-radius: 12px;
+  background: var(--c-active);
 }
 
 .player-profile-avatar {
@@ -226,7 +236,10 @@
 
 .player-video-list {
   display: grid;
-  gap: 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  overflow: hidden;
 }
 
 .player-video-card {
@@ -235,8 +248,16 @@
   align-items: center;
   gap: 12px;
   padding: 12px;
-  border: 1px solid var(--border);
-  background: var(--panel);
+  border-bottom: 1px solid var(--c-border-soft);
+  transition: background var(--c-t-hover);
+}
+
+.player-video-card:last-child {
+  border-bottom: 0;
+}
+
+.player-video-card:hover {
+  background: var(--c-hover);
 }
 
 .player-video-card.is-legacy {

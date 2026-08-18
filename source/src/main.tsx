@@ -6,7 +6,14 @@ import { isBookingEmbedMode, isPlayerBookingMode } from "./modules/shared/bookin
 import { installOptixBookingFeedback } from "./optix-booking-feedback";
 import { installOptixBookingMutationSync } from "./optix-booking-mutation-sync";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
+import { installBoxAudit } from "./lib/boxAudit";
+// Tokens first: styles.css and every module stylesheet read --c-*.
+import "./tokens.css";
 import "./styles.css";
+
+// The nesting law is a property of the rendered page, not the stylesheet, so
+// it is checked in the browser rather than by uiRules.test.ts. Dev only.
+installBoxAudit();
 
 // Both shells are lazy so a player never downloads the coach workspace, and a
 // visitor at the login screen downloads neither. This is why the login form

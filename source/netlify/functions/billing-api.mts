@@ -879,7 +879,7 @@ function invoiceRowToApi(row: Record<string, unknown>, items: Array<Record<strin
 }
 
 // The client a transaction belongs to, resolved by email alone — the same rule
-// the Optix import uses for inbound lessons (see _shared/optix-db.mts): an
+// the Optix import uses for inbound lessons (see _shared/integrations/db.mts): an
 // email that matches exactly one person links, anything less certain stays
 // unlinked. Names are never matched — two clients called "John Smith" must not
 // share a transaction history. A miss is recoverable (the row still shows the

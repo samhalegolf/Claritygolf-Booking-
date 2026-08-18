@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyPassPurchase, isOptixPurchaseEvent, normalizeOptixPurchaseEvent } from "./optix-passes.mts";
-import { amountInCents } from "./optix-payload.mts";
+import { classifyPassPurchase } from "./purchases.mts";
+import { normalizeOptixPurchase, optixEventKind } from "./providers/optix.mts";
+import { amountInCents } from "./payload.mts";
 
 // A real new_sale, verbatim: Sam's test purchase of a lesson pass on
 // 18 Aug 2026. This replaced the fixture built from Optix's docs — the docs
@@ -73,22 +74,23 @@ const newPlanSubscription = {
 };
 
 test("only the events that describe a purchase are treated as purchases", () => {
-  assert.equal(isOptixPurchaseEvent("new_sale"), true);
-  assert.equal(isOptixPurchaseEvent("new_plan_subscription"), true);
+  const kindOf = (event: string) => optixEventKind({ event });
+  assert.equal(kindOf("new_sale"), "purchase.sale");
+  assert.equal(kindOf("new_plan_subscription"), "purchase.subscription");
   // invoice_paid settles an invoice somewhere in Optix; with no invoice_id on
   // a sale it can never be tied to one, so it is not a purchase event and is
   // left to fall through as unsupported.
-  assert.equal(isOptixPurchaseEvent("invoice_paid"), false);
+  assert.equal(kindOf("invoice_paid"), "unsupported");
   // Bookings keep going down the booking path.
-  assert.equal(isOptixPurchaseEvent("new_member_booking"), false);
+  assert.equal(kindOf("new_member_booking"), "booking.created");
   // A modification is neither.
-  assert.equal(isOptixPurchaseEvent("invoice_updated"), false);
-  assert.equal(isOptixPurchaseEvent(""), false);
+  assert.equal(kindOf("invoice_updated"), "unsupported");
+  assert.equal(kindOf(""), "unsupported");
 });
 
 test("a real product sale is normalised from its real field names", () => {
-  const purchase = normalizeOptixPurchaseEvent(newSale);
-  assert.equal(purchase.eventType, "new_sale");
+  const purchase = normalizeOptixPurchase(newSale);
+  assert.equal(purchase.rawEventType, "new_sale");
   // product_sale_id identifies the sale; number is the receipt the buyer sees.
   assert.equal(purchase.purchaseId, "400324");
   assert.equal(purchase.saleNumber, "00652");
@@ -106,13 +108,13 @@ test("a product sale carries no email and no currency", () => {
   // The limitation, asserted so it is not mistaken for a bug later: Optix
   // identifies the buyer of a sale by display name only, so a sale cannot be
   // auto-linked to a Clarity client.
-  assert.equal(normalizeOptixPurchaseEvent(newSale).memberEmail, "");
-  assert.equal(normalizeOptixPurchaseEvent(newSale).currency, "");
+  assert.equal(normalizeOptixPurchase(newSale).memberEmail, "");
+  assert.equal(normalizeOptixPurchase(newSale).currency, "");
 });
 
 test("a plan subscription is normalised, including its subscriber", () => {
-  const purchase = normalizeOptixPurchaseEvent(newPlanSubscription);
-  assert.equal(purchase.eventType, "new_plan_subscription");
+  const purchase = normalizeOptixPurchase(newPlanSubscription);
+  assert.equal(purchase.rawEventType, "new_plan_subscription");
   assert.equal(purchase.purchaseId, "29191");
   // The template is the product; "name" is this subscriber's instance of it.
   assert.equal(purchase.itemName, "Gold Membership");
@@ -137,39 +139,39 @@ test("money is read whether it arrives in major or minor units", () => {
 test("the real lesson package classifies as a pass", () => {
   // The word that settled the classifier: Sam's passes say "Lesson", not
   // "Pass" — "30 Minute Golf Lesson Package" was filed unknown until this.
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent(newSale)), "pass");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchase(newSale)), "pass");
 });
 
 test("a sale naming a Pass still classifies as a pass", () => {
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "10 Lesson Pass" })), "pass");
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "5x Range Pass" })), "pass");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchase({ event: "new_sale", product: "10 Lesson Pass" })), "pass");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchase({ event: "new_sale", product: "5x Range Pass" })), "pass");
   // Case does not matter, and the wording may only be in the invoice line.
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "Ten pack", invoice_item_name: "Sale of Ten pack (pass)" })), "pass");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchase({ event: "new_sale", product: "Ten pack", invoice_item_name: "Sale of Ten pack (pass)" })), "pass");
 });
 
 test("a bay top-up is a sale but not a lesson", () => {
   // Real payload: says neither "lesson" nor "pass", so it stays unknown —
   // visible in the POS list as an Optix sale, just not tagged as a lesson.
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent(extraHour)), "unknown");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchase(extraHour)), "unknown");
 });
 
 test("a plan is never a Pass, whatever it is called", () => {
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent(newPlanSubscription)), "not_pass");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchase(newPlanSubscription)), "not_pass");
   // A plan recurs by definition, so even this wording cannot make it a Pass.
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_plan_subscription", plan_template_name: "Coaching Pass" })), "not_pass");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchase({ event: "new_plan_subscription", plan_template_name: "Coaching Pass" })), "not_pass");
 });
 
 test("a sale we cannot call is kept as unknown, never silently dropped", () => {
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "10 Session Bundle" })), "unknown");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchase({ event: "new_sale", product: "10 Session Bundle" })), "unknown");
 });
 
 test("'pass' or 'lesson' inside another word does not count", () => {
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "Compass Golf Club" })), "unknown");
-  assert.equal(classifyPassPurchase(normalizeOptixPurchaseEvent({ event: "new_sale", product: "Passenger seat hire" })), "unknown");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchase({ event: "new_sale", product: "Compass Golf Club" })), "unknown");
+  assert.equal(classifyPassPurchase(normalizeOptixPurchase({ event: "new_sale", product: "Passenger seat hire" })), "unknown");
 });
 
 test("a sale with no usable time still records, defaulting at the caller", () => {
-  const purchase = normalizeOptixPurchaseEvent({ event: "new_sale", product: "Pass" });
+  const purchase = normalizeOptixPurchase({ event: "new_sale", product: "Pass" });
   assert.equal(purchase.purchasedAt, "");
   assert.equal(purchase.amountCents, null);
   assert.equal(purchase.quantity, null);

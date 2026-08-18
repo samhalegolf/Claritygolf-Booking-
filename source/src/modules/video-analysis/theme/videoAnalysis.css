@@ -1093,7 +1093,9 @@
   position: relative;
   overflow: visible;
   cursor: zoom-in;
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  /* Rule 11: no transform on hover. Nothing sets one on this button; the
+     hover state is the border and the shadow. */
+  transition: border-color 160ms ease, box-shadow 160ms ease;
   border: 1px solid rgba(125, 149, 196, 0.2);
 }
 
