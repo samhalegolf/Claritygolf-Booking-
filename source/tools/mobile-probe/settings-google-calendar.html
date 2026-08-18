@@ -1,0 +1,61 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="../../src/tokens.css">
+<link rel="stylesheet" href="../../src/styles.css">
+</head>
+<body>
+<div id="root"><div class="app-shell">
+<aside class="sidebar"><div class="brand"><div class="brand-mark">C</div><div><strong>Clarity Golf</strong><span>Booking</span></div></div></aside>
+<main class="main-panel">
+<section class="module-page settings-page">
+  <nav class="settings-subnav" aria-label="Settings sections">
+    <span class="settings-subnav-heading">Settings</span>
+    <button>Business</button><button>Booking</button><button>Lesson types</button>
+    <button>Notifications</button><button>Account</button><button class="active">Integrations</button><button>Admin</button>
+  </nav>
+  <div class="settings-grid settings-tab-developer">
+
+    <article class="data-card settings-section settings-developer settings-group is-open sync-card">
+      <button class="settings-group-header" aria-expanded="true" type="button"><span>Google Calendar sync</span><span class="settings-group-caret">▾</span></button>
+      <div class="settings-group-wrap"><div class="settings-group-body">
+
+        <div class="sync-status offline">
+          <span>Direct Google API</span>
+          <strong>Needs OAuth credentials</strong>
+          <em>Add Google OAuth credentials in Netlify.</em>
+        </div>
+
+        <details class="settings-subsection" open>
+          <summary class="settings-subsection-title"><svg width="18" height="18"></svg><div><span>Direct API sync</span><strong>primary</strong></div></summary>
+          <label class="sync-field"><span>Google calendar ID</span><input value="primary" placeholder="primary or calendar email"></label>
+          <div class="sync-meta"><span>Sync mode</span><strong>Automatic after every change</strong></div>
+          <div class="sync-meta"><span>Redirect URI</span><code>Set GOOGLE_CALENDAR_REDIRECT_URI or use /api/google-calendar/callback</code></div>
+          <div class="sync-actions"><button class="primary-button" type="button">Connect Google</button></div>
+        </details>
+
+        <details class="settings-subsection gcal-debug" open>
+          <summary class="settings-subsection-title"><svg width="18" height="18"></svg><div><span>Sync debug window</span><strong>Google failure codes, payloads and triggers</strong></div></summary>
+          <p class="gcal-debug-intro">Every Google Calendar sync attempt is recorded here — what triggered it, the exact event payload sent to the Calendar API, and the failure code Google returned.</p>
+          <div class="gcal-debug-toolbar"><button class="outline-button" type="button">Refresh</button><button class="outline-button" type="button">Copy log</button><button class="outline-button" type="button">Clear</button></div>
+          <div class="gcal-debug-entry"><button class="gcal-debug-entry-head"><span class="gcal-debug-badge is-failed">failed</span><span class="gcal-debug-entry-main"><strong>Booking created</strong><em>18 Aug, 8:58 am · 2 hours ago · 812ms</em></span><span class="gcal-debug-entry-result">calendar_insert_failed_precondition</span></button><pre class="gcal-debug-pre">{"summary":"Lesson with Jean-Baptiste","start":{"dateTime":"2026-08-18T09:00:00+12:00"}}</pre></div>
+        </details>
+
+      </div></div>
+    </article>
+
+    <article class="data-card settings-section settings-developer settings-group is-open">
+      <button class="settings-group-header" aria-expanded="true" type="button"><span>Video storage</span><span class="settings-group-caret">▾</span></button>
+      <div class="settings-group-wrap"><div class="settings-group-body">
+        <div class="video-storage-grid">
+          <div class="storage-card"><h3>My Library</h3><p>Recorded lessons kept on this device until they are pushed to the cloud.</p></div>
+          <div class="storage-card"><h3>Clarity Cloud</h3><p>Google Drive folder clarity-lessons/2026-08.</p></div>
+        </div>
+        <div class="storage-diagnostics-grid"><div class="storage-diagnostics-group"><h4>Clarity Cloud</h4><div class="sync-meta"><span>Folder id</span><strong>1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789</strong></div><div class="sync-meta"><span>Safe error code</span><strong>clarity_cloud_refresh_token_invalid</strong></div></div></div>
+      </div></div>
+    </article>
+
+  </div>
+</section>
+</main></div></div>
+</body></html>

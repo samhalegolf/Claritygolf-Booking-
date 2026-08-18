@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="../../src/tokens.css"><link rel="stylesheet" href="../../src/styles.css"></head>
+<body><div id="root"><div class="app-shell">
+<aside class="sidebar"><div class="brand"><div class="brand-mark">C</div><div><strong>Clarity Golf</strong><span>Booking</span></div></div></aside>
+<main class="main-panel"><section class="module-page settings-page">
+<nav class="settings-subnav"><span class="settings-subnav-heading">Settings</span><button class="active">Integrations</button></nav>
+<div class="settings-grid settings-tab-developer">
+
+  <article class="data-card settings-section settings-developer integration-panel">
+    <div class="integration-breadcrumb"><button class="text-button" type="button">← Integrations</button><strong>Optix</strong></div>
+    <header class="integration-header"><div><span>Connections</span><h2>Optix</h2><p>Bay and lesson bookings, and the passes sold against them.</p></div></header>
+    <div class="integration-tabs"><button class="active" type="button">Webhooks</button><button type="button">API</button><button type="button">Resources</button><button type="button">Events</button></div>
+    <div class="integration-body">
+      <div class="integration-directions"><section>
+        <label class="integration-credential"><span class="credential-label">Webhook URL<button class="credential-copy" type="button">Copy</button></span><input readonly value="https://booking.claritygolf.app/api/optix-webhook"></label>
+        <label class="integration-credential missing"><span class="credential-label">App secret<code>OPTIX_APP_SECRET</code></span><input readonly value="Not set"><strong class="credential-warning">This value has a space or newline around it. That is enough on its own to make every request fail — re-paste it.</strong><small>Optix › Apps › your app › Secret. Signs every delivery.</small></label>
+      </section></div>
+
+      <div class="integration-stat-grid"><div><span>Events stored</span><strong>1,284</strong></div><div><span>Unprocessed</span><strong>9</strong></div><div><span>Last delivery</span><strong>14 Aug, 6:12 pm</strong></div></div>
+
+      <div class="integration-resource-profile">
+        <div class="profile-title"><strong>Default bays</strong><select><option>Priority order</option></select><button class="text-button danger" type="button">Delete</button></div>
+        <div class="profile-columns">
+          <div><h4>Priority</h4><div class="resource-list">
+            <div class="resource-row"><span>1</span><strong>Simulator Bay 3 — Takapuna Driving Range</strong><button type="button">↑</button><button type="button">↓</button><button type="button">Remove</button></div>
+          </div><div class="removed-resources"><button type="button">+ Simulator Bay 4</button></div></div>
+          <div><h4>Services</h4><div class="resource-services"><label class="toggle"><input type="checkbox"><span>60 minute lesson</span></label></div></div>
+        </div>
+      </div>
+
+      <ul class="integration-events">
+        <details class="integration-event"><summary><strong>new_member_booking</strong><span>jean-baptiste.delacroix@example.com</span><time>18/08/2026, 8:58:14 am</time><em>processed</em></summary>
+          <div class="event-facts"><span>Workspace <b>637949</b></span><span>Booking ID <b>opx_01J9ZQ4T7N2K</b></span><span>Appointment <b>optix-637949-01J9ZQ4T7N2K</b></span><span>Bay <b>Not booked</b></span></div>
+          <pre>{"event":"new_member_booking","workspace_id":"637949","member":{"email":"jean-baptiste.delacroix@example.com"}}</pre>
+        </details>
+      </ul>
+    </div>
+  </article>
+
+  <article class="data-card settings-section settings-developer settings-group is-open">
+    <button class="settings-group-header" type="button"><span>Availability</span><span class="settings-group-caret">▾</span></button>
+    <div class="settings-group-wrap"><div class="settings-group-body">
+      <div class="availability-row"><span>Monday</span><div><input value="09:00"><input value="17:00"></div></div>
+      <div class="settings-field"><span>Booking page URL</span><input value="https://booking.claritygolf.app/takapuna-golf-academy"></div>
+      <div class="embed-code"><svg width="18" height="18"></svg><code>&lt;iframe src="https://booking.claritygolf.app/takapuna-golf-academy?embed=1" width="100%" height="900"&gt;&lt;/iframe&gt;</code></div>
+      <div class="brand-vein-preview"><div class="brand-vein-swatch"></div><div><strong>Coach primary</strong><span>#27d66f</span></div></div>
+    </div></div>
+  </article>
+
+</div></section></main></div></div></body></html>
