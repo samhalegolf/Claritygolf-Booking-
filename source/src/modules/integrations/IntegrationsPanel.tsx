@@ -27,6 +27,9 @@ type Card = {
   configured: boolean;
   missing: string[];
   needsAuthorisation: boolean;
+  /** OAuth only: who is signed in, and whatever last went wrong. */
+  connectedAs?: string;
+  connectionError?: string;
 };
 
 /** Click-to-connect first, then the rest — easiest effort at the top. */
@@ -42,8 +45,11 @@ const CATEGORY_LABEL: Record<string, string> = {
 };
 
 function statusOf(card: Card) {
+  // A recorded error outranks "configured". An integration that is connected
+  // and failing is the one worth knowing about, and it used to read as fine.
+  if (card.connectionError) return { tone: "bad", label: "Needs attention" };
   if (!card.configured) return { tone: "unset", label: "Not set up" };
-  if (card.needsAuthorisation) return { tone: "ok", label: "Connected" };
+  if (card.needsAuthorisation) return { tone: "ok", label: card.connectedAs ? `Connected · ${card.connectedAs}` : "Connected" };
   return { tone: "ok", label: "Ready" };
 }
 

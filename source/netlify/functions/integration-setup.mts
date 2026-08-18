@@ -3,6 +3,7 @@ import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
 import { allIntegrations, integrationById } from "./_shared/integrations/catalogue.mts";
+import { integrationRequest } from "./_shared/integrations/db.mts";
 import { providerCapabilities } from "./_shared/integrations/registry.mts";
 import type { ConnectionSpec, FieldSpec, IntegrationDescriptor } from "./_shared/integrations/types.mts";
 
@@ -145,6 +146,32 @@ function integrationStatus(descriptor: IntegrationDescriptor) {
   };
 }
 
+/**
+ * Whether an OAuth integration is actually connected.
+ *
+ * Not a question the environment can answer. A client id and secret being set
+ * says the app EXISTS; it says nothing about whether anyone has signed in, and
+ * the two are days or months apart. The truth is a stored refresh token, which
+ * is what the Google Calendar panel has always read — this makes the card agree
+ * with it instead of contradicting it one screen higher.
+ */
+async function oauthState() {
+  const rows = await integrationRequest(
+    "google_provider_connections?select=provider_email,connection_status,granted_scopes_json,last_error_code,last_successful_use_at,revoked_at&order=updated_at.desc&limit=1",
+  ).catch(() => []);
+  const row = (rows || [])[0];
+  if (!row || row.revoked_at) return { connected: false, account: "", scopes: [] as string[], lastUsed: "", error: "" };
+  let scopes: string[] = [];
+  try { scopes = JSON.parse(row.granted_scopes_json || "[]"); } catch { scopes = []; }
+  return {
+    connected: row.connection_status === "connected",
+    account: row.provider_email || "",
+    scopes,
+    lastUsed: row.last_successful_use_at || "",
+    error: row.last_error_code || "",
+  };
+}
+
 function card(descriptor: IntegrationDescriptor) {
   return {
     id: descriptor.id,
@@ -167,7 +194,18 @@ export default async function handler(req: Request) {
   // that are not configured are the "+ New integration" list — four of them are
   // live in the product today and invisible in it.
   if (!id) {
-    return json({ integrations: allIntegrations().map(card) });
+    const cards = allIntegrations().map(card);
+    const oauth = await oauthState();
+    return json({
+      integrations: cards.map((entry) =>
+        // An OAuth integration reports what the token store says, not what the
+        // field scan guessed. Connected wins over "fields missing": you cannot
+        // have signed in without an app to sign into.
+        entry.needsAuthorisation
+          ? { ...entry, configured: oauth.connected || entry.configured, connectedAs: oauth.account, connectionError: oauth.error }
+          : entry,
+      ),
+    });
   }
 
   const descriptor = integrationById(id);
@@ -179,7 +217,12 @@ export default async function handler(req: Request) {
     }, 404);
   }
 
+  const oauth = descriptor.connections.some((connection) => connection.kind === "oauth2")
+    ? await oauthState()
+    : null;
+
   return json({
+    oauth,
     integration: {
       id: descriptor.id,
       label: descriptor.label,
@@ -191,6 +234,7 @@ export default async function handler(req: Request) {
       // outbound and have nothing to say here.
       capabilities: descriptor.category === "bookings" ? providerCapabilities(descriptor.id) : null,
       ...integrationStatus(descriptor),
+      ...(oauth?.connected ? { configured: true } : {}),
     },
     connections: descriptor.connections.map((connection) => ({
       kind: connection.kind,

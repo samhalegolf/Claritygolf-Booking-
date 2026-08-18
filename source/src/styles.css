@@ -11336,3 +11336,7 @@ button {
   line-height: 1.45;
   opacity: 0.72;
 }
+
+.integration-card-dot.is-bad {
+  background: var(--c-danger);
+}
