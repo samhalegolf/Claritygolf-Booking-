@@ -596,6 +596,7 @@ export default function IntegrationPanel() {
                 <div className="profile-columns">
                   <div>
                     <h4>Priority</h4>
+                    <div className="resource-list">
                     {profile.resourceIds.map((id, index) => (
                       <div className="resource-row" key={id}>
                         <span>{index + 1}</span>
@@ -605,6 +606,7 @@ export default function IntegrationPanel() {
                         <button onClick={() => patchProfile(profile.id, { resourceIds: profile.resourceIds.filter((candidate) => candidate !== id) })} type="button">Remove</button>
                       </div>
                     ))}
+                    </div>
                     <div className="removed-resources">
                       {resourceWorkspaces.filter((workspace) => !profile.resourceIds.includes(workspace.id)).map((workspace) => (
                         <button key={workspace.id} onClick={() => patchProfile(profile.id, { resourceIds: [...profile.resourceIds, workspace.id] })} title={workspaceLabel(workspace)} type="button">

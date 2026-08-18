@@ -579,13 +579,23 @@ button {
 .profile-title button:disabled, .resource-row button:disabled { opacity: .35; }
 .profile-columns { display: grid; grid-template-columns: minmax(260px, .9fr) minmax(260px, 1.1fr); gap: 20px; margin-top: 15px; }
 .profile-columns h4 { margin: 0 0 8px; color: #697068; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
-.resource-row { display: grid; grid-template-columns: 24px 1fr auto auto auto; align-items: center; gap: 6px; margin: 5px 0; padding: 7px 8px; border-radius: 8px; background: #f0f3ed; font-size: 12px; }
+/* A priority-ordered list, so it follows Rule 08 like every other list: one
+   container, hairlines between, no chip per row. */
+.resource-list { border: 1px solid var(--c-border); border-radius: var(--c-radius-control); overflow: hidden; }
+.resource-row { display: grid; grid-template-columns: 24px 1fr auto auto auto; align-items: center; gap: 6px; padding: 7px 8px; border-bottom: 1px solid var(--c-border-soft); font-size: 12px; transition: background var(--c-t-hover); }
+.resource-row:last-child { border-bottom: 0; }
+.resource-row:hover { background: var(--c-hover); }
 .removed-resources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .resource-services { display: grid; gap: 6px; }
 .resource-services label { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 7px; background: #f0f3ed; font-size: 12px; }
 
 .integration-feed-toolbar { margin-bottom: 12px; }
-.integration-event { margin: 8px 0; overflow: hidden; border: 1px solid #dde2d8; border-radius: 9px; }
+/* Rule 08. These were mine, three commits ago, and they reproduced the exact
+   pattern this rule exists to stop -- which is the argument for the lint
+   rather than the rule. */
+.integration-event { overflow: hidden; border-bottom: 1px solid var(--c-border-soft); }
+.integration-event:last-of-type { border-bottom: 0; }
+.integration-event summary:hover { background: var(--c-hover); }
 .integration-event summary { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(120px, 1fr) auto auto; gap: 10px; align-items: center; padding: 11px 13px; cursor: pointer; }
 .integration-event summary span, .integration-event summary time { color: #697068; font-size: 11px; }
 .integration-event summary em { font-size: 10px; font-style: normal; font-weight: 900; text-transform: uppercase; }
@@ -594,7 +604,7 @@ button {
 .integration-event > button { margin: 0 13px 13px; }
 .integration-empty { padding: 28px; border: 1px dashed #ccd2c8; border-radius: 9px; color: #697068; text-align: center; }
 .integration-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.integration-stat-grid > div { display: grid; gap: 4px; padding: 15px; border-radius: 9px; background: #f3f5f1; }
+.integration-stat-grid > div { display: grid; gap: 4px; padding: 15px; border-radius: var(--c-radius-control); background: var(--c-surface-soft); }
 .integration-stat-grid span { color: #697068; font-size: 11px; }
 .integration-stat-grid strong { font-size: 22px; }
 .integration-diagnostic-list { margin-top: 16px; }
@@ -1787,17 +1797,31 @@ button {
   gap: 8px;
 }
 
+/* Rule 08: one border around the list, hairlines between the rows. Was a
+   10px-gapped stack of individually bordered cards, which reads as ten things
+   rather than one list of ten. */
 .lesson-notes-list {
   display: grid;
-  gap: 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  overflow: hidden;
 }
 
 .lesson-note-card {
   display: grid;
   gap: 8px;
   padding: 12px;
-  border: 1px solid var(--border);
-  background: var(--panel);
+  border-bottom: 1px solid var(--c-border-soft);
+  transition: background var(--c-t-hover);
+}
+
+.lesson-note-card:last-child {
+  border-bottom: 0;
+}
+
+.lesson-note-card:hover {
+  background: var(--c-hover);
 }
 
 .lesson-note-card strong,
@@ -4540,12 +4564,15 @@ button {
   border-radius: 8px;
   background: var(--panel-soft);
   color: var(--text);
+  /* Rule 11: no transform here. Every secondary button in the coach app used
+     to transition it, which is the twitch under the pointer the rules call
+     out — and nothing ever set a transform on these to begin with, so the
+     declaration was paying for an animation that never ran. */
   transition:
-    transform 140ms ease,
-    border-color 140ms ease,
-    background 140ms ease,
-    color 140ms ease,
-    box-shadow 140ms ease;
+    border-color var(--c-t-hover),
+    background var(--c-t-hover),
+    color var(--c-t-hover),
+    box-shadow var(--c-t-hover);
 }
 
 .icon-button:hover,
@@ -7560,12 +7587,19 @@ button {
   justify-content: flex-end;
 }
 
+/* Rule 08 again: three pick-one-of-these lists that were stacks of separately
+   boxed buttons. A row is still a button -- it is genuinely pressable -- but
+   pressable is carried by the hover tint and the cursor, not by giving every
+   row its own outline. */
 .invoice-customer-results,
 .invoice-customer-settled,
 .invoice-option-list,
 .completed-booking-list {
   display: grid;
-  gap: 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  overflow: hidden;
 }
 
 .invoice-customer-results button,
@@ -7578,25 +7612,31 @@ button {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid #e0e6dc;
-  border-radius: 8px;
-  background: #f8faf6;
-  color: #101510;
+  border: 0;
+  border-bottom: 1px solid var(--c-border-soft);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text);
   text-align: left;
   cursor: pointer;
+  transition: background var(--c-t-hover);
+}
+
+.invoice-customer-results button:last-child,
+.invoice-option-list button:last-child,
+.completed-booking-list button:last-child {
+  border-bottom: 0;
 }
 
 .invoice-customer-results button:hover,
 .invoice-option-list button:hover,
 .completed-booking-list button:hover {
-  border-color: #b8c7b2;
-  background: #f2f6ef;
+  background: var(--c-hover);
 }
 
 /* Completed lesson that belongs to the chosen billing customer: floated to the
    top of the pull list and accented. */
 .completed-booking-list button.for-billing-client {
-  border-color: #7fd6a3;
   background: #f1fbf5;
   box-shadow: inset 3px 0 0 #1fbf6a;
 }
