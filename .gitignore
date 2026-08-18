@@ -22,3 +22,6 @@ source/server/clarity-booking.sqlite
 # build, and git on some setups can't unlink its own index.lock, so stale
 # lock artefacts collect here too. Never commit it.
 _to_delete/
+integration-decoupling.tgz
+apply-integration-decoupling.sh
+_transfer.tgz
