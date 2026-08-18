@@ -510,6 +510,7 @@ button {
 .settings-grid.settings-tab-account > .settings-account,
 .settings-grid.settings-tab-branding > .settings-branding,
 .settings-grid.settings-tab-integrations > .settings-integrations,
+.settings-grid.settings-tab-developer > .settings-developer,
 .settings-grid.settings-tab-data > .settings-data {
   display: grid !important;
 }
@@ -520,6 +521,7 @@ button {
 .settings-experience,
 .settings-branding,
 .settings-integrations,
+.settings-developer,
 .settings-data {
   grid-column: 1 / -1;
 }
@@ -531,13 +533,13 @@ button {
   overflow: hidden;
 }
 
-.optix-native-panel {
+.integration-panel {
   grid-column: 1 / -1;
   padding: 0;
   overflow: hidden;
 }
 
-.optix-native-header {
+.integration-header {
   display: flex;
   justify-content: space-between;
   gap: 20px;
@@ -545,31 +547,31 @@ button {
   background: linear-gradient(120deg, rgba(39, 214, 111, 0.11), transparent 58%);
 }
 
-.optix-native-header span { color: #187c48; font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
-.optix-native-header h2 { margin: 3px 0; font-size: 27px; }
-.optix-native-header p { margin: 0; color: #697068; }
-.optix-native-header > strong { height: max-content; padding: 6px 10px; border-radius: 999px; background: #e2f7e9; color: #17753f; font-size: 11px; }
-.optix-native-header > strong.needs-attention { background: #fde8e8; color: #a53535; }
+.integration-header span { color: #187c48; font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.integration-header h2 { margin: 3px 0; font-size: 27px; }
+.integration-header p { margin: 0; color: #697068; }
+.integration-header > strong { height: max-content; padding: 6px 10px; border-radius: 999px; background: #e2f7e9; color: #17753f; font-size: 11px; }
+.integration-header > strong.needs-attention { background: #fde8e8; color: #a53535; }
 
-.optix-native-tabs { display: flex; gap: 3px; padding: 0 24px; overflow-x: auto; border-bottom: 1px solid #e1e5dc; }
-.optix-native-tabs button { display: flex; align-items: center; gap: 7px; padding: 12px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #656a63; font-weight: 800; cursor: pointer; }
-.optix-native-tabs button.active { border-color: #1eaf60; color: #111; }
-.optix-native-tabs b { min-width: 18px; padding: 2px 5px; border-radius: 999px; background: #e2f7e9; font-size: 10px; }
-.optix-native-body { padding: 22px 24px 24px; }
-.optix-native-note { display: grid; gap: 3px; padding: 13px 15px; margin-bottom: 16px; border-radius: 9px; background: #eef9f1; }
-.optix-native-note span, .optix-resource-heading p, .optix-feed-toolbar p { color: #697068; font-size: 12px; }
-.optix-native-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 13px; }
-.optix-native-grid label { display: grid; gap: 5px; color: #42473f; font-size: 12px; font-weight: 800; }
-.optix-native-grid label.toggle { display: flex; align-items: center; }
-.optix-native-grid input:not([type="checkbox"]), .optix-native-grid select, .profile-title input, .profile-title select { min-height: 39px; padding: 8px 10px; border: 1px solid #d9ded2; border-radius: 8px; background: #fff; color: #20241f; }
-.optix-native-actions { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
-.optix-native-actions button, .optix-resource-heading button, .optix-feed-toolbar button, .optix-native-event > button { padding: 9px 13px; border: 0; border-radius: 8px; background: #102d20; color: #fff; font-weight: 800; cursor: pointer; }
-.optix-native-actions button:disabled { opacity: .5; cursor: not-allowed; }
-.optix-native-error { display: grid; gap: 3px; margin-bottom: 14px; padding: 11px 13px; border-radius: 8px; background: #fdeaea; color: #a43232; font-size: 12px; }
+.integration-tabs { display: flex; gap: 3px; padding: 0 24px; overflow-x: auto; border-bottom: 1px solid #e1e5dc; }
+.integration-tabs button { display: flex; align-items: center; gap: 7px; padding: 12px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #656a63; font-weight: 800; cursor: pointer; }
+.integration-tabs button.active { border-color: #1eaf60; color: #111; }
+.integration-tabs b { min-width: 18px; padding: 2px 5px; border-radius: 999px; background: #e2f7e9; font-size: 10px; }
+.integration-body { padding: 22px 24px 24px; }
+.integration-note { display: grid; gap: 3px; padding: 13px 15px; margin-bottom: 16px; border-radius: 9px; background: #eef9f1; }
+.integration-note span, .integration-resource-heading p, .integration-feed-toolbar p { color: #697068; font-size: 12px; }
+.integration-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 13px; }
+.integration-grid label { display: grid; gap: 5px; color: #42473f; font-size: 12px; font-weight: 800; }
+.integration-grid label.toggle { display: flex; align-items: center; }
+.integration-grid input:not([type="checkbox"]), .integration-grid select, .profile-title input, .profile-title select { min-height: 39px; padding: 8px 10px; border: 1px solid #d9ded2; border-radius: 8px; background: #fff; color: #20241f; }
+.integration-actions { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
+.integration-actions button, .integration-resource-heading button, .integration-feed-toolbar button, .integration-event > button { padding: 9px 13px; border: 0; border-radius: 8px; background: #102d20; color: #fff; font-weight: 800; cursor: pointer; }
+.integration-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.integration-error { display: grid; gap: 3px; margin-bottom: 14px; padding: 11px 13px; border-radius: 8px; background: #fdeaea; color: #a43232; font-size: 12px; }
 
-.optix-resource-heading, .optix-feed-toolbar, .profile-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.optix-resource-heading h3, .optix-resource-heading p, .optix-feed-toolbar h3, .optix-feed-toolbar p { margin: 0; }
-.optix-resource-profile { margin-top: 14px; padding: 15px; border: 1px solid #dde2d8; border-radius: 11px; background: #fbfcfa; }
+.integration-resource-heading, .integration-feed-toolbar, .profile-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.integration-resource-heading h3, .integration-resource-heading p, .integration-feed-toolbar h3, .integration-feed-toolbar p { margin: 0; }
+.integration-resource-profile { margin-top: 14px; padding: 15px; border: 1px solid #dde2d8; border-radius: 11px; background: #fbfcfa; }
 .profile-title { justify-content: flex-start; }
 .profile-title input { flex: 1; min-width: 160px; font-weight: 800; }
 .profile-title button, .resource-row button, .removed-resources button { padding: 7px 9px; border: 1px solid #d9ded2; border-radius: 7px; background: #fff; color: #333; font-weight: 700; cursor: pointer; }
@@ -582,31 +584,31 @@ button {
 .resource-services { display: grid; gap: 6px; }
 .resource-services label { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 7px; background: #f0f3ed; font-size: 12px; }
 
-.optix-feed-toolbar { margin-bottom: 12px; }
-.optix-native-event { margin: 8px 0; overflow: hidden; border: 1px solid #dde2d8; border-radius: 9px; }
-.optix-native-event summary { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(120px, 1fr) auto auto; gap: 10px; align-items: center; padding: 11px 13px; cursor: pointer; }
-.optix-native-event summary span, .optix-native-event summary time { color: #697068; font-size: 11px; }
-.optix-native-event summary em { font-size: 10px; font-style: normal; font-weight: 900; text-transform: uppercase; }
+.integration-feed-toolbar { margin-bottom: 12px; }
+.integration-event { margin: 8px 0; overflow: hidden; border: 1px solid #dde2d8; border-radius: 9px; }
+.integration-event summary { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(120px, 1fr) auto auto; gap: 10px; align-items: center; padding: 11px 13px; cursor: pointer; }
+.integration-event summary span, .integration-event summary time { color: #697068; font-size: 11px; }
+.integration-event summary em { font-size: 10px; font-style: normal; font-weight: 900; text-transform: uppercase; }
 .event-facts { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 13px; background: #f6f8f4; font-size: 11px; }
-.optix-native-event pre { max-height: 360px; margin: 12px 13px; padding: 12px; overflow: auto; border-radius: 8px; background: #0d1711; color: #dce8df; font: 11px/1.5 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
-.optix-native-event > button { margin: 0 13px 13px; }
-.optix-native-empty { padding: 28px; border: 1px dashed #ccd2c8; border-radius: 9px; color: #697068; text-align: center; }
-.optix-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.optix-stat-grid > div { display: grid; gap: 4px; padding: 15px; border-radius: 9px; background: #f3f5f1; }
-.optix-stat-grid span { color: #697068; font-size: 11px; }
-.optix-stat-grid strong { font-size: 22px; }
-.optix-diagnostic-list { margin-top: 16px; }
-.optix-diagnostic-list p { display: flex; justify-content: space-between; gap: 14px; margin: 0; padding: 10px 0; border-bottom: 1px solid #e1e5dc; font-size: 12px; }
-.optix-diagnostic-list code { max-width: 65%; text-align: right; word-break: break-word; }
+.integration-event pre { max-height: 360px; margin: 12px 13px; padding: 12px; overflow: auto; border-radius: 8px; background: #0d1711; color: #dce8df; font: 11px/1.5 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
+.integration-event > button { margin: 0 13px 13px; }
+.integration-empty { padding: 28px; border: 1px dashed #ccd2c8; border-radius: 9px; color: #697068; text-align: center; }
+.integration-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.integration-stat-grid > div { display: grid; gap: 4px; padding: 15px; border-radius: 9px; background: #f3f5f1; }
+.integration-stat-grid span { color: #697068; font-size: 11px; }
+.integration-stat-grid strong { font-size: 22px; }
+.integration-diagnostic-list { margin-top: 16px; }
+.integration-diagnostic-list p { display: flex; justify-content: space-between; gap: 14px; margin: 0; padding: 10px 0; border-bottom: 1px solid #e1e5dc; font-size: 12px; }
+.integration-diagnostic-list code { max-width: 65%; text-align: right; word-break: break-word; }
 
 @media (max-width: 720px) {
-  .optix-native-header, .optix-native-body { padding-left: 16px; padding-right: 16px; }
-  .optix-native-tabs { padding: 0 8px; }
+  .integration-header, .integration-body { padding-left: 16px; padding-right: 16px; }
+  .integration-tabs { padding: 0 8px; }
   .profile-columns { grid-template-columns: 1fr; }
   .profile-title { align-items: stretch; flex-direction: column; }
-  .optix-native-event summary { grid-template-columns: 1fr auto; }
-  .optix-native-event summary span, .optix-native-event summary time { display: none; }
-  .optix-stat-grid { grid-template-columns: repeat(2, 1fr); }
+  .integration-event summary { grid-template-columns: 1fr auto; }
+  .integration-event summary span, .integration-event summary time { display: none; }
+  .integration-stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 .booking-page-settings {
@@ -10622,4 +10624,195 @@ button {
   margin: 10px 0 0;
   font-size: 13px;
   color: #8e1d0c;
+}
+
+/* --- Developer › connection screens ---------------------------------------
+   The two-column credential layout. Direction is the layout, not a label:
+   what you copy out of Clarity on the left, what you paste in on the right.
+   Knowing which way a value travels is the hard part of any integration, so
+   the screen answers it before you read a word. */
+
+.integration-directions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin: 14px 0;
+}
+
+.integration-directions.single {
+  grid-template-columns: 1fr;
+}
+
+@media (max-width: 900px) {
+  .integration-directions {
+    grid-template-columns: 1fr;
+  }
+}
+
+.integration-directions > section {
+  border: 1px solid #deded8;
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: #fcfcfa;
+}
+
+.integration-directions > section > h3 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #5d6b60;
+}
+
+.integration-credential {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.integration-credential .credential-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.integration-credential .credential-label code {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: .55;
+  letter-spacing: .02em;
+}
+
+.integration-credential .credential-copy {
+  margin-left: auto;
+  border: 1px solid #deded8;
+  background: #fff;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.integration-credential input {
+  width: 100%;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 7px 9px;
+  border: 1px solid #deded8;
+  border-radius: 7px;
+  background: #fff;
+  color: #102d20;
+}
+
+.integration-credential.missing input {
+  border-color: #d4574a;
+  background: #fdf5f4;
+}
+
+.integration-credential.optional input {
+  opacity: .7;
+}
+
+.integration-credential small {
+  display: block;
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  opacity: .72;
+}
+
+.integration-credential .credential-warning {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: #fdf0ee;
+  color: #8d2f24;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.integration-events {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  font-size: 12px;
+}
+
+.integration-events li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid #ececE6;
+}
+
+.integration-events li code {
+  font-size: 11px;
+  color: #102d20;
+}
+
+.integration-events li em {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: .6;
+}
+
+.integration-feed-group {
+  margin: 18px 0 8px;
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #5d6b60;
+}
+
+.integration-pending-bar.stuck {
+  border-color: #d4574a;
+  background: #fdf5f4;
+}
+
+.integration-checks {
+  margin-top: 14px;
+}
+
+.integration-checks .check {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+  padding: 9px 2px;
+  border-top: 1px solid #ececE6;
+  font-size: 13px;
+}
+
+.integration-checks .check > span:first-child {
+  width: 14px;
+  font-weight: 800;
+}
+
+.integration-checks .check b {
+  min-width: 160px;
+}
+
+.integration-checks .check > span:last-of-type {
+  opacity: .75;
+}
+
+.integration-checks .check button {
+  margin-left: auto;
+  border: 1px solid #deded8;
+  background: #fff;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.integration-checks .check.ok > span:first-child {
+  color: #1f9d55;
+}
+
+.integration-checks .check.bad > span:first-child {
+  color: #d4574a;
 }

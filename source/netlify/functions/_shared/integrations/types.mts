@@ -160,4 +160,66 @@ export type ProviderAdapter = {
    * id stays readable in a database row without a join.
    */
   itemIdPrefix: string;
+  /** Everything the setup screens need to render themselves. */
+  descriptor: ProviderDescriptor;
+};
+
+/**
+ * One credential, described well enough that the setup screen is also the
+ * documentation.
+ *
+ * `help` is the field that earns its keep. "OPTIX_APP_SECRET" tells an admin
+ * nothing; "Optix › Apps › your app › Secret — without it every incoming
+ * webhook is rejected as unsigned" tells them where to look and what breaks.
+ */
+export type CredentialSpec = {
+  /** The environment variable that currently holds it. */
+  key: string;
+  label: string;
+  help: string;
+  /** Secrets are never sent to the browser — only whether they are set. */
+  secret: boolean;
+  required: boolean;
+  /** Shown as the field's placeholder when the provider has a usual value. */
+  defaultValue?: string;
+};
+
+/**
+ * What a provider's setup screens should show.
+ *
+ * Served to the browser rather than duplicated there. The panel renders
+ * whatever it is given and knows nothing about any particular provider, so
+ * adding one is a descriptor and an adapter — no UI change at all.
+ */
+export type ProviderDescriptor = {
+  id: ExternalProvider;
+  label: string;
+  docsUrl?: string;
+  /** Inbound: what they send us. Absent if the provider pushes nothing. */
+  webhook?: {
+    /** The URL to paste into their system. Path only; the host is ours. */
+    path: string;
+    events: Array<{ id: string; label: string; note?: string }>;
+    credentials: CredentialSpec[];
+    /**
+     * How a delivery is signed, in plain arithmetic. Visible because it is what
+     * silently fails when a secret is pasted with a trailing space, and a 401
+     * should be debuggable from the screen rather than from the source.
+     */
+    signatureRecipe?: string;
+  };
+  /** Outbound: what we send them. Absent if Clarity only ever receives. */
+  api?: {
+    kind: "graphql" | "rest";
+    credentials: CredentialSpec[];
+    /** Operations Clarity performs, for the health screen and the log. */
+    operations: Array<{ id: string; label: string }>;
+  };
+  /** What a provider calls the things a mapping points at. */
+  vocabulary: {
+    /** Optix "workspace", Acuity "calendar", Setmore "service". */
+    workspace: string;
+    /** Optix "bay", another provider's "court" or "room". */
+    resource: string;
+  };
 };

@@ -68,7 +68,7 @@ import {
   setActivePhoneCountry,
 } from "../netlify/functions/_shared/phone.mts";
 import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
-import OptixIntegrationPanel from "./modules/optix/OptixIntegrationPanel";
+import IntegrationPanel from "./modules/integrations/IntegrationPanel";
 import {
   BASE_WEEK_START,
   BOOKING_EMBED_PARAM,
@@ -1098,6 +1098,7 @@ type SettingsTab =
   | "account"
   | "branding"
   | "integrations"
+  | "developer"
   | "data";
 
 type BookingForm = {
@@ -5473,7 +5474,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
   useEffect(() => {
     if (isAdminUser) return;
-    if (["coaches", "locations", "email", "experience", "account", "branding", "integrations", "data"].includes(settingsTab)) {
+    if (["coaches", "locations", "email", "experience", "account", "branding", "integrations", "developer", "data"].includes(settingsTab)) {
       setSettingsTab("services");
     }
   }, [isAdminUser, settingsTab]);
@@ -25504,6 +25505,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     Integrations
                   </button>
                   <button
+                    className={settingsTab === "developer" ? "active" : ""}
+                    onClick={() => switchSettingsTab("developer")}
+                    role="tab"
+                    aria-selected={settingsTab === "developer"}
+                    type="button"
+                  >
+                    <Code2 size={16} />
+                    Developer
+                  </button>
+                  <button
                     className={settingsTab === "data" ? "active" : ""}
                     onClick={() => switchSettingsTab("data")}
                     role="tab"
@@ -25518,7 +25529,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             </div>
 
             <div className={`settings-grid settings-tab-${settingsTab}`}>
-              {settingsTab === "integrations" ? <OptixIntegrationPanel /> : null}
+              {settingsTab === "developer" ? <IntegrationPanel /> : null}
               {isAdminUser ? <BrowserNotificationsPanel /> : null}
               {servicesSettingsPanel}
               {isAdminUser ? coachesSettingsPanel : null}
