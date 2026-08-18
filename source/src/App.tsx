@@ -9110,6 +9110,50 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     return before.size === after.size && [...before].every((id) => after.has(id));
   }
 
+  // Poll the Optix sync row while the deferred cancel-and-rebook runs after a
+  // reschedule (see deferOptixBayRebook in booking-core). Restores the orange
+  // outline once the new bay is booked; warns once if Optix refused. A 'synced'
+  // row older than the move is the pre-move state (the background task has not
+  // run yet), so it is skipped rather than repainting the ring for the old bay.
+  // Gives up silently after ~45s — the next hydration shows the true state.
+  async function watchBayRebook(itemId: string, movedAtMs: number) {
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      try {
+        const response = await fetch("/api/optix-booking-status", { credentials: "same-origin", cache: "no-store" });
+        if (!response.ok) continue;
+        const data = await response.json().catch(() => ({}));
+        const record = (Array.isArray(data?.records) ? data.records : []).find(
+          (entry: { calendarItemId?: string }) => entry?.calendarItemId === itemId,
+        );
+        if (!record) continue;
+        const rowUpdatedAtMs = Date.parse(String(record.updatedAt || "")) || 0;
+        if (rowUpdatedAtMs < movedAtMs - 15000) continue; // pre-move state; rebook still running
+        if (record.syncStatus === "synced") {
+          setItems((current) =>
+            current.map((entry) =>
+              entry.id === itemId
+                ? { ...entry, bayBooked: true, bayResourceId: record.resourceId || entry.bayResourceId }
+                : entry,
+            ),
+          );
+          return;
+        }
+        if (record.syncStatus === "failed" || record.syncStatus === "token_expired") {
+          setToast({
+            message: record.errorMessage
+              ? `The lesson was moved, but its Optix bay booking was not: ${record.errorMessage}`
+              : "The lesson was moved, but its Optix bay booking was not. Use Book resource on the booking card.",
+          });
+          return;
+        }
+        // 'cancelled': old bay released, rebook still in flight — keep polling.
+      } catch {
+        // Transient fetch problem; the next attempt retries.
+      }
+    }
+  }
+
   async function persistUpsertItem(item: CalendarItem, previousItems: CalendarItem[], optimisticItems: CalendarItem[]) {
     beginAdminSave("upsert_item");
     try {
@@ -9137,6 +9181,22 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         setCalendarStateVersion(data.updatedAt);
       }
       scheduleAdminNotificationDebounceFlush();
+      // A moved lesson takes its bay with it: the server cancels and rebooks
+      // the Optix bay in the background. Drop the orange outline now so it
+      // never claims a bay held at the old time, then watch the sync row to
+      // restore it when the rebook lands.
+      const previousVersion = previousItems.find((entry) => entry.id === item.id);
+      if (
+        item.kind === "appointment" &&
+        previousVersion?.bayBooked === true &&
+        (previousVersion.week !== item.week ||
+          previousVersion.day !== item.day ||
+          previousVersion.start !== item.start ||
+          previousVersion.duration !== item.duration)
+      ) {
+        setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, bayBooked: false } : entry)));
+        void watchBayRebook(item.id, Date.now());
+      }
     } catch (error) {
       setItems(previousItems);
       setToast({ message: error instanceof Error ? error.message : "Calendar change could not be saved." });

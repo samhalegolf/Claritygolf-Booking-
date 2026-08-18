@@ -90,6 +90,32 @@ test("preserves the existing Optix IDs for reschedule and cancellation", () => {
   assert.equal(input.isCanceled, true);
 });
 
+test("a sync row with cleared IDs produces a create, not an amend", () => {
+  // rebookResourceAfterReschedule blanks optix_booking_id after cancelling the
+  // old bay booking so the rebook creates a fresh booking. If empty IDs ever
+  // pass through as booking IDs again, the rebook would try to resurrect the
+  // cancelled booking instead.
+  const input = buildOptixAppointmentInput(
+    appointment,
+    {
+      calendarItemId: "appt-1",
+      optixBookingId: "",
+      optixBookingSessionId: "",
+      resourceId: "resource-default",
+      startTimestamp: 1,
+      endTimestamp: 2,
+      fingerprint: "old",
+      syncStatus: "cancelled",
+      errorCode: "",
+      errorMessage: "",
+    },
+    config(),
+  );
+  assert.equal(input.bookingId, null);
+  assert.equal(input.bookingSessionId, null);
+  assert.equal(input.isCanceled, false);
+});
+
 test("fingerprint changes when the appointment moves", () => {
   const first = buildOptixAppointmentInput(appointment, null, config());
   const moved = buildOptixAppointmentInput(

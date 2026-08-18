@@ -6,6 +6,7 @@ import {
   type OptixSyncRecord,
 } from "./optix-reconcile.mts";
 import { reconcileOptixAppointmentWithAutoSelect } from "./optix-auto-select.mts";
+import { cancelOptixBayForCalendarItem } from "./optix-cancel.mts";
 import { notifyBookingEvent } from "../notification-engine.mts";
 
 const OVERALL_TIMEOUT_MS = 25_000;
@@ -262,6 +263,67 @@ export async function bookOneResource(calendarItemId: string) {
     failed: result.syncStatus === "failed" ? 1 : 0,
     result,
   };
+}
+
+export type BayRebookOutcome = {
+  moved: boolean;
+  skipped?: "no_synced_bay";
+  error?: string;
+};
+
+/**
+ * Move a lesson's bay booking after the lesson itself was rescheduled:
+ * cancel the old Optix bay booking, then book a fresh one at the new slot.
+ *
+ * Cancel-then-rebook rather than amending the live booking in place — cancel
+ * and create are the two Optix operations Clarity already exercises in
+ * production (the delete path and the Book resource button), and the rebook
+ * re-runs bay auto-select, so a lesson moved to a time where its original bay
+ * is busy lands in another free bay instead of failing.
+ *
+ * Never throws — this runs as a deferred side effect after the reschedule
+ * response has gone out. If the cancel is refused, the rebook is NOT
+ * attempted (rebooking while the old booking stands would hold two bays); the
+ * sync row is already marked failed and the Optix panel shows it. If the
+ * rebook fails, the bay is released but not re-held — the lesson loses its
+ * orange outline and Book resource on the card retries as usual.
+ */
+export async function rebookResourceAfterReschedule(calendarItemId: string): Promise<BayRebookOutcome> {
+  const cleanId = String(calendarItemId || "").trim();
+  try {
+    await ensureOptixSyncTable();
+    const existing = cleanId ? await readSyncRecord(cleanId) : null;
+    if (!existing?.optixBookingId || existing.syncStatus !== "synced") {
+      return { moved: false, skipped: "no_synced_bay" };
+    }
+    await cancelOptixBayForCalendarItem(cleanId);
+    // The cancelled booking is dead. Clear its IDs so the rebook creates a
+    // fresh booking — left in place, buildOptixAppointmentInput would reuse
+    // them and try to resurrect the cancelled booking instead.
+    await db().sql`
+      UPDATE optix_booking_sync
+      SET optix_booking_id = '', optix_booking_session_id = '', updated_at = NOW()
+      WHERE calendar_item_id = ${cleanId}
+    `;
+    const outcome = await bookOneResource(cleanId);
+    const errorMessage =
+      (outcome as { message?: string }).message ||
+      (outcome as { result?: OptixSyncRecord }).result?.errorMessage ||
+      "";
+    console.info("optix_bay_rebook_after_reschedule", {
+      calendarItemId: cleanId,
+      ok: outcome.ok === true,
+      error: outcome.ok === true ? "" : errorMessage.slice(0, 300),
+    });
+    return outcome.ok === true ? { moved: true } : { moved: false, error: errorMessage };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "Optix bay rebook failed.");
+    console.error("optix_bay_rebook_after_reschedule_failed", {
+      calendarItemId: cleanId,
+      error: message.slice(0, 300),
+    });
+    return { moved: false, error: message };
+  }
 }
 
 /**

@@ -15,8 +15,8 @@ import {
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
 import { cancelOptixBayForCalendarItem, cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
-import { autoBookResourceForNewBooking } from "./_shared/optix-book-resource.mts";
-import { planExternalReschedule } from "./_shared/external-reschedule.mts";
+import { autoBookResourceForNewBooking, rebookResourceAfterReschedule } from "./_shared/optix-book-resource.mts";
+import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
 import {
@@ -4919,6 +4919,45 @@ function deferGoogleCalendarAvailabilitySync(netlifyContext = null) {
   }
 }
 
+/**
+ * A moved lesson takes its bay with it: cancel the old Optix bay booking and
+ * rebook at the new slot. Deferred like the Google sync so a drag save never
+ * waits on Optix (two round trips, up to 25s each). rebookResourceAfterReschedule
+ * never throws and skips lessons without a synced bay, so callers pass every
+ * slot-changed appointment id without checking the sync table first.
+ */
+function deferOptixBayRebook(calendarItemIds, netlifyContext = null) {
+  const ids = (calendarItemIds || []).filter(Boolean);
+  if (!ids.length) return;
+  const task = (async () => {
+    for (const id of ids) {
+      await rebookResourceAfterReschedule(id);
+    }
+  })().catch((error) => console.error("optix_bay_rebook_deferred_failed", error));
+  if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
+    netlifyContext.waitUntil(task);
+  }
+}
+
+/** True when a saved appointment occupies a different slot than before. */
+function appointmentSlotChanged(previousItem, item) {
+  if (!previousItem || !item || item.kind !== "appointment") return false;
+  return !sameSlot(
+    {
+      week: Number(previousItem.week ?? 0),
+      day: Number(previousItem.day ?? 0),
+      start: Number(previousItem.start ?? 0),
+      duration: Number(previousItem.duration ?? 0),
+    },
+    {
+      week: Number(item.week ?? 0),
+      day: Number(item.day ?? 0),
+      start: Number(item.start ?? 0),
+      duration: Number(item.duration ?? 0),
+    },
+  );
+}
+
 async function writeCalendarState(nextState, context = null, netlifyContext = null) {
   const current = await readCalendarState();
   if (context) {
@@ -5012,6 +5051,14 @@ async function writeCalendarState(nextState, context = null, netlifyContext = nu
     clearItems: nextState?.clearItems === true,
     accountId: context?.accountId,
   });
+  // Bay bookings follow their lessons: every appointment whose slot changed in
+  // this save gets its Optix bay cancelled and rebooked in the background.
+  deferOptixBayRebook(
+    items
+      .filter((item) => appointmentSlotChanged(previousItemsById.get(item.id), item))
+      .map((item) => item.id),
+    netlifyContext,
+  );
   const updatedAt = nowIso();
   await setSettingsBulk({ syncKey, updatedAt });
   // The response payload rebuilds the whole admin state. None of these reads depend on each
@@ -5355,9 +5402,9 @@ function schedulePublicBookingSideEffects(context, appointment, options = {}) {
     // Lesson types with Auto-book ticked in Resources get their Optix bay
     // booked here — after the booking is already on the calendar — instead of
     // holding up the client's booking flow. Only for newly created client
-    // bookings (not reschedules: a bay already booked stays where it is until
-    // the coach moves it). Never throws; on failure the card simply shows no
-    // bay and the coach books it manually as before.
+    // bookings (reschedules move an existing bay via deferOptixBayRebook on
+    // the calendar save paths instead). Never throws; on failure the card
+    // simply shows no bay and the coach books it manually as before.
     if (options.autoBookResource === true) {
       await autoBookResourceForNewBooking(appointment.id, appointment.serviceId);
     }
@@ -9523,6 +9570,11 @@ export async function handleBookingApiRoute(
           });
           const updatedAt = nowIso();
           await setSetting("updatedAt", updatedAt);
+          // A moved lesson takes its Optix bay with it — cancel and rebook in
+          // the background (see deferOptixBayRebook).
+          if (appointmentSlotChanged(previousItem, item)) {
+            deferOptixBayRebook([item.id], context);
+          }
           // Keep Google Calendar in step with every single-booking change (drag
           // reschedule, edit, lesson-complete). Deferred like the other save
           // paths so the round trip runs after the response rather than inside
