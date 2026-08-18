@@ -25,3 +25,4 @@ _to_delete/
 integration-decoupling.tgz
 apply-integration-decoupling.sh
 _transfer.tgz
+frontend-decoupling.tgz

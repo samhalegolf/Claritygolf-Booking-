@@ -10,18 +10,18 @@ type PassPurchase = {
   purchased_at: string; paid_at: string | null;
   is_pass: boolean; classification: "pass" | "not_pass" | "unknown"; rawPayload: unknown;
 };
-type IntegrationState = { mappings: any[]; catalog: { services: any[]; locations: any[]; coaches: any[] }; events: any[]; pending?: PendingSummary; purchases?: PassPurchase[] };
+/**
+ * An external workspace Clarity has seen traffic from. Bays, lesson
+ * workspaces, hire equipment — Optix models them all the same way, so the
+ * panel shows the type and lets you choose rather than guessing which is which.
+ */
+type Workspace = { id: string; name: string; type: string; events: number; lastSeen: string | null; firstSeen: string | null };
+type IntegrationState = { mappings: any[]; catalog: { services: any[]; locations: any[]; coaches: any[] }; events: any[]; workspaces?: Workspace[]; pending?: PendingSummary; purchases?: PassPurchase[] };
 
 /** Events that never reached a conclusion, so the panel can retry them. */
 const UNPROCESSED = ["received", "stored", "failed"];
 
-const BAYS = [
-  ["600009", "Bay #1"], ["600004", "Bay #2"], ["600005", "Bay #3"], ["600006", "Bay #4"],
-  ["600007", "Bay #5"], ["600008", "Bay #6"], ["600010", "Bay #7"],
-] as const;
-const BAY_IDS = BAYS.map(([id]) => id);
-const bayName = (id: string) => BAYS.find(([candidate]) => candidate === id)?.[1] || id;
-const newProfile = (number = 1): ResourceProfile => ({ id: `resource-${Date.now()}-${number}`, name: number === 1 ? "Standard lessons" : `Resource profile ${number}`, handedness: "standard", resourceIds: [...BAY_IDS], serviceIds: [] });
+const newProfile = (number = 1, resourceIds: string[] = []): ResourceProfile => ({ id: `resource-${Date.now()}-${number}`, name: number === 1 ? "Standard lessons" : `Resource profile ${number}`, handedness: "standard", resourceIds, serviceIds: [] });
 
 function formatAmount(row: { amount_cents: number | null; currency: string | null }) {
   if (row.amount_cents == null) return "Amount unknown";
@@ -76,7 +76,10 @@ export default function OptixIntegrationPanel() {
       if (!response.ok) throw new Error(payload?.message || payload?.error || `Optix feed returned ${response.status}.`);
       setIntegration(payload);
       setIntegrationError("");
-      const mapping = payload.mappings?.find((row: any) => String(row.workspace_id) === "637949") || {};
+      // The saved mapping is what makes a workspace ours. There is one row per
+      // provider today; picking the first is the same answer the hardcoded id
+      // used to give, without naming anyone's workspace in the source.
+      const mapping = payload.mappings?.[0] || {};
       setSetupDraft({ enabled: mapping.enabled === true, locationId: mapping.location_id || "", defaultCoachId: mapping.default_coach_id || "", emailBehaviour: mapping.email_behaviour || "none" });
     } catch (error) {
       setIntegrationError(error instanceof Error ? error.message : "Optix feed could not load.");
@@ -107,7 +110,7 @@ export default function OptixIntegrationPanel() {
   // /api/services is normalized, so it always includes the reserved External
   // Booking lesson type; the raw settings catalog only has it after a save.
   const services = resourceServices.length ? resourceServices : integration?.catalog?.services || [];
-  const mapping = integration?.mappings?.find((row) => String(row.workspace_id) === "637949") || null;
+  const mapping = integration?.mappings?.[0] || null;
   const events = integration?.events || [];
   const pending: PendingSummary = integration?.pending || { count: 0, oldest: null, newest: null };
   const purchases = integration?.purchases || [];
@@ -117,6 +120,14 @@ export default function OptixIntegrationPanel() {
   const passes = useMemo(() => purchases.filter((row) => row.is_pass), [purchases]);
   const unclassified = useMemo(() => purchases.filter((row) => row.classification === "unknown"), [purchases]);
   const failedCount = useMemo(() => events.filter((event) => event.processing_status === "failed").length, [events]);
+  const workspaces = integration?.workspaces || [];
+  // Anything that is not the mapped lesson workspace is a bookable resource.
+  // Deriving it this way means a new bay appears on its own the first time it
+  // is booked, rather than waiting for someone to edit a constant.
+  const mappedIds = useMemo(() => new Set((integration?.mappings || []).map((row: any) => String(row.workspace_id))), [integration]);
+  const resourceWorkspaces = useMemo(() => workspaces.filter((workspace) => !mappedIds.has(workspace.id)), [workspaces, mappedIds]);
+  const workspaceName = (id: string) => workspaces.find((workspace) => workspace.id === id)?.name || id;
+  const workspaceLabel = (workspace: Workspace) => workspace.type ? `${workspace.name} · ${workspace.type}` : workspace.name;
 
   function patchProfile(id: string, patch: Partial<ResourceProfile>) {
     setProfiles((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
@@ -133,7 +144,7 @@ export default function OptixIntegrationPanel() {
 
   async function saveSetup() {
     setSaving("setup"); setSaved("");
-    const response = await fetch("/api/external-bookings", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceId: "637949", ...setupDraft }) });
+    const response = await fetch("/api/external-bookings", { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceId: mapping?.workspace_id || "", ...setupDraft }) });
     const payload = await response.json().catch(() => ({})); setSaving("");
     if (!response.ok) return setIntegrationError(payload?.message || payload?.error || "Optix setup could not be saved.");
     setIntegration(payload.state); setIntegrationError(""); setSaved("Setup saved");
@@ -190,10 +201,10 @@ export default function OptixIntegrationPanel() {
       <div className="optix-native-body">
         {tab === "setup" ? <>
           {integrationError ? <div className="optix-native-error"><strong>Setup data is unavailable</strong>{integrationError}</div> : null}
-          <div className="optix-native-note"><strong>Inbound Optix lessons</strong><span>Workspace 637949 is recognised; ordinary bay workspaces, including 600006, are ignored. Every booking imports as the External Booking lesson type — its time comes from Optix, the Optix label goes in the lesson note, and the customer lands in the external booking clients list unless their email matches an existing client.</span></div>
+          <div className="optix-native-note"><strong>Inbound Optix lessons</strong><span>{mapping ? `Workspace ${mapping.workspace_id}${workspaceName(String(mapping.workspace_id)) !== String(mapping.workspace_id) ? ` (${workspaceName(String(mapping.workspace_id))})` : ""} is recognised; every other workspace is ignored.` : "No workspace is mapped yet, so nothing is imported."} Every booking imports as the External Booking lesson type — its time comes from Optix, the Optix label goes in the lesson note, and the customer lands in the external booking clients list unless their email matches an existing client.</span></div>
           <div className="optix-native-grid">
             <label className="toggle"><input checked={setupDraft.enabled} onChange={(event) => setSetupDraft((draft) => ({ ...draft, enabled: event.target.checked }))} type="checkbox" /> Enable appointment creation</label>
-            <label>Optix workspace<input readOnly value="637949 · Swing Analysis" /></label>
+            <label>Optix workspace<input readOnly value={mapping ? `${mapping.workspace_id}${workspaceName(String(mapping.workspace_id)) !== String(mapping.workspace_id) ? ` · ${workspaceName(String(mapping.workspace_id))}` : ""}` : "Not mapped"} /></label>
             <label>Lesson type<input readOnly value="External Booking (automatic)" /></label>
             <label>Clarity location<select disabled={!integration} value={setupDraft.locationId} onChange={(event) => setSetupDraft((draft) => ({ ...draft, locationId: event.target.value }))}><option value="">Select location</option>{(integration?.catalog?.locations || []).map((location) => <option key={location.id} value={location.id}>{location.name || location.id}</option>)}</select></label>
             <label>Default coach<select disabled={!integration} value={setupDraft.defaultCoachId} onChange={(event) => setSetupDraft((draft) => ({ ...draft, defaultCoachId: event.target.value }))}><option value="">No default coach</option>{(integration?.catalog?.coaches || []).map((coach) => <option key={coach.id} value={coach.id}>{coach.displayName || coach.name || coach.id}</option>)}</select></label>
@@ -205,10 +216,10 @@ export default function OptixIntegrationPanel() {
 
         {tab === "resources" ? <>
           {resourceError ? <div className="optix-native-error"><strong>Resource settings need attention</strong>{resourceError}</div> : null}
-          <div className="optix-resource-heading"><div><h3>Bay resource profiles</h3><p>Set eligible bays and their booking priority for each Clarity lesson type.</p></div><button onClick={() => setProfiles((current) => [...current, newProfile(current.length + 1)])} type="button">+ New profile</button></div>
+          <div className="optix-resource-heading"><div><h3>Bay resource profiles</h3><p>Set eligible bays and their booking priority for each Clarity lesson type.</p></div><button onClick={() => setProfiles((current) => [...current, newProfile(current.length + 1, resourceWorkspaces.map((workspace) => workspace.id))])} type="button">+ New profile</button></div>
           {profiles.map((profile) => <section className="optix-resource-profile" key={profile.id}>
             <div className="profile-title"><input aria-label="Profile name" value={profile.name} onChange={(event) => patchProfile(profile.id, { name: event.target.value })} /><select aria-label="Player handedness" value={profile.handedness} onChange={(event) => patchProfile(profile.id, { handedness: event.target.value === "left" ? "left" : "standard" })}><option value="standard">Standard / any player</option><option value="left">Left-handed players</option></select><button className="danger" disabled={profiles.length === 1} onClick={() => setProfiles((current) => current.filter((candidate) => candidate.id !== profile.id))} type="button">Delete</button></div>
-            <div className="profile-columns"><div><h4>Bay priority</h4>{profile.resourceIds.map((id, index) => <div className="resource-row" key={id}><span>{index + 1}</span><strong>{bayName(id)}</strong><button aria-label={`Move ${bayName(id)} up`} disabled={index === 0} onClick={() => moveBay(profile, index, -1)} type="button">↑</button><button aria-label={`Move ${bayName(id)} down`} disabled={index === profile.resourceIds.length - 1} onClick={() => moveBay(profile, index, 1)} type="button">↓</button><button onClick={() => patchProfile(profile.id, { resourceIds: profile.resourceIds.filter((candidate) => candidate !== id) })} type="button">Remove</button></div>)}<div className="removed-resources">{BAY_IDS.filter((id) => !profile.resourceIds.includes(id)).map((id) => <button key={id} onClick={() => patchProfile(profile.id, { resourceIds: [...profile.resourceIds, id] })} type="button">+ {bayName(id)}</button>)}</div></div>
+            <div className="profile-columns"><div><h4>Bay priority</h4>{profile.resourceIds.map((id, index) => <div className="resource-row" key={id}><span>{index + 1}</span><strong>{workspaceName(id)}</strong><button aria-label={`Move ${workspaceName(id)} up`} disabled={index === 0} onClick={() => moveBay(profile, index, -1)} type="button">↑</button><button aria-label={`Move ${workspaceName(id)} down`} disabled={index === profile.resourceIds.length - 1} onClick={() => moveBay(profile, index, 1)} type="button">↓</button><button onClick={() => patchProfile(profile.id, { resourceIds: profile.resourceIds.filter((candidate) => candidate !== id) })} type="button">Remove</button></div>)}<div className="removed-resources">{resourceWorkspaces.filter((workspace) => !profile.resourceIds.includes(workspace.id)).map((workspace) => <button key={workspace.id} onClick={() => patchProfile(profile.id, { resourceIds: [...profile.resourceIds, workspace.id] })} title={workspaceLabel(workspace)} type="button">+ {workspace.name}</button>)}{resourceWorkspaces.length ? null : <em>No resources seen yet. A bay appears here the first time Optix sends a booking for it.</em>}</div></div>
               <div><h4>Lesson types</h4><div className="resource-services">{services.length ? services.map((service) => <label key={service.id}><input checked={profile.serviceIds.includes(service.id)} onChange={(event) => patchProfile(profile.id, { serviceIds: event.target.checked ? [...profile.serviceIds, service.id] : profile.serviceIds.filter((id) => id !== service.id) })} type="checkbox" />{service.name || service.id}</label>) : <p>Lesson types will appear when the Optix setup endpoint is available.</p>}</div></div></div>
           </section>)}
           <section className="optix-resource-profile">
