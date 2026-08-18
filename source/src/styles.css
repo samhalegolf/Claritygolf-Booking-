@@ -11226,3 +11226,113 @@ button {
   background: none;
   box-shadow: none;
 }
+
+/* --- Integrations list ------------------------------------------------------
+   The question this screen answers is "what is Clarity talking to?", so it
+   opens on the answer rather than on one connection's credentials. */
+
+.integration-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--c-space-4);
+  margin: var(--c-space-4) 0;
+}
+
+.integration-card {
+  display: grid;
+  gap: var(--c-space-1);
+  padding: var(--c-space-5) var(--c-space-6);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--c-t-hover);
+}
+
+/* A card is a destination, so it keeps its box — Rule 01 level 3. What it must
+   not do is move: Rule 11, nothing animates position or size on hover. */
+.integration-card:hover {
+  background: var(--c-hover);
+}
+
+.integration-card:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.integration-card strong {
+  font-size: var(--c-size-accordion);
+}
+
+.integration-card em {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  font-style: normal;
+}
+
+.integration-card-status {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+/* Status is a dot rather than a coloured card: the card is a place to go, and
+   tinting the whole thing green would say the destination is the state. */
+.integration-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--c-radius-pill);
+  background: var(--c-muted);
+}
+
+.integration-card-dot.is-ok {
+  background: var(--c-success-text);
+}
+
+.integration-card-dot.is-unset {
+  background: var(--c-border);
+  box-shadow: inset 0 0 0 1px var(--c-muted);
+}
+
+.integration-card.is-add {
+  border-style: dashed;
+  background: none;
+}
+
+.integration-cards-note {
+  margin: var(--c-space-4) 0 0;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.integration-breadcrumb {
+  display: flex;
+  align-items: baseline;
+  gap: var(--c-space-4);
+  padding: var(--c-space-5) var(--c-space-6) 0;
+}
+
+.integration-breadcrumb strong {
+  font-size: var(--c-size-accordion);
+}
+
+.integration-oauth {
+  display: grid;
+  justify-items: start;
+  gap: var(--c-space-2);
+  margin-bottom: var(--c-space-5);
+}
+
+.integration-oauth .primary-button.small {
+  height: var(--c-h-pill);
+  padding: 0 14px;
+  text-decoration: none;
+}
+
+.integration-oauth small {
+  font-size: 11.5px;
+  line-height: 1.45;
+  opacity: 0.72;
+}

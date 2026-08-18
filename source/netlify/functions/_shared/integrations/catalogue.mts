@@ -1,0 +1,308 @@
+import { optixAdapter } from "./providers/optix.mts";
+import type { IntegrationDescriptor, IntegrationId } from "./types.mts";
+
+/**
+ * Every integration Clarity has code for.
+ *
+ * Five of these six had no screen at all before this file. They were
+ * environment variables, set by editing Netlify and redeploying, with nothing
+ * anywhere saying whether they were configured, working, or subtly wrong. Optix
+ * got a screen because it broke often enough to earn one; the other five break
+ * quietly, which is worse.
+ *
+ * A descriptor here does NOT mean an adapter exists. Only Optix sends events
+ * Clarity has to interpret; the rest are outbound, and an integration with
+ * nothing to normalise is still a complete integration. That is the whole
+ * reason this is a separate list from the adapter registry.
+ */
+
+/**
+ * Stripe: Clarity Pay at the counter, and the billing subscription sync.
+ *
+ * Two webhook secrets because Stripe is wired up twice — the billing one falls
+ * back to the general one (see stripe-billing-webhook.mts), which is what
+ * `required: "one-of"` is describing rather than prescribing.
+ */
+const stripe: IntegrationDescriptor = {
+  id: "stripe",
+  label: "Stripe",
+  category: "payments",
+  summary: "Card payments at the counter, and the subscription that bills this workspace.",
+  docsUrl: "https://dashboard.stripe.com/apikeys",
+  connections: [
+    {
+      kind: "api-key-pair",
+      title: "API keys",
+      summary: "What we send Stripe.",
+      transport: "rest",
+      operations: [
+        { id: "checkout.session", label: "Open a hosted checkout" },
+        { id: "payment_intent", label: "Take a payment" },
+        { id: "subscription", label: "Read this workspace's plan" },
+      ],
+      fields: [
+        {
+          key: "STRIPE_SECRET_KEY",
+          type: "secret",
+          label: "Secret key",
+          help: "Stripe › Developers › API keys › Secret key. Starts sk_live_ or sk_test_ — check which, because a test key takes payments that never arrive.",
+          required: true,
+        },
+      ],
+    },
+    {
+      kind: "webhook-in",
+      title: "Webhooks",
+      summary: "What Stripe sends us.",
+      path: "/api/stripe-billing-webhook",
+      events: [
+        { id: "checkout.session.completed", label: "Checkout finished" },
+        { id: "customer.subscription.updated", label: "Plan changed" },
+        { id: "invoice.paid", label: "Invoice paid" },
+      ],
+      fields: [
+        {
+          key: "__webhook_url",
+          type: "copy",
+          compute: "webhook-url",
+          label: "Webhook URL",
+          help: "Stripe › Developers › Webhooks › Add endpoint.",
+          required: true,
+        },
+        {
+          key: "__events",
+          type: "copy",
+          compute: "event-list",
+          label: "Events to send",
+          help: "Nothing else is read.",
+          required: true,
+        },
+        {
+          key: "STRIPE_BILLING_WEBHOOK_SECRET",
+          type: "secret",
+          label: "Billing webhook secret",
+          help: "The signing secret for the endpoint above. Falls back to the general webhook secret when unset, so either one satisfies this.",
+          required: "one-of",
+          group: "webhook-secret",
+        },
+        {
+          key: "STRIPE_WEBHOOK_SECRET",
+          type: "secret",
+          label: "Webhook secret",
+          help: "The general signing secret, used when no billing-specific one is set.",
+          required: "one-of",
+          group: "webhook-secret",
+        },
+      ],
+    },
+  ],
+};
+
+/** Akahu: the bank feed behind expense reconciliation. */
+const akahu: IntegrationDescriptor = {
+  id: "akahu",
+  label: "Akahu",
+  category: "banking",
+  summary: "Reads your bank transactions so expenses and payments can be reconciled.",
+  docsUrl: "https://developers.akahu.nz",
+  connections: [
+    {
+      kind: "api-key-pair",
+      title: "API tokens",
+      summary: "Two tokens: one identifies the app, one the connected bank account.",
+      transport: "rest",
+      operations: [
+        { id: "transactions", label: "List transactions" },
+        { id: "accounts", label: "List accounts" },
+      ],
+      fields: [
+        {
+          key: "AKAHU_APP_TOKEN",
+          type: "secret",
+          label: "App token",
+          help: "Akahu › My Apps › your app › App ID token. Identifies Clarity, not your bank account — starts app_token_.",
+          required: true,
+        },
+        {
+          key: "AKAHU_USER_TOKEN",
+          type: "secret",
+          label: "User token",
+          help: "Issued when you connect a bank account. Identifies whose transactions are being read, so revoking it stops the feed without touching the app.",
+          required: true,
+        },
+      ],
+    },
+  ],
+};
+
+/** Resend: every email Clarity sends. */
+const resend: IntegrationDescriptor = {
+  id: "resend",
+  label: "Resend",
+  category: "email",
+  summary: "Sends booking confirmations, reminders and invoices.",
+  docsUrl: "https://resend.com/api-keys",
+  connections: [
+    {
+      kind: "api-token",
+      title: "API",
+      summary: "What we send Resend.",
+      transport: "rest",
+      operations: [{ id: "emails.send", label: "Send an email" }],
+      fields: [
+        {
+          key: "RESEND_API_KEY",
+          type: "secret",
+          label: "API key",
+          help: "Resend › API Keys. Without it every notification silently does not send — the booking still works, the email just never arrives.",
+          required: true,
+        },
+        {
+          key: "RESEND_FROM_EMAIL",
+          type: "text",
+          label: "From address",
+          help: "Must be on a domain verified in Resend, or every send is rejected.",
+          required: true,
+        },
+        {
+          key: "NOTIFICATION_REPLY_TO",
+          type: "text",
+          label: "Reply-to address",
+          help: "Where a client's reply goes. Usually your own inbox rather than the sending domain.",
+          required: false,
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * Clarity Caddy: the sibling app.
+ *
+ * The one member of `service-link`, and on probation for exactly that reason —
+ * if nothing else ever links to a peer service this should collapse into
+ * api-token, which is nearly what it is. Kept separate for now because the
+ * secret is shared rather than issued: both ends hold the same string, which
+ * is a different failure mode from a revocable token.
+ */
+const caddy: IntegrationDescriptor = {
+  id: "caddy",
+  label: "Clarity Caddy",
+  category: "internal",
+  summary: "Links a coach's player profiles to the Caddy app.",
+  connections: [
+    {
+      kind: "service-link",
+      title: "Service link",
+      summary: "A shared secret between two apps we both own.",
+      transport: "rest",
+      operations: [{ id: "profile.link", label: "Link a player profile" }],
+      fields: [
+        {
+          key: "CLARITY_CADDY_URL",
+          type: "url",
+          label: "Caddy URL",
+          help: "The default is correct unless Caddy has moved.",
+          required: false,
+          defaultValue: "https://caddy.claritygolf.app",
+        },
+        {
+          key: "CLARITY_SERVICE_SECRET",
+          type: "secret",
+          label: "Shared secret",
+          help: "The same string must be set on both ends. Shared rather than issued, so rotating it means changing two places at once or the link drops.",
+          required: true,
+        },
+        {
+          key: "CLARITY_CADDY_COACH_ACCOUNT_ID",
+          type: "text",
+          label: "Coach account ID",
+          help: "Which Caddy account this workspace's profiles belong to.",
+          required: true,
+        },
+        {
+          key: "CLARITY_CADDY_COACH_EMAIL",
+          type: "text",
+          label: "Coach email",
+          help: "The identity Caddy recognises on the far side.",
+          required: false,
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * Google: Calendar sync and Drive video storage.
+ *
+ * The only oauth2 member, and the only integration whose "is it connected"
+ * answer comes from stored tokens rather than from whether a field is filled
+ * in — the client id and secret being set says the app exists, not that anyone
+ * has said yes to it. The panel reads that from google_provider_connections.
+ */
+const google: IntegrationDescriptor = {
+  id: "google",
+  label: "Google",
+  category: "storage",
+  summary: "Two-way calendar sync, and Drive as somewhere to keep lesson video.",
+  docsUrl: "https://console.cloud.google.com/apis/credentials",
+  connections: [
+    {
+      kind: "oauth2",
+      title: "Google account",
+      summary: "Calendar and Drive, authorised by signing in.",
+      fields: [
+        {
+          key: "__redirect_uri",
+          type: "copy",
+          compute: "redirect-uri",
+          label: "Redirect URI",
+          help: "Google Cloud › Credentials › your OAuth client › Authorised redirect URIs. Must match exactly, including the scheme.",
+          required: true,
+        },
+        {
+          key: "GOOGLE_CLIENT_ID",
+          type: "text",
+          label: "Client ID",
+          help: "Google Cloud › Credentials › OAuth 2.0 Client IDs. Ends in .apps.googleusercontent.com.",
+          required: true,
+        },
+        {
+          key: "GOOGLE_CLIENT_SECRET",
+          type: "secret",
+          label: "Client secret",
+          help: "Issued beside the client ID. Identifies the app, not the account — connecting is still a separate step below.",
+          required: true,
+        },
+        {
+          key: "__connect",
+          type: "oauth",
+          label: "Connection",
+          help: "Signing in is what actually grants access. The two fields above only say which app is asking.",
+          required: true,
+        },
+      ],
+    },
+  ],
+};
+
+const CATALOGUE: IntegrationDescriptor[] = [
+  optixAdapter.descriptor,
+  google,
+  stripe,
+  akahu,
+  resend,
+  caddy,
+];
+
+export function allIntegrations(): IntegrationDescriptor[] {
+  return CATALOGUE;
+}
+
+export function integrationById(id: unknown): IntegrationDescriptor | null {
+  return CATALOGUE.find((entry) => entry.id === id) ?? null;
+}
+
+export function isIntegrationId(value: unknown): value is IntegrationId {
+  return CATALOGUE.some((entry) => entry.id === value);
+}

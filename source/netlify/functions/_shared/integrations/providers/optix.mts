@@ -15,8 +15,8 @@ import type {
   IntegrationEventKind,
   NormalizedBookingEvent,
   NormalizedPurchaseEvent,
+  IntegrationDescriptor,
   ProviderAdapter,
-  ProviderDescriptor,
 } from "../types.mts";
 
 /**
@@ -140,91 +140,130 @@ function quantityOf(value: unknown) {
 }
 
 /**
- * What the setup screens show for Optix.
+ * Optix, in the field schema.
  *
- * Every credential lists where to find it on Optix's side and what breaks
- * without it, because the setup screen is the only documentation anyone will
- * read. Nothing here is a secret — the values live in the environment; this
- * only describes them.
+ * Two connections, not one: it pushes bookings and sales to us, and we call it
+ * to book a bay. Those are different directions with different credentials, and
+ * running them together is what made the old screen hard to reason about.
+ *
+ * Nothing here is a secret. The values live in the environment; this describes
+ * them — what they are called on Optix's side, where to find them, and what
+ * stops working without them.
  */
-const optixDescriptor: ProviderDescriptor = {
+const optixDescriptor: IntegrationDescriptor = {
   id: "optix",
   label: "Optix",
+  category: "bookings",
+  summary: "Bay and lesson bookings, and the passes sold against them.",
   docsUrl: "https://developer.optixapp.com",
-  webhook: {
-    path: "/api/optix-webhook",
-    events: [
-      { id: "new_member_booking", label: "Booking created" },
-      { id: "member_booking_updated", label: "Booking updated" },
-      { id: "member_booking_cancelled", label: "Booking cancelled" },
-      { id: "new_sale", label: "Product sale", note: "Pass purchases arrive here" },
-      { id: "new_plan_subscription", label: "Plan started", note: "Recorded, never treated as a Pass" },
-    ],
-    credentials: [
-      {
-        key: "OPTIX_CLIENT_ID",
-        label: "Client ID",
-        help: "Optix › Apps › your app › ID. Every payload carries this; a delivery whose client_id does not match is rejected.",
-        secret: false,
-        required: true,
-      },
-      {
-        key: "OPTIX_APP_SECRET",
-        label: "App secret",
-        help: "Optix › Apps › your app › Secret. Signs every delivery. Without it, or with a stray space on the end, every incoming webhook is rejected as unsigned.",
-        secret: true,
-        required: true,
-      },
-    ],
-    signatureRecipe: "sha256(client_id + app_secret + created_timestamp)",
-  },
-  api: {
-    kind: "graphql",
-    credentials: [
-      {
-        key: "OPTIX_GRAPHQL_ENDPOINT",
-        label: "GraphQL endpoint",
-        help: "The default is correct unless Optix has moved you.",
-        secret: false,
-        required: false,
-        defaultValue: "https://api.optixapp.com/graphql",
-      },
-      {
-        key: "OPTIX_ORGANIZATION_TOKEN",
-        label: "Organisation token",
-        help: "Optix › Settings › API. Preferred over the personal token. Set one or the other, never both — which one is present decides how Optix reads the request.",
-        secret: true,
-        required: false,
-      },
-      {
-        key: "OPTIX_PERSONAL_TOKEN",
-        label: "Personal token",
-        help: "The fallback when no organisation token is set. One of the two is required for bay booking to work at all.",
-        secret: true,
-        required: false,
-      },
-      {
-        key: "OPTIX_MEMBER_ID",
-        label: "Member ID",
-        help: "Who a bay booking is made as.",
-        secret: false,
-        required: true,
-      },
-      {
-        key: "OPTIX_OWNER_USER_ID",
-        label: "Owner user ID",
-        help: "Who owns the resulting booking inside Optix.",
-        secret: false,
-        required: true,
-      },
-    ],
-    operations: [
-      { id: "bookingsDraft", label: "Check a bay is free" },
-      { id: "bookingsCommit", label: "Book a bay" },
-      { id: "bookingsCancel", label: "Release a bay" },
-    ],
-  },
   vocabulary: { workspace: "workspace", resource: "bay" },
+  connections: [
+    {
+      kind: "webhook-in",
+      title: "Webhooks",
+      summary: "What Optix sends us.",
+      path: "/api/optix-webhook",
+      events: [
+        { id: "new_member_booking", label: "Booking created" },
+        { id: "member_booking_updated", label: "Booking updated" },
+        { id: "member_booking_cancelled", label: "Booking cancelled" },
+        { id: "new_sale", label: "Product sale", note: "Pass purchases arrive here" },
+        { id: "new_plan_subscription", label: "Plan started", note: "Recorded, never treated as a Pass" },
+      ],
+      signatureRecipe: "sha256(client_id + app_secret + created_timestamp)",
+      fields: [
+        {
+          key: "__webhook_url",
+          type: "copy",
+          compute: "webhook-url",
+          label: "Webhook URL",
+          help: "Paste into Optix › Apps › your app › Webhooks. This is the only address Clarity listens on.",
+          required: true,
+        },
+        {
+          key: "__events",
+          type: "copy",
+          compute: "event-list",
+          label: "Events to subscribe to",
+          help: "Nothing else is read. Anything not on this list is stored and ignored.",
+          required: true,
+        },
+        {
+          key: "__signature",
+          type: "copy",
+          compute: "signature-recipe",
+          label: "Signature recipe",
+          help: "How every delivery is signed. Shown because this is what silently fails when a secret is pasted with a stray space — a 401 should be readable from here rather than from the source.",
+          required: false,
+        },
+        {
+          key: "OPTIX_CLIENT_ID",
+          type: "text",
+          label: "Client ID",
+          help: "Optix › Apps › your app › ID. Every payload carries this; a delivery whose client_id does not match is rejected.",
+          required: true,
+        },
+        {
+          key: "OPTIX_APP_SECRET",
+          type: "secret",
+          label: "App secret",
+          help: "Optix › Apps › your app › Secret. Signs every delivery. Without it, or with a stray space on the end, every incoming webhook is rejected as unsigned.",
+          required: true,
+        },
+      ],
+    },
+    {
+      kind: "api-token",
+      title: "API",
+      summary: "What we send Optix.",
+      transport: "graphql",
+      operations: [
+        { id: "bookingsDraft", label: "Check a bay is free" },
+        { id: "bookingsCommit", label: "Book a bay" },
+        { id: "bookingsCancel", label: "Release a bay" },
+      ],
+      fields: [
+        {
+          key: "OPTIX_GRAPHQL_ENDPOINT",
+          type: "url",
+          label: "GraphQL endpoint",
+          help: "The default is correct unless Optix has moved you.",
+          required: false,
+          defaultValue: "https://api.optixapp.com/graphql",
+        },
+        {
+          key: "OPTIX_ORGANIZATION_TOKEN",
+          type: "secret",
+          label: "Organisation token",
+          help: "Optix › Settings › API. Preferred over the personal token. Set one or the other, never both — which one is present decides how Optix reads the request.",
+          required: "one-of",
+          group: "token",
+        },
+        {
+          key: "OPTIX_PERSONAL_TOKEN",
+          type: "secret",
+          label: "Personal token",
+          help: "The fallback when no organisation token is set. One of the two is required for bay booking to work at all.",
+          required: "one-of",
+          group: "token",
+        },
+        {
+          key: "OPTIX_MEMBER_ID",
+          type: "text",
+          label: "Member ID",
+          help: "Who a bay booking is made as.",
+          required: true,
+        },
+        {
+          key: "OPTIX_OWNER_USER_ID",
+          type: "text",
+          label: "Owner user ID",
+          help: "Who owns the resulting booking inside Optix.",
+          required: true,
+        },
+      ],
+    },
+  ],
 };
 
 export const optixAdapter: ProviderAdapter = {

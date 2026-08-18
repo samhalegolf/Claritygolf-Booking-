@@ -136,6 +136,117 @@ export type IntegrationMapping = {
 };
 
 /**
+ * Every integration Clarity knows about.
+ *
+ * Wider than ExternalProvider, which is only the booking systems that send us
+ * events and therefore need an adapter. Stripe, Akahu, Resend and Caddy are
+ * integrations with credentials and a health story but nothing to normalise.
+ */
+export type IntegrationId = ExternalProvider | "google" | "stripe" | "akahu" | "resend" | "caddy";
+
+/**
+ * The six field types every integration is built from.
+ *
+ * `copy` is the one worth pausing on: it travels the other way. It is a fact
+ * about Clarity that the other system needs — a webhook URL, a redirect URI,
+ * the list of events to subscribe to. Direction is a property of the field
+ * rather than of the screen it lands on, which is what lets one renderer draw
+ * both columns of a setup pane without being told which side it is drawing.
+ */
+export type FieldType = "copy" | "text" | "secret" | "url" | "choice" | "oauth";
+
+/**
+ * How a `copy` field's value is worked out. These cannot be literals: the
+ * webhook URL depends on which deployment is asking.
+ */
+export type FieldCompute = "webhook-url" | "redirect-uri" | "event-list" | "signature-recipe";
+
+export type FieldSpec = {
+  /** The environment variable holding it today. */
+  key: string;
+  type: FieldType;
+  label: string;
+  /**
+   * Where to find it on their side, and what breaks without it.
+   *
+   * Not optional, and not decoration. "OPTIX_APP_SECRET" tells an admin
+   * nothing; "Optix › Apps › your app › Secret — without it every incoming
+   * webhook is rejected as unsigned" tells them where to look and what breaks.
+   * The setup screen is the only documentation anyone reads.
+   */
+  help: string;
+  /**
+   * "one-of" means this field and its `group` partners are satisfied by any
+   * one of them being set. Optix takes an organisation token OR a personal
+   * token; Stripe's billing webhook secret falls back to the general one.
+   * Plain `required` gets both of those wrong in both directions.
+   */
+  required: boolean | "one-of";
+  group?: string;
+  defaultValue?: string;
+  choices?: Array<{ value: string; label: string }>;
+  compute?: FieldCompute;
+};
+
+/**
+ * The five shapes an integration comes in.
+ *
+ * All five were already in the codebase before they had names — this is a
+ * description of what is there, not a framework laid over it.
+ *
+ *   webhook-in     they push to us          Optix, Stripe
+ *   api-token      we call with a token     Optix, Resend, Caddy
+ *   api-key-pair   two keys, two jobs       Akahu, Stripe
+ *   oauth2         they hand us a token     Google
+ *   service-link   shared secret with a peer Caddy
+ *
+ * A new kind earns its name when a SECOND integration needs it. service-link
+ * has one member and is on probation: if nothing else ever links to a peer
+ * service it should collapse into api-token, which is nearly what it is.
+ */
+export type ConnectionKind = "webhook-in" | "api-token" | "api-key-pair" | "oauth2" | "service-link";
+
+export type ConnectionSpec = {
+  kind: ConnectionKind;
+  title: string;
+  /** One line under the title. What this half of the connection is for. */
+  summary: string;
+  fields: FieldSpec[];
+  /** webhook-in: the path Clarity listens on. */
+  path?: string;
+  /** webhook-in: which events to subscribe to. Nothing else is read. */
+  events?: Array<{ id: string; label: string; note?: string }>;
+  /** webhook-in: how a delivery is signed, in plain arithmetic. */
+  signatureRecipe?: string;
+  /** api-*: what Clarity asks the other system to do. */
+  operations?: Array<{ id: string; label: string }>;
+  transport?: "graphql" | "rest";
+};
+
+/**
+ * One integration, whole.
+ *
+ * An integration is one or more connections, not one — Optix is a webhook
+ * receiver AND an API client, Stripe likewise. That is why a connection is a
+ * set of fields rather than a screen.
+ *
+ * `adapter` is absent for most of them, and that is the point: an integration
+ * with no events to interpret is still a complete integration. Four of the six
+ * are outbound only.
+ */
+export type IntegrationDescriptor = {
+  id: IntegrationId;
+  label: string;
+  category: "bookings" | "payments" | "email" | "banking" | "storage" | "internal";
+  /** One line on the card, before anything is opened. */
+  summary: string;
+  docsUrl?: string;
+  connections: ConnectionSpec[];
+  /** What this provider calls the things a mapping points at. */
+  vocabulary?: { workspace: string; resource: string };
+};
+
+/**
  * Everything Clarity needs to know about one external system.
  *
  * Two required methods, because two things genuinely cannot be described in
@@ -161,65 +272,5 @@ export type ProviderAdapter = {
    */
   itemIdPrefix: string;
   /** Everything the setup screens need to render themselves. */
-  descriptor: ProviderDescriptor;
-};
-
-/**
- * One credential, described well enough that the setup screen is also the
- * documentation.
- *
- * `help` is the field that earns its keep. "OPTIX_APP_SECRET" tells an admin
- * nothing; "Optix › Apps › your app › Secret — without it every incoming
- * webhook is rejected as unsigned" tells them where to look and what breaks.
- */
-export type CredentialSpec = {
-  /** The environment variable that currently holds it. */
-  key: string;
-  label: string;
-  help: string;
-  /** Secrets are never sent to the browser — only whether they are set. */
-  secret: boolean;
-  required: boolean;
-  /** Shown as the field's placeholder when the provider has a usual value. */
-  defaultValue?: string;
-};
-
-/**
- * What a provider's setup screens should show.
- *
- * Served to the browser rather than duplicated there. The panel renders
- * whatever it is given and knows nothing about any particular provider, so
- * adding one is a descriptor and an adapter — no UI change at all.
- */
-export type ProviderDescriptor = {
-  id: ExternalProvider;
-  label: string;
-  docsUrl?: string;
-  /** Inbound: what they send us. Absent if the provider pushes nothing. */
-  webhook?: {
-    /** The URL to paste into their system. Path only; the host is ours. */
-    path: string;
-    events: Array<{ id: string; label: string; note?: string }>;
-    credentials: CredentialSpec[];
-    /**
-     * How a delivery is signed, in plain arithmetic. Visible because it is what
-     * silently fails when a secret is pasted with a trailing space, and a 401
-     * should be debuggable from the screen rather than from the source.
-     */
-    signatureRecipe?: string;
-  };
-  /** Outbound: what we send them. Absent if Clarity only ever receives. */
-  api?: {
-    kind: "graphql" | "rest";
-    credentials: CredentialSpec[];
-    /** Operations Clarity performs, for the health screen and the log. */
-    operations: Array<{ id: string; label: string }>;
-  };
-  /** What a provider calls the things a mapping points at. */
-  vocabulary: {
-    /** Optix "workspace", Acuity "calendar", Setmore "service". */
-    workspace: string;
-    /** Optix "bay", another provider's "court" or "room". */
-    resource: string;
-  };
+  descriptor: IntegrationDescriptor;
 };

@@ -70,7 +70,7 @@ import {
   setActivePhoneCountry,
 } from "../netlify/functions/_shared/phone.mts";
 import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
-import IntegrationPanel from "./modules/integrations/IntegrationPanel";
+import IntegrationsPanel from "./modules/integrations/IntegrationsPanel";
 import {
   BASE_WEEK_START,
   BOOKING_EMBED_PARAM,
@@ -1190,7 +1190,7 @@ const SETTINGS_SECTIONS: Array<{
   { key: "services", label: "Lesson types", icon: ScissorsLineDashed },
   { key: "notifications", label: "Notifications", icon: Bell, adminOnly: true },
   { key: "account", label: "Account", icon: User, adminOnly: true },
-  { key: "developer", label: "Developer", icon: Code2, adminOnly: true },
+  { key: "developer", label: "Integrations", icon: Code2, adminOnly: true },
 ];
 
 type SettingsTab =
@@ -25522,7 +25522,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
             <SettingsGroups>
             <div className={`settings-grid settings-tab-${settingsTab}`}>
-              {settingsTab === "developer" ? <IntegrationPanel /> : null}
+              {settingsTab === "developer" ? <IntegrationsPanel /> : null}
               {isAdminUser ? <BrowserNotificationsPanel /> : null}
               {servicesSettingsPanel}
               {isAdminUser ? coachesSettingsPanel : null}

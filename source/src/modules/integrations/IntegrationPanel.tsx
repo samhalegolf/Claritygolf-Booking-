@@ -22,10 +22,32 @@ import { AutoSaved, InlineEditProvider, InlineEditRow } from "../shared/InlineEd
 type Tab = "webhooks" | "api" | "mapping" | "activity" | "health";
 type ActivityFilter = "all" | "bookings" | "purchases" | "problems";
 
-type Credential = {
-  key: string; label: string; help: string; secret: boolean; required: boolean;
-  defaultValue: string; set: boolean; length: number; fingerprint: string;
-  value: string; hasSurroundingWhitespace: boolean;
+/** One field, resolved by the server into something a browser can draw. */
+type Field = {
+  key: string;
+  type: "copy" | "text" | "secret" | "url" | "choice" | "oauth";
+  label: string;
+  help: string;
+  required: boolean | "one-of";
+  group: string;
+  defaultValue: string;
+  choices: Array<{ value: string; label: string }>;
+  set: boolean;
+  length: number;
+  fingerprint: string;
+  value: string;
+  hasSurroundingWhitespace: boolean;
+};
+
+type Connection = {
+  kind: "webhook-in" | "api-token" | "api-key-pair" | "oauth2" | "service-link";
+  title: string;
+  summary: string;
+  transport: string;
+  events: Array<{ id: string; label: string; note?: string }>;
+  operations: Array<{ id: string; label: string }>;
+  signatureRecipe: string;
+  fields: Field[];
 };
 type Capabilities = {
   sourceType: string; label: string;
@@ -34,10 +56,14 @@ type Capabilities = {
   writeBlockedReason?: string;
 };
 type SetupState = {
-  providers: Array<{ id: string; label: string }>;
-  provider: { id: string; label: string; docsUrl: string; vocabulary: { workspace: string; resource: string }; capabilities: Capabilities };
-  webhook: { url: string; events: Array<{ id: string; label: string; note?: string }>; signatureRecipe: string; credentials: Credential[] } | null;
-  api: { kind: string; operations: Array<{ id: string; label: string }>; credentials: Credential[] } | null;
+  integration: {
+    id: string; label: string; category: string; summary: string; docsUrl: string;
+    vocabulary: { workspace: string; resource: string };
+    /** Only a booking provider has these; the rest are outbound only. */
+    capabilities: Capabilities | null;
+    configured: boolean; missing: string[]; needsAuthorisation: boolean;
+  };
+  connections: Connection[];
 };
 
 type ResourceProfile = { id: string; name: string; handedness: "standard" | "left"; resourceIds: string[]; serviceIds: string[] };
@@ -144,14 +170,20 @@ function CopyField({ label, value, help }: { label: string; value: string; help?
  * a trailing newline is invisible behind a row of dots and rejects every
  * delivery. A length one longer than expected gives it away immediately.
  */
-function CredentialField({ credential }: { credential: Credential }) {
+function CredentialField({ credential }: { credential: Field }) {
   const status = credential.set
-    ? credential.secret
+    ? credential.type === "secret"
       ? `Set · ${credential.length} chars · ${credential.fingerprint}`
       : credential.value
-    : credential.required ? "Not set — required" : "Not set";
+    : credential.required === true
+      ? "Not set — required"
+      : credential.required === "one-of"
+        // Not "required", because a partner field may already satisfy it, and
+        // marking both red when one is set is how a working setup reads broken.
+        ? "Not set — or use the field beside it"
+        : "Not set";
   return (
-    <label className={`integration-credential${credential.set ? "" : credential.required ? " missing" : " optional"}`}>
+    <label className={`integration-credential${credential.set ? "" : credential.required === true ? " missing" : " optional"}`}>
       <span className="credential-label">
         {credential.label}
         <code>{credential.key}</code>
@@ -168,8 +200,9 @@ function CredentialField({ credential }: { credential: Credential }) {
   );
 }
 
-export default function IntegrationPanel() {
+export default function IntegrationPanel({ integrationId }: { integrationId: string }) {
   const [tab, setTab] = useState<Tab>("webhooks");
+  const [tabReady, setTabReady] = useState(false);
   const [setup, setSetup] = useState<SetupState | null>(null);
   const [setupError, setSetupError] = useState("");
   const [integration, setIntegration] = useState<IntegrationState | null>(null);
@@ -194,7 +227,7 @@ export default function IntegrationPanel() {
 
   const loadSetup = useCallback(async () => {
     try {
-      const response = await fetch("/api/integration-setup", { credentials: "same-origin", cache: "no-store" });
+      const response = await fetch(`/api/integration-setup?id=${encodeURIComponent(integrationId)}`, { credentials: "same-origin", cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.message || payload?.error || `Setup returned ${response.status}.`);
       setSetup(payload);
@@ -202,7 +235,7 @@ export default function IntegrationPanel() {
     } catch (error) {
       setSetupError(error instanceof Error ? error.message : "Connection details could not load.");
     }
-  }, []);
+  }, [integrationId]);
 
   const loadIntegration = useCallback(async () => {
     try {
@@ -244,6 +277,15 @@ export default function IntegrationPanel() {
 
   useEffect(() => { void Promise.all([loadSetup(), loadIntegration(), loadResources()]); }, [loadSetup, loadIntegration, loadResources]);
 
+  // Land on a pane this integration has. Defaulting to "webhooks" for one that
+  // does not receive anything opens on a blank screen.
+  useEffect(() => {
+    if (!setup || tabReady) return;
+    const first = setup.connections.find((connection) => connection.kind === "webhook-in") ? "webhooks" : "api";
+    setTab(first);
+    setTabReady(true);
+  }, [setup, tabReady]);
+
   // /api/services is normalized, so it always includes the reserved External
   // Booking lesson type; the raw settings catalog only has it after a save.
   const services = resourceServices.length ? resourceServices : integration?.catalog?.services || [];
@@ -257,8 +299,17 @@ export default function IntegrationPanel() {
   // "Integration", which turned the API tab's hint into "What we send
   // Integration" any time the descriptor had not loaded — which is exactly when
   // somebody is looking at this screen.
-  const providerLabel = setup?.provider?.label || "this connection";
-  const words = setup?.provider?.vocabulary || { workspace: "workspace", resource: "resource" };
+  const providerLabel = setup?.integration?.label || "this connection";
+  const words = setup?.integration?.vocabulary || { workspace: "workspace", resource: "resource" };
+  // A connection is a set of fields, and an integration has one or more. The
+  // panes read whichever ones exist rather than assuming both — Resend has no
+  // webhook, Akahu has no inbound anything.
+  const inbound = setup?.connections.find((connection) => connection.kind === "webhook-in") || null;
+  const outbound = setup?.connections.find((connection) => connection.kind !== "webhook-in") || null;
+  // Mapping, Activity and Health are about events arriving. Only a booking
+  // provider has any, so for the other five those panes would be three empty
+  // screens claiming something is wrong.
+  const receivesEvents = Boolean(setup?.integration?.capabilities);
   const resourceWord = words.resource;
 
   const mappedIds = useMemo(
@@ -292,12 +343,12 @@ export default function IntegrationPanel() {
   const showPurchases = activityFilter === "all" || activityFilter === "purchases" || activityFilter === "problems";
 
   const missingRequired = useMemo(() => {
-    const all = [...(setup?.webhook?.credentials || []), ...(setup?.api?.credentials || [])];
-    return all.filter((credential) => credential.required && !credential.set);
+    return (setup?.connections || []).flatMap((connection) => connection.fields)
+      .filter((field) => field.required === true && !field.set && field.type !== "copy" && field.type !== "oauth");
   }, [setup]);
   const whitespaceProblems = useMemo(() => {
-    const all = [...(setup?.webhook?.credentials || []), ...(setup?.api?.credentials || [])];
-    return all.filter((credential) => credential.hasSurroundingWhitespace);
+    return (setup?.connections || []).flatMap((connection) => connection.fields)
+      .filter((field) => field.hasSurroundingWhitespace);
   }, [setup]);
 
   // Age, not count. One event stuck for three days matters more than fifty that
@@ -433,7 +484,14 @@ export default function IntegrationPanel() {
     activity: "Everything that moved",
     health: "Can I use this right now",
   };
-  const tabs: Tab[] = ["webhooks", "api", "mapping", "activity", "health"];
+  // Only the panes this integration actually has. Resend has no webhook and
+  // Akahu receives nothing, so showing them five tabs would be three empty
+  // screens implying something is missing.
+  const tabs: Tab[] = [
+    ...(inbound ? (["webhooks"] as Tab[]) : []),
+    ...(outbound ? (["api"] as Tab[]) : []),
+    ...(receivesEvents ? (["mapping", "activity", "health"] as Tab[]) : []),
+  ];
 
   return (
     <InlineEditProvider>
@@ -441,7 +499,7 @@ export default function IntegrationPanel() {
       <header className="integration-header">
         <div>
           <span>Connection</span>
-          <h2>{setup?.provider?.label || "Not connected"}</h2>
+          <h2>{setup?.integration?.label || "Not connected"}</h2>
           <p>{TAB_HINTS[tab]}</p>
         </div>
         <strong className={attention ? "needs-attention" : ""}>{attention ? "Needs attention" : "Ready"}</strong>
@@ -469,7 +527,7 @@ export default function IntegrationPanel() {
 
         {/* ---------------- Webhooks: what they send us ------------------- */}
         {tab === "webhooks" ? (
-          setup?.webhook ? (
+          inbound ? (
             <>
               <div className="integration-note">
                 <strong>Inbound</strong>
@@ -483,16 +541,16 @@ export default function IntegrationPanel() {
                   <h3>Give these to {providerLabel}</h3>
                   <CopyField
                     label="Webhook URL"
-                    value={setup.webhook.url}
+                    value={inbound.fields.find((field) => field.type === "copy" && field.label.includes("URL"))?.value || ""}
                     help={`Paste into ${providerLabel}'s webhook settings. This is the only address Clarity listens on.`}
                   />
                   <CopyField
                     label="Events to subscribe to"
-                    value={setup.webhook.events.map((event) => event.id).join("\n")}
+                    value={inbound.events.map((event) => event.id).join("\n")}
                     help="Nothing else is read. Anything not on this list is stored and ignored."
                   />
                   <ul className="integration-events">
-                    {setup.webhook.events.map((event) => (
+                    {inbound.events.map((event) => (
                       <li key={event.id}>
                         <code>{event.id}</code>
                         <span>{event.label}</span>
@@ -503,11 +561,11 @@ export default function IntegrationPanel() {
                 </section>
                 <section>
                   <h3>Paste these from {providerLabel}</h3>
-                  {setup.webhook.credentials.map((credential) => <CredentialField credential={credential} key={credential.key} />)}
-                  {setup.webhook.signatureRecipe ? (
+                  {inbound.fields.filter((field) => field.type !== "copy").map((field) => <CredentialField credential={field} key={field.key} />)}
+                  {inbound.signatureRecipe ? (
                     <label className="integration-credential">
                       <span className="credential-label">Signature recipe</span>
-                      <input readOnly value={setup.webhook.signatureRecipe} />
+                      <input readOnly value={inbound.signatureRecipe} />
                       <small>
                         How every delivery is signed. Shown because this is what silently fails when a secret
                         is pasted with a stray space — a 401 should be readable from here rather than from the source.
@@ -530,33 +588,47 @@ export default function IntegrationPanel() {
 
         {/* ---------------- API: what we send them ------------------------ */}
         {tab === "api" ? (
-          setup?.api ? (
+          outbound ? (
             <>
               <div className="integration-note">
                 <strong>Outbound</strong>
                 <span>
-                  Clarity calls {providerLabel} over {setup.api.kind === "graphql" ? "GraphQL" : "REST"} to book and
-                  release {resourceWord}s. Everything here is pasted from {providerLabel}; there is nothing to copy back.
+                  {outbound.summary} {outbound.transport ? `Over ${outbound.transport === "graphql" ? "GraphQL" : "REST"}.` : ""}
                 </span>
               </div>
               <div className="integration-directions single">
                 <section>
                   <h3>Paste these from {providerLabel}</h3>
-                  {setup.api.credentials.map((credential) => <CredentialField credential={credential} key={credential.key} />)}
+                  {outbound.fields.filter((field) => field.type === "copy").map((field) => (
+                    <CopyField help={field.help} key={field.key} label={field.label} value={field.value} />
+                  ))}
+                  {outbound.fields.filter((field) => field.type !== "copy" && field.type !== "oauth").map((field) => (
+                    <CredentialField credential={field} key={field.key} />
+                  ))}
+                  {outbound.fields.filter((field) => field.type === "oauth").map((field) => (
+                    <div className="integration-oauth" key={field.key}>
+                      <span className="credential-label">{field.label}</span>
+                      {/* Signing in is the connection. The fields above only say
+                          which app is asking, so a filled-in client id is not
+                          the same as access and must not read as one. */}
+                      <a className="primary-button small" href="/api/google-calendar/connect">Connect</a>
+                      <small>{field.help}</small>
+                    </div>
+                  ))}
                 </section>
               </div>
               <div className="integration-note">
                 <strong>What Clarity asks for</strong>
                 <ul className="integration-events">
-                  {setup.api.operations.map((operation) => (
+                  {outbound.operations.map((operation) => (
                     <li key={operation.id}><code>{operation.id}</code><span>{operation.label}</span></li>
                   ))}
                 </ul>
               </div>
-              {setup.provider.capabilities.writeBlockedReason ? (
+              {setup?.integration.capabilities?.writeBlockedReason ? (
                 <div className="integration-note">
                   <strong>What Clarity cannot do</strong>
-                  <span>{setup.provider.capabilities.writeBlockedReason}</span>
+                  <span>{setup.integration.capabilities?.writeBlockedReason}</span>
                 </div>
               ) : null}
             </>
@@ -887,10 +959,10 @@ export default function IntegrationPanel() {
                 detail={failedCount ? `${failedCount} event${failedCount === 1 ? "" : "s"} failed and can be retried from Activity.` : "None."}
               />
             </div>
-            {setup?.provider?.docsUrl ? (
+            {setup?.integration?.docsUrl ? (
               <div className="integration-note">
                 <strong>{providerLabel} documentation</strong>
-                <span><a href={setup.provider.docsUrl} rel="noreferrer" target="_blank">{setup.provider.docsUrl}</a></span>
+                <span><a href={setup.integration.docsUrl} rel="noreferrer" target="_blank">{setup.integration.docsUrl}</a></span>
               </div>
             ) : null}
           </>

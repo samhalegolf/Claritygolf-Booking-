@@ -155,6 +155,52 @@ test("every dedicated /api route is excluded from the wildcard", () => {
   assert.deepEqual(missing, [], missing.join("\n  "));
 });
 
+/**
+ * An archetype earns its name when a second integration needs it.
+ *
+ * Naming five shapes risks the usual failure: an abstraction fitted to what
+ * exists, which then fights the seventh integration. This is the check that
+ * keeps it honest — a kind with one member is either a genuinely different
+ * mechanism or a premature abstraction, and it has to be named here as one.
+ *
+ * When a single-member kind gets a second member, delete it from SOLO. When it
+ * never does, that is the argument for collapsing it into its neighbour.
+ */
+test("every connection archetype has two integrations, or a stated reason", () => {
+  const SOLO: Record<string, string> = {
+    // A handshake rather than a set of fields. Nothing else about it resembles
+    // pasting a token, so sharing a kind with one would help nobody.
+    oauth2: "Google — the only OAuth integration, and a different mechanism rather than a variation",
+    // On probation. The secret is shared rather than issued, which is a
+    // different failure mode from a revocable token — but if nothing else ever
+    // links to a peer service this should collapse into api-token.
+    "service-link": "Caddy — on probation; collapse into api-token if nothing joins it",
+  };
+  const dir = path.join(SRC, "..", "netlify", "functions", "_shared", "integrations");
+  const sources = [
+    readFileSync(path.join(dir, "catalogue.mts"), "utf8"),
+    readFileSync(path.join(dir, "providers", "optix.mts"), "utf8"),
+  ].join("\n");
+
+  const counts = new Map<string, number>();
+  for (const match of sources.matchAll(/kind: "([a-z0-9-]+)"/g)) {
+    counts.set(match[1], (counts.get(match[1]) ?? 0) + 1);
+  }
+  assert.ok(counts.size >= 4, `only found ${counts.size} archetypes — has the catalogue moved?`);
+
+  const unjustified = [...counts].filter(([kind, n]) => n < 2 && !SOLO[kind]).map(([kind]) => kind);
+  assert.deepEqual(
+    unjustified,
+    [],
+    `Archetype(s) with a single member and no stated reason: ${unjustified.join(", ")}. ` +
+      "Either a second integration needs it, or it should collapse into its neighbour — " +
+      "or say why in SOLO above.",
+  );
+
+  const outgrown = Object.keys(SOLO).filter((kind) => (counts.get(kind) ?? 0) >= 2);
+  assert.deepEqual(outgrown, [], `No longer solo, remove from SOLO: ${outgrown.join(", ")}`);
+});
+
 /* --- Ratchets ------------------------------------------------------------ */
 
 /**

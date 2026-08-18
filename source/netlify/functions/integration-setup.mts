@@ -2,24 +2,21 @@ import { createHash } from "node:crypto";
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
-import { adapterFor, connectedProviders, providerCapabilities } from "./_shared/integrations/registry.mts";
-import type { CredentialSpec } from "./_shared/integrations/types.mts";
+import { allIntegrations, integrationById } from "./_shared/integrations/catalogue.mts";
+import { providerCapabilities } from "./_shared/integrations/registry.mts";
+import type { ConnectionSpec, FieldSpec, IntegrationDescriptor } from "./_shared/integrations/types.mts";
 
 /**
- * What the setup screens need to draw themselves, for any provider.
+ * What the Integrations screens need to draw themselves.
  *
- * Two halves, and the split is the point:
+ * Two modes. Without ?id it returns every integration with enough status to
+ * draw a card; with ?id it returns one, resolved down to fields a browser can
+ * render.
  *
- *   "give these to them"   the webhook URL, the events to subscribe to, the
- *                          signature recipe. Facts about Clarity. Read-only,
- *                          copyable, impossible to type wrong.
- *
- *   "paste these from them" the credentials. Reported as set/not-set only,
- *                          never as values.
- *
- * Knowing which direction a value travels is the hard part of wiring up any
- * integration, so direction is the shape of the response rather than something
- * the UI has to infer.
+ * The rule this endpoint exists to enforce: a secret's VALUE never leaves the
+ * server. What leaves is whether it is set, how long it is, and a fingerprint —
+ * enough to tell two secrets apart and to catch the trailing newline that
+ * rejects every request, and nowhere near enough to reconstruct one.
  */
 
 const SESSION_COOKIE = "clarity_session";
@@ -48,42 +45,114 @@ function env(name: string) {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || "";
 }
 
-/**
- * A credential's state, without its value.
- *
- * `length` and `fingerprint` are here for one specific bug: a secret pasted
- * with a trailing newline is invisible behind eight dots and rejects every
- * delivery. A length one longer than expected gives it away instantly, and a
- * fingerprint lets you compare what Clarity holds against what the other system
- * shows without either side revealing anything.
- *
- * Four hex characters of a salted hash is 65,536 buckets — enough to tell two
- * secrets apart, nowhere near enough to work backwards to one.
- *
- * A non-secret credential (an endpoint, a numeric member id) reports its value,
- * because hiding it helps nobody and seeing it is how you spot the wrong one.
- */
-function credentialStatus(spec: CredentialSpec) {
-  const raw = env(spec.key);
-  const trimmed = raw.trim();
+/** A `copy` field's value depends on the deployment, so it is worked out here. */
+function computed(field: FieldSpec, connection: ConnectionSpec, origin: string) {
+  switch (field.compute) {
+    case "webhook-url":
+      return connection.path ? `${origin}${connection.path}` : "";
+    case "redirect-uri":
+      return `${origin}/api/google-calendar/callback`;
+    case "event-list":
+      return (connection.events || []).map((event) => event.id).join("\n");
+    case "signature-recipe":
+      return connection.signatureRecipe || "";
+    default:
+      return "";
+  }
+}
+
+function resolveField(field: FieldSpec, connection: ConnectionSpec, origin: string) {
   const base = {
-    key: spec.key,
-    label: spec.label,
-    help: spec.help,
-    secret: spec.secret,
-    required: spec.required,
-    defaultValue: spec.defaultValue || "",
-    set: trimmed.length > 0,
-    length: trimmed.length,
-    // Surfaced rather than silently trimmed: whitespace around a credential is
-    // a real and maddening cause of 401s, and the env var is the thing to fix.
-    hasSurroundingWhitespace: raw.length !== trimmed.length,
+    key: field.key,
+    type: field.type,
+    label: field.label,
+    help: field.help,
+    required: field.required,
+    group: field.group || "",
+    defaultValue: field.defaultValue || "",
+    choices: field.choices || [],
   };
-  if (!trimmed) return { ...base, fingerprint: "", value: "" };
+
+  // Ours to give away: no secret, no storage, just a value to copy.
+  if (field.type === "copy") {
+    return { ...base, value: computed(field, connection, origin), set: true, length: 0, fingerprint: "", hasSurroundingWhitespace: false };
+  }
+  // Not a value at all — a handshake. Whether it is connected is a question for
+  // the token store, which the panel asks separately.
+  if (field.type === "oauth") {
+    return { ...base, value: "", set: false, length: 0, fingerprint: "", hasSurroundingWhitespace: false };
+  }
+
+  const raw = env(field.key);
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return { ...base, value: "", set: false, length: 0, fingerprint: "", hasSurroundingWhitespace: false };
+  }
   return {
     ...base,
-    fingerprint: createHash("sha256").update(`clarity:${spec.key}:${trimmed}`).digest("hex").slice(0, 4),
-    value: spec.secret ? "" : trimmed,
+    set: true,
+    length: trimmed.length,
+    // Four hex characters of a salted hash: enough to tell two secrets apart or
+    // to compare against what the other system shows, nowhere near enough to
+    // work backwards to one.
+    fingerprint: createHash("sha256").update(`clarity:${field.key}:${trimmed}`).digest("hex").slice(0, 4),
+    // Surfaced rather than quietly trimmed. Whitespace around a credential is a
+    // real and maddening cause of 401s, and the env var is the thing to fix.
+    hasSurroundingWhitespace: raw.length !== trimmed.length,
+    // A non-secret reports its value: hiding an endpoint or a numeric id helps
+    // nobody, and seeing it is how you spot the wrong one.
+    value: field.type === "secret" ? "" : trimmed,
+  };
+}
+
+/**
+ * Is this integration usable right now?
+ *
+ * "one-of" fields count as satisfied when any member of their group is set —
+ * Optix takes either token, Stripe falls back between two webhook secrets. A
+ * check that demanded both would report a working integration as broken.
+ */
+function integrationStatus(descriptor: IntegrationDescriptor) {
+  const missing: string[] = [];
+  const satisfiedGroups = new Set<string>();
+  const groupFields = new Map<string, FieldSpec[]>();
+
+  for (const connection of descriptor.connections) {
+    for (const field of connection.fields) {
+      if (field.type === "copy" || field.type === "oauth") continue;
+      const set = Boolean(env(field.key).trim());
+      if (field.required === "one-of" && field.group) {
+        const group = groupFields.get(field.group) || [];
+        group.push(field);
+        groupFields.set(field.group, group);
+        if (set) satisfiedGroups.add(field.group);
+        continue;
+      }
+      if (field.required === true && !set) missing.push(field.key);
+    }
+  }
+  for (const [group, fields] of groupFields) {
+    if (!satisfiedGroups.has(group)) missing.push(fields.map((field) => field.key).join(" or "));
+  }
+
+  const configured = missing.length === 0;
+  return {
+    configured,
+    missing,
+    // An OAuth integration is never "ready" from fields alone: the app existing
+    // is not the same as somebody having said yes to it.
+    needsAuthorisation: descriptor.connections.some((connection) => connection.kind === "oauth2"),
+  };
+}
+
+function card(descriptor: IntegrationDescriptor) {
+  return {
+    id: descriptor.id,
+    label: descriptor.label,
+    category: descriptor.category,
+    summary: descriptor.summary,
+    kinds: descriptor.connections.map((connection) => connection.kind),
+    ...integrationStatus(descriptor),
   };
 }
 
@@ -92,46 +161,47 @@ export default async function handler(req: Request) {
   if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
   const url = new URL(req.url);
-  const requested = url.searchParams.get("provider") || "optix";
-  const adapter = adapterFor(requested);
-  if (!adapter) {
+  const id = url.searchParams.get("id");
+
+  // List mode: everything Clarity has code for, configured or not. The ones
+  // that are not configured are the "+ New integration" list — four of them are
+  // live in the product today and invisible in it.
+  if (!id) {
+    return json({ integrations: allIntegrations().map(card) });
+  }
+
+  const descriptor = integrationById(id);
+  if (!descriptor) {
     return json({
-      error: "unknown_provider",
-      message: `Clarity has no adapter for "${requested}".`,
-      available: connectedProviders().map((candidate) => ({ id: candidate.id, label: candidate.label })),
+      error: "unknown_integration",
+      message: `Clarity has no integration called "${id}".`,
+      available: allIntegrations().map((entry) => ({ id: entry.id, label: entry.label })),
     }, 404);
   }
 
-  const descriptor = adapter.descriptor;
-  const capabilities = providerCapabilities(adapter.id);
-
   return json({
-    providers: connectedProviders().map((candidate) => ({ id: candidate.id, label: candidate.label })),
-    provider: {
+    integration: {
       id: descriptor.id,
       label: descriptor.label,
+      category: descriptor.category,
+      summary: descriptor.summary,
       docsUrl: descriptor.docsUrl || "",
-      vocabulary: descriptor.vocabulary,
-      capabilities,
+      vocabulary: descriptor.vocabulary || { workspace: "workspace", resource: "resource" },
+      // Only a booking provider has capabilities to report; the rest are
+      // outbound and have nothing to say here.
+      capabilities: descriptor.category === "bookings" ? providerCapabilities(descriptor.id) : null,
+      ...integrationStatus(descriptor),
     },
-    // Inbound. `url` is absolute because the whole point is pasting it
-    // somewhere else, and a path alone is one more thing to get wrong.
-    webhook: descriptor.webhook
-      ? {
-          url: `${url.origin}${descriptor.webhook.path}`,
-          events: descriptor.webhook.events,
-          signatureRecipe: descriptor.webhook.signatureRecipe || "",
-          credentials: descriptor.webhook.credentials.map(credentialStatus),
-        }
-      : null,
-    // Outbound.
-    api: descriptor.api
-      ? {
-          kind: descriptor.api.kind,
-          operations: descriptor.api.operations,
-          credentials: descriptor.api.credentials.map(credentialStatus),
-        }
-      : null,
+    connections: descriptor.connections.map((connection) => ({
+      kind: connection.kind,
+      title: connection.title,
+      summary: connection.summary,
+      transport: connection.transport || "",
+      events: connection.events || [],
+      operations: connection.operations || [],
+      signatureRecipe: connection.signatureRecipe || "",
+      fields: connection.fields.map((field) => resolveField(field, connection, url.origin)),
+    })),
   });
 }
 
