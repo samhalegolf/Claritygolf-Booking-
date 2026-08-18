@@ -331,3 +331,49 @@ test("expandable sections arrive closed", () => {
       "Open on click, not on arrival.",
   );
 });
+
+/**
+ * One speed for opening and closing.
+ *
+ * There were four: the Settings accordion at 200ms, its opacity at 160ms, the
+ * details panel popping at 160ms and collapsing at 260ms, and a native
+ * <details> at no speed at all. Same gesture, four answers. Everything that
+ * opens or closes now reads --c-t-expand, so changing the feel of the whole app
+ * is one line in tokens.css.
+ *
+ * A rule counts as a disclosure if it animates the row track (the 0fr → 1fr
+ * trick), if it dresses ::details-content, or if it is one of the two panel
+ * keyframes. Hover, drag and flight animations are a different question and are
+ * left alone.
+ */
+test("everything opens and closes at the same speed", () => {
+  const offenders: string[] = [];
+  for (const file of files) {
+    if (file === TOKENS) continue;
+    for (const match of read(file).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = match[1].split("*/").pop()!.trim().replace(/\s+/g, " ");
+      const body = match[2];
+      const motion = [...body.matchAll(/(?:transition|animation)\s*:\s*([^;]+);/g)].map((entry) => entry[1]);
+      if (!motion.length) continue;
+      const isDisclosure =
+        /details-content|disclosure/.test(selector) ||
+        motion.some((value) => /grid-template-rows|detailsPop|panelCollapse/.test(value));
+      if (!isDisclosure) continue;
+      // Per property, not per declaration: a transition list can hold one
+      // stray literal beside three correct tokens, and reading the whole
+      // declaration would call that fine.
+      for (const value of motion) {
+        for (const part of value.split(",")) {
+          if (!/\d+\s*m?s\b/.test(part)) continue;
+          offenders.push(`${rel(file)}: ${selector.slice(0, 40)} — ${part.replace(/\s+/g, " ").trim()}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `These open or close at their own speed:\n  ${offenders.join("\n  ")}\n` +
+      "Use var(--c-t-expand), and change tokens.css if the speed is wrong.",
+  );
+});

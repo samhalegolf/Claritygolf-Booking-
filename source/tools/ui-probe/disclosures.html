@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../src/tokens.css"><link rel="stylesheet" href="../../src/styles.css"></head>
+<body><div id="root"><div class="app-shell">
+<aside class="sidebar"><div class="brand"><div class="brand-mark">C</div></div></aside>
+<main class="main-panel"><section class="module-page settings-page">
+<nav class="settings-subnav"><span class="settings-subnav-heading">Settings</span><button class="active">Business</button></nav>
+<div class="settings-grid settings-tab-business">
+
+  <!-- 1. the Settings accordion -->
+  <article class="data-card settings-section settings-business settings-group" data-disclosure="settings accordion" data-measure>
+    <button class="settings-group-header" data-open type="button"><span>Coaches</span><span class="settings-group-caret">&#9662;</span></button>
+    <div class="disclosure-wrap"><div class="disclosure-body settings-group-body">
+      <p>Two coaches, each with their own colour and working hours.</p>
+      <label class="settings-field"><span>Display name</span><input value="Sam"></label>
+      <label class="settings-field"><span>Email</span><input value="sam@example.com"></label>
+    </div></div>
+  </article>
+
+  <!-- 2. a native <details> sub-section -->
+  <article class="data-card settings-section settings-business settings-group is-open">
+    <button class="settings-group-header" type="button"><span>Theme</span><span class="settings-group-caret">&#9662;</span></button>
+    <div class="disclosure-wrap is-open"><div class="disclosure-body settings-group-body">
+      <details class="settings-subsection" data-disclosure="native details" data-measure>
+        <summary class="settings-subsection-title" data-open><div><span>Colours</span><strong>Coach primary</strong></div></summary>
+        <label class="settings-field"><span>Primary</span><input value="#27d66f"></label>
+        <label class="settings-field"><span>Secondary</span><input value="#c7a45b"></label>
+        <p class="field-help">Used on the booking page and on every emailed confirmation.</p>
+      </details>
+    </div></div>
+  </article>
+
+  <!-- 3. a Billing product group -->
+  <article class="data-card settings-section settings-business">
+    <section class="product-group" data-disclosure="product group" data-measure>
+      <button class="product-group-header" data-open type="button"><strong>Products</strong><em>3</em></button>
+      <div class="disclosure-wrap"><div class="disclosure-body product-group-body">
+        <table class="recent-invoices-table product-table"><thead><tr><th>Name</th><th>Price</th></tr></thead>
+        <tbody><tr><td>Glove</td><td>$35</td></tr><tr><td>Balls</td><td>$60</td></tr><tr><td>Cap</td><td>$29</td></tr></tbody></table>
+      </div></div>
+    </section>
+  </article>
+
+</div>
+</section></main></div></div>
+<script>
+  for (const button of document.querySelectorAll("[data-open]")) {
+    if (button.tagName === "SUMMARY") continue;
+    button.addEventListener("click", () => {
+      const wrap = button.parentElement.querySelector(".disclosure-wrap");
+      wrap.classList.toggle("is-open");
+      button.closest("[data-disclosure]").classList.toggle("is-open");
+    });
+  }
+</script>
+</body></html>

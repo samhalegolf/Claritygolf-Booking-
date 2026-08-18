@@ -1160,8 +1160,8 @@ function SettingsGroup({
         <span>{title}</span>
         <span className="settings-group-caret" aria-hidden="true">▾</span>
       </button>
-      <div className="settings-group-wrap" inert={!open}>
-        <div className="settings-group-body">{children}</div>
+      <div className={`disclosure-wrap${open ? " is-open" : ""}`} inert={!open}>
+        <div className="disclosure-body settings-group-body">{children}</div>
       </div>
     </article>
   );

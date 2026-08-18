@@ -10,7 +10,7 @@
  * Anything that scrolls on purpose is excluded: inputs, selects, and any
  * element whose own overflow-x is auto or scroll (the integration tab strip).
  *
- *   node tools/mobile-probe/probe.mjs [fixture.html] [width]
+ *   node tools/ui-probe/overflow.mjs [fixture.html] [width]
  *
  * Needs playwright (npm i -D playwright). Fixtures live beside this file; add
  * one whenever a screen is worth checking, copying the class names AND the
@@ -30,7 +30,7 @@ try {
 
 const browser = await chromium.launch({ args: ["--headless=new", "--no-sandbox"] });
 const page = await browser.newPage({ viewport: { width, height: 844 }, deviceScaleFactor: 2 });
-await page.goto(`file://${process.cwd()}/tools/mobile-probe/${fixtureArg}`);
+await page.goto(`file://${process.cwd()}/tools/ui-probe/${fixtureArg}`);
 await page.waitForTimeout(150);
 
 const report = await page.evaluate((vw) => {
@@ -63,7 +63,8 @@ const report = await page.evaluate((vw) => {
     }
   }
   return {
-    pageScroll: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    // Clamped: a negative is the reserved scrollbar gutter, not an overflow.
+    pageScroll: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
     offenders: out,
   };
 }, width);

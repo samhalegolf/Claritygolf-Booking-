@@ -545,163 +545,167 @@ export function ProductsPanel({
                 {groupLow > 0 && <span className="unpaid-count-badge">{groupLow} low</span>}
                 {lessons && <Lock className="product-group-lock" size={13} />}
               </button>
-              {open && lessons && (
-                <p className="field-help product-group-note">
-                  Your lesson types, priced where they are booked.{" "}
-                  <button className="link-button" onClick={onEditLessonTypes} type="button">
-                    Edit lesson types
-                  </button>
-                </p>
-              )}
-              {open && (
-                <table className="recent-invoices-table product-table">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      {stocked && <th>SKU</th>}
-                      {stocked && <th>Supplier</th>}
-                      {stocked && <th>Stock</th>}
-                      <th>Price</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.items.map((product) => {
-                      const low = isLowStock(product);
-                      const drawerOpen = stockFor === product.id;
-                      const readOnly = product.readOnly === true;
-                      return (
-                        <Fragment key={product.id}>
-                          <tr className={product.active === false ? "product-row-inactive" : ""}>
-                            <td>
-                              {readOnly ? (
-                                <span className="product-row-name">{product.name}</span>
-                              ) : (
-                                <button className="link-button" onClick={() => startEdit(product)} type="button">
-                                  {product.name}
-                                </button>
-                              )}
-                              {(product.active === false ||
-                                product.isVoucher ||
-                                marginLabel(product) ||
-                                product.description) && (
-                                <em className="product-row-meta">
-                                  {[
-                                    product.active === false ? "Retired" : "",
-                                    product.isVoucher ? "Gift voucher" : "",
-                                    marginLabel(product),
-                                    stocked ? "" : product.description,
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" - ")}
-                                </em>
-                              )}
-                            </td>
-                            {stocked && <td>{product.sku || "-"}</td>}
-                            {stocked && <td>{product.supplier || "-"}</td>}
-                            {stocked && (
+              {/* Always rendered, so it has something to slide. Same wrapper,
+                  same 200ms, as every other disclosure in the app. */}
+              <div className={`disclosure-wrap${open ? " is-open" : ""}`} inert={!open}>
+                <div className="disclosure-body product-group-body">
+                  {lessons && (
+                    <p className="field-help product-group-note">
+                      Your lesson types, priced where they are booked.{" "}
+                      <button className="link-button" onClick={onEditLessonTypes} type="button">
+                        Edit lesson types
+                      </button>
+                    </p>
+                  )}
+                  <table className="recent-invoices-table product-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        {stocked && <th>SKU</th>}
+                        {stocked && <th>Supplier</th>}
+                        {stocked && <th>Stock</th>}
+                        <th>Price</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.items.map((product) => {
+                        const low = isLowStock(product);
+                        const drawerOpen = stockFor === product.id;
+                        const readOnly = product.readOnly === true;
+                        return (
+                          <Fragment key={product.id}>
+                            <tr className={product.active === false ? "product-row-inactive" : ""}>
                               <td>
-                                {product.trackStock ? (
-                                  <span className={`product-stock${low ? " low" : ""}`}>
-                                    {low && <AlertTriangle size={13} />}
-                                    {product.stockLevel ?? 0}
-                                  </span>
+                                {readOnly ? (
+                                  <span className="product-row-name">{product.name}</span>
                                 ) : (
-                                  <span className="product-stock untracked">not counted</span>
+                                  <button className="link-button" onClick={() => startEdit(product)} type="button">
+                                    {product.name}
+                                  </button>
+                                )}
+                                {(product.active === false ||
+                                  product.isVoucher ||
+                                  marginLabel(product) ||
+                                  product.description) && (
+                                  <em className="product-row-meta">
+                                    {[
+                                      product.active === false ? "Retired" : "",
+                                      product.isVoucher ? "Gift voucher" : "",
+                                      marginLabel(product),
+                                      stocked ? "" : product.description,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" - ")}
+                                  </em>
                                 )}
                               </td>
-                            )}
-                            <td>{formatMoney(product.price, currency)}</td>
-                            <td className="product-row-actions">
-                              {product.trackStock && (
-                                <button className="link-button" onClick={() => void openStockDrawer(product)} type="button">
-                                  {drawerOpen ? "Close" : "Stock"}
-                                </button>
+                              {stocked && <td>{product.sku || "-"}</td>}
+                              {stocked && <td>{product.supplier || "-"}</td>}
+                              {stocked && (
+                                <td>
+                                  {product.trackStock ? (
+                                    <span className={`product-stock${low ? " low" : ""}`}>
+                                      {low && <AlertTriangle size={13} />}
+                                      {product.stockLevel ?? 0}
+                                    </span>
+                                  ) : (
+                                    <span className="product-stock untracked">not counted</span>
+                                  )}
+                                </td>
                               )}
-                              {!readOnly && (
-                                <button
-                                  className="text-link-button"
-                                  onClick={() => void onSetActive(product, product.active === false)}
-                                  type="button"
-                                >
-                                  {product.active === false ? "Restore" : "Retire"}
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                          {drawerOpen && (
-                            <tr className="product-stock-row">
-                              <td colSpan={stocked ? 6 : 3}>
-                                <div className="product-stock-drawer">
-                                  <div className="settings-field-row">
-                                    <label className="settings-field">
-                                      <span>Change</span>
-                                      <select
-                                        value={stockMode}
-                                        onChange={(event) => setStockMode(event.target.value as "delta" | "setTo")}
-                                      >
-                                        <option value="delta">Add / remove</option>
-                                        <option value="setTo">Counted on the shelf</option>
-                                      </select>
-                                    </label>
-                                    <label className="settings-field">
-                                      <span>{stockMode === "delta" ? "Quantity (use -2 to remove)" : "Actual count"}</span>
-                                      <input
-                                        type="number"
-                                        step="1"
-                                        value={stockValue}
-                                        onChange={(event) => setStockValue(event.target.value)}
-                                      />
-                                    </label>
-                                    <label className="settings-field">
-                                      <span>Reason</span>
-                                      <input
-                                        value={stockNote}
-                                        onChange={(event) => setStockNote(event.target.value)}
-                                        placeholder="Optional - e.g. delivery, damaged"
-                                      />
-                                    </label>
-                                    <button
-                                      className="outline-button"
-                                      disabled={stockBusy || stockValue === ""}
-                                      onClick={() => void submitStock(product)}
-                                      type="button"
-                                    >
-                                      {stockBusy ? "Saving..." : "Apply"}
-                                    </button>
-                                  </div>
-                                  <div className="product-movement-list">
-                                    {movementsLoading && <p className="field-help">Loading history...</p>}
-                                    {!movementsLoading && !movements.length && (
-                                      <p className="field-help">No stock movements recorded yet.</p>
-                                    )}
-                                    {!movementsLoading &&
-                                      movements.map((movement) => (
-                                        <div key={movement.id} className="product-movement">
-                                          <strong className={movement.delta < 0 ? "negative" : "positive"}>
-                                            {movement.delta > 0 ? `+${movement.delta}` : movement.delta}
-                                          </strong>
-                                          <span>
-                                            {MOVEMENT_LABELS[movement.kind] || movement.kind}
-                                            {movement.note ? ` - ${movement.note}` : ""}
-                                          </span>
-                                          <em>
-                                            {movement.createdAt ? new Date(movement.createdAt).toLocaleString() : ""}
-                                            {movement.resultingLevel === null ? "" : ` - left ${movement.resultingLevel}`}
-                                          </em>
-                                        </div>
-                                      ))}
-                                  </div>
-                                </div>
+                              <td>{formatMoney(product.price, currency)}</td>
+                              <td className="product-row-actions">
+                                {product.trackStock && (
+                                  <button className="link-button" onClick={() => void openStockDrawer(product)} type="button">
+                                    {drawerOpen ? "Close" : "Stock"}
+                                  </button>
+                                )}
+                                {!readOnly && (
+                                  <button
+                                    className="text-link-button"
+                                    onClick={() => void onSetActive(product, product.active === false)}
+                                    type="button"
+                                  >
+                                    {product.active === false ? "Restore" : "Retire"}
+                                  </button>
+                                )}
                               </td>
                             </tr>
-                          )}
-                        </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
+                            {drawerOpen && (
+                              <tr className="product-stock-row">
+                                <td colSpan={stocked ? 6 : 3}>
+                                  <div className="product-stock-drawer">
+                                    <div className="settings-field-row">
+                                      <label className="settings-field">
+                                        <span>Change</span>
+                                        <select
+                                          value={stockMode}
+                                          onChange={(event) => setStockMode(event.target.value as "delta" | "setTo")}
+                                        >
+                                          <option value="delta">Add / remove</option>
+                                          <option value="setTo">Counted on the shelf</option>
+                                        </select>
+                                      </label>
+                                      <label className="settings-field">
+                                        <span>{stockMode === "delta" ? "Quantity (use -2 to remove)" : "Actual count"}</span>
+                                        <input
+                                          type="number"
+                                          step="1"
+                                          value={stockValue}
+                                          onChange={(event) => setStockValue(event.target.value)}
+                                        />
+                                      </label>
+                                      <label className="settings-field">
+                                        <span>Reason</span>
+                                        <input
+                                          value={stockNote}
+                                          onChange={(event) => setStockNote(event.target.value)}
+                                          placeholder="Optional - e.g. delivery, damaged"
+                                        />
+                                      </label>
+                                      <button
+                                        className="outline-button"
+                                        disabled={stockBusy || stockValue === ""}
+                                        onClick={() => void submitStock(product)}
+                                        type="button"
+                                      >
+                                        {stockBusy ? "Saving..." : "Apply"}
+                                      </button>
+                                    </div>
+                                    <div className="product-movement-list">
+                                      {movementsLoading && <p className="field-help">Loading history...</p>}
+                                      {!movementsLoading && !movements.length && (
+                                        <p className="field-help">No stock movements recorded yet.</p>
+                                      )}
+                                      {!movementsLoading &&
+                                        movements.map((movement) => (
+                                          <div key={movement.id} className="product-movement">
+                                            <strong className={movement.delta < 0 ? "negative" : "positive"}>
+                                              {movement.delta > 0 ? `+${movement.delta}` : movement.delta}
+                                            </strong>
+                                            <span>
+                                              {MOVEMENT_LABELS[movement.kind] || movement.kind}
+                                              {movement.note ? ` - ${movement.note}` : ""}
+                                            </span>
+                                            <em>
+                                              {movement.createdAt ? new Date(movement.createdAt).toLocaleString() : ""}
+                                              {movement.resultingLevel === null ? "" : ` - left ${movement.resultingLevel}`}
+                                            </em>
+                                          </div>
+                                        ))}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </section>
           );
         })}

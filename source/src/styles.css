@@ -12,6 +12,13 @@
   box-sizing: border-box;
 }
 
+/* Keep the scrollbar's space reserved whether or not there is one. Otherwise a
+   screen that fits the window and one that does not are two different widths,
+   and everything shifts sideways as you move between them. */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -473,10 +480,15 @@ button {
 /* One page card holding a 216px sub-nav and the pane it opens. Was a stack of
    a horizontal tab bar over a grid, which meant eleven destinations competing
    for one row and wrapping onto two on a laptop. */
+/* The floor is what stops the pane resizing every time you pick a section.
+   Business has four headings, Account has two, and without a floor the whole
+   bordered block grew and shrank under the cursor as you moved down the list.
+   It only grows past this when a section genuinely has more in it. */
 .settings-page {
   display: grid;
   grid-template-columns: 216px minmax(0, 1fr);
   gap: 0;
+  min-height: max(480px, 60vh);
   overflow: hidden;
   padding: 0;
 }
@@ -1118,6 +1130,33 @@ button {
   gap: 12px;
   padding-top: 12px;
   border-top: 1px solid #ecebe5;
+}
+
+/* Every <details> in the app opens at the accordion's speed.
+ *
+ * A native <details> snaps open with no animation, so a Settings section slid
+ * open over 200ms and the sub-section inside it jumped. Same gesture, two
+ * different speeds. This gives them one.
+ *
+ * Behind @supports because animating to `auto` needs interpolate-size, which
+ * Chrome and Edge have and Safari does not yet. Where it is missing, the
+ * details snaps exactly as it does today — nothing is worse than it was. */
+@supports (interpolate-size: allow-keywords) and selector(details::details-content) {
+  :root {
+    interpolate-size: allow-keywords;
+  }
+
+  details::details-content {
+    block-size: 0;
+    overflow: hidden;
+    transition:
+      block-size var(--c-t-expand),
+      content-visibility var(--c-t-expand) allow-discrete;
+  }
+
+  details[open]::details-content {
+    block-size: auto;
+  }
 }
 
 .settings-subsection:first-child {
@@ -3848,12 +3887,12 @@ button {
   top: auto;
   overflow: auto;
   box-shadow: 0 24px 70px rgba(6, 13, 8, 0.26);
-  animation: detailsPop 160ms ease-out both;
+  animation: detailsPop var(--c-t-expand) both;
 }
 
 .details-panel:has(.empty-panel) {
   min-height: 260px;
-  animation: panelCollapse 260ms ease-out both;
+  animation: panelCollapse var(--c-t-expand) both;
 }
 
 .panel-header {
@@ -11173,13 +11212,21 @@ button {
   transform: rotate(180deg);
 }
 
-/* minmax(0, 1fr) on both of these grids, and it is the whole reason the older
-   panels ran off the side of a phone. A grid item's automatic minimum size is
-   its min-content width, so one child that cannot shrink — a long token, a row
-   of max-content columns — widened the track and every sibling stretched to
-   match it. The Google Calendar card measured 757px wide inside a 324px box.
-   Naming the column lets the track shrink and the contents wrap instead. */
-.settings-group-wrap {
+/* One open, one close, one speed — for everything that is not a <details>.
+ *
+ * The Settings accordion, the product groups and the player tool panel were
+ * three separate implementations at three different speeds, and one of them
+ * (display: none) had no speed at all. They are one thing now: a wrapper whose
+ * single row goes 0fr → 1fr, and a body that clips while it moves. Add
+ * `is-open` to the wrapper and set `inert` on it while shut, or a keyboard tab
+ * lands on controls nobody can see.
+ *
+ * minmax(0, 1fr) on the column is not decoration. A grid item's automatic
+ * minimum size is its min-content width, so one child that cannot shrink — a
+ * long token, a row of max-content columns — widens the track and every sibling
+ * stretches to match. That is how the Google Calendar card came to be 757px
+ * wide inside a 324px box. */
+.disclosure-wrap {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 0fr;
@@ -11187,17 +11234,17 @@ button {
   visibility: hidden;
   transition:
     grid-template-rows var(--c-t-expand),
-    opacity 160ms ease,
+    opacity var(--c-t-expand),
     visibility var(--c-t-expand);
 }
 
-.settings-group.is-open .settings-group-wrap {
+.disclosure-wrap.is-open {
   grid-template-rows: 1fr;
   opacity: 1;
   visibility: visible;
 }
 
-.settings-group-body {
+.disclosure-body {
   min-height: 0;
   overflow: hidden;
 }
