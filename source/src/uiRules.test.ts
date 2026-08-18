@@ -286,12 +286,17 @@ function sourceFiles(dir: string): string[] {
 }
 
 /**
- * playerToolExpanded is not a default-open disclosure: the panel it controls
- * only exists once a player has been clicked, so the click IS the request to
- * open it. Starting it false would mean clicking a player and getting a shut
- * box.
+ * The two that are meant to start open, and why.
+ *
+ * playerToolExpanded — the panel it controls only exists once a player has been
+ * clicked, so the click IS the request to open it. False would mean clicking a
+ * player and getting a shut box.
+ *
+ * openPublicBookingSection — the customer's booking flow, not an admin screen.
+ * It opens on "Appointment" because a booking page showing three shut bars
+ * looks like a page with nothing on it.
  */
-const OPENS_ON_A_CLICK = new Set(["playerToolExpanded"]);
+const MEANT_TO_START_OPEN = new Set(["playerToolExpanded", "openPublicBookingSection"]);
 
 test("expandable sections arrive closed", () => {
   const offenders: string[] = [];
@@ -302,10 +307,21 @@ test("expandable sections arrive closed", () => {
     for (const match of source.matchAll(/<details\b[^>]*?\bopen\s*(?![=\w])[^>]*>/g)) {
       offenders.push(`${rel(file)}: ${match[0].slice(0, 60).replace(/\s+/g, " ")}`);
     }
-    // A disclosure flag that starts open.
-    for (const match of source.matchAll(/\[\s*(\w*(?:[Oo]pen|[Ee]xpanded|[Ss]hown?)\w*)\s*,[^\]]*\]\s*=\s*useState(?:<[^>]*>)?\(\s*true\s*\)/g)) {
-      if (OPENS_ON_A_CLICK.has(match[1])) continue;
-      offenders.push(`${rel(file)}: ${match[1]} starts true`);
+    // A disclosure flag that starts open. Two shapes: a boolean that starts
+    // true, and the "which one is open" id that starts naming one.
+    const CLOSED = ["", "false", '""', "''", "null", "undefined", "{}", "[]", "new Set()"];
+    // The type argument is matched up to the paren rather than to the first `>`,
+    // or a nested generic like Partial<Record<K, boolean>> slips through.
+    const disclosure = /\[\s*(\w*(?:[Oo]pen|[Ee]xpand\w*|[Ss]how\w*|[Cc]ollaps\w*|[Dd]rawer|[Aa]ccordion)\w*)\s*,\s*set\w+\s*\]\s*=\s*useState\s*(?:<[^(]*>)?\s*\(([^)]*)\)/g;
+    for (const match of source.matchAll(disclosure)) {
+      const initial = match[2].trim();
+      if (CLOSED.includes(initial)) continue;
+      if (MEANT_TO_START_OPEN.has(match[1])) continue;
+      offenders.push(`${rel(file)}: ${match[1]} starts as ${initial || "open"}`);
+    }
+    // A header that claims to be expanded before anything has been clicked.
+    for (const match of source.matchAll(/aria-expanded=\{?\s*true/g)) {
+      offenders.push(`${rel(file)}: ${match[0]}`);
     }
   }
   assert.deepEqual(
