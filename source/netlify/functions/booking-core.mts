@@ -631,7 +631,7 @@ function cleanService(service, index = 0) {
 }
 
 // Every inbound external booking (Optix) files under this reserved lesson
-// type. The id must match EXTERNAL_BOOKING_SERVICE_ID in _shared/optix-origin.mts.
+// type. The id must match EXTERNAL_BOOKING_SERVICE_ID in _shared/integrations/ingest.mts.
 export const EXTERNAL_BOOKING_SERVICE_ID = "external-booking";
 
 const externalBookingServiceTemplate = {
@@ -3707,7 +3707,7 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
         queryRows(await client.query("SELECT to_regclass($1) AS name", [`public.${table}`]))[0]?.name,
       );
     // External providers resolve the customer from their own link row, and
-    // processStoredOptixEvent() prefers that value over the calendar item. Left
+    // processStoredExternalEvent() prefers that value over the calendar item. Left
     // behind, the next inbound event would write the deleted loser id straight
     // back onto the booking and silently undo this merge.
     if (await tableExists("external_booking_links")) {

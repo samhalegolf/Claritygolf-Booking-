@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { EXTERNAL_BOOKING_SERVICE_ID, assertProcessableEvent, createCalendarItemFromOptixBooking, externalBookingNote, findDuplicateBooking, isDeletedInClarityLink, normalizeOptixLessonEvent, updateCalendarItemFromOptixBooking, type OptixLessonMapping } from "./optix-origin.mts";
-import { matchPersonByEmail } from "./optix-db.mts";
-import { buildOptixAppointmentInput } from "./optix-reconcile.mts";
+import { EXTERNAL_BOOKING_SERVICE_ID, assertProcessableEvent, createCalendarItemFromOptixBooking, externalBookingNote, findDuplicateBooking, isDeletedInClarityLink, updateCalendarItemFromOptixBooking } from "./ingest.mts";
+import { normalizeOptixBooking } from "./providers/optix.mts";
+import type { IntegrationMapping } from "./types.mts";
+import { matchPersonByEmail } from "./db.mts";
+import { buildOptixAppointmentInput } from "../optix-reconcile.mts";
 
-const mapping: OptixLessonMapping = {
+const mapping: IntegrationMapping = {
   provider: "optix", organisationId: "org-1", workspaceId: "637949", workspaceName: "Swing Analysis",
   accountId: "sam-hale-golf",
   locationId: "three-kings", defaultCoachId: "sam-hale", enabled: true, expectedDuration: 60,
@@ -19,7 +21,7 @@ const payload = {
 };
 
 test("workspace 637949 creates the canonical calendar appointment contract", () => {
-  const event = normalizeOptixLessonEvent(payload);
+  const event = normalizeOptixBooking(payload);
   const item = createCalendarItemFromOptixBooking(event, mapping, { itemId: "optix-item-1", personId: "person-1" });
   assert.deepEqual({ kind: item.kind, account: item.account_id, service: item.service_id, location: item.location_id, coach: item.coach_id }, {
     kind: "appointment", account: "sam-hale-golf", service: EXTERNAL_BOOKING_SERVICE_ID, location: "three-kings", coach: "sam-hale",
@@ -33,7 +35,7 @@ test("workspace 637949 creates the canonical calendar appointment contract", () 
 });
 
 test("reads Optix form payload member_name instead of creating an Optix customer placeholder", () => {
-  const event = normalizeOptixLessonEvent({
+  const event = normalizeOptixBooking({
     ...payload,
     member: undefined,
     member_name: "Samuel",
@@ -48,7 +50,7 @@ test("reads Optix form payload member_name instead of creating an Optix customer
 });
 
 test("rejects a nameless Optix event rather than pooling it into a fake customer", () => {
-  const event = normalizeOptixLessonEvent({
+  const event = normalizeOptixBooking({
     ...payload,
     member: undefined,
     member_name: "",
@@ -60,7 +62,7 @@ test("rejects a nameless Optix event rather than pooling it into a fake customer
 });
 
 test("generated item is accepted unchanged by the existing Book resource payload builder", () => {
-  const item: any = createCalendarItemFromOptixBooking(normalizeOptixLessonEvent(payload), mapping, { itemId: "optix-item-1", personId: "person-1" });
+  const item: any = createCalendarItemFromOptixBooking(normalizeOptixBooking(payload), mapping, { itemId: "optix-item-1", personId: "person-1" });
   const appointment = {
     id: item.id, kind: item.kind, week: item.week, day: item.day, start: item.start, duration: item.duration,
     title: item.title, client: item.client, note: item.note, serviceId: item.service_id,
@@ -77,14 +79,14 @@ test("generated item is accepted unchanged by the existing Book resource payload
 });
 
 test("ordinary bay workspace 600006 cannot match the recognised lesson mapping", () => {
-  const bay = normalizeOptixLessonEvent({ ...payload, workspace_id: 600006, workspace_name: "Bay #4" });
+  const bay = normalizeOptixBooking({ ...payload, workspace_id: 600006, workspace_name: "Bay #4" });
   assert.notEqual(bay.workspaceId, mapping.workspaceId);
   assert.equal(bay.workspaceName, "Bay #4");
 });
 
 test("update and cancellation retain the same external booking identity", () => {
-  const updated = normalizeOptixLessonEvent({ ...payload, event: "member_booking_updated", check_out_timestamp: "2026-08-03T03:30:00Z" });
-  const cancelled = normalizeOptixLessonEvent({ ...payload, event: "member_booking_cancelled" });
+  const updated = normalizeOptixBooking({ ...payload, event: "member_booking_updated", check_out_timestamp: "2026-08-03T03:30:00Z" });
+  const cancelled = normalizeOptixBooking({ ...payload, event: "member_booking_cancelled" });
   const updatedItem = createCalendarItemFromOptixBooking(updated, mapping, { itemId: "same-item", personId: "same-person" });
   const cancelledItem = createCalendarItemFromOptixBooking(cancelled, mapping, { itemId: "same-item", personId: "same-person" });
   assert.equal(updatedItem.id, cancelledItem.id);
@@ -109,7 +111,7 @@ test("two clients sharing an email or a name never collapse into one record", ()
 });
 
 test("a reschedule moves the booking without touching what an admin owns", () => {
-  const moved = normalizeOptixLessonEvent({
+  const moved = normalizeOptixBooking({
     ...payload,
     event: "member_booking_updated",
     check_in_timestamp: "2026-08-04T02:00:00.000Z",
@@ -126,18 +128,18 @@ test("a reschedule moves the booking without touching what an admin owns", () =>
 });
 
 test("every inbound booking files under the reserved External Booking type", () => {
-  const created = createCalendarItemFromOptixBooking(normalizeOptixLessonEvent(payload), mapping, { itemId: "id", personId: "person" });
+  const created = createCalendarItemFromOptixBooking(normalizeOptixBooking(payload), mapping, { itemId: "id", personId: "person" });
   assert.equal(created.service_id, EXTERNAL_BOOKING_SERVICE_ID);
   // The Optix wording lives in the note, written on create only.
   assert.equal(created.note, "Optix: Swing Analysis");
 });
 
 test("the note carries the source's own label, workspace and type", () => {
-  const event = normalizeOptixLessonEvent({ ...payload, workspace_name: "Sam Hale Golf", workspace_type: "Golf Lessons" });
+  const event = normalizeOptixBooking({ ...payload, workspace_name: "Sam Hale Golf", workspace_type: "Golf Lessons" });
   assert.equal(externalBookingNote(event, mapping), "Optix: Sam Hale Golf · Golf Lessons");
   // A repeated label is not written twice, and an empty payload still notes
   // where the booking came from.
-  const bare = normalizeOptixLessonEvent({ ...payload, workspace_name: "", workspace_type: "" });
+  const bare = normalizeOptixBooking({ ...payload, workspace_name: "", workspace_type: "" });
   assert.equal(externalBookingNote(bare, { ...mapping, workspaceName: "" }), "Optix booking");
   assert.equal(externalBookingNote(bare, mapping), "Optix: Swing Analysis");
 });
@@ -145,7 +147,7 @@ test("the note carries the source's own label, workspace and type", () => {
 test("a lesson the coach already has is not imported a second time", () => {
   // The 13 duplicates found on 5 Aug 2026: a native lesson the coach booked,
   // then the same lesson arriving through Optix.
-  const event = normalizeOptixLessonEvent(payload);
+  const event = normalizeOptixBooking(payload);
   const native = { id: "appt-native", client: "Ada Lovelace", email: "", phone: "", start: 840, duration: 60, status: "booked" };
   assert.equal(findDuplicateBooking([native], event, { start: 840, duration: 60 }), "appt-native");
   // Matching on any one identity field is enough.
@@ -154,7 +156,7 @@ test("a lesson the coach already has is not imported a second time", () => {
     "appt-native",
   );
   // Phone matching is canonical, so stored formatting does not matter.
-  const phoneEvent = normalizeOptixLessonEvent({
+  const phoneEvent = normalizeOptixBooking({
     ...payload,
     member: { first_name: "", last_name: "", email: "", phone: "021 463 7700" },
   });
@@ -171,13 +173,13 @@ test("a lesson the coach already has is not imported a second time", () => {
 test("a cancelled record never blocks the rebooking that replaced it", () => {
   // The other form: Optix cancels a booking and reissues a new ID for the same
   // slot. The cancelled row is history and the slot is genuinely free.
-  const event = normalizeOptixLessonEvent(payload);
+  const event = normalizeOptixBooking(payload);
   const cancelled = { id: "optix-old", client: "Ada Lovelace", start: 840, duration: 60, status: "cancelled" };
   assert.equal(findDuplicateBooking([cancelled], event, { start: 840, duration: 60 }), null);
 });
 
 test("a different customer or a clear slot is not a duplicate", () => {
-  const event = normalizeOptixLessonEvent(payload);
+  const event = normalizeOptixBooking(payload);
   const other = { id: "appt-other", client: "Someone Else", start: 840, duration: 60, status: "booked" };
   assert.equal(findDuplicateBooking([other], event, { start: 840, duration: 60 }), null);
   const laterSameClient = { id: "appt-later", client: "Ada Lovelace", start: 1200, duration: 60, status: "booked" };
@@ -186,13 +188,13 @@ test("a different customer or a clear slot is not a duplicate", () => {
 });
 
 test("a lesson that merely overlaps the same customer's slot still counts", () => {
-  const event = normalizeOptixLessonEvent(payload);
+  const event = normalizeOptixBooking(payload);
   const overlapping = { id: "appt-overlap", client: "Ada Lovelace", start: 870, duration: 60, status: "booked" };
   assert.equal(findDuplicateBooking([overlapping], event, { start: 840, duration: 60 }), "appt-overlap");
 });
 
 test("external metadata is additive to normal lesson fields", () => {
-  const item = createCalendarItemFromOptixBooking(normalizeOptixLessonEvent(payload), mapping, { itemId: "id", personId: "person" });
+  const item = createCalendarItemFromOptixBooking(normalizeOptixBooking(payload), mapping, { itemId: "id", personId: "person" });
   const canonical = ["id", "account_id", "kind", "week", "day", "start", "duration", "coach_id", "location_id", "service_id", "client", "title", "phone", "email", "person_id", "note", "status", "coach", "location", "custom_group"];
   for (const field of canonical) assert.ok(field in item, `missing canonical field ${field}`);
   assert.equal(item.origin, "optix");

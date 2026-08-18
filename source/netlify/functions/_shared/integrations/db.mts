@@ -1,13 +1,15 @@
-import { text } from "./optix-payload.mts";
+import { text } from "./payload.mts";
 
 /**
- * Supabase access and person identity for everything the Optix integration
- * writes.
+ * Supabase access and person identity for everything any integration writes.
  *
- * These live here rather than in optix-origin.mts so the booking path and the
- * pass-purchase path can both use them without importing each other — the
- * booking path routes purchase events to the pass recorder, and the pass
- * recorder needs the same database client and the same person matching.
+ * Provider-neutral on purpose. Every adapter — inbound bookings, purchases,
+ * whatever a future provider sends — writes through the same client and
+ * resolves people through the same matcher, so identity rules can't drift
+ * apart one provider at a time.
+ *
+ * These live here rather than beside a provider's ingest code so two paths can
+ * share them without importing each other.
  */
 
 type SupabaseConfig = { url: string; key: string };
@@ -23,7 +25,7 @@ function config(): SupabaseConfig {
   return { url, key };
 }
 
-export async function optixOriginRequest(path: string, init: RequestInit = {}) {
+export async function integrationRequest(path: string, init: RequestInit = {}) {
   const { url, key } = config();
   const response = await fetch(`${url}/rest/v1/${path}`, {
     ...init,
@@ -60,8 +62,8 @@ function uniqueById(rows: ExternalPersonCandidate[]) {
 }
 
 /**
- * Identity matching for anything inbound from Optix is deliberately one-sided,
- * and matches on email alone.
+ * Identity matching for anything arriving from an external provider is
+ * deliberately one-sided, and matches on email alone.
  *
  * A duplicate person is always recoverable — the new record lands in the
  * external booking clients list, where an admin merges or moves it later. A
