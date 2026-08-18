@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
-import { allIntegrations, integrationById } from "./_shared/integrations/catalogue.mts";
+import { allIntegrations, integrationById, integrationsFor } from "./_shared/integrations/catalogue.mts";
 import { integrationRequest } from "./_shared/integrations/db.mts";
 import { providerCapabilities } from "./_shared/integrations/registry.mts";
 import type { ConnectionSpec, FieldSpec, IntegrationDescriptor } from "./_shared/integrations/types.mts";
@@ -176,7 +176,15 @@ function card(descriptor: IntegrationDescriptor) {
   return {
     id: descriptor.id,
     label: descriptor.label,
+    audience: descriptor.audience,
     category: descriptor.category,
+    caveat: descriptor.caveat || "",
+    // The card says "same sign-in as Google Calendar", so it needs the other
+    // entry's label — which the client cannot look up, because the twin lives
+    // in the other audience's list.
+    sharesGrantWith: descriptor.sharesGrantWith
+      ? integrationById(descriptor.sharesGrantWith)?.label || descriptor.sharesGrantWith
+      : "",
     summary: descriptor.summary,
     kinds: descriptor.connections.map((connection) => connection.kind),
     ...integrationStatus(descriptor),
@@ -189,12 +197,18 @@ export default async function handler(req: Request) {
 
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
+  const audience = url.searchParams.get("audience");
 
   // List mode: everything Clarity has code for, configured or not. The ones
   // that are not configured are the "+ New integration" list — four of them are
   // live in the product today and invisible in it.
+  //
+  // ?audience splits that list in two: what a coach has plugged in, versus what
+  // the software itself runs on. No audience means the whole catalogue, which
+  // is what anything asking "is everything set up" wants.
   if (!id) {
-    const cards = allIntegrations().map(card);
+    const list = audience === "admin" || audience === "integration" ? integrationsFor(audience) : allIntegrations();
+    const cards = list.map(card);
     const oauth = await oauthState();
     return json({
       integrations: cards.map((entry) =>
@@ -226,13 +240,15 @@ export default async function handler(req: Request) {
     integration: {
       id: descriptor.id,
       label: descriptor.label,
+      audience: descriptor.audience,
       category: descriptor.category,
+      caveat: descriptor.caveat || "",
       summary: descriptor.summary,
       docsUrl: descriptor.docsUrl || "",
       vocabulary: descriptor.vocabulary || { workspace: "workspace", resource: "resource" },
       // Only a booking provider has capabilities to report; the rest are
       // outbound and have nothing to say here.
-      capabilities: descriptor.category === "bookings" ? providerCapabilities(descriptor.id) : null,
+      capabilities: descriptor.category === "resource-booking" ? providerCapabilities(descriptor.id) : null,
       ...integrationStatus(descriptor),
       ...(oauth?.connected ? { configured: true } : {}),
     },

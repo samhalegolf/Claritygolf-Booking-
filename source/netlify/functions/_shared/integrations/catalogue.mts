@@ -1,5 +1,10 @@
 import { optixAdapter } from "./providers/optix.mts";
-import type { IntegrationDescriptor, IntegrationId } from "./types.mts";
+import type {
+  ConnectionSpec,
+  IntegrationAudience,
+  IntegrationDescriptor,
+  IntegrationId,
+} from "./types.mts";
 
 /**
  * Every integration Clarity has code for.
@@ -26,7 +31,12 @@ import type { IntegrationDescriptor, IntegrationId } from "./types.mts";
 const stripe: IntegrationDescriptor = {
   id: "stripe",
   label: "Stripe",
-  category: "payments",
+  audience: "admin",
+  category: "billing",
+  caveat:
+    "One Stripe key does both jobs today: it takes your customers' payments AND bills this workspace. " +
+    "That works for one coach and is wrong for two — a second coach's takings would land in this account. " +
+    "Multi-coach needs Stripe Connect, at which point the payments half becomes each coach's own integration.",
   summary: "Card payments at the counter, and the subscription that bills this workspace.",
   docsUrl: "https://dashboard.stripe.com/apikeys",
   connections: [
@@ -102,7 +112,8 @@ const stripe: IntegrationDescriptor = {
 const akahu: IntegrationDescriptor = {
   id: "akahu",
   label: "Akahu",
-  category: "banking",
+  audience: "integration",
+  category: "accounting",
   summary: "Reads your bank transactions so expenses and payments can be reconciled.",
   docsUrl: "https://developers.akahu.nz",
   connections: [
@@ -139,6 +150,7 @@ const akahu: IntegrationDescriptor = {
 const resend: IntegrationDescriptor = {
   id: "resend",
   label: "Resend",
+  audience: "admin",
   category: "email",
   summary: "Sends booking confirmations, reminders and invoices.",
   docsUrl: "https://resend.com/api-keys",
@@ -188,7 +200,8 @@ const resend: IntegrationDescriptor = {
 const caddy: IntegrationDescriptor = {
   id: "caddy",
   label: "Clarity Caddy",
-  category: "internal",
+  audience: "admin",
+  category: "clarity-apps",
   summary: "Links a coach's player profiles to the Caddy app.",
   connections: [
     {
@@ -233,88 +246,115 @@ const caddy: IntegrationDescriptor = {
 };
 
 /**
- * Google: Calendar sync and Drive video storage.
+ * Google, listed twice and connected once.
  *
- * The only oauth2 member, and the only integration whose "is it connected"
- * answer comes from stored tokens rather than from whether a field is filled
- * in — the client id and secret being set says the app exists, not that anyone
- * has said yes to it. The panel reads that from google_provider_connections.
+ * One OAuth grant does two jobs that belong to different people. The calendar
+ * is the coach's own diary, connected because they want their lessons in it —
+ * an integration. Drive is where Clarity keeps lesson video, which is the
+ * software's storage decision and not something a coach chooses — admin.
+ *
+ * Filing it once would have put "connect my diary" inside an admin area, or
+ * Clarity's storage inside the coach's list. So both entries appear, both show
+ * the same connected account, and both lead to the same Connect. Nobody signs
+ * in twice.
+ *
+ * Worth knowing, because it caused a real bug: one grant means one scope list,
+ * and a narrower re-consent for one product silently narrows the other. The
+ * calendar sync failed for exactly this reason while every screen said the
+ * scope was present.
  */
-const google: IntegrationDescriptor = {
-  id: "google",
-  label: "Google",
-  category: "storage",
-  summary: "Two-way calendar sync, and Drive as somewhere to keep lesson video.",
-  docsUrl: "https://console.cloud.google.com/apis/credentials",
-  connections: [
+const googleConnection: ConnectionSpec = {
+  kind: "oauth2",
+  title: "Google account",
+  summary: "One sign-in. Calendar and Drive are separate permissions on it.",
+  fields: [
     {
-      kind: "oauth2",
-      title: "Google account",
-      summary: "Calendar and Drive, authorised by signing in.",
-      fields: [
-        {
-          key: "__redirect_uri",
-          type: "copy",
-          compute: "redirect-uri",
-          label: "Redirect URI",
-          help: "Google Cloud › Credentials › your OAuth client › Authorised redirect URIs. Must match exactly, including the scheme.",
-          required: true,
-        },
-        // Two accepted names per field, because clarity-cloud-google-config.mts
-        // resolves either. Naming only the bare pair reported an integration
-        // that has been connected since July as "2 fields to set".
-        {
-          key: "GOOGLE_CLIENT_ID",
-          type: "text",
-          label: "Client ID",
-          help: "Google Cloud › Credentials › OAuth 2.0 Client IDs. Ends in .apps.googleusercontent.com.",
-          required: "one-of",
-          group: "google-client-id",
-        },
-        {
-          key: "GOOGLE_CALENDAR_CLIENT_ID",
-          type: "text",
-          label: "Client ID (Calendar-specific)",
-          help: "An alternative to the one above, for a separate Calendar OAuth client. Either satisfies this.",
-          required: "one-of",
-          group: "google-client-id",
-        },
-        {
-          key: "GOOGLE_CLIENT_SECRET",
-          type: "secret",
-          label: "Client secret",
-          help: "Issued beside the client ID. Identifies the app, not the account — connecting is still a separate step.",
-          required: "one-of",
-          group: "google-client-secret",
-        },
-        {
-          key: "GOOGLE_CALENDAR_CLIENT_SECRET",
-          type: "secret",
-          label: "Client secret (Calendar-specific)",
-          help: "The partner of the Calendar-specific client ID. Either pair works.",
-          required: "one-of",
-          group: "google-client-secret",
-        },
-        {
-          key: "__connect",
-          type: "oauth",
-          label: "Connection",
-          help: "Signing in is what actually grants access. The fields above only say which app is asking.",
-          required: false,
-        },
-      ],
+      key: "__redirect_uri",
+      type: "copy",
+      compute: "redirect-uri",
+      label: "Redirect URI",
+      help: "Google Cloud › Credentials › your OAuth client › Authorised redirect URIs. Must match exactly, including the scheme.",
+      required: true,
+    },
+    // Two accepted names per field, because clarity-cloud-google-config.mts
+    // resolves either. Naming only the bare pair reported an integration that
+    // has been connected since July as "2 fields to set".
+    {
+      key: "GOOGLE_CLIENT_ID",
+      type: "text",
+      label: "Client ID",
+      help: "Google Cloud › Credentials › OAuth 2.0 Client IDs. Ends in .apps.googleusercontent.com.",
+      required: "one-of",
+      group: "google-client-id",
+    },
+    {
+      key: "GOOGLE_CALENDAR_CLIENT_ID",
+      type: "text",
+      label: "Client ID (Calendar-specific)",
+      help: "An alternative to the one above, for a separate Calendar OAuth client. Either satisfies this.",
+      required: "one-of",
+      group: "google-client-id",
+    },
+    {
+      key: "GOOGLE_CLIENT_SECRET",
+      type: "secret",
+      label: "Client secret",
+      help: "Issued beside the client ID. Identifies the app, not the account — connecting is still a separate step.",
+      required: "one-of",
+      group: "google-client-secret",
+    },
+    {
+      key: "GOOGLE_CALENDAR_CLIENT_SECRET",
+      type: "secret",
+      label: "Client secret (Calendar-specific)",
+      help: "The partner of the Calendar-specific client ID. Either pair works.",
+      required: "one-of",
+      group: "google-client-secret",
+    },
+    {
+      key: "__connect",
+      type: "oauth",
+      label: "Connection",
+      help: "Signing in is what actually grants access. The fields above only say which app is asking.",
+      required: false,
     },
   ],
 };
 
+const googleCalendar: IntegrationDescriptor = {
+  id: "google-calendar",
+  label: "Google Calendar",
+  audience: "integration",
+  category: "calendar",
+  summary: "Puts your lessons in your own diary, and keeps them in step.",
+  docsUrl: "https://console.cloud.google.com/apis/credentials",
+  connections: [googleConnection],
+};
+
+const googleDrive: IntegrationDescriptor = {
+  id: "google-drive",
+  label: "Google Drive",
+  audience: "admin",
+  category: "storage",
+  summary: "Where lesson video is kept once it leaves the browser.",
+  docsUrl: "https://console.cloud.google.com/apis/credentials",
+  sharesGrantWith: "google-calendar",
+  connections: [googleConnection],
+};
+
 const CATALOGUE: IntegrationDescriptor[] = [
   optixAdapter.descriptor,
-  google,
-  stripe,
+  googleCalendar,
   akahu,
+  googleDrive,
+  stripe,
   resend,
   caddy,
 ];
+
+export function integrationsFor(audience: IntegrationAudience): IntegrationDescriptor[] {
+  return CATALOGUE.filter((entry) => entry.audience === audience);
+}
 
 export function allIntegrations(): IntegrationDescriptor[] {
   return CATALOGUE;

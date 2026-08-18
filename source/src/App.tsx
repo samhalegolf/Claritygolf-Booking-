@@ -1190,7 +1190,11 @@ const SETTINGS_SECTIONS: Array<{
   { key: "services", label: "Lesson types", icon: ScissorsLineDashed },
   { key: "notifications", label: "Notifications", icon: Bell, adminOnly: true },
   { key: "account", label: "Account", icon: User, adminOnly: true },
-  { key: "developer", label: "Integrations", icon: Code2, adminOnly: true },
+  // Two lists, two questions. Integrations is "what have I plugged in" — the
+  // coach's own accounts. Admin is "what is this software made of" — the
+  // services Clarity runs on, which a coach never picks.
+  { key: "developer", label: "Integrations", icon: Link2, adminOnly: true },
+  { key: "admin", label: "Admin", icon: Code2, adminOnly: true },
 ];
 
 type SettingsTab =
@@ -1200,7 +1204,8 @@ type SettingsTab =
   | "services"
   | "notifications"
   | "account"
-  | "developer";
+  | "developer"
+  | "admin";
 
 type BookingForm = {
   firstName: string;
@@ -11208,7 +11213,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       setToast({ message: cloudReason });
       if (options.openSettingsOnConfigurationIssue && shouldOpenClarityCloudSettings(clarityCloudHealth)) {
         setActiveView("settings");
-        setSettingsTab("developer");
+        setSettingsTab("admin");
       }
       // eslint-disable-next-line no-console
       console.warn("clarity_cloud_transfer_blocked", {
@@ -22286,7 +22291,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 }
                 onOpenCloudSettings={() => {
                   setActiveView("settings");
-                  setSettingsTab("developer");
+                  setSettingsTab("admin");
                 }}
               />
             </Suspense>
@@ -25522,7 +25527,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
             <SettingsGroups>
             <div className={`settings-grid settings-tab-${settingsTab}`}>
-              {settingsTab === "developer" ? <IntegrationsPanel /> : null}
+              {settingsTab === "developer" ? <IntegrationsPanel audience="integration" /> : null}
+              {settingsTab === "admin" ? <IntegrationsPanel audience="admin" /> : null}
               {isAdminUser ? <BrowserNotificationsPanel /> : null}
               {servicesSettingsPanel}
               {isAdminUser ? coachesSettingsPanel : null}

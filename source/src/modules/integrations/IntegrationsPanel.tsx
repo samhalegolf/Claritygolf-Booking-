@@ -3,25 +3,30 @@ import { useCallback, useEffect, useState } from "react";
 import IntegrationPanel from "./IntegrationPanel";
 
 /**
- * Settings › Integrations — the list, and one connection behind each card.
+ * The connection list — used twice, for two different audiences.
  *
- * The list comes first because the question a coach actually has is "what is
- * Clarity talking to?", and that question has one answer. Six integrations ship
- * today and five of them had no screen at all: they were environment variables,
- * set by editing the deployment, with nothing anywhere saying whether they were
- * configured, working, or subtly wrong.
+ * Settings › Integrations   what a coach connects: their calendar, their
+ *                           range's booking system, their bank.
+ * Settings › Admin          what Clarity runs on: the email sender, the video
+ *                           storage, the sibling app, the billing account.
  *
- * Both connect methods live in one list on purpose. Google is OAuth and Optix
- * is pasted secrets, and an earlier pass split those into different sections on
- * exactly that difference. Splitting by *how you connect* answers a question
- * nobody asks; the click-to-connect ones simply sort first, because those are
- * the ones a coach will touch.
+ * Both are credentials on a screen, which is why they were one list to begin
+ * with. They answer completely different questions: one is "what have I plugged
+ * in", the other is "what is this software made of". A coach picks from the
+ * first and never needs the second.
+ *
+ * Within Integrations the grouping is by the JOB — Calendar, Resource booking,
+ * Accounting — because "I want my lessons in my diary" is how somebody arrives
+ * here, not "I want to configure an OAuth2 connection".
  */
 
 type Card = {
   id: string;
   label: string;
+  audience: "admin" | "integration";
   category: string;
+  caveat?: string;
+  sharesGrantWith?: string;
   summary: string;
   kinds: string[];
   configured: boolean;
@@ -36,12 +41,37 @@ type Card = {
 const KIND_ORDER: Record<string, number> = { oauth2: 0, "api-key-pair": 1, "api-token": 2, "webhook-in": 3, "service-link": 4 };
 
 const CATEGORY_LABEL: Record<string, string> = {
-  bookings: "Bookings",
+  calendar: "Calendar",
+  "resource-booking": "Resource booking",
+  accounting: "Accounting",
   payments: "Payments",
   email: "Email",
-  banking: "Banking",
   storage: "Storage",
-  internal: "Clarity apps",
+  billing: "Billing",
+  "clarity-apps": "Clarity apps",
+};
+
+/** The order categories read in, rather than alphabetical by accident. */
+const CATEGORY_ORDER = [
+  "calendar", "resource-booking", "accounting", "payments",
+  "email", "storage", "billing", "clarity-apps",
+];
+
+const COPY = {
+  integration: {
+    eyebrow: "Connections",
+    title: "Integrations",
+    lead: "Your own accounts, connected to Clarity.",
+    empty: "Nothing connected yet.",
+    add: "+ New integration",
+  },
+  admin: {
+    eyebrow: "Platform",
+    title: "Admin",
+    lead: "The services Clarity itself runs on. Not things a coach picks.",
+    empty: "Nothing configured.",
+    add: "+ Show unconfigured",
+  },
 };
 
 function statusOf(card: Card) {
@@ -53,7 +83,12 @@ function statusOf(card: Card) {
   return { tone: "ok", label: "Ready" };
 }
 
-export default function IntegrationsPanel() {
+export default function IntegrationsPanel({
+  audience = "integration",
+}: {
+  audience?: "admin" | "integration";
+}) {
+  const copy = COPY[audience];
   const [cards, setCards] = useState<Card[] | null>(null);
   const [error, setError] = useState("");
   const [open, setOpen] = useState<string>("");
@@ -61,24 +96,24 @@ export default function IntegrationsPanel() {
 
   const load = useCallback(async () => {
     try {
-      const response = await fetch("/api/integration-setup", { credentials: "same-origin", cache: "no-store" });
+      const response = await fetch(`/api/integration-setup?audience=${audience}`, { credentials: "same-origin", cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload?.message || payload?.error || `Integrations returned ${response.status}.`);
       setCards(payload.integrations || []);
       setError("");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The integrations list could not load.");
+      setError(cause instanceof Error ? cause.message : "The list could not load.");
     }
-  }, []);
+  }, [audience]);
 
   useEffect(() => { void load(); }, [load]);
 
   if (open) {
     const card = cards?.find((entry) => entry.id === open);
     return (
-      <article className="data-card settings-section settings-developer integration-panel">
+      <article className={`data-card settings-section settings-${audience === "admin" ? "admin" : "developer"} integration-panel`}>
         <div className="integration-breadcrumb">
-          <button className="text-button" onClick={() => setOpen("")} type="button">← Integrations</button>
+          <button className="text-button" onClick={() => setOpen("")} type="button">← {copy.title}</button>
           <strong>{card?.label || open}</strong>
         </div>
         <IntegrationPanel integrationId={open} />
@@ -91,13 +126,30 @@ export default function IntegrationsPanel() {
   const sort = (list: Card[]) =>
     [...list].sort((a, b) => (KIND_ORDER[a.kinds[0]] ?? 9) - (KIND_ORDER[b.kinds[0]] ?? 9) || a.label.localeCompare(b.label));
 
+  /** By job, in reading order. A category with nothing in it is not drawn. */
+  const byCategory = (list: Card[]) =>
+    CATEGORY_ORDER
+      .map((category) => ({ category, items: sort(list.filter((card) => card.category === category)) }))
+      .filter((group) => group.items.length);
+
+  const cardButton = (card: Card, status: { tone: string; label: string }) => (
+    <button className="integration-card" key={card.id} onClick={() => setOpen(card.id)} type="button">
+      <span className={`integration-card-dot is-${status.tone}`} aria-hidden="true" />
+      <strong>{card.label}</strong>
+      <em>{card.summary}</em>
+      <span className="integration-card-status">{status.label}</span>
+      {card.sharesGrantWith ? <span className="integration-card-note">Same sign-in as {card.sharesGrantWith}</span> : null}
+      {card.caveat ? <span className="integration-card-note is-caveat">{card.caveat}</span> : null}
+    </button>
+  );
+
   return (
-    <article className="data-card settings-section settings-developer integration-panel">
+    <article className={`data-card settings-section settings-${audience === "admin" ? "admin" : "developer"} integration-panel`}>
       <header className="integration-header">
         <div>
-          <span>Connections</span>
-          <h2>Integrations</h2>
-          <p>What Clarity is talking to.</p>
+          <span>{copy.eyebrow}</span>
+          <h2>{copy.title}</h2>
+          <p>{copy.lead}</p>
         </div>
       </header>
 
@@ -105,26 +157,25 @@ export default function IntegrationsPanel() {
         {error ? <div className="integration-error"><strong>The list is unavailable</strong>{error}</div> : null}
         {!cards && !error ? <p className="inline-working">Loading…</p> : null}
 
-        <div className="integration-cards">
-          {sort(configured).map((card) => {
-            const status = statusOf(card);
-            return (
-              <button className="integration-card" key={card.id} onClick={() => setOpen(card.id)} type="button">
-                <span className={`integration-card-dot is-${status.tone}`} aria-hidden="true" />
-                <strong>{card.label}</strong>
-                <em>{CATEGORY_LABEL[card.category] || card.category}</em>
-                <span className="integration-card-status">{status.label}</span>
-              </button>
-            );
-          })}
+        {byCategory(configured).map((group) => (
+          <section className="integration-group" key={group.category}>
+            <h3>{CATEGORY_LABEL[group.category] || group.category}</h3>
+            <div className="integration-cards">
+              {group.items.map((card) => cardButton(card, statusOf(card)))}
+            </div>
+          </section>
+        ))}
 
-          {available.length ? (
+        {cards && !configured.length && !error ? <p className="integration-cards-note">{copy.empty}</p> : null}
+
+        {available.length ? (
+          <div className="integration-cards">
             <button className="integration-card is-add" onClick={() => setAdding((current) => !current)} type="button">
-              <strong>+ New integration</strong>
+              <strong>{copy.add}</strong>
               <em>{available.length} available</em>
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         {adding && available.length ? (
           <>
@@ -136,18 +187,19 @@ export default function IntegrationsPanel() {
                 below is live in the product today and configured by environment variable.
               </span>
             </div>
-            <div className="integration-cards">
-              {sort(available).map((card) => (
-                <button className="integration-card" key={card.id} onClick={() => setOpen(card.id)} type="button">
-                  <span className="integration-card-dot is-unset" aria-hidden="true" />
-                  <strong>{card.label}</strong>
-                  <em>{CATEGORY_LABEL[card.category] || card.category}</em>
-                  <span className="integration-card-status">
-                    {card.missing.length} {card.missing.length === 1 ? "field" : "fields"} to set
-                  </span>
-                </button>
-              ))}
-            </div>
+            {byCategory(available).map((group) => (
+              <section className="integration-group" key={group.category}>
+                <h3>{CATEGORY_LABEL[group.category] || group.category}</h3>
+                <div className="integration-cards">
+                  {group.items.map((card) =>
+                    cardButton(card, {
+                      tone: "unset",
+                      label: `${card.missing.length} ${card.missing.length === 1 ? "field" : "fields"} to set`,
+                    }),
+                  )}
+                </div>
+              </section>
+            ))}
           </>
         ) : null}
 

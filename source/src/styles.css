@@ -575,7 +575,7 @@ button {
   display: none !important;
 }
 
-/* Six sections, each panel filed under exactly one of them. There used to be
+/* Seven sections, each panel filed under exactly one of them. There used to be
    eleven, and four panels were classed onto two tabs at once — which is how
    "Customer Experience" and "Coach Branding" ended up being the same screen. */
 .settings-grid.settings-tab-services > .settings-services,
@@ -586,7 +586,8 @@ button {
 .settings-grid.settings-tab-business > .settings-business,
 .settings-grid.settings-tab-notifications > .settings-notifications,
 .settings-grid.settings-tab-account > .settings-account,
-.settings-grid.settings-tab-developer > .settings-developer {
+.settings-grid.settings-tab-developer > .settings-developer,
+.settings-grid.settings-tab-admin > .settings-admin {
   display: grid !important;
 }
 
@@ -595,7 +596,8 @@ button {
 .settings-booking,
 .settings-notifications,
 .settings-account,
-.settings-developer {
+.settings-developer,
+.settings-admin {
   grid-column: 1 / -1;
 }
 
@@ -11233,7 +11235,7 @@ button {
 
 .integration-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--c-space-4);
   margin: var(--c-space-4) 0;
 }
@@ -11305,6 +11307,38 @@ button {
   margin: var(--c-space-4) 0 0;
   color: var(--c-muted);
   font-size: var(--c-size-meta);
+}
+
+/* A category is a group, not a destination — Rule 01 level 3 has no box of its
+   own. The heading is the whole boundary. */
+.integration-group {
+  margin: var(--c-space-6) 0 0;
+}
+
+.integration-group > h3 {
+  margin: 0;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-group);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.integration-group > h3 + .integration-cards {
+  margin-top: var(--c-space-3);
+}
+
+/* Something true about the integration that is not a field: the shared Google
+   sign-in, the Stripe Connect gap. Sits under the status so the card still
+   reads top-down. */
+.integration-card-note {
+  margin-top: var(--c-space-2);
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.integration-card-note.is-caveat {
+  padding-left: var(--c-space-3);
+  border-left: 2px solid var(--c-border);
 }
 
 .integration-breadcrumb {

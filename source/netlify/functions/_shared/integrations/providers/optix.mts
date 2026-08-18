@@ -153,7 +153,8 @@ function quantityOf(value: unknown) {
 const optixDescriptor: IntegrationDescriptor = {
   id: "optix",
   label: "Optix",
-  category: "bookings",
+  audience: "integration",
+  category: "resource-booking",
   summary: "Bay and lesson bookings, and the passes sold against them.",
   docsUrl: "https://developer.optixapp.com",
   vocabulary: { workspace: "workspace", resource: "bay" },

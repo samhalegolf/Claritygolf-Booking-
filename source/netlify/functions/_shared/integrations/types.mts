@@ -142,7 +142,51 @@ export type IntegrationMapping = {
  * events and therefore need an adapter. Stripe, Akahu, Resend and Caddy are
  * integrations with credentials and a health story but nothing to normalise.
  */
-export type IntegrationId = ExternalProvider | "google" | "stripe" | "akahu" | "resend" | "caddy";
+export type IntegrationId =
+  | ExternalProvider
+  | "google-calendar"
+  | "google-drive"
+  | "stripe"
+  | "akahu"
+  | "resend"
+  | "caddy";
+
+/**
+ * Whose decision this is.
+ *
+ * The distinction that matters most and was missing entirely: some of these are
+ * the software, and some are things a coach chooses to plug into it.
+ *
+ *   admin        Clarity runs on it. Resend sends the email, Drive holds the
+ *                video, Caddy is the sibling app. A coach never picks these and
+ *                mostly cannot change them.
+ *   integration  The coach's own account, connected because they want it —
+ *                their calendar, their range's booking system, their bank.
+ *
+ * Both are credentials on a screen, which is why they were filed together. They
+ * answer completely different questions.
+ */
+export type IntegrationAudience = "admin" | "integration";
+
+/**
+ * What an integration is FOR, in the coach's words.
+ *
+ * The admin ones are grouped by what part of the software they are; the
+ * integration ones by the job a coach is trying to do, because "I want my
+ * lessons in my calendar" is how somebody arrives at this screen — not "I want
+ * to configure an OAuth2 connection".
+ */
+export type IntegrationCategory =
+  // Things a coach connects.
+  | "calendar"
+  | "resource-booking"
+  | "accounting"
+  | "payments"
+  // Things Clarity runs on.
+  | "email"
+  | "storage"
+  | "billing"
+  | "clarity-apps";
 
 /**
  * The six field types every integration is built from.
@@ -237,13 +281,25 @@ export type ConnectionSpec = {
 export type IntegrationDescriptor = {
   id: IntegrationId;
   label: string;
-  category: "bookings" | "payments" | "email" | "banking" | "storage" | "internal";
+  audience: IntegrationAudience;
+  category: IntegrationCategory;
   /** One line on the card, before anything is opened. */
   summary: string;
   docsUrl?: string;
   connections: ConnectionSpec[];
   /** What this provider calls the things a mapping points at. */
   vocabulary?: { workspace: string; resource: string };
+  /**
+   * Two entries over one authorisation.
+   *
+   * Google is a single OAuth grant doing two jobs: the coach's calendar and
+   * Clarity's video storage. Filing it once would put "connect my diary" in an
+   * admin area, or Clarity's storage in the coach's list. It is listed twice
+   * and connected once, and this is the id of the entry that owns the consent.
+   */
+  sharesGrantWith?: IntegrationId;
+  /** Something true about this integration that is not a field. */
+  caveat?: string;
 };
 
 /**
