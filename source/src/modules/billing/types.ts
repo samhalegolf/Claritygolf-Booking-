@@ -121,6 +121,10 @@ export type InvoiceLine = {
 export type InvoiceDraft = {
   accountId?: string;
   coachId?: string;
+  // The client's people.id when the payer was picked from the client list (or
+  // the invoice was loaded with one already linked). Empty/absent for a payer
+  // typed free-hand — the backend then falls back to an email match.
+  payerId?: string;
   payerName: string;
   payerEmail: string;
   payerPhone: string;
@@ -144,6 +148,9 @@ export type BillingInvoiceRecord = {
   id: string;
   invoiceNumber: string;
   status: BillingInvoiceStatus;
+  // The client's people.id, when the invoice is linked to one (picker or
+  // email match). null/absent = unlinked; the customerName still displays.
+  customerId?: string | null;
   customerName: string;
   customerEmail: string;
   issueDate: string;
@@ -151,6 +158,11 @@ export type BillingInvoiceRecord = {
   currency: string;
   total: number;
   amountPaid: number;
+  createdAt?: string;
+  // Only on rows from GET /api/billing/customer-transactions: "billed" =
+  // addressed to this client; "included" = billed to someone else but one of
+  // this client's lessons is a line on it (the bulk-invoice case).
+  relation?: "billed" | "included";
   // Set once the invoice has actually been emailed. status "sent" without this =
   // Published (committed but not emailed).
   sentAt?: string | null;

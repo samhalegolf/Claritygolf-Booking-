@@ -985,7 +985,7 @@ type BillingSection =
   | "products"
   | "coupons"
   | "reports"
-  | "pos"
+  | "transactions"
   | "settings";
 
 // Which completed bookings the "ready to pull" lists show.
@@ -1185,7 +1185,13 @@ type RescheduleLookupCredentials = RescheduleForm & {
 
 type SavedBookingLogin = BookingForm;
 
-type ClientProfileTab = "bookings" | "notes" | "notifications";
+type ClientProfileTab = "bookings" | "notes" | "notifications" | "transactions";
+
+// One row of a client's money history: a counter/Optix sale, or an invoice
+// they were billed on (or included in, for a bulk invoice).
+type ClientTransactionRow =
+  | { kind: "sale"; date: string; sale: PosTransaction }
+  | { kind: "invoice"; date: string; invoice: BillingInvoiceRecord };
 type PlayerProfileTool = "recent" | "notes" | "videos";
 type PlayerToolRecord = {
   id: string;
@@ -4805,6 +4811,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const [clientEditor, setClientEditor] = useState<ClientEditor>(emptyClientEditor);
   const [clientSaveState, setClientSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [clientProfileTab, setClientProfileTab] = useState<ClientProfileTab>("bookings");
+  const [clientTransactions, setClientTransactions] = useState<ClientTransactionRow[]>([]);
+  const [clientTransactionsLoadState, setClientTransactionsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [notesContext, setNotesContext] = useState<{ playerId: string; playerName: string } | null>(null);
   const [playerProfileTool, setPlayerProfileTool] = useState<PlayerProfileTool>("recent");
   const [playerToolExpanded, setPlayerToolExpanded] = useState(true);
@@ -13564,10 +13572,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     setInvoiceDraft((current) => ({ ...current, [field]: value }));
   }
 
-  function selectInvoiceCustomer(customer: Pick<Person, "name" | "email" | "phone">) {
+  function selectInvoiceCustomer(customer: Pick<Person, "name" | "email" | "phone"> & { id?: string }) {
     markInvoiceDraftDirty();
     setInvoiceDraft((current) => ({
       ...current,
+      // Keep the client's id, not just their contact details — it is what ties
+      // the invoice to their transaction history on the profile.
+      payerId: customer.id || "",
       payerName: customer.name,
       payerEmail: customer.email,
       payerPhone: customer.phone || "",
@@ -13620,6 +13631,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       const created = result.person;
       selectInvoiceCustomer({
+        id: created?.id || "",
         name: created?.name || name,
         email: created?.email || email,
         phone: created?.phone || phone,
@@ -13638,6 +13650,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     setNewInvoiceCustomer(null);
     setInvoiceDraft((current) => ({
       ...current,
+      payerId: "",
       payerName: "",
       payerEmail: "",
       payerPhone: "",
@@ -14394,7 +14407,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         return next;
       });
     }
-    if (billingSection === "pos") void fetchPosTransactions();
+    if (billingSection === "transactions") void fetchPosTransactions();
   }
 
   async function setPosTransactionStatus(id: string, status: PosTransaction["status"]) {
@@ -14833,6 +14846,41 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const overdueOldestDays = overdueInvoiceRecords.length
     ? Math.max(...overdueInvoiceRecords.map((invoiceRecord) => isoDateDiffDays(todayDateValue, invoiceRecord.dueDate as string)))
     : 0;
+
+  // The Transaction History table: counter/Optix sales and invoices in one
+  // list, newest first. Invoices are filtered client-side to the same date
+  // range as the POS fetch, so both sources cover the same window.
+  const transactionHistoryRows = useMemo(() => {
+    const saleRows = posTransactions.map((sale) => ({
+      kind: "sale" as const,
+      date: sale.createdAt || sale.paidAt || "",
+      sale,
+    }));
+    const invoiceRows = allInvoices
+      .filter((invoiceRecord) => {
+        const issued = String(invoiceRecord.issueDate || "").slice(0, 10);
+        if (posRangeFrom && issued && issued < posRangeFrom) return false;
+        if (posRangeTo && issued && issued > posRangeTo) return false;
+        return true;
+      })
+      .map((invoiceRecord) => ({
+        kind: "invoice" as const,
+        // issueDate for display AND sorting, matching the range filter above —
+        // a backdated invoice files under the date on the invoice, not the day
+        // it was typed in.
+        date: invoiceRecord.issueDate || invoiceRecord.createdAt || "",
+        invoice: invoiceRecord,
+      }));
+    return [...saleRows, ...invoiceRows].sort((a, b) => b.date.localeCompare(a.date));
+  }, [allInvoices, posTransactions, posRangeFrom, posRangeTo]);
+
+  const transactionDateLabel = (value: string) => {
+    if (!value) return "-";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.valueOf())
+      ? "-"
+      : parsed.toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" });
+  };
 
   // Reconcile type filter: the distinct transaction-type labels present, and the
   // candidates left after hiding the toggled-off types (internal transfers by
@@ -15366,6 +15414,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // Maps a persisted invoice (GET /api/billing/invoices/:id) back into the
   // editor's in-progress draft shape so a saved draft can be re-opened and edited.
   function invoiceRecordToDraft(invoice: {
+    customerId?: string | null;
     customerName?: string;
     customerEmail?: string;
     customerPhone?: string;
@@ -15379,6 +15428,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   }): InvoiceDraft {
     return {
       ...emptyInvoiceDraft(invoiceSettings, activeCoachId),
+      payerId: invoice.customerId || "",
       payerName: invoice.customerName || "",
       payerEmail: invoice.customerEmail || "",
       payerPhone: invoice.customerPhone || "",
@@ -15452,6 +15502,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     return {
       hasLines: billableLines.length > 0,
       body: {
+        customerId: invoiceDraft.payerId || "",
         customerName: invoiceDraft.payerName.trim(),
         customerEmail: invoiceDraft.payerEmail.trim(),
         customerPhone: invoiceDraft.payerPhone.trim(),
@@ -16931,6 +16982,63 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     setClientEditor(editorFromClient(client));
     setClientEditMode(false);
     setClientSaveState("idle");
+  }
+
+  // The Transactions tab on a client profile: everything billed to (or
+  // including) this client, fetched from the one backend endpoint that knows
+  // all three ways money ties to a person.
+  async function fetchClientTransactions(personId: string) {
+    setClientTransactionsLoadState("loading");
+    try {
+      const response = await fetch(`/api/billing/customer-transactions?personId=${encodeURIComponent(personId)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        setClientTransactionsLoadState("error");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load transactions."));
+      const data = (await response.json()) as { pos?: PosTransaction[]; invoices?: BillingInvoiceRecord[] };
+      const rows: ClientTransactionRow[] = [
+        ...(Array.isArray(data.pos) ? data.pos : []).map((sale) => ({
+          kind: "sale" as const,
+          date: sale.createdAt || sale.paidAt || "",
+          sale,
+        })),
+        ...(Array.isArray(data.invoices) ? data.invoices : []).map((invoice) => ({
+          kind: "invoice" as const,
+          date: invoice.createdAt || invoice.issueDate || "",
+          invoice,
+        })),
+      ].sort((a, b) => b.date.localeCompare(a.date));
+      setClientTransactions(rows);
+      setClientTransactionsLoadState("loaded");
+    } catch (error) {
+      setClientTransactionsLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load transactions." });
+    }
+  }
+
+  useEffect(() => {
+    // Synthetic "appointment-*" ids are legacy bookings with no saved client
+    // record — there is nothing in billing to look up for them.
+    if (clientProfileTab !== "transactions" || !selectedClientId || selectedClientId.startsWith("appointment-")) return;
+    void fetchClientTransactions(selectedClientId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientProfileTab, selectedClientId]);
+
+  // A customer cell that opens the client's profile when the transaction is
+  // linked to a real client, and falls back to plain text when it is not.
+  function transactionCustomerLink(customerId: string | null | undefined, fallbackName: string) {
+    const linked = customerId ? clients.find((entry) => entry.id === customerId) : undefined;
+    if (!linked) return fallbackName || "-";
+    return (
+      <button className="link-button" onClick={() => openClientProfile(linked)} type="button">
+        {linked.name || fallbackName || "-"}
+      </button>
+    );
   }
 
   function openNewClient() {
@@ -22126,17 +22234,18 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 Coupons
               </button>
               <button
-                className={billingSection === "pos" ? "active" : ""}
+                className={billingSection === "transactions" ? "active" : ""}
                 onClick={() => {
-                  setBillingSection("pos");
+                  setBillingSection("transactions");
                   void fetchPosTransactions();
+                  void fetchAllInvoices();
                 }}
                 role="tab"
-                aria-selected={billingSection === "pos"}
+                aria-selected={billingSection === "transactions"}
                 type="button"
               >
                 <CreditCard size={16} />
-                POS Transactions
+                Transaction History
               </button>
               <button
                 className={billingSection === "reports" ? "active" : ""}
@@ -24002,7 +24111,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               />
             )}
 
-            {billingSection === "pos" && (
+            {billingSection === "transactions" && (
               <div className="billing-dashboard billing-pos">
                 <article className="data-card">
                   <div className="data-card-header">
@@ -24013,8 +24122,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <CreditCard size={24} />
                   </div>
                   <p className="field-help">
-                    Counter takings plus Optix sales, kept separate from invoicing. These totals are not included in
-                    Revenue, Reports or accounts receivable. Optix records are read-only — that money was taken in Optix.
+                    These totals are counter takings plus Optix sales only — invoice rows in the list below belong to
+                    invoicing (Revenue and Reports), so they stay out of the tiles to avoid double counting. Optix
+                    records are read-only — that money was taken in Optix.
                   </p>
                   <div className="settings-field-row pos-range-row">
                     <div className="settings-field">
@@ -24061,8 +24171,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 <article className="data-card wide recent-invoices-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Receipts</span>
-                      <h2>POS transactions</h2>
+                      <span>Receipts & invoices</span>
+                      <h2>Transaction History</h2>
                     </div>
                     <Receipt size={24} />
                   </div>
@@ -24075,14 +24185,15 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       </button>
                     </p>
                   )}
-                  {posTransactionsLoadState === "loaded" && !posTransactions.length && (
-                    <p>No counter sales in this range yet.</p>
+                  {posTransactionsLoadState === "loaded" && !transactionHistoryRows.length && (
+                    <p>No transactions in this range yet.</p>
                   )}
-                  {posTransactions.length > 0 && (
+                  {transactionHistoryRows.length > 0 && (
                     <table className="recent-invoices-table">
                       <thead>
                         <tr>
-                          <th>Receipt</th>
+                          <th>Ref</th>
+                          <th>Date</th>
                           <th>Description</th>
                           <th>Customer</th>
                           <th>Method</th>
@@ -24091,50 +24202,79 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                         </tr>
                       </thead>
                       <tbody>
-                        {posTransactions.map((transaction) => (
-                          <tr key={transaction.id}>
-                            <td>{transaction.receiptNumber}</td>
-                            <td>
-                              {transaction.description}
-                              {transaction.isLessonPass && <span className="pos-lesson-tag">Lesson pass</span>}
-                              {transaction.listedAmount !== null &&
-                                Math.abs(transaction.listedAmount - transaction.amount) > 0.005 && (
-                                  <em className="pos-adjusted-note">
-                                    listed {formatMoney(transaction.listedAmount, transaction.currency)}
-                                  </em>
+                        {transactionHistoryRows.map((row) =>
+                          row.kind === "invoice" ? (
+                            <tr key={`invoice-${row.invoice.id}`}>
+                              <td>
+                                <button
+                                  className="link-button"
+                                  onClick={() => void openInvoiceForEdit(row.invoice)}
+                                  type="button"
+                                >
+                                  {row.invoice.invoiceNumber}
+                                </button>
+                              </td>
+                              <td>{transactionDateLabel(row.date)}</td>
+                              <td>Invoice</td>
+                              <td>{transactionCustomerLink(row.invoice.customerId, row.invoice.customerName)}</td>
+                              <td>Invoice</td>
+                              <td>{formatMoney(row.invoice.total, row.invoice.currency)}</td>
+                              <td>
+                                <span
+                                  className={`invoice-status-pill invoice-status-${
+                                    row.invoice.status === "sent" && !row.invoice.sentAt ? "published" : row.invoice.status
+                                  }`}
+                                >
+                                  {row.invoice.status === "sent" && !row.invoice.sentAt ? "published" : row.invoice.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ) : (
+                            <tr key={`sale-${row.sale.id}`}>
+                              <td>{row.sale.receiptNumber}</td>
+                              <td>{transactionDateLabel(row.date)}</td>
+                              <td>
+                                {row.sale.description}
+                                {row.sale.isLessonPass && <span className="pos-lesson-tag">Lesson pass</span>}
+                                {row.sale.listedAmount !== null &&
+                                  Math.abs(row.sale.listedAmount - row.sale.amount) > 0.005 && (
+                                    <em className="pos-adjusted-note">
+                                      listed {formatMoney(row.sale.listedAmount, row.sale.currency)}
+                                    </em>
+                                  )}
+                              </td>
+                              <td>{transactionCustomerLink(row.sale.customerId, row.sale.customerName)}</td>
+                              <td>{row.sale.paymentMethodName}</td>
+                              <td>{formatMoney(row.sale.amount, row.sale.currency)}</td>
+                              <td>
+                                <span className={`invoice-status-pill invoice-status-${row.sale.status === "paid" ? "paid" : row.sale.status === "void" ? "void" : "published"}`}>
+                                  {row.sale.status}
+                                </span>
+                                {/* Optix records are read-only: that money lives
+                                    in Optix, so there is nothing here to mark
+                                    paid or refund. */}
+                                {row.sale.source !== "optix" && row.sale.status === "pending" && (
+                                  <button
+                                    className="link-button"
+                                    onClick={() => void setPosTransactionStatus(row.sale.id, "paid")}
+                                    type="button"
+                                  >
+                                    Mark paid
+                                  </button>
                                 )}
-                            </td>
-                            <td>{transaction.customerName || "-"}</td>
-                            <td>{transaction.paymentMethodName}</td>
-                            <td>{formatMoney(transaction.amount, transaction.currency)}</td>
-                            <td>
-                              <span className={`invoice-status-pill invoice-status-${transaction.status === "paid" ? "paid" : transaction.status === "void" ? "void" : "published"}`}>
-                                {transaction.status}
-                              </span>
-                              {/* Optix records are read-only: that money lives
-                                  in Optix, so there is nothing here to mark
-                                  paid or refund. */}
-                              {transaction.source !== "optix" && transaction.status === "pending" && (
-                                <button
-                                  className="link-button"
-                                  onClick={() => void setPosTransactionStatus(transaction.id, "paid")}
-                                  type="button"
-                                >
-                                  Mark paid
-                                </button>
-                              )}
-                              {transaction.source !== "optix" && transaction.status === "paid" && (
-                                <button
-                                  className="link-button"
-                                  onClick={() => void setPosTransactionStatus(transaction.id, "refunded")}
-                                  type="button"
-                                >
-                                  Refund
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                                {row.sale.source !== "optix" && row.sale.status === "paid" && (
+                                  <button
+                                    className="link-button"
+                                    onClick={() => void setPosTransactionStatus(row.sale.id, "refunded")}
+                                    type="button"
+                                  >
+                                    Refund
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ),
+                        )}
                       </tbody>
                     </table>
                   )}
@@ -27660,6 +27800,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <Mail size={16} />
                     Emails sent
                   </button>
+                  <button
+                    className={clientProfileTab === "transactions" ? "active" : ""}
+                    onClick={() => setClientProfileTab("transactions")}
+                    role="tab"
+                    type="button"
+                    aria-selected={clientProfileTab === "transactions"}
+                  >
+                    <CreditCard size={16} />
+                    Transactions
+                  </button>
                 </div>
 
                 <div className="profile-history-panel">
@@ -27730,23 +27880,86 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                         </div>
                       )}
                     </div>
-                  ) : selectedClientNotifications.length ? (
-                    selectedClientNotifications.map((notification) => (
-                      <div className="profile-history-row notification-history-row" key={notification.id}>
-                        <div>
-                          <strong>{notification.subject || notificationKindLabel(notification.kind)}</strong>
-                          <span>
-                            {notificationKindLabel(notification.kind)} to {notification.recipient}
-                          </span>
+                  ) : clientProfileTab === "notifications" ? (
+                    selectedClientNotifications.length ? (
+                      selectedClientNotifications.map((notification) => (
+                        <div className="profile-history-row notification-history-row" key={notification.id}>
+                          <div>
+                            <strong>{notification.subject || notificationKindLabel(notification.kind)}</strong>
+                            <span>
+                              {notificationKindLabel(notification.kind)} to {notification.recipient}
+                            </span>
+                          </div>
+                          <em>
+                            {notificationStatusLabel(notification)}
+                            {notification.createdAt ? ` · ${notificationTimeLabel(notification.createdAt)}` : ""}
+                          </em>
                         </div>
-                        <em>
-                          {notificationStatusLabel(notification)}
-                          {notification.createdAt ? ` · ${notificationTimeLabel(notification.createdAt)}` : ""}
-                        </em>
-                      </div>
-                    ))
+                      ))
+                    ) : (
+                      <p>No email receipts recorded yet.</p>
+                    )
+                  ) : selectedClient && selectedClient.id.startsWith("appointment-") ? (
+                    <p>Save this booking contact as a client to track their transactions.</p>
+                  ) : clientTransactionsLoadState === "loading" ? (
+                    <p>Loading transactions...</p>
+                  ) : clientTransactionsLoadState === "error" ? (
+                    <p>
+                      Could not load transactions.{" "}
+                      {selectedClient && (
+                        <button
+                          className="link-button"
+                          onClick={() => void fetchClientTransactions(selectedClient.id)}
+                          type="button"
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </p>
+                  ) : clientTransactions.length ? (
+                    clientTransactions.map((row) =>
+                      row.kind === "sale" ? (
+                        <div className="profile-history-row" key={`sale-${row.sale.id}`}>
+                          <div>
+                            <strong>{row.sale.description || row.sale.receiptNumber}</strong>
+                            <span>
+                              {row.sale.receiptNumber} · {row.sale.paymentMethodName}
+                              {row.sale.isLessonPass ? " · Lesson pass" : ""}
+                            </span>
+                          </div>
+                          <em>{`${formatMoney(row.sale.amount, row.sale.currency)} · ${row.sale.status} · ${transactionDateLabel(row.date)}`}</em>
+                        </div>
+                      ) : (
+                        <div className="profile-history-row" key={`invoice-${row.invoice.id}`}>
+                          <div>
+                            <strong>
+                              <button
+                                className="link-button"
+                                onClick={() => {
+                                  // The invoice editor lives in the Billing view;
+                                  // close the profile modal and go there, or the
+                                  // invoice opens invisibly underneath it.
+                                  closeClientModal();
+                                  switchView("billing");
+                                  void openInvoiceForEdit(row.invoice);
+                                }}
+                                type="button"
+                              >
+                                {row.invoice.invoiceNumber}
+                              </button>
+                            </strong>
+                            <span>
+                              {row.invoice.relation === "included"
+                                ? `Included on an invoice billed to ${row.invoice.customerName || "someone else"}`
+                                : "Invoice"}
+                            </span>
+                          </div>
+                          <em>{`${formatMoney(row.invoice.total, row.invoice.currency)} · ${row.invoice.status} · ${transactionDateLabel(row.date)}`}</em>
+                        </div>
+                      ),
+                    )
                   ) : (
-                    <p>No email receipts recorded yet.</p>
+                    <p>No transactions for this client yet.</p>
                   )}
                 </div>
               </div>

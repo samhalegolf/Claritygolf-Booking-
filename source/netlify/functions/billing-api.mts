@@ -878,11 +878,35 @@ function invoiceRowToApi(row: Record<string, unknown>, items: Array<Record<strin
   };
 }
 
+// The client a transaction belongs to, resolved by email alone — the same rule
+// the Optix import uses for inbound lessons (see _shared/optix-db.mts): an
+// email that matches exactly one person links, anything less certain stays
+// unlinked. Names are never matched — two clients called "John Smith" must not
+// share a transaction history. A miss is recoverable (the row still shows the
+// typed name and an admin can link it by picking the client); a wrong link
+// silently pollutes someone's history, so the matcher refuses to guess.
+async function resolveCustomerIdByEmail(accountId: string, email: unknown): Promise<string | null> {
+  const wanted = cleanString(email, "", 180).toLowerCase();
+  if (!wanted) return null;
+  const rows = (await supabase("people", {
+    query: `select=id,email&account_id=eq.${encodeFilter(accountId)}&email=ilike.${encodeFilter(wanted)}&limit=10`,
+  }).catch(() => [])) as Array<{ id?: unknown; email?: unknown }>;
+  const ids = [...new Set(
+    rows
+      .filter((row) => String(row?.email ?? "").toLowerCase() === wanted)
+      .map((row) => String(row?.id ?? ""))
+      .filter(Boolean),
+  )];
+  return ids.length === 1 ? ids[0] : null;
+}
+
 async function listInvoices(accountId: string, url: URL) {
   const status = cleanString(url.searchParams.get("status"), "", 20);
+  const customerId = cleanString(url.searchParams.get("customerId"), "", 160);
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit")) || 50));
   const filters = [`account_id=eq.${encodeFilter(accountId)}`];
   if (status) filters.push(`status=eq.${encodeFilter(status)}`);
+  if (customerId) filters.push(`customer_id=eq.${encodeFilter(customerId)}`);
   const rows = await supabase("billing_invoices", {
     query: `select=*&${filters.join("&")}&order=issue_date.desc,created_at.desc&limit=${limit}`,
   });
@@ -1024,12 +1048,16 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
 
   const status = ["draft", "sent"].includes(String(body?.status)) ? String(body.status) : "draft";
   const invoiceId = randomUUID();
+  // An explicit customerId (the picker) wins; otherwise try the email. Both can
+  // miss, which leaves the invoice unlinked but otherwise complete.
+  const customerId = cleanString(body?.customerId, "", 160)
+    || await resolveCustomerIdByEmail(accountId, body?.customerEmail);
   const invoiceRow = {
     id: invoiceId,
     account_id: accountId,
     invoice_number: invoiceNumber,
     status,
-    customer_id: cleanString(body?.customerId, "", 160) || null,
+    customer_id: customerId,
     customer_name: customerName,
     customer_email: cleanString(body?.customerEmail, "", 180) || null,
     customer_phone: cleanString(body?.customerPhone, "", 80) || null,
@@ -1122,7 +1150,8 @@ async function updateInvoiceDraft(accountId: string, id: string, body: Record<st
   const total = round2(Math.max(0, subtotal - discountTotal) + (taxInclusive ? 0 : taxTotal));
 
   const patch = {
-    customer_id: cleanString(body?.customerId, "", 160) || null,
+    customer_id: cleanString(body?.customerId, "", 160)
+      || await resolveCustomerIdByEmail(accountId, body?.customerEmail),
     customer_name: customerName,
     customer_email: cleanString(body?.customerEmail, "", 180) || null,
     customer_phone: cleanString(body?.customerPhone, "", 80) || null,
@@ -2772,17 +2801,20 @@ async function listPosTransactions(accountId: string, url: URL) {
   const limit = Math.max(1, Math.min(500, cleanNumber(url.searchParams.get("limit"), 100)));
   const from = cleanString(url.searchParams.get("from"), "", 20);
   const to = cleanString(url.searchParams.get("to"), "", 20);
+  // customerId narrows both sources to one client (the profile Transactions tab).
+  const customerId = cleanString(url.searchParams.get("customerId"), "", 160);
   const filters = [`account_id=eq.${encodeFilter(accountId)}`];
   // created_at is a timestamp; widen a bare date bound to cover the whole day.
   if (from) filters.push(`created_at=gte.${encodeFilter(`${from}T00:00:00.000Z`)}`);
   if (to) filters.push(`created_at=lte.${encodeFilter(`${to}T23:59:59.999Z`)}`);
+  if (customerId) filters.push(`customer_id=eq.${encodeFilter(customerId)}`);
   const rows = await supabase("billing_pos_transactions", {
     query: `select=*&${filters.join("&")}&order=created_at.desc&limit=${limit}`,
   });
   const transactions = rows.map(posRowToApi);
   const itemsByTransaction = await posItemsForTransactions(accountId, transactions.map((entry) => entry.id));
   const counter = transactions.map((entry) => ({ ...entry, items: itemsByTransaction[entry.id] || [] }));
-  const optix = await listOptixPosRecords(accountId, { from, to, limit });
+  const optix = await listOptixPosRecords(accountId, { from, to, limit, customerId });
   // Newest first across both sources, held to the same limit as before.
   const merged = [...counter, ...optix]
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
@@ -2806,10 +2838,11 @@ async function listPosTransactions(accountId: string, url: URL) {
 //
 // A sale is paid at purchase: Optix takes the money when new_sale fires, and
 // the payload carries no invoice_id, so there is no later settlement signal.
-async function listOptixPosRecords(accountId: string, range: { from: string; to: string; limit: number }) {
+async function listOptixPosRecords(accountId: string, range: { from: string; to: string; limit: number; customerId?: string }) {
   const filters = [`account_id=eq.${encodeFilter(accountId)}`, "event_type=eq.new_sale", "is_pass=eq.true"];
   if (range.from) filters.push(`purchased_at=gte.${encodeFilter(`${range.from}T00:00:00.000Z`)}`);
   if (range.to) filters.push(`purchased_at=lte.${encodeFilter(`${range.to}T23:59:59.999Z`)}`);
+  if (range.customerId) filters.push(`person_id=eq.${encodeFilter(range.customerId)}`);
   // The table is created by the Optix migration; absent (or any read failure)
   // just means no Optix records to merge, never a broken POS list.
   const rows = (await supabase("optix_pass_purchases", {
@@ -3017,7 +3050,8 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
         : null
       : round2(cleanNumber(listedAmountRaw, 0, { min: 0 })),
     currency: cleanString(body?.currency, await resolveDefaultCurrency(), 10),
-    customer_id: cleanString(body?.customerId, "", 160) || null,
+    customer_id: cleanString(body?.customerId, "", 160)
+      || await resolveCustomerIdByEmail(accountId, body?.customerEmail),
     customer_name: cleanString(body?.customerName, "", 140) || null,
     customer_email: cleanString(body?.customerEmail, "", 180) || null,
     booking_id: cleanString(body?.bookingId, "", 160) || null,
@@ -3243,6 +3277,68 @@ async function posSummary(accountId: string, url: URL) {
     couponTotal,
     byMethod: [...byMethod.values()].sort((a, b) => b.total - a.total),
   };
+}
+
+// Everything billed to one client, for the Transactions tab on their profile.
+//
+// Money ties to a person three ways, gathered here in one response:
+//   - POS sales and Optix lesson passes carrying their client id
+//   - invoices addressed to them (customer_id — the picker or an email match)
+//   - invoices that contain one of their lessons as a line item without being
+//     addressed to them: the bulk-invoice case, where a parent or employer is
+//     billed for several people's lessons at once. The lesson inside belongs
+//     to this client, so the invoice shows in their history tagged
+//     relation "included" rather than "billed".
+async function customerTransactions(accountId: string, url: URL) {
+  const personId = cleanString(url.searchParams.get("personId"), "", 160);
+  if (!personId) throw Object.assign(new Error("personId is required."), { status: 400 });
+
+  const posUrl = new URL(url.toString());
+  posUrl.searchParams.set("customerId", personId);
+  posUrl.searchParams.set("limit", "200");
+
+  const [pos, billedRows, bookingRows] = await Promise.all([
+    listPosTransactions(accountId, posUrl),
+    supabase("billing_invoices", {
+      query: `select=*&account_id=eq.${encodeFilter(accountId)}&customer_id=eq.${encodeFilter(personId)}&order=issue_date.desc,created_at.desc&limit=200`,
+    }),
+    // Read-only, per this function's protected rules: the client's lessons are
+    // only read to find which invoices their bookings were pulled into.
+    supabase("calendar_items", {
+      query: `select=id&account_id=eq.${encodeFilter(accountId)}&person_id=eq.${encodeFilter(personId)}&limit=1000`,
+    }),
+  ]);
+
+  const billed = (billedRows as Array<Record<string, unknown>>).map((row) => ({ ...invoiceRowToApi(row), relation: "billed" }));
+  const seen = new Set(billed.map((invoice) => String(invoice.id)));
+
+  const bookingIds = (bookingRows as Array<{ id?: unknown }>).map((row) => String(row?.id ?? "")).filter(Boolean);
+  const included: Array<Record<string, unknown>> = [];
+  if (bookingIds.length) {
+    const invoiceIds = new Set<string>();
+    for (let index = 0; index < bookingIds.length; index += 200) {
+      const list = bookingIds.slice(index, index + 200).map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+      const links = await supabase("billing_booking_invoice_links", {
+        query: `select=invoice_id&account_id=eq.${encodeFilter(accountId)}&booking_id=in.(${encodeURIComponent(list)})`,
+      });
+      for (const link of links as Array<Record<string, unknown>>) {
+        const invoiceId = String(link.invoice_id ?? "");
+        if (invoiceId && !seen.has(invoiceId)) invoiceIds.add(invoiceId);
+      }
+    }
+    if (invoiceIds.size) {
+      const list = [...invoiceIds].map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+      const rows = await supabase("billing_invoices", {
+        query: `select=*&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
+      });
+      for (const row of rows as Array<Record<string, unknown>>) included.push({ ...invoiceRowToApi(row), relation: "included" });
+    }
+  }
+
+  const invoices = [...billed, ...included].sort((a, b) =>
+    String((b as Record<string, unknown>).issueDate ?? "").localeCompare(String((a as Record<string, unknown>).issueDate ?? ""))
+    || String((b as Record<string, unknown>).createdAt ?? "").localeCompare(String((a as Record<string, unknown>).createdAt ?? "")));
+  return { pos: pos.transactions, invoices };
 }
 
 // --- Coupons (gift vouchers) -------------------------------------------------
@@ -3772,6 +3868,10 @@ export default async function handler(req: Request) {
     }
     if (action.startsWith("pos/transactions/") && req.method === "PATCH") {
       return json(await updatePosTransactionStatus(accountId, action.slice("pos/transactions/".length), await parseBody(req)));
+    }
+
+    if (action === "customer-transactions" && req.method === "GET") {
+      return json(await customerTransactions(accountId, url));
     }
 
     if (action === "booking-links" && req.method === "GET") {
