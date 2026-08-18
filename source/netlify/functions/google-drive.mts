@@ -278,6 +278,8 @@ async function finishGoogleDriveOAuth(req: Request) {
     grantedScopes: cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean).length
       ? cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean)
       : requiredDriveScopes,
+    // Google told us; anything else is a guess and must not overwrite the truth.
+    scopesFromProvider: cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean).length > 0,
     providerEmail: profile.email || settings.googleCalendarAccountEmail || "",
     providerUserId: profile.id,
     enableCalendar: true,

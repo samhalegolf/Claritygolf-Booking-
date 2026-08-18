@@ -313,6 +313,11 @@ export async function saveGoogleAuthorization(args: {
   accountId: string;
   refreshToken?: string;
   grantedScopes: string[];
+  /**
+   * False when `grantedScopes` is what Clarity asked for rather than what
+   * Google returned. Only then is it safe to merge with what is already known.
+   */
+  scopesFromProvider?: boolean;
   providerEmail?: string;
   providerUserId?: string;
   enableCalendar?: boolean;
@@ -332,7 +337,25 @@ export async function saveGoogleAuthorization(args: {
       status: 400,
     });
   }
-  const grantedScopes = mergeGoogleScopes(existingConnection?.grantedScopes || [], args.grantedScopes);
+  // Replace, do not merge.
+  //
+  // args.grantedScopes comes from Google's token response, so it IS what the
+  // token just issued can do. Unioning it with everything ever granted turns an
+  // accurate record into a high-water mark: reconnect with a narrower consent
+  // and the row still claims the wider one, hasGoogleScopes() waves the sync
+  // through, and the API rejects it with ACCESS_TOKEN_SCOPE_INSUFFICIENT while
+  // every screen says the scope is present.
+  //
+  // That is not hypothetical — it is what happened here between 10 July and
+  // 16 August: the row claimed calendar.events, and calendar.v3.Events.Update
+  // came back 403 on every sync.
+  //
+  // Merging is only right in the fallback case, where Google sent no scope at
+  // all and the caller passed its requested list as a guess; keeping what is
+  // already known beats overwriting it with a guess.
+  const grantedScopes = args.scopesFromProvider === false
+    ? mergeGoogleScopes(existingConnection?.grantedScopes || [], args.grantedScopes)
+    : mergeGoogleScopes([], args.grantedScopes);
   const row: GoogleProviderConnectionRow = {
     id: existingRow?.id || randomUUID(),
     account_id: args.accountId,
@@ -342,10 +365,16 @@ export async function saveGoogleAuthorization(args: {
     encrypted_refresh_token_json: encryptedRefreshTokenJson,
     encrypted_refresh_token_version: encryptionVersion,
     granted_scopes_json: JSON.stringify(grantedScopes),
-    calendar_enabled: args.enableCalendar === true || existingRow?.calendar_enabled === true,
-    drive_enabled: args.enableDrive === true || existingRow?.drive_enabled === true,
+    // Enabled follows the scope actually held, not "was ever ticked". Same
+    // failure as the scope merge: once true, always true, so a narrowed grant
+    // still reported both products as working.
+    calendar_enabled: grantedScopes.some((scope) => scope.includes("/auth/calendar")),
+    drive_enabled: grantedScopes.some((scope) => scope.includes("/auth/drive")),
     connection_status: "connected",
-    connected_at: existingRow?.connected_at || now,
+    // A new refresh token is a new authorisation, so the date moves with it.
+    // Keeping the first one forever is why this row said 10 July while the
+    // settings said 16 August, and why nobody could tell which grant was live.
+    connected_at: args.refreshToken ? now : existingRow?.connected_at || now,
     updated_at: now,
     last_token_refresh_at: existingRow?.last_token_refresh_at || null,
     last_successful_use_at: existingRow?.last_successful_use_at || null,

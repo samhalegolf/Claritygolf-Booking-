@@ -539,6 +539,8 @@ export async function finishGoogleCalendarOAuth(req: Request) {
     grantedScopes: cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean).length
       ? cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean)
       : googleScopes,
+    // Google told us; anything else is a guess and must not overwrite the truth.
+    scopesFromProvider: cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean).length > 0,
     providerEmail: email || settings.googleCalendarAccountEmail || "",
     enableCalendar: true,
   });
