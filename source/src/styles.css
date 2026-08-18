@@ -10856,3 +10856,191 @@ button {
 .integration-checks .check.bad > span:first-child {
   color: #d4574a;
 }
+
+/* --- Rule 06: inline editing ----------------------------------------------
+   A row is text until you touch it. The three states are resting, editing and
+   saved, and Save lives inside the row being edited — never in a panel header
+   and never in a page footer, because a Save you have to go and find is a Save
+   you press by habit rather than by intent. */
+
+.inline-row {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--c-radius-control);
+  border-bottom: 1px solid var(--c-border-soft);
+  transition: background var(--c-t-hover);
+}
+
+.inline-row:last-child {
+  border-bottom: 0;
+}
+
+.inline-row:hover:not(.is-locked):not(.is-editing) {
+  background: var(--c-hover);
+}
+
+.inline-row-label {
+  color: var(--c-muted);
+  font-size: var(--c-size-secondary);
+}
+
+/* A button, because it is one — but it must read as the value it replaces, so
+   everything that makes a button look like a button is taken off. */
+.inline-row-value {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-body);
+  text-align: left;
+  cursor: text;
+}
+
+.inline-row-value:disabled {
+  cursor: default;
+}
+
+.inline-row-value em {
+  color: var(--c-muted);
+  font-style: normal;
+}
+
+.inline-row-value:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.inline-row-pencil {
+  color: var(--c-pencil);
+  font-size: var(--c-size-meta);
+  opacity: 0;
+  transition: opacity var(--c-t-fade);
+}
+
+.inline-row:hover .inline-row-pencil {
+  color: var(--c-pencil-hover);
+  opacity: 1;
+}
+
+/* Keyboard users never hover, so the affordance has to survive without it. */
+.inline-row:focus-within .inline-row-pencil {
+  opacity: 1;
+}
+
+/* The open edit. 12px on all four sides: nothing inside a box touches its
+   edge, and no negative margin reaching for the card wall. */
+.inline-row.is-editing {
+  display: block;
+  padding: 12px;
+  background: var(--c-hover);
+}
+
+.inline-edit-field {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.inline-edit-field input,
+.inline-edit-field select {
+  height: var(--c-control-h);
+  padding: 0 10px;
+  border: 1px solid var(--c-accent);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-body);
+}
+
+/* Rule 05. A field is as wide as its content — never a bare 100%, never a 1fr
+   column, never a stretching flex child. */
+.inline-edit-field .w-time { width: var(--c-w-time); }
+.inline-edit-field .w-price { width: var(--c-w-price); }
+.inline-edit-field .w-date { width: var(--c-w-date); }
+.inline-edit-field .w-name { width: var(--c-w-name); }
+.inline-edit-field .w-email { width: var(--c-w-email); }
+.inline-edit-field .w-prose { width: var(--c-w-prose); }
+
+/* Wraps rather than pushing into the padding. */
+.inline-edit-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.inline-edit-actions .primary-button.small {
+  height: var(--c-h-pill);
+  padding: 0 14px;
+}
+
+.inline-edit-unit {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-secondary);
+}
+
+/* Rule 09: feedback is one line of coloured text. No fill, no border, no icon,
+   no uppercase heading. The field's own border already says what is wrong; the
+   line only says why. */
+.inline-saved {
+  color: var(--c-success-text);
+  font-size: var(--c-size-meta);
+}
+
+.inline-error {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 6px 0 0;
+  color: var(--c-danger);
+  font-size: var(--c-size-meta);
+}
+
+.inline-working {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+/* Rule 10: Cancel, Skip, Delete and Close account are underlined text. A box
+   around Delete gives it the same weight as the action the screen exists for. */
+.text-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-text-soft);
+  font: inherit;
+  font-size: var(--c-size-secondary);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color var(--c-t-hover);
+}
+
+.text-button:hover {
+  color: var(--c-text);
+  font-weight: 700;
+}
+
+.text-button:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.text-button:disabled {
+  color: var(--c-text-disabled);
+  cursor: default;
+}
+
+.text-button.danger {
+  color: var(--c-danger);
+}

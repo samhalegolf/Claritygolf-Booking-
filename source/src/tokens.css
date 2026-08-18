@@ -37,6 +37,10 @@
   --c-success-text: #225b2f;
   --c-pencil: #8f8c86;
   --c-pencil-hover: #57544d;
+  /* Disabled text on a plain/underlined button. Its own token rather than an
+     opacity, because it sits on tinted rows as often as on white and an
+     opacity would give two different greys for one state. */
+  --c-text-disabled: #a8a5a0;
 
   /* --- Dark: parked until a trigger asks for it -------------------------- */
   /* Held as their own names rather than repeated inside each trigger block,
@@ -61,6 +65,7 @@
   --dark-success-text: #b7e0bd;
   --dark-pencil: rgba(244, 247, 242, 0.5);
   --dark-pencil-hover: rgba(244, 247, 242, 0.76);
+  --dark-text-disabled: rgba(244, 247, 242, 0.38);
 
   /* --- Geometry ---------------------------------------------------------- */
   --c-radius-control: 9px;
@@ -78,7 +83,7 @@
   --c-space-8: 28px;
 
   /* Control heights. Coach and player are two densities of one component set,
-     never two designs — see --c-density below. */
+     never two designs — see the density block below. */
   --c-h-pill: 34px;
   --c-h-control: 40px;
   --c-h-touch: 44px;
@@ -145,6 +150,7 @@
   --c-success-text: var(--dark-success-text);
   --c-pencil: var(--dark-pencil);
   --c-pencil-hover: var(--dark-pencil-hover);
+  --c-text-disabled: var(--dark-text-disabled);
 }
 
 /* --- Dark, trigger two: the player's own device setting --------------------
@@ -172,6 +178,7 @@
     --c-success-text: var(--dark-success-text);
     --c-pencil: var(--dark-pencil);
     --c-pencil-hover: var(--dark-pencil-hover);
+    --c-text-disabled: var(--dark-text-disabled);
   }
 }
 

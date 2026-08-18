@@ -103,6 +103,24 @@ test("nothing transitions transform on a button", () => {
   );
 });
 
+test("both dark triggers map the same set of tokens", () => {
+  // There are two, deliberately: the coach's saved toggle and the player's OS
+  // preference. Two blocks means they can drift, and a token missing from one
+  // of them keeps its light value on that surface — invisible until somebody
+  // opens the portal at night. Written once, so check it once.
+  const tokens = readFileSync(TOKENS, "utf8");
+  const mapped = [...tokens.matchAll(/\{([^}]*--c-[a-z0-9-]+:\s*var\(--dark-[^}]*)\}/g)].map(
+    (block) => new Set([...block[1].matchAll(/(--c-[a-z0-9-]+):\s*var\(/g)].map((m) => m[1])),
+  );
+  assert.equal(mapped.length, 2, "expected exactly two dark trigger blocks");
+  const [first, second] = mapped;
+  const missing = [
+    ...[...first].filter((name) => !second.has(name)).map((name) => `${name} missing from the media-query block`),
+    ...[...second].filter((name) => !first.has(name)).map((name) => `${name} missing from the .theme-dark block`),
+  ];
+  assert.deepEqual(missing, [], missing.join("\n  "));
+});
+
 /* --- Ratchets ------------------------------------------------------------ */
 
 /**

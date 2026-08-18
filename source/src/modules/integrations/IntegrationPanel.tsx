@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { AutoSaved, InlineEditProvider, InlineEditRow } from "../shared/InlineEdit";
+
 /**
  * The Developer tab's connection screen.
  *
@@ -177,8 +179,14 @@ export default function IntegrationPanel() {
   const [resourceServices, setResourceServices] = useState<any[]>([]);
   const [resourceConfig, setResourceConfig] = useState<Record<string, any>>({});
   const [mappingDraft, setMappingDraft] = useState({ enabled: false, locationId: "", defaultCoachId: "", emailBehaviour: "none" });
-  const [saving, setSaving] = useState<"" | "mapping" | "resources">("");
-  const [saved, setSaved] = useState("");
+  // Rule 06: every control on these two panels commits on its own, so what is
+  // tracked is when it last landed and whether it failed — not whether a
+  // button should be enabled.
+  const [busy, setBusy] = useState<"" | "mapping" | "resources">("");
+  const [savedAt, setSavedAt] = useState<{ mapping: number | null; resources: number | null }>({
+    mapping: null,
+    resources: null,
+  });
   const [replayDays, setReplayDays] = useState(7);
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>("all");
   const [replaying, setReplaying] = useState(false);
@@ -298,8 +306,7 @@ export default function IntegrationPanel() {
   const attention = Boolean(setupError || integrationError || resourceError || missingRequired.length || whitespaceProblems.length || failedCount || queueStuck);
 
   function patchProfile(id: string, patch: Partial<ResourceProfile>) {
-    setProfiles((current) => current.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
-    setSaved("");
+    void commitResources(profiles.map((profile) => profile.id === id ? { ...profile, ...patch } : profile));
   }
 
   function moveResource(profile: ResourceProfile, index: number, direction: -1 | 1) {
@@ -310,44 +317,78 @@ export default function IntegrationPanel() {
     patchProfile(profile.id, { resourceIds });
   }
 
-  async function saveMapping() {
-    setSaving("mapping"); setSaved("");
+  /**
+   * Commit one mapping change the moment it is made.
+   *
+   * Every control here is a toggle or a picker, and Rule 06 is explicit that
+   * those never get a Save button: the change already happened when you made
+   * it, so a Save would ask you to confirm something that is already true.
+   * What they get instead is the line that says when it landed.
+   */
+  async function commitMapping(patch: Partial<typeof mappingDraft>) {
+    const next = { ...mappingDraft, ...patch };
+    setMappingDraft(next);
+    setBusy("mapping");
     const response = await fetch("/api/external-bookings", {
       method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workspaceId: mapping?.workspace_id || "", ...mappingDraft }),
+      body: JSON.stringify({ workspaceId: mapping?.workspace_id || "", ...next }),
     });
-    const payload = await response.json().catch(() => ({})); setSaving("");
-    if (!response.ok) return setIntegrationError(payload?.message || payload?.error || "Mapping could not be saved.");
-    setIntegration(payload.state); setIntegrationError(""); setSaved("Mapping saved");
+    const payload = await response.json().catch(() => ({}));
+    setBusy("");
+    if (!response.ok) {
+      return setIntegrationError(payload?.message || payload?.error || "That change could not be saved.");
+    }
+    setIntegration(payload.state);
+    setIntegrationError("");
+    setSavedAt((current) => ({ ...current, mapping: Date.now() }));
   }
 
-  async function saveResources() {
-    if (profiles.some((profile) => !profile.resourceIds.length)) return setResourceError(`Every profile needs at least one ${resourceWord}.`);
+  /**
+   * Commit the resource profiles as they are edited.
+   *
+   * Validation used to run when a Save button was pressed, which meant an
+   * invalid arrangement could sit on screen indefinitely looking fine. It now
+   * runs on every change: an invalid state is refused, said out loud on the
+   * line under the panel, and — crucially — not written, so what is stored and
+   * what is shown cannot drift apart while somebody thinks about it.
+   */
+  async function commitResources(nextProfiles: ResourceProfile[], nextConfig = resourceConfig) {
+    setProfiles(nextProfiles);
+    setResourceConfig(nextConfig);
+    if (nextProfiles.some((profile) => !profile.resourceIds.length)) {
+      return setResourceError(`Every profile needs at least one ${resourceWord}.`);
+    }
     const assigned = new Set<string>();
-    for (const profile of profiles) for (const serviceId of profile.serviceIds) {
+    for (const profile of nextProfiles) for (const serviceId of profile.serviceIds) {
       const key = `${profile.handedness}:${serviceId}`;
       if (assigned.has(key)) return setResourceError("A lesson type can only use one profile for each handedness.");
       assigned.add(key);
     }
     const config = Object.fromEntries(services.map((service) => {
-      const standard = profiles.find((profile) => profile.handedness === "standard" && profile.serviceIds.includes(service.id));
-      const left = profiles.find((profile) => profile.handedness === "left" && profile.serviceIds.includes(service.id));
+      const standard = nextProfiles.find((profile) => profile.handedness === "standard" && profile.serviceIds.includes(service.id));
+      const left = nextProfiles.find((profile) => profile.handedness === "left" && profile.serviceIds.includes(service.id));
       return [service.id, {
         enabled: Boolean(standard || left),
-        autoBook: resourceConfig[service.id]?.autoBook === true,
+        autoBook: nextConfig[service.id]?.autoBook === true,
         leftHanded: false,
         preferredResourceIds: standard?.resourceIds || [],
         leftHandedResourceIds: left?.resourceIds || [],
       }];
     }));
-    setSaving("resources"); setSaved("");
+    setBusy("resources");
     const response = await fetch("/api/optix-booking-type-settings", {
       method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ profiles, config: { ...resourceConfig, ...config } }),
+      body: JSON.stringify({ profiles: nextProfiles, config: { ...nextConfig, ...config } }),
     });
-    const payload = await response.json().catch(() => ({})); setSaving("");
-    if (!response.ok) return setResourceError(payload?.message || payload?.error || "Resource settings could not be saved.");
-    setProfiles(payload.profiles || profiles); setResourceConfig(payload.config || config); setResourceError(""); setSaved("Resources saved");
+    const payload = await response.json().catch(() => ({}));
+    setBusy("");
+    if (!response.ok) {
+      return setResourceError(payload?.message || payload?.error || "That change could not be saved.");
+    }
+    setProfiles(payload.profiles || nextProfiles);
+    setResourceConfig(payload.config || config);
+    setResourceError("");
+    setSavedAt((current) => ({ ...current, resources: Date.now() }));
   }
 
   async function processPending() {
@@ -391,6 +432,7 @@ export default function IntegrationPanel() {
   const tabs: Tab[] = ["webhooks", "api", "mapping", "activity", "health"];
 
   return (
+    <InlineEditProvider>
     <article className="data-card settings-section settings-developer integration-panel">
       <header className="integration-header">
         <div>
@@ -534,7 +576,7 @@ export default function IntegrationPanel() {
             </div>
             <div className="integration-grid">
               <label className="toggle">
-                <input checked={mappingDraft.enabled} onChange={(event) => setMappingDraft((draft) => ({ ...draft, enabled: event.target.checked }))} type="checkbox" />
+                <input checked={mappingDraft.enabled} onChange={(event) => void commitMapping({ enabled: event.target.checked })} type="checkbox" />
                 {" "}Enable appointment creation
               </label>
               <label>
@@ -544,32 +586,31 @@ export default function IntegrationPanel() {
               <label>Lesson type<input readOnly value="External Booking (automatic)" /></label>
               <label>
                 Clarity location
-                <select disabled={!integration} value={mappingDraft.locationId} onChange={(event) => setMappingDraft((draft) => ({ ...draft, locationId: event.target.value }))}>
+                <select disabled={!integration} value={mappingDraft.locationId} onChange={(event) => void commitMapping({ locationId: event.target.value })}>
                   <option value="">Select location</option>
                   {(integration?.catalog?.locations || []).map((location) => <option key={location.id} value={location.id}>{location.name || location.id}</option>)}
                 </select>
               </label>
               <label>
                 Default coach
-                <select disabled={!integration} value={mappingDraft.defaultCoachId} onChange={(event) => setMappingDraft((draft) => ({ ...draft, defaultCoachId: event.target.value }))}>
+                <select disabled={!integration} value={mappingDraft.defaultCoachId} onChange={(event) => void commitMapping({ defaultCoachId: event.target.value })}>
                   <option value="">No default coach</option>
                   {(integration?.catalog?.coaches || []).map((coach) => <option key={coach.id} value={coach.id}>{coach.displayName || coach.name || coach.id}</option>)}
                 </select>
               </label>
               <label>
                 Customer email
-                <select value={mappingDraft.emailBehaviour} onChange={(event) => setMappingDraft((draft) => ({ ...draft, emailBehaviour: event.target.value }))}>
+                <select value={mappingDraft.emailBehaviour} onChange={(event) => void commitMapping({ emailBehaviour: event.target.value })}>
                   <option value="none">No Clarity email</option>
                   <option value="immediate">Send immediately</option>
                   <option value="after_bay">Send after {resourceWord} booking</option>
                 </select>
               </label>
             </div>
+            {/* No Save. Every control above is a toggle or a picker and has
+                already committed; what is left to say is when. */}
             <div className="integration-actions">
-              <button disabled={!integration || !mapping || saving === "mapping"} onClick={() => void saveMapping()} type="button">
-                {saving === "mapping" ? "Saving…" : "Save mapping"}
-              </button>
-              {saved ? <span>{saved}</span> : null}
+              <AutoSaved savedAt={savedAt.mapping} busy={busy === "mapping"} />
             </div>
 
             {resourceError ? <div className="integration-error"><strong>Resource settings need attention</strong>{resourceError}</div> : null}
@@ -581,17 +622,22 @@ export default function IntegrationPanel() {
                   {" "}The list comes from {words.workspace}s {providerLabel} has actually sent — {resourceWorkspaces.length} so far.
                 </p>
               </div>
-              <button onClick={() => setProfiles((current) => [...current, newProfile(current.length + 1, resourceWorkspaces.map((workspace) => workspace.id))])} type="button">+ New profile</button>
+              <button onClick={() => void commitResources([...profiles, newProfile(profiles.length + 1, resourceWorkspaces.map((workspace) => workspace.id))])} type="button">+ New profile</button>
             </div>
             {profiles.map((profile) => (
               <section className="integration-resource-profile" key={profile.id}>
                 <div className="profile-title">
-                  <input aria-label="Profile name" value={profile.name} onChange={(event) => patchProfile(profile.id, { name: event.target.value })} />
+                  <InlineEditRow
+                    label="Profile name"
+                    value={profile.name}
+                    width="name"
+                    onSave={(name) => patchProfile(profile.id, { name: String(name) })}
+                  />
                   <select aria-label="Player handedness" value={profile.handedness} onChange={(event) => patchProfile(profile.id, { handedness: event.target.value === "left" ? "left" : "standard" })}>
                     <option value="standard">Standard / any player</option>
                     <option value="left">Left-handed players</option>
                   </select>
-                  <button className="danger" disabled={profiles.length === 1} onClick={() => setProfiles((current) => current.filter((candidate) => candidate.id !== profile.id))} type="button">Delete</button>
+                  <button className="text-button danger" disabled={profiles.length === 1} onClick={() => void commitResources(profiles.filter((candidate) => candidate.id !== profile.id))} type="button">Delete</button>
                 </div>
                 <div className="profile-columns">
                   <div>
@@ -654,8 +700,10 @@ export default function IntegrationPanel() {
                       checked={resourceConfig[service.id]?.autoBook === true}
                       onChange={(event) => {
                         const checked = event.target.checked;
-                        setResourceConfig((current) => ({ ...current, [service.id]: { ...(current[service.id] || {}), autoBook: checked } }));
-                        setSaved("");
+                        void commitResources(profiles, {
+                          ...resourceConfig,
+                          [service.id]: { ...(resourceConfig[service.id] || {}), autoBook: checked },
+                        });
                       }}
                       type="checkbox"
                     />
@@ -664,11 +712,12 @@ export default function IntegrationPanel() {
                 ))}
               </div>
             </section>
+            {/* Same again: every control in this section commits itself, and
+                validation now runs on the change rather than on a button, so an
+                invalid arrangement is refused instead of sitting on screen
+                looking saved. */}
             <div className="integration-actions">
-              <button disabled={saving === "resources"} onClick={() => void saveResources()} type="button">
-                {saving === "resources" ? "Saving…" : "Save resources"}
-              </button>
-              {saved ? <span>{saved}</span> : null}
+              <AutoSaved savedAt={savedAt.resources} busy={busy === "resources"} />
             </div>
           </>
         ) : null}
@@ -844,6 +893,7 @@ export default function IntegrationPanel() {
         ) : null}
       </div>
     </article>
+    </InlineEditProvider>
   );
 }
 
