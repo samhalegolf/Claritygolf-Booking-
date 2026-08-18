@@ -4,6 +4,8 @@ import {
   ArrowLeft,
   ArrowRight,
   BarChart3,
+  Bell,
+  Building2,
   CalendarDays,
   Check,
   Cloud,
@@ -1087,19 +1089,47 @@ function bankCandidateSortText(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
 }
 
+/**
+ * Settings sections, in the order they appear in the sub-nav.
+ *
+ * Was eleven tabs, several of which were the same screen under two names —
+ * "Customer Experience" and "Coach Branding" showed an identical set of four
+ * panels, because every one of them was classed onto both. These six are what
+ * is left once each panel is filed once.
+ *
+ * Missing on purpose: Payments. Invoicing defaults, tax and payment terms all
+ * live inside the Coach Account panel today, and pulling them out is a job
+ * about that panel rather than about the filing.
+ */
+/**
+ * The sub-nav, as data.
+ *
+ * One list drives the rows, the highlight and the admin gating, so a section
+ * cannot exist in the nav and nowhere else — which is how "Customer
+ * Experience" and "Coach Branding" both survived pointing at the same panels.
+ */
+const SETTINGS_SECTIONS: Array<{
+  key: Exclude<SettingsTab, "none">;
+  label: string;
+  icon: typeof Settings;
+  adminOnly?: boolean;
+}> = [
+  { key: "business", label: "Business", icon: Building2, adminOnly: true },
+  { key: "booking", label: "Booking", icon: CalendarDays },
+  { key: "services", label: "Lesson types", icon: ScissorsLineDashed },
+  { key: "notifications", label: "Notifications", icon: Bell, adminOnly: true },
+  { key: "account", label: "Account", icon: User, adminOnly: true },
+  { key: "developer", label: "Developer", icon: Code2, adminOnly: true },
+];
+
 type SettingsTab =
   | "none"
+  | "business"
+  | "booking"
   | "services"
-  | "coaches"
-  | "locations"
-  | "availability"
-  | "email"
-  | "experience"
+  | "notifications"
   | "account"
-  | "branding"
-  | "integrations"
-  | "developer"
-  | "data";
+  | "developer";
 
 type BookingForm = {
   firstName: string;
@@ -5474,7 +5504,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
   useEffect(() => {
     if (isAdminUser) return;
-    if (["coaches", "locations", "email", "experience", "account", "branding", "integrations", "developer", "data"].includes(settingsTab)) {
+    if (["business", "notifications", "account", "developer"].includes(settingsTab)) {
       setSettingsTab("services");
     }
   }, [isAdminUser, settingsTab]);
@@ -5486,7 +5516,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     // with a second effect gated on its result calling refreshClarityCloudImports
     // afterwards), which stacked a full extra round trip onto how long it took
     // a cloud-only saved video to become eligible for a player profile.
-    if ((activeView === "settings" && settingsTab === "integrations") || activeView === "players") {
+    if ((activeView === "settings" && settingsTab === "developer") || activeView === "players") {
       void refreshGoogleDriveTransferStatus();
       void refreshClarityCloudImports();
     }
@@ -7011,7 +7041,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // event payloads, so there is no reason to pull it on every Settings visit.
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated") return;
-    if (!googleCalendarDebugOpen || settingsTab !== "integrations") return;
+    if (!googleCalendarDebugOpen || settingsTab !== "developer") return;
     void refreshGoogleCalendarDebugLog();
   }, [authStatus, googleCalendarDebugOpen, isEmbedMode, settingsTab]);
 
@@ -11107,7 +11137,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       setToast({ message: cloudReason });
       if (options.openSettingsOnConfigurationIssue && shouldOpenClarityCloudSettings(clarityCloudHealth)) {
         setActiveView("settings");
-        setSettingsTab("integrations");
+        setSettingsTab("developer");
       }
       // eslint-disable-next-line no-console
       console.warn("clarity_cloud_transfer_blocked", {
@@ -18444,7 +18474,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     pendingServiceAction ? services.find((service) => service.id === pendingServiceAction.serviceId) ?? null : null;
 
   const locationsSettingsPanel = (
-    <div className="settings-section settings-locations">
+    <div className="settings-section settings-business">
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
@@ -18606,7 +18636,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   );
 
   const coachesSettingsPanel = (
-    <div className="settings-section settings-coaches">
+    <div className="settings-section settings-business">
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
@@ -18794,7 +18824,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   );
 
   const availabilitySettingsPanel = (
-    <div className="settings-section settings-availability">
+    <div className="settings-section settings-booking">
       <div className="availability-layout">
         <div className="data-card wide">
           <div className="data-card-header">
@@ -18914,7 +18944,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   );
 
   const bookingSettingsPanel = (
-    <article className="data-card settings-section settings-experience settings-branding booking-page-settings">
+    <article className="data-card settings-section settings-booking booking-page-settings">
       <div className="data-card-header">
         <div>
           <span>Booking Page</span>
@@ -22195,7 +22225,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 }
                 onOpenCloudSettings={() => {
                   setActiveView("settings");
-                  setSettingsTab("integrations");
+                  setSettingsTab("developer");
                 }}
               />
             </Suspense>
@@ -25409,124 +25439,25 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "settings" && (
           <section className="module-page settings-page">
-            <div className="settings-tabs" role="tablist" aria-label="Settings sections">
-              <button
-                className={settingsTab === "services" ? "active" : ""}
-                onClick={() => switchSettingsTab("services")}
-                role="tab"
-                aria-selected={settingsTab === "services"}
-                type="button"
-              >
-                <ScissorsLineDashed size={16} />
-                Lesson Setup
-              </button>
-              {isAdminUser ? (
+            {/* Rule 07: the sub-nav keeps its boxes. 216px column, 38px rows,
+                9px radius, 2px apart; the open section is a filled block and
+                the rest are plain until hovered. Highlight and open section are
+                the same state value, so they cannot disagree. */}
+            <nav className="settings-subnav" aria-label="Settings sections">
+              <span className="settings-subnav-heading">Settings</span>
+              {SETTINGS_SECTIONS.filter((section) => isAdminUser || !section.adminOnly).map((section) => (
                 <button
-                  className={settingsTab === "coaches" ? "active" : ""}
-                  onClick={() => switchSettingsTab("coaches")}
-                  role="tab"
-                  aria-selected={settingsTab === "coaches"}
+                  key={section.key}
+                  className={settingsTab === section.key ? "active" : ""}
+                  onClick={() => switchSettingsTab(section.key)}
+                  aria-current={settingsTab === section.key ? "page" : undefined}
                   type="button"
                 >
-                  <User size={16} />
-                  Coaches
+                  <section.icon size={16} />
+                  {section.label}
                 </button>
-              ) : null}
-              <button
-                className={settingsTab === "availability" ? "active" : ""}
-                onClick={() => switchSettingsTab("availability")}
-                role="tab"
-                aria-selected={settingsTab === "availability"}
-                type="button"
-              >
-                <Clock size={16} />
-                Schedule
-              </button>
-              <button
-                className={settingsTab === "locations" ? "active" : ""}
-                onClick={() => switchSettingsTab("locations")}
-                role="tab"
-                aria-selected={settingsTab === "locations"}
-                type="button"
-              >
-                <MapPin size={16} />
-                Locations
-              </button>
-              {isAdminUser ? (
-                <>
-                  <button
-                    className={settingsTab === "email" ? "active" : ""}
-                    onClick={() => switchSettingsTab("email")}
-                    role="tab"
-                    aria-selected={settingsTab === "email"}
-                    type="button"
-                  >
-                    <Mail size={16} />
-                    Email
-                  </button>
-                  <button
-                    className={settingsTab === "experience" ? "active" : ""}
-                    onClick={() => switchSettingsTab("experience")}
-                    role="tab"
-                    aria-selected={settingsTab === "experience"}
-                    type="button"
-                  >
-                    <Eye size={16} />
-                    Customer Experience
-                  </button>
-                  <button
-                    className={settingsTab === "account" ? "active" : ""}
-                    onClick={() => switchSettingsTab("account")}
-                    role="tab"
-                    aria-selected={settingsTab === "account"}
-                    type="button"
-                  >
-                    <User size={16} />
-                    Coach Account
-                  </button>
-                  <button
-                    className={settingsTab === "branding" ? "active" : ""}
-                    onClick={() => switchSettingsTab("branding")}
-                    role="tab"
-                    aria-selected={settingsTab === "branding"}
-                    type="button"
-                  >
-                    <Palette size={16} />
-                    Coach Branding
-                  </button>
-                  <button
-                    className={settingsTab === "integrations" ? "active" : ""}
-                    onClick={() => switchSettingsTab("integrations")}
-                    role="tab"
-                    aria-selected={settingsTab === "integrations"}
-                    type="button"
-                  >
-                    <KeyRound size={16} />
-                    Integrations
-                  </button>
-                  <button
-                    className={settingsTab === "developer" ? "active" : ""}
-                    onClick={() => switchSettingsTab("developer")}
-                    role="tab"
-                    aria-selected={settingsTab === "developer"}
-                    type="button"
-                  >
-                    <Code2 size={16} />
-                    Developer
-                  </button>
-                  <button
-                    className={settingsTab === "data" ? "active" : ""}
-                    onClick={() => switchSettingsTab("data")}
-                    role="tab"
-                    aria-selected={settingsTab === "data"}
-                    type="button"
-                  >
-                    <Upload size={16} />
-                    Data
-                  </button>
-                </>
-              ) : null}
-            </div>
+              ))}
+            </nav>
 
             <div className={`settings-grid settings-tab-${settingsTab}`}>
               {settingsTab === "developer" ? <IntegrationPanel /> : null}
@@ -25536,7 +25467,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               {isAdminUser ? locationsSettingsPanel : null}
               {availabilitySettingsPanel}
               {bookingSettingsPanel}
-              <article className="data-card notification-card account-card settings-section settings-account settings-branding">
+              <article className="data-card notification-card account-card settings-section settings-account">
                 <div className="data-card-header">
                   <div>
                     <span>Coach Account</span>
@@ -25995,7 +25926,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </div>
               </article>
 
-              <article className="data-card sync-card settings-section settings-integrations">
+              <article className="data-card sync-card settings-section settings-developer">
                 <div className="data-card-header">
                   <div>
                     <span>Google Calendar Sync</span>
@@ -26761,7 +26692,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </details>
               </article>
 
-              <article className="data-card notification-card settings-section settings-email">
+              <article className="data-card notification-card settings-section settings-notifications">
                 <span>Email Notifications</span>
                 <h2>Confirmation emails</h2>
                 <EditableSettingsBlock
@@ -26978,7 +26909,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </EditableSettingsBlock>
               </article>
 
-              <article className="data-card notification-card settings-section settings-experience settings-integrations">
+              <article className="data-card notification-card settings-section settings-notifications">
                 <span>Text Machine</span>
                 <h2>SMS/webhook hook</h2>
                 <EditableSettingsBlock
@@ -27075,7 +27006,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </EditableSettingsBlock>
               </article>
 
-              <article className="data-card notification-card email-template-card settings-section settings-email">
+              <article className="data-card notification-card email-template-card settings-section settings-notifications">
                 <span>Email Template</span>
                 <h2>Customer experience</h2>
                 <div className="email-preview">
@@ -27328,7 +27259,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </EditableSettingsBlock>
               </article>
 
-              <article className="data-card notification-card settings-section settings-experience settings-branding">
+              <article className="data-card notification-card settings-section settings-business">
                 <span>Theme</span>
                 <h2>Light and dark surfaces</h2>
                 <details className="settings-subsection">
@@ -27396,7 +27327,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </details>
               </article>
 
-              <article className="data-card brand-vein-card settings-section settings-branding settings-experience">
+              <article className="data-card brand-vein-card settings-section settings-business">
                 <div className="data-card-header">
                   <div>
                     <span>Coach Branding</span>
@@ -27525,7 +27456,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </details>
               </article>
 
-              <article className="data-card import-card settings-section settings-data">
+              <article className="data-card import-card settings-section settings-account">
                 <div className="data-card-header">
                   <div>
                     <span>Clients</span>

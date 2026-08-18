@@ -45,7 +45,7 @@ export default function BrowserNotificationsPanel() {
   const blocked = status?.permission === "denied";
 
   return (
-    <article className="data-card notification-card settings-section settings-email browser-push-card">
+    <article className="data-card notification-card settings-section settings-notifications browser-push-card">
       <div className="data-card-header">
         <div>
           <span>Notifications</span>
