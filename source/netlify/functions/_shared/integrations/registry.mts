@@ -7,21 +7,22 @@
  * deliver is how the two systems end up silently disagreeing.
  */
 
-export type ExternalProvider = "optix" | "google_calendar" | "acuity" | "setmore";
+import { optixAdapter } from "./providers/optix.mts";
+import type { ExternalProvider, ProviderAdapter, ProviderCapabilities } from "./types.mts";
 
-export type ExternalSourceType = "api" | "calendar";
+export type { ExternalProvider, ExternalSourceType, ProviderCapabilities } from "./types.mts";
 
-export type ProviderCapabilities = {
-  sourceType: ExternalSourceType;
-  label: string;
-  createExternally: boolean;
-  rescheduleExternally: boolean;
-  cancelExternally: boolean;
-  receiveCreatedEvents: boolean;
-  receiveUpdatedEvents: boolean;
-  receiveCancelledEvents: boolean;
-  /** Why a write capability is off, shown to the admin instead of a dead end. */
-  writeBlockedReason?: string;
+/**
+ * Every provider Clarity has an adapter for.
+ *
+ * Adding a provider is one entry here plus one file under ./providers. Nothing
+ * else in the codebase should ever need to name a provider.
+ *
+ * A provider can appear in CAPABILITIES below without appearing here: that is
+ * the honest state for one Clarity knows about but cannot yet talk to.
+ */
+const ADAPTERS: Partial<Record<ExternalProvider, ProviderAdapter>> = {
+  optix: optixAdapter,
 };
 
 const OPTIX_WRITE_BLOCKED =
@@ -135,4 +136,20 @@ export function canCancelExternally(provider: unknown): ExternalWriteCheck {
       capabilities.writeBlockedReason ||
       `${capabilities.label} bookings cannot be cancelled from Clarity.`,
   };
+}
+
+/**
+ * The adapter for a provider, or null when Clarity has no code to talk to it.
+ *
+ * Callers must handle null rather than assuming: an unrecognised provider is a
+ * routine state (a stale mapping row, a webhook from a system someone
+ * configured and then removed), not an exception.
+ */
+export function adapterFor(provider: unknown): ProviderAdapter | null {
+  return isExternalProvider(provider) ? ADAPTERS[provider] ?? null : null;
+}
+
+/** Every provider that can actually be talked to right now. */
+export function connectedProviders(): ProviderAdapter[] {
+  return Object.values(ADAPTERS).filter(Boolean) as ProviderAdapter[];
 }

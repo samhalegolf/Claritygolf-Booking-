@@ -1,10 +1,13 @@
 /**
- * Reading values out of an Optix webhook payload.
+ * Reading values out of an inbound webhook payload, whoever sent it.
  *
- * Optix posts form-encoded webhooks whose field names vary by event type and
- * have changed shape between events we have seen (member.email vs member_email
- * vs email, for one). Rather than each consumer inventing its own defensive
- * lookup, both the booking path and the pass-purchase path read through these.
+ * Nothing here knows about a particular provider. Booking systems post payloads
+ * whose field names vary by event type and drift between versions (member.email
+ * vs member_email vs email, for one), so rather than each provider adapter
+ * inventing its own defensive lookup, they all read through these four.
+ *
+ * A provider adapter's job is to say *which* paths to try. This file's job is
+ * to try them without throwing.
  */
 
 export function text(value: unknown) {
@@ -22,8 +25,8 @@ export function pick(payload: any, ...paths: string[]) {
 
 /**
  * An ISO timestamp from either a unix epoch (seconds or milliseconds, which is
- * what Optix sends) or a parseable date string. "" when the value is unusable,
- * so callers decide whether a missing time is fatal.
+ * what most booking systems send) or a parseable date string. "" when the value
+ * is unusable, so callers decide whether a missing time is fatal.
  */
 export function iso(value: unknown) {
   const raw = text(value);
@@ -38,7 +41,7 @@ export function iso(value: unknown) {
 /**
  * A money amount in minor units (cents).
  *
- * Optix has not been observed sending money yet, so this accepts both shapes
+ * Providers disagree about how to send money, so this accepts both shapes
  * every billing API uses: an integer in minor units (`amount_cents: 4500`) and
  * a decimal major amount (`amount: "45.00"`). A value with a decimal point, or
  * a field named for major units, is treated as major; a bare integer in a

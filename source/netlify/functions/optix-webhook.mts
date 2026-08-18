@@ -1,9 +1,9 @@
 import type { Config } from "@netlify/functions";
 
-import { processStoredOptixEvent, storeOptixWebhookEvent, webhookEventKey } from "./_shared/optix-origin.mts";
-import { optixOriginRequest } from "./_shared/optix-db.mts";
+import { processStoredExternalEvent, storeOptixWebhookEvent, webhookEventKey } from "./_shared/integrations/ingest.mts";
+import { integrationRequest } from "./_shared/integrations/db.mts";
 import { notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
-import { validateOptixWebhook } from "./_shared/optix-webhook-auth.mts";
+import { validateOptixWebhook } from "./_shared/integrations/providers/optix-webhook-auth.mts";
 
 function env(name: string) {
   return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
@@ -57,7 +57,7 @@ export default async function handler(req: Request) {
     //
     // This ran receipt-only from 5 Aug to 13 Aug 2026 as a stopgap after Optix
     // events overwrote Clarity lessons. The guards that stopgap stood in for
-    // now live in processStoredOptixEvent(): assertSafeExistingLink() refuses
+    // now live in processStoredExternalEvent(): assertSafeExistingLink() refuses
     // any item Optix does not exclusively own, findDuplicateBooking() catches a
     // lesson the coach already has, and every inbound booking files under the
     // reserved External Booking lesson type so it can never reclassify a native
@@ -67,7 +67,7 @@ export default async function handler(req: Request) {
     // duplicate, and replaying it would re-run the import.
     if (stored.inserted) {
       try {
-        const processed: any = await processStoredOptixEvent(eventKey, payload);
+        const processed: any = await processStoredExternalEvent("optix", eventKey, payload);
         if (processed?.status === "processed" && processed?.created) {
           // The coach's pop-up is not tied to the client's email behaviour —
           // a booking landing on the calendar is worth knowing about whether
@@ -76,14 +76,14 @@ export default async function handler(req: Request) {
 
           if (processed?.mapping?.emailBehaviour === "immediate") {
             await notifyBookingEvent({ action: "booking", appointment: processed.item, source: `optix:${eventKey}` });
-            await optixOriginRequest(`external_booking_links?provider=eq.optix&purpose=eq.lesson&external_booking_id=eq.${encodeURIComponent(externalBookingId)}`, {
+            await integrationRequest(`external_booking_links?provider=eq.optix&purpose=eq.lesson&external_booking_id=eq.${encodeURIComponent(externalBookingId)}`, {
               method: "PATCH",
               body: JSON.stringify({ email_status: "sent", confirmation_sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
             });
           }
         }
       } catch (error) {
-        // The event is stored and marked failed by processStoredOptixEvent, so
+        // The event is stored and marked failed by processStoredExternalEvent, so
         // it stays retryable from the integration panel.
         console.error("optix_webhook_processing_failed", {
           eventKey,

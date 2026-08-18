@@ -2,7 +2,7 @@ import {
   canRescheduleExternally,
   providerCapabilities,
   type ExternalProvider,
-} from "./external-providers.mts";
+} from "./integrations/registry.mts";
 
 export type ExternalSlot = { week: number; day: number; start: number; duration: number };
 

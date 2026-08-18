@@ -5,7 +5,7 @@ import {
   canCancelExternally,
   canRescheduleExternally,
   providerCapabilities,
-} from "./external-providers.mts";
+} from "./integrations/registry.mts";
 import { planExternalReschedule, sameSlot, type ExternalBooking } from "./external-reschedule.mts";
 
 const optixBooking: ExternalBooking = {
