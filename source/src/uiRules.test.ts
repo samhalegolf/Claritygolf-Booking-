@@ -262,3 +262,56 @@ test("literal hex colours are not spreading", () => {
     console.log(`  ↓ literal hexes down to ${count} (baseline ${BASELINE}) — lower it.`);
   }
 });
+
+/**
+ * Nothing arrives already open.
+ *
+ * A screen that unfolds one of its sections on arrival reads as though that
+ * section is the screen; the others become things you might not notice are
+ * there. So every disclosure — Settings accordion, subsection, product group,
+ * event row — starts shut and opens because somebody asked for it.
+ *
+ * Two forms are caught here: a `<details>` carrying a bare `open`, and a state
+ * flag named for a disclosure that starts true. A `<details open={someState}>`
+ * is fine and common — that is a controlled disclosure, and its default is the
+ * useState below, which this test also reads.
+ */
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap((entry) => {
+    const full = path.join(dir, entry);
+    if (entry === "node_modules") return [];
+    if (statSync(full).isDirectory()) return sourceFiles(full);
+    return /\.tsx?$/.test(full) && !full.endsWith(".test.ts") ? [full] : [];
+  });
+}
+
+/**
+ * playerToolExpanded is not a default-open disclosure: the panel it controls
+ * only exists once a player has been clicked, so the click IS the request to
+ * open it. Starting it false would mean clicking a player and getting a shut
+ * box.
+ */
+const OPENS_ON_A_CLICK = new Set(["playerToolExpanded"]);
+
+test("expandable sections arrive closed", () => {
+  const offenders: string[] = [];
+  for (const file of sourceFiles(SRC)) {
+    const source = read(file);
+    // <details ... open> or <details ... open ...> — a bare attribute, which in
+    // JSX means true. `open={...}` is a controlled disclosure and is allowed.
+    for (const match of source.matchAll(/<details\b[^>]*?\bopen\s*(?![=\w])[^>]*>/g)) {
+      offenders.push(`${rel(file)}: ${match[0].slice(0, 60).replace(/\s+/g, " ")}`);
+    }
+    // A disclosure flag that starts open.
+    for (const match of source.matchAll(/\[\s*(\w*(?:[Oo]pen|[Ee]xpanded|[Ss]hown?)\w*)\s*,[^\]]*\]\s*=\s*useState(?:<[^>]*>)?\(\s*true\s*\)/g)) {
+      if (OPENS_ON_A_CLICK.has(match[1])) continue;
+      offenders.push(`${rel(file)}: ${match[1]} starts true`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `These arrive already open:\n  ${offenders.join("\n  ")}\n` +
+      "Open on click, not on arrival.",
+  );
+});

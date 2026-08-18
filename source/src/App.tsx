@@ -1134,24 +1134,19 @@ function SettingsGroup({
   section,
   title,
   className = "",
-  defaultOpen,
   children,
 }: {
   id: string;
   section: string;
   title: string;
   className?: string;
-  defaultOpen?: boolean;
   children: ReactNode;
 }) {
   const context = useContext(SettingsGroupContext);
-  // Before anything has been clicked, the first group of each section is open —
-  // an accordion that opens onto six shut boxes reads as broken.
-  const open = context
-    ? context.openGroup === ""
-      ? Boolean(defaultOpen)
-      : context.openGroup === id
-    : true;
+  // Every section arrives shut. A tab that opens with one section already
+  // expanded pushes the rest below the fold and makes that one look like the
+  // screen rather than one choice among several.
+  const open = context ? context.openGroup === id : true;
   return (
     <article
       className={`data-card settings-section settings-${section} settings-group${open ? " is-open" : ""}${className ? ` ${className}` : ""}`}
@@ -1159,7 +1154,7 @@ function SettingsGroup({
       <button
         className="settings-group-header"
         aria-expanded={open}
-        onClick={() => context?.setOpenGroup(open ? `${id}:closed` : id)}
+        onClick={() => context?.setOpenGroup(open ? "" : id)}
         type="button"
       >
         <span>{title}</span>
@@ -18711,7 +18706,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   );
 
   const coachesSettingsPanel = (
-    <SettingsGroup id="coaches" section="business" title="Coaches" defaultOpen>
+    <SettingsGroup id="coaches" section="business" title="Coaches">
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
@@ -18898,7 +18893,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   );
 
   const availabilitySettingsPanel = (
-    <SettingsGroup id="availability" section="booking" title="Availability" defaultOpen>
+    <SettingsGroup id="availability" section="booking" title="Availability">
       <div className="availability-layout">
         <div className="data-card wide">
           <div className="data-card-header">
@@ -25535,8 +25530,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               {isAdminUser ? locationsSettingsPanel : null}
               {availabilitySettingsPanel}
               {bookingSettingsPanel}
-              <SettingsGroup id="coach-account" section="account" title="Coach account" className="notification-card account-card" defaultOpen>
-                <details className="settings-subsection" open>
+              <SettingsGroup id="coach-account" section="account" title="Coach account" className="notification-card account-card">
+                <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <KeyRound size={18} />
                     <div>
@@ -25987,7 +25982,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </div>
               </SettingsGroup>
 
-              <SettingsGroup id="google-calendar" section="developer" title="Google Calendar sync" className="sync-card" defaultOpen>
+              <SettingsGroup id="google-calendar" section="developer" title="Google Calendar sync" className="sync-card">
 
                 <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
                   <span>Direct Google API</span>
@@ -26023,7 +26018,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   </em>
                 </div>
 
-                <details className="settings-subsection" open>
+                <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Link2 size={18} />
                     <div>
@@ -26746,7 +26741,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </details>
               </SettingsGroup>
 
-              <SettingsGroup id="email-notifications" section="notifications" title="Email notifications" className="notification-card" defaultOpen>
+              <SettingsGroup id="email-notifications" section="notifications" title="Email notifications" className="notification-card">
                 <EditableSettingsBlock
                   id="email-notifications-block"
                   title="Email Notifications"

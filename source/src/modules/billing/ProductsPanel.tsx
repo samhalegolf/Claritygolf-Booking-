@@ -160,7 +160,10 @@ export function ProductsPanel({
   // and a price and nothing else. Editing an existing product opens it.
   const [showDetail, setShowDetail] = useState(false);
   const nameRef = useRef<HTMLInputElement | null>(null);
-  const [collapsed, setCollapsed] = useState<Partial<Record<BillingCatalogKind, boolean>>>({});
+  // Which groups the coach has opened. Everything starts shut, so the screen
+  // arrives as a short list of headings and counts rather than three full
+  // tables stacked on top of each other.
+  const [expanded, setExpanded] = useState<Partial<Record<BillingCatalogKind, boolean>>>({});
 
   // Which product's stock drawer is open, plus that drawer's form.
   const [stockFor, setStockFor] = useState("");
@@ -525,14 +528,14 @@ export function ProductsPanel({
           const stocked = group.kind === "product";
           // A search that matched something inside a closed section would look
           // like a search that found nothing, so searching opens everything.
-          const open = Boolean(searching || !collapsed[group.kind]);
+          const open = Boolean(searching || expanded[group.kind]);
           const groupLow = group.items.filter((product) => isLowStock(product)).length;
           const lessons = group.kind !== "product";
           return (
             <section className="product-group" key={group.kind}>
               <button
                 className="product-group-header"
-                onClick={() => setCollapsed((current) => ({ ...current, [group.kind]: !current[group.kind] }))}
+                onClick={() => setExpanded((current) => ({ ...current, [group.kind]: !current[group.kind] }))}
                 aria-expanded={open}
                 type="button"
               >

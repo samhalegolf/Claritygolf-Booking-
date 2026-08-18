@@ -869,8 +869,12 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
             {showEvents ? (
               <>
                 {showPurchases && purchaseRows.length ? <h4 className="integration-feed-group">Bookings</h4> : null}
+                {/* Every row closed, failed ones included. A failure says so on
+                    its summary line, which is enough to find it — a list that
+                    unfolds three payloads on arrival is harder to scan, not
+                    easier. */}
                 {eventRows.length ? eventRows.map((event) => (
-                  <details className="integration-event" key={event.event_key} open={event.processing_status === "failed"}>
+                  <details className="integration-event" key={event.event_key}>
                     <summary>
                       <strong>{event.event_type || "Unknown event"}</strong>
                       <span>{event.customer || "No customer"}</span>
