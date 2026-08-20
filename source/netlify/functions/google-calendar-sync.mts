@@ -14,6 +14,13 @@ import {
   saveGoogleAuthorization,
 } from "./_shared/google-provider.mts";
 import { unavailableSpans } from "./_shared/availability-blocks.mts";
+import { defaultAccountId } from "./_shared/account.mts";
+import {
+  GOOGLE_IMPORT_ORIGIN,
+  busyBlocksFromGoogleEvents,
+  planBusyBlockImport,
+  type GoogleEvent,
+} from "./_shared/google-calendar-import.mts";
 
 const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
@@ -586,6 +593,7 @@ function rowToItem(row: any) {
   return {
     id: row.id,
     kind: row.kind === "block" ? "block" : "appointment",
+    origin: row.origin || "",
     week: Number(row.week ?? 0),
     day: Number(row.day ?? 0),
     start: Number(row.start ?? 0),
@@ -620,9 +628,16 @@ function isCancelledGroupSessionItem(item: any) {
  * is free to fill. Falling out of this predicate is what deletes the event on
  * the next sync, so cancelling in Clarity clears the Google slot.
  */
-function isBusyGoogleItem(item: any) {
+export function isBusyGoogleItem(item: any) {
   if (!item) return false;
   if (isCancelledGroupSessionItem(item)) return false;
+  // Never send back what we read in. A block imported from this same calendar
+  // already exists in Google as the event it came from; pushing it would
+  // duplicate that event, and the next import would read the duplicate and
+  // make another. This is the second half of the loop guard — the first is
+  // in google-calendar-import.mts, which refuses to import Clarity's own
+  // events. Either half alone still loops, one hop slower.
+  if (item.origin === GOOGLE_IMPORT_ORIGIN) return false;
   return item.status !== "cancelled" && item.status !== "no_show";
 }
 
@@ -762,6 +777,121 @@ function googleEventForItem(item: any, settings: Record<string, string>, service
 
 function googleEventFingerprint(event: any) {
   return createHash("sha256").update(JSON.stringify(event)).digest("hex");
+}
+
+/**
+ * How far either side of today the busy import looks.
+ *
+ * Backwards at all, because a lesson moved earlier this week still has to stop
+ * holding its old slot. Not far backwards, because past time cannot be
+ * double-booked and every extra week is events to page through.
+ */
+const busyImportWeeksBack = 1;
+const busyImportWeeksAhead = 12;
+/** Pages of 250. Clarity's own recurring "Unavailable" events expand into a
+ * lot of instances inside the window, and they all arrive before being
+ * discarded, so the ceiling has to allow for them. */
+const busyImportMaxPages = 6;
+
+async function listGoogleEvents(accessToken: string, calendarId: string, timeMin: string, timeMax: string) {
+  const events: GoogleEvent[] = [];
+  let pageToken = "";
+  for (let page = 0; page < busyImportMaxPages; page += 1) {
+    const query = new URLSearchParams({
+      timeMin,
+      timeMax,
+      // Expand recurring events into their instances: a weekly commitment has
+      // to hold each of its own slots, not one slot forever.
+      singleEvents: "true",
+      orderBy: "startTime",
+      maxResults: "250",
+      ...(pageToken ? { pageToken } : {}),
+    });
+    const data = await googleCalendarRequest(accessToken, `/calendars/${encodeURIComponent(calendarId)}/events?${query}`);
+    events.push(...(Array.isArray(data?.items) ? data.items : []));
+    pageToken = String(data?.nextPageToken || "");
+    if (!pageToken) break;
+  }
+  return { events, truncated: Boolean(pageToken) };
+}
+
+/**
+ * Pulls the coach's other commitments in as read-only busy blocks.
+ *
+ * Everything Clarity did not write becomes a block: no client, no lesson type,
+ * no price, and `origin` set so the UI refuses to move or resize it and the
+ * outbound sync refuses to send it back.
+ *
+ * Failure here must never fail the outbound sync. Pushing lessons to Google is
+ * the job that matters; knowing about a Golf HQ commitment is the bonus. The
+ * caller wraps this, and the outcome is reported either way rather than
+ * swallowed — a silent import is how a broken sync hides for three days.
+ */
+async function importGoogleBusyBlocks(accessToken: string, calendarId: string, settings: Record<string, string>) {
+  const account = accountFromSettings(settings);
+  const now = new Date();
+  const timeMin = new Date(now.getTime() - busyImportWeeksBack * 7 * 86_400_000).toISOString();
+  const timeMax = new Date(now.getTime() + busyImportWeeksAhead * 7 * 86_400_000).toISOString();
+
+  const { events, truncated } = await listGoogleEvents(accessToken, calendarId, timeMin, timeMax);
+  const wanted = busyBlocksFromGoogleEvents(events, account.timezone);
+
+  // Only rows this import owns are ever read here, and therefore only they can
+  // ever be deleted below. A lesson or a coach's own block is out of reach.
+  const existingRows = (await supabase("calendar_items", {
+    query: `select=id,week,day,start,duration,title&origin=eq.${encodeURIComponent(GOOGLE_IMPORT_ORIGIN)}`,
+  })) as Array<Record<string, unknown>>;
+  const plan = planBusyBlockImport(wanted, existingRows.map((row) => ({ ...row, id: String(row.id) })));
+
+  // The coach owns their own diary, so the block files under the same account
+  // and coach as everything else on this calendar.
+  const accountSlug = settings.accountCalendarSlug || defaultAccountId();
+  const rowFor = (block: (typeof wanted)[number]) => ({
+    id: block.id,
+    account_id: accountSlug,
+    kind: "block",
+    title: block.title,
+    client: "",
+    week: block.week,
+    day: block.day,
+    start: block.start,
+    duration: block.duration,
+    status: "booked",
+    coach_id: accountSlug,
+    service_id: "",
+    person_id: "",
+    location_id: "",
+    note: "",
+    origin: GOOGLE_IMPORT_ORIGIN,
+    external_provider: GOOGLE_IMPORT_ORIGIN,
+    external_booking_id: block.googleEventId,
+    external_updated_at: nowIso(),
+    updated_at: nowIso(),
+  });
+
+  const writes = [...plan.create, ...plan.update].map(rowFor);
+  if (writes.length) {
+    await supabase("calendar_items?on_conflict=id", {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: writes,
+    });
+  }
+  if (plan.deleteIds.length) {
+    const list = plan.deleteIds.map((id) => `"${id}"`).join(",");
+    await supabase("calendar_items", {
+      method: "DELETE",
+      query: `origin=eq.${encodeURIComponent(GOOGLE_IMPORT_ORIGIN)}&id=in.(${encodeURIComponent(list)})`,
+    });
+  }
+  return {
+    scanned: events.length,
+    imported: plan.create.length,
+    updated: plan.update.length,
+    removed: plan.deleteIds.length,
+    unchanged: plan.unchanged,
+    truncated,
+  };
 }
 
 /** Tag an in-flight error with the request that produced it, for the debug log. */
@@ -1133,6 +1263,21 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
     // Work actually landed in Google, so the connection has earned "connected"
     // — the only place that claim is made. A token refresh no longer makes it.
     await markConnectionHealthy(accountId).catch(() => undefined);
+
+    // Then the other direction: the coach's other commitments come back as
+    // read-only busy blocks. Deliberately after the push and deliberately
+    // isolated — getting lessons into Google is the job, and a failure to read
+    // Golf HQ's diary must not report the whole sync as broken. The outcome is
+    // returned either way rather than swallowed.
+    let busyImport: Record<string, unknown> | null = null;
+    let busyImportError = "";
+    if (settings.googleCalendarImportBusy !== "false") {
+      try {
+        busyImport = await importGoogleBusyBlocks(accessToken, calendarId, settings);
+      } catch (error: any) {
+        busyImportError = error instanceof Error ? error.message.slice(0, 300) : "Busy import failed.";
+      }
+    }
     await recordGoogleCalendarDebugEntry(
       finishEntry("success", {
         stage: "complete",
@@ -1153,6 +1298,8 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
       deleted,
       unchanged,
       syncedAt,
+      busyImport,
+      busyImportError,
     };
   } catch (error: any) {
     const debugError = debugErrorFromUnknown(error, stage);

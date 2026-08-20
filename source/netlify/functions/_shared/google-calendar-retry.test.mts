@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isRetryableGoogleFailure } from "../google-calendar-sync.mts";
+import { isBusyGoogleItem, isRetryableGoogleFailure } from "../google-calendar-sync.mts";
 
 test("retries the 403 rate limit Google returns for calendar write bursts", () => {
   // Google answers a throttled burst with 403 + usageLimits/rateLimitExceeded
@@ -31,4 +31,28 @@ test("does not retry client errors that will fail again identically", () => {
   assert.equal(isRetryableGoogleFailure(401, { googleReason: "" }), false);
   assert.equal(isRetryableGoogleFailure(404, { googleReason: "" }), false);
   assert.equal(isRetryableGoogleFailure(409, { googleReason: "duplicate" }), false);
+});
+
+// The other half of the import loop guard. google-calendar-import.mts refuses
+// to read Clarity's own events back in; this refuses to write imported blocks
+// back out. Either half alone still loops, one hop slower — an imported block
+// would be pushed to Google as a new event, read back as a foreign event on
+// the next run, and blocks would breed on every sync.
+test("a block imported from Google is never pushed back to Google", () => {
+  const imported = { kind: "block", status: "booked", origin: "google" };
+  assert.equal(isBusyGoogleItem(imported), false);
+});
+
+test("the coach's own blocks and lessons still sync out", () => {
+  assert.equal(isBusyGoogleItem({ kind: "block", status: "booked", origin: "clarity" }), true);
+  assert.equal(isBusyGoogleItem({ kind: "appointment", status: "booked", origin: "clarity" }), true);
+  // An Optix-owned lesson is Clarity's to display and Google's to know about;
+  // only the google origin is the loop risk.
+  assert.equal(isBusyGoogleItem({ kind: "appointment", status: "booked", origin: "optix" }), true);
+});
+
+test("cancelled and no-show time is released in Google", () => {
+  assert.equal(isBusyGoogleItem({ kind: "appointment", status: "cancelled", origin: "clarity" }), false);
+  assert.equal(isBusyGoogleItem({ kind: "appointment", status: "no_show", origin: "clarity" }), false);
+  assert.equal(isBusyGoogleItem(null), false);
 });

@@ -4,6 +4,7 @@ import { createExternalPerson, matchPersonByEmail, integrationRequest, rowsOf } 
 import { recordPassPurchase } from "./purchases.mts";
 import { text } from "./payload.mts";
 import { canonicalPhoneKey } from "../phone.mts";
+import { calendarSlot } from "../calendar-slot.mts";
 import { adapterFor } from "./registry.mts";
 import { isPurchaseKind } from "./types.mts";
 import type {
@@ -57,24 +58,10 @@ export function assertProcessableEvent(event: NormalizedBookingEvent) {
 
 const BOOKING_KINDS: IntegrationEventKind[] = ["booking.created", "booking.updated", "booking.cancelled"];
 
-const BASE_WEEK_START = Date.UTC(2026, 5, 1);
-
-export function calendarSlot(startIso: string, timezone: string) {
-  const date = new Date(startIso);
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric", month: "2-digit", day: "2-digit", weekday: "short",
-    hour: "2-digit", minute: "2-digit", hour12: false,
-  }).formatToParts(date);
-  const get = (type: string) => parts.find((part) => part.type === type)?.value || "";
-  const dayMap: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
-  const localDate = Date.UTC(Number(get("year")), Number(get("month")) - 1, Number(get("day")));
-  return {
-    week: Math.floor((localDate - BASE_WEEK_START) / (7 * 86_400_000)),
-    day: dayMap[get("weekday")] ?? 0,
-    start: Number(get("hour")) * 60 + Number(get("minute")),
-  };
-}
+// Where a moment sits on the Clarity grid is one definition, shared with the
+// Google sync in both directions — see _shared/calendar-slot.mts. Re-exported
+// because this module's callers have always reached it through here.
+export { calendarSlot };
 
 function customerName(event: NormalizedBookingEvent) {
   return [event.firstName, event.lastName].filter(Boolean).join(" ").trim() || event.email || event.phone;
