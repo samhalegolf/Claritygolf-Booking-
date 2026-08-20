@@ -1,3 +1,4 @@
+import { apiFetch } from "../../auth/apiFetch";
 import type { VideoAnalysis } from "../models/Analysis";
 import type { PlayerVideo } from "../models/Video";
 import type { ComparisonSide, ComparisonWorkspaceState } from "./localPersistence";
@@ -835,7 +836,7 @@ const uploadChunkToClarity = async (
   scope: VideoTransferScope = "coach"
 ): Promise<PublicTransferSession> => {
   const endByte = startByte + chunk.size - 1;
-  const response = await fetch(transferUrl(scope, savedVideoId, "chunk"), {
+  const response = await apiFetch(transferUrl(scope, savedVideoId, "chunk"), {
     method: "PUT",
     headers: {
       "Content-Type": mimeType,
@@ -1013,7 +1014,7 @@ export const saveSavedVideoToCloud = async (
       // Only a player sends one: a short note to the coach alongside the video.
       ...(options.message ? { message: options.message } : {}),
     };
-    const sessionResponse = await fetch(transferUrl(scope, savedVideoId, "session"), {
+    const sessionResponse = await apiFetch(transferUrl(scope, savedVideoId, "session"), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(uploadSessionRequest),
@@ -1075,7 +1076,7 @@ export const saveSavedVideoToCloud = async (
       progress: 99,
     });
 
-    const finalizeResponse = await fetch(transferUrl(scope, savedVideoId, "finalize"), {
+    const finalizeResponse = await apiFetch(transferUrl(scope, savedVideoId, "finalize"), {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
@@ -1153,7 +1154,7 @@ export const pauseSavedVideoCloudUpload = async (
   const item = await store.getItem(savedVideoId);
   if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
   try {
-    const response = await fetch(transferUrl(scope, savedVideoId, "pause"), {
+    const response = await apiFetch(transferUrl(scope, savedVideoId, "pause"), {
       method: "POST",
       headers: { Accept: "application/json" },
     });
@@ -1174,7 +1175,7 @@ export const cancelSavedVideoCloudUpload = async (
   const item = await store.getItem(savedVideoId);
   if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
   try {
-    await fetch(transferUrl(scope, savedVideoId, "session"), {
+    await apiFetch(transferUrl(scope, savedVideoId, "session"), {
       method: "DELETE",
       headers: { Accept: "application/json" },
     });
@@ -1200,7 +1201,7 @@ export const removeSavedVideoCloudTransfer = async (
   if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
   if (item.cloud?.transferId) {
     try {
-      await fetch(transferUrl(scope, savedVideoId, "session"), {
+      await apiFetch(transferUrl(scope, savedVideoId, "session"), {
         method: "DELETE",
         headers: { Accept: "application/json" },
       });
@@ -1217,7 +1218,7 @@ export const removeSavedVideoCloudTransfer = async (
  */
 export const markClarityCloudSubmissionSeen = async (savedVideoId: string): Promise<void> => {
   try {
-    await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/seen`, {
+    await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/seen`, {
       method: "POST",
       headers: { Accept: "application/json" },
     });
@@ -1227,7 +1228,7 @@ export const markClarityCloudSubmissionSeen = async (savedVideoId: string): Prom
 };
 
 export const listClarityCloudImportTransfers = async (): Promise<ClarityCloudImportTransfer[]> => {
-  const response = await fetch("/api/video-transfer/imports", { headers: { Accept: "application/json" } });
+  const response = await apiFetch("/api/video-transfer/imports", { headers: { Accept: "application/json" } });
   const data = await safeJson<{ transfers?: ClarityCloudImportTransfer[] }>(
     response,
     "Clarity Cloud import list did not return JSON.",
@@ -1280,7 +1281,7 @@ const sendImportReceipt = async (
   options: { deviceId?: string; deviceName?: string; platform?: string } = {}
 ) => {
   const device = getClarityDevice();
-  const response = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/import-receipt`, {
+  const response = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/import-receipt`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({
@@ -1308,7 +1309,7 @@ export const importSavedVideoFromClarityCloud = async (
   store: SavedVideoLibraryStore,
   options: { deviceId?: string; deviceName?: string; platform?: string } = {}
 ): Promise<SavedVideoItem> => {
-  const packageResponse = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/import`, {
+  const packageResponse = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/import`, {
     headers: { Accept: "application/json" },
   });
   const importPackage = await safeJson<ClarityCloudImportPackage>(
@@ -1343,7 +1344,7 @@ export const importSavedVideoFromClarityCloud = async (
     });
   }
 
-  const downloadResponse = await fetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/download`, {
+  const downloadResponse = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/download`, {
     headers: { Accept: importPackage.video.mimeType || "application/octet-stream" },
   });
   if (!downloadResponse.ok) {

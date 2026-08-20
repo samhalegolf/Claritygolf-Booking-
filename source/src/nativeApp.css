@@ -1,0 +1,27 @@
+/* Only loaded by the Capacitor entry point, so nothing here can reach the web
+   build. Two things a browser handles for us and a webview does not: the
+   notch, and the fact that the page cannot be scrolled away from. */
+
+.native-app,
+.native-app body {
+  /* A webview has no address bar to hide, so 100vh is the real height and
+     rubber-band scrolling past it just shows white. */
+  height: 100%;
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The nav is sticky at the top of the terminal, which in a full-screen webview
+   means underneath the status bar and notch. */
+.native-app .player-terminal-nav-inner {
+  padding-top: calc(10px + env(safe-area-inset-top));
+}
+
+.native-app .player-terminal {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.native-app .login-shell {
+  padding-top: calc(24px + env(safe-area-inset-top));
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}

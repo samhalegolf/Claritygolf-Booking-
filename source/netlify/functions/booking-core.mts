@@ -1602,8 +1602,55 @@ function clearPlayerCookieHeader() {
   return `${playerSessionCookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
 }
 
+/**
+ * The native app cannot hold the cookie above.
+ *
+ * It is served from capacitor://localhost, so every request here is cross-site
+ * and a SameSite=Lax cookie is never sent -- there is no cookie posture that
+ * fixes that without opening the browser up too. It carries the same
+ * player_sessions token in an Authorization header instead. Same token, same
+ * table, same expiry and the same revocation check; only the transport differs,
+ * so nothing downstream has to know which client it is answering.
+ */
+function bearerTokenFromRequest(req) {
+  const header = req.headers.get("authorization") || "";
+  const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
+  return match ? match[1] : "";
+}
+
 function playerSessionTokenFromRequest(req) {
-  return parseCookies(req)[playerSessionCookieName] || "";
+  return bearerTokenFromRequest(req) || parseCookies(req)[playerSessionCookieName] || "";
+}
+
+/**
+ * True when the caller has told us it cannot store cookies, which is the only
+ * case where a login response carries the raw session token. A browser never
+ * sends this header and so never sees the token.
+ */
+function wantsTokenAuth(req) {
+  return (req.headers.get("x-clarity-client") || "").toLowerCase() === "app";
+}
+
+// The only origins allowed to call this API from somewhere other than our own
+// pages: the two schemes a Capacitor webview serves from. Nothing here is
+// credentialed -- these clients authenticate with a bearer token, so a cookie
+// is never in play and a hostile page on one of these origins gains nothing.
+const nativeAppOrigins = new Set([
+  "capacitor://localhost",
+  "http://localhost",
+  "https://localhost",
+]);
+
+function corsHeaders(req) {
+  const origin = req.headers.get("origin") || "";
+  if (!nativeAppOrigins.has(origin)) return null;
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Clarity-Client",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  };
 }
 
 function db() {
@@ -9085,7 +9132,32 @@ async function parseBody(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
+/**
+ * Every route reaches the network through here, so this is the one place that
+ * has to know a caller might be the native app rather than one of our pages.
+ * A preflight is answered without touching the database; anything else is
+ * routed as normal and the headers are added on the way out.
+ */
 export async function handleBookingApiRoute(
+  req: Request,
+  forcedPathname = "",
+  context = null,
+) {
+  const cors = corsHeaders(req);
+  if (!cors) return routeBookingApiRequest(req, forcedPathname, context);
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+
+  const response = await routeBookingApiRequest(req, forcedPathname, context);
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(cors)) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function routeBookingApiRequest(
   req: Request,
   forcedPathname = "",
   context = null,
@@ -9186,6 +9258,9 @@ export async function handleBookingApiRoute(
             email: player.email,
             name: player.name,
             expiresAt: session.expiresAt,
+            // Only to a client that has said it cannot hold the cookie. The
+            // cookie is still set either way, so the web is unchanged.
+            ...(wantsTokenAuth(req) ? { token: session.token } : {}),
           },
           200,
           {

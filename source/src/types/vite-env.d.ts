@@ -13,6 +13,10 @@ interface ImportMetaEnv {
   readonly DEV: boolean;
   readonly PROD: boolean;
   readonly MODE: string;
+  /** "1" in the Capacitor build only. Set by vite.app.config.ts. */
+  readonly VITE_NATIVE?: string;
+  /** Absolute API origin the native app calls. Empty on the web. */
+  readonly VITE_API_BASE?: string;
 }
 
 interface ImportMeta {

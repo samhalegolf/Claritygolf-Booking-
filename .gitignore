@@ -3,6 +3,18 @@ dist/
 source/node_modules/
 source/dist/
 source/.netlify/
+# The native build output and everything Xcode/Gradle regenerates. The ios/ and
+# android/ project folders themselves are committed -- they hold real config
+# (entitlements, icons, Info.plist) that `npx cap add` will not put back.
+source/dist-app/
+source/ios/App/Pods/
+source/ios/App/App/public/
+source/android/app/src/main/assets/public/
+source/android/.gradle/
+source/android/build/
+source/android/app/build/
+source/android/local.properties
+
 .netlify/
 .DS_Store
 

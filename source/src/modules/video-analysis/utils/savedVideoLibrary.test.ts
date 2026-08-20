@@ -646,7 +646,10 @@ describe("saved video library", () => {
       }
       if (String(input).includes(`/api/video-transfer/${encodeURIComponent(item.savedVideoId)}/chunk`)) {
         const body = init?.body as Blob;
-        const start = Number((init?.headers as Record<string, string>)["X-Clarity-Start-Byte"]);
+        // Read through Headers rather than indexing the object: apiFetch
+        // normalises every request into a Headers instance before it reaches
+        // fetch, and the header is what this test is about, not its container.
+        const start = Number(new Headers(init?.headers).get("X-Clarity-Start-Byte"));
         return Response.json({
           ok: true,
           status: start + body.size >= sourceBlob().size ? "verifying" : "uploading",

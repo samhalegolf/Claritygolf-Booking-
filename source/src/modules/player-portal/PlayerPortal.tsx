@@ -1,6 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import "./playerPortal.css";
+import { apiFetch } from "../auth/apiFetch";
 import { signOut, type Session } from "../auth/session";
 import {
   closePlayerBooking,
@@ -163,11 +164,7 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
     setProfileLoading(true);
     setProfileError("");
     try {
-      const res = await fetch("/api/player/profile", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
+      const res = await apiFetch("/api/player/profile");
       if (res.status === 401) {
         onSignedOut();
         return;
@@ -202,11 +199,7 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/player/caddy", {
-          credentials: "same-origin",
-          headers: { Accept: "application/json" },
-          cache: "no-store",
-        });
+        const res = await apiFetch("/api/player/caddy");
         if (!res.ok) return;
         const data = (await res.json().catch(() => null)) as {
           appUrl?: string;

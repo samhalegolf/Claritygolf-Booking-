@@ -500,8 +500,39 @@ type PlayerScope = {
   name: string;
 };
 
+/**
+ * The native app is served from capacitor://localhost, so its requests here are
+ * cross-site and the player cookie is never sent. It carries the same
+ * player_sessions token in an Authorization header instead. Kept in step with
+ * the identical pair in booking-core.mts.
+ */
+function bearerTokenFromRequest(req: Request): string {
+  const header = req.headers.get("authorization") || "";
+  const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
+  return match ? match[1] : "";
+}
+
+const nativeAppOrigins = new Set([
+  "capacitor://localhost",
+  "http://localhost",
+  "https://localhost",
+]);
+
+function corsHeaders(req: Request): Record<string, string> | null {
+  const origin = req.headers.get("origin") || "";
+  if (!nativeAppOrigins.has(origin)) return null;
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Clarity-Client",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Max-Age": "86400",
+    Vary: "Origin",
+  };
+}
+
 async function readPlayerScope(req: Request): Promise<PlayerScope | null> {
-  const token = parseCookies(req)[playerSessionCookieName] || "";
+  const token =
+    bearerTokenFromRequest(req) || parseCookies(req)[playerSessionCookieName] || "";
   if (!token) return null;
   const rows = await supabase("player_sessions", {
     query: `select=person_id,email,phone,portal_player_id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
@@ -2409,6 +2440,21 @@ async function handlePlayerVideoRoute(
 }
 
 export default async function handler(req: Request) {
+  const cors = corsHeaders(req);
+  if (!cors) return routeVideoTransferRequest(req);
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+
+  const response = await routeVideoTransferRequest(req);
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(cors)) headers.set(name, value);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function routeVideoTransferRequest(req: Request) {
   const url = new URL(req.url);
   const parts = url.pathname
     .replace(/^\/api\/video-transfer\/?/, "")

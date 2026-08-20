@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 
-import { sessionFromLoginResponse, type Session } from "./session";
+import { apiFetch } from "./apiFetch";
+import { login, sessionFromLoginResponse, type Session } from "./session";
 
 // The single front door. It used to live inside App.tsx, which meant a player
 // had to download the whole coach workspace just to reach a sign-in form. It is
@@ -87,10 +88,9 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
   const checkInvite = useCallback(async () => {
     if (!inviteToken) return;
     try {
-      const response = await fetch(`/api/portal/invite?token=${encodeURIComponent(inviteToken)}`, {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
+      const response = await apiFetch(
+        `/api/portal/invite?token=${encodeURIComponent(inviteToken)}`,
+      );
       const data = (await response.json().catch(() => ({}))) as {
         valid?: boolean;
         email?: string;
@@ -113,33 +113,13 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
     void checkInvite();
   }, [checkInvite]);
 
-  async function submitLogin(loginEmail: string, loginPassword: string) {
-    const response = await fetch("/api/auth/login", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ email: loginEmail, password: loginPassword }),
-    });
-    const data = (await response.json().catch(() => ({}))) as {
-      authenticated?: boolean;
-      role?: string;
-      email?: string;
-      name?: string;
-      message?: string;
-    };
-    if (!response.ok || !data.authenticated) {
-      throw new Error(data.message || "Email or password is incorrect.");
-    }
-    return sessionFromLoginResponse(data);
-  }
-
   async function handleLogin(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
     setError("");
     try {
-      const session = await submitLogin(email.trim(), password);
+      const session = await login(email.trim(), password);
       setPassword("");
       onSignedIn(session);
     } catch (caught) {
@@ -156,9 +136,9 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
     setError("");
     setNotice("");
     try {
-      const response = await fetch("/api/auth/forgot-password", {
+      const response = await apiFetch("/api/auth/forgot-password", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: forgotEmail.trim() }),
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string };
@@ -189,10 +169,9 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/auth/reset-password", {
+      const response = await apiFetch("/api/auth/reset-password", {
         method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: resetToken, password: newPassword }),
       });
       const data = (await response.json().catch(() => ({}))) as {
@@ -232,10 +211,9 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch("/api/portal/set-password", {
+      const response = await apiFetch("/api/portal/set-password", {
         method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: inviteToken, password: newPassword }),
       });
       const data = (await response.json().catch(() => ({}))) as {
@@ -247,7 +225,7 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
         setError(data.message || "Could not set that password.");
         return;
       }
-      const session = await submitLogin(data.email || inviteEmail, newPassword);
+      const session = await login(data.email || inviteEmail, newPassword);
       clearQueryString();
       onSignedIn(session);
     } catch (caught) {
