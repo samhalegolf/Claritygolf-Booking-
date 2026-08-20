@@ -15,6 +15,7 @@ import {
 } from "./_shared/google-provider.mts";
 import { unavailableSpans } from "./_shared/availability-blocks.mts";
 import { defaultAccountId } from "./_shared/account.mts";
+import { getClarityCloudGoogleConfig } from "./_shared/clarity-cloud-google-config.mts";
 import {
   GOOGLE_IMPORT_ORIGIN,
   busyBlocksFromGoogleEvents,
@@ -391,10 +392,30 @@ function configuredRedirectUri(req: Request) {
   return `${url.origin}/api/google-calendar/callback`;
 }
 
-function googleConfig(req?: Request) {
+/**
+ * Which Google app Clarity is, and where Google should return to.
+ *
+ * Calendar may have its own Google app one day — that is what the
+ * GOOGLE_CALENDAR_* pair is reserved for — so it still wins when set. What
+ * changed is the fallback: when it is absent, the shared credentials every
+ * other Google feature already uses are taken instead of nothing at all.
+ *
+ * Having no fallback was invisible and nasty (found 20 Aug 2026). An install
+ * with only the shared pair set had a perfectly working token refresh, because
+ * that path already read the shared credentials — while this screen reported
+ * "Needs OAuth credentials" and Connect Google could not build an auth URL at
+ * all. The connection looked alive, every write was failing on scope, and the
+ * one action that would have fixed it was unreachable from the UI.
+ *
+ * The redirect URI is deliberately NOT shared: Google returns to
+ * /api/google-calendar/callback here and /api/google-drive/callback for Drive,
+ * and those are separately registered with Google.
+ */
+export function googleConfig(req?: Request) {
+  const shared = getClarityCloudGoogleConfig(req);
   return {
-    clientId: env("GOOGLE_CALENDAR_CLIENT_ID", ""),
-    clientSecret: env("GOOGLE_CALENDAR_CLIENT_SECRET", ""),
+    clientId: env("GOOGLE_CALENDAR_CLIENT_ID", "") || shared.clientId,
+    clientSecret: env("GOOGLE_CALENDAR_CLIENT_SECRET", "") || shared.clientSecret,
     redirectUri: req ? configuredRedirectUri(req) : env("GOOGLE_CALENDAR_REDIRECT_URI", ""),
   };
 }

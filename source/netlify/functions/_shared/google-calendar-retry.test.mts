@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isBusyGoogleItem, isRetryableGoogleFailure } from "../google-calendar-sync.mts";
+import { googleConfig, isBusyGoogleItem, isRetryableGoogleFailure } from "../google-calendar-sync.mts";
 
 test("retries the 403 rate limit Google returns for calendar write bursts", () => {
   // Google answers a throttled burst with 403 + usageLimits/rateLimitExceeded
@@ -55,4 +55,41 @@ test("cancelled and no-show time is released in Google", () => {
   assert.equal(isBusyGoogleItem({ kind: "appointment", status: "cancelled", origin: "clarity" }), false);
   assert.equal(isBusyGoogleItem({ kind: "appointment", status: "no_show", origin: "clarity" }), false);
   assert.equal(isBusyGoogleItem(null), false);
+});
+
+// Calendar credentials: the specific pair wins, the shared pair is the
+// fallback. Having no fallback is what made the 17-20 Aug outage unfixable —
+// token refresh read the shared credentials and worked, so the connection
+// looked alive, while this screen read only GOOGLE_CALENDAR_* , reported
+// "Needs OAuth credentials", and could not build a Connect Google URL.
+test("calendar falls back to the shared Google credentials", () => {
+  const before = { ...process.env };
+  try {
+    delete process.env.GOOGLE_CALENDAR_CLIENT_ID;
+    delete process.env.GOOGLE_CALENDAR_CLIENT_SECRET;
+    process.env.GOOGLE_CLIENT_ID = "shared-id";
+    process.env.GOOGLE_CLIENT_SECRET = "shared-secret";
+    const config = googleConfig();
+    assert.equal(config.clientId, "shared-id");
+    assert.equal(config.clientSecret, "shared-secret");
+  } finally {
+    process.env = before;
+  }
+});
+
+test("a calendar-specific Google app still overrides the shared one", () => {
+  // Reserved for wiring Calendar to its own Google app later; setting it must
+  // take precedence rather than being ignored in favour of the shared pair.
+  const before = { ...process.env };
+  try {
+    process.env.GOOGLE_CLIENT_ID = "shared-id";
+    process.env.GOOGLE_CLIENT_SECRET = "shared-secret";
+    process.env.GOOGLE_CALENDAR_CLIENT_ID = "calendar-id";
+    process.env.GOOGLE_CALENDAR_CLIENT_SECRET = "calendar-secret";
+    const config = googleConfig();
+    assert.equal(config.clientId, "calendar-id");
+    assert.equal(config.clientSecret, "calendar-secret");
+  } finally {
+    process.env = before;
+  }
 });
