@@ -1,9 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyPassPurchase } from "./purchases.mts";
-import { normalizeOptixPurchase, optixEventKind } from "./providers/optix.mts";
+import { classifyPassPurchase, recordPassPurchase } from "./purchases.mts";
+import { normalizeOptixPurchase, optixAdapter, optixEventKind } from "./providers/optix.mts";
 import { amountInCents } from "./payload.mts";
+
+/** Mocks Supabase for one test, routing by which table the request path names. */
+function withMockSupabase(handlers: Record<string, (url: string, init: RequestInit) => Response>) {
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.SUPABASE_URL;
+  const originalKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL = "https://supabase.example";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key";
+  const calls: { url: string; init: RequestInit }[] = [];
+  globalThis.fetch = async (input: any, init: RequestInit = {}) => {
+    const url = String(input);
+    calls.push({ url, init });
+    const handler = Object.entries(handlers).find(([table]) => url.includes(`/rest/v1/${table}`))?.[1];
+    if (!handler) throw new Error(`No mock handler for ${url}`);
+    return handler(url, init);
+  };
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+      if (originalUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = originalUrl;
+      if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = originalKey;
+    },
+  };
+}
 
 // A real new_sale, verbatim: Sam's test purchase of a lesson pass on
 // 18 Aug 2026. This replaced the fixture built from Optix's docs — the docs
@@ -204,4 +229,49 @@ test("a sale with no usable time still records, defaulting at the caller", () =>
   assert.equal(purchase.amountCents, null);
   assert.equal(purchase.quantity, null);
   assert.equal(purchase.saleNumber, "");
+});
+
+// A sale with a name but no email — the ordinary case for new_sale — used to
+// leave the purchase permanently unlinked: memberName showed on the row, but
+// no client record ever got created, so there was nothing for an admin to
+// merge or promote. It now gets an external booking client, same as an
+// unmatched booking, never a guess against the main client list by name.
+test("a sale with no email gets a new external booking client, not a name-based guess at an existing one", async () => {
+  const mock = withMockSupabase({
+    people: () => Response.json([{ id: "person-new" }]),
+    optix_pass_purchases: () => Response.json([{ id: "row-1" }]),
+  });
+  try {
+    const result = await recordPassPurchase(optixAdapter, "event-key-1", {
+      event: "new_sale", product: "5 hr Golf Lesson Package", account_name: "Cindi Yu", product_sale_id: "401323",
+    }, "sam-hale-golf");
+    const peopleCall = mock.calls.find((c) => c.url.includes("/rest/v1/people"));
+    const body = JSON.parse(String(peopleCall?.init.body))[0];
+    // createExternalPerson mints its own id rather than trusting the response.
+    assert.ok(result.personId);
+    assert.equal(result.personId, body.id);
+    assert.equal(body.name, "Cindi Yu");
+    assert.equal(body.external, true);
+    assert.equal(body.email, null);
+    // Never a lookup against existing people by name — only a create.
+    assert.ok(!mock.calls.some((c) => c.url.includes("/rest/v1/people?") && c.url.includes("name")));
+  } finally {
+    mock.restore();
+  }
+});
+
+test("a purchase with no recoverable name at all is still recorded, just with no client link", async () => {
+  const mock = withMockSupabase({
+    optix_pass_purchases: () => Response.json([{ id: "row-2" }]),
+  });
+  try {
+    const result = await recordPassPurchase(optixAdapter, "event-key-2", {
+      event: "new_plan_subscription", plan_template_name: "12-month (29.95p/w)", name: "12-month (29.95p/w)", account_plan_id: "12345",
+    }, "sam-hale-golf");
+    assert.equal(result.personId, null);
+    // No call to people at all — nothing to file.
+    assert.ok(!mock.calls.some((c) => c.url.includes("/rest/v1/people")));
+  } finally {
+    mock.restore();
+  }
 });

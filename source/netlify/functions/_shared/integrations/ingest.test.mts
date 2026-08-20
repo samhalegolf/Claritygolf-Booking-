@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { EXTERNAL_BOOKING_SERVICE_ID, assertProcessableEvent, createCalendarItemFromOptixBooking, externalBookingNote, findDuplicateBooking, isDeletedInClarityLink, updateCalendarItemFromOptixBooking } from "./ingest.mts";
-import { normalizeOptixBooking } from "./providers/optix.mts";
+import { normalizeOptixBooking, optixAdapter } from "./providers/optix.mts";
 import type { IntegrationMapping } from "./types.mts";
 import { matchPersonByEmail } from "./db.mts";
 import { buildOptixAppointmentInput } from "../optix-reconcile.mts";
@@ -61,44 +61,28 @@ test("rejects a nameless Optix event rather than pooling it into a fake customer
   assert.throws(() => assertProcessableEvent(event), (error: any) => error?.code === "missing_customer_identity");
 });
 
-// Real payloads (from 16 Aug 2026 on): "External Calendar" bookings carry no
-// member/customer field at all, only a title pairing the lesson label with a
-// name — on either side of the dash, with either a hyphen or an em dash. This
-// used to make the booking permanently unrecoverable: no identity field meant
-// assertProcessableEvent threw, and (before the ingest.mts fix) that error
-// left the row stuck at "received" forever, invisible to the retry UI.
-test("falls back to the booking title when Optix sends no member fields at all", () => {
-  const nameAfterDash = normalizeOptixBooking({
-    ...payload, member: undefined, title: "1 Hour Golf Lesson — Ryan Haste",
-  });
-  assert.equal(nameAfterDash.firstName, "Ryan Haste");
-  assert.doesNotThrow(() => assertProcessableEvent(nameAfterDash));
+// Optix relays the coach's own external calendar (Golf HQ → Google Calendar)
+// back to this webhook as bookings with source "External Calendar". They are
+// not Optix bookings: Optix holds no member record, so the payload has no
+// email, phone or customer name at all — only a free-text title, and most are
+// the calendar's own "Unavailable" busy blocks rather than lessons. They are
+// refused at the door as a stated result so they never reach normalisation.
+test("an external calendar relay is ignored at the door, whatever it is titled", () => {
+  const lessonLike = optixAdapter.ignoreReason?.({ ...payload, member: undefined, source: "External Calendar", title: "1 Hour Golf Lesson — Ryan Haste" });
+  assert.equal(lessonLike?.code, "external_calendar_relay");
 
-  const nameBeforeDash = normalizeOptixBooking({
-    ...payload, member: undefined, title: "Shaun Kao - 1 Hour Golf Lesson",
-  });
-  assert.equal(nameBeforeDash.firstName, "Shaun Kao");
-  assert.doesNotThrow(() => assertProcessableEvent(nameBeforeDash));
+  const busyBlock = optixAdapter.ignoreReason?.({ ...payload, member: undefined, source: "External Calendar", title: "Unavailable - Sam Hale Golf" });
+  assert.equal(busyBlock?.code, "external_calendar_relay");
 });
 
-test("a real member field always wins over the title fallback", () => {
-  const event = normalizeOptixBooking({
-    ...payload, title: "1 Hour Golf Lesson — Ryan Haste",
-  });
-  assert.equal(event.firstName, "Ada");
-});
-
-test("a title that doesn't pair a lesson label with a name is not guessed at", () => {
-  // Neither side reads as a lesson label — could be two names, could be
-  // anything. Guessing which one is the customer risks filing the booking
-  // under the wrong person with nothing in the payload to make it noticeable,
-  // so this stays empty and the event fails loudly instead.
-  const ambiguous = normalizeOptixBooking({ ...payload, member: undefined, title: "Ada Lovelace - Charles Babbage" });
-  assert.equal(ambiguous.firstName, "");
-  assert.throws(() => assertProcessableEvent(ambiguous), (error: any) => error?.code === "missing_customer_identity");
-
-  const noDash = normalizeOptixBooking({ ...payload, member: undefined, title: "1 Hour Golf Lesson" });
-  assert.equal(noDash.firstName, "");
+test("a genuine Optix booking is never mistaken for a relay", () => {
+  // Every other source — iOS app, Android app, Admin, Drop-in, Clarity
+  // Booking — is a real Optix booking and carries full customer identity.
+  for (const source of ["iOS app", "Android app", "Admin", "Drop-in", "Clarity Booking"]) {
+    assert.equal(optixAdapter.ignoreReason?.({ ...payload, source }), null, `${source} must not be ignored`);
+  }
+  // A payload with no source at all is still Clarity's to process.
+  assert.equal(optixAdapter.ignoreReason?.(payload), null);
 });
 
 test("generated item is accepted unchanged by the existing Book resource payload builder", () => {

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { matchPersonByEmail, integrationRequest, rowsOf } from "./db.mts";
+import { createExternalPerson, matchPersonByEmail, integrationRequest, rowsOf } from "./db.mts";
 import { recordPassPurchase } from "./purchases.mts";
 import { text } from "./payload.mts";
 import { canonicalPhoneKey } from "../phone.mts";
@@ -271,32 +271,6 @@ async function findMapping(event: NormalizedBookingEvent, provider: ExternalProv
   };
 }
 
-function isDuplicateEmailError(error: any) {
-  const code = String(error?.code || "");
-  const message = error instanceof Error ? error.message : "";
-  return code === "23505" || /duplicate key|unique constraint|idx_people_.*email/i.test(message);
-}
-
-async function createExternalPerson(event: NormalizedBookingEvent, accountId: string, name: string, provider: ExternalProvider) {
-  const personId = randomUUID();
-  try {
-    // external: TRUE files the new person in the external booking clients
-    // list, not the main client list. They move across when an admin merges
-    // them into a main client or moves them over.
-    await integrationRequest("people", { method: "POST", body: JSON.stringify([{ id: personId, account_id: accountId, name, email: event.email || null, phone: event.phone || null, source: provider, external: true }]) });
-    return personId;
-  } catch (error: any) {
-    // The account-scoped unique index on email means at most one person can hold
-    // this address, so re-reading it resolves a constraint rather than guessing
-    // between candidates. Anything else is a real failure and must surface.
-    if (!event.email || !isDuplicateEmailError(error)) throw error;
-    const rows = await integrationRequest(`people?account_id=eq.${encodeURIComponent(accountId)}&email=ilike.${encodeURIComponent(event.email)}&select=id,name,email,phone&limit=10`);
-    const matched = matchPersonByEmail(rowsOf(rows), event.email);
-    if (matched) return matched;
-    throw error;
-  }
-}
-
 async function resolvePerson(event: NormalizedBookingEvent, accountId: string, provider: ExternalProvider) {
   const name = customerName(event);
   if (!name) throw Object.assign(new Error("Optix customer identity is missing."), { code: "missing_customer_identity" });
@@ -311,7 +285,7 @@ async function resolvePerson(event: NormalizedBookingEvent, accountId: string, p
     if (matched) return matched;
   }
 
-  return createExternalPerson(event, accountId, name, provider);
+  return createExternalPerson(accountId, provider, { name, email: event.email || null, phone: event.phone || null });
 }
 
 async function updateEvent(eventKey: string, values: Record<string, unknown>) {
@@ -340,6 +314,21 @@ export async function processStoredExternalEvent(
       processed_at: new Date().toISOString(),
     }).catch(() => undefined);
     return { status: "ignored", reason: "unknown_provider" };
+  }
+
+  // Some events are structurally fine but none of Clarity's business — a
+  // mirror of a calendar Clarity does not own, say. Only the adapter can tell,
+  // so it is asked first, before anything is normalised or written. This is a
+  // stated result, not a failure: stored, ignored, never retried.
+  const ignore = adapter.ignoreReason?.(payload);
+  if (ignore) {
+    await updateEvent(eventKey, {
+      processing_status: "ignored",
+      failure_code: ignore.code,
+      error_message: ignore.message,
+      processed_at: new Date().toISOString(),
+    });
+    return { status: "ignored", reason: ignore.code };
   }
 
   // Purchase events are a different shape entirely — no booking, no workspace,

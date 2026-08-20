@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { integrationRequest, matchPersonByEmail, rowsOf } from "./db.mts";
+import { createExternalPerson, integrationRequest, matchPersonByEmail, rowsOf } from "./db.mts";
 import { text } from "./payload.mts";
 import type { ExternalProvider, NormalizedPurchaseEvent, ProviderAdapter } from "./types.mts";
 
@@ -57,18 +57,28 @@ export async function purchaseAccountId(provider: ExternalProvider) {
 /**
  * The client this purchase belongs to, by email only — same rule as bookings.
  *
- * A provider that omits the buyer's email on sales — Optix is one — leaves the
- * purchase unlinked, showing its buyer name instead. Matching a sale on name was
- * considered and rejected: two clients sharing a name would silently attach a
- * purchase to the wrong person, and there is no signal in the payload that
- * would let anyone notice.
+ * A provider that omits the buyer's email on sales — Optix is one — never
+ * gets an auto-match, because matching a sale on name was considered and
+ * rejected: two clients sharing a name would silently attach a purchase to
+ * the wrong person, with no signal in the payload that would let anyone
+ * notice. What it gets instead — same as an unmatched booking — is a new
+ * external booking client, so the purchase has somewhere to live and an admin
+ * can merge or promote it explicitly rather than the buyer's name just
+ * floating on the row with nothing behind it.
  */
-async function resolvePurchasePerson(purchase: NormalizedPurchaseEvent, accountId: string) {
-  if (!purchase.memberEmail) return null;
-  const rows = await integrationRequest(
-    `people?account_id=eq.${encodeURIComponent(accountId)}&email=ilike.${encodeURIComponent(purchase.memberEmail)}&select=id,name,email,phone&limit=10`,
-  ).catch(() => []);
-  return matchPersonByEmail(rowsOf(rows), purchase.memberEmail);
+async function resolvePurchasePerson(purchase: NormalizedPurchaseEvent, accountId: string, provider: string) {
+  if (purchase.memberEmail) {
+    const rows = await integrationRequest(
+      `people?account_id=eq.${encodeURIComponent(accountId)}&email=ilike.${encodeURIComponent(purchase.memberEmail)}&select=id,name,email,phone&limit=10`,
+    ).catch(() => []);
+    const matched = matchPersonByEmail(rowsOf(rows), purchase.memberEmail);
+    if (matched) return matched;
+  }
+  // Nothing to file an external person under — the descriptor never resolved
+  // a name (seen on plan subscriptions with no subscriber on the payload).
+  // The purchase itself is still recorded; it just has no client link.
+  if (!purchase.memberName) return null;
+  return createExternalPerson(accountId, provider, { name: purchase.memberName, email: purchase.memberEmail || null });
 }
 
 /**
@@ -95,7 +105,7 @@ export async function recordPassPurchase(
   const account = accountId || await purchaseAccountId(adapter.id);
   const purchase = adapter.normalizePurchase(payload);
   const classification = classifyPassPurchase(purchase);
-  const personId = await resolvePurchasePerson(purchase, account);
+  const personId = await resolvePurchasePerson(purchase, account, adapter.id);
   const now = new Date().toISOString();
   await integrationRequest("optix_pass_purchases?on_conflict=event_key", {
     method: "POST",

@@ -323,6 +323,19 @@ export type ProviderAdapter = {
   normalizeBooking(payload: unknown): NormalizedBookingEvent;
   normalizePurchase?(payload: unknown): NormalizedPurchaseEvent;
   /**
+   * Why this event is none of Clarity's business, if it isn't.
+   *
+   * A provider can deliver events that are structurally valid but are not
+   * Clarity's to act on — a mirror of a calendar Clarity does not own, another
+   * system's traffic passing through the same webhook. Only the adapter can
+   * tell, because recognising them means reading the provider's own wording.
+   *
+   * A reason here is a *stated negative result*, not a failure: the event is
+   * stored, marked ignored with this code, and never retried. Returning null
+   * (or omitting the method) means the event is Clarity's to process.
+   */
+  ignoreReason?(payload: unknown): { code: string; message: string } | null;
+  /**
    * Prefix for the Clarity calendar item ids this provider creates. Kept so an
    * id stays readable in a database row without a join.
    */

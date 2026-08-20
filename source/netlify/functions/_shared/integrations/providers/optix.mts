@@ -63,7 +63,6 @@ export function optixEventKind(payload: unknown): IntegrationEventKind {
  * so each lookup is deliberately generous.
  */
 export function normalizeOptixBooking(payload: any): NormalizedBookingEvent {
-  const structuredName = text(pick(payload, "member.first_name", "member_name", "member_first_name", "customer.first_name", "first_name"));
   return {
     kind: optixEventKind(payload),
     rawEventType: optixRawEventType(payload),
@@ -75,12 +74,7 @@ export function normalizeOptixBooking(payload: any): NormalizedBookingEvent {
     startIso: iso(pick(payload, "check_in_timestamp", "booking.check_in_timestamp", "start_timestamp", "start")),
     endIso: iso(pick(payload, "check_out_timestamp", "booking.check_out_timestamp", "end_timestamp", "end")),
     timezone: text(pick(payload, "timezone", "time_zone", "booking.timezone")) || "Pacific/Auckland",
-    // Some External Calendar bookings (seen from 16 Aug 2026) carry no
-    // member/customer fields at all — only a "title" like "1 Hour Golf Lesson
-    // — Ryan Haste" or "Shaun Kao - 1 Hour Golf Lesson". Falling back to that
-    // is what stops a real booking from being permanently unrecoverable for
-    // want of an identity field; see bookingTitleName() below.
-    firstName: structuredName || bookingTitleName(text(pick(payload, "title"))),
+    firstName: text(pick(payload, "member.first_name", "member_name", "member_first_name", "customer.first_name", "first_name")),
     lastName: text(pick(payload, "member.last_name", "member_last_name", "customer.last_name", "last_name")),
     email: text(pick(payload, "member.email", "member_email", "customer.email", "email")).toLowerCase(),
     phone: text(pick(payload, "member.phone", "member.phone_number", "member_phone", "customer.phone", "phone")),
@@ -89,25 +83,36 @@ export function normalizeOptixBooking(payload: any): NormalizedBookingEvent {
 }
 
 /**
- * Pulls a customer name out of an Optix booking title when nothing else on
- * the payload identifies who it's for.
+ * Optix mirrors the coach's *own* external calendar back to us.
  *
- * The title pairs a lesson label with a name on either side of a dash —
- * "1 Hour Golf Lesson — Ryan Haste" or "Shaun Kao - 1 Hour Golf Lesson" are
- * both real examples. Whichever side does NOT read like the lesson label is
- * the name. If both sides do, or neither does, this deliberately returns ""
- * rather than guess — a booking with no recoverable identity should fail
- * loudly (missing_customer_identity) rather than get filed under a wrong or
- * mangled name.
+ * Sam's Golf HQ lessons sync into Google Calendar, Optix subscribes to that
+ * calendar, and Optix then relays every entry it finds there to this webhook
+ * as a booking with source "External Calendar". They look like bookings and
+ * are not: Optix holds no member record for them, so the payload carries no
+ * email, no phone and no customer name — only a free-text `title`. Verified
+ * across every stored event: 203 of 203 External Calendar bookings have no
+ * identity field, and every booking from every other source has one.
+ *
+ * Importing them was wrong twice over. Most are not lessons at all — 161 of
+ * the 183 relayed bookings are titled "Unavailable - Sam Hale Golf", the
+ * calendar's own busy blocks. The ones that are lessons are lessons Clarity
+ * either already holds natively, or cannot ever link to a client, because
+ * with no email there is nothing to match on and each new booking would mint
+ * another duplicate of the same person.
+ *
+ * So the relay is ignored at the door, as a stated result rather than a
+ * failure. Clarity is the source of truth for the lessons it books; Golf HQ
+ * is the source of truth for the ones it books. Neither needs to import the
+ * other's diary through a third system.
  */
-export function bookingTitleName(title: string) {
-  const parts = title.split(/\s+[-—]\s+/).map((part) => part.trim()).filter(Boolean);
-  if (parts.length !== 2) return "";
-  const looksLikeLessonLabel = (value: string) => /lesson|swing|analysis|session|coaching|hour/i.test(value);
-  const [first, second] = parts;
-  if (looksLikeLessonLabel(first) && !looksLikeLessonLabel(second)) return second;
-  if (looksLikeLessonLabel(second) && !looksLikeLessonLabel(first)) return first;
-  return "";
+const RELAYED_CALENDAR_SOURCE = "external calendar";
+
+export function optixIgnoreReason(payload: any) {
+  if (text(pick(payload, "source")).toLowerCase() !== RELAYED_CALENDAR_SOURCE) return null;
+  return {
+    code: "external_calendar_relay",
+    message: "Optix relayed an entry from the external calendar it mirrors. Clarity does not import these — they are the coach's own diary coming back around, not Optix bookings.",
+  };
 }
 
 /**
@@ -309,6 +314,7 @@ export const optixAdapter: ProviderAdapter = {
   label: "Optix",
   itemIdPrefix: "optix",
   eventKind: optixEventKind,
+  ignoreReason: optixIgnoreReason,
   normalizeBooking: normalizeOptixBooking,
   normalizePurchase: normalizeOptixPurchase,
   descriptor: optixDescriptor,

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { text } from "./payload.mts";
 
 /**
@@ -78,4 +80,44 @@ export function matchPersonByEmail(rows: ExternalPersonCandidate[], email: strin
   if (!wanted) return null;
   const matches = uniqueById(rowsOf(rows).filter((row) => text(row?.email).toLowerCase() === wanted));
   return matches.length === 1 ? text(matches[0].id) || null : null;
+}
+
+function isDuplicateEmailError(error: any) {
+  const code = String(error?.code || "");
+  const message = error instanceof Error ? error.message : "";
+  return code === "23505" || /duplicate key|unique constraint|idx_people_.*email/i.test(message);
+}
+
+export type NewExternalPerson = { name: string; email?: string | null; phone?: string | null };
+
+/**
+ * Files someone Clarity has never seen arriving from a provider, whether that
+ * provider sent a booking or a purchase.
+ *
+ * external: TRUE puts the new person in the external booking clients list,
+ * not the main client list — never the main list, because that would be a
+ * silent guess about which existing client this is. An admin merges or moves
+ * them across explicitly. This is the one and only way an unmatched arrival
+ * gets a person record; nothing upstream of this may match by name.
+ */
+export async function createExternalPerson(accountId: string, provider: string, details: NewExternalPerson): Promise<string> {
+  const personId = randomUUID();
+  const email = text(details.email || "");
+  try {
+    await integrationRequest("people", {
+      method: "POST",
+      body: JSON.stringify([{ id: personId, account_id: accountId, name: details.name, email: email || null, phone: details.phone || null, source: provider, external: true }]),
+    });
+    return personId;
+  } catch (error: any) {
+    // The account-scoped unique index on email means at most one person can
+    // hold this address, so re-reading it resolves a constraint rather than
+    // guessing between candidates. Anything else is a real failure and must
+    // surface.
+    if (!email || !isDuplicateEmailError(error)) throw error;
+    const rows = await integrationRequest(`people?account_id=eq.${encodeURIComponent(accountId)}&email=ilike.${encodeURIComponent(email)}&select=id,name,email,phone&limit=10`);
+    const matched = matchPersonByEmail(rowsOf(rows), email);
+    if (matched) return matched;
+    throw error;
+  }
 }
