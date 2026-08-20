@@ -60,12 +60,18 @@ function Root() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      // Before anything asks the server who we are: without the stored token
-      // every request goes out anonymous and the player is asked to sign in
-      // again on every launch.
-      await loadAuthToken();
-      const next = await fetchSession();
-      if (!cancelled) setSession(next);
+      try {
+        // Before anything asks the server who we are: without the stored token
+        // every request goes out anonymous and the player is asked to sign in
+        // again on every launch.
+        await loadAuthToken();
+        const next = await fetchSession();
+        if (!cancelled) setSession(next);
+      } catch {
+        // Anything going wrong here (native storage, a bad response) should
+        // land on the login screen, not leave the splash spinning forever.
+        if (!cancelled) setSession(guestSession);
+      }
     })();
     return () => {
       cancelled = true;

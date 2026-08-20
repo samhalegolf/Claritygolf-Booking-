@@ -54,10 +54,17 @@ async function preferences(): Promise<PreferencesPlugin | null> {
 /** Read the stored token into memory. Await this before the first API call. */
 export async function loadAuthToken(): Promise<void> {
   if (!NATIVE) return;
-  const store = await preferences();
-  token = store
-    ? ((await store.get({ key: TOKEN_KEY })).value ?? "")
-    : (window.localStorage.getItem(TOKEN_KEY) ?? "");
+  try {
+    const store = await preferences();
+    token = store
+      ? ((await store.get({ key: TOKEN_KEY })).value ?? "")
+      : (window.localStorage.getItem(TOKEN_KEY) ?? "");
+  } catch {
+    // A plugin bridge hiccup (fresh install, cold start) should not take the
+    // whole session check down with it -- treat it as no token and let the
+    // player sign in again rather than hang forever.
+    token = "";
+  }
 }
 
 export async function setAuthToken(next: string): Promise<void> {
