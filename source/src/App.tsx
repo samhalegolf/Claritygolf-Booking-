@@ -5239,6 +5239,14 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // the press-in cue so the wait is visible rather than a dead half second.
   const [holdingItemId, setHoldingItemId] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
+  // Every setToast in the app lands here and is rendered once, at the bottom of
+  // App. Each new message replaces the previous one and clears itself; a message
+  // with an undo gets longer on screen because there is something to act on.
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), toast.undo ? 8000 : 4500);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
   const [quickCreate, setQuickCreate] = useState<QuickCreateState | null>(null);
   const [quickClientSearch, setQuickClientSearch] = useState("");
   const [quickMatchField, setQuickMatchField] = useState<"name" | "phone" | "email" | "">("");
@@ -15727,13 +15735,15 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // draft is updated in place; a new invoice or a revision creates a fresh one
   // (and, when revising a committed invoice, voids the original).
   async function commitInvoice(mode: "draft" | "publish" | "publish-send") {
-    if (!invoiceDraft.payerName.trim()) {
-      setToast({ message: "Choose or enter a payer first." });
-      return;
-    }
     const { hasLines, body } = invoiceApiBody();
     if (!hasLines) {
       setToast({ message: "Add at least one invoice line first." });
+      return;
+    }
+    // A draft is a work-in-progress, so it saves without a payer. Publishing
+    // commits the invoice to someone, so the name is required from there on.
+    if (mode !== "draft" && !invoiceDraft.payerName.trim()) {
+      setToast({ message: "Add a customer name before publishing this invoice." });
       return;
     }
     if (mode === "publish-send" && !invoiceDraft.payerEmail.trim()) {
@@ -22659,7 +22669,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             }}
                           >
                             <td>{invoiceRecord.invoiceNumber}</td>
-                            <td>{invoiceRecord.customerName}</td>
+                            <td>{invoiceRecord.customerName || <em className="muted">No customer yet</em>}</td>
                             <td>{invoiceRecord.issueDate}</td>
                             <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
                             <td>
@@ -22742,7 +22752,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             }}
                           >
                             <td>{invoiceRecord.invoiceNumber}</td>
-                            <td>{invoiceRecord.customerName}</td>
+                            <td>{invoiceRecord.customerName || <em className="muted">No customer yet</em>}</td>
                             <td>{invoiceRecord.issueDate}</td>
                             <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
                             <td>
@@ -28064,6 +28074,27 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           onCompleted={handlePosSaleChanged}
           onToast={(message) => setToast({ message })}
         />
+      )}
+
+      {toast && (
+        <div className="toast" role="status" aria-live="polite">
+          <span>{toast.message}</span>
+          {toast.undo && (
+            <button
+              onClick={() => {
+                const undo = toast.undo;
+                setToast(null);
+                undo?.();
+              }}
+              type="button"
+            >
+              Undo
+            </button>
+          )}
+          <button aria-label="Dismiss" className="toast-close" onClick={() => setToast(null)} type="button">
+            <X size={16} />
+          </button>
+        </div>
       )}
 
       {edgeCue && <div className={`edge-cue ${edgeCue}`}>{edgeCue === "next" ? "Next week" : "Previous week"}</div>}

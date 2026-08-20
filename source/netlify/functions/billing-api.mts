@@ -1028,8 +1028,14 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
     ? (await nextInvoiceNumber(accountId, body?.invoicePrefix)).invoiceNumber
     : cleanString(body?.invoiceNumber, "", 60);
   const customerName = cleanString(body?.customerName, "", 140);
+  const status = ["draft", "sent"].includes(String(body?.status)) ? String(body.status) : "draft";
   if (!invoiceNumber) throw Object.assign(new Error("Invoice number is required."), { status: 400 });
-  if (!customerName) throw Object.assign(new Error("Customer is required."), { status: 400 });
+  // A draft can be parked without a customer; anything committed is billed to
+  // someone, so the name is required from "sent" onwards (see updateInvoiceStatus,
+  // which enforces the same rule when a draft is later published).
+  if (!customerName && status !== "draft") {
+    throw Object.assign(new Error("Add a customer name before publishing this invoice."), { status: 400 });
+  }
 
   const taxInclusive = body?.taxInclusive === true;
   const itemsInput = Array.isArray(body?.items) ? (body.items as InvoiceItemInput[]) : [];
@@ -1046,7 +1052,6 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
   // Inclusive: tax is already inside the line prices, so it isn't added again.
   const total = round2(Math.max(0, subtotal - discountTotal) + (taxInclusive ? 0 : taxTotal));
 
-  const status = ["draft", "sent"].includes(String(body?.status)) ? String(body.status) : "draft";
   const invoiceId = randomUUID();
   // An explicit customerId (the picker) wins; otherwise try the email. Both can
   // miss, which leaves the invoice unlinked but otherwise complete.
@@ -1136,8 +1141,9 @@ async function updateInvoiceDraft(accountId: string, id: string, body: Record<st
     });
   }
 
+  // Drafts only (the status guard above), so an unfinished one may still have
+  // no customer. The name becomes mandatory at publish time.
   const customerName = cleanString(body?.customerName, "", 140);
-  if (!customerName) throw Object.assign(new Error("Customer is required."), { status: 400 });
 
   const taxInclusive = body?.taxInclusive === true;
   const itemsInput = Array.isArray(body?.items) ? (body.items as InvoiceItemInput[]) : [];
@@ -1210,6 +1216,17 @@ async function updateInvoiceStatus(accountId: string, id: string, body: Record<s
   const nextStatus = String(body?.status || "");
   if (!["draft", "sent", "paid", "overdue", "void"].includes(nextStatus)) {
     throw Object.assign(new Error("Invalid invoice status."), { status: 400 });
+  }
+  // Publishing is where a customer stops being optional: a draft can be parked
+  // without one, but nothing leaves draft unnamed - by this route or any other.
+  if (nextStatus !== "draft" && nextStatus !== "void") {
+    const rows = await supabase("billing_invoices", {
+      query: `select=customer_name&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+    });
+    if (!rows.length) throw Object.assign(new Error("Invoice not found."), { status: 404 });
+    if (!cleanString(rows[0]?.customer_name, "", 140)) {
+      throw Object.assign(new Error("Add a customer name before publishing this invoice."), { status: 400 });
+    }
   }
   const patch: Record<string, unknown> = { status: nextStatus, updated_at: nowIso() };
   // Publishing (status -> sent) does NOT set sent_at; only the send endpoint

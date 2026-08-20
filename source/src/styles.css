@@ -4248,7 +4248,9 @@ button {
   position: fixed;
   left: 50%;
   bottom: 24px;
-  z-index: 10;
+  /* Above modals (1000-1200) - a toast raised from inside a modal has to be
+     readable, not stacked behind its overlay. */
+  z-index: 1300;
   transform: translateX(-50%);
   min-height: 46px;
   max-width: min(680px, calc(100vw - 32px));
