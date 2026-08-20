@@ -2864,7 +2864,7 @@ async function listOptixPosRecords(accountId: string, range: { from: string; to:
   // just means no Optix records to merge, never a broken POS list.
   const rows = (await supabase("optix_pass_purchases", {
     query:
-      `select=id,sale_number,external_purchase_id,member_name,person_id,item_name,quantity,amount_cents,currency,purchased_at,paid_at,is_pass` +
+      `select=id,sale_number,external_purchase_id,member_name,person_id,person_link_source,item_name,quantity,amount_cents,currency,purchased_at,paid_at,is_pass` +
       `&${filters.join("&")}&order=purchased_at.desc&limit=${range.limit}`,
   }).catch(() => [])) as Array<Record<string, unknown>>;
   if (!rows.length) return [];
@@ -2886,6 +2886,10 @@ async function listOptixPosRecords(accountId: string, range: { from: string; to:
       currency: String(row.currency ?? "") || defaultCurrency,
       customerId: String(row.person_id ?? ""),
       customerName: String(row.member_name ?? ""),
+      // How the client link was made. "name" is the weak one: Optix sales
+      // carry no email, so it means exactly one client happened to hold that
+      // name. Surfaced so a wrong match is correctable rather than invisible.
+      customerLinkSource: String(row.person_link_source ?? ""),
       customerEmail: "",
       bookingId: "",
       source: "optix",

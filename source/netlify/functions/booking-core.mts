@@ -3774,6 +3774,18 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
         [survivorId, loserId],
       );
     }
+    // Optix sales carry no email, so they are the records most likely to be
+    // sitting on a duplicate person in the first place — which makes them the
+    // ones a merge most needs to move. There is no foreign key on this column,
+    // so leaving them behind does not fail loudly: the purchase would simply
+    // point at a deleted person id and drop out of the client's history with
+    // nothing to show it had ever been linked.
+    if (await tableExists("optix_pass_purchases")) {
+      await client.query(
+        "UPDATE optix_pass_purchases SET person_id = $1, updated_at = NOW() WHERE person_id = $2",
+        [survivorId, loserId],
+      );
+    }
     await client.query("DELETE FROM people WHERE id = $1", [loserId]);
     await client.query("COMMIT");
   } catch (error) {

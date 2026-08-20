@@ -82,6 +82,34 @@ export function matchPersonByEmail(rows: ExternalPersonCandidate[], email: strin
   return matches.length === 1 ? text(matches[0].id) || null : null;
 }
 
+/** Case and spacing are not identity: "Charles  Sham" is "charles sham". */
+function normalisedName(value: unknown) {
+  return text(value).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Identity by name, for providers that never send an email.
+ *
+ * Optix product sales carry a display name and nothing else, so email
+ * matching cannot reach them and the purchase would stay unlinked forever.
+ * This is the deliberate exception to "names are never matched", and it keeps
+ * the rule that made email matching safe: **exactly one** candidate, or no
+ * answer at all. Two clients called "Sam Hale" — which this account really has
+ * — produce null, and the caller files a new external client instead.
+ *
+ * The residual risk is a real one and cannot be designed away: the account may
+ * hold exactly one "John Smith" while the buyer is a different John Smith. It
+ * is accepted only because the caller records that the link was made this way
+ * (`person_link_source: "name"`), so a wrong one is visible and reversible —
+ * unlike a merge, which is not.
+ */
+export function matchPersonByExactName(rows: ExternalPersonCandidate[], name: string): string | null {
+  const wanted = normalisedName(name);
+  if (!wanted) return null;
+  const matches = uniqueById(rowsOf(rows).filter((row) => normalisedName(row?.name) === wanted));
+  return matches.length === 1 ? text(matches[0].id) || null : null;
+}
+
 function isDuplicateEmailError(error: any) {
   const code = String(error?.code || "");
   const message = error instanceof Error ? error.message : "";

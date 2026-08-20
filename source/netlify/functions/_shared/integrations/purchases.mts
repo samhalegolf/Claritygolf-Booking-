@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { createExternalPerson, integrationRequest, matchPersonByEmail, rowsOf } from "./db.mts";
+import { createExternalPerson, integrationRequest, matchPersonByEmail, matchPersonByExactName, rowsOf } from "./db.mts";
 import { text } from "./payload.mts";
 import type { ExternalProvider, NormalizedPurchaseEvent, ProviderAdapter } from "./types.mts";
 
@@ -54,31 +54,58 @@ export async function purchaseAccountId(provider: ExternalProvider) {
   return text(rowsOf(rows)[0]?.["account_id" as keyof object]) || "sam-hale-golf";
 }
 
+/** How a purchase came to be attached to the client it is attached to. */
+export type PersonLinkSource = "email" | "name" | "new" | "";
+
 /**
- * The client this purchase belongs to, by email only — same rule as bookings.
+ * The client this purchase belongs to, and how confidently.
  *
- * A provider that omits the buyer's email on sales — Optix is one — never
- * gets an auto-match, because matching a sale on name was considered and
- * rejected: two clients sharing a name would silently attach a purchase to
- * the wrong person, with no signal in the payload that would let anyone
- * notice. What it gets instead — same as an unmatched booking — is a new
- * external booking client, so the purchase has somewhere to live and an admin
- * can merge or promote it explicitly rather than the buyer's name just
- * floating on the row with nothing behind it.
+ * Three answers, in descending order of certainty, and the caller records
+ * which one was used so the weakest is never mistaken for the strongest:
+ *
+ *   email  the buyer's address matched exactly one client. Certain.
+ *   name   no email in the payload at all — true of every Optix product sale —
+ *          and exactly one client carries that name. Good, not certain.
+ *   new    neither matched, so a fresh external booking client is filed for an
+ *          admin to merge or promote.
+ *
+ * The name step is the deliberate exception to "names are never matched",
+ * added because Optix sales carry a display name and nothing else, so without
+ * it a purchase from a client Clarity already knows would sit unlinked forever
+ * and every repeat buyer would breed another duplicate to merge. It keeps the
+ * discipline that makes email matching safe — exactly one candidate or no
+ * answer — so an account holding two clients of the same name gets "new"
+ * rather than a coin flip.
  */
-async function resolvePurchasePerson(purchase: NormalizedPurchaseEvent, accountId: string, provider: string) {
+async function resolvePurchasePerson(
+  purchase: NormalizedPurchaseEvent,
+  accountId: string,
+  provider: string,
+): Promise<{ personId: string | null; linkSource: PersonLinkSource }> {
+  const account = encodeURIComponent(accountId);
   if (purchase.memberEmail) {
     const rows = await integrationRequest(
-      `people?account_id=eq.${encodeURIComponent(accountId)}&email=ilike.${encodeURIComponent(purchase.memberEmail)}&select=id,name,email,phone&limit=10`,
+      `people?account_id=eq.${account}&email=ilike.${encodeURIComponent(purchase.memberEmail)}&select=id,name,email,phone&limit=10`,
     ).catch(() => []);
     const matched = matchPersonByEmail(rowsOf(rows), purchase.memberEmail);
-    if (matched) return matched;
+    if (matched) return { personId: matched, linkSource: "email" };
   }
   // Nothing to file an external person under — the descriptor never resolved
   // a name (seen on plan subscriptions with no subscriber on the payload).
   // The purchase itself is still recorded; it just has no client link.
-  if (!purchase.memberName) return null;
-  return createExternalPerson(accountId, provider, { name: purchase.memberName, email: purchase.memberEmail || null });
+  if (!purchase.memberName) return { personId: null, linkSource: "" };
+
+  const byName = await integrationRequest(
+    `people?account_id=eq.${account}&name=ilike.${encodeURIComponent(purchase.memberName)}&select=id,name,email,phone&limit=10`,
+  ).catch(() => []);
+  const named = matchPersonByExactName(rowsOf(byName), purchase.memberName);
+  if (named) return { personId: named, linkSource: "name" };
+
+  const created = await createExternalPerson(accountId, provider, {
+    name: purchase.memberName,
+    email: purchase.memberEmail || null,
+  });
+  return { personId: created, linkSource: "new" };
 }
 
 /**
@@ -105,7 +132,7 @@ export async function recordPassPurchase(
   const account = accountId || await purchaseAccountId(adapter.id);
   const purchase = adapter.normalizePurchase(payload);
   const classification = classifyPassPurchase(purchase);
-  const personId = await resolvePurchasePerson(purchase, account, adapter.id);
+  const { personId, linkSource } = await resolvePurchasePerson(purchase, account, adapter.id);
   const now = new Date().toISOString();
   await integrationRequest("optix_pass_purchases?on_conflict=event_key", {
     method: "POST",
@@ -121,6 +148,7 @@ export async function recordPassPurchase(
       member_email: purchase.memberEmail || null,
       member_name: purchase.memberName || null,
       person_id: personId,
+      person_link_source: linkSource || null,
       item_name: purchase.itemName || null,
       quantity: purchase.quantity,
       amount_cents: purchase.amountCents,
@@ -133,5 +161,5 @@ export async function recordPassPurchase(
       updated_at: now,
     }]),
   });
-  return { classification, isPass: classification === "pass", personId, purchase };
+  return { classification, isPass: classification === "pass", personId, linkSource, purchase };
 }

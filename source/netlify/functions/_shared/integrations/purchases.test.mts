@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { classifyPassPurchase, recordPassPurchase } from "./purchases.mts";
+import { matchPersonByExactName } from "./db.mts";
 import { normalizeOptixPurchase, optixAdapter, optixEventKind } from "./providers/optix.mts";
 import { amountInCents } from "./payload.mts";
 
@@ -236,25 +237,25 @@ test("a sale with no usable time still records, defaulting at the caller", () =>
 // no client record ever got created, so there was nothing for an admin to
 // merge or promote. It now gets an external booking client, same as an
 // unmatched booking, never a guess against the main client list by name.
-test("a sale with no email gets a new external booking client, not a name-based guess at an existing one", async () => {
+test("an unknown buyer becomes an external client, never a main-list guess", async () => {
   const mock = withMockSupabase({
-    people: () => Response.json([{ id: "person-new" }]),
+    // Nobody in the account carries this name.
+    people: (url, init) => (init.method === "POST" ? Response.json([{ id: "created" }]) : Response.json([])),
     optix_pass_purchases: () => Response.json([{ id: "row-1" }]),
   });
   try {
     const result = await recordPassPurchase(optixAdapter, "event-key-1", {
-      event: "new_sale", product: "5 hr Golf Lesson Package", account_name: "Cindi Yu", product_sale_id: "401323",
+      event: "new_sale", product: "5 hr Golf Lesson Package", account_name: "Nic Taplin", product_sale_id: "401323",
     }, "sam-hale-golf");
-    const peopleCall = mock.calls.find((c) => c.url.includes("/rest/v1/people"));
-    const body = JSON.parse(String(peopleCall?.init.body))[0];
-    // createExternalPerson mints its own id rather than trusting the response.
-    assert.ok(result.personId);
-    assert.equal(result.personId, body.id);
-    assert.equal(body.name, "Cindi Yu");
+    assert.equal(result.linkSource, "new");
+    const create = mock.calls.find((c) => c.init.method === "POST" && c.url.includes("/rest/v1/people"));
+    const body = JSON.parse(String(create?.init.body))[0];
+    // external: true keeps them out of the main client list until an admin
+    // merges or promotes them deliberately.
     assert.equal(body.external, true);
+    assert.equal(body.name, "Nic Taplin");
     assert.equal(body.email, null);
-    // Never a lookup against existing people by name — only a create.
-    assert.ok(!mock.calls.some((c) => c.url.includes("/rest/v1/people?") && c.url.includes("name")));
+    assert.equal(result.personId, body.id);
   } finally {
     mock.restore();
   }
@@ -271,6 +272,87 @@ test("a purchase with no recoverable name at all is still recorded, just with no
     assert.equal(result.personId, null);
     // No call to people at all — nothing to file.
     assert.ok(!mock.calls.some((c) => c.url.includes("/rest/v1/people")));
+  } finally {
+    mock.restore();
+  }
+});
+
+
+// Optix sales carry a display name and no email, so a uniquely-held name is
+// the only way a purchase from an existing client can ever link itself. The
+// rule that keeps it safe is the same one email matching uses: exactly one
+// candidate, or no answer.
+test("a uniquely held name links; a shared one refuses to guess", () => {
+  const clients = [
+    { id: "cindi", name: "Cindi Yu", email: "cindi.yu@xtra.co.nz" },
+    { id: "sam-1", name: "Sam Hale", email: "samhale23@gmail.com" },
+    { id: "sam-2", name: "Sam Hale", email: "samhalegolf@gmail.com" },
+  ];
+  assert.equal(matchPersonByExactName(clients, "Cindi Yu"), "cindi");
+  // This account really does hold two Sam Hales. A coin flip here would file
+  // a purchase against the wrong one with nothing to show it had happened.
+  assert.equal(matchPersonByExactName(clients, "Sam Hale"), null);
+  assert.equal(matchPersonByExactName(clients, "Nic Taplin"), null);
+});
+
+test("case and stray spacing are not identity", () => {
+  const clients = [{ id: "charles", name: "Charles Sham", email: "" }];
+  // Real Optix payload: "Charles  Sham", two spaces.
+  assert.equal(matchPersonByExactName(clients, "Charles  Sham"), "charles");
+  assert.equal(matchPersonByExactName(clients, "  cindi yu "), null);
+  assert.equal(matchPersonByExactName([{ id: "c", name: "Cindi Yu" }], "  cindi yu "), "c");
+});
+
+test("an empty name never matches anyone", () => {
+  const clients = [{ id: "blank", name: "", email: "" }, { id: "real", name: "Cindi Yu" }];
+  assert.equal(matchPersonByExactName(clients, ""), null);
+  assert.equal(matchPersonByExactName(clients, "   "), null);
+});
+
+test("the same client listed twice is still one candidate", () => {
+  // A duplicated row in the response must not read as ambiguity.
+  const clients = [{ id: "cindi", name: "Cindi Yu" }, { id: "cindi", name: "Cindi Yu" }];
+  assert.equal(matchPersonByExactName(clients, "Cindi Yu"), "cindi");
+});
+
+test("a sale from a known client links by name and says so", async () => {
+  const mock = withMockSupabase({
+    people: (url) => (url.includes("name=ilike") ? Response.json([{ id: "cindi", name: "Cindi Yu" }]) : Response.json([])),
+    optix_pass_purchases: () => Response.json([{ id: "row" }]),
+  });
+  try {
+    const result = await recordPassPurchase(optixAdapter, "k1", {
+      event: "new_sale", product: "5 hr Golf Lesson Package", account_name: "Cindi Yu", product_sale_id: "401323",
+    }, "sam-hale-golf");
+    assert.equal(result.personId, "cindi");
+    assert.equal(result.linkSource, "name");
+    // Recorded on the row, so a name match is never read as an email match.
+    const write = mock.calls.find((c) => c.url.includes("optix_pass_purchases"));
+    assert.equal(JSON.parse(String(write?.init.body))[0].person_link_source, "name");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("an ambiguous name falls through to a new external client", async () => {
+  const mock = withMockSupabase({
+    people: (url, init) =>
+      url.includes("name=ilike")
+        ? Response.json([{ id: "sam-1", name: "Sam Hale" }, { id: "sam-2", name: "Sam Hale" }])
+        : Response.json([{ id: "created" }]),
+    optix_pass_purchases: () => Response.json([{ id: "row" }]),
+  });
+  try {
+    const result = await recordPassPurchase(optixAdapter, "k2", {
+      event: "new_sale", product: "30 Minute Golf Lesson Package", account_name: "Sam Hale", product_sale_id: "400324",
+    }, "sam-hale-golf");
+    assert.equal(result.linkSource, "new");
+    // A fresh external person, not either existing Sam Hale.
+    const create = mock.calls.find((c) => c.init.method === "POST" && c.url.includes("/rest/v1/people"));
+    const body = JSON.parse(String(create?.init.body))[0];
+    assert.equal(body.external, true);
+    assert.equal(body.name, "Sam Hale");
+    assert.equal(result.personId, body.id);
   } finally {
     mock.restore();
   }
