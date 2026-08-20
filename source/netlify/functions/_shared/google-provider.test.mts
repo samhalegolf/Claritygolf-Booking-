@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   decryptRefreshToken,
   encryptRefreshToken,
+  googleConnectionFailureCode,
   hasGoogleScopes,
   mergeGoogleScopes,
 } from "./google-provider.mts";
@@ -70,4 +71,27 @@ test("scope helpers merge deterministically and detect missing scopes", () => {
   assert.deepEqual(scopes, ["a", "b", "c"]);
   assert.equal(hasGoogleScopes({ grantedScopes: scopes }, ["a", "c"]), true);
   assert.equal(hasGoogleScopes({ grantedScopes: scopes }, ["a", "d"]), false);
+});
+
+
+// The failure that hid for three days (17–20 Aug 2026): every Calendar write
+// came back 403 insufficientPermissions, because the token Google minted was
+// narrower than the scopes Clarity had recorded at consent time. Nothing read
+// that rejection, so the connection kept reporting "connected".
+test("a scope rejection and a lost grant are the only failures that damn the connection", () => {
+  assert.equal(googleConnectionFailureCode(403, "insufficientPermissions"), "GOOGLE_SCOPE_MISSING");
+  assert.equal(googleConnectionFailureCode(401, ""), "GOOGLE_RECONNECT_REQUIRED");
+});
+
+test("a busy minute is not a broken connection", () => {
+  // Most 403s are throttling. Marking these would tell the coach to reconnect
+  // a credential that is working perfectly, so they are deliberately ignored.
+  assert.equal(googleConnectionFailureCode(403, "rateLimitExceeded"), null);
+  assert.equal(googleConnectionFailureCode(403, "userRateLimitExceeded"), null);
+  assert.equal(googleConnectionFailureCode(429, ""), null);
+  assert.equal(googleConnectionFailureCode(500, ""), null);
+  assert.equal(googleConnectionFailureCode(503, ""), null);
+  // A missing event is about the event, not the grant.
+  assert.equal(googleConnectionFailureCode(404, "notFound"), null);
+  assert.equal(googleConnectionFailureCode(200, ""), null);
 });

@@ -6,7 +6,9 @@ import {
   googleCalendarScopes as googleScopes,
   hasGoogleScopes,
   loadGoogleProviderConnection,
+  markConnectionHealthy,
   migrateLegacyGoogleCalendarToken,
+  noteGoogleApiFailure,
   publicGoogleProviderStatus,
   resolveGoogleAccountId,
   saveGoogleAuthorization,
@@ -1044,6 +1046,9 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
   let unchanged = 0;
   let stage = "access_token";
   const retryBudget: GoogleRetryBudget = { spentMs: 0, retries: 0 };
+  // Held rather than resolved inline, because the outcome of this run has to
+  // be recorded against the same connection whether it succeeds or fails.
+  const accountId = resolveGoogleAccountId(settings);
 
   // Partial progress has to survive a mid-run failure. Without this, events
   // already created in Google are absent from the stored map, so the next run
@@ -1059,7 +1064,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
     });
 
   try {
-    const accessToken = await getGoogleAccessToken(resolveGoogleAccountId(settings), googleScopes);
+    const accessToken = await getGoogleAccessToken(accountId, googleScopes);
 
     stage = "upsert";
     for (const item of items) {
@@ -1125,6 +1130,9 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
       googleCalendarLastSyncStatus: "synced",
       googleCalendarLastSyncError: "",
     });
+    // Work actually landed in Google, so the connection has earned "connected"
+    // — the only place that claim is made. A token refresh no longer makes it.
+    await markConnectionHealthy(accountId).catch(() => undefined);
     await recordGoogleCalendarDebugEntry(
       finishEntry("success", {
         stage: "complete",
@@ -1153,6 +1161,11 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
       googleCalendarLastSyncStatus: "failed",
       googleCalendarLastSyncError: debugError.message,
     });
+    // A rejection that means the credential itself can no longer do the job is
+    // recorded on the connection, so the health screen stops saying
+    // "connected" while every write is refused. Rate limits and one-off
+    // failures leave it alone.
+    await noteGoogleApiFailure(accountId, debugError.httpStatus, debugError.googleReason).catch(() => undefined);
     await recordGoogleCalendarDebugEntry(
       finishEntry("failed", {
         stage: debugError.stage,
@@ -1247,9 +1260,10 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
   let unchanged = 0;
   let stage = "access_token";
   const retryBudget: GoogleRetryBudget = { spentMs: 0, retries: 0 };
+  const accountId = resolveGoogleAccountId(settings);
 
   try {
-    const accessToken = await getGoogleAccessToken(resolveGoogleAccountId(settings), googleScopes);
+    const accessToken = await getGoogleAccessToken(accountId, googleScopes);
 
     stage = "changes";
     for (const change of normalized) {
@@ -1314,6 +1328,9 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
       googleCalendarLastSyncError: "",
     });
     const noWork = upserted === 0 && deleted === 0;
+    // Only claim the connection works when something actually reached Google.
+    // A run with nothing to do proves nothing, so it makes no such claim.
+    if (!noWork) await markConnectionHealthy(accountId).catch(() => undefined);
     await recordGoogleCalendarDebugEntry(
       finishEntry("success", calendarId, status.accountEmail || "", {
         stage: "complete",
@@ -1349,6 +1366,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
       googleCalendarLastSyncStatus: "failed",
       googleCalendarLastSyncError: debugError.message,
     });
+    await noteGoogleApiFailure(accountId, debugError.httpStatus, debugError.googleReason).catch(() => undefined);
     await recordGoogleCalendarDebugEntry(
       finishEntry("failed", calendarId, status.accountEmail || "", {
         stage: debugError.stage,

@@ -398,18 +398,79 @@ export async function markConnectionError(accountId: string, code: string) {
   });
 }
 
+/**
+ * A refreshed access token proves the grant still exists. It proves nothing
+ * about what that token is allowed to *do*.
+ *
+ * This used to call markConnectionHealthy(), and that is how a broken sync
+ * stayed invisible for three days (17–20 Aug 2026): every Calendar write was
+ * being rejected 403 insufficientPermissions, but each run refreshed a token
+ * first, and the refresh stamped the connection "connected", cleared
+ * last_error_code and moved last_successful_use_at forward. The health screen
+ * read those fields and reported a connection that could not write.
+ *
+ * So a refresh now records only that a refresh happened. Health is claimed by
+ * work that actually succeeded — see markConnectionHealthy().
+ */
+export async function markTokenRefreshed(accountId: string) {
+  const existing = await loadGoogleProviderConnectionRow(accountId);
+  if (!existing) return;
+  await upsertGoogleProviderConnection({
+    ...existing,
+    last_token_refresh_at: nowIso(),
+    updated_at: nowIso(),
+  });
+}
+
+/** Called when a real Google API call succeeded — not merely a token refresh. */
 export async function markConnectionHealthy(accountId: string) {
   const existing = await loadGoogleProviderConnectionRow(accountId);
   if (!existing) return;
   await upsertGoogleProviderConnection({
     ...existing,
     connection_status: "connected",
-    last_token_refresh_at: nowIso(),
     last_successful_use_at: nowIso(),
     last_error_code: null,
     last_error_at: null,
     updated_at: nowIso(),
   });
+}
+
+/**
+ * What a live Google rejection says about the *connection*, as opposed to the
+ * one request that failed.
+ *
+ * Deliberately narrow. A 403 is mostly rate limiting, and treating those as a
+ * broken grant would tell Sam to reconnect over a busy minute. Only two
+ * answers here mean the credential itself can no longer do the job:
+ *
+ *   401                        the grant is gone — revoked, or the refresh
+ *                              token no longer valid.
+ *   403 insufficientPermissions  the token is real but was issued without the
+ *                              scope this call needs. This is the one that
+ *                              Clarity's own record cannot see: granted_scopes_json
+ *                              says the scope was granted, because that is what
+ *                              was recorded at consent time, while the token
+ *                              Google actually minted is narrower.
+ *
+ * Everything else returns null and is left as an ordinary request failure.
+ */
+export function googleConnectionFailureCode(status: number, googleReason = ""): string | null {
+  if (status === 401) return "GOOGLE_RECONNECT_REQUIRED";
+  if (status === 403 && googleReason === "insufficientPermissions") return "GOOGLE_SCOPE_MISSING";
+  return null;
+}
+
+/**
+ * Records what a failed Google call means for the connection, if anything.
+ * Safe to call on every failure: a rate limit or a 404 leaves the connection
+ * untouched.
+ */
+export async function noteGoogleApiFailure(accountId: string, status: number, googleReason = "") {
+  const code = googleConnectionFailureCode(status, googleReason);
+  if (!code) return null;
+  await markConnectionError(accountId, code);
+  return code;
 }
 
 export async function getGoogleAccessToken(accountId: string, requiredScopes: string[]) {
@@ -431,7 +492,7 @@ export async function getGoogleAccessToken(accountId: string, requiredScopes: st
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     });
-    await markConnectionHealthy(accountId);
+    await markTokenRefreshed(accountId);
     return data.access_token as string;
   } catch (error: any) {
     await markConnectionError(accountId, error?.code || "GOOGLE_TOKEN_REFRESH_FAILED");
