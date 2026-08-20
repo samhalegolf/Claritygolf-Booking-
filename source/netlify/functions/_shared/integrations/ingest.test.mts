@@ -61,6 +61,46 @@ test("rejects a nameless Optix event rather than pooling it into a fake customer
   assert.throws(() => assertProcessableEvent(event), (error: any) => error?.code === "missing_customer_identity");
 });
 
+// Real payloads (from 16 Aug 2026 on): "External Calendar" bookings carry no
+// member/customer field at all, only a title pairing the lesson label with a
+// name — on either side of the dash, with either a hyphen or an em dash. This
+// used to make the booking permanently unrecoverable: no identity field meant
+// assertProcessableEvent threw, and (before the ingest.mts fix) that error
+// left the row stuck at "received" forever, invisible to the retry UI.
+test("falls back to the booking title when Optix sends no member fields at all", () => {
+  const nameAfterDash = normalizeOptixBooking({
+    ...payload, member: undefined, title: "1 Hour Golf Lesson — Ryan Haste",
+  });
+  assert.equal(nameAfterDash.firstName, "Ryan Haste");
+  assert.doesNotThrow(() => assertProcessableEvent(nameAfterDash));
+
+  const nameBeforeDash = normalizeOptixBooking({
+    ...payload, member: undefined, title: "Shaun Kao - 1 Hour Golf Lesson",
+  });
+  assert.equal(nameBeforeDash.firstName, "Shaun Kao");
+  assert.doesNotThrow(() => assertProcessableEvent(nameBeforeDash));
+});
+
+test("a real member field always wins over the title fallback", () => {
+  const event = normalizeOptixBooking({
+    ...payload, title: "1 Hour Golf Lesson — Ryan Haste",
+  });
+  assert.equal(event.firstName, "Ada");
+});
+
+test("a title that doesn't pair a lesson label with a name is not guessed at", () => {
+  // Neither side reads as a lesson label — could be two names, could be
+  // anything. Guessing which one is the customer risks filing the booking
+  // under the wrong person with nothing in the payload to make it noticeable,
+  // so this stays empty and the event fails loudly instead.
+  const ambiguous = normalizeOptixBooking({ ...payload, member: undefined, title: "Ada Lovelace - Charles Babbage" });
+  assert.equal(ambiguous.firstName, "");
+  assert.throws(() => assertProcessableEvent(ambiguous), (error: any) => error?.code === "missing_customer_identity");
+
+  const noDash = normalizeOptixBooking({ ...payload, member: undefined, title: "1 Hour Golf Lesson" });
+  assert.equal(noDash.firstName, "");
+});
+
 test("generated item is accepted unchanged by the existing Book resource payload builder", () => {
   const item: any = createCalendarItemFromOptixBooking(normalizeOptixBooking(payload), mapping, { itemId: "optix-item-1", personId: "person-1" });
   const appointment = {

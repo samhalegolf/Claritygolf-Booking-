@@ -63,6 +63,7 @@ export function optixEventKind(payload: unknown): IntegrationEventKind {
  * so each lookup is deliberately generous.
  */
 export function normalizeOptixBooking(payload: any): NormalizedBookingEvent {
+  const structuredName = text(pick(payload, "member.first_name", "member_name", "member_first_name", "customer.first_name", "first_name"));
   return {
     kind: optixEventKind(payload),
     rawEventType: optixRawEventType(payload),
@@ -74,12 +75,39 @@ export function normalizeOptixBooking(payload: any): NormalizedBookingEvent {
     startIso: iso(pick(payload, "check_in_timestamp", "booking.check_in_timestamp", "start_timestamp", "start")),
     endIso: iso(pick(payload, "check_out_timestamp", "booking.check_out_timestamp", "end_timestamp", "end")),
     timezone: text(pick(payload, "timezone", "time_zone", "booking.timezone")) || "Pacific/Auckland",
-    firstName: text(pick(payload, "member.first_name", "member_name", "member_first_name", "customer.first_name", "first_name")),
+    // Some External Calendar bookings (seen from 16 Aug 2026) carry no
+    // member/customer fields at all — only a "title" like "1 Hour Golf Lesson
+    // — Ryan Haste" or "Shaun Kao - 1 Hour Golf Lesson". Falling back to that
+    // is what stops a real booking from being permanently unrecoverable for
+    // want of an identity field; see bookingTitleName() below.
+    firstName: structuredName || bookingTitleName(text(pick(payload, "title"))),
     lastName: text(pick(payload, "member.last_name", "member_last_name", "customer.last_name", "last_name")),
     email: text(pick(payload, "member.email", "member_email", "customer.email", "email")).toLowerCase(),
     phone: text(pick(payload, "member.phone", "member.phone_number", "member_phone", "customer.phone", "phone")),
     source: text(pick(payload, "source")) || "Optix webhook",
   };
+}
+
+/**
+ * Pulls a customer name out of an Optix booking title when nothing else on
+ * the payload identifies who it's for.
+ *
+ * The title pairs a lesson label with a name on either side of a dash —
+ * "1 Hour Golf Lesson — Ryan Haste" or "Shaun Kao - 1 Hour Golf Lesson" are
+ * both real examples. Whichever side does NOT read like the lesson label is
+ * the name. If both sides do, or neither does, this deliberately returns ""
+ * rather than guess — a booking with no recoverable identity should fail
+ * loudly (missing_customer_identity) rather than get filed under a wrong or
+ * mangled name.
+ */
+export function bookingTitleName(title: string) {
+  const parts = title.split(/\s+[-—]\s+/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length !== 2) return "";
+  const looksLikeLessonLabel = (value: string) => /lesson|swing|analysis|session|coaching|hour/i.test(value);
+  const [first, second] = parts;
+  if (looksLikeLessonLabel(first) && !looksLikeLessonLabel(second)) return second;
+  if (looksLikeLessonLabel(second) && !looksLikeLessonLabel(first)) return first;
+  return "";
 }
 
 /**
@@ -89,14 +117,23 @@ export function normalizeOptixBooking(payload: any): NormalizedBookingEvent {
  * once against the event that sends it and the reader takes the first that
  * resolves.
  *
- * Worth knowing about new_sale (first seen 18 Aug 2026): it carries NO
- * invoice_id, no email and no currency, despite Optix's docs listing
- * invoice_id. What it does carry: product, quantity, unit_amount, tax, total,
- * product_sale_id, number (the Optix sale number, "00652"), account and
- * user_name. The buyer is a display name only, so a sale cannot be auto-linked
- * to a Clarity client the way a booking is.
+ * Worth knowing about new_sale (first seen 18 Aug 2026, corrected 20 Aug after
+ * seeing more real payloads): it carries NO invoice_id, no email and no
+ * currency, despite Optix's docs listing invoice_id. What it does carry:
+ * product, quantity, unit_amount, tax, total, product_sale_id, number (the
+ * Optix sale number, "00652"), account and account_name. account_name is the
+ * field that is actually always present — it was originally guessed as
+ * user_name, which real payloads show is only present sometimes. The buyer is
+ * a display name only, so a sale cannot be auto-linked to a Clarity client the
+ * way a booking is.
+ *
+ * account_name/user_name are new_sale-only fields, read here gated on kind —
+ * a new_plan_subscription payload has its own "name" field, but that is the
+ * subscriber's *instance of the plan* ("12-month (29.95p/w)"), not a person,
+ * so it must never be read into memberName.
  */
 export function normalizeOptixPurchase(payload: any): NormalizedPurchaseEvent {
+  const kind = optixEventKind(payload);
   const itemName = text(pick(
     payload,
     // new_sale: the product itself, not invoice_item_name ("Sale of X (#123)").
@@ -112,13 +149,13 @@ export function normalizeOptixPurchase(payload: any): NormalizedPurchaseEvent {
   ].filter(Boolean).join(" ");
   const subscriber = (payload?.subscribers as any[] | undefined)?.[0];
   return {
-    kind: optixEventKind(payload),
+    kind,
     rawEventType: optixRawEventType(payload),
     purchaseId: text(pick(payload, "product_sale_id", "account_plan_id")),
     saleNumber: text(pick(payload, "number")),
     // Only new_plan_subscription identifies the buyer by email.
     memberEmail: text(pick(subscriber || {}, "email")).toLowerCase(),
-    memberName: text(pick(payload, "user_name")) || text(pick(subscriber || {}, "user_fullname")),
+    memberName: (kind === "purchase.sale" ? text(pick(payload, "account_name", "user_name")) : "") || text(pick(subscriber || {}, "user_fullname")),
     itemName,
     descriptor,
     quantity: quantityOf(pick(payload, "quantity")),

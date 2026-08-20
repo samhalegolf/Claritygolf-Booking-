@@ -378,6 +378,12 @@ export async function processStoredExternalEvent(
       await updateEvent(eventKey, { processing_status: "ignored", failure_code: error.code, error_message: error.message, processed_at: new Date().toISOString() });
       return { status: "ignored", reason: error.code };
     }
+    // Anything else (missing booking id, bad timestamps, no recoverable
+    // identity) used to propagate straight out of this function with the row
+    // still sitting at "received" — never marked failed, so it was invisible
+    // to the retry UI and silently never processed. Every rejection now has to
+    // land in a terminal, visible status before it's rethrown.
+    await updateEvent(eventKey, { processing_status: "failed", failure_code: String(error?.code || "invalid_event"), error_message: error instanceof Error ? error.message.slice(0, 1000) : "Event failed validation." }).catch(() => undefined);
     throw error;
   }
   const attemptRows = await integrationRequest(`optix_webhook_events?event_key=eq.${encodeURIComponent(eventKey)}&select=attempt_count&limit=1`).catch(() => []);

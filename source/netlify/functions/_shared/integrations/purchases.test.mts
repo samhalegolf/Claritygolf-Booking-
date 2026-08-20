@@ -104,6 +104,34 @@ test("a real product sale is normalised from its real field names", () => {
   assert.equal(purchase.purchasedAt, "2026-08-17T20:41:47.000Z");
 });
 
+// Real payload (20 Aug 2026): a sale whose only name field is account_name —
+// no user_name, no top-level "name" at all. This is the common case, not the
+// exception: of the first real new_sale payloads seen, account_name was
+// present on every one and user_name on barely a third. Reading user_name
+// first (the original guess) left the buyer's name off most Passes even
+// though it was sitting right there on the payload.
+test("a sale with only account_name still gets the buyer's name", () => {
+  const purchase = normalizeOptixPurchase({
+    event: "new_sale", product: "5 hr Golf Lesson Package", account_name: "Cindi Yu",
+    product_sale_id: "401323", total: "0.00",
+  });
+  assert.equal(purchase.memberName, "Cindi Yu");
+});
+
+// Real payload (20 Aug 2026): a plan subscription with no subscribers array
+// and a top-level "name" field that is the plan instance's own name
+// ("12-month (29.95p/w)"), not a person. Reading a generic "name" fallback
+// for memberName — the same fallback that is correct for new_sale — would
+// have filed this purchase under its own plan name as if that were the buyer.
+test("a plan subscription's own 'name' field is never mistaken for the buyer", () => {
+  const purchase = normalizeOptixPurchase({
+    event: "new_plan_subscription", plan_template_name: "12-month (29.95p/w)",
+    name: "12-month (29.95p/w)", account_plan_id: "12345", price: "59.90",
+  });
+  assert.equal(purchase.itemName, "12-month (29.95p/w)");
+  assert.equal(purchase.memberName, "");
+});
+
 test("a product sale carries no email and no currency", () => {
   // The limitation, asserted so it is not mistaken for a bug later: Optix
   // identifies the buyer of a sale by display name only, so a sale cannot be
