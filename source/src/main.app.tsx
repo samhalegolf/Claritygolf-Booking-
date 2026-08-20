@@ -58,7 +58,19 @@ function Root() {
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    let settled = false;
+
+    // The Preferences plugin call below is not guaranteed to reject when
+    // something is wrong -- on some simulator/bridge states it just never
+    // answers at all. A splash screen with no way out is worse than a wrong
+    // guess, so force a decision once this has taken too long.
+    const giveUp = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        setSession(guestSession);
+      }
+    }, 4000);
+
     void (async () => {
       try {
         // Before anything asks the server who we are: without the stored token
@@ -66,15 +78,25 @@ function Root() {
         // again on every launch.
         await loadAuthToken();
         const next = await fetchSession();
-        if (!cancelled) setSession(next);
+        if (!settled) {
+          settled = true;
+          clearTimeout(giveUp);
+          setSession(next);
+        }
       } catch {
         // Anything going wrong here (native storage, a bad response) should
         // land on the login screen, not leave the splash spinning forever.
-        if (!cancelled) setSession(guestSession);
+        if (!settled) {
+          settled = true;
+          clearTimeout(giveUp);
+          setSession(guestSession);
+        }
       }
     })();
+
     return () => {
-      cancelled = true;
+      settled = true;
+      clearTimeout(giveUp);
     };
   }, []);
 
