@@ -3022,6 +3022,17 @@ button {
   background: #fbfbf9;
 }
 
+/* Videos from someone with no account. Marked, because the sender is
+   self-declared and the row expires if the coach does nothing. */
+.storage-transfer-row.is-guest-submission {
+  border-color: #ddd9ce;
+  background: #fdfbf5;
+}
+
+.storage-transfer-row.is-guest-submission .storage-transfer-icon {
+  border-color: #c9b98f;
+}
+
 .storage-transfer-icon {
   width: 34px;
   height: 34px;

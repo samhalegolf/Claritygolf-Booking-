@@ -20,6 +20,25 @@ export const BOOKING_EMBED_VALUE = "booking";
 export const PLAYER_BOOKING_PARAM = "portal";
 export const PLAYER_BOOKING_VALUE = "player";
 
+/**
+ * The coach's no-login view of a guest submission: ?videoShare=<token>.
+ *
+ * A query-param mode rather than a path, matching every other entry this app
+ * has (?embed=booking, ?portal=player, ?portalInvite=, ?reset=). netlify.toml
+ * already sends /* to index.html and there is no router, so a path would need
+ * its own redirect and would still land in the same entry point.
+ */
+export const VIDEO_SHARE_PARAM = "videoShare";
+
+export function videoShareToken(): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get(VIDEO_SHARE_PARAM) ?? "";
+}
+
+export function isVideoShareMode(): boolean {
+  return Boolean(videoShareToken());
+}
+
 /** The public booking host serves the embed with no parameter at all. */
 export const PUBLIC_BOOKING_HOST = "book.claritygolf.app";
 

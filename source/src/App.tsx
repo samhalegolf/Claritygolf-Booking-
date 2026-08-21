@@ -8534,7 +8534,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const unseenSubmissionCounts = useMemo(() => {
     const counts = new Map<string, number>();
     const unseen = clarityCloudImports.filter(
-      (transfer) => transfer.direction === "player-submission" && !transfer.coachSeenAt,
+      (transfer) =>
+        (transfer.direction === "player-submission" || transfer.direction === "guest-submission") &&
+        !transfer.coachSeenAt,
     );
     if (!unseen.length) return counts;
     for (const player of playerProfiles) {
@@ -16708,6 +16710,61 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   }
 
   /** Grants access, or re-sends the set-password invite if they already have it. */
+  /**
+   * Adds someone who sent a video without an account to the player list.
+   *
+   * The server takes their name and email from the guest_senders row rather
+   * than from anything sent here -- taking them from the body would make this
+   * an arbitrary-person-creation endpoint. It merges or creates the person,
+   * grants portal access exactly as the manual button does, then re-points
+   * their already-sent videos at the new person and stops the retention clock,
+   * so the video moves out of this list and into that player's profile.
+   */
+  async function addGuestAsPlayer(transfer: ClarityCloudImportTransfer) {
+    const guestSenderId = transfer.guestSenderId || "";
+    if (!guestSenderId || portalPlayerBusyId) return;
+    setPortalPlayerBusyId(guestSenderId);
+    try {
+      const response = await fetch("/api/guest-players", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ guestSenderId, includeCaddyPass }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+        claimed?: number;
+        inviteSent?: boolean;
+        inviteUrl?: string;
+      };
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok || !data.ok) {
+        setToast({ message: data.message || "Could not add that sender as a player." });
+        return;
+      }
+      await refreshPortalPlayers();
+      await refreshClarityCloudImports();
+      void refreshPeopleList();
+      const who = transfer.submittedByName || transfer.submittedByEmail || "They";
+      if (data.inviteSent) {
+        setToast({ message: `${who} was added and invited. Their videos are now kept for good.` });
+      } else if (data.inviteUrl) {
+        await navigator.clipboard?.writeText(data.inviteUrl).catch(() => {});
+        setToast({ message: "Added. Email is not set up, so the invite link is on your clipboard." });
+      } else {
+        setToast({ message: `${who} was added to your players.` });
+      }
+    } catch {
+      setToast({ message: "Could not reach the booking server." });
+    } finally {
+      setPortalPlayerBusyId("");
+    }
+  }
+
   async function grantPortalAccess(person: Pick<Person, "id" | "name" | "email">) {
     if (portalPlayerBusyId) return;
     setPortalPlayerBusyId(person.id);
@@ -26473,8 +26530,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                               transfer.catalogueStatus === "complete" ||
                               transfer.catalogueStatus === "cleanup_scheduled") &&
                             !clarityCloudImportActionIds.has(savedVideoId);
+                          // Someone with no account sent this. It is unclaimed
+                          // until the coach adds them, and it expires if they
+                          // never do.
+                          const isGuestSubmission = transfer.direction === "guest-submission";
+                          const guestUnclaimed = isGuestSubmission && !transfer.claimedAt;
                           return (
-                            <article className="storage-transfer-row" key={savedVideoId}>
+                            <article
+                              className={`storage-transfer-row${isGuestSubmission ? " is-guest-submission" : ""}`}
+                              key={savedVideoId}
+                            >
                               <div className="storage-transfer-icon">
                                 <Download size={16} />
                               </div>
@@ -26485,7 +26550,33 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                   {transfer.savedVideo?.createdAt ? ` · ${profileRecordDateLabel(transfer.savedVideo.createdAt)}` : ""}
                                   {transfer.video?.sizeBytes ? ` · ${Math.round(transfer.video.sizeBytes / 1024 / 1024)} MB` : ""}
                                 </span>
+                                {isGuestSubmission && (
+                                  <>
+                                    {/* Say plainly that none of this was checked. */}
+                                    <span>
+                                      Sent by {transfer.submittedByName || "someone"}
+                                      {transfer.submittedByEmail ? ` · ${transfer.submittedByEmail}` : ""}
+                                      {guestUnclaimed ? " · no account yet" : ""}
+                                    </span>
+                                    {transfer.playerMessage && <span>“{transfer.playerMessage}”</span>}
+                                    {guestUnclaimed && transfer.cleanupAfter && (
+                                      <span>
+                                        Expires {profileRecordDateLabel(transfer.cleanupAfter)} unless you add them.
+                                      </span>
+                                    )}
+                                  </>
+                                )}
                               </div>
+                              {guestUnclaimed && (
+                                <button
+                                  type="button"
+                                  className="outline-button"
+                                  disabled={Boolean(portalPlayerBusyId)}
+                                  onClick={() => void addGuestAsPlayer(transfer)}
+                                >
+                                  {portalPlayerBusyId === transfer.guestSenderId ? "Adding" : "Add as player"}
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 className="primary-button"

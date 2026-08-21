@@ -12,6 +12,7 @@ import {
 import "./playerPortal.css";
 import { apiFetch } from "../auth/apiFetch";
 import { signOut, type Session } from "../auth/session";
+import { hasGuestToken } from "../auth/apiFetch";
 import { isPlayerBookingMode, slotDate } from "../shared/bookingHandoff";
 import {
   PlayerTerminalNav,
@@ -19,7 +20,11 @@ import {
 } from "./PlayerTerminalNav";
 import {
   createIndexedDbSavedVideoLibrary,
+  fetchGuestStatus,
+  registerGuestSender,
   saveSavedVideoToCloud,
+  type GuestSender,
+  type GuestStatus,
   type SavedVideoItem,
   type SavedVideoLibraryStore,
 } from "../video-analysis/utils/savedVideoLibrary";
@@ -103,10 +108,13 @@ function formatBookingWhen(booking: Booking) {
 
 // The coach-side label speaks in Clarity Cloud and Drive terms. A player only
 // needs to know whether their coach has it.
-function sendStatusLabel(item: SavedVideoItem) {
+function sendStatusLabel(item: SavedVideoItem, isGuest = false, connected = false) {
   switch (item.cloud?.status) {
     case "ready":
     case "imported":
+      // "Sent to your coach" over-promises for a guest: nobody has accepted it
+      // yet, and it expires if nobody does.
+      if (isGuest && !connected) return "Sent — waiting for your coach";
       return "Sent to your coach";
     case "preparing":
     case "session-created":
@@ -181,6 +189,19 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [sendProgress, setSendProgress] = useState<Record<string, number>>({});
   const [recording, setRecording] = useState(false);
   const [openVideoId, setOpenVideoId] = useState("");
+
+  // Sending as a guest. The identity is a name and an email -- not an account
+  // -- captured inline the first time they send, so nothing about the screen
+  // they are on has to change.
+  const guestIdentityRef = useRef<GuestSender | null>(null);
+  const [guestSheetVideoId, setGuestSheetVideoId] = useState("");
+  const [guestName, setGuestName] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
+  const [guestNote, setGuestNote] = useState("");
+  const [guestBusy, setGuestBusy] = useState(false);
+  const [guestError, setGuestError] = useState("");
+  const [guestStatus, setGuestStatus] = useState<GuestStatus | null>(null);
+  const lastGuestStatusAtRef = useRef(0);
 
   // A guest's own notes -- local only, same on-device-first philosophy as
   // their videos. Separate from `notes` above, which is the coach-authored
@@ -300,10 +321,67 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     setRecording(true);
   }, []);
 
+  const refreshGuestStatus = useCallback(async () => {
+    if (!isGuest || !hasGuestToken()) return;
+    lastGuestStatusAtRef.current = Date.now();
+    setGuestStatus(await fetchGuestStatus());
+  }, [isGuest]);
+
+  /**
+   * The actual send. Identical to the player path but for the scope string --
+   * same engine, same coach, different credential.
+   */
+  const sendAsGuest = useCallback(
+    async (savedVideoId: string) => {
+      if (!savedVideoLibrary || sendingIds.has(savedVideoId)) return;
+      setVideoError("");
+      setSendingIds((current) => new Set(current).add(savedVideoId));
+      try {
+        await saveSavedVideoToCloud(savedVideoId, savedVideoLibrary, {
+          scope: "guest",
+          message: guestNote.trim(),
+          onProgress: (progress) =>
+            setSendProgress((current) => ({ ...current, [savedVideoId]: progress })),
+        });
+        // The note belongs to the video it was written for. Leaving it set
+        // would silently attach it to the next one too.
+        setGuestNote("");
+        await refreshSavedVideos();
+        void refreshGuestStatus();
+      } catch (error) {
+        setVideoError(
+          error instanceof Error
+            ? error.message
+            : "Could not send that video. Your copy is still saved on this device.",
+        );
+      } finally {
+        setSendingIds((current) => {
+          const next = new Set(current);
+          next.delete(savedVideoId);
+          return next;
+        });
+      }
+    },
+    [guestNote, refreshGuestStatus, refreshSavedVideos, savedVideoLibrary, sendingIds],
+  );
+
   const sendToCoach = useCallback(
     async (savedVideoId: string) => {
       if (isGuest) {
-        onRequestSignIn?.();
+        // Ask for a name and an email inline, once. No navigation, no account:
+        // the screen must not change until a coach is actually connected.
+        //
+        // hasGuestToken() matters as much as the ref: the ref only lives as
+        // long as this component, so on the next launch it is empty while the
+        // stored token is still perfectly good. Going by the ref alone would
+        // mint a second sender row and orphan the first one's quota -- and any
+        // claim the coach had already made against it.
+        if (!guestIdentityRef.current && !hasGuestToken()) {
+          setGuestError("");
+          setGuestSheetVideoId(savedVideoId);
+          return;
+        }
+        await sendAsGuest(savedVideoId);
         return;
       }
       if (!savedVideoLibrary || sendingIds.has(savedVideoId)) return;
@@ -330,7 +408,30 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         });
       }
     },
-    [isGuest, onRequestSignIn, refreshSavedVideos, savedVideoLibrary, sendingIds],
+    [isGuest, refreshSavedVideos, savedVideoLibrary, sendAsGuest, sendingIds],
+  );
+
+  const submitGuestIdentity = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const name = guestName.trim();
+      const email = guestEmail.trim();
+      if (!name || !email || guestBusy) return;
+      setGuestBusy(true);
+      setGuestError("");
+      const videoId = guestSheetVideoId;
+      try {
+        guestIdentityRef.current = await registerGuestSender({ name, email });
+        setGuestSheetVideoId("");
+        if (videoId) await sendAsGuest(videoId);
+        void refreshGuestStatus();
+      } catch (error) {
+        setGuestError(error instanceof Error ? error.message : "Could not set that up.");
+      } finally {
+        setGuestBusy(false);
+      }
+    },
+    [guestBusy, guestEmail, guestName, guestSheetVideoId, refreshGuestStatus, sendAsGuest],
   );
 
   const closeWorkspace = useCallback(
@@ -353,11 +454,17 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   // In the workspace, "save and send" means send it to the coach.
   const handleSaveAndSend = useCallback(
     async (result: VideoWorkspaceSaveResult) => {
+      // A guest with no identity yet would otherwise open the sheet once per
+      // item. Open it once, for the first, and let them send the rest after.
+      if (isGuest && !guestIdentityRef.current) {
+        setGuestSheetVideoId(result.savedItems[0]?.savedVideoId ?? "");
+        return;
+      }
       for (const item of result.savedItems) {
         await sendToCoach(item.savedVideoId);
       }
     },
-    [sendToCoach],
+    [isGuest, sendToCoach],
   );
 
   const startGuestNoteDraft = useCallback(() => {
@@ -433,6 +540,22 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     )[0];
   }, [savedVideos]);
 
+  // Deliberately not a setInterval. The coach adding someone is a rare event,
+  // and the realistic case is: player puts the phone down, coach acts, player
+  // picks the phone back up. So: once on mount, once after each send, and on
+  // becoming visible again -- throttled, because iOS fires that generously.
+  useEffect(() => {
+    if (!isGuest || !hasGuestToken()) return;
+    void refreshGuestStatus();
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastGuestStatusAtRef.current < 60000) return;
+      void refreshGuestStatus();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [isGuest, refreshGuestStatus]);
+
   const wasGuestRef = useRef(isGuest);
   useEffect(() => {
     // Lessons doesn't exist for a guest any more -- if a sign-out happens
@@ -501,7 +624,15 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
           {isGuest && (
             <div className="player-portal-guest-banner">
-              <p>Browsing as a guest -- your videos stay on this device until you sign in.</p>
+              {guestStatus?.connected ? (
+                // The coach has acted. Say so -- but the screen stays exactly
+                // as it is: they are still a guest until they finish the invite.
+                <p>
+                  {guestStatus.coachName} has added you — check your email to set a password.
+                </p>
+              ) : (
+                <p>Browsing as a guest -- your videos stay on this device until you sign in.</p>
+              )}
               <button className="player-portal-primary" type="button" onClick={() => onRequestSignIn?.()}>
                 Sign in
               </button>
@@ -803,6 +934,70 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     Videos are saved on this device. Send one to your coach when you want them to see it.
                   </p>
 
+                  {isGuest && guestStatus && guestStatus.sent.limit > 0 && !guestStatus.connected && (
+                    <p className="player-portal-lead">
+                      {guestStatus.sent.count} of {guestStatus.sent.limit} sent. Videos you send are
+                      kept for {guestStatus.retentionDays} days until your coach adds you.
+                    </p>
+                  )}
+
+                  {guestSheetVideoId && (
+                    <form className="player-portal-note-form" onSubmit={submitGuestIdentity}>
+                      <p className="player-portal-lead">
+                        Your coach needs to know who this is from. No account needed.
+                      </p>
+                      <label className="player-portal-field">
+                        <span>Your name</span>
+                        <input
+                          value={guestName}
+                          onChange={(event) => setGuestName(event.target.value)}
+                          autoComplete="name"
+                          placeholder="Your name"
+                        />
+                      </label>
+                      <label className="player-portal-field">
+                        <span>Your email</span>
+                        <input
+                          value={guestEmail}
+                          onChange={(event) => setGuestEmail(event.target.value)}
+                          type="email"
+                          autoComplete="email"
+                          placeholder="you@example.com"
+                        />
+                      </label>
+                      <label className="player-portal-field">
+                        <span>Note for your coach (optional)</span>
+                        <textarea
+                          value={guestNote}
+                          onChange={(event) => setGuestNote(event.target.value)}
+                          rows={3}
+                          placeholder="Anything you want them to look at?"
+                        />
+                      </label>
+                      {guestError && (
+                        <div className="player-portal-error" role="alert">
+                          <p style={{ margin: 0 }}>{guestError}</p>
+                        </div>
+                      )}
+                      <div className="player-portal-note-form-actions">
+                        <button
+                          className="player-portal-ghost"
+                          type="button"
+                          onClick={() => setGuestSheetVideoId("")}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="player-portal-primary"
+                          type="submit"
+                          disabled={guestBusy || !guestName.trim() || !guestEmail.trim()}
+                        >
+                          {guestBusy ? "Sending…" : "Send to coach"}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
                   {!savedVideoLibrary ? (
                     <p className="player-portal-empty">
                       This browser cannot store videos. Try Chrome or Safari on your phone or laptop.
@@ -853,7 +1048,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                   <span className="player-portal-video-status">
                                       {sending
                                         ? `Sending… ${Math.round(progress)}%`
-                                        : sendStatusLabel(item)}
+                                        : sendStatusLabel(item, isGuest, Boolean(guestStatus?.connected))}
                                   </span>
                                 </div>
                                 <div className="player-portal-video-actions">
@@ -870,13 +1065,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                     disabled={sending || sent}
                                     onClick={() => void sendToCoach(item.savedVideoId)}
                                   >
-                                    {sent
-                                      ? "Sent"
-                                      : sending
-                                        ? "Sending…"
-                                        : isGuest
-                                          ? "Sign in to send"
-                                          : "Send to coach"}
+                                    {sent ? "Sent" : sending ? "Sending…" : "Send to coach"}
                                   </button>
                                 </div>
                               </li>

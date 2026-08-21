@@ -81,6 +81,10 @@ export async function signOut(): Promise<void> {
   // Not best effort. A token left in native storage would sign the player
   // straight back in on the next launch.
   await clearAuthToken();
+  // The guest token is deliberately NOT cleared here. It is not a session --
+  // it is how someone with no account is known to the coach they already sent
+  // a video to. Clearing it on sign-out would orphan their remaining allowance
+  // and any send still in flight. The omission looks like a bug, so: it isn't.
 }
 
 export function sessionFromLoginResponse(data: SessionResponse): Session {

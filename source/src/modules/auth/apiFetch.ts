@@ -27,9 +27,17 @@ const API_BASE = NATIVE ? (buildEnv.VITE_API_BASE ?? "").replace(/\/$/, "") : ""
 
 const TOKEN_KEY = "clarity-player-token";
 
+// A second, completely separate credential: someone with no account who has
+// sent the coach a video. It is not a session and it is not a weaker player
+// token -- it buys upload and status, nothing else, and the server only ever
+// reads it on the guest routes. Keeping it in its own key and its own header
+// is what makes that true by construction rather than by remembering to check.
+const GUEST_TOKEN_KEY = "clarity-guest-token";
+
 // Held in memory so apiFetch stays synchronous after startup. loadAuthToken()
 // fills it once, before the first request.
 let token = "";
+let guestToken = "";
 
 type PreferencesPlugin = {
   get(options: { key: string }): Promise<{ value: string | null }>;
@@ -128,6 +136,68 @@ export async function clearAuthToken(): Promise<void> {
 }
 
 /**
+ * The guest token, stored the same way and for the same reason. Note these go
+ * through the identical boxed `preferences()` accessor -- the boxing is what
+ * stops JavaScript's thenable probe from calling a native method named "then"
+ * that does not exist. Any new storage helper must use it too.
+ *
+ * Guests exist on the web as well as in the app, so on the web this falls
+ * through to localStorage rather than doing nothing.
+ */
+export async function loadGuestToken(): Promise<void> {
+  if (!NATIVE) {
+    try {
+      guestToken = window.localStorage.getItem(GUEST_TOKEN_KEY) ?? "";
+    } catch {
+      guestToken = "";
+    }
+    return;
+  }
+  const boxed = await preferences();
+  if (!boxed) {
+    guestToken = window.localStorage.getItem(GUEST_TOKEN_KEY) ?? "";
+    return;
+  }
+  const result = await withTimeout(boxed.plugin.get({ key: GUEST_TOKEN_KEY }), () => ({ value: null }));
+  guestToken = result.value ?? "";
+}
+
+export async function setGuestToken(next: string): Promise<void> {
+  guestToken = next;
+  if (!NATIVE) {
+    try {
+      window.localStorage.setItem(GUEST_TOKEN_KEY, next);
+    } catch {
+      // A private window with storage blocked still gets to send this video;
+      // it just has to re-register on the next launch.
+    }
+    return;
+  }
+  const boxed = await preferences();
+  if (boxed) await withTimeout(boxed.plugin.set({ key: GUEST_TOKEN_KEY, value: next }), () => undefined);
+  else window.localStorage.setItem(GUEST_TOKEN_KEY, next);
+}
+
+export function hasGuestToken(): boolean {
+  return Boolean(guestToken);
+}
+
+export async function clearGuestToken(): Promise<void> {
+  guestToken = "";
+  if (!NATIVE) {
+    try {
+      window.localStorage.removeItem(GUEST_TOKEN_KEY);
+    } catch {
+      // Nothing to do.
+    }
+    return;
+  }
+  const boxed = await preferences();
+  if (boxed) await withTimeout(boxed.plugin.remove({ key: GUEST_TOKEN_KEY }), () => undefined);
+  else window.localStorage.removeItem(GUEST_TOKEN_KEY);
+}
+
+/**
  * fetch() for the Clarity API. Takes the same absolute path either build uses
  * ("/api/player/profile") and adds whatever that build needs to reach it.
  */
@@ -141,6 +211,11 @@ export function apiFetch(path: string, init: RequestInit = {}): Promise<Response
     headers.set("X-Clarity-Client", "app");
     if (token) headers.set("Authorization", `Bearer ${token}`);
   }
+  // Outside the NATIVE branch on purpose: the portal serves guests from the
+  // browser too. The server reads this header only on the guest routes, so
+  // sending it everywhere costs nothing and no check written for a player
+  // session can be satisfied by it.
+  if (guestToken) headers.set("X-Clarity-Guest-Token", guestToken);
   return fetch(`${API_BASE}${path}`, {
     cache: "no-store",
     ...init,

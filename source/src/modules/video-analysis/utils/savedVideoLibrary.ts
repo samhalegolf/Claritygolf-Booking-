@@ -1,4 +1,4 @@
-import { apiFetch } from "../../auth/apiFetch";
+import { apiFetch, clearGuestToken, setGuestToken } from "../../auth/apiFetch";
 import type { VideoAnalysis } from "../models/Analysis";
 import type { PlayerVideo } from "../models/Video";
 import type { ComparisonSide, ComparisonWorkspaceState } from "./localPersistence";
@@ -729,11 +729,17 @@ type PublicTransferSession = {
   /**
    * 'player-submission' means a portal player sent this in, rather than it
    * being the coach's own library syncing between their devices.
+   * 'guest-submission' means someone with no account did.
    */
   direction?: VideoTransferDirection;
   submittedByName?: string;
   playerMessage?: string;
   coachSeenAt?: string;
+  /** Guest submissions only. */
+  guestSenderId?: string;
+  submittedByEmail?: string;
+  /** Set once the coach adds the sender as a player; stops the retention clock. */
+  claimedAt?: string;
 };
 
 export type ClarityCloudImportTransfer = PublicTransferSession & {
@@ -807,17 +813,106 @@ const applyTransferSessionToCloud = (
  * authorises with the player session at /api/video-transfer/player/*. Same
  * transfer engine, same Drive account, different credential -- so the only
  * thing that varies is the path.
+ *
+ * A guest -- someone with no account at all -- authorises with a guest_senders
+ * token at /api/video-transfer/guest/*. Third credential, same engine again,
+ * with quota and a retention clock the other two do not have.
  */
-export type VideoTransferScope = "coach" | "player";
+export type VideoTransferScope = "coach" | "player" | "guest";
 
-export type VideoTransferDirection = "coach-device" | "player-submission";
+export type VideoTransferDirection = "coach-device" | "player-submission" | "guest-submission";
 
 const transferUrl = (scope: VideoTransferScope, ...segments: string[]) =>
   [
     "/api/video-transfer",
-    ...(scope === "player" ? ["player"] : []),
+    ...(scope === "player" ? ["player"] : scope === "guest" ? ["guest"] : []),
     ...segments.map((segment) => encodeURIComponent(segment)),
   ].join("/");
+
+/* --- Sending as a guest ---------------------------------------------------
+ *
+ * Someone with no account, who wants their coach to see one swing. They give a
+ * name and an email -- enough for the coach to know who sent it and to add them
+ * to their player list -- and get back a token. No password, no account, and
+ * nothing about the screen they are on changes.
+ * ------------------------------------------------------------------------- */
+
+export type GuestSender = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+export type GuestStatus = {
+  /** True once the coach has added this sender to their player list. */
+  connected: boolean;
+  /** True once a portal invite exists for them. */
+  inviteSent: boolean;
+  coachName: string;
+  retentionDays: number;
+  sent: { count: number; limit: number };
+};
+
+/**
+ * Registers a guest sender and stores the returned token. The raw token comes
+ * back exactly once, so this is the only place that can persist it.
+ */
+export const registerGuestSender = async (input: {
+  name: string;
+  email: string;
+}): Promise<GuestSender> => {
+  const response = await apiFetch("/api/guest/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: input.name,
+      email: input.email,
+      deviceId: getStoredClarityDeviceId(),
+    }),
+  });
+  const data = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    token?: string;
+    guest?: GuestSender;
+    message?: string;
+  };
+  if (!response.ok || !data?.token || !data?.guest) {
+    throw new Error(data?.message || "Could not set that up. Try again in a moment.");
+  }
+  await setGuestToken(data.token);
+  return data.guest;
+};
+
+/** What the coach has done about this guest, if anything. Null when not a guest. */
+export const fetchGuestStatus = async (): Promise<GuestStatus | null> => {
+  try {
+    const response = await apiFetch("/api/guest/status");
+    // The sender row is gone -- purged after long disuse, or never valid. Drop
+    // the token so the next send asks for a name and an email again instead of
+    // failing forever against a credential the server has never heard of. Only
+    // on an explicit 401: a network error must not throw the token away.
+    if (response.status === 401) {
+      await clearGuestToken();
+      return null;
+    }
+    if (!response.ok) return null;
+    const data = (await response.json().catch(() => null)) as (GuestStatus & { ok?: boolean }) | null;
+    if (!data?.ok) return null;
+    return {
+      connected: Boolean(data.connected),
+      inviteSent: Boolean(data.inviteSent),
+      coachName: String(data.coachName || "Your coach"),
+      retentionDays: Number(data.retentionDays || 14),
+      sent: {
+        count: Number(data.sent?.count || 0),
+        limit: Number(data.sent?.limit || 0),
+      },
+    };
+  } catch {
+    // Offline. The rest of the Videos tab works without this.
+    return null;
+  }
+};
 
 const isCloudSetupError = (code: SavedVideoCloudErrorCode) =>
   code === "CLOUD_OAUTH_NOT_CONFIGURED" ||

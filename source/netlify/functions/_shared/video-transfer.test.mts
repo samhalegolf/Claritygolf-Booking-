@@ -7,6 +7,8 @@ import {
   googleChunkGranularityBytes,
   maxChunkSizeBytes,
   publicTransferSession,
+  rowToSession,
+  sessionToRow,
   validateChunkRequest,
   validateFinalizePayload,
   validateUploadSessionPayload,
@@ -362,4 +364,92 @@ test("chunk validation rejects out-of-order overlapping and oversized chunks", (
     }),
     true,
   );
+});
+
+// Regression guard for a real bug: rowToSession used to be a two-way ternary
+// (`row.direction === "player-submission" ? ... : "coach-device"`), and
+// patchTransferSession round-trips the whole row back through sessionToRow. A
+// guest submission read and patched -- which happens on its very first chunk --
+// was therefore silently relabelled coach-device, laundering a stranger's video
+// past the guest quota, past the purge job's `direction =` filter, and into the
+// coach's own import stream.
+test("a guest-submission row survives the rowToSession -> sessionToRow round trip", () => {
+  const row = {
+    version: 1,
+    transfer_id: "transfer-guest-1",
+    saved_video_id: "saved-video-guest-1",
+    account_id: "sam-hale-golf",
+    provider_id: "google-drive",
+    catalogue_status: "ready_to_import",
+    player_id: "guest-gs-1",
+    analysis_id: "analysis-1",
+    status: "ready",
+    expected_size_bytes: 1024,
+    checksum_sha256: "a".repeat(64),
+    accepted_offset_bytes: 1024,
+    chunk_size_bytes: defaultChunkSizeBytes,
+    drive_asset_folder_id: "folder-1",
+    resumable_session_url: "https://example.invalid/session",
+    resumable_session_created_at: "2026-08-21T00:00:00.000Z",
+    direction: "guest-submission",
+    guest_sender_id: "gs-1",
+    submitted_by_name: "Alex Guest",
+    submitted_by_email: "alex@example.com",
+    coach_view_token_hash: "b".repeat(64),
+    coach_view_expires_at: "2026-09-04T00:00:00.000Z",
+    cleanup_after: "2026-09-04T00:00:00.000Z",
+    cleanup_status: "scheduled",
+    created_at: "2026-08-21T00:00:00.000Z",
+    updated_at: "2026-08-21T00:00:00.000Z",
+  };
+
+  const session = rowToSession(row);
+  assert.equal(session.direction, "guest-submission", "a guest row must not be read back as coach-device");
+  assert.equal(session.guestSenderId, "gs-1");
+  assert.equal(session.coachViewTokenHash, "b".repeat(64));
+
+  const roundTripped = sessionToRow(session);
+  assert.equal(roundTripped.direction, "guest-submission", "a guest row must not be written back as coach-device");
+  assert.equal(roundTripped.guest_sender_id, "gs-1");
+  assert.equal(roundTripped.claimed_at, null);
+
+  // And the guest columns must not leak onto a coach transfer, or a deploy
+  // landing ahead of the migration would 400 every write the coach makes.
+  const coachRow = sessionToRow(rowToSession({ ...row, direction: "coach-device", guest_sender_id: null }));
+  assert.equal(coachRow.direction, "coach-device");
+  assert.ok(!("guest_sender_id" in coachRow), "coach rows must not carry guest columns");
+});
+
+test("publicTransferSession exposes guest provenance but never the view token", () => {
+  const session = rowToSession({
+    version: 1,
+    transfer_id: "transfer-guest-2",
+    saved_video_id: "saved-video-guest-2",
+    account_id: "sam-hale-golf",
+    provider_id: "google-drive",
+    catalogue_status: "ready_to_import",
+    player_id: "guest-gs-2",
+    analysis_id: "analysis-2",
+    status: "ready",
+    expected_size_bytes: 2048,
+    checksum_sha256: "c".repeat(64),
+    accepted_offset_bytes: 2048,
+    chunk_size_bytes: defaultChunkSizeBytes,
+    drive_asset_folder_id: "folder-2",
+    resumable_session_url: "https://example.invalid/session",
+    resumable_session_created_at: "2026-08-21T00:00:00.000Z",
+    direction: "guest-submission",
+    guest_sender_id: "gs-2",
+    submitted_by_email: "alex@example.com",
+    coach_view_token_hash: "d".repeat(64),
+    created_at: "2026-08-21T00:00:00.000Z",
+    updated_at: "2026-08-21T00:00:00.000Z",
+  });
+
+  const wire = publicTransferSession(session) as Record<string, unknown>;
+  assert.equal(wire.direction, "guest-submission");
+  assert.equal(wire.guestSenderId, "gs-2");
+  assert.equal(wire.submittedByEmail, "alex@example.com");
+  assert.ok(!("coachViewTokenHash" in wire), "the coach view token hash must never reach a client");
+  assert.ok(!("resumableSessionUrl" in wire), "the resumable session url is secret");
 });

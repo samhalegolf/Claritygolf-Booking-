@@ -14,7 +14,7 @@ import { StrictMode, Suspense, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import LoginScreen from "./modules/auth/LoginScreen";
-import { loadAuthToken } from "./modules/auth/apiFetch";
+import { loadAuthToken, loadGuestToken } from "./modules/auth/apiFetch";
 import { fetchSession, guestSession, signOut, type Session } from "./modules/auth/session";
 import PlayerPortal from "./modules/player-portal/PlayerPortal";
 // Tokens first: styles.css and every module stylesheet read --c-*.
@@ -72,6 +72,10 @@ function Root() {
         // every request goes out anonymous and the player is asked to sign in
         // again on every launch.
         await loadAuthToken();
+        // A guest credential is not a session and never becomes one, but it
+        // does have to survive a relaunch or the app would ask for a name and
+        // an email again for every video.
+        await loadGuestToken();
         const next = await fetchSession();
         if (!cancelled) setSession(next);
       } catch {

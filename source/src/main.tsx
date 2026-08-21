@@ -2,7 +2,7 @@ import { StrictMode, Suspense, lazy, useCallback, useEffect, useState } from "re
 import { createRoot } from "react-dom/client";
 import LoginScreen from "./modules/auth/LoginScreen";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
-import { isBookingEmbedMode, isPlayerBookingMode } from "./modules/shared/bookingHandoff";
+import { isBookingEmbedMode, isPlayerBookingMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
 import { installOptixBookingFeedback } from "./optix-booking-feedback";
 import { installOptixBookingMutationSync } from "./optix-booking-mutation-sync";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
@@ -20,6 +20,7 @@ installBoxAudit();
 // lives in its own module rather than inside App.
 const App = lazy(() => import("./App"));
 const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
+const VideoSharePage = lazy(() => import("./modules/video-share/VideoSharePage"));
 
 // The booking embed is public by design -- it is the widget clients book
 // through. It wins over everything below, including any session.
@@ -30,6 +31,11 @@ const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
 const bookingEmbed = isBookingEmbedMode();
 const playerBooking = isPlayerBookingMode();
 const publicBookingOnly = bookingEmbed && !playerBooking;
+// The coach's emailed link to a video a guest sent them. Like the booking
+// embed it wins over everything below, including any session -- the token is
+// the credential, and asking a coach to log in to watch one video is exactly
+// the friction the link exists to remove.
+const videoShare = isVideoShareMode();
 
 let adminHooksInstalled = false;
 
@@ -56,7 +62,9 @@ function Root() {
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    if (publicBookingOnly) return;
+    // The share page never asks who is looking -- that is the whole point of
+    // it -- so it must not make a session call either.
+    if (publicBookingOnly || videoShare) return;
     let cancelled = false;
     void fetchSession().then((next) => {
       if (!cancelled) setSession(next);
@@ -85,6 +93,14 @@ function Root() {
   // revoked cookie), which drops straight back to the login screen instead of
   // leaving a workspace on screen that can no longer save anything.
   const handleSessionLost = useCallback(() => setSession(guestSession), []);
+
+  if (videoShare) {
+    return (
+      <Suspense fallback={<Splash label="Loading video…" />}>
+        <VideoSharePage />
+      </Suspense>
+    );
+  }
 
   if (publicBookingOnly) {
     return (

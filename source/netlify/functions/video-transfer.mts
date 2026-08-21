@@ -1,5 +1,12 @@
 import type { Config } from "@netlify/functions";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+  guestResidentBytesPerAccount,
+  guestRetentionDays,
+  guestSubmissionMaxBytes,
+  guestSubmissionsLifetime,
+  guestSubmissionsPerAccountPerDay,
+} from "./_shared/guest-limits.mts";
 import {
   getClarityCloudGoogleConfig,
   getSafeClarityCloudGoogleRuntimeDiagnostic,
@@ -43,13 +50,26 @@ type TransferStatus =
 
 export type ClarityCloudProviderId = "google-drive";
 
-export type TransferDirection = "coach-device" | "player-submission";
+export type TransferDirection = "coach-device" | "player-submission" | "guest-submission";
 
 /** Set only for player submissions; forced from the session, never the body. */
 export type PlayerSubmission = {
   playerId: string;
   portalPlayerId: string;
   name: string;
+  message: string;
+};
+
+/**
+ * Set only for guest submissions; forced from the guest_senders row, never the
+ * body. playerId is always `guest-<guestSenderId>` -- a guest has no person
+ * record to file the video under, and the id the client sends is a placeholder.
+ */
+export type GuestSubmission = {
+  guestSenderId: string;
+  playerId: string;
+  name: string;
+  email: string;
   message: string;
 };
 
@@ -259,14 +279,23 @@ export type VideoTransferSession = {
   /**
    * 'coach-device' is the original flow: the coach's library syncing to their
    * own Drive and back down to another of their devices. 'player-submission'
-   * is a portal player sending a video in. Same engine, same Drive account --
-   * only the credential that authorised the upload differs.
+   * is a portal player sending a video in. 'guest-submission' is someone with
+   * no account at all doing the same. Same engine, same Drive account -- only
+   * the credential that authorised the upload differs.
    */
   direction?: TransferDirection;
   submittedByPortalPlayerId?: string;
   submittedByName?: string;
   playerMessage?: string;
   coachSeenAt?: string;
+  /** Guest submissions only: the guest_senders row that authorised this. */
+  guestSenderId?: string;
+  submittedByEmail?: string;
+  /** sha256 of the no-login coach view link. The raw token is never stored. */
+  coachViewTokenHash?: string;
+  coachViewExpiresAt?: string;
+  /** Set when the coach adds this guest as a player; stops the purge job. */
+  claimedAt?: string;
   readyToImportAt?: string;
   destinationDeviceId?: string;
   destinationDeviceName?: string;
@@ -523,7 +552,8 @@ function corsHeaders(req: Request): Record<string, string> | null {
   if (!nativeAppOrigins.has(origin)) return null;
   return {
     "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Clarity-Client",
+    "Access-Control-Allow-Headers":
+      "Authorization, Content-Type, Accept, X-Clarity-Client, X-Clarity-Guest-Token",
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
@@ -574,6 +604,88 @@ async function playerSubmissionsToday(accountId: string, portalPlayerId: string)
       `&created_at=gt.${encodeURIComponent(since)}`,
   }).catch(() => []);
   return Array.isArray(rows) ? rows.length : 0;
+}
+
+const guestTokenHeaderName = "x-clarity-guest-token";
+
+export type GuestScope = {
+  id: string;
+  accountId: string;
+  name: string;
+  email: string;
+  claimedAt: string;
+};
+
+/**
+ * The guest credential. Deliberately its own header and its own table: it is
+ * not a player session and must never satisfy a check written for one.
+ *
+ * There is no expiry here on purpose -- the app has to survive a relaunch
+ * without re-asking for a name and an email. What is bounded is what the token
+ * can do, not how long it lasts.
+ */
+async function readGuestScope(req: Request): Promise<GuestScope | null> {
+  const token = cleanString(req.headers.get(guestTokenHeaderName), "", 400);
+  if (!token) return null;
+  const rows = await supabase("guest_senders", {
+    query: `select=id,account_id,name,email,claimed_at&token_hash=eq.${encodeURIComponent(hashToken(token))}&limit=1`,
+  }).catch(() => []);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: cleanString(row.id, "", 80),
+    accountId: cleanString(row.account_id, "", 120),
+    name: cleanString(row.name, "", 180),
+    email: cleanString(row.email, "", 180).toLowerCase(),
+    claimedAt: cleanString(row.claimed_at, "", 80),
+  };
+}
+
+/**
+ * How many videos this guest has sent, ever. Cancelled, failed and expired
+ * rows are excluded so a dropped connection does not silently burn one of
+ * their three attempts.
+ */
+async function guestSubmissionCount(accountId: string, guestSenderId: string) {
+  if (!guestSenderId) return Number.MAX_SAFE_INTEGER;
+  const rows = await supabase(transferSessionTable, {
+    query:
+      `select=transfer_id&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&direction=eq.guest-submission` +
+      `&guest_sender_id=eq.${encodeURIComponent(guestSenderId)}` +
+      `&status=not.in.(cancelled,failed,expired)`,
+  }).catch(() => []);
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+/** Burst brake: how many strangers the account has absorbed in 24h. */
+async function guestSubmissionsTodayForAccount(accountId: string) {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const rows = await supabase(transferSessionTable, {
+    query:
+      `select=transfer_id&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&direction=eq.guest-submission` +
+      `&created_at=gt.${encodeURIComponent(since)}`,
+  }).catch(() => []);
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+/**
+ * Unclaimed guest bytes currently resident in the coach's Drive. This is the
+ * cap that actually bounds their storage bill -- a rate limit only bounds how
+ * fast an abuser paces themselves, not the total they can leave behind.
+ */
+async function guestResidentBytes(accountId: string) {
+  const rows = await supabase(transferSessionTable, {
+    query:
+      `select=expected_size_bytes&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&direction=eq.guest-submission&claimed_at=is.null` +
+      `&status=in.(preparing,session-created,uploading,paused,verifying,ready)`,
+  }).catch(() => []);
+  return (Array.isArray(rows) ? rows : []).reduce(
+    (sum: number, row: any) => sum + Number(row?.expected_size_bytes || 0),
+    0,
+  );
 }
 
 function playerVideoBase64(value: string) {
@@ -672,6 +784,10 @@ export function publicTransferSession(session: VideoTransferSession) {
     submittedByName: session.submittedByName,
     playerMessage: session.playerMessage,
     coachSeenAt: session.coachSeenAt,
+    // Deliberately no coachViewTokenHash: it never leaves the server.
+    guestSenderId: session.guestSenderId,
+    submittedByEmail: session.submittedByEmail,
+    claimedAt: session.claimedAt,
     readyToImportAt: session.readyToImportAt,
     destinationDeviceId: session.destinationDeviceId,
     destinationDeviceName: session.destinationDeviceName,
@@ -1449,10 +1565,21 @@ function googleDriveProviderAdapter(
     },
 
     async deleteTransferAsset(context) {
-      await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(context.assetFolderId)}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const response = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(context.assetFolderId)}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      // 404/410 means it is already gone, which is the outcome we wanted.
+      // Anything else has to throw: the purge job marks rows complete on a
+      // clean return, and a silent failure there would leave the coach's Drive
+      // filling up behind a retention policy that reports success.
+      if (!response.ok && response.status !== 404 && response.status !== 410) {
+        throw new TransferError(
+          "CLARITY_CLOUD_PROVIDER_FAILED",
+          `Could not delete the transfer folder (${response.status}).`,
+          response.status,
+        );
+      }
     },
 
     async getTransferFolderLink(context) {
@@ -1476,7 +1603,9 @@ function googleDriveProviderAdapter(
   };
 }
 
-function rowToSession(row: any): VideoTransferSession {
+// Exported for the round-trip test: these two are pure and the guest/coach
+// direction mapping between them is security-relevant.
+export function rowToSession(row: any): VideoTransferSession {
   return {
     version: 1,
     transferId: row.transfer_id,
@@ -1500,11 +1629,21 @@ function rowToSession(row: any): VideoTransferSession {
     resumableSessionCreatedAt: row.resumable_session_created_at,
     resumableSessionExpiresAt: row.resumable_session_expires_at || undefined,
     sourceDeviceId: row.source_device_id || undefined,
-    direction: row.direction === "player-submission" ? "player-submission" : "coach-device",
+    direction:
+      row.direction === "player-submission"
+        ? "player-submission"
+        : row.direction === "guest-submission"
+          ? "guest-submission"
+          : "coach-device",
     submittedByPortalPlayerId: row.submitted_by_portal_player_id || undefined,
     submittedByName: row.submitted_by_name || undefined,
     playerMessage: row.player_message || undefined,
     coachSeenAt: row.coach_seen_at || undefined,
+    guestSenderId: row.guest_sender_id || undefined,
+    submittedByEmail: row.submitted_by_email || undefined,
+    coachViewTokenHash: row.coach_view_token_hash || undefined,
+    coachViewExpiresAt: row.coach_view_expires_at || undefined,
+    claimedAt: row.claimed_at || undefined,
     readyToImportAt: row.ready_to_import_at || undefined,
     destinationDeviceId: row.destination_device_id || undefined,
     destinationDeviceName: row.destination_device_name || undefined,
@@ -1523,7 +1662,7 @@ function rowToSession(row: any): VideoTransferSession {
   };
 }
 
-function sessionToRow(session: VideoTransferSession) {
+export function sessionToRow(session: VideoTransferSession) {
   return {
     transfer_id: session.transferId,
     saved_video_id: session.savedVideoId,
@@ -1551,6 +1690,19 @@ function sessionToRow(session: VideoTransferSession) {
     submitted_by_name: session.submittedByName || null,
     player_message: session.playerMessage || null,
     coach_seen_at: session.coachSeenAt || null,
+    // Guest columns are emitted only for guest rows. Sending them
+    // unconditionally would make PostgREST reject every transfer write --
+    // including the coach's own -- on any deploy that reached production
+    // before the migration did.
+    ...(session.direction === "guest-submission" || session.guestSenderId
+      ? {
+          guest_sender_id: session.guestSenderId || null,
+          submitted_by_email: session.submittedByEmail || null,
+          coach_view_token_hash: session.coachViewTokenHash || null,
+          coach_view_expires_at: session.coachViewExpiresAt || null,
+          claimed_at: session.claimedAt || null,
+        }
+      : {}),
     ready_to_import_at: session.readyToImportAt || null,
     destination_device_id: session.destinationDeviceId || null,
     destination_device_name: session.destinationDeviceName || null,
@@ -1660,7 +1812,8 @@ async function handleSession(
   provider: ClarityCloudProviderAdapter,
   savedVideoId: string,
   diagnostics: ProviderDiagnostics = {},
-  submission: PlayerSubmission | null = null
+  submission: PlayerSubmission | null = null,
+  guest: GuestSubmission | null = null
 ) {
   if (req.method === "GET") {
     const session = await readTransferSession(accountId, savedVideoId);
@@ -1673,6 +1826,9 @@ async function handleSession(
   // A player's own id comes from their session, never from the body they sent.
   // Without this, a portal player could file a video under someone else.
   if (submission) savedVideo.playerId = submission.playerId;
+  // Same rule for a guest, and it matters more: they have no person record at
+  // all, and the client sends a placeholder id.
+  if (guest) savedVideo.playerId = guest.playerId;
   const submissionFields = submission
     ? {
         direction: "player-submission" as const,
@@ -1680,7 +1836,18 @@ async function handleSession(
         submittedByName: submission.name,
         playerMessage: submission.message || cleanString(body?.message, "", 600),
       }
-    : { direction: "coach-device" as const };
+    : guest
+      ? {
+          // Reusing submittedByName and playerMessage is what makes the coach's
+          // existing catalogue row render a guest submission with no new
+          // plumbing on that side.
+          direction: "guest-submission" as const,
+          guestSenderId: guest.guestSenderId,
+          submittedByName: guest.name,
+          submittedByEmail: guest.email,
+          playerMessage: guest.message || cleanString(body?.message, "", 600),
+        }
+      : { direction: "coach-device" as const };
   const existing = await readTransferSession(accountId, savedVideoId);
   const sourceMatchesExisting = Boolean(
     existing && existing.expectedSizeBytes === video.sizeBytes && existing.checksumSha256 === video.checksumSha256
@@ -1731,7 +1898,25 @@ async function handleSession(
           { ...diagnostics, step: "drive-player-submissions-folder-provision" }
         ),
       }
-    : transferFolders;
+    : guest
+      ? {
+          ...transferFolders,
+          // Strangers get their own bucket, beside Player Submissions rather
+          // than inside it, so the coach can see and empty the whole lot in
+          // one place.
+          inbox: await ensureFolder(
+            accessToken,
+            "Guest Submissions",
+            {
+              clarityType: "video-transfer-guest-submissions",
+              clarityAccountId: accountId,
+              clarityVersion,
+            },
+            transferFolders.transfer.id,
+            { ...diagnostics, step: "drive-guest-submissions-folder-provision" }
+          ),
+        }
+      : transferFolders;
   // If we know the saved source changed since the last completed upload, the
   // finalized manifest in Drive is stale — skip the ready shortcut and
   // re-upload the new bytes.
@@ -2021,6 +2206,25 @@ async function handleFinalize(
       console.warn("video_transfer:submission_notify_failed", redactForLogs(error?.message || error));
     });
   }
+  // A guest submission is ephemeral and its recipient has no app open, so it
+  // needs two more things than a player's: a clock, and a link that works
+  // without a login. Both are set here rather than at session-create -- an
+  // abandoned half-upload has no bytes worth a retention policy.
+  if (ready.direction === "guest-submission") {
+    const coachViewToken = randomBytes(32).toString("base64url");
+    const expiresAt = new Date(Date.now() + guestRetentionDays * 86400000).toISOString();
+    const readyGuest = await patchTransferSession(ready, {
+      coachViewTokenHash: hashToken(coachViewToken),
+      coachViewExpiresAt: expiresAt,
+      cleanupAfter: expiresAt,
+      cleanupScheduledAt: new Date().toISOString(),
+      cleanupStatus: "scheduled",
+    });
+    // The raw token lives only long enough to reach the email.
+    await notifyCoachOfGuestSubmission(readyGuest, coachViewToken).catch((error) => {
+      console.warn("video_transfer:guest_notify_failed", redactForLogs(error?.message || error));
+    });
+  }
   return json({
     ok: true,
     status: "ready",
@@ -2293,6 +2497,307 @@ async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
   });
 }
 
+/**
+ * Emails the coach that someone with no account has sent them a video.
+ *
+ * The recipient is always the configured coach address and never the address
+ * the sender typed. That single rule is what stops this being an open "someone
+ * sent you a video" spam relay, and it is also why no verification email is
+ * sent at registration: there is no address we are willing to mail.
+ *
+ * text/plain only. submittedByName, submittedByEmail and playerMessage are all
+ * attacker-controlled -- a plaintext body has no injection surface. If an HTML
+ * variant is ever added, every one of those three must go through escapeHtml.
+ */
+async function notifyCoachOfGuestSubmission(session: VideoTransferSession, coachViewToken: string) {
+  const apiKey = env("RESEND_API_KEY");
+  const to = env("CLARITY_ALERT_EMAIL") || env("CLARITY_COACH_EMAIL");
+  const senderName = cleanString(session.submittedByName, "Someone", 180);
+  const senderEmail = cleanString(session.submittedByEmail, "", 180);
+  const message = cleanString(session.playerMessage, "", 600);
+  const appUrl = (env("CLARITY_APP_URL", "") || "").replace(/\/$/, "");
+  const shareUrl = appUrl
+    ? `${appUrl}/?videoShare=${encodeURIComponent(coachViewToken)}`
+    : "";
+  const expiryLabel = session.coachViewExpiresAt
+    ? new Date(session.coachViewExpiresAt).toDateString()
+    : `${guestRetentionDays} days from now`;
+  const subject = `${senderName} sent you a video`;
+  const lines = [
+    `${senderName} has sent you a swing video.`,
+    "",
+    // Say plainly that none of this is verified. They typed it themselves.
+    `They say they are ${senderName}${senderEmail ? ` (${senderEmail})` : ""}. They do not have an account yet, so none of that has been checked.`,
+    message ? `\nTheir note: ${message}` : "",
+    shareUrl ? `\nWatch or download it here:\n${shareUrl}` : "\nOpen Clarity Golf Booking to watch it.",
+    `\nThis link and the video expire on ${expiryLabel}. Adding them as a player from Clarity Golf Booking keeps the video for good.`,
+  ].filter(Boolean);
+
+  if (apiKey && to) {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": `guest-submission-${session.transferId}`,
+      },
+      body: JSON.stringify({
+        from: env("CLARITY_EMAIL_FROM", "Clarity Golf <onboarding@resend.dev>"),
+        to: [to],
+        subject,
+        text: lines.join("\n"),
+      }),
+    });
+  }
+
+  await supabase("notification_history", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: {
+      id: randomUUID(),
+      person_key: session.playerId,
+      recipient: to || "",
+      subject,
+      kind: "guest_video_submission",
+      status: apiKey && to ? "sent" : "skipped",
+      provider: "resend",
+      created_at: new Date().toISOString(),
+    },
+  }).catch(() => {
+    // A log, not a dependency of the upload.
+  });
+}
+
+/**
+ * Guest-scoped video routes (/api/video-transfer/guest/*).
+ *
+ * A guest may create, upload to, finalize and cancel their own submissions.
+ * That is all. There is deliberately no imports, download, import, pause or
+ * seen route here: a guest can put bytes into the coach's Drive and can never
+ * read a single one back out.
+ *
+ * Ownership is guest_sender_id and nothing else -- never the email/phone
+ * candidate matching the player route uses, because a guest picks their own
+ * email and every candidate form is therefore attacker-chosen. Misses answer
+ * 404 rather than 403 so a guest cannot probe which saved video ids exist.
+ */
+async function handleGuestVideoRoute(
+  req: Request,
+  scope: GuestScope,
+  sub: string[],
+  diagnostics: ProviderDiagnostics,
+) {
+  assertClarityCloudServerConfigured(req);
+  const settings = await readSettings();
+  const accountId = resolveGoogleAccountId(settings);
+  // The recipient seam: a guest token minted against another account may not
+  // spend this one's Drive. Inert while there is one workspace, load-bearing
+  // the moment there is more than one.
+  if (scope.accountId && scope.accountId !== accountId) {
+    return json({ error: "not_found", message: "Video route not found." }, 404);
+  }
+
+  const savedVideoId = cleanString(sub[0], "", 160);
+  if (!savedVideoId) return json({ error: "not_found", message: "Guest video route not found." }, 404);
+  const owned = await readTransferSession(accountId, savedVideoId);
+  const ownedByGuest = Boolean(
+    owned && owned.direction === "guest-submission" && owned.guestSenderId === scope.id,
+  );
+
+  if (req.method === "POST" && sub[1] === "session") {
+    if (owned && !ownedByGuest) {
+      return json({ error: "not_found", message: "Video not found." }, 404);
+    }
+    const body = (await req.clone().json().catch(() => ({}))) as any;
+    const sizeBytes = Number(body?.video?.sizeBytes || 0);
+    if (sizeBytes > guestSubmissionMaxBytes) {
+      return errorJson(
+        "DRIVE_UPLOAD_TOO_LARGE",
+        `That video is too large to send. The limit is ${Math.round(guestSubmissionMaxBytes / (1024 * 1024))} MB.`,
+        413,
+      );
+    }
+    // Resuming an interrupted upload must not count again.
+    if (!owned) {
+      if ((await guestSubmissionCount(accountId, scope.id)) >= guestSubmissionsLifetime) {
+        return errorJson(
+          "CLARITY_CLOUD_PROVIDER_FAILED",
+          `You can send ${guestSubmissionsLifetime} videos without an account. Ask your coach to add you to keep sending.`,
+          429,
+        );
+      }
+      // The two account-wide brakes. Both answer with the same vague message:
+      // a stranger has no business learning how full the coach's Drive is.
+      if ((await guestSubmissionsTodayForAccount(accountId)) >= guestSubmissionsPerAccountPerDay) {
+        return errorJson(
+          "CLARITY_CLOUD_PROVIDER_FAILED",
+          "Your coach is not accepting new videos right now. Try again tomorrow.",
+          429,
+        );
+      }
+      if ((await guestResidentBytes(accountId)) + sizeBytes > guestResidentBytesPerAccount) {
+        return errorJson(
+          "CLARITY_CLOUD_PROVIDER_FAILED",
+          "Your coach is not accepting new videos right now. Try again tomorrow.",
+          429,
+        );
+      }
+    }
+
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    return await handleSession(
+      req,
+      accountId,
+      accessToken,
+      settings,
+      googleDriveProviderAdapter(accessToken, settings, diagnostics),
+      savedVideoId,
+      diagnostics,
+      null,
+      {
+        guestSenderId: scope.id,
+        playerId: `guest-${scope.id}`,
+        name: scope.name,
+        email: scope.email,
+        message: cleanString(body?.message, "", 600),
+      },
+    );
+  }
+
+  if (!ownedByGuest) return json({ error: "not_found", message: "Video not found." }, 404);
+
+  if (req.method === "GET" && (sub[1] === "session" || !sub[1])) {
+    return json({ ok: true, session: publicTransferSession(owned!) });
+  }
+  if (req.method === "PUT" && (sub[1] === "chunk" || sub[1] === "upload")) {
+    return await handleChunk(req, accountId, savedVideoId, googleDriveProviderAdapter("", settings, diagnostics));
+  }
+  if (req.method === "POST" && sub[1] === "finalize") {
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    return await handleFinalize(
+      req,
+      accountId,
+      accessToken,
+      googleDriveProviderAdapter(accessToken, settings, diagnostics),
+      savedVideoId,
+    );
+  }
+  if (req.method === "DELETE" && (sub[1] === "session" || !sub[1])) {
+    return await updateSessionStatus(
+      accountId,
+      savedVideoId,
+      "cancelled",
+      "Send cancelled. Your copy on this device was not deleted.",
+    );
+  }
+  return json({ error: "not_found", message: "Guest video route not found." }, 404);
+}
+
+/**
+ * The coach's no-login view of a guest submission. The token in the emailed
+ * link is the whole credential, so it is deliberately narrow: one video,
+ * read-only, expiring with the bytes it points at.
+ */
+async function readShareSession(token: string) {
+  if (!token) return null;
+  const rows = await supabase(transferSessionTable, {
+    query: `select=*&coach_view_token_hash=eq.${encodeURIComponent(hashToken(token))}&limit=1`,
+  }).catch(() => []);
+  const session = rows[0] ? rowToSession(rows[0]) : null;
+  if (!session || session.direction !== "guest-submission") return null;
+  if (!session.coachViewExpiresAt) return null;
+  if (new Date(session.coachViewExpiresAt).getTime() <= Date.now()) return null;
+  if (session.status !== "ready" || !session.driveVideoFileId) return null;
+  return session;
+}
+
+const shareResponseHeaders = {
+  "Cache-Control": "no-store",
+  "X-Robots-Tag": "noindex, nofollow",
+  "Referrer-Policy": "no-referrer",
+};
+
+async function handleShareRoute(
+  req: Request,
+  token: string,
+  action: string,
+  diagnostics: ProviderDiagnostics,
+) {
+  const session = await readShareSession(cleanString(token, "", 400));
+  // One flat 404 for expired, wrong and never-existed alike.
+  if (!session) {
+    return new Response(JSON.stringify({ error: "not_found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json", ...shareResponseHeaders },
+    });
+  }
+
+  const settings = await readSettings();
+  const accountId = session.accountId || resolveGoogleAccountId(settings);
+
+  if (!action) {
+    let manifest: any = {};
+    try {
+      const accessToken = await ensureDriveReady(accountId, diagnostics);
+      const provider = googleDriveProviderAdapter(accessToken, settings, diagnostics);
+      manifest = session.driveManifestFileId
+        ? await provider.readJsonFile({ fileId: session.driveManifestFileId }).catch(() => ({}))
+        : {};
+    } catch {
+      // Metadata is a nicety; the page still renders without it.
+    }
+    // Deliberately narrow: no Drive ids, no account id, no saved video id, and
+    // nothing at all about the coach's other transfers.
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        video: {
+          title: cleanString(manifest?.title, "Swing video", 180),
+          sizeBytes: session.expectedSizeBytes,
+          mimeType: cleanString(manifest?.video?.mimeType, "video/mp4", 80),
+          duration: Number(manifest?.video?.duration || 0) || null,
+          createdAt: session.createdAt,
+        },
+        sender: {
+          name: cleanString(session.submittedByName, "Someone", 180),
+          email: cleanString(session.submittedByEmail, "", 180),
+          // Never let this page imply the identity was checked.
+          verified: false,
+        },
+        message: cleanString(session.playerMessage, "", 600),
+        expiresAt: session.coachViewExpiresAt,
+      }),
+      { status: 200, headers: { "Content-Type": "application/json", ...shareResponseHeaders } },
+    );
+  }
+
+  if (action === "download") {
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    const provider = googleDriveProviderAdapter(accessToken, settings, diagnostics);
+    // Streamed server-side with the coach's own token. The Drive file's own
+    // sharing is never touched, so the bytes never leave their account.
+    const result = await provider.readFileRange({
+      fileId: session.driveVideoFileId || "",
+      range: req.headers.get("range") || undefined,
+    });
+    if (result instanceof Response) {
+      const headers = new Headers(result.headers);
+      Object.entries(shareResponseHeaders).forEach(([key, value]) => headers.set(key, value));
+      return new Response(result.body, { status: result.status, statusText: result.statusText, headers });
+    }
+    const body = result.buffer.slice(result.byteOffset, result.byteOffset + result.byteLength) as ArrayBuffer;
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/octet-stream", ...shareResponseHeaders },
+    });
+  }
+
+  return new Response(JSON.stringify({ error: "not_found" }), {
+    status: 404,
+    headers: { "Content-Type": "application/json", ...shareResponseHeaders },
+  });
+}
+
 async function handlePlayerVideoRoute(
   req: Request,
   scope: PlayerScope,
@@ -2454,6 +2959,103 @@ export default async function handler(req: Request) {
   });
 }
 
+/**
+ * Deletes guest videos whose retention has run out.
+ *
+ * Scope is the load-bearing part of this function and MUST NOT WIDEN.
+ * cleanup_after is also written by handleImportReceipt for coach-device
+ * transfers the coach has already imported -- those rows carry
+ * cleanup_status 'scheduled' too, and nothing has ever read them. Sweeping
+ * them would delete the coach's own imported videos out of their own Drive.
+ * The `direction = guest-submission` clause is what prevents that, and
+ * `claimed_at is null` is the second guard: a guest the coach has added is a
+ * player now, and players' videos are kept.
+ *
+ * Lives here rather than in the scheduled function because everything it needs
+ * -- the Drive adapter, the token refresh, the session table -- is private to
+ * this module. The scheduled function is a thin wrapper, the same way
+ * akahu-poll wraps _shared/akahu.
+ */
+export async function purgeExpiredGuestSubmissions(limit = 25) {
+  const now = new Date().toISOString();
+  const rows = await supabase(transferSessionTable, {
+    query:
+      `select=*&direction=eq.guest-submission&claimed_at=is.null` +
+      `&cleanup_after=not.is.null&cleanup_after=lt.${encodeURIComponent(now)}` +
+      `&cleanup_status=in.(scheduled,failed)` +
+      `&order=cleanup_after.asc&limit=${limit}`,
+  }).catch(() => []);
+  const sessions = (Array.isArray(rows) ? rows : []).map(rowToSession);
+  if (!sessions.length) return { scanned: 0, purged: 0, failed: 0 };
+
+  const settings = await readSettings();
+  let purged = 0;
+  let failed = 0;
+
+  for (const session of sessions) {
+    try {
+      const accountId = session.accountId || resolveGoogleAccountId(settings);
+      const accessToken = await ensureDriveReady(accountId, {});
+      const provider = googleDriveProviderAdapter(accessToken, settings, {});
+      await provider.deleteTransferAsset({ assetFolderId: session.driveAssetFolderId });
+      await patchTransferSession(session, {
+        status: "expired",
+        catalogueStatus: "expired",
+        cleanupStatus: "complete",
+        // The emailed link has to die with the bytes, not 404 on a token that
+        // still resolves to a row.
+        coachViewTokenHash: undefined,
+        coachViewExpiresAt: undefined,
+      });
+      purged += 1;
+    } catch (error) {
+      failed += 1;
+      // Left as 'failed' rather than 'complete', and the query above picks
+      // failed rows back up, so the next run retries it.
+      await patchTransferSession(session, { cleanupStatus: "failed" }).catch(() => {});
+      console.error(
+        "guest_submission_purge:row_failed",
+        redactForLogs(error instanceof Error ? error.message : String(error)),
+      );
+    }
+  }
+
+  return { scanned: sessions.length, purged, failed };
+}
+
+/**
+ * Guest sender rows outlive their videos by design -- the token has to keep
+ * working so the app can ask whether a coach has added them. But an unclaimed
+ * sender who has not opened the app in three months is never coming back, and
+ * the table would otherwise grow without bound behind the daily-registration
+ * counter's index.
+ */
+export async function purgeStaleGuestSenders(days = 90) {
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const rows = await supabase("guest_senders", {
+    query:
+      `select=id&claimed_at=is.null&last_seen_at=lt.${encodeURIComponent(cutoff)}&limit=200`,
+  }).catch(() => []);
+  let removed = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const id = cleanString(row?.id, "", 80);
+    if (!id) continue;
+    // Never orphan a live transfer: if anything of theirs is still in Drive,
+    // leave the sender row alone until the video purge has been through.
+    const live = await supabase(transferSessionTable, {
+      query: `select=transfer_id&guest_sender_id=eq.${encodeURIComponent(id)}&cleanup_status=neq.complete&limit=1`,
+    }).catch(() => [{}]);
+    if (Array.isArray(live) && live.length) continue;
+    await supabase("guest_senders", {
+      method: "DELETE",
+      prefer: "return=minimal",
+      query: `id=eq.${encodeURIComponent(id)}`,
+    }).catch(() => {});
+    removed += 1;
+  }
+  return { removed };
+}
+
 async function routeVideoTransferRequest(req: Request) {
   const url = new URL(req.url);
   const parts = url.pathname
@@ -2470,6 +3072,20 @@ async function routeVideoTransferRequest(req: Request) {
       const scope = await readPlayerScope(req);
       if (!scope) return json({ error: "unauthorized", message: "Player login required." }, 401);
       return await handlePlayerVideoRoute(req, scope, parts.slice(1), diagnostics);
+    }
+
+    // Same shape as the player branch above: its own credential, checked
+    // before the admin gate, and nothing below this point is reachable with it.
+    if (parts[0] === "guest") {
+      const guestScope = await readGuestScope(req);
+      if (!guestScope) return json({ error: "unauthorized", message: "Guest session required." }, 401);
+      return await handleGuestVideoRoute(req, guestScope, parts.slice(1), diagnostics);
+    }
+
+    // The coach's emailed no-login link. Unauthenticated by design -- the token
+    // is the credential -- so it also sits ahead of the admin gate.
+    if (parts[0] === "share" && req.method === "GET") {
+      return await handleShareRoute(req, parts[1] || "", parts[2] || "", diagnostics);
     }
 
     if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);

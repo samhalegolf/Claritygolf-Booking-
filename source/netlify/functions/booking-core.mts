@@ -29,6 +29,11 @@ import {
 } from "./_shared/caddy.mts";
 import { unavailableSpans } from "./_shared/availability-blocks.mts";
 import {
+  guestRegistrationsPerAccountPerDay,
+  guestRetentionDays,
+  guestSubmissionsLifetime,
+} from "./_shared/guest-limits.mts";
+import {
   canonicalPhoneKey,
   cleanPhoneCountry,
   getActivePhoneCountry,
@@ -1646,7 +1651,8 @@ function corsHeaders(req) {
   if (!nativeAppOrigins.has(origin)) return null;
   return {
     "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Clarity-Client",
+    "Access-Control-Allow-Headers":
+      "Authorization, Content-Type, Accept, X-Clarity-Client, X-Clarity-Guest-Token",
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
@@ -7531,6 +7537,207 @@ function playerProfileIdCandidates({ personId, email, phone }) {
   return ids;
 }
 
+/* ---------------------------------------------------------------------------
+ * Guest senders
+ *
+ * Someone with no account who wants their coach to see a swing video. They get
+ * a token, and that token buys exactly two things: the right to upload a
+ * bounded number of videos, and the right to ask whether a coach has added
+ * them yet. It is deliberately NOT a player_sessions row with a null
+ * portal_player_id -- readPlayerProfile below resolves bookings and lesson
+ * notes from the session's email string, and readPlayerSession only checks
+ * portal_player_id when one is set, so a guest row there would hand anyone who
+ * typed someone else's address that person's real lessons. Separate table,
+ * separate header, fail-closed: code that does not know guests exist cannot
+ * authenticate one.
+ * ------------------------------------------------------------------------- */
+
+// Self-creating, like player_sessions above: a deploy that reaches production
+// before the migration is applied by hand must not 500. The repo migration
+// (netlify/database/migrations/20260821000100_create_guest_senders) is the
+// schema record.
+let guestSendersTableReady = false;
+async function ensureGuestSendersTable() {
+  if (guestSendersTableReady) return;
+  const ddl = ddlBatch();
+  ddl.sql`
+    CREATE TABLE IF NOT EXISTS guest_senders (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      source_device_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      claimed_person_id TEXT,
+      claimed_portal_player_id TEXT,
+      claimed_at TIMESTAMPTZ
+    )
+  `;
+  ddl.sql`CREATE INDEX IF NOT EXISTS guest_senders_token_idx ON guest_senders (token_hash)`;
+  ddl.sql`
+    CREATE INDEX IF NOT EXISTS guest_senders_account_created_idx
+    ON guest_senders (account_id, created_at DESC)
+  `;
+  await ddl.run();
+  guestSendersTableReady = true;
+}
+
+/**
+ * Its own header, never Authorization. A guest credential must not be
+ * presentable anywhere a player bearer token is read.
+ */
+function guestTokenFromRequest(req) {
+  return cleanString(req.headers.get("x-clarity-guest-token"), "", 400);
+}
+
+async function readGuestSender(token) {
+  if (!token) return null;
+  await ensureGuestSendersTable();
+  const rows = await db().sql`
+    SELECT * FROM guest_senders WHERE token_hash = ${hashToken(token)} LIMIT 1
+  `;
+  const row = rows[0];
+  if (!row) return null;
+  // Best effort -- a failed touch must never fail the caller.
+  try {
+    await db().sql`UPDATE guest_senders SET last_seen_at = NOW() WHERE id = ${row.id}`;
+  } catch {
+    // Ignore.
+  }
+  return {
+    id: row.id,
+    accountId: row.account_id || "",
+    name: row.name || "",
+    email: (row.email || "").toLowerCase(),
+    claimedPersonId: row.claimed_person_id || "",
+    claimedPortalPlayerId: row.claimed_portal_player_id || "",
+    claimedAt: row.claimed_at || "",
+  };
+}
+
+async function countGuestRegistrationsToday(accountId) {
+  const rows = await db().sql`
+    SELECT COUNT(*)::int AS count FROM guest_senders
+    WHERE account_id = ${accountId}
+      AND created_at > NOW() - INTERVAL '24 hours'
+  `;
+  return Number(rows[0]?.count || 0);
+}
+
+/**
+ * Deliberately no de-dupe by email. Deduping would hand an existing guest's
+ * row, their remaining quota and their pending videos to anyone who retyped
+ * that address -- and people genuinely do share an inbox (see
+ * 20260714000200_allow_shared_client_emails). Every registration is a new row.
+ *
+ * Also deliberately sends no email. Mailing the address someone just typed is
+ * what turns a feature like this into an open spam relay.
+ */
+async function createGuestSender({ name, email, deviceId, accountId }) {
+  await ensureGuestSendersTable();
+  const token = randomBytes(32).toString("base64url");
+  const id = randomUUID();
+  await db().sql`
+    INSERT INTO guest_senders (id, account_id, token_hash, name, email, source_device_id)
+    VALUES (
+      ${id},
+      ${accountId},
+      ${hashToken(token)},
+      ${name},
+      ${email},
+      ${deviceId || null}
+    )
+  `;
+  return { id, token, name, email, accountId };
+}
+
+/** How many videos this guest has already sent. Never throws. */
+async function countGuestSubmissions(guestSenderId) {
+  if (!guestSenderId) return 0;
+  try {
+    const rows = await db().sql`
+      SELECT COUNT(*)::int AS count FROM video_transfer_sessions
+      WHERE guest_sender_id = ${guestSenderId}
+        AND direction = 'guest-submission'
+        AND status NOT IN ('cancelled', 'failed', 'expired')
+    `;
+    return Number(rows[0]?.count || 0);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * What the app polls to find out whether the coach has acted. Reads
+ * guest_senders and portal_players and nothing else -- it must never touch
+ * readPlayerProfile, readPeople or readLessonNotes, because every one of those
+ * resolves by email string and that is exactly the fail-open this whole design
+ * exists to avoid.
+ */
+async function readGuestStatus(guest) {
+  const portalPlayer = guest.claimedPortalPlayerId
+    ? await readPortalPlayerById(guest.claimedPortalPlayerId)
+    : null;
+  const coachAccount = await readCoachAccount();
+  return {
+    ok: true,
+    connected: Boolean(guest.claimedAt),
+    inviteSent: Boolean(portalPlayer && portalPlayer.status !== "disabled"),
+    coachName: coachAccount?.coachName || coachAccount?.businessName || "Your coach",
+    retentionDays: guestRetentionDays,
+    sent: {
+      count: await countGuestSubmissions(guest.id),
+      limit: guestSubmissionsLifetime,
+    },
+  };
+}
+
+/**
+ * The coach has added this guest as a player. Re-point their submissions at the
+ * real person and stop the clock: a claimed video is no longer ephemeral.
+ *
+ * player_id moving from `guest-<id>` to the real person id is the whole
+ * integration -- importSummaryFromManifest reads it off the row, so on the
+ * coach's next catalogue refresh the video stops being an orphan and appears
+ * inside that player's profile with no new UI.
+ *
+ * direction stays 'guest-submission': it is a true record of how the video
+ * arrived, and rewriting it would erase the audit trail.
+ */
+async function claimGuestSubmissions({ guestSenderId, personId, portalPlayerId, accountId }) {
+  await ensureGuestSendersTable();
+  await db().sql`
+    UPDATE guest_senders
+    SET claimed_person_id = ${personId},
+        claimed_portal_player_id = ${portalPlayerId || null},
+        claimed_at = COALESCE(claimed_at, NOW())
+    WHERE id = ${guestSenderId} AND account_id = ${accountId}
+  `;
+  try {
+    const rows = await db().sql`
+      UPDATE video_transfer_sessions
+      SET player_id = ${personId},
+          submitted_by_portal_player_id = ${portalPlayerId || null},
+          claimed_at = COALESCE(claimed_at, NOW()),
+          cleanup_after = NULL,
+          cleanup_status = 'not_scheduled',
+          updated_at = NOW()
+      WHERE guest_sender_id = ${guestSenderId}
+        AND account_id = ${accountId}
+        AND direction = 'guest-submission'
+      RETURNING transfer_id
+    `;
+    return rows.length;
+  } catch {
+    // The person and their portal invite are already real; a failure to
+    // re-point old videos must not undo that. They stay under the guest badge
+    // with the same action available.
+    return 0;
+  }
+}
+
 async function readPlayerProfile(session) {
   const state = await readPublicCatalogState();
   const workspaceAccount = publicWorkspaceAccount(state);
@@ -9546,6 +9753,63 @@ async function routeBookingApiRequest(
       return json({ ok: true, appUrl: caddyAppUrl(), status });
     }
 
+    // Registering as a guest is necessarily unauthenticated -- having no
+    // account is the entire premise. The bar is the one createPublicBooking
+    // already set for a stranger writing into this account: a name, an
+    // address, and no verification. What is bounded is what the resulting
+    // token can spend (see _shared/guest-limits.mts), not who may ask for one.
+    if (req.method === "POST" && pathname === "/api/guest/register") {
+      const body = await parseBody(req);
+      const name = cleanString(body?.name, "", 180);
+      const email = cleanEmail(body?.email, "");
+      if (!name || !email) {
+        return json(
+          {
+            error: "invalid",
+            message: "Add your name and email so your coach knows who sent it.",
+          },
+          400,
+        );
+      }
+      const state = await readCalendarState();
+      // Resolved server-side. A body-supplied account would let anyone pick
+      // whose Drive they spend.
+      const accountId = resolveWorkspaceAccount(req, state).id;
+      await ensureGuestSendersTable();
+      if ((await countGuestRegistrationsToday(accountId)) >= guestRegistrationsPerAccountPerDay) {
+        return json(
+          {
+            error: "rate_limited",
+            message: "Too many people are setting this up right now. Try again later.",
+          },
+          429,
+        );
+      }
+      const guest = await createGuestSender({
+        name,
+        email,
+        deviceId: cleanString(body?.deviceId, "", 160),
+        accountId,
+      });
+      // The raw token is returned exactly once and never stored.
+      return json(
+        {
+          ok: true,
+          token: guest.token,
+          guest: { id: guest.id, name: guest.name, email: guest.email },
+        },
+        201,
+      );
+    }
+
+    if (req.method === "GET" && pathname === "/api/guest/status") {
+      const guest = await readGuestSender(guestTokenFromRequest(req));
+      if (!guest) {
+        return json({ error: "unauthorized", message: "Guest session required." }, 401);
+      }
+      return json(await readGuestStatus(guest));
+    }
+
     if (pathname.startsWith("/api/")) {
       if (!(await requireAdmin(req)))
         return json(
@@ -10115,6 +10379,60 @@ async function routeBookingApiRequest(
         includeCaddyPass: body?.includeCaddyPass === true,
       });
       return json({ ok: true, ...result });
+    }
+
+    // Adding a guest sender to the player list. The whole connect-coach flow:
+    // merge or create the person, grant portal access exactly as the manual
+    // button does, then re-point their already-sent videos at the new person
+    // and stop the retention clock.
+    //
+    // Name and email come from the guest_senders row, never the request body.
+    // Taking them from the body would turn the coach's own UI into an
+    // arbitrary-person-creation endpoint.
+    if (req.method === "POST" && pathname === "/api/guest-players") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const body = await parseBody(req);
+      const guestSenderId = cleanString(body?.guestSenderId, "", 80);
+      await ensureGuestSendersTable();
+      const rows = await db().sql`
+        SELECT * FROM guest_senders
+        WHERE id = ${guestSenderId} AND account_id = ${requestContext.accountId}
+        LIMIT 1
+      `;
+      const guest = rows[0];
+      if (!guest) {
+        return json({ error: "not_found", message: "That sender is not in this account." }, 404);
+      }
+
+      // updatePerson runs compatiblePersonMatch internally, so a guest who is
+      // already a client under the same name and email merges into that row
+      // rather than creating a duplicate.
+      const saved = await updatePerson(
+        { name: guest.name, email: guest.email, source: "guest_submission" },
+        requestContext.accountId,
+      );
+      const personId = saved?.person?.id || "";
+      if (!personId) {
+        return json({ error: "invalid", message: "Could not create that player." }, 400);
+      }
+
+      const result = await grantPortalAccess({
+        req,
+        personId,
+        accountId: requestContext.accountId,
+        includeCaddyPass: body?.includeCaddyPass === true,
+      });
+
+      const claimed = await claimGuestSubmissions({
+        guestSenderId,
+        personId,
+        portalPlayerId: result?.portalPlayer?.id || "",
+        accountId: requestContext.accountId,
+      });
+
+      return json({ ok: true, personId, claimed, ...result });
     }
 
     // The Caddy card on a Booking player profile. Read-only, and it never
