@@ -201,6 +201,133 @@
   padding: 0 16px;
 }
 
+/* --- Home --------------------------------------------------------------- */
+
+.player-portal-home-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.player-portal-home-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 14px;
+  border: 1px solid var(--pt-border);
+  border-radius: 12px;
+  background: var(--pt-surface-soft);
+  color: var(--pt-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.player-portal-home-card:hover {
+  background: var(--pt-hover);
+}
+
+.player-portal-home-card-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.player-portal-home-card-sub {
+  font-size: 12px;
+  color: var(--pt-text-soft);
+}
+
+.player-portal-home-card-wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 420px) {
+  .player-portal-home-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Lessons: Book / Upcoming pill toggle -------------------------------- */
+
+.player-portal-pill-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--pt-border);
+  border-radius: 999px;
+  background: var(--pt-surface-soft);
+  width: fit-content;
+}
+
+.player-portal-pill-toggle button {
+  flex: 1;
+  min-height: 36px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 16px;
+  background: transparent;
+  color: var(--pt-text-soft);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.player-portal-pill-toggle button.active {
+  background: var(--pt-accent);
+  color: var(--pt-accent-text);
+}
+
+/* Booking embedded inline in the Lessons tab, in place of the old
+   full-screen takeover -- the widget is mobile-first already, so it only
+   needs its width relaxed to fill the card rather than a fixed max-width. */
+.player-portal-inline-booking .app-shell {
+  width: 100%;
+  padding: 0;
+}
+
+/* --- Guest notes ---------------------------------------------------------- */
+
+.player-portal-field textarea {
+  min-height: 96px;
+  border: 1px solid var(--pt-border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: var(--pt-surface-soft);
+  color: var(--pt-text);
+  font: inherit;
+  resize: vertical;
+}
+
+.player-portal-field textarea:focus {
+  outline: none;
+  border-color: var(--pt-text);
+  background: var(--pt-surface);
+}
+
+.player-portal-note-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.player-portal-note-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.player-portal-note-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.player-portal-note-actions .player-portal-ghost {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
 .player-portal-section {
   display: flex;
   flex-direction: column;
@@ -341,6 +468,58 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.player-portal-video-main {
+  flex: 1 1 160px;
+}
+
+.player-portal-video-thumb {
+  position: relative;
+  flex-shrink: 0;
+  width: 64px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--pt-border-soft),
+    var(--pt-border-soft) 4px,
+    var(--pt-surface-soft) 4px,
+    var(--pt-surface-soft) 8px
+  );
+  border: 1px solid var(--pt-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player-portal-video-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.player-portal-video-thumb-play {
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 6px 0 6px 10px;
+  border-color: transparent transparent transparent var(--pt-surface);
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.4));
+}
+
+.player-portal-video-thumb-duration {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .player-portal-video-main span {
@@ -507,12 +686,35 @@
   color: var(--pt-text);
 }
 
-.player-terminal-nav-links button.locked {
-  opacity: 0.55;
-}
-
 .player-terminal-nav-menu {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player-terminal-nav-record {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--pt-border);
+  border-radius: 999px;
+  background: var(--pt-surface);
+  cursor: pointer;
+}
+
+.player-terminal-nav-record:hover {
+  background: var(--pt-hover);
+}
+
+.player-terminal-nav-record-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c-danger);
 }
 
 @media (max-width: 700px) {

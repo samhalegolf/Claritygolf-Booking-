@@ -9,7 +9,7 @@
 // Clarity Caddy is deliberately absent. It is a different product, and its one
 // way in is the card on the home route -- a permanent link in the bar would put
 // "leave here" next to every screen in the terminal.
-export type PlayerTerminalDestination = "lessons" | "book" | "notes" | "videos";
+export type PlayerTerminalDestination = "home" | "lessons" | "notes" | "videos";
 
 type NavLink = {
   id: PlayerTerminalDestination;
@@ -17,8 +17,8 @@ type NavLink = {
 };
 
 const NAV_LINKS: NavLink[] = [
+  { id: "home", label: "Home" },
   { id: "lessons", label: "Lessons" },
-  { id: "book", label: "Book" },
   { id: "notes", label: "Notes" },
   { id: "videos", label: "Videos" },
 ];
@@ -30,9 +30,9 @@ export type PlayerTerminalNavProps = {
   /** Present only inside a child workspace, e.g. the video workspace. */
   back?: { label: string; onBack: () => void } | null;
   onSignOut: () => void;
-  /** Tabs that need a real session. Still tappable -- onNavigate decides what
-   *  happens -- this is just what tells the player a tab needs signing in for. */
-  lockedDestinations?: ReadonlySet<PlayerTerminalDestination>;
+  /** Jumps straight into recording. Hidden while a back-mode workspace owns
+   *  the screen -- that workspace already has its own record controls. */
+  onRecord: () => void;
   /** Browsing without a session: swaps the sign-out control for a sign-in one. */
   guest?: boolean;
   onSignIn?: () => void;
@@ -43,10 +43,14 @@ export function PlayerTerminalNav({
   onNavigate,
   back,
   onSignOut,
-  lockedDestinations,
+  onRecord,
   guest,
   onSignIn,
 }: PlayerTerminalNavProps) {
+  // Lessons -- and booking with it -- doesn't exist for a guest at all. Not
+  // shown-but-locked, just not here: there is nothing behind it to show yet.
+  const visibleLinks = guest ? NAV_LINKS.filter((link) => link.id !== "lessons") : NAV_LINKS;
+
   return (
     <header className="player-terminal-nav">
       <div className="player-terminal-nav-inner">
@@ -69,26 +73,31 @@ export function PlayerTerminalNav({
         </div>
 
         <nav className="player-terminal-nav-links" aria-label="Player Terminal">
-          {NAV_LINKS.map((link) => {
-            const locked = lockedDestinations?.has(link.id) ?? false;
-            return (
-              <button
-                key={link.id}
-                type="button"
-                className={[active === link.id ? "active" : "", locked ? "locked" : ""]
-                  .filter(Boolean)
-                  .join(" ")}
-                aria-current={active === link.id ? "page" : undefined}
-                title={locked ? "Sign in to use this" : undefined}
-                onClick={() => onNavigate(link.id)}
-              >
-                {link.label}
-              </button>
-            );
-          })}
+          {visibleLinks.map((link) => (
+            <button
+              key={link.id}
+              type="button"
+              className={active === link.id ? "active" : ""}
+              aria-current={active === link.id ? "page" : undefined}
+              onClick={() => onNavigate(link.id)}
+            >
+              {link.label}
+            </button>
+          ))}
         </nav>
 
         <div className="player-terminal-nav-menu">
+          {!back && (
+            <button
+              type="button"
+              className="player-terminal-nav-record"
+              aria-label="Record a video"
+              title="Record a video"
+              onClick={onRecord}
+            >
+              <span className="player-terminal-nav-record-dot" aria-hidden="true" />
+            </button>
+          )}
           {guest ? (
             <button className="player-portal-ghost" type="button" onClick={onSignIn}>
               Sign in

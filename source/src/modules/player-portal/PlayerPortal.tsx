@@ -1,14 +1,18 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import "./playerPortal.css";
 import { apiFetch } from "../auth/apiFetch";
 import { signOut, type Session } from "../auth/session";
-import {
-  closePlayerBooking,
-  isPlayerBookingMode,
-  openPlayerBooking,
-  slotDate,
-} from "../shared/bookingHandoff";
+import { isPlayerBookingMode, slotDate } from "../shared/bookingHandoff";
 import {
   PlayerTerminalNav,
   type PlayerTerminalDestination,
@@ -23,6 +27,7 @@ import type {
   VideoWorkspaceNavigationContext,
   VideoWorkspaceSaveResult,
 } from "../video-analysis/VideoWorkspace";
+import { deleteGuestNote, listGuestNotes, saveGuestNote, type GuestNote } from "./guestNotesStore";
 
 // The player's own app. It is chosen by the entry point from the session role,
 // not by hostname any more, and it never renders a login form of its own --
@@ -34,8 +39,9 @@ const VideoAnalysisPage = lazy(() =>
 );
 
 // The booking widget is the same component the public site embeds -- one
-// booking flow, not a player-shaped copy of it. It renders inside the terminal
-// here, so the navigation bar stays where the player left it.
+// booking flow, not a player-shaped copy of it. It renders inline inside the
+// Lessons tab's "Book" subtab now, so the navigation bar and the rest of the
+// terminal stay exactly where the player left them.
 const BookingWidget = lazy(() => import("../../App"));
 
 type Booking = {
@@ -58,7 +64,7 @@ type Note = {
   updatedAt?: string;
 };
 
-type PortalTab = "lessons" | "book" | "notes" | "videos";
+type PortalTab = "home" | "lessons" | "notes" | "videos";
 
 type CaddyAccess = {
   appUrl: string;
@@ -126,6 +132,11 @@ function formatDate(value?: string) {
   return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+function formatDuration(seconds: number) {
+  const total = Math.max(0, Math.round(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
 export type PlayerPortalProps = {
   session: Session;
   onSignedOut: () => void;
@@ -135,17 +146,18 @@ export type PlayerPortalProps = {
 };
 
 export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: PlayerPortalProps) {
-  // No account yet. The terminal still opens -- the video tool works right
-  // away -- but nothing that belongs to an account (lessons, booking, notes,
-  // Caddy) can load without one, so those tabs redirect to sign-in instead.
+  // No account yet. The terminal still opens -- the video tool and personal
+  // notes both work right away -- but Lessons (and booking with it) has
+  // nothing to show without one, so it isn't in the nav at all for a guest.
   const isGuest = session.role !== "player";
 
-  // Booking is a view of the terminal alongside the tabs, and it is the one
-  // view the URL can name -- so a booking link opens straight into it. A
-  // guest never gets there: a shared booking link should ask them to sign in,
-  // not quietly drop them into a booking flow with no account behind it.
-  const [booking, setBooking] = useState(() => !isGuest && isPlayerBookingMode());
-  const [tab, setTab] = useState<PortalTab>(isGuest ? "videos" : "lessons");
+  // The deep-link check is still real (a push notification can land straight
+  // on booking) -- it now just selects Lessons + the Book subtab instead of
+  // the old separate full-screen mode.
+  const [tab, setTab] = useState<PortalTab>(() => (!isGuest && isPlayerBookingMode() ? "lessons" : "home"));
+  const [lessonsSubtab, setLessonsSubtab] = useState<"book" | "upcoming">(() =>
+    !isGuest && isPlayerBookingMode() ? "book" : "upcoming",
+  );
   const [playerEmail, setPlayerEmail] = useState(session.email);
   const [playerName, setPlayerName] = useState(session.name);
   const [playerId, setPlayerId] = useState("");
@@ -169,6 +181,19 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [sendProgress, setSendProgress] = useState<Record<string, number>>({});
   const [recording, setRecording] = useState(false);
   const [openVideoId, setOpenVideoId] = useState("");
+
+  // A guest's own notes -- local only, same on-device-first philosophy as
+  // their videos. Separate from `notes` above, which is the coach-authored
+  // list a signed-in player gets from the server.
+  const [guestNotes, setGuestNotes] = useState<GuestNote[]>(() => (isGuest ? listGuestNotes() : []));
+  const [addingNote, setAddingNote] = useState(false);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDraftTitle, setNoteDraftTitle] = useState("");
+  const [noteDraftBody, setNoteDraftBody] = useState("");
+
+  useEffect(() => {
+    if (isGuest) setGuestNotes(listGuestNotes());
+  }, [isGuest]);
 
   const loadProfile = useCallback(async () => {
     // A guest has no account to load one for, and 401 here would otherwise
@@ -264,39 +289,15 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     window.open(caddy.appUrl, "_blank", "noopener,noreferrer");
   }, [caddy]);
 
-  const navigateTerminal = useCallback(
-    (destination: PlayerTerminalDestination) => {
-      setRecording(false);
-      setOpenVideoId("");
-      // A guest gets the tab, not a bounce to the login screen -- the locked
-      // section it renders is what has the "Sign in" button on it.
-      if (isGuest && destination !== "videos") {
-        closePlayerBooking();
-        setBooking(false);
-        setTab(destination as PortalTab);
-        return;
-      }
-      // Booking is part of the terminal, not a separate front door. The session
-      // travels with the player, so nothing is copied into localStorage and no
-      // personal data goes into the URL -- booking asks the server who this is.
-      if (destination === "book") {
-        openPlayerBooking();
-        setBooking(true);
-        return;
-      }
-      closePlayerBooking();
-      setBooking(false);
-      setTab(destination);
-    },
-    [isGuest],
-  );
+  const navigateTerminal = useCallback((destination: PlayerTerminalDestination) => {
+    setRecording(false);
+    setOpenVideoId("");
+    setTab(destination);
+  }, []);
 
-  // The address bar and the terminal have to agree, or Back leaves a player
-  // looking at booking on a URL that says otherwise.
-  useEffect(() => {
-    const sync = () => setBooking(isPlayerBookingMode());
-    window.addEventListener("popstate", sync);
-    return () => window.removeEventListener("popstate", sync);
+  const startRecording = useCallback(() => {
+    setOpenVideoId("");
+    setRecording(true);
   }, []);
 
   const sendToCoach = useCallback(
@@ -359,6 +360,40 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     [sendToCoach],
   );
 
+  const startGuestNoteDraft = useCallback(() => {
+    setEditingNoteId(null);
+    setNoteDraftTitle("");
+    setNoteDraftBody("");
+    setAddingNote(true);
+  }, []);
+
+  const editGuestNoteDraft = useCallback((note: GuestNote) => {
+    setEditingNoteId(note.id);
+    setNoteDraftTitle(note.title);
+    setNoteDraftBody(note.body);
+    setAddingNote(true);
+  }, []);
+
+  const cancelGuestNoteDraft = useCallback(() => {
+    setAddingNote(false);
+    setEditingNoteId(null);
+  }, []);
+
+  const handleSaveGuestNote = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!noteDraftTitle.trim() && !noteDraftBody.trim()) return;
+      setGuestNotes(saveGuestNote({ id: editingNoteId ?? undefined, title: noteDraftTitle, body: noteDraftBody }));
+      setAddingNote(false);
+      setEditingNoteId(null);
+    },
+    [editingNoteId, noteDraftTitle, noteDraftBody],
+  );
+
+  const handleDeleteGuestNote = useCallback((id: string) => {
+    setGuestNotes(deleteGuestNote(id));
+  }, []);
+
   const now = Date.now();
   const upcomingBookings = useMemo(
     () =>
@@ -391,19 +426,20 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const nextLesson = upcomingBookings[0] || null;
   const laterLessons = upcomingBookings.slice(1);
 
+  const mostRecentVideo = useMemo(() => {
+    if (!savedVideos.length) return null;
+    return [...savedVideos].sort((a, b) =>
+      String(b.capturedAt || b.createdAt || "").localeCompare(String(a.capturedAt || a.createdAt || "")),
+    )[0];
+  }, [savedVideos]);
+
   const wasGuestRef = useRef(isGuest);
   useEffect(() => {
-    if (wasGuestRef.current && !isGuest) setTab("lessons");
+    // Lessons doesn't exist for a guest any more -- if a sign-out happens
+    // while sitting on it, land back on Home instead of rendering a dead tab.
+    if (!wasGuestRef.current && isGuest && tab === "lessons") setTab("home");
     wasGuestRef.current = isGuest;
-  }, [isGuest]);
-
-  const guestLockedTabs = useMemo(
-    () =>
-      isGuest
-        ? new Set<PlayerTerminalDestination>(["lessons", "book", "notes"])
-        : undefined,
-    [isGuest],
-  );
+  }, [isGuest, tab]);
 
   // Every screen in the terminal wears the same bar, including the ones that
   // take the whole viewport.
@@ -416,24 +452,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       back={back}
       onNavigate={navigateTerminal}
       onSignOut={() => void handleSignOut()}
+      onRecord={startRecording}
       guest={isGuest}
       onSignIn={onRequestSignIn}
-      lockedDestinations={guestLockedTabs}
     />
   );
-
-  if (booking) {
-    return (
-      <div className="player-terminal">
-        {renderNav("book")}
-        <div className="player-terminal-booking">
-          <Suspense fallback={<div className="player-portal-card">Loading booking…</div>}>
-            <BookingWidget bookingEntry="player" />
-          </Suspense>
-        </div>
-      </div>
-    );
-  }
 
   if (recording || openVideoId) {
     return (
@@ -499,19 +522,89 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
             </div>
           ) : (
             <>
-              {tab === "lessons" && isGuest && (
-                <section className="player-portal-section">
-                  <h2>Lessons</h2>
-                  <p className="player-portal-empty">
-                    Sign in to see your upcoming lessons and book new ones.
-                  </p>
-                  <button
-                    className="player-portal-primary"
-                    type="button"
-                    onClick={() => onRequestSignIn?.()}
-                  >
-                    Sign in
-                  </button>
+              {tab === "home" && (
+                <section className="player-portal-home">
+                  <div className="player-portal-home-grid">
+                    {isGuest ? (
+                      <>
+                        <button
+                          type="button"
+                          className="player-portal-home-card"
+                          onClick={() => navigateTerminal("notes")}
+                        >
+                          <span className="player-portal-home-card-title">Notes</span>
+                          <span className="player-portal-home-card-sub">Quick notes for yourself</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="player-portal-home-card"
+                          onClick={() => navigateTerminal("videos")}
+                        >
+                          <span className="player-portal-home-card-title">Videos</span>
+                          <span className="player-portal-home-card-sub">
+                            {savedVideos.length ? `${savedVideos.length} saved` : "Saved on this device"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="player-portal-home-card player-portal-home-card-wide"
+                          onClick={startRecording}
+                        >
+                          <span className="player-portal-home-card-title">Record a video</span>
+                          <span className="player-portal-home-card-sub">Opens your camera</span>
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="player-portal-home-card"
+                          onClick={() => navigateTerminal("lessons")}
+                        >
+                          <span className="player-portal-home-card-title">Next lesson</span>
+                          <span className="player-portal-home-card-sub">
+                            {profileLoading && !bookings.length
+                              ? "Loading…"
+                              : nextLesson
+                                ? formatBookingWhen(nextLesson)
+                                : "No upcoming lessons"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="player-portal-home-card"
+                          onClick={() => navigateTerminal("notes")}
+                        >
+                          <span className="player-portal-home-card-title">Notes</span>
+                          <span className="player-portal-home-card-sub">
+                            {sortedNotes.length
+                              ? `${sortedNotes.length} lesson note${sortedNotes.length === 1 ? "" : "s"}`
+                              : "Lesson notes"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="player-portal-home-card"
+                          onClick={() => navigateTerminal("videos")}
+                        >
+                          <span className="player-portal-home-card-title">Videos</span>
+                          <span className="player-portal-home-card-sub">
+                            {mostRecentVideo
+                              ? `Last saved ${formatDate(mostRecentVideo.capturedAt || mostRecentVideo.createdAt)}`
+                              : "No videos yet"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="player-portal-home-card player-portal-home-card-wide"
+                          onClick={startRecording}
+                        >
+                          <span className="player-portal-home-card-title">Record a video</span>
+                          <span className="player-portal-home-card-sub">Opens your camera</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </section>
               )}
 
@@ -533,32 +626,60 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     ) : (
                       <p className="player-portal-empty">No upcoming lessons booked.</p>
                     )}
-                    <button
-                      className="player-portal-primary"
-                      type="button"
-                      onClick={() => navigateTerminal("book")}
-                    >
-                      Book a lesson
-                    </button>
                   </section>
 
-                  {laterLessons.length > 0 && (
-                    <section className="player-portal-section">
-                      <h2>Upcoming lessons</h2>
-                      <ul className="player-portal-list">{laterLessons.map(renderBooking)}</ul>
-                    </section>
-                  )}
+                  <div className="player-portal-pill-toggle" role="tablist" aria-label="Lessons view">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={lessonsSubtab === "book"}
+                      className={lessonsSubtab === "book" ? "active" : ""}
+                      onClick={() => setLessonsSubtab("book")}
+                    >
+                      Book
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={lessonsSubtab === "upcoming"}
+                      className={lessonsSubtab === "upcoming" ? "active" : ""}
+                      onClick={() => setLessonsSubtab("upcoming")}
+                    >
+                      Upcoming
+                    </button>
+                  </div>
 
-                  {pastBookings.length > 0 && (
-                    <details className="player-portal-past">
-                      <summary>Past lessons ({pastBookings.length})</summary>
-                      <ul className="player-portal-list">{pastBookings.slice(0, 20).map(renderBooking)}</ul>
-                    </details>
+                  {lessonsSubtab === "book" ? (
+                    <div className="player-portal-inline-booking">
+                      <Suspense fallback={<p className="player-portal-empty">Loading booking…</p>}>
+                        <BookingWidget bookingEntry="player" />
+                      </Suspense>
+                    </div>
+                  ) : (
+                    <>
+                      {laterLessons.length > 0 && (
+                        <section className="player-portal-section">
+                          <h2>Upcoming lessons</h2>
+                          <ul className="player-portal-list">{laterLessons.map(renderBooking)}</ul>
+                        </section>
+                      )}
+
+                      {pastBookings.length > 0 && (
+                        <details className="player-portal-past">
+                          <summary>Past lessons ({pastBookings.length})</summary>
+                          <ul className="player-portal-list">{pastBookings.slice(0, 20).map(renderBooking)}</ul>
+                        </details>
+                      )}
+
+                      {!laterLessons.length && !pastBookings.length && !profileLoading && (
+                        <p className="player-portal-empty">No other lessons yet.</p>
+                      )}
+                    </>
                   )}
 
                   {/* Caddy is its own product with its own billing. The portal
                       shows where the player stands and opens the door --
-                      nothing more, and only from the home route. */}
+                      nothing more, and only from the Lessons tab. */}
                   {caddy?.appUrl && (
                     <section className="player-portal-section player-portal-caddy">
                       <h2>Clarity Caddy</h2>
@@ -573,31 +694,80 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                 </>
               )}
 
-              {tab === "book" && isGuest && (
-                <section className="player-portal-section">
-                  <h2>Book a lesson</h2>
-                  <p className="player-portal-empty">Sign in to book a lesson with your coach.</p>
-                  <button
-                    className="player-portal-primary"
-                    type="button"
-                    onClick={() => onRequestSignIn?.()}
-                  >
-                    Sign in
-                  </button>
-                </section>
-              )}
-
               {tab === "notes" && isGuest && (
                 <section className="player-portal-section">
-                  <h2>Lesson notes</h2>
-                  <p className="player-portal-empty">Sign in to see notes your coach has left for you.</p>
-                  <button
-                    className="player-portal-primary"
-                    type="button"
-                    onClick={() => onRequestSignIn?.()}
-                  >
-                    Sign in
-                  </button>
+                  <h2>Notes</h2>
+                  <p className="player-portal-lead">Quick notes for yourself. Saved on this device.</p>
+
+                  {addingNote ? (
+                    <form className="player-portal-note-form" onSubmit={handleSaveGuestNote}>
+                      <label className="player-portal-field">
+                        <span>Title</span>
+                        <input
+                          value={noteDraftTitle}
+                          onChange={(event) => setNoteDraftTitle(event.target.value)}
+                          placeholder="Title"
+                        />
+                      </label>
+                      <label className="player-portal-field">
+                        <span>Note</span>
+                        <textarea
+                          value={noteDraftBody}
+                          onChange={(event) => setNoteDraftBody(event.target.value)}
+                          rows={4}
+                          placeholder="Write a note…"
+                        />
+                      </label>
+                      <div className="player-portal-note-form-actions">
+                        <button className="player-portal-ghost" type="button" onClick={cancelGuestNoteDraft}>
+                          Cancel
+                        </button>
+                        <button
+                          className="player-portal-primary"
+                          type="submit"
+                          disabled={!noteDraftTitle.trim() && !noteDraftBody.trim()}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <button className="player-portal-primary" type="button" onClick={startGuestNoteDraft}>
+                      Add a note
+                    </button>
+                  )}
+
+                  {guestNotes.length ? (
+                    <ul className="player-portal-list">
+                      {guestNotes.map((note) => (
+                        <li className="player-portal-note" key={note.id}>
+                          <div className="player-portal-note-head">
+                            <strong>{note.title || "Note"}</strong>
+                            {formatDate(note.updatedAt) && <span>{formatDate(note.updatedAt)}</span>}
+                          </div>
+                          {note.body && <p>{note.body}</p>}
+                          <div className="player-portal-note-actions">
+                            <button
+                              className="player-portal-ghost"
+                              type="button"
+                              onClick={() => editGuestNoteDraft(note)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="player-portal-ghost"
+                              type="button"
+                              onClick={() => handleDeleteGuestNote(note.id)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    !addingNote && <p className="player-portal-empty">No notes yet.</p>
+                  )}
                 </section>
               )}
 
@@ -642,7 +812,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       <button
                         className="player-portal-primary"
                         type="button"
-                        onClick={() => setRecording(true)}
+                        onClick={startRecording}
                       >
                         Record a video
                       </button>
@@ -661,6 +831,22 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             const sent = item.cloud?.status === "ready" || item.cloud?.status === "imported";
                             return (
                               <li className="player-portal-video" key={item.savedVideoId}>
+                                <div className="player-portal-video-thumb" aria-hidden="true">
+                                  {item.thumbnailDataUrl ? (
+                                    <img
+                                      src={item.thumbnailDataUrl}
+                                      alt=""
+                                      className="player-portal-video-thumb-img"
+                                    />
+                                  ) : (
+                                    <span className="player-portal-video-thumb-play" />
+                                  )}
+                                  {item.source.duration != null && (
+                                    <span className="player-portal-video-thumb-duration">
+                                      {formatDuration(item.source.duration)}
+                                    </span>
+                                  )}
+                                </div>
                                 <div className="player-portal-video-main">
                                   <strong>{item.title || "Swing video"}</strong>
                                   <span>{formatDate(item.capturedAt || item.createdAt)}</span>
