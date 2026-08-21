@@ -2911,26 +2911,34 @@ export function VideoWorkspace({
             leftOverlayDimensions,
             setLeftOverlayDimensions
           )}
-          <div className="video-intake-actions">
-            <button
-              type="button"
-              className="video-tool-btn"
-              aria-label="Record clip"
-              onClick={() => void openLiveRecording("left")}
-            >
-              <IconRecord />
-              <span className="video-tool-tip" aria-hidden="true">
-                Record clip
-              </span>
-            </button>
-            <button
-              type="button"
-              className="upload-button"
-              onClick={() => void openLiveRecording("left")}
-            >
-              Record from camera
-            </button>
-          </div>
+          {/* A player is always on their own phone -- tapping the video card
+              above already opens iOS's native camera/photo sheet, so a
+              second "record from camera" control here is just a duplicate
+              tap target. Coaches keep it: this is how they pull in a shot
+              from an external or desktop-attached camera, which has no
+              native picker to fall back on. */}
+          {!isPlayerVariant && (
+            <div className="video-intake-actions">
+              <button
+                type="button"
+                className="video-tool-btn"
+                aria-label="Record clip"
+                onClick={() => void openLiveRecording("left")}
+              >
+                <IconRecord />
+                <span className="video-tool-tip" aria-hidden="true">
+                  Record clip
+                </span>
+              </button>
+              <button
+                type="button"
+                className="upload-button"
+                onClick={() => void openLiveRecording("left")}
+              >
+                Record from camera
+              </button>
+            </div>
+          )}
         </section>
       ) : null}
 
