@@ -41,11 +41,20 @@ type PreferencesPlugin = {
 // The import is dynamic and NATIVE is a build-time constant, so the plugin is
 // dropped from the web bundle entirely rather than shipped and never called.
 // A missing plugin falls back to localStorage rather than failing sign-in.
-async function preferences(): Promise<PreferencesPlugin | null> {
+//
+// The plugin object itself must never be `return`ed straight out of an async
+// function. Capacitor's plugin objects are Proxies that treat every property
+// access as a native method call -- and returning a value from an async
+// function makes the engine probe it for a `.then` property to see if it is
+// itself a promise. That probe reads as a call to a native method named
+// "then", which does not exist, and the plugin rejects with exactly that:
+// `"Preferences.then() is not implemented on ios"`. Boxing it in a plain
+// object keeps it away from that check.
+async function preferences(): Promise<{ plugin: PreferencesPlugin } | null> {
   if (!NATIVE) return null;
   try {
     const module = await import("@capacitor/preferences");
-    return module.Preferences as PreferencesPlugin;
+    return { plugin: module.Preferences as PreferencesPlugin };
   } catch {
     return null;
   }
@@ -90,12 +99,12 @@ function withTimeout<T>(promise: Promise<T>, fallback: () => T): Promise<T> {
 /** Read the stored token into memory. Await this before the first API call. */
 export async function loadAuthToken(): Promise<void> {
   if (!NATIVE) return;
-  const store = await preferences();
-  if (!store) {
+  const boxed = await preferences();
+  if (!boxed) {
     token = window.localStorage.getItem(TOKEN_KEY) ?? "";
     return;
   }
-  const result = await withTimeout(store.get({ key: TOKEN_KEY }), () => ({ value: null }));
+  const result = await withTimeout(boxed.plugin.get({ key: TOKEN_KEY }), () => ({ value: null }));
   token = result.value ?? "";
 }
 
@@ -105,16 +114,16 @@ export async function setAuthToken(next: string): Promise<void> {
   // is at risk, not signing in right now.
   token = next;
   if (!NATIVE) return;
-  const store = await preferences();
-  if (store) await withTimeout(store.set({ key: TOKEN_KEY, value: next }), () => undefined);
+  const boxed = await preferences();
+  if (boxed) await withTimeout(boxed.plugin.set({ key: TOKEN_KEY, value: next }), () => undefined);
   else window.localStorage.setItem(TOKEN_KEY, next);
 }
 
 export async function clearAuthToken(): Promise<void> {
   token = "";
   if (!NATIVE) return;
-  const store = await preferences();
-  if (store) await withTimeout(store.remove({ key: TOKEN_KEY }), () => undefined);
+  const boxed = await preferences();
+  if (boxed) await withTimeout(boxed.plugin.remove({ key: TOKEN_KEY }), () => undefined);
   else window.localStorage.removeItem(TOKEN_KEY);
 }
 
