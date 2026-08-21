@@ -129,13 +129,23 @@ function formatDate(value?: string) {
 export type PlayerPortalProps = {
   session: Session;
   onSignedOut: () => void;
+  /** Present only for a guest session -- opens the login screen. There is
+   *  nothing to call when a real player is signed in, so it is optional. */
+  onRequestSignIn?: () => void;
 };
 
-export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps) {
+export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: PlayerPortalProps) {
+  // No account yet. The terminal still opens -- the video tool works right
+  // away -- but nothing that belongs to an account (lessons, booking, notes,
+  // Caddy) can load without one, so those tabs redirect to sign-in instead.
+  const isGuest = session.role !== "player";
+
   // Booking is a view of the terminal alongside the tabs, and it is the one
-  // view the URL can name -- so a booking link opens straight into it.
-  const [booking, setBooking] = useState(isPlayerBookingMode);
-  const [tab, setTab] = useState<PortalTab>("lessons");
+  // view the URL can name -- so a booking link opens straight into it. A
+  // guest never gets there: a shared booking link should ask them to sign in,
+  // not quietly drop them into a booking flow with no account behind it.
+  const [booking, setBooking] = useState(() => !isGuest && isPlayerBookingMode());
+  const [tab, setTab] = useState<PortalTab>(isGuest ? "videos" : "lessons");
   const [playerEmail, setPlayerEmail] = useState(session.email);
   const [playerName, setPlayerName] = useState(session.name);
   const [playerId, setPlayerId] = useState("");
@@ -161,6 +171,13 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
   const [openVideoId, setOpenVideoId] = useState("");
 
   const loadProfile = useCallback(async () => {
+    // A guest has no account to load one for, and 401 here would otherwise
+    // read as "signed out" and bounce them off a screen they never signed
+    // into in the first place.
+    if (isGuest) {
+      setProfileLoading(false);
+      return;
+    }
     setProfileLoading(true);
     setProfileError("");
     try {
@@ -186,7 +203,7 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
     } finally {
       setProfileLoading(false);
     }
-  }, [onSignedOut]);
+  }, [isGuest, onSignedOut]);
 
   useEffect(() => {
     void loadProfile();
@@ -196,6 +213,7 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
   // asks where it is and what this player has, and stays usable if it cannot
   // be reached at all.
   useEffect(() => {
+    if (isGuest) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -221,7 +239,7 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isGuest]);
 
   const refreshSavedVideos = useCallback(async () => {
     if (!savedVideoLibrary) return;
@@ -248,6 +266,10 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
 
   const navigateTerminal = useCallback(
     (destination: PlayerTerminalDestination) => {
+      if (isGuest && destination !== "videos") {
+        onRequestSignIn?.();
+        return;
+      }
       setRecording(false);
       setOpenVideoId("");
       // Booking is part of the terminal, not a separate front door. The session
@@ -262,7 +284,7 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
       setBooking(false);
       setTab(destination);
     },
-    [],
+    [isGuest, onRequestSignIn],
   );
 
   // The address bar and the terminal have to agree, or Back leaves a player
@@ -275,6 +297,10 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
 
   const sendToCoach = useCallback(
     async (savedVideoId: string) => {
+      if (isGuest) {
+        onRequestSignIn?.();
+        return;
+      }
       if (!savedVideoLibrary || sendingIds.has(savedVideoId)) return;
       setVideoError("");
       setSendingIds((current) => new Set(current).add(savedVideoId));
@@ -299,7 +325,7 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
         });
       }
     },
-    [refreshSavedVideos, savedVideoLibrary, sendingIds],
+    [isGuest, onRequestSignIn, refreshSavedVideos, savedVideoLibrary, sendingIds],
   );
 
   const closeWorkspace = useCallback(
@@ -361,6 +387,14 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
   const nextLesson = upcomingBookings[0] || null;
   const laterLessons = upcomingBookings.slice(1);
 
+  const guestLockedTabs = useMemo(
+    () =>
+      isGuest
+        ? new Set<PlayerTerminalDestination>(["lessons", "book", "notes"])
+        : undefined,
+    [isGuest],
+  );
+
   // Every screen in the terminal wears the same bar, including the ones that
   // take the whole viewport.
   const renderNav = (
@@ -372,6 +406,9 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
       back={back}
       onNavigate={navigateTerminal}
       onSignOut={() => void handleSignOut()}
+      guest={isGuest}
+      onSignIn={onRequestSignIn}
+      lockedDestinations={guestLockedTabs}
     />
   );
 
@@ -426,8 +463,17 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
       {renderNav(tab)}
       <div className="player-portal">
         <div className="player-portal-card">
-          <h1>{playerName ? `Hi, ${playerName.split(/\s+/)[0]}` : "Your profile"}</h1>
+          <h1>{isGuest ? "Welcome" : playerName ? `Hi, ${playerName.split(/\s+/)[0]}` : "Your profile"}</h1>
           {playerEmail && <p className="player-portal-lead">{playerEmail}</p>}
+
+          {isGuest && (
+            <div className="player-portal-guest-banner">
+              <p>Browsing as a guest -- your videos stay on this device until you sign in.</p>
+              <button className="player-portal-primary" type="button" onClick={() => onRequestSignIn?.()}>
+                Sign in
+              </button>
+            </div>
+          )}
 
           {profileError ? (
             <div className="player-portal-error" role="alert">
@@ -584,7 +630,13 @@ export default function PlayerPortal({ session, onSignedOut }: PlayerPortalProps
                                     disabled={sending || sent}
                                     onClick={() => void sendToCoach(item.savedVideoId)}
                                   >
-                                    {sent ? "Sent" : sending ? "Sending…" : "Send to coach"}
+                                    {sent
+                                      ? "Sent"
+                                      : sending
+                                        ? "Sending…"
+                                        : isGuest
+                                          ? "Sign in to send"
+                                          : "Send to coach"}
                                   </button>
                                 </div>
                               </li>

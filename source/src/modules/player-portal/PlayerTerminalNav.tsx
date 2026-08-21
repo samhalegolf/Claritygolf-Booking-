@@ -30,6 +30,12 @@ export type PlayerTerminalNavProps = {
   /** Present only inside a child workspace, e.g. the video workspace. */
   back?: { label: string; onBack: () => void } | null;
   onSignOut: () => void;
+  /** Tabs that need a real session. Still tappable -- onNavigate decides what
+   *  happens -- this is just what tells the player a tab needs signing in for. */
+  lockedDestinations?: ReadonlySet<PlayerTerminalDestination>;
+  /** Browsing without a session: swaps the sign-out control for a sign-in one. */
+  guest?: boolean;
+  onSignIn?: () => void;
 };
 
 export function PlayerTerminalNav({
@@ -37,6 +43,9 @@ export function PlayerTerminalNav({
   onNavigate,
   back,
   onSignOut,
+  lockedDestinations,
+  guest,
+  onSignIn,
 }: PlayerTerminalNavProps) {
   return (
     <header className="player-terminal-nav">
@@ -60,23 +69,35 @@ export function PlayerTerminalNav({
         </div>
 
         <nav className="player-terminal-nav-links" aria-label="Player Terminal">
-          {NAV_LINKS.map((link) => (
-            <button
-              key={link.id}
-              type="button"
-              className={active === link.id ? "active" : ""}
-              aria-current={active === link.id ? "page" : undefined}
-              onClick={() => onNavigate(link.id)}
-            >
-              {link.label}
-            </button>
-          ))}
+          {NAV_LINKS.map((link) => {
+            const locked = lockedDestinations?.has(link.id) ?? false;
+            return (
+              <button
+                key={link.id}
+                type="button"
+                className={[active === link.id ? "active" : "", locked ? "locked" : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+                aria-current={active === link.id ? "page" : undefined}
+                title={locked ? "Sign in to use this" : undefined}
+                onClick={() => onNavigate(link.id)}
+              >
+                {link.label}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="player-terminal-nav-menu">
-          <button className="player-portal-ghost" type="button" onClick={onSignOut}>
-            Sign out
-          </button>
+          {guest ? (
+            <button className="player-portal-ghost" type="button" onClick={onSignIn}>
+              Sign in
+            </button>
+          ) : (
+            <button className="player-portal-ghost" type="button" onClick={onSignOut}>
+              Sign out
+            </button>
+          )}
         </div>
       </div>
     </header>

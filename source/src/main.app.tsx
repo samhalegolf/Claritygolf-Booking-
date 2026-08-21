@@ -56,6 +56,7 @@ function CoachNotice({ onSignOut }: { onSignOut: () => void }) {
 
 function Root() {
   const [session, setSession] = useState<Session | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
 
   useEffect(() => {
     let settled = false;
@@ -106,6 +107,11 @@ function Root() {
     void signOut().then(() => setSession(guestSession));
   }, []);
 
+  const handleSignedIn = useCallback((next: Session) => {
+    setSession(next);
+    setShowLogin(false);
+  }, []);
+
   if (!session) return <Splash label="Checking session…" />;
 
   if (session.role === "player") {
@@ -118,7 +124,22 @@ function Root() {
 
   if (session.role === "coach") return <CoachNotice onSignOut={handleCoachSignOut} />;
 
-  return <LoginScreen onSignedIn={setSession} />;
+  // Guest: nothing stored yet, but the terminal opens anyway -- the video
+  // tool works right away and signing in is one tap from any locked tab,
+  // not a wall in front of the whole app.
+  if (showLogin) {
+    return <LoginScreen onSignedIn={handleSignedIn} onCancel={() => setShowLogin(false)} />;
+  }
+
+  return (
+    <Suspense fallback={<Splash label="Loading…" />}>
+      <PlayerPortal
+        session={session}
+        onSignedOut={handleSessionLost}
+        onRequestSignIn={() => setShowLogin(true)}
+      />
+    </Suspense>
+  );
 }
 
 document.documentElement.classList.add("native-app");

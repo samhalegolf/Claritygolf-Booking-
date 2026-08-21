@@ -56,9 +56,12 @@ function clearQueryString() {
 
 export type LoginScreenProps = {
   onSignedIn: (session: Session) => void;
+  /** Present only when the caller can send a guest back to browsing without
+   *  signing in -- the standalone web login has nowhere to send them back to. */
+  onCancel?: () => void;
 };
 
-export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
+export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) {
   const [themeMode] = useState(storedThemeMode);
   const [brandStyle] = useState(storedBrandStyle);
 
@@ -418,6 +421,12 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
             }}
           >
             Back to sign in
+          </button>
+        )}
+
+        {mode === "login" && onCancel && (
+          <button className="text-button" type="button" onClick={onCancel}>
+            Continue without signing in
           </button>
         )}
       </form>

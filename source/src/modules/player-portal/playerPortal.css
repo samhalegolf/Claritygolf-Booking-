@@ -178,6 +178,29 @@
   font-size: 13px;
 }
 
+.player-portal-guest-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--pt-border);
+  border-radius: 9px;
+  background: var(--pt-surface-soft);
+}
+
+.player-portal-guest-banner p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--pt-text-soft);
+}
+
+.player-portal-guest-banner .player-portal-primary {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 0 16px;
+}
+
 .player-portal-section {
   display: flex;
   flex-direction: column;
@@ -482,6 +505,10 @@
 .player-terminal-nav-links button.active {
   background: var(--pt-active);
   color: var(--pt-text);
+}
+
+.player-terminal-nav-links button.locked {
+  opacity: 0.55;
 }
 
 .player-terminal-nav-menu {
