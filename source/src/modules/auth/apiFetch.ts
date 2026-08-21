@@ -51,27 +51,62 @@ async function preferences(): Promise<PreferencesPlugin | null> {
   }
 }
 
+// The Preferences bridge call has been observed to neither resolve nor
+// reject on some simulator/cold-start states -- it just goes silent. Every
+// call into it goes through here so a stuck native call can never hang the
+// caller (loading a session, or saving one right after a successful login)
+// forever. On timeout or rejection it falls back to whatever the caller
+// decides is safe to assume.
+const NATIVE_STORAGE_TIMEOUT_MS = 3000;
+
+function withTimeout<T>(promise: Promise<T>, fallback: () => T): Promise<T> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(fallback());
+      }
+    }, NATIVE_STORAGE_TIMEOUT_MS);
+    promise.then(
+      (value) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        }
+      },
+      () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(fallback());
+        }
+      },
+    );
+  });
+}
+
 /** Read the stored token into memory. Await this before the first API call. */
 export async function loadAuthToken(): Promise<void> {
   if (!NATIVE) return;
-  try {
-    const store = await preferences();
-    token = store
-      ? ((await store.get({ key: TOKEN_KEY })).value ?? "")
-      : (window.localStorage.getItem(TOKEN_KEY) ?? "");
-  } catch {
-    // A plugin bridge hiccup (fresh install, cold start) should not take the
-    // whole session check down with it -- treat it as no token and let the
-    // player sign in again rather than hang forever.
-    token = "";
+  const store = await preferences();
+  if (!store) {
+    token = window.localStorage.getItem(TOKEN_KEY) ?? "";
+    return;
   }
+  const result = await withTimeout(store.get({ key: TOKEN_KEY }), () => ({ value: null }));
+  token = result.value ?? "";
 }
 
 export async function setAuthToken(next: string): Promise<void> {
+  // Set in memory first: even if native storage never answers, the rest of
+  // this launch can still use the token. Only persisting it for next launch
+  // is at risk, not signing in right now.
   token = next;
   if (!NATIVE) return;
   const store = await preferences();
-  if (store) await store.set({ key: TOKEN_KEY, value: next });
+  if (store) await withTimeout(store.set({ key: TOKEN_KEY, value: next }), () => undefined);
   else window.localStorage.setItem(TOKEN_KEY, next);
 }
 
@@ -79,7 +114,7 @@ export async function clearAuthToken(): Promise<void> {
   token = "";
   if (!NATIVE) return;
   const store = await preferences();
-  if (store) await store.remove({ key: TOKEN_KEY });
+  if (store) await withTimeout(store.remove({ key: TOKEN_KEY }), () => undefined);
   else window.localStorage.removeItem(TOKEN_KEY);
 }
 
