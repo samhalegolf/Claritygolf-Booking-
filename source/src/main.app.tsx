@@ -55,22 +55,16 @@ function CoachNotice({ onSignOut }: { onSignOut: () => void }) {
 }
 
 function Root() {
-  const [session, setSession] = useState<Session | null>(null);
+  // Guest is the default, not a loading state -- the terminal has something
+  // useful to show with no session at all, so there is nothing worth blocking
+  // the first paint on. This effect quietly upgrades to a real session if the
+  // device has one stored; if it never resolves, the player just stays a
+  // guest instead of staring at a spinner.
+  const [session, setSession] = useState<Session>(guestSession);
   const [showLogin, setShowLogin] = useState(false);
 
   useEffect(() => {
-    let settled = false;
-
-    // The Preferences plugin call below is not guaranteed to reject when
-    // something is wrong -- on some simulator/bridge states it just never
-    // answers at all. A splash screen with no way out is worse than a wrong
-    // guess, so force a decision once this has taken too long.
-    const giveUp = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        setSession(guestSession);
-      }
-    }, 4000);
+    let cancelled = false;
 
     void (async () => {
       try {
@@ -79,25 +73,14 @@ function Root() {
         // again on every launch.
         await loadAuthToken();
         const next = await fetchSession();
-        if (!settled) {
-          settled = true;
-          clearTimeout(giveUp);
-          setSession(next);
-        }
+        if (!cancelled) setSession(next);
       } catch {
-        // Anything going wrong here (native storage, a bad response) should
-        // land on the login screen, not leave the splash spinning forever.
-        if (!settled) {
-          settled = true;
-          clearTimeout(giveUp);
-          setSession(guestSession);
-        }
+        // Already defaulted to guest above -- nothing else to do.
       }
     })();
 
     return () => {
-      settled = true;
-      clearTimeout(giveUp);
+      cancelled = true;
     };
   }, []);
 
@@ -111,8 +94,6 @@ function Root() {
     setSession(next);
     setShowLogin(false);
   }, []);
-
-  if (!session) return <Splash label="Checking session…" />;
 
   if (session.role === "player") {
     return (

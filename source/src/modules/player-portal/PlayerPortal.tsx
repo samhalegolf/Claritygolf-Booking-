@@ -58,7 +58,7 @@ type Note = {
   updatedAt?: string;
 };
 
-type PortalTab = "lessons" | "notes" | "videos";
+type PortalTab = "lessons" | "book" | "notes" | "videos";
 
 type CaddyAccess = {
   appUrl: string;
@@ -266,12 +266,16 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
   const navigateTerminal = useCallback(
     (destination: PlayerTerminalDestination) => {
-      if (isGuest && destination !== "videos") {
-        onRequestSignIn?.();
-        return;
-      }
       setRecording(false);
       setOpenVideoId("");
+      // A guest gets the tab, not a bounce to the login screen -- the locked
+      // section it renders is what has the "Sign in" button on it.
+      if (isGuest && destination !== "videos") {
+        closePlayerBooking();
+        setBooking(false);
+        setTab(destination as PortalTab);
+        return;
+      }
       // Booking is part of the terminal, not a separate front door. The session
       // travels with the player, so nothing is copied into localStorage and no
       // personal data goes into the URL -- booking asks the server who this is.
@@ -284,7 +288,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       setBooking(false);
       setTab(destination);
     },
-    [isGuest, onRequestSignIn],
+    [isGuest],
   );
 
   // The address bar and the terminal have to agree, or Back leaves a player
@@ -386,6 +390,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
   const nextLesson = upcomingBookings[0] || null;
   const laterLessons = upcomingBookings.slice(1);
+
+  const wasGuestRef = useRef(isGuest);
+  useEffect(() => {
+    if (wasGuestRef.current && !isGuest) setTab("lessons");
+    wasGuestRef.current = isGuest;
+  }, [isGuest]);
 
   const guestLockedTabs = useMemo(
     () =>
@@ -489,7 +499,23 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
             </div>
           ) : (
             <>
-              {tab === "lessons" && (
+              {tab === "lessons" && isGuest && (
+                <section className="player-portal-section">
+                  <h2>Lessons</h2>
+                  <p className="player-portal-empty">
+                    Sign in to see your upcoming lessons and book new ones.
+                  </p>
+                  <button
+                    className="player-portal-primary"
+                    type="button"
+                    onClick={() => onRequestSignIn?.()}
+                  >
+                    Sign in
+                  </button>
+                </section>
+              )}
+
+              {tab === "lessons" && !isGuest && (
                 <>
                   {/* The next lesson is the one thing a player opens this for, so
                       it gets its own place above the list rather than being the
@@ -547,7 +573,35 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                 </>
               )}
 
-              {tab === "notes" && (
+              {tab === "book" && isGuest && (
+                <section className="player-portal-section">
+                  <h2>Book a lesson</h2>
+                  <p className="player-portal-empty">Sign in to book a lesson with your coach.</p>
+                  <button
+                    className="player-portal-primary"
+                    type="button"
+                    onClick={() => onRequestSignIn?.()}
+                  >
+                    Sign in
+                  </button>
+                </section>
+              )}
+
+              {tab === "notes" && isGuest && (
+                <section className="player-portal-section">
+                  <h2>Lesson notes</h2>
+                  <p className="player-portal-empty">Sign in to see notes your coach has left for you.</p>
+                  <button
+                    className="player-portal-primary"
+                    type="button"
+                    onClick={() => onRequestSignIn?.()}
+                  >
+                    Sign in
+                  </button>
+                </section>
+              )}
+
+              {tab === "notes" && !isGuest && (
                 <section className="player-portal-section">
                   <h2>Lesson notes</h2>
                   {profileLoading && !notes.length ? (
