@@ -24,6 +24,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Clarity Player uses your camera to record and review your golf swing.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Clarity Player uses your microphone to record audio alongside your swing videos.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
