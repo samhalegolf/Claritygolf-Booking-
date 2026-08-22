@@ -85,9 +85,22 @@ export function usePlayback({ videoRef }: UsePlaybackOptions): UsePlaybackState 
     };
   }, []);
 
+  // The element these listen to does not exist yet on the first pass: the
+  // workspace renders no <video> until a clip is chosen, and a ref filling in
+  // later is not a state change, so an effect keyed only on `videoRef` would
+  // attach to nothing and never run again. Everything downstream of
+  // `currentTime` then sits at zero for the life of the screen -- the
+  // playhead never leaves the start of the timeline, and a frame step or a
+  // scrub measures its move from 0 instead of from where the video is.
+  // Reading `videoRef.current` during render is what makes the element's
+  // arrival a dependency the effect can see.
+  const videoElement = videoRef.current;
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    // Whatever the element is already showing, before its first timeupdate.
+    setCurrentTime(video.currentTime || 0);
     const onTime = () => setCurrentTime(video.currentTime || 0);
     const onEnded = () => setIsPlaying(false);
     const onLoaded = () => handleMetadata();
@@ -107,7 +120,7 @@ export function usePlayback({ videoRef }: UsePlaybackOptions): UsePlaybackState 
       video.removeEventListener("play", onPlay);
       video.removeEventListener("pause", onPause);
     };
-  }, [videoRef, handleMetadata]);
+  }, [videoRef, videoElement, handleMetadata]);
 
   const loadVideoFile = useCallback(
     async (file: File) => {

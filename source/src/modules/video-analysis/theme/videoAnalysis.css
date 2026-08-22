@@ -1537,3 +1537,315 @@
     max-height: calc(100svh - 24px);
   }
 }
+
+/* ===========================================================================
+   The player's screen
+   ===========================================================================
+
+   The coach console and the player screen are the same workspace at two
+   densities of intent. A coach has every mode on screen because they use
+   every mode. A player has one swing, a thumb, and three things to do with
+   it: move through it, mark one thing on it, send it.
+
+   So this block does three things the console does not need:
+
+     1. Locks the screen to the viewport. Nothing below the fold means
+        nothing to scroll past, and the video takes whatever height is left
+        rather than a guessed subtraction.
+     2. Takes the borders off everything that is not pressable. The panel and
+        the canvas inside it were two nested boxes around one picture; now
+        the picture is the box.
+     3. Tucks the drawing tools off the video until they are asked for, which
+        is also what frees the surface to be a scrubber.
+   =========================================================================== */
+
+.video-analysis-shell.is-player {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 760px;
+  /* Fill the host rather than a fraction of the page: the portal gives this
+     screen the viewport minus its nav, and 100% of that is the budget. */
+  height: 100%;
+  min-height: 0;
+  /* The ceiling stays a subtraction rather than becoming `flex: 1`, and that
+     is deliberate. `.video-frame` has to shrink-wrap the video exactly --
+     the drawing overlay is measured from that box, so a frame even slightly
+     taller than the picture puts every annotation out of alignment. A
+     flexed frame would letterbox; a capped video cannot. The numbers are the
+     terminal nav, the timeline and the control row, and the host clips
+     anyway, so an imperfect guess costs a few pixels of video rather than a
+     scrollbar. */
+  --va-video-max-height: calc(100svh - 214px);
+}
+
+/* The video area is the only thing that grows. */
+.is-player .comparison-layout {
+  flex: 1;
+  min-height: 0;
+}
+
+.is-player .comparison-video-panel {
+  /* Rule 01, applied to the thing this screen exists for: a video is not a
+     control, so the frame around it is the picture's own edge and nothing
+     more. Was a bordered, padded card wrapping a second bordered shell. */
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.is-player .comparison-video-panel.is-active {
+  /* Active side is a compare-mode idea. With one video there is nothing to
+     distinguish it from, so the highlight is noise. */
+  border: 0;
+  box-shadow: none;
+}
+
+.is-player .video-canvas-shell {
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--c-radius-card, 12px);
+  background: transparent;
+}
+
+.is-player .video-frame {
+  /* The surface is a horizontal scrubber, so the browser must not claim
+     horizontal drags for panning first. Vertical is left alone deliberately:
+     the gesture handler ignores it, and the page keeps its scroll. */
+  touch-action: pan-y;
+}
+
+/* --- The tool rail -------------------------------------------------------- */
+
+/* Tucked against the left edge of the video and slid out of frame when
+   closed. It stays mounted so the selected tool survives being put away, and
+   it overlays rather than occupying a column, so opening it never resizes
+   the video underneath. */
+.va-tool-rail {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border-radius: var(--c-radius-pill, 999px);
+  background: rgba(8, 12, 22, 0.82);
+  backdrop-filter: blur(8px);
+  transform: translate(calc(-100% - 12px), -50%);
+  opacity: 0;
+  visibility: hidden;
+  transition: transform 180ms ease, opacity 180ms ease, visibility 180ms;
+}
+
+.va-tool-rail.is-open {
+  transform: translate(0, -50%);
+  opacity: 1;
+  visibility: visible;
+}
+
+.va-rail-btn {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--va-text);
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.va-rail-btn svg {
+  width: 19px;
+  height: 19px;
+}
+
+.va-rail-btn:hover:not(:disabled) {
+  background: rgba(233, 240, 255, 0.12);
+}
+
+.va-rail-btn.is-active {
+  background: var(--va-text);
+  color: var(--va-bg);
+}
+
+.va-rail-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* A separator is a line. It was never a reason for a second container. */
+.va-rail-rule {
+  width: 22px;
+  height: 1px;
+  margin: 3px 0;
+  background: rgba(233, 240, 255, 0.22);
+}
+
+/* --- The action bar ------------------------------------------------------- */
+
+.va-player-bar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: max(4px, env(safe-area-inset-bottom));
+}
+
+.va-player-bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.va-transport {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.va-bar-btn {
+  width: var(--c-h-touch, 44px);
+  height: var(--c-h-touch, 44px);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--va-text);
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.va-bar-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.va-bar-btn:hover {
+  background: rgba(233, 240, 255, 0.1);
+}
+
+/* Pressed-in rather than a second colour: the rail being open is a state of
+   this button, not a different button. */
+.va-bar-btn.is-active {
+  background: var(--va-text);
+  color: var(--va-bg);
+}
+
+.va-bar-btn.is-play svg {
+  width: 24px;
+  height: 24px;
+}
+
+.va-player-destinations {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Save is the quieter of the two destinations — it is what already happened
+   on the way in — so it is text, and Send is the filled control. */
+.va-bar-text-btn {
+  min-height: var(--c-h-touch, 44px);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--c-radius-pill, 999px);
+  background: transparent;
+  color: var(--va-muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.va-bar-text-btn:hover:not(:disabled) {
+  color: var(--va-text);
+}
+
+.va-bar-send {
+  min-height: var(--c-h-touch, 44px);
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--c-radius-pill, 999px);
+  background: var(--va-text);
+  color: var(--va-bg);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Below this the row is transport plus one destination and nothing spare, so
+   the label keeps its line and the icons give up their padding instead. */
+@media (max-width: 400px) {
+  .va-player-bar-row {
+    gap: 2px;
+  }
+
+  .va-bar-text-btn {
+    padding: 0 6px;
+  }
+
+  .va-bar-send {
+    padding: 0 13px;
+  }
+}
+
+.va-bar-text-btn:disabled,
+.va-bar-send:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* Rule 09: save state is one line of text, not a box and not a third button. */
+.va-player-status {
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--va-muted);
+}
+
+.va-player-status.is-saved {
+  color: var(--va-accent);
+}
+
+.va-player-status.is-error {
+  color: var(--va-danger);
+}
+
+/* The timeline keeps its track -- it is how you jump across the whole clip --
+   but the panel around it goes. Its title row and zoom slider are console
+   furniture and are dropped by `showHeader`, not from here: that row carries
+   its layout in a style attribute, which no stylesheet can outrank. */
+.is-player .timeline-wrap {
+  flex-shrink: 0;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* A phone's nav bar wraps to two rows, so the video's ceiling drops with it. */
+@media (max-width: 700px) {
+  .video-analysis-shell.is-player {
+    --va-video-max-height: calc(100svh - 252px);
+  }
+}

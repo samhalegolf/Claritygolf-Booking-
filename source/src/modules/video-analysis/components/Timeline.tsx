@@ -11,6 +11,10 @@ export interface TimelineProps {
   hoverMarker: TimelineMarker | null;
   compact?: boolean;
   sideLabel?: string;
+  /** The title and zoom slider above the track. Console furniture: the player
+   *  screen turns it off, which is a prop rather than a CSS override because
+   *  the row carries its layout inline and a stylesheet cannot outrank that. */
+  showHeader?: boolean;
   onSeek: (time: number) => void;
   onSetHoverMarker: (marker: TimelineMarker | null) => void;
   onJumpToMarker: (marker: TimelineMarker) => void;
@@ -28,6 +32,7 @@ export function Timeline({
   hoverMarker,
   compact = false,
   sideLabel,
+  showHeader = true,
   onSeek,
   onSetHoverMarker,
   onJumpToMarker,
@@ -184,20 +189,22 @@ export function Timeline({
 
   return (
     <div className={wrapClassName}>
-      <div style={{ marginBottom: 8, display: "flex", gap: 8, alignItems: "center" }}>
-        <span style={{ fontSize: compact ? 11 : 12, color: "#c3cee6" }}>{titleText}</span>
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 11, color: "#94a2c0" }}>Zoom</span>
-          <input
-            type="range"
-            min={0.6}
-            max={1.8}
-            step={0.1}
-            value={zoom}
-            onChange={(event) => onZoomChange(parseFloat(event.target.value))}
-          />
+      {showHeader ? (
+        <div style={{ marginBottom: 8, display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ fontSize: compact ? 11 : 12, color: "#c3cee6" }}>{titleText}</span>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 11, color: "#94a2c0" }}>Zoom</span>
+            <input
+              type="range"
+              min={0.6}
+              max={1.8}
+              step={0.1}
+              value={zoom}
+              onChange={(event) => onZoomChange(parseFloat(event.target.value))}
+            />
+          </div>
         </div>
-      </div>
+      ) : null}
       <div
         className="timeline-track"
         ref={containerRef}

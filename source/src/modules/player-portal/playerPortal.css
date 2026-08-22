@@ -619,11 +619,32 @@
 
 /* The video workspace takes the whole screen -- the portal card would crop it.
    It paints its own dark surface in either scheme; that is the swing analysis
-   convention and it does not follow the terminal. */
+   convention and it does not follow the terminal.
+ *
+ * It is also the one screen in the terminal that does not scroll. The
+ * workspace lays itself out against the height it is given -- video, then
+ * timeline, then one row of controls -- so the height it is given has to be
+ * real: the viewport minus the nav, no more, with nothing below it. A
+ * min-height here instead would let the workspace ask for a screen of its own
+ * and put the controls under the fold, which is the bug this replaces. */
 .player-portal-video-host {
-  padding: 0;
-  display: block;
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 10px 12px calc(6px + env(safe-area-inset-bottom));
+  /* The workspace is never light -- a bright surround changes how you read
+     what is on the frame. It used to reach that by painting each video card
+     dark; now that the card has no box of its own, the screen it sits on
+     carries the colour. --va-bg is the workspace's own token, published on
+     :root by the theme block the workspace renders. */
+  background: var(--va-bg);
+}
+
+.player-portal-video-host > * {
+  flex: 1;
+  min-height: 0;
 }
 
 /* --- Player Terminal shell ----------------------------------------------- */
@@ -640,6 +661,15 @@
 
 .player-terminal * {
   box-sizing: border-box;
+}
+
+/* Every other screen may grow past the viewport and scroll. The video
+   workspace may not, so while it owns the terminal the height is exact --
+   dvh rather than vh, because on a phone the two differ by a browser bar and
+   the difference is the control row. */
+.player-terminal:has(.player-portal-video-host) {
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .player-terminal .player-portal,
