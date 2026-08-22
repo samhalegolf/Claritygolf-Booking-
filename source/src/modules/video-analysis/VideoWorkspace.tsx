@@ -18,6 +18,7 @@ import { Timeline } from "./components/Timeline";
 import { Toolbar } from "./components/Toolbar";
 import { VideoCanvas } from "./components/VideoCanvas";
 import { IconPlay, IconPause, IconRecord, IconUpload } from "./components/VideoIcons";
+import { PlayerActionBar, PlayerToolRail } from "./components/PlayerVideoControls";
 import {
   ComparisonSide,
   ComparisonWorkspaceState,
@@ -504,6 +505,11 @@ export function VideoWorkspace({
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState("");
+  // The player's drawing rail, tucked away until asked for. It is also the
+  // mode switch for the video surface: closed means a drag scrubs frames,
+  // open means a drag draws. One flag rather than two, because a player who
+  // has put the tools away has said which of the two they wanted.
+  const [toolRailOpen, setToolRailOpen] = useState(false);
 
   const timelineEngine = useMemo(() => new TimelineEngine(), []);
   const modeIsCompare = comparisonMode === "compare";
@@ -1414,10 +1420,75 @@ export function VideoWorkspace({
     [liveRecording, openLiveRecording]
   );
 
+  /**
+   * Drag the video itself to move through it, frame by frame.
+   *
+   * On a phone the timeline is a few hundred pixels wide for the whole clip,
+   * so a thumb on it lands within about a tenth of a second of where it was
+   * aimed -- fine for finding the swing, useless for looking at the moment of
+   * impact. Dragging the picture instead spends the same pixels on far less
+   * time: SCRUB_PX_PER_FRAME apart means a full-width swipe covers roughly two
+   * seconds, and a single frame is a deliberate, reachable movement.
+   *
+   * The gesture is horizontal-only on purpose. A vertical drag belongs to the
+   * page, and claiming it here would break scrolling everywhere this workspace
+   * is embedded.
+   */
+  const SCRUB_PX_PER_FRAME = 7;
+  const SCRUB_START_SLOP = 8;
+  const scrubGestureRef = useRef<{
+    side: ComparisonSide;
+    startX: number;
+    startY: number;
+    startTime: number;
+    engaged: boolean;
+    /** Set once the press has travelled far enough to be a drag of any kind,
+     *  including one this gesture then declines. It is what stops a scroll
+     *  from being released as a tap and playing the video. */
+    moved: boolean;
+  } | null>(null);
+
+  // Closed rail means the surface is a scrubber. A focus selection is a drag
+  // of its own and always wins.
+  const canScrubByDrag = isPlayerVariant && !toolRailOpen && !focusSelectionMode;
+
+  const scrubToOffset = useCallback(
+    (side: ComparisonSide, deltaX: number) => {
+      const gesture = scrubGestureRef.current;
+      if (!gesture) return;
+      const playback = side === "left" ? leftPlayback : rightPlayback;
+      const video = side === "left" ? playerVideoLeft : playerVideoRight;
+      const fps = video?.fps || playback.frameRate || FRAME_RATE_DEFAULT;
+      const frames = Math.round(deltaX / SCRUB_PX_PER_FRAME);
+      // Dragging right moves forward, the same direction the playhead travels.
+      const target = gesture.startTime + frames / fps;
+      const duration = playback.duration || 0;
+      playback.seekTo(Math.max(0, duration > 0 ? Math.min(target, duration) : target));
+    },
+    [leftPlayback, playerVideoLeft, playerVideoRight, rightPlayback]
+  );
+
   const handleCanvasPointerDown = useCallback(
     (side: ComparisonSide, point: { x: number; y: number }) => {
       const hasVideo = side === "left" ? !!playerVideoLeft : !!playerVideoRight;
       if (!hasVideo) {
+        return;
+      }
+      if (canScrubByDrag) {
+        const playback = side === "left" ? leftPlayback : rightPlayback;
+        const element = (side === "left" ? leftVideoRef : rightVideoRef).current;
+        setActiveSideInCompare(side);
+        scrubGestureRef.current = {
+          side,
+          startX: point.x,
+          startY: point.y,
+          // The element, not the mirrored state: a drag measures from where
+          // the video actually is, and asking it directly cannot be a frame
+          // behind whatever the last render happened to see.
+          startTime: element ? element.currentTime : playback.currentTime,
+          engaged: false,
+          moved: false,
+        };
         return;
       }
       if (focusSelectionMode === "area") {
@@ -1442,12 +1513,15 @@ export function VideoWorkspace({
       rightDrawing.pointerDown(point);
     },
     [
+      canScrubByDrag,
       focusSelectionMode,
       leftDrawing,
       leftOverlayDimensions,
+      leftPlayback,
       playerVideoLeft,
       rightDrawing,
       rightOverlayDimensions,
+      rightPlayback,
       setActiveSideInCompare,
       playerVideoRight,
     ]
@@ -1455,6 +1529,30 @@ export function VideoWorkspace({
 
   const handleCanvasPointerMove = useCallback(
     (side: ComparisonSide, point: { x: number; y: number }) => {
+      const gesture = scrubGestureRef.current;
+      if (gesture && gesture.side === side) {
+        const deltaX = point.x - gesture.startX;
+        if (!gesture.engaged) {
+          // Wait until the drag has committed to an axis. Anything steeper
+          // than 45 degrees is a scroll, not a scrub -- and is still a drag,
+          // so it is marked moved and left to run its course rather than
+          // released as a tap that would start the video playing.
+          const deltaY = point.y - gesture.startY;
+          if (Math.abs(deltaY) > SCRUB_START_SLOP && Math.abs(deltaY) > Math.abs(deltaX)) {
+            gesture.moved = true;
+            return;
+          }
+          if (Math.abs(deltaX) < SCRUB_START_SLOP) return;
+          gesture.engaged = true;
+          gesture.moved = true;
+          // Scrubbing a playing video fights the clock. Stop it, and leave it
+          // stopped -- the frame they dragged to is the one they wanted.
+          const playback = side === "left" ? leftPlayback : rightPlayback;
+          playback.pause();
+        }
+        scrubToOffset(side, deltaX);
+        return;
+      }
       if (!focusSelectionMode || !focusSelectionStart || focusSelectionSide !== side) {
         if (side === "left") {
           leftDrawing.pointerMove(point);
@@ -1475,13 +1573,26 @@ export function VideoWorkspace({
       focusSelectionStart,
       leftDrawing,
       leftOverlayDimensions,
+      leftPlayback,
       rightDrawing,
       rightOverlayDimensions,
+      rightPlayback,
+      scrubToOffset,
     ]
   );
 
   const handleCanvasPointerUp = useCallback(
     (side: ComparisonSide, point: { x: number; y: number }) => {
+      const gesture = scrubGestureRef.current;
+      if (gesture && gesture.side === side) {
+        scrubGestureRef.current = null;
+        // A press that never became a drag is a tap, and a tap on a video
+        // means play or pause. Nothing else on this surface needs a click.
+        if (!gesture.moved) {
+          playPauseSide(side);
+        }
+        return;
+      }
       if (focusSelectionMode === "area" && focusSelectionSide === side && focusSelectionDraft) {
         const canCreate = focusSelectionDraft.width > MIN_ACTIVE_SELECTION_SIZE && focusSelectionDraft.height > MIN_ACTIVE_SELECTION_SIZE;
         if (canCreate) {
@@ -1507,6 +1618,7 @@ export function VideoWorkspace({
       focusSelectionMode,
       focusSelectionSide,
       leftDrawing,
+      playPauseSide,
       rightDrawing,
       setFocusWindowMode,
       setFocusWindowSide,
@@ -2529,66 +2641,72 @@ export function VideoWorkspace({
         }`}
         onMouseDown={() => setActiveSideInCompare(side)}
       >
-        <div className="comparison-video-header">
-          <div className="comparison-side-chip">
-            <span>
-              {sideTitle} • {getSideLabel(side)}
-            </span>
-            <span className="comparison-mode-label">
-              {metadataReady ? "ready" : "loading"}
-            </span>
-          </div>
-          <div className="comparison-video-actions">
-            <button
-              type="button"
-              className="video-tool-btn"
-              aria-label={`Record ${sideTitle.toLowerCase()} clip`}
-              onClick={(event) => {
-                event.stopPropagation();
-                void openLiveRecording(side);
-              }}
-            >
-              <IconRecord />
-              <span className="video-tool-tip" aria-hidden="true">
-                Record {sideTitle.toLowerCase()} clip
+        {/* The player has no header row at all. Play is the video itself,
+            and choosing or replacing a clip is what the Videos screen they
+            arrived from is for -- repeating it here put four controls around
+            a picture that only needed to be looked at. */}
+        {isPlayerVariant ? null : (
+          <div className="comparison-video-header">
+            <div className="comparison-side-chip">
+              <span>
+                {sideTitle} • {getSideLabel(side)}
               </span>
-            </button>
-            <button
-              type="button"
-              className="video-tool-btn"
-              aria-label={playback.isPlaying ? "Pause" : "Play"}
-              onClick={(event) => {
-                event.stopPropagation();
-                playPauseSide(side);
-              }}
-            >
-              {playback.isPlaying ? <IconPause /> : <IconPlay />}
-              <span className="video-tool-tip" aria-hidden="true">
-                {playback.isPlaying ? "Pause" : "Play"}
+              <span className="comparison-mode-label">
+                {metadataReady ? "ready" : "loading"}
               </span>
-            </button>
-            <button
-              type="button"
-              className="upload-button"
-              onClick={(event) => {
-                event.stopPropagation();
-                openUpload(side);
-              }}
-            >
-              Replace {sideTitle.toLowerCase()} clip
-            </button>
-            <button
-              type="button"
-              className="upload-button video-action-button video-action-button--clear"
-              onClick={(event) => {
-                event.stopPropagation();
-                clearCurrentSide(side);
-              }}
-            >
-              Clear {sideTitle.toLowerCase()} clip
-            </button>
+            </div>
+            <div className="comparison-video-actions">
+              <button
+                type="button"
+                className="video-tool-btn"
+                aria-label={`Record ${sideTitle.toLowerCase()} clip`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void openLiveRecording(side);
+                }}
+              >
+                <IconRecord />
+                <span className="video-tool-tip" aria-hidden="true">
+                  Record {sideTitle.toLowerCase()} clip
+                </span>
+              </button>
+              <button
+                type="button"
+                className="video-tool-btn"
+                aria-label={playback.isPlaying ? "Pause" : "Play"}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  playPauseSide(side);
+                }}
+              >
+                {playback.isPlaying ? <IconPause /> : <IconPlay />}
+                <span className="video-tool-tip" aria-hidden="true">
+                  {playback.isPlaying ? "Pause" : "Play"}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="upload-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openUpload(side);
+                }}
+              >
+                Replace {sideTitle.toLowerCase()} clip
+              </button>
+              <button
+                type="button"
+                className="upload-button video-action-button video-action-button--clear"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  clearCurrentSide(side);
+                }}
+              >
+                Clear {sideTitle.toLowerCase()} clip
+              </button>
+            </div>
           </div>
-        </div>
+        )}
         <div className="video-canvas-shell">
           <VideoCanvas
             sourceUrl={mountedSource}
@@ -2623,6 +2741,17 @@ export function VideoWorkspace({
             }}
           />
           {hasSelectionDraft ? <div className="focus-selection-overlay" style={draftStyle || undefined} /> : null}
+          {isPlayerVariant ? (
+            <PlayerToolRail
+              open={toolRailOpen}
+              selectedTool={drawingState.selectedTool}
+              onToolChange={updateActiveDrawingTool}
+              onUndo={drawingState.undo}
+              canUndo={drawingState.canUndo}
+              onClear={clearActiveDrawing}
+              canClear={drawingState.objects.length > 0}
+            />
+          ) : null}
         </div>
         <Timeline
           duration={Math.max(1, playback.duration || (isLeft ? leftCurrentDuration : rightCurrentDuration) || 0)}
@@ -2631,6 +2760,7 @@ export function VideoWorkspace({
           markers={markerMode}
           hoverMarker={hoverMarker}
           compact={modeIsCompare}
+          showHeader={!isPlayerVariant}
           sideLabel={`${getSideLabel(side)} ${sideTitle}`}
           onSeek={(time) => {
             setActiveSideInCompare(side);
@@ -2664,12 +2794,19 @@ export function VideoWorkspace({
   return (
     <div className={`video-analysis-shell is-${variant}`}>
       <style>{videoAnalysisThemeCss}</style>
-      <h1>{playerName ? `${playerName} Video Analysis` : "Clarity Golf Video Analysis"}</h1>
-      <p className="subtitle">
-        {resolvedPlayerName
-          ? `${resolvedPlayerName} • ${lessonTitle || "Unlinked"} lesson context`
-          : "Premium, protected, and reusable workspace foundation."}
-      </p>
+      {/* The player already knows whose swing this is and how they got here --
+          the terminal's own bar says Videos and offers the way back. A title
+          and a subtitle here spend the top of a phone screen restating it. */}
+      {isPlayerVariant ? null : (
+        <>
+          <h1>{playerName ? `${playerName} Video Analysis` : "Clarity Golf Video Analysis"}</h1>
+          <p className="subtitle">
+            {resolvedPlayerName
+              ? `${resolvedPlayerName} • ${lessonTitle || "Unlinked"} lesson context`
+              : "Premium, protected, and reusable workspace foundation."}
+          </p>
+        </>
+      )}
 
       <input
         ref={leftUploadInputRef}
@@ -2740,7 +2877,9 @@ export function VideoWorkspace({
         </section>
       ) : null}
 
-      {workspaceHasVideo ? (
+      {/* The console bar is the coach's. A player's controls are the rail
+          over the video and the one row under it, both rendered below. */}
+      {workspaceHasVideo && !isPlayerVariant ? (
         <div className="video-analysis-toolbar">
           <Toolbar
             selected={leftDrawing.selectedTool}
@@ -2760,53 +2899,27 @@ export function VideoWorkspace({
             onUndo={activeDrawing.undo}
             canUndo={activeDrawing.canUndo}
           />
-          {isPlayerVariant ? (
-            /* A player saves to their own phone, or sends the clip to their
-               coach. There is no third destination to choose between. */
-            <div className="analysis-save-controls" aria-label="Video save controls">
-              <button
-                type="button"
-                className="upload-button video-save-button"
-                onClick={handleManualSave}
-                disabled={saveBusy}
-              >
-                {saveStatus === "saving" ? "Saving..." : "Save"}
-              </button>
-              <button
-                type="button"
-                className="upload-button video-save-button"
-                onClick={() => void handleSaveAndSend()}
-                disabled={saveBusy}
-              >
-                {saveStatus === "sending" ? "Sending..." : "Send to Coach"}
-              </button>
-              <span className={`analysis-save-status is-${saveStatus}`} role="status">
-                {saveMessage}
-              </span>
-            </div>
-          ) : (
-            <div className="analysis-save-controls" aria-label="Video analysis save controls">
-              <button
-                type="button"
-                className="upload-button video-save-button"
-                onClick={handleManualSave}
-                disabled={saveBusy}
-              >
-                {saveStatus === "saving" ? "Saving..." : "Save"}
-              </button>
-              <button
-                type="button"
-                className="upload-button video-save-button"
-                onClick={handleMyLibrarySave}
-                disabled={saveBusy}
-              >
-                Save permanently to My Library
-              </button>
-              <span className={`analysis-save-status is-${saveStatus}`} role="status">
-                {saveMessage}
-              </span>
-            </div>
-          )}
+          <div className="analysis-save-controls" aria-label="Video analysis save controls">
+            <button
+              type="button"
+              className="upload-button video-save-button"
+              onClick={handleManualSave}
+              disabled={saveBusy}
+            >
+              {saveStatus === "saving" ? "Saving..." : "Save"}
+            </button>
+            <button
+              type="button"
+              className="upload-button video-save-button"
+              onClick={handleMyLibrarySave}
+              disabled={saveBusy}
+            >
+              Save permanently to My Library
+            </button>
+            <span className={`analysis-save-status is-${saveStatus}`} role="status">
+              {saveMessage}
+            </span>
+          </div>
           {isPlayerVariant ? null : (
             <div className="analysis-record-controls" aria-label="Screen recording">
               <button
@@ -3013,6 +3126,26 @@ export function VideoWorkspace({
         </div>
       ) : null}
 
+      {workspaceHasVideo && isPlayerVariant ? (
+        <PlayerActionBar
+          railOpen={toolRailOpen}
+          onRailToggle={() => setToolRailOpen((previous) => !previous)}
+          isPlaying={activePlayback.isPlaying}
+          onTogglePlay={() => playPauseSide(effectiveActiveSide)}
+          onStepFrame={(direction) => activePlayback.stepFrame(direction)}
+          onSave={handleManualSave}
+          onSend={() => void handleSaveAndSend()}
+          canSend={Boolean(onSaveAndSend)}
+          busy={saveBusy}
+          saving={saveStatus === "saving"}
+          sending={saveStatus === "sending"}
+          status={saveStatus === "idle" ? "" : saveMessage}
+          statusTone={
+            saveStatus === "error" ? "error" : saveStatus === "saved" ? "saved" : "idle"
+          }
+        />
+      ) : null}
+
       {workspaceHasVideo && onSaveNote ? (
         <section className="video-note-panel" aria-label="Lesson note">
           <h2>Lesson note</h2>
@@ -3062,7 +3195,10 @@ export function VideoWorkspace({
         />
       ) : null}
 
-      {workspaceHasVideo ? (
+      {/* Focus snapshots are made with the focus palette, which is a coach
+          tool. On the player's screen the strip was a permanently empty
+          200px panel below the fold. */}
+      {workspaceHasVideo && !isPlayerVariant ? (
         <div className="focus-artifacts">
           <div className="focus-artifacts-title">
             <span className="focus-artifacts-title-text">
