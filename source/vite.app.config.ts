@@ -16,10 +16,16 @@ import { defineConfig } from "vite";
  *     booking panel loads.
  *   - `base: "./"` because the webview serves from capacitor://localhost,
  *     where a root-absolute asset path is a gamble.
- *   - VITE_NATIVE tells apiFetch.ts to carry a bearer token instead of a
- *     cookie, and VITE_API_BASE tells it where to send it. Override the origin
- *     with VITE_API_BASE=... npm run build:app to point a build at a Netlify
- *     deploy preview.
+ *   - __CLARITY_NATIVE__ tells apiFetch.ts to carry a bearer token instead of
+ *     a cookie, and VITE_API_BASE tells it where to send it. Override the
+ *     origin with VITE_API_BASE=... npm run build:app to point a build at a
+ *     Netlify deploy preview.
+ *
+ *     It is a bare define rather than a VITE_ env var so that it substitutes
+ *     as a literal at each use site. Vite hoists import.meta.env into one
+ *     runtime object, which would leave every `if (NATIVE)` in the web build
+ *     as a live branch shipping code no browser can reach. vite.config.ts
+ *     defines the same name as false.
  *
  * The output is dist-app/, which is Capacitor's webDir. The web build still
  * writes dist/ and is untouched by any of this.
@@ -30,7 +36,7 @@ export default defineConfig({
   publicDir: fileURLToPath(new URL("./public", import.meta.url)),
   base: "./",
   define: {
-    "import.meta.env.VITE_NATIVE": JSON.stringify("1"),
+    __CLARITY_NATIVE__: "true",
     "import.meta.env.VITE_API_BASE": JSON.stringify(
       process.env.VITE_API_BASE || "https://claritygolf.app",
     ),

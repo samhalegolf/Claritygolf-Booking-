@@ -19,10 +19,26 @@
 // crash in the test runner.
 const buildEnv: Partial<ImportMetaEnv> = import.meta.env ?? {};
 
-/** True in the Capacitor build only. Set by vite.app.config.ts. */
-export const NATIVE = buildEnv.VITE_NATIVE === "1";
+/**
+ * True in the Capacitor build only.
+ *
+ * Read from a `define`d literal rather than from an import.meta.env field,
+ * because only the literal folds. Vite hoists `import.meta.env` into a single
+ * runtime object, so a comparison against one of its fields stays live and
+ * every branch below it ships to browsers as unreachable code -- which is what
+ * this file used to do, bearer path and Capacitor plugin included. A define is
+ * substituted at each use site, so the bundler drops the dead side outright.
+ *
+ * The `typeof` guard is for the unit tests, which import this module under
+ * `tsx` in plain Node where nothing defines it.
+ */
+export const NATIVE = typeof __CLARITY_NATIVE__ !== "undefined" && __CLARITY_NATIVE__;
 
-/** Absolute on native, empty (same-origin) on the web. */
+/**
+ * Absolute on native, empty (same-origin) on the web. Still read from the env
+ * object: it is only ever reached when NATIVE is true, so the web build folds
+ * this whole expression away with the branch.
+ */
 const API_BASE = NATIVE ? (buildEnv.VITE_API_BASE ?? "").replace(/\/$/, "") : "";
 
 const TOKEN_KEY = "clarity-player-token";

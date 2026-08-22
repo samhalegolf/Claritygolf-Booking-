@@ -1,9 +1,9 @@
 # Player Portal as a native app — Handover
 
-Built 20 Aug 2026. The portal now has a second build target that Capacitor can
-wrap and run on a simulator or a device. It is not a second app: same repo,
-same `src/`, same components, same API. Only the entry point and the way the
-session travels are different.
+Built 20 Aug 2026, revised 22 Aug 2026. The portal now has a second build
+target that Capacitor can wrap and run on a simulator or a device. It is not a
+second app: same repo, same `src/`, same components, same API. Only the entry
+point and the way the session travels are different.
 
 ## Run it
 
@@ -38,6 +38,51 @@ The coach workspace is still *in* the app bundle, as the lazy chunk the
 portal's Book panel loads — the booking widget is `App`, and the portal renders
 it rather than keeping a player-shaped copy. It is ~800 KB of the download and
 nothing loads it until the player taps Book.
+
+### Which build am I? — `__CLARITY_NATIVE__`
+
+Both vite configs `define` it: `true` in `vite.app.config.ts`, `false` in
+`vite.config.ts`. `apiFetch.ts` exports it as `NATIVE`, and that is the only
+thing in the codebase that knows which build it is in.
+
+It is a bare define and not a `VITE_` env var, and the difference is not
+cosmetic. Vite hoists `import.meta.env` into one runtime object, so reading a
+field off it leaves a live comparison and every `if (NATIVE)` survives
+minification as a branch that can never be taken. This file read
+`VITE_NATIVE` through a local alias until 22 Aug 2026, and the web bundle
+shipped the whole bearer-token path, the `clarity-player-token` storage key and
+an 8.5 KB Capacitor core chunk as unreachable code. Not a vulnerability — the
+flag was provably `false` in a browser — but not the guarantee the code claimed
+either. A define substitutes at each use site as a literal, so the bundler
+drops the dead side outright.
+
+Two consequences worth knowing:
+
+- **A new vite config must define it.** Miss it and `typeof
+  __CLARITY_NATIVE__ !== "undefined"` is false, the build silently behaves as
+  the web build, and a native build would send cookies that cannot travel.
+- **Check the output, not the source.** `grep -c 'X-Clarity-Client'
+  dist/assets/*.js` should find nothing. That the source *looks* tree-shakeable
+  is what went wrong the first time.
+
+## In a webview the URL tells you nothing
+
+The app is served from `capacitor://localhost` with no path and no query
+string. Anything that decides what to render by reading `window.location` is
+therefore wrong in the app, and usually wrong in a way that fails quietly.
+
+This bit once already. `App` decided whether it was the booking widget or the
+coach workspace with `isBookingEmbedMode()`, which looks for
+`?embed=booking` or the `book.claritygolf.app` hostname. Once the portal
+started rendering the widget inline in its Lessons tab instead of navigating to
+that URL, neither was ever true — so every `if (isEmbedMode) return` guard in
+`App` stopped guarding and the coach boot sequence ran inside the player's
+portal. On the web it merely fired coach requests nobody wanted; in the app it
+put an error toast on the player's screen.
+
+`App` now takes how it was mounted from its `bookingEntry` prop and only
+consults the URL as a fallback. The rule to keep: **mode comes from the caller,
+never from the address bar.**
 
 ## The session had to change transport
 
@@ -78,6 +123,29 @@ API origin lives. Override it for a deploy preview:
 VITE_API_BASE=https://deploy-preview-12--clarity.netlify.app npm run build:app
 ```
 
+## Videos on a device that has never held them
+
+A phone is a fresh device: the portal's video library is IndexedDB, so a player
+signing in on the app sees an empty list however much they have in the cloud.
+The Videos tab now asks `/api/video-transfer/imports` on mount and renders
+anything missing as a dashed shell with a download arrow.
+
+Two things about that path are deliberate:
+
+- **A player download sends no import receipt.** The receipt is a coach taking
+  custody — it flips the transfer to complete and schedules the Drive original
+  for deletion. `importSavedVideoFromClarityCloud` takes `sendReceipt: false`
+  for this reason. A player pulling a copy is a read.
+- **A guest never asks at all.** A guest can put bytes into the coach's Drive
+  and can never read one back out, so the portal does not call the route on
+  their behalf.
+
+**Record a video** opens the OS sheet — Photo Library, Take Video, Choose File
+— rather than the in-page recorder. The `.click()` on the hidden file input has
+to happen inside the tap that triggered it or iOS ignores it, which is why the
+input lives in `PlayerPortal` and not in the workspace it opens. Desktop web
+still gets the in-page recorder, since a file dialog there has no camera in it.
+
 ## Known gaps
 
 - **Web push does nothing in the app.** Service workers are unreliable in the
@@ -87,7 +155,14 @@ VITE_API_BASE=https://deploy-preview-12--clarity.netlify.app npm run build:app
   plugin, which is its own patch.
 - **Video submissions are untested on device.** The upload path takes the
   bearer token and the resumable chunk logic is unchanged, but a 750 MB upload
-  from a phone over cellular has not been exercised.
+  from a phone over cellular has not been exercised. The download direction
+  above is untested on device too.
+- **A cleaned-up transfer disappears from the player's list.** Once a coach
+  imports a video, its Drive copy is scheduled for deletion seven days later.
+  The portal filters the catalogue to transfers that are still `ready` with a
+  live `driveVideoFileId`, so those rows vanish rather than offering a download
+  that would 404 — but nobody has decided whether a player *should* lose access
+  at that point. Worth a product answer, not just a filter.
 - **No icon or splash screen yet.** `npx @capacitor/assets generate` from a
   1024px source is the usual route.
 - **Deep links are not wired.** A password-reset or portal-invite email opens

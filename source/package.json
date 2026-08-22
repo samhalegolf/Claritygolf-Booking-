@@ -9,7 +9,7 @@
     "typecheck:functions": "tsc --noEmit --module NodeNext --moduleResolution NodeNext --target ES2022 --lib ES2022,DOM --skipLibCheck --allowImportingTsExtensions netlify/functions/_shared/google-provider.mts netlify/functions/google-calendar-sync.mts netlify/functions/google-calendar.mts netlify/functions/google-drive.mts netlify/functions/video-transfer.mts netlify/functions/guest-submission-purge.mts",
     "test": "tsx --test \"netlify/functions/**/*.test.mts\" \"src/**/*.test.ts\"",
     "build": "tsc && vite build",
-    "build:app": "tsc && vite build --config vite.app.config.ts",
+    "build:app": "node scripts/sync-app-version.mjs && tsc && vite build --config vite.app.config.ts",
     "ios": "npm run build:app && npx cap sync ios && npx cap open ios",
     "android": "npm run build:app && npx cap sync android && npx cap open android",
     "preview": "vite preview --host 127.0.0.1"

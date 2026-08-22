@@ -13,8 +13,6 @@ interface ImportMetaEnv {
   readonly DEV: boolean;
   readonly PROD: boolean;
   readonly MODE: string;
-  /** "1" in the Capacitor build only. Set by vite.app.config.ts. */
-  readonly VITE_NATIVE?: string;
   /** Absolute API origin the native app calls. Empty on the web. */
   readonly VITE_API_BASE?: string;
 }
@@ -22,3 +20,17 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/**
+ * True in the Capacitor build, false on the web. Both vite configs `define` it.
+ *
+ * A bare define rather than a VITE_ env var, because the two substitute
+ * differently. Vite hoists `import.meta.env` to one object and reads fields
+ * off it at runtime, so a branch guarded by it cannot fold. A plain define is
+ * replaced at the use site with a literal, which is what lets the bundler drop
+ * the native-only code from the web build instead of shipping it unreachable.
+ *
+ * Undeclared under `tsx` in plain Node, hence the `typeof` guard at the only
+ * place that reads it.
+ */
+declare const __CLARITY_NATIVE__: boolean;
