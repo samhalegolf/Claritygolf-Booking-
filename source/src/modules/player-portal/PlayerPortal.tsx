@@ -12,7 +12,7 @@ import {
 import "./playerPortal.css";
 import { apiFetch } from "../auth/apiFetch";
 import { signOut, type Session } from "../auth/session";
-import { hasGuestToken } from "../auth/apiFetch";
+import { hasGuestToken, NATIVE } from "../auth/apiFetch";
 import { isPlayerBookingMode, slotDate } from "../shared/bookingHandoff";
 import {
   PlayerTerminalNav,
@@ -140,6 +140,27 @@ function sendStatusLabel(item: SavedVideoItem, isGuest = false, connected = fals
 // transfer is something the coach put in the cloud for them; a player
 // submission is their own video coming back to a device that has never held
 // it -- a new phone, or one whose local library was cleared.
+/**
+ * Which way "Record a video" should go on this device.
+ *
+ * The native build and any touch device get the operating system's own sheet
+ * -- Photo Library, Take Video, Choose File -- because that is one tap to
+ * either the camera or a clip they already have, and it is the camera app
+ * rather than a webview approximation of one.
+ *
+ * A desktop browser has no such sheet. A file dialog there offers no camera at
+ * all, so the workspace's in-page recorder is the only way to actually record
+ * something and it stays the default.
+ *
+ * NATIVE decides this before the media query is ever asked, so the app build
+ * never depends on the pointer heuristic being right.
+ */
+function shouldUseDevicePicker() {
+  if (NATIVE) return true;
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(pointer: coarse)").matches;
+}
+
 function cloudVideoLabel(transfer: ClarityCloudImportTransfer) {
   return transfer.direction === "coach-device" ? "From your coach" : "You sent this";
 }
@@ -402,16 +423,24 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   // workspace mounts afterwards, around whatever file came back.
   const recordInputRef = useRef<HTMLInputElement>(null);
   const [pendingVideoFile, setPendingVideoFile] = useState<File | null>(null);
+  const [liveRecordRequested, setLiveRecordRequested] = useState(false);
+  // Say what the tap actually does, which is not the same on both.
+  const recordCardSub = useMemo(
+    () => (shouldUseDevicePicker() ? "Record one or pick an existing one" : "Opens your camera"),
+    [],
+  );
 
   const startRecording = useCallback(() => {
+    setOpenVideoId("");
     const input = recordInputRef.current;
-    if (!input) {
-      // No input in the tree (an older webview, or a render where it never
-      // mounted). The workspace's own recorder is still a way in.
-      setOpenVideoId("");
+    if (!input || !shouldUseDevicePicker()) {
+      // Desktop, or no input in the tree. Open the workspace straight onto its
+      // own camera rather than a file dialog that cannot record anything.
+      setLiveRecordRequested(true);
       setRecording(true);
       return;
     }
+    setLiveRecordRequested(false);
     // Picking the same file twice in a row fires no change event unless the
     // value is cleared first.
     input.value = "";
@@ -547,6 +576,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       // Holding the File would pin the whole video in memory, and reopening
       // the workspace would silently load the last one again.
       setPendingVideoFile(null);
+      setLiveRecordRequested(false);
       setTab("videos");
       void refreshSavedVideos();
     },
@@ -702,6 +732,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
               playerName={playerName}
               savedVideoId={openVideoId || undefined}
               initialVideoFile={openVideoId ? null : pendingVideoFile}
+              autoStartLiveRecording={!openVideoId && liveRecordRequested}
               savedVideoLibrary={savedVideoLibrary}
               onSavedVideoLibraryChange={() => void refreshSavedVideos()}
               onNavigateBack={closeWorkspace}
@@ -802,7 +833,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           onClick={startRecording}
                         >
                           <span className="player-portal-home-card-title">Record a video</span>
-                          <span className="player-portal-home-card-sub">Record one or pick an existing one</span>
+                          <span className="player-portal-home-card-sub">{recordCardSub}</span>
                         </button>
                       </>
                     ) : (
@@ -853,7 +884,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           onClick={startRecording}
                         >
                           <span className="player-portal-home-card-title">Record a video</span>
-                          <span className="player-portal-home-card-sub">Record one or pick an existing one</span>
+                          <span className="player-portal-home-card-sub">{recordCardSub}</span>
                         </button>
                       </>
                     )}
