@@ -16,6 +16,7 @@ import {
   Copy,
   Clock,
   Download,
+  ClipboardList,
   Eye,
   ExternalLink,
   FileText,
@@ -228,6 +229,11 @@ const VideoAnalysisPage = lazy(() =>
 );
 const ClarityVoiceTextPanel = lazy(() =>
   import("./modules/clarity-voice/ClarityVoiceTextPanel").then((module) => ({ default: module.ClarityVoiceTextPanel })),
+);
+// Owns its own loading, its own category library and its own writes. The
+// console only tells it which player is open.
+const PracticeFeeder = lazy(() =>
+  import("./modules/practice/PracticeFeeder").then((module) => ({ default: module.PracticeFeeder })),
 );
 
 type EditableBlockStatus = "idle" | "editing" | "saving" | "saved" | "error";
@@ -1294,7 +1300,7 @@ type ClientProfileTab = "bookings" | "notes" | "notifications" | "transactions";
 type ClientTransactionRow =
   | { kind: "sale"; date: string; sale: PosTransaction }
   | { kind: "invoice"; date: string; invoice: BillingInvoiceRecord };
-type PlayerProfileTool = "recent" | "notes" | "videos";
+type PlayerProfileTool = "recent" | "notes" | "practice" | "videos";
 type PlayerToolRecord = {
   id: string;
   kind: "note" | "video";
@@ -21601,6 +21607,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                 </button>
                                 <button
                                   type="button"
+                                  className={playerProfileTool === "practice" ? "active" : ""}
+                                  onClick={() => setPlayerProfileTool("practice")}
+                                  role="tab"
+                                  aria-selected={playerProfileTool === "practice"}
+                                >
+                                  <ClipboardList size={15} />
+                                  Practice
+                                </button>
+                                <button
+                                  type="button"
                                   className={playerProfileTool === "videos" ? "active" : ""}
                                   onClick={() => setPlayerProfileTool("videos")}
                                   role="tab"
@@ -21800,6 +21816,20 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                     <p className="notes-empty">No lesson notes yet.</p>
                                   )}
                                 </div>
+                              </div>
+                            ) : playerToolExpanded && playerProfileTool === "practice" ? (
+                              <div className="player-tool-body">
+                                <Suspense fallback={<div className="module-loading">Loading practice…</div>}>
+                                  <PracticeFeeder
+                                    // Keyed so switching player remounts rather
+                                    // than showing the previous player's blocks
+                                    // until the fetch lands.
+                                    key={notesWorkspaceClient.id}
+                                    player={{ id: notesWorkspaceClient.id, name: notesWorkspaceClient.name }}
+                                    onUnauthorized={() => setAuthStatus("guest")}
+                                    onToast={(message) => setToast({ message })}
+                                  />
+                                </Suspense>
                               </div>
                             ) : playerToolExpanded ? (
                               <div className="player-tool-body">

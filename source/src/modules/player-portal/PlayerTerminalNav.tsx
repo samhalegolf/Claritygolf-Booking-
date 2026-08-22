@@ -9,16 +9,19 @@
 // Clarity Caddy is deliberately absent. It is a different product, and its one
 // way in is the card on the home route -- a permanent link in the bar would put
 // "leave here" next to every screen in the terminal.
-export type PlayerTerminalDestination = "home" | "lessons" | "notes" | "videos";
+export type PlayerTerminalDestination = "home" | "lessons" | "practice" | "notes" | "videos";
 
 type NavLink = {
   id: PlayerTerminalDestination;
   label: string;
 };
 
+// Practice sits next to Lessons because that is the order of the thing: a
+// lesson happens, practice comes out of it, notes and videos are the record.
 const NAV_LINKS: NavLink[] = [
   { id: "home", label: "Home" },
   { id: "lessons", label: "Lessons" },
+  { id: "practice", label: "Practice" },
   { id: "notes", label: "Notes" },
   { id: "videos", label: "Videos" },
 ];
@@ -47,9 +50,13 @@ export function PlayerTerminalNav({
   guest,
   onSignIn,
 }: PlayerTerminalNavProps) {
-  // Lessons -- and booking with it -- doesn't exist for a guest at all. Not
-  // shown-but-locked, just not here: there is nothing behind it to show yet.
-  const visibleLinks = guest ? NAV_LINKS.filter((link) => link.id !== "lessons") : NAV_LINKS;
+  // Lessons -- and booking with it -- doesn't exist for a guest at all, and
+  // neither does practice: prescribed practice comes from a coach, and a guest
+  // has not got one yet. Not shown-but-locked, just not here: there is nothing
+  // behind either of them to show.
+  const visibleLinks = guest
+    ? NAV_LINKS.filter((link) => link.id !== "lessons" && link.id !== "practice")
+    : NAV_LINKS;
 
   return (
     <header className="player-terminal-nav">

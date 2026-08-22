@@ -348,11 +348,41 @@
 }
 
 .player-portal-booking,
-.player-portal-note {
+.player-portal-note,
+.player-portal-practice {
   border: 1px solid var(--pt-border-soft);
   border-radius: 10px;
   padding: 12px 14px;
   background: var(--pt-surface-soft);
+}
+
+/* Practice is grouped under its category. The heading is the only thing
+   separating the groups -- no second border, because the blocks inside
+   already carry one. */
+.player-portal-practice-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.player-portal-practice-group h3 {
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pt-muted);
+}
+
+/* A prescription is read, not skimmed: keep the coach's own line breaks and
+   hold the measure to something readable on a phone held at arm's length. */
+.player-portal-practice p {
+  margin: 8px 0 0;
+  max-width: var(--c-w-prose);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--pt-text-body);
+  white-space: pre-wrap;
 }
 
 .player-portal-booking {
@@ -453,6 +483,7 @@
 }
 
 .player-portal-video-tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -609,6 +640,230 @@
   cursor: progress;
 }
 
+/* --- Deleting videos, the iPhone way -----------------------------------
+ *
+ * Hold a tile, the grid shakes loose, a bin rises from the bottom, drag one
+ * in. The gesture is borrowed on purpose: it is the one every player on a
+ * phone already knows, and nothing about it is reachable by accident.
+ * ---------------------------------------------------------------------- */
+
+.player-portal-shelf-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.player-portal-shelf-hint {
+  font-size: 12px;
+  color: var(--pt-muted);
+}
+
+.player-portal-shelf-done {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--pt-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--pt-surface);
+  color: var(--pt-text);
+  font: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.player-portal-shelf-done:hover {
+  background: var(--pt-hover);
+}
+
+/* A long press must not also select the title or raise iOS's own callout. */
+.player-portal-video-grid.is-editing .player-portal-video-tile {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Scrolling the page past the tiles has to keep working, so at rest a tile
+   only gives up the horizontal axis. Once the grid is armed it takes the
+   gesture outright, because then a drag is moving a video rather than the
+   page. */
+.player-portal-video-media {
+  touch-action: pan-y;
+}
+
+.player-portal-video-grid.is-editing .player-portal-video-media {
+  touch-action: none;
+}
+
+/* The shake. Two keyframes offset by an odd multiple so neighbouring tiles
+   are never in step -- a grid shaking in unison reads as a broken animation
+   rather than a pile of loose objects. */
+@keyframes player-portal-jiggle-a {
+  0%, 100% { transform: rotate(-0.7deg); }
+  50% { transform: rotate(0.7deg); }
+}
+
+@keyframes player-portal-jiggle-b {
+  0%, 100% { transform: rotate(0.65deg); }
+  50% { transform: rotate(-0.65deg); }
+}
+
+.player-portal-video-grid.is-editing .player-portal-video-tile {
+  animation: player-portal-jiggle-a 0.24s ease-in-out infinite;
+  transform-origin: 50% 45%;
+}
+
+.player-portal-video-grid.is-editing .player-portal-video-tile:nth-child(2n) {
+  animation-name: player-portal-jiggle-b;
+  animation-duration: 0.26s;
+}
+
+.player-portal-video-grid.is-editing .player-portal-video-tile:nth-child(3n) {
+  animation-duration: 0.22s;
+}
+
+/* A cloud tile is somebody else's video. It stays still while the rest shake,
+   which is the whole explanation of why it has no minus badge. */
+.player-portal-video-grid.is-editing .player-portal-video-tile-cloud {
+  animation: none;
+}
+
+/* The tile under the finger. It leaves the shake, lifts, and follows. */
+.player-portal-video-tile.is-dragging {
+  animation: none !important;
+  z-index: 30;
+  transform: translate(var(--tile-dx, 0), var(--tile-dy, 0)) scale(1.08);
+  opacity: 0.92;
+  filter: drop-shadow(0 12px 20px var(--c-scrim-soft));
+}
+
+/* The corner minus, sized to the density minimum even though it looks small --
+   the hit area is the padding, not the circle. */
+.player-portal-video-remove {
+  position: absolute;
+  top: -9px;
+  left: -9px;
+  z-index: 25;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--pt-border);
+  border-radius: 999px;
+  background: var(--pt-surface);
+  color: var(--pt-text);
+  font: inherit;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.player-portal-video-tile {
+  position: relative;
+}
+
+/* The bin. Fixed to the bottom of the screen so it is reachable with the same
+   thumb that is holding the tile, whatever the grid has scrolled to. */
+.player-portal-trash {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 40;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 116px;
+  padding: 12px 0 10px;
+  border: 1px dashed var(--pt-border);
+  border-radius: var(--c-radius-card);
+  background: var(--pt-surface);
+  color: var(--pt-muted);
+  font-size: 11px;
+  font-weight: 600;
+  animation: player-portal-trash-in 180ms ease-out;
+}
+
+.player-portal-trash svg {
+  width: 26px;
+  height: 26px;
+}
+
+/* Hot: solid, in the error colour, and grown. The size change is the part you
+   feel through your thumb without looking away from the tile. */
+.player-portal-trash.is-hot {
+  border-style: solid;
+  border-color: var(--pt-error-text);
+  color: var(--pt-error-text);
+  transform: translateX(-50%) scale(1.12);
+}
+
+@keyframes player-portal-trash-in {
+  from { transform: translate(-50%, 18px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+/* The undo bar. Nothing has actually been deleted while this is on screen --
+   it is a clock, not a report. */
+.player-portal-undo {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 45;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 10px 10px 16px;
+  border: 1px solid var(--pt-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--pt-surface);
+  color: var(--pt-text);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 10px 24px var(--c-scrim-soft);
+  animation: player-portal-trash-in 180ms ease-out;
+}
+
+.player-portal-undo span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-portal-undo button {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--pt-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--pt-surface);
+  color: var(--pt-text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* A shaking grid is exactly the animation someone with this preference set
+   asked not to see. The bin, the badge and the drag all still work. */
+@media (prefers-reduced-motion: reduce) {
+  .player-portal-video-grid.is-editing .player-portal-video-tile {
+    animation: none;
+    outline: 2px dashed var(--pt-border);
+    outline-offset: 3px;
+  }
+
+  .player-portal-trash,
+  .player-portal-undo {
+    animation: none;
+  }
+}
+
 /* Rule 09: feedback is one line of coloured text, not a box. */
 .player-portal-error-line {
   margin: 0;
@@ -627,6 +882,26 @@
  * real: the viewport minus the nav, no more, with nothing below it. A
  * min-height here instead would let the workspace ask for a screen of its own
  * and put the controls under the fold, which is the bug this replaces. */
+/* Leaving the video screen. It drops away towards the library rather than
+   being cut, so saving reads as one movement: the video goes, the shelf it
+   went to is underneath. Kept in step with WORKSPACE_EXIT_MS. */
+.player-portal-video-host.is-leaving {
+  animation: player-portal-video-host-out 190ms ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes player-portal-video-host-out {
+  from { transform: scale(1); opacity: 1; }
+  to { transform: scale(0.94); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-portal-video-host.is-leaving {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 .player-portal-video-host {
   display: flex;
   flex-direction: column;

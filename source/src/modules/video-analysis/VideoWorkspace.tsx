@@ -2334,10 +2334,15 @@ export function VideoWorkspace({
       setSaveStatus("saved");
       setSaveMessage(message);
       await resetWorkspaceAfterDurableSave();
-      await briefSuccessDelay();
+      // The reset leaves an empty workspace behind -- the upload screen. The
+      // coach pauses on it long enough to read the confirmation, because their
+      // console stays put either way. The player is being taken back to their
+      // library, so pausing there is a flash of a screen they did not ask for:
+      // land them on the library and let the new tile be the confirmation.
+      if (!isPlayerVariant) await briefSuccessDelay();
       await onLocalSaveComplete?.(result);
     },
-    [onLocalSaveComplete, resetWorkspaceAfterDurableSave]
+    [isPlayerVariant, onLocalSaveComplete, resetWorkspaceAfterDurableSave]
   );
 
   const handleManualSave = useCallback(async () => {

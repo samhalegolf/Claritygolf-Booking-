@@ -54,6 +54,8 @@ export const config: Config = {
     "/api/people/import",
     "/api/people/import-lite",
     "/api/people/migrate",
+    "/api/practice",
+    "/api/practice/categories",
     "/api/public-booking",
     "/api/public-booking-catalog",
     "/api/public-booking-notifications",

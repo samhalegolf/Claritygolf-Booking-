@@ -18,12 +18,15 @@ import {
   PlayerTerminalNav,
   type PlayerTerminalDestination,
 } from "./PlayerTerminalNav";
+import { PlayerVideoShelf } from "./PlayerVideoShelf";
+import { formatDate } from "./format";
 import {
   createIndexedDbSavedVideoLibrary,
   fetchGuestStatus,
   importSavedVideoFromClarityCloud,
   listClarityCloudImportTransfers,
   registerGuestSender,
+  removeSavedVideoCloudTransfer,
   saveSavedVideoToCloud,
   type ClarityCloudImportTransfer,
   type GuestSender,
@@ -72,7 +75,17 @@ type Note = {
   updatedAt?: string;
 };
 
-type PortalTab = "home" | "lessons" | "notes" | "videos";
+type PortalTab = "home" | "lessons" | "practice" | "notes" | "videos";
+
+/** Prescribed practice, as the player's profile hands it over. */
+type PracticeItem = {
+  id: string;
+  categoryName?: string;
+  subcategoryName?: string;
+  body?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 type CaddyAccess = {
   appUrl: string;
@@ -109,37 +122,6 @@ function formatBookingWhen(booking: Booking) {
   return `${dateLabel} · ${formatMinutes(booking.start)}–${formatMinutes(booking.start + booking.duration)}`;
 }
 
-// The coach-side label speaks in Clarity Cloud and Drive terms. A player only
-// needs to know whether their coach has it.
-function sendStatusLabel(item: SavedVideoItem, isGuest = false, connected = false) {
-  switch (item.cloud?.status) {
-    case "ready":
-    case "imported":
-      // "Sent to your coach" over-promises for a guest: nobody has accepted it
-      // yet, and it expires if nobody does.
-      if (isGuest && !connected) return "Sent — waiting for your coach";
-      return "Sent to your coach";
-    case "preparing":
-    case "session-created":
-    case "uploading":
-    case "verifying":
-      return "Sending…";
-    case "paused":
-      return "Paused";
-    case "cancelled":
-      return "Not sent";
-    case "failed":
-    case "expired":
-      return "Could not send — try again";
-    default:
-      return "On this device only";
-  }
-}
-
-// What a cloud video is doing here, in the player's words. A coach-device
-// transfer is something the coach put in the cloud for them; a player
-// submission is their own video coming back to a device that has never held
-// it -- a new phone, or one whose local library was cleared.
 /**
  * Which way "Record a video" should go on this device.
  *
@@ -161,27 +143,8 @@ function shouldUseDevicePicker() {
   return window.matchMedia("(pointer: coarse)").matches;
 }
 
-function cloudVideoLabel(transfer: ClarityCloudImportTransfer) {
-  return transfer.direction === "coach-device" ? "From your coach" : "You sent this";
-}
-
-function formatSize(bytes?: number) {
-  if (!bytes) return "";
-  const mb = bytes / (1024 * 1024);
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`;
-}
-
-function formatDate(value?: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-}
-
-function formatDuration(seconds: number) {
-  const total = Math.max(0, Math.round(seconds));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
-}
+/** Kept in step with the slide-out in playerPortal.css. */
+const WORKSPACE_EXIT_MS = 190;
 
 export type PlayerPortalProps = {
   session: Session;
@@ -210,6 +173,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [caddy, setCaddy] = useState<CaddyAccess | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [practice, setPractice] = useState<PracticeItem[]>([]);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
 
@@ -282,10 +246,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         player?: { email?: string; name?: string; phone?: string; id?: string };
         bookings?: Booking[];
         notes?: Note[];
+        practice?: PracticeItem[];
       };
       if (!res.ok) throw new Error(data?.message || "We couldn't load your profile.");
       setBookings(Array.isArray(data.bookings) ? data.bookings : []);
       setNotes(Array.isArray(data.notes) ? data.notes : []);
+      setPractice(Array.isArray(data.practice) ? data.practice : []);
       if (data.player?.email) setPlayerEmail(data.player.email);
       if (data.player?.name) setPlayerName(data.player.name);
       if (data.player?.id) setPlayerId(data.player.id);
@@ -570,8 +536,22 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     [guestBusy, guestEmail, guestName, guestSheetVideoId, refreshGuestStatus, sendAsGuest],
   );
 
-  const closeWorkspace = useCallback(
-    (_context?: VideoWorkspaceNavigationContext) => {
+  // Leaving the video screen is two steps: the screen slides out, and then it
+  // is torn down. Tearing it down first would make the video vanish and the
+  // library appear in the same frame, which is the jump this replaces.
+  const [leavingWorkspace, setLeavingWorkspace] = useState(false);
+
+  const closeWorkspace = useCallback((_context?: VideoWorkspaceNavigationContext) => {
+    setLeavingWorkspace(true);
+  }, []);
+
+  useEffect(() => {
+    if (!leavingWorkspace) return;
+    // A timer rather than onAnimationEnd: an animation that never runs -- a
+    // hidden tab, a reduced-motion setting, a browser that skips it -- would
+    // otherwise strand the player on a screen that is already on its way out.
+    const timer = window.setTimeout(() => {
+      setLeavingWorkspace(false);
       setRecording(false);
       setOpenVideoId("");
       // Holding the File would pin the whole video in memory, and reopening
@@ -580,15 +560,65 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       setLiveRecordRequested(false);
       setTab("videos");
       void refreshSavedVideos();
+    }, WORKSPACE_EXIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [leavingWorkspace, refreshSavedVideos]);
+
+  /**
+   * Deletes the copy on this device, and nothing else.
+   *
+   * A video already delivered to the coach stays delivered -- sending is
+   * final, and the copy in their Drive is theirs. What that means in practice
+   * is that a sent video deleted here can come back as a cloud tile to
+   * download again, which is the honest picture of where it now lives.
+   *
+   * An upload still in flight is called off first. Leaving it running against
+   * a video this device is about to stop holding is how a transfer ends up
+   * stuck half-finished for good.
+   */
+  const deleteSavedVideo = useCallback(
+    async (savedVideoId: string) => {
+      if (!savedVideoLibrary) return;
+      setVideoError("");
+      try {
+        const item = await savedVideoLibrary.getItem(savedVideoId);
+        const status = item?.cloud?.status;
+        const inFlight =
+          status === "preparing" ||
+          status === "session-created" ||
+          status === "uploading" ||
+          status === "verifying" ||
+          status === "paused";
+        if (inFlight) {
+          await removeSavedVideoCloudTransfer(
+            savedVideoId,
+            savedVideoLibrary,
+            isGuest ? "guest" : "player",
+          );
+        }
+        await savedVideoLibrary.deleteItem(savedVideoId);
+      } catch (error) {
+        setVideoError(
+          error instanceof Error ? error.message : "Could not delete that video. Try again.",
+        );
+      } finally {
+        await refreshSavedVideos();
+        // A sent video that has just left this device belongs in the cloud
+        // list now, so that list has to be asked again.
+        void refreshCloudVideos();
+      }
     },
-    [refreshSavedVideos],
+    [isGuest, refreshCloudVideos, refreshSavedVideos, savedVideoLibrary],
   );
 
+  // Saving is the end of the visit to the video screen. The workspace empties
+  // itself after a durable save, so staying put would land the player on the
+  // blank upload screen -- the library is where the thing they just saved is.
   const handleLocalSaveComplete = useCallback(
     async (_result: VideoWorkspaceSaveResult) => {
-      await refreshSavedVideos();
+      closeWorkspace();
     },
-    [refreshSavedVideos],
+    [closeWorkspace],
   );
 
   // In the workspace, "save and send" means send it to the coach.
@@ -670,6 +700,25 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     [notes],
   );
 
+  /**
+   * Practice, grouped under its category heading.
+   *
+   * Insertion order rather than alphabetical: the server hands these over
+   * newest first, so the category a coach touched most recently is the one at
+   * the top of the screen. Alphabetical would put "Chipping" above whatever
+   * was set after this morning's lesson.
+   */
+  const practiceGroups = useMemo(() => {
+    const groups = new Map<string, PracticeItem[]>();
+    for (const block of practice) {
+      const name = block.categoryName?.trim() || "Practice";
+      const existing = groups.get(name);
+      if (existing) existing.push(block);
+      else groups.set(name, [block]);
+    }
+    return [...groups].map(([name, blocks]) => ({ name, blocks }));
+  }, [practice]);
+
   const nextLesson = upcomingBookings[0] || null;
   const laterLessons = upcomingBookings.slice(1);
 
@@ -700,7 +749,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   useEffect(() => {
     // Lessons doesn't exist for a guest any more -- if a sign-out happens
     // while sitting on it, land back on Home instead of rendering a dead tab.
-    if (!wasGuestRef.current && isGuest && tab === "lessons") setTab("home");
+    if (!wasGuestRef.current && isGuest && (tab === "lessons" || tab === "practice")) setTab("home");
     wasGuestRef.current = isGuest;
   }, [isGuest, tab]);
 
@@ -725,7 +774,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     return (
       <div className="player-terminal">
         {renderNav(null, { label: "Videos", onBack: () => closeWorkspace() })}
-        <div className="player-portal player-portal-video-host">
+        <div
+          className={`player-portal player-portal-video-host${leavingWorkspace ? " is-leaving" : ""}`}
+        >
           <Suspense fallback={<div className="player-portal-card">Loading video…</div>}>
             <VideoAnalysisPage
               variant="player"
@@ -848,6 +899,20 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               : nextLesson
                                 ? formatBookingWhen(nextLesson)
                                 : "No upcoming lessons"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="player-portal-home-card"
+                          onClick={() => navigateTerminal("practice")}
+                        >
+                          <span className="player-portal-home-card-title">Practice</span>
+                          <span className="player-portal-home-card-sub">
+                            {profileLoading && !practice.length
+                              ? "Loading…"
+                              : practice.length
+                                ? `${practice.length} thing${practice.length === 1 ? "" : "s"} to work on`
+                                : "Nothing set yet"}
                           </span>
                         </button>
                         <button
@@ -1053,6 +1118,44 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                 </section>
               )}
 
+              {tab === "practice" && !isGuest && (
+                <section className="player-portal-section">
+                  <h2>Practice</h2>
+                  <p className="player-portal-lead">
+                    What your coach has asked you to work on between lessons.
+                  </p>
+                  {profileLoading && !practice.length ? (
+                    <p className="player-portal-empty">Loading your practice…</p>
+                  ) : practiceGroups.length ? (
+                    // Grouped by category, so a screen full of blocks reads as
+                    // "here is the drilling, here is the playing" rather than
+                    // as one long undifferentiated list.
+                    practiceGroups.map((group) => (
+                      <div className="player-portal-practice-group" key={group.name}>
+                        <h3>{group.name}</h3>
+                        <ul className="player-portal-list">
+                          {group.blocks.map((block) => (
+                            <li className="player-portal-practice" key={block.id}>
+                              <div className="player-portal-note-head">
+                                <strong>{block.subcategoryName || group.name}</strong>
+                                {formatDate(block.updatedAt || block.createdAt) && (
+                                  <span>{formatDate(block.updatedAt || block.createdAt)}</span>
+                                )}
+                              </div>
+                              {block.body && <p>{block.body}</p>}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="player-portal-empty">
+                      Nothing to practise yet. Your coach will put it here after your next lesson.
+                    </p>
+                  )}
+                </section>
+              )}
+
               {tab === "notes" && !isGuest && (
                 <section className="player-portal-section">
                   <h2>Lesson notes</h2>
@@ -1171,122 +1274,20 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         </p>
                       )}
 
-                      {savedVideos.length || missingCloudVideos.length ? (
-                        <ul className="player-portal-video-grid">
-                          {missingCloudVideos.map((transfer) => {
-                            const downloading = downloadingIds.has(transfer.savedVideoId);
-                            const title = transfer.savedVideo?.title || "Swing video";
-                            const size = formatSize(transfer.video?.sizeBytes || transfer.expectedSizeBytes);
-                            return (
-                              <li className="player-portal-video-tile" key={transfer.savedVideoId}>
-                                {/* The tile and the pill both download -- the
-                                    tile because it is the thing your thumb
-                                    goes to, the pill because it says what the
-                                    tap will do. */}
-                                <button
-                                  type="button"
-                                  className="player-portal-video-media player-portal-video-media-cloud"
-                                  disabled={downloading}
-                                  onClick={() => void downloadFromCloud(transfer.savedVideoId)}
-                                  aria-label={`Download ${title} to this device`}
-                                >
-                                  <span className="player-portal-video-cloud-glyph" aria-hidden="true" />
-                                  {transfer.video?.duration != null && (
-                                    <span className="player-portal-video-duration">
-                                      {formatDuration(transfer.video.duration)}
-                                    </span>
-                                  )}
-                                </button>
-                                <div className="player-portal-video-meta">
-                                  <strong>{title}</strong>
-                                  <span>
-                                    {formatDate(transfer.savedVideo?.createdAt || transfer.readyToImportAt)}
-                                  </span>
-                                  <span>{[cloudVideoLabel(transfer), size].filter(Boolean).join(" · ")}</span>
-                                </div>
-                                <button
-                                  className="player-portal-video-action"
-                                  type="button"
-                                  disabled={downloading}
-                                  onClick={() => void downloadFromCloud(transfer.savedVideoId)}
-                                >
-                                  {downloading ? "Downloading…" : "Download"}
-                                </button>
-                              </li>
-                            );
-                          })}
-                          {savedVideos.map((item) => {
-                            const sending = sendingIds.has(item.savedVideoId);
-                            const progress = sendProgress[item.savedVideoId] ?? item.cloud?.progress ?? 0;
-                            const cloudStatus = item.cloud?.status;
-                            const sent = cloudStatus === "ready" || cloudStatus === "imported";
-                            const failed = cloudStatus === "failed" || cloudStatus === "expired";
-                            // A tile at rest says nothing -- the screen's lead
-                            // already covers "on this device". The state line
-                            // appears only when there is state: in flight,
-                            // sent, stalled or failed.
-                            const showState = sending || sent || failed || cloudStatus === "paused";
-                            const title = item.title || "Swing video";
-                            return (
-                              <li className="player-portal-video-tile" key={item.savedVideoId}>
-                                <button
-                                  type="button"
-                                  className="player-portal-video-media"
-                                  onClick={() => setOpenVideoId(item.savedVideoId)}
-                                  aria-label={`Open ${title}`}
-                                >
-                                  {item.thumbnailDataUrl ? (
-                                    <img src={item.thumbnailDataUrl} alt="" loading="lazy" />
-                                  ) : (
-                                    <span className="player-portal-video-play-glyph" aria-hidden="true" />
-                                  )}
-                                  {item.source.duration != null && (
-                                    <span className="player-portal-video-duration">
-                                      {formatDuration(item.source.duration)}
-                                    </span>
-                                  )}
-                                  {sending && (
-                                    <span className="player-portal-video-progress" aria-hidden="true">
-                                      <span
-                                        style={{ width: `${Math.min(100, Math.max(4, progress))}%` }}
-                                      />
-                                    </span>
-                                  )}
-                                </button>
-                                <div className="player-portal-video-meta">
-                                  <strong>{title}</strong>
-                                  <span>{formatDate(item.capturedAt || item.createdAt)}</span>
-                                </div>
-                                {showState && (
-                                  <span
-                                    className={`player-portal-video-state${sent ? " is-sent" : ""}${failed ? " is-error" : ""}`}
-                                  >
-                                    {sending
-                                      ? `Sending… ${Math.round(progress)}%`
-                                      : sendStatusLabel(item, isGuest, Boolean(guestStatus?.connected))}
-                                  </span>
-                                )}
-                                {!sent && (
-                                  <button
-                                    className="player-portal-video-action"
-                                    type="button"
-                                    disabled={sending}
-                                    onClick={() => void sendToCoach(item.savedVideoId)}
-                                  >
-                                    {sending ? "Sending…" : failed ? "Try again" : "Send to coach"}
-                                  </button>
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      ) : (
-                        <p className="player-portal-empty">
-                          {cloudLoading
-                            ? "Looking for your videos…"
-                            : "No videos on this device yet. Record a swing to get started."}
-                        </p>
-                      )}
+                      <PlayerVideoShelf
+                        savedVideos={savedVideos}
+                        cloudVideos={missingCloudVideos}
+                        sendingIds={sendingIds}
+                        sendProgress={sendProgress}
+                        downloadingIds={downloadingIds}
+                        isGuest={isGuest}
+                        guestConnected={Boolean(guestStatus?.connected)}
+                        cloudLoading={cloudLoading}
+                        onOpen={setOpenVideoId}
+                        onSend={(id) => void sendToCoach(id)}
+                        onDownload={(id) => void downloadFromCloud(id)}
+                        onDelete={(id) => void deleteSavedVideo(id)}
+                      />
                     </>
                   )}
                 </section>

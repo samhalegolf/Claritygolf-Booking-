@@ -3405,6 +3405,168 @@ async function deleteLessonNote(noteId, accountId = defaultWorkspaceAccountFromC
   return { notes };
 }
 
+/* --- Practice -------------------------------------------------------------
+ *
+ * A practice block is prescribed practice: a coach picks a category and a
+ * sub-category, writes what to do, and it lands in the player's Practice
+ * section. The pair is the title -- "Drill · At home", "Play · Golf course" --
+ * so the coach never types a heading, only chooses one.
+ *
+ * The categories are one library per workspace rather than one per player.
+ * A coach's vocabulary for practice is their own and does not change from
+ * player to player; making it per-player would mean rebuilding the same tree
+ * every time somebody new came along.
+ *
+ * Stored as settings JSON, exactly like lesson notes above. Same reasoning:
+ * this is a small, coach-authored list read as a whole, and a table would buy
+ * nothing a settings row does not already give.
+ * ------------------------------------------------------------------------- */
+
+const PRACTICE_CATEGORIES_SETTING_PREFIX = "practiceCategories.v1";
+const PRACTICE_BLOCKS_SETTING_PREFIX = "practiceBlocks.v1";
+
+function practiceCategoriesSettingKey(accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  return `${PRACTICE_CATEGORIES_SETTING_PREFIX}.${cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id)}`;
+}
+
+function practiceBlocksSettingKey(accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  return `${PRACTICE_BLOCKS_SETTING_PREFIX}.${cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id)}`;
+}
+
+function rowToPracticeCategory(category) {
+  const subcategories = (Array.isArray(category?.subcategories) ? category.subcategories : [])
+    .map((sub) => ({
+      id: cleanString(sub?.id, "", 120) || randomUUID(),
+      name: cleanString(sub?.name, "", 80),
+    }))
+    .filter((sub) => sub.name)
+    .slice(0, 60);
+  return {
+    id: cleanString(category?.id, "", 120) || randomUUID(),
+    name: cleanString(category?.name, "", 80),
+    subcategories,
+  };
+}
+
+async function readPracticeCategories(accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const parsed = safeJsonParse(await getSetting(practiceCategoriesSettingKey(cleanAccountId)), []);
+  return Array.isArray(parsed)
+    ? parsed.map(rowToPracticeCategory).filter((category) => category.name)
+    : [];
+}
+
+async function writePracticeCategories(categories, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const scoped = (Array.isArray(categories) ? categories : [])
+    .map(rowToPracticeCategory)
+    .filter((category) => category.name)
+    .slice(0, 40);
+  await setSetting(practiceCategoriesSettingKey(cleanAccountId), JSON.stringify(scoped));
+  return scoped;
+}
+
+function rowToPracticeBlock(block, fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const createdAt = cleanString(block?.createdAt || block?.created_at, "", 80) || nowIso();
+  const updatedAt = cleanString(block?.updatedAt || block?.updated_at, "", 80) || createdAt;
+  return {
+    id: cleanString(block?.id, "", 120) || randomUUID(),
+    accountId: cleanSlug(block?.accountId || block?.account_id, fallbackAccountId),
+    playerId: cleanString(block?.playerId || block?.player_id, "", 160),
+    playerName: cleanString(block?.playerName || block?.player_name, "", 180),
+    categoryId: cleanString(block?.categoryId || block?.category_id, "", 120),
+    // The names are stored alongside the ids, not instead of them. Which one
+    // wins is decided at read time -- see readPracticeBlocks.
+    categoryName: cleanString(block?.categoryName || block?.category_name, "", 80),
+    subcategoryId: cleanString(block?.subcategoryId || block?.subcategory_id, "", 120),
+    subcategoryName: cleanString(block?.subcategoryName || block?.subcategory_name, "", 80),
+    body: cleanString(block?.body || block?.text || block?.description, "", 4000),
+    createdAt,
+    updatedAt,
+  };
+}
+
+/**
+ * Reads the blocks with their titles resolved against the current category
+ * library.
+ *
+ * A block keeps both the id and the name it was filed under. The id is tried
+ * first, so renaming "DRILL" to "Drill" retitles every block that used it --
+ * a typo fixed once is fixed everywhere. The stored name is the fallback, so
+ * deleting a category leaves its blocks readable rather than untitled. Neither
+ * on its own gets both of those.
+ */
+async function readPracticeBlocks(accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const parsed = safeJsonParse(await getSetting(practiceBlocksSettingKey(cleanAccountId)), []);
+  if (!Array.isArray(parsed)) return [];
+  const categories = await readPracticeCategories(cleanAccountId);
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const subcategoryById = new Map(
+    categories.flatMap((category) => category.subcategories.map((sub) => [sub.id, sub])),
+  );
+  return parsed
+    .map((block) => rowToPracticeBlock(block, cleanAccountId))
+    .filter((block) => block.playerId && block.body)
+    .map((block) => ({
+      ...block,
+      categoryName: categoryById.get(block.categoryId)?.name || block.categoryName,
+      subcategoryName: subcategoryById.get(block.subcategoryId)?.name || block.subcategoryName,
+    }))
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
+
+async function writePracticeBlocks(blocks, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const scoped = (Array.isArray(blocks) ? blocks : [])
+    .map((block) => rowToPracticeBlock(block, cleanAccountId))
+    .filter((block) => block.playerId && block.body);
+  await setSetting(practiceBlocksSettingKey(cleanAccountId), JSON.stringify(scoped));
+  return scoped.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
+
+async function upsertPracticeBlock(rawBlock, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const now = nowIso();
+  const current = await readPracticeBlocks(cleanAccountId);
+  const block = rowToPracticeBlock(
+    {
+      ...rawBlock,
+      accountId: cleanAccountId,
+      id: rawBlock?.id || randomUUID(),
+      createdAt: rawBlock?.createdAt || now,
+      updatedAt: now,
+    },
+    cleanAccountId,
+  );
+  if (!block.playerId) {
+    throw Object.assign(new Error("A practice block needs a player id."), { status: 400 });
+  }
+  if (!block.body.trim()) {
+    throw Object.assign(new Error("A practice block needs a description."), { status: 400 });
+  }
+  if (!block.categoryName) {
+    throw Object.assign(new Error("A practice block needs a category."), { status: 400 });
+  }
+  const next = [block, ...current.filter((entry) => entry.id !== block.id)];
+  const blocks = await writePracticeBlocks(next, cleanAccountId);
+  return { block, blocks };
+}
+
+async function deletePracticeBlock(blockId, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
+  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+  const cleanId = cleanString(blockId, "", 120);
+  if (!cleanId) {
+    throw Object.assign(new Error("A practice block id is required."), { status: 400 });
+  }
+  const current = await readPracticeBlocks(cleanAccountId);
+  const blocks = await writePracticeBlocks(
+    current.filter((block) => block.id !== cleanId),
+    cleanAccountId,
+  );
+  return { blocks };
+}
+
 /**
  * True when writing this person would leave the stored row exactly as it is.
  *
@@ -7767,6 +7929,20 @@ async function readPlayerProfile(session) {
       updatedAt: note.updatedAt,
     }));
 
+  // Prescribed practice. Filed against the same player id candidates as the
+  // notes above, so a player who exists under more than one historical id
+  // still sees everything filed under any of them.
+  const practice = (await readPracticeBlocks(accountId))
+    .filter((block) => block.playerId && candidates.has(block.playerId))
+    .map((block) => ({
+      id: block.id,
+      categoryName: block.categoryName,
+      subcategoryName: block.subcategoryName,
+      body: block.body,
+      createdAt: block.createdAt,
+      updatedAt: block.updatedAt,
+    }));
+
   // Surface display name + original-formatted phone (from the matched
   // appointment) so the client can pre-fill the booking form on hand-off
   // without ever re-asking the player for their details.
@@ -7783,6 +7959,7 @@ async function readPlayerProfile(session) {
     },
     bookings,
     notes,
+    practice,
   };
 }
 
@@ -10500,6 +10677,53 @@ async function routeBookingApiRequest(
       assertAccountFeature(requestContext.account, "clients");
       const noteId = cleanString(url.searchParams.get("id"), "", 120);
       return json(await deleteLessonNote(noteId, requestContext.accountId));
+    }
+
+    // The category library. One list per workspace, saved whole rather than
+    // item by item -- it is a short tree the coach edits as a tree.
+    if (req.method === "GET" && pathname === "/api/practice/categories") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json({ categories: await readPracticeCategories(requestContext.accountId) });
+    }
+
+    if (req.method === "PUT" && pathname === "/api/practice/categories") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json({
+        categories: await writePracticeCategories(body.categories || body, requestContext.accountId),
+      });
+    }
+
+    if (req.method === "GET" && pathname === "/api/practice") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const playerId = cleanString(url.searchParams.get("playerId"), "", 160);
+      const blocks = (await readPracticeBlocks(requestContext.accountId)).filter(
+        (block) => !playerId || block.playerId === playerId,
+      );
+      return json({ blocks });
+    }
+
+    if ((req.method === "POST" || req.method === "PUT") && pathname === "/api/practice") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const result = await upsertPracticeBlock(body.block || body, requestContext.accountId);
+      return json(result, req.method === "POST" ? 201 : 200);
+    }
+
+    if (req.method === "DELETE" && pathname === "/api/practice") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const blockId = cleanString(url.searchParams.get("id"), "", 120);
+      return json(await deletePracticeBlock(blockId, requestContext.accountId));
     }
 
 	    if (req.method === "POST" && (pathname === "/api/people/import" || pathname === "/api/people/import-lite")) {

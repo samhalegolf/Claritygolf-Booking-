@@ -145,11 +145,17 @@ test("every dedicated /api route is excluded from the wildcard", () => {
   for (const entry of readdirSync(fnDir)) {
     if (!entry.endsWith(".mts") || entry === "booking-api.mts" || entry.endsWith(".test.mts")) continue;
     const text = readFileSync(path.join(fnDir, entry), "utf8");
-    for (const match of text.matchAll(/path:\s*"(\/api\/[^"]+)"/g)) {
-      const route = match[1].replace(/\/\*$/, "");
-      if (route === "/api" || excluded.has(route)) continue;
-      if ([...excluded].some((e) => route.startsWith(`${e}/`))) continue;
-      missing.push(`${entry} owns ${match[1]} but booking-api.mts does not exclude it`);
+    // `path` is a bare string on most functions and an array on the ones that
+    // own more than one route. Reading only the string form let an array-path
+    // function deploy with no exclusion and then 404 from booking-api at
+    // runtime — the exact failure this test exists to catch.
+    for (const declaration of text.matchAll(/path:\s*(\[[^\]]*\]|"\/api\/[^"]+")/g)) {
+      for (const match of declaration[1].matchAll(/"(\/api\/[^"]+)"/g)) {
+        const route = match[1].replace(/\/\*$/, "");
+        if (route === "/api" || excluded.has(route)) continue;
+        if ([...excluded].some((e) => route.startsWith(`${e}/`))) continue;
+        missing.push(`${entry} owns ${match[1]} but booking-api.mts does not exclude it`);
+      }
     }
   }
   assert.deepEqual(missing, [], missing.join("\n  "));

@@ -52,3 +52,6 @@ ui-layout-fix.tgz
 integrations-list.tgz
 integrations-status-fix.tgz
 google-scope-fix.tgz
+
+# The npm lockfile, deliberately untracked.
+source/package-lock.json

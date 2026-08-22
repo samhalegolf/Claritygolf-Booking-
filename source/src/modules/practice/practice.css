@@ -1,0 +1,219 @@
+/* The coach's practice feeder, inside the Player Profiles tool panel.
+ *
+ * The panel around this is already a bordered box, so nothing here draws a
+ * second one: the form is a stack of fields, and the prescribed blocks are
+ * separated by hairlines rather than boxed individually. */
+
+.practice-feeder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-5);
+}
+
+.practice-prescribe {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-3);
+}
+
+.practice-pickers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--c-space-3);
+}
+
+.practice-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-1);
+  min-width: 0;
+}
+
+.practice-field > span {
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  color: var(--c-text-soft);
+}
+
+/* No width:100% on any of these. The field is a flex column, so a control
+   already fills it; what each one needs is a ceiling, and the ceiling is the
+   token for the kind of content it holds. */
+.practice-field select,
+.practice-field textarea,
+.practice-inline-add input {
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  padding: 0 10px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-body);
+}
+
+.practice-field select,
+.practice-inline-add input {
+  min-height: var(--c-h-control);
+  max-width: var(--c-w-name);
+}
+
+.practice-field textarea {
+  max-width: var(--c-w-prose);
+  padding: 8px 10px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.practice-field select:disabled {
+  color: var(--c-text-disabled);
+}
+
+.practice-inline-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--c-space-2);
+}
+
+.practice-inline-add input {
+  flex: 1 1 180px;
+}
+
+.practice-prescribe-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--c-space-3);
+}
+
+/* The title the block will carry, shown before it is committed. It is built
+   from the two selects, so seeing it is the only way to know they are right. */
+.practice-preview {
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  color: var(--c-text-soft);
+}
+
+.practice-error {
+  margin: 0;
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+  color: var(--c-error-text);
+}
+
+.practice-library-toggle {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--c-text-soft);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.practice-library-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-3);
+  padding-top: var(--c-space-3);
+}
+
+.practice-library-note,
+.practice-library-empty {
+  margin: 0;
+  font-size: var(--c-size-meta);
+  color: var(--c-muted);
+}
+
+.practice-library-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-2);
+  padding-bottom: var(--c-space-3);
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.practice-library-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--c-space-3);
+}
+
+.practice-library-subs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2);
+}
+
+.practice-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--c-h-pill);
+  padding: 0 6px 0 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+.practice-chip button,
+.practice-remove {
+  border: 0;
+  padding: 0 6px;
+  background: none;
+  color: var(--c-muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.practice-chip button:hover,
+.practice-remove:hover {
+  color: var(--c-error-text);
+}
+
+.practice-remove {
+  font-size: var(--c-size-meta);
+}
+
+.practice-block-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Hairlines between, not a box around each — the tool panel is the box. */
+.practice-block-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-2);
+  padding: var(--c-space-3) 0;
+  border-top: 1px solid var(--c-border-soft);
+  align-items: flex-start;
+}
+
+.practice-block-card > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.practice-block-card strong {
+  font-size: var(--c-size-card-heading);
+}
+
+.practice-block-card span {
+  font-size: var(--c-size-meta);
+  color: var(--c-muted);
+}
+
+.practice-block-card p {
+  margin: 0;
+  max-width: var(--c-w-prose);
+  color: var(--c-text-body);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
