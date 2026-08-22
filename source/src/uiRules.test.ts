@@ -247,7 +247,7 @@ test("bare width:100% is not spreading on fields", () => {
  * has always had rough edges.
  */
 test("literal hex colours are not spreading", () => {
-  const BASELINE = 883;
+  const BASELINE = 880;
   let count = 0;
   for (const file of files) {
     if (file === TOKENS) continue;

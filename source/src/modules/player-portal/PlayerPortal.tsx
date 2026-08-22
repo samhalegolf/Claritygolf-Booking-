@@ -791,14 +791,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
           )}
 
           {profileError ? (
-            <div className="player-portal-error" role="alert">
-              <p style={{ margin: 0 }}>{profileError}</p>
-              <button
-                className="player-portal-ghost"
-                type="button"
-                onClick={() => void loadProfile()}
-                style={{ marginTop: 10 }}
-              >
+            <div className="player-portal-profile-error">
+              <p className="player-portal-error-line" role="alert">
+                {profileError}
+              </p>
+              <button className="player-portal-ghost" type="button" onClick={() => void loadProfile()}>
                 Try again
               </button>
             </div>
@@ -1130,9 +1127,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         />
                       </label>
                       {guestError && (
-                        <div className="player-portal-error" role="alert">
-                          <p style={{ margin: 0 }}>{guestError}</p>
-                        </div>
+                        <p className="player-portal-error-line" role="alert">
+                          {guestError}
+                        </p>
                       )}
                       <div className="player-portal-note-form-actions">
                         <button
@@ -1168,111 +1165,125 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       </button>
 
                       {videoError && (
-                        <div className="player-portal-error" role="alert">
-                          <p style={{ margin: 0 }}>{videoError}</p>
-                        </div>
+                        <p className="player-portal-error-line" role="alert">
+                          {videoError}
+                        </p>
                       )}
 
                       {savedVideos.length || missingCloudVideos.length ? (
-                        <ul className="player-portal-list">
+                        <ul className="player-portal-video-grid">
                           {missingCloudVideos.map((transfer) => {
                             const downloading = downloadingIds.has(transfer.savedVideoId);
                             const title = transfer.savedVideo?.title || "Swing video";
                             const size = formatSize(transfer.video?.sizeBytes || transfer.expectedSizeBytes);
                             return (
-                              <li
-                                className="player-portal-video player-portal-video-cloud"
-                                key={transfer.savedVideoId}
-                              >
-                                <div className="player-portal-video-thumb" aria-hidden="true">
-                                  <span className="player-portal-video-thumb-cloud" />
+                              <li className="player-portal-video-tile" key={transfer.savedVideoId}>
+                                {/* The tile and the pill both download -- the
+                                    tile because it is the thing your thumb
+                                    goes to, the pill because it says what the
+                                    tap will do. */}
+                                <button
+                                  type="button"
+                                  className="player-portal-video-media player-portal-video-media-cloud"
+                                  disabled={downloading}
+                                  onClick={() => void downloadFromCloud(transfer.savedVideoId)}
+                                  aria-label={`Download ${title} to this device`}
+                                >
+                                  <span className="player-portal-video-cloud-glyph" aria-hidden="true" />
                                   {transfer.video?.duration != null && (
-                                    <span className="player-portal-video-thumb-duration">
+                                    <span className="player-portal-video-duration">
                                       {formatDuration(transfer.video.duration)}
                                     </span>
                                   )}
-                                </div>
-                                <div className="player-portal-video-main">
+                                </button>
+                                <div className="player-portal-video-meta">
                                   <strong>{title}</strong>
                                   <span>
                                     {formatDate(transfer.savedVideo?.createdAt || transfer.readyToImportAt)}
                                   </span>
-                                  <span className="player-portal-video-status">
-                                    {downloading
-                                      ? "Downloading…"
-                                      : [cloudVideoLabel(transfer), size].filter(Boolean).join(" · ")}
-                                  </span>
+                                  <span>{[cloudVideoLabel(transfer), size].filter(Boolean).join(" · ")}</span>
                                 </div>
-                                <div className="player-portal-video-actions">
-                                  <button
-                                    className="player-portal-primary player-portal-video-download"
-                                    type="button"
-                                    disabled={downloading}
-                                    onClick={() => void downloadFromCloud(transfer.savedVideoId)}
-                                    aria-label={`Download ${title} to this device`}
-                                  >
-                                    <span aria-hidden="true">↓</span>
-                                    {downloading ? "Downloading…" : "Download"}
-                                  </button>
-                                </div>
+                                <button
+                                  className="player-portal-video-action"
+                                  type="button"
+                                  disabled={downloading}
+                                  onClick={() => void downloadFromCloud(transfer.savedVideoId)}
+                                >
+                                  {downloading ? "Downloading…" : "Download"}
+                                </button>
                               </li>
                             );
                           })}
                           {savedVideos.map((item) => {
                             const sending = sendingIds.has(item.savedVideoId);
                             const progress = sendProgress[item.savedVideoId] ?? item.cloud?.progress ?? 0;
-                            const sent = item.cloud?.status === "ready" || item.cloud?.status === "imported";
+                            const cloudStatus = item.cloud?.status;
+                            const sent = cloudStatus === "ready" || cloudStatus === "imported";
+                            const failed = cloudStatus === "failed" || cloudStatus === "expired";
+                            // A tile at rest says nothing -- the screen's lead
+                            // already covers "on this device". The state line
+                            // appears only when there is state: in flight,
+                            // sent, stalled or failed.
+                            const showState = sending || sent || failed || cloudStatus === "paused";
+                            const title = item.title || "Swing video";
                             return (
-                              <li className="player-portal-video" key={item.savedVideoId}>
-                                <div className="player-portal-video-thumb" aria-hidden="true">
+                              <li className="player-portal-video-tile" key={item.savedVideoId}>
+                                <button
+                                  type="button"
+                                  className="player-portal-video-media"
+                                  onClick={() => setOpenVideoId(item.savedVideoId)}
+                                  aria-label={`Open ${title}`}
+                                >
                                   {item.thumbnailDataUrl ? (
-                                    <img
-                                      src={item.thumbnailDataUrl}
-                                      alt=""
-                                      className="player-portal-video-thumb-img"
-                                    />
+                                    <img src={item.thumbnailDataUrl} alt="" loading="lazy" />
                                   ) : (
-                                    <span className="player-portal-video-thumb-play" />
+                                    <span className="player-portal-video-play-glyph" aria-hidden="true" />
                                   )}
                                   {item.source.duration != null && (
-                                    <span className="player-portal-video-thumb-duration">
+                                    <span className="player-portal-video-duration">
                                       {formatDuration(item.source.duration)}
                                     </span>
                                   )}
-                                </div>
-                                <div className="player-portal-video-main">
-                                  <strong>{item.title || "Swing video"}</strong>
+                                  {sending && (
+                                    <span className="player-portal-video-progress" aria-hidden="true">
+                                      <span
+                                        style={{ width: `${Math.min(100, Math.max(4, progress))}%` }}
+                                      />
+                                    </span>
+                                  )}
+                                </button>
+                                <div className="player-portal-video-meta">
+                                  <strong>{title}</strong>
                                   <span>{formatDate(item.capturedAt || item.createdAt)}</span>
-                                  <span className="player-portal-video-status">
-                                      {sending
-                                        ? `Sending… ${Math.round(progress)}%`
-                                        : sendStatusLabel(item, isGuest, Boolean(guestStatus?.connected))}
-                                  </span>
                                 </div>
-                                <div className="player-portal-video-actions">
-                                  <button
-                                    className="player-portal-ghost"
-                                    type="button"
-                                    onClick={() => setOpenVideoId(item.savedVideoId)}
+                                {showState && (
+                                  <span
+                                    className={`player-portal-video-state${sent ? " is-sent" : ""}${failed ? " is-error" : ""}`}
                                   >
-                                    Open
-                                  </button>
+                                    {sending
+                                      ? `Sending… ${Math.round(progress)}%`
+                                      : sendStatusLabel(item, isGuest, Boolean(guestStatus?.connected))}
+                                  </span>
+                                )}
+                                {!sent && (
                                   <button
-                                    className="player-portal-primary"
+                                    className="player-portal-video-action"
                                     type="button"
-                                    disabled={sending || sent}
+                                    disabled={sending}
                                     onClick={() => void sendToCoach(item.savedVideoId)}
                                   >
-                                    {sent ? "Sent" : sending ? "Sending…" : "Send to coach"}
+                                    {sending ? "Sending…" : failed ? "Try again" : "Send to coach"}
                                   </button>
-                                </div>
+                                )}
                               </li>
                             );
                           })}
                         </ul>
                       ) : (
                         <p className="player-portal-empty">
-                          {cloudLoading ? "Looking for your videos…" : "No videos on this device yet."}
+                          {cloudLoading
+                            ? "Looking for your videos…"
+                            : "No videos on this device yet. Record a swing to get started."}
                         </p>
                       )}
                     </>

@@ -643,7 +643,7 @@
 
 .player-portal-access-body span {
   font-size: 12px;
-  color: var(--muted, #77746d);
+  color: var(--muted);
 }
 
 .player-portal-access-actions {
@@ -670,7 +670,7 @@
 
 .player-video-submission-note {
   font-size: 12px;
-  color: var(--muted, #77746d);
+  color: var(--muted);
   font-style: italic;
 }
 
@@ -686,7 +686,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--muted, #77746d);
+  color: var(--muted);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -723,7 +723,7 @@
 
 .player-caddy-card-body span {
   font-size: 12px;
-  color: var(--muted, #77746d);
+  color: var(--muted);
 }
 
 .player-caddy-card-actions {

@@ -35,6 +35,13 @@
   --c-danger: #a52e15;
   --c-error-text: #6f1d1d;
   --c-success-text: #225b2f;
+  /* Overlays drawn on top of video imagery -- a duration badge, an upload
+     bar. Deliberately the same in both schemes, so they are not swapped in
+     the dark blocks below: a dark scrim with light text reads on any
+     thumbnail. */
+  --c-scrim: rgba(0, 0, 0, 0.65);
+  --c-scrim-soft: rgba(0, 0, 0, 0.45);
+  --c-on-scrim: #ffffff;
   --c-pencil: #8f8c86;
   --c-pencil-hover: #57544d;
   /* Disabled text on a plain/underlined button. Its own token rather than an
