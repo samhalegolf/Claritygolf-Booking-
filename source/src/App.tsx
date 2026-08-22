@@ -2270,8 +2270,12 @@ function sectionTitle(view: View) {
   }
 }
 
-function getInitialView(): View {
+function getInitialView(embedded = false): View {
   if (typeof window === "undefined") return "calendar";
+  // Mounted as the booking widget, the view is booking and nothing in the URL
+  // may say otherwise -- ?view=settings on a portal page must not open coach
+  // settings inside the player's Lessons tab.
+  if (embedded) return "booking";
   const requestedView = new URLSearchParams(window.location.search).get("view");
   if (requestedView === "settings") return "settings";
   if (requestedView === "billing") return "billing";
@@ -4825,8 +4829,20 @@ type AppProps = {
 };
 
 function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
-  const isEmbedMode = isBookingWidgetMode();
-  const isPlayerBooking = isEmbedMode && bookingEntry === "player";
+  // How this component was mounted, not what the URL says.
+  //
+  // The portal used to hand the whole page over to ?embed=booking&portal=player
+  // and the URL was the only signal there was. It now renders the widget inline
+  // inside the Lessons tab, and the native build has no query string at all --
+  // its origin is capacitor://localhost. Reading the URL there answers "coach
+  // workspace", so every `if (isEmbedMode) return` guard below stopped
+  // guarding and the coach boot sequence ran inside the player's portal.
+  const isEmbedMode = bookingEntry === "player" || isBookingWidgetMode();
+  const isPlayerBooking = bookingEntry === "player";
+  // True only when the widget *is* the page. The portal nests it inside the
+  // Lessons tab, where stamping the document would restyle the terminal
+  // around it.
+  const ownsPage = isEmbedMode && !isPlayerBooking;
   const bookingCardScheme = useBookingCardScheme();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
@@ -4928,7 +4944,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const [clientListTab, setClientListTab] = useState<"main" | "external">("main");
   const [clientMoveSavingId, setClientMoveSavingId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
-  const [activeView, setActiveView] = useState<View>(getInitialView);
+  const [activeView, setActiveView] = useState<View>(() => getInitialView(isEmbedMode));
   const [videoContext, setVideoContext] = useState<{
     playerId: string;
     playerName: string;
@@ -6472,14 +6488,14 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   }, [themeMode]);
 
   useEffect(() => {
-    if (!isEmbedMode) return;
+    if (!ownsPage) return;
     document.documentElement.classList.add("clarity-embed-mode");
     document.body.classList.add("clarity-embed-mode");
     return () => {
       document.documentElement.classList.remove("clarity-embed-mode");
       document.body.classList.remove("clarity-embed-mode");
     };
-  }, [isEmbedMode]);
+  }, [ownsPage]);
 
   useEffect(() => {
     window.localStorage.setItem(COACH_ACCOUNT_STORAGE_KEY, JSON.stringify(coachAccount));

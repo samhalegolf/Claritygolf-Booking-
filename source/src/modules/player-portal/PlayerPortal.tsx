@@ -21,8 +21,11 @@ import {
 import {
   createIndexedDbSavedVideoLibrary,
   fetchGuestStatus,
+  importSavedVideoFromClarityCloud,
+  listClarityCloudImportTransfers,
   registerGuestSender,
   saveSavedVideoToCloud,
+  type ClarityCloudImportTransfer,
   type GuestSender,
   type GuestStatus,
   type SavedVideoItem,
@@ -133,6 +136,20 @@ function sendStatusLabel(item: SavedVideoItem, isGuest = false, connected = fals
   }
 }
 
+// What a cloud video is doing here, in the player's words. A coach-device
+// transfer is something the coach put in the cloud for them; a player
+// submission is their own video coming back to a device that has never held
+// it -- a new phone, or one whose local library was cleared.
+function cloudVideoLabel(transfer: ClarityCloudImportTransfer) {
+  return transfer.direction === "coach-device" ? "From your coach" : "You sent this";
+}
+
+function formatSize(bytes?: number) {
+  if (!bytes) return "";
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`;
+}
+
 function formatDate(value?: string) {
   if (!value) return "";
   const date = new Date(value);
@@ -189,6 +206,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [sendProgress, setSendProgress] = useState<Record<string, number>>({});
   const [recording, setRecording] = useState(false);
   const [openVideoId, setOpenVideoId] = useState("");
+
+  // Videos that exist in the cloud but not on this device. A guest never has
+  // any -- a guest can put bytes into the coach's Drive and can never read one
+  // back out -- so the portal does not ask on their behalf.
+  const [cloudVideos, setCloudVideos] = useState<ClarityCloudImportTransfer[]>([]);
+  const [cloudLoading, setCloudLoading] = useState(false);
+  const [downloadingIds, setDownloadingIds] = useState<Set<string>>(() => new Set());
 
   // Sending as a guest. The identity is a name and an email -- not an account
   // -- captured inline the first time they send, so nothing about the screen
@@ -299,6 +323,60 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   useEffect(() => {
     void refreshSavedVideos();
   }, [refreshSavedVideos]);
+
+  const refreshCloudVideos = useCallback(async () => {
+    if (isGuest) return;
+    setCloudLoading(true);
+    try {
+      const transfers = await listClarityCloudImportTransfers();
+      // Only what the server would actually hand over: the catalogue keeps
+      // rows whose Drive copy has since been cleaned up, and a shell that
+      // cannot be downloaded is worse than no shell at all.
+      setCloudVideos(transfers.filter((transfer) => transfer.status === "ready" && transfer.driveVideoFileId));
+    } catch {
+      // The device library is the portal's source of truth. A cloud list that
+      // will not load hides the extra rows and nothing else.
+      setCloudVideos([]);
+    } finally {
+      setCloudLoading(false);
+    }
+  }, [isGuest]);
+
+  useEffect(() => {
+    void refreshCloudVideos();
+  }, [refreshCloudVideos]);
+
+  // A cloud row is only worth showing while this device has no copy.
+  const missingCloudVideos = useMemo(() => {
+    const onDevice = new Set(savedVideos.map((item) => item.savedVideoId));
+    return cloudVideos.filter((transfer) => !onDevice.has(transfer.savedVideoId));
+  }, [cloudVideos, savedVideos]);
+
+  const downloadFromCloud = useCallback(
+    async (savedVideoId: string) => {
+      if (!savedVideoLibrary || downloadingIds.has(savedVideoId)) return;
+      setVideoError("");
+      setDownloadingIds((current) => new Set(current).add(savedVideoId));
+      try {
+        // No receipt: pulling a copy is a read. The receipt is the coach
+        // taking custody, and it schedules the Drive original for deletion.
+        await importSavedVideoFromClarityCloud(savedVideoId, savedVideoLibrary, { sendReceipt: false });
+        await refreshSavedVideos();
+        await refreshCloudVideos();
+      } catch (error) {
+        setVideoError(
+          error instanceof Error ? error.message : "Could not download that video. Try again.",
+        );
+      } finally {
+        setDownloadingIds((current) => {
+          const next = new Set(current);
+          next.delete(savedVideoId);
+          return next;
+        });
+      }
+    },
+    [downloadingIds, refreshCloudVideos, refreshSavedVideos, savedVideoLibrary],
+  );
 
   async function handleSignOut() {
     await signOut();
@@ -720,9 +798,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         >
                           <span className="player-portal-home-card-title">Videos</span>
                           <span className="player-portal-home-card-sub">
-                            {mostRecentVideo
-                              ? `Last saved ${formatDate(mostRecentVideo.capturedAt || mostRecentVideo.createdAt)}`
-                              : "No videos yet"}
+                            {missingCloudVideos.length
+                              ? `${missingCloudVideos.length} to download`
+                              : mostRecentVideo
+                                ? `Last saved ${formatDate(mostRecentVideo.capturedAt || mostRecentVideo.createdAt)}`
+                                : "No videos yet"}
                           </span>
                         </button>
                         <button
@@ -931,7 +1011,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                 <section className="player-portal-section">
                   <h2>Your videos</h2>
                   <p className="player-portal-lead">
-                    Videos are saved on this device. Send one to your coach when you want them to see it.
+                    {isGuest
+                      ? "Videos are saved on this device. Send one to your coach when you want them to see it."
+                      : "Videos are saved on this device. Anything in the cloud shows a download arrow — tap it to bring that video onto this device."}
                   </p>
 
                   {isGuest && guestStatus && guestStatus.sent.limit > 0 && !guestStatus.connected && (
@@ -1018,8 +1100,51 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         </div>
                       )}
 
-                      {savedVideos.length ? (
+                      {savedVideos.length || missingCloudVideos.length ? (
                         <ul className="player-portal-list">
+                          {missingCloudVideos.map((transfer) => {
+                            const downloading = downloadingIds.has(transfer.savedVideoId);
+                            const title = transfer.savedVideo?.title || "Swing video";
+                            const size = formatSize(transfer.video?.sizeBytes || transfer.expectedSizeBytes);
+                            return (
+                              <li
+                                className="player-portal-video player-portal-video-cloud"
+                                key={transfer.savedVideoId}
+                              >
+                                <div className="player-portal-video-thumb" aria-hidden="true">
+                                  <span className="player-portal-video-thumb-cloud" />
+                                  {transfer.video?.duration != null && (
+                                    <span className="player-portal-video-thumb-duration">
+                                      {formatDuration(transfer.video.duration)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="player-portal-video-main">
+                                  <strong>{title}</strong>
+                                  <span>
+                                    {formatDate(transfer.savedVideo?.createdAt || transfer.readyToImportAt)}
+                                  </span>
+                                  <span className="player-portal-video-status">
+                                    {downloading
+                                      ? "Downloading…"
+                                      : [cloudVideoLabel(transfer), size].filter(Boolean).join(" · ")}
+                                  </span>
+                                </div>
+                                <div className="player-portal-video-actions">
+                                  <button
+                                    className="player-portal-primary player-portal-video-download"
+                                    type="button"
+                                    disabled={downloading}
+                                    onClick={() => void downloadFromCloud(transfer.savedVideoId)}
+                                    aria-label={`Download ${title} to this device`}
+                                  >
+                                    <span aria-hidden="true">↓</span>
+                                    {downloading ? "Downloading…" : "Download"}
+                                  </button>
+                                </div>
+                              </li>
+                            );
+                          })}
                           {savedVideos.map((item) => {
                             const sending = sendingIds.has(item.savedVideoId);
                             const progress = sendProgress[item.savedVideoId] ?? item.cloud?.progress ?? 0;
@@ -1073,7 +1198,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           })}
                         </ul>
                       ) : (
-                        <p className="player-portal-empty">No videos on this device yet.</p>
+                        <p className="player-portal-empty">
+                          {cloudLoading ? "Looking for your videos…" : "No videos on this device yet."}
+                        </p>
                       )}
                     </>
                   )}

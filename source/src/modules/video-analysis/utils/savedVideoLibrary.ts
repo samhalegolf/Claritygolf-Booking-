@@ -1399,10 +1399,48 @@ const sendImportReceipt = async (
   return receipt;
 };
 
+export interface ImportSavedVideoOptions {
+  deviceId?: string;
+  deviceName?: string;
+  platform?: string;
+  /**
+   * A coach importing a video is taking custody of it: the receipt is what
+   * tells the catalogue the Drive copy may be cleaned up. A player pulling
+   * their own copy is only a read, so it sends no receipt -- otherwise a
+   * player opening a video would schedule deletion of the coach's master.
+   */
+  sendReceipt?: boolean;
+}
+
+const finishClarityCloudImport = async (
+  savedVideoId: string,
+  store: SavedVideoLibraryStore,
+  item: SavedVideoItem,
+  checksumSha256: string,
+  transfer: PublicTransferSession,
+  options: ImportSavedVideoOptions
+): Promise<SavedVideoItem> => {
+  const receipt =
+    options.sendReceipt === false
+      ? null
+      : await sendImportReceipt(savedVideoId, item, checksumSha256, options);
+  const base = applyTransferSessionToCloud(item.cloud, receipt?.session || transfer);
+  return patchCloudState(store, item, {
+    ...base,
+    status: "imported",
+    catalogueStatus: receipt?.catalogueStatus || base.catalogueStatus || "complete",
+    importedAt: receipt?.importedAt || base.importedAt || nowIso(),
+    importVerifiedAt: receipt?.importVerifiedAt || base.importVerifiedAt || nowIso(),
+    cleanupScheduledAt: receipt?.cleanupScheduledAt || base.cleanupScheduledAt,
+    cleanupAfter: receipt?.cleanupAfter || base.cleanupAfter,
+    progress: 100,
+  });
+};
+
 export const importSavedVideoFromClarityCloud = async (
   savedVideoId: string,
   store: SavedVideoLibraryStore,
-  options: { deviceId?: string; deviceName?: string; platform?: string } = {}
+  options: ImportSavedVideoOptions = {}
 ): Promise<SavedVideoItem> => {
   const packageResponse = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/import`, {
     headers: { Accept: "application/json" },
@@ -1426,17 +1464,14 @@ export const importSavedVideoFromClarityCloud = async (
     existing.source.sizeBytes === importPackage.video.sizeBytes
   ) {
     const verifiedExisting = await store.verifyItem(existing.savedVideoId);
-    const receipt = await sendImportReceipt(savedVideoId, verifiedExisting, existing.source.checksumSha256, options);
-    return patchCloudState(store, verifiedExisting, {
-      ...applyTransferSessionToCloud(verifiedExisting.cloud, receipt.session || importPackage.transfer),
-      status: "imported",
-      catalogueStatus: receipt.catalogueStatus || "complete",
-      importedAt: receipt.importedAt,
-      importVerifiedAt: receipt.importVerifiedAt,
-      cleanupScheduledAt: receipt.cleanupScheduledAt,
-      cleanupAfter: receipt.cleanupAfter,
-      progress: 100,
-    });
+    return finishClarityCloudImport(
+      savedVideoId,
+      store,
+      verifiedExisting,
+      existing.source.checksumSha256,
+      importPackage.transfer,
+      options
+    );
   }
 
   const downloadResponse = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/download`, {
@@ -1486,17 +1521,14 @@ export const importSavedVideoFromClarityCloud = async (
     workspaceSnapshot: workspace,
   });
   const verified = await store.verifyItem(item.savedVideoId);
-  const receipt = await sendImportReceipt(savedVideoId, verified, checksumSha256, options);
-  return patchCloudState(store, verified, {
-    ...applyTransferSessionToCloud(verified.cloud, receipt.session || importPackage.transfer),
-    status: "imported",
-    catalogueStatus: receipt.catalogueStatus || "complete",
-    importedAt: receipt.importedAt,
-    importVerifiedAt: receipt.importVerifiedAt,
-    cleanupScheduledAt: receipt.cleanupScheduledAt,
-    cleanupAfter: receipt.cleanupAfter,
-    progress: 100,
-  });
+  return finishClarityCloudImport(
+    savedVideoId,
+    store,
+    verified,
+    checksumSha256,
+    importPackage.transfer,
+    options
+  );
 };
 
 export interface ManagedLocalVideoLibraryStatus {

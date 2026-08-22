@@ -550,6 +550,35 @@
   cursor: default;
 }
 
+/* A cloud row is a shell: the video exists, this device just does not hold it
+   yet. The dashed edge says "not here" without looking broken. */
+.player-portal-video-cloud {
+  border-style: dashed;
+  background: transparent;
+}
+
+.player-portal-video-cloud .player-portal-video-thumb {
+  background: var(--pt-surface-soft);
+  border-style: dashed;
+}
+
+/* Cloud with a down arrow, drawn as a mask so it takes the theme's muted
+   colour in either scheme rather than shipping two coloured copies. */
+.player-portal-video-thumb-cloud {
+  width: 20px;
+  height: 20px;
+  background: var(--pt-muted);
+  --pt-cloud-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 13v8'/%3E%3Cpath d='m8 17 4 4 4-4'/%3E%3Cpath d='M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29'/%3E%3C/svg%3E");
+  -webkit-mask: var(--pt-cloud-icon) center / contain no-repeat;
+  mask: var(--pt-cloud-icon) center / contain no-repeat;
+}
+
+.player-portal-video-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* The video workspace takes the whole screen -- the portal card would crop it.
    It paints its own dark surface in either scheme; that is the swing analysis
    convention and it does not follow the terminal. */
