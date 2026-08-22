@@ -24,11 +24,6 @@
   --pt-accent: var(--c-accent);
   --pt-accent-text: var(--c-accent-text);
   --pt-error-text: var(--c-error-text);
-  /* Rule 09: feedback is one line of coloured text, not a box. These two are
-     the box — kept only until the surfaces reading them are converted, and
-     they should go with it. */
-  --pt-error-border: #e4b4b4;
-  --pt-error-bg: #fff4f4;
 }
 
 /* Dark lives in tokens.css now, on the same selectors and by the same rule:
@@ -168,14 +163,14 @@
   background: var(--pt-hover);
 }
 
-.player-portal-error {
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--pt-error-border);
-  border-radius: 9px;
-  background: var(--pt-error-bg);
-  color: var(--pt-error-text);
-  font-size: 13px;
+/* Rule 09: feedback is one line of coloured text, not a box. The old
+   .player-portal-error box and its two --pt-error-* literals went with the
+   surfaces that read them. */
+.player-portal-profile-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .player-portal-guest-banner {
@@ -441,142 +436,185 @@
   }
 }
 
-/* --- Videos -------------------------------------------------------------- */
+/* --- Videos: the library grid --------------------------------------------- */
 
-.player-portal-video {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--pt-border);
-  border-radius: 12px;
-  background: var(--pt-surface-soft);
-  flex-wrap: wrap;
+/* The library is a gallery, not a table. On a phone the thumbnail is how a
+   player recognises a swing, so the thumbnail IS the row: a big pressable
+   tile that opens the video, portrait because that is how swings are filmed.
+   Under it, plain unboxed text (Rule 01) and at most one boxed control --
+   the action that moves the video, at the player density minimum. */
+.player-portal-video-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 18px 12px;
 }
 
-.player-portal-video-main {
+.player-portal-video-tile {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 8px;
   min-width: 0;
 }
 
-.player-portal-video-main strong {
-  font-size: 14px;
-  color: var(--pt-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.player-portal-video-main {
-  flex: 1 1 160px;
-}
-
-.player-portal-video-thumb {
+.player-portal-video-media {
   position: relative;
-  flex-shrink: 0;
-  width: 64px;
-  height: 44px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: repeating-linear-gradient(
-    45deg,
-    var(--pt-border-soft),
-    var(--pt-border-soft) 4px,
-    var(--pt-surface-soft) 4px,
-    var(--pt-surface-soft) 8px
-  );
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  padding: 0;
   border: 1px solid var(--pt-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  border-radius: var(--c-radius-card);
+  overflow: hidden;
+  background: var(--pt-surface-soft);
+  cursor: pointer;
 }
 
-.player-portal-video-thumb-img {
+.player-portal-video-media img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.player-portal-video-thumb-play {
+/* A saved video whose thumbnail has not been captured yet. */
+.player-portal-video-play-glyph {
+  position: absolute;
+  inset: 0;
+  margin: auto;
   width: 0;
   height: 0;
   border-style: solid;
-  border-width: 6px 0 6px 10px;
-  border-color: transparent transparent transparent var(--pt-surface);
-  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.4));
+  border-width: 10px 0 10px 17px;
+  border-color: transparent transparent transparent var(--pt-muted);
 }
 
-.player-portal-video-thumb-duration {
+.player-portal-video-duration {
   position: absolute;
-  bottom: 3px;
-  right: 3px;
-  padding: 1px 4px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
-  font-size: 10px;
+  bottom: 6px;
+  right: 6px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--c-scrim);
+  color: var(--c-on-scrim);
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.4;
 }
 
-.player-portal-video-main span {
-  font-size: 12px;
-  color: var(--pt-muted);
+/* Upload progress drawn over the media, so the tile never changes shape.
+   Light on a dark track reads on top of any thumbnail in either scheme. */
+.player-portal-video-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: var(--c-scrim-soft);
 }
 
-.player-portal-video-status {
-  font-weight: 600;
+.player-portal-video-progress span {
+  display: block;
+  height: 100%;
+  background: var(--c-on-scrim);
+  transition: width 200ms ease;
 }
 
-.player-portal-video-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.player-portal-video-actions .player-portal-primary,
-.player-portal-video-actions .player-portal-ghost {
-  width: auto;
-  margin: 0;
-  padding: 8px 12px;
-  font-size: 13px;
-}
-
-.player-portal-video-actions .player-portal-primary:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-/* A cloud row is a shell: the video exists, this device just does not hold it
-   yet. The dashed edge says "not here" without looking broken. */
-.player-portal-video-cloud {
+/* A cloud tile is a shell: the video exists, this device just does not hold
+   it yet. The dashed edge says "not here" without looking broken. */
+.player-portal-video-media-cloud {
   border-style: dashed;
   background: transparent;
 }
 
-.player-portal-video-cloud .player-portal-video-thumb {
-  background: var(--pt-surface-soft);
-  border-style: dashed;
+.player-portal-video-media-cloud:disabled {
+  cursor: progress;
 }
 
 /* Cloud with a down arrow, drawn as a mask so it takes the theme's muted
    colour in either scheme rather than shipping two coloured copies. */
-.player-portal-video-thumb-cloud {
-  width: 20px;
-  height: 20px;
+.player-portal-video-cloud-glyph {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 28px;
+  height: 28px;
   background: var(--pt-muted);
   --pt-cloud-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 13v8'/%3E%3Cpath d='m8 17 4 4 4-4'/%3E%3Cpath d='M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29'/%3E%3C/svg%3E");
   -webkit-mask: var(--pt-cloud-icon) center / contain no-repeat;
   mask: var(--pt-cloud-icon) center / contain no-repeat;
 }
 
-.player-portal-video-download {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.player-portal-video-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-portal-video-meta strong {
+  font-size: 13px;
+  color: var(--pt-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-portal-video-meta span {
+  font-size: 12px;
+  color: var(--pt-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One line of state, never a box (Rule 09). */
+.player-portal-video-state {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pt-text-soft);
+}
+
+.player-portal-video-state.is-sent {
+  color: var(--c-success-text);
+}
+
+.player-portal-video-state.is-error {
+  color: var(--pt-error-text);
+}
+
+/* The one boxed control a tile carries. 44px is the player density minimum
+   (Rule 04); full width so a thumb does not have to aim. */
+.player-portal-video-action {
+  min-height: var(--c-h-touch);
+  border: 1px solid var(--pt-border);
+  border-radius: var(--c-radius-pill);
+  padding: 0 12px;
+  background: var(--pt-surface);
+  color: var(--pt-text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.player-portal-video-action:hover {
+  background: var(--pt-hover);
+}
+
+.player-portal-video-action:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* Rule 09: feedback is one line of coloured text, not a box. */
+.player-portal-error-line {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pt-error-text);
 }
 
 /* The video workspace takes the whole screen -- the portal card would crop it.
