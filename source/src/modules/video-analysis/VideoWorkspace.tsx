@@ -139,6 +139,15 @@ interface VideoWorkspaceProps {
   onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
   /** Open the camera recorder as soon as the workspace mounts. */
   autoStartLiveRecording?: boolean;
+  /**
+   * A video the caller already has, loaded as soon as the workspace mounts.
+   *
+   * This is how the portal's record button works on a phone: the file input
+   * has to be clicked inside the tap that started it or iOS ignores it, so the
+   * picker opens before this component is even downloaded, and the chosen file
+   * arrives here.
+   */
+  initialVideoFile?: File | null;
   /** Which control set to show. Defaults to the full coach console. */
   variant?: VideoWorkspaceVariant;
 }
@@ -422,6 +431,7 @@ export function VideoWorkspace({
   onOpenCloudSettings,
   onSaveNote,
   autoStartLiveRecording,
+  initialVideoFile,
   variant = "coach",
 }: VideoWorkspaceProps) {
   const isPlayerVariant = variant === "player";
@@ -1238,6 +1248,18 @@ export function VideoWorkspace({
     setLiveStream(null);
     setLiveRecording(null);
   }, [liveStream, stopLiveStream]);
+
+  // A file the caller picked before this component existed. Same single-shot
+  // rule as the recorder below: loading it again on every render would throw
+  // away whatever the player has drawn on it.
+  const initialFileLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!initialVideoFile || initialFileLoadedRef.current) return;
+    initialFileLoadedRef.current = true;
+    void loadClipFileForSide("left", initialVideoFile).catch(() => {
+      // loadClipFileForSide surfaces its own failure in the workspace.
+    });
+  }, [initialVideoFile, loadClipFileForSide]);
 
   // Entering straight from the Profile tab's record button. The ref keeps this
   // to a single shot, so closing the recorder does not immediately reopen it.

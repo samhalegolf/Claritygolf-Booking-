@@ -394,7 +394,35 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     setTab(destination);
   }, []);
 
+  // Tapping Record opens the phone's own camera/library sheet, not a page.
+  //
+  // The click has to happen inside the tap that triggered it -- iOS ignores a
+  // file input opened from a promise or a later render -- so this stays
+  // synchronous and does not wait for the workspace chunk to download. The
+  // workspace mounts afterwards, around whatever file came back.
+  const recordInputRef = useRef<HTMLInputElement>(null);
+  const [pendingVideoFile, setPendingVideoFile] = useState<File | null>(null);
+
   const startRecording = useCallback(() => {
+    const input = recordInputRef.current;
+    if (!input) {
+      // No input in the tree (an older webview, or a render where it never
+      // mounted). The workspace's own recorder is still a way in.
+      setOpenVideoId("");
+      setRecording(true);
+      return;
+    }
+    // Picking the same file twice in a row fires no change event unless the
+    // value is cleared first.
+    input.value = "";
+    input.click();
+  }, []);
+
+  const handleRecordInputChange = useCallback((event: FormEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    // Dismissing the sheet is a decision, not a failure -- stay where we are.
+    if (!file) return;
+    setPendingVideoFile(file);
     setOpenVideoId("");
     setRecording(true);
   }, []);
@@ -516,6 +544,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     (_context?: VideoWorkspaceNavigationContext) => {
       setRecording(false);
       setOpenVideoId("");
+      // Holding the File would pin the whole video in memory, and reopening
+      // the workspace would silently load the last one again.
+      setPendingVideoFile(null);
       setTab("videos");
       void refreshSavedVideos();
     },
@@ -670,6 +701,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
               playerId={playerId || playerEmail}
               playerName={playerName}
               savedVideoId={openVideoId || undefined}
+              initialVideoFile={openVideoId ? null : pendingVideoFile}
               savedVideoLibrary={savedVideoLibrary}
               onSavedVideoLibraryChange={() => void refreshSavedVideos()}
               onNavigateBack={closeWorkspace}
@@ -695,6 +727,16 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   return (
     <div className="player-terminal">
       {renderNav(tab)}
+      {/* No `capture` attribute on purpose: with it iOS goes straight to the
+          camera, without it the player gets the sheet -- Photo Library, Take
+          Video, Choose File -- which is the choice they actually want. */}
+      <input
+        ref={recordInputRef}
+        type="file"
+        accept="video/*"
+        style={{ display: "none" }}
+        onChange={handleRecordInputChange}
+      />
       <div className="player-portal">
         <div className="player-portal-card">
           <h1>{isGuest ? "Welcome" : playerName ? `Hi, ${playerName.split(/\s+/)[0]}` : "Your profile"}</h1>
@@ -760,7 +802,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           onClick={startRecording}
                         >
                           <span className="player-portal-home-card-title">Record a video</span>
-                          <span className="player-portal-home-card-sub">Opens your camera</span>
+                          <span className="player-portal-home-card-sub">Record one or pick an existing one</span>
                         </button>
                       </>
                     ) : (
@@ -811,7 +853,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           onClick={startRecording}
                         >
                           <span className="player-portal-home-card-title">Record a video</span>
-                          <span className="player-portal-home-card-sub">Opens your camera</span>
+                          <span className="player-portal-home-card-sub">Record one or pick an existing one</span>
                         </button>
                       </>
                     )}

@@ -27,6 +27,8 @@ export interface VideoAnalysisPageProps {
   onOpenCloudSettings?: () => void;
   onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
   autoStartLiveRecording?: boolean;
+  /** A video the caller already picked, loaded as soon as the workspace mounts. */
+  initialVideoFile?: File | null;
   /** Which control set to show. Defaults to the full coach console. */
   variant?: VideoWorkspaceVariant;
 }
