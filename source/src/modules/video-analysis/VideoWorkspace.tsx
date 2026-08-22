@@ -1074,7 +1074,11 @@ export function VideoWorkspace({
       if (!blob && (item.cloud?.status === "ready" || item.cloud?.status === "imported")) {
         setSaveStatus("downloading");
         setSaveMessage("Downloading from Clarity Cloud...");
-        item = await importSavedVideoFromClarityCloud(targetSavedVideoId, savedVideoStore);
+        item = await importSavedVideoFromClarityCloud(targetSavedVideoId, savedVideoStore, {
+          // The player variant runs on a player session, which cannot reach
+          // the admin routes at all in the native app.
+          scope: isPlayerVariant ? "player" : "coach",
+        });
         onSavedVideoLibraryChange?.();
         blob = await savedVideoStore.getBlob(item.savedVideoId);
       }
@@ -1150,6 +1154,7 @@ export function VideoWorkspace({
       setSaveMessage("Saved video loaded.");
     },
     [
+      isPlayerVariant,
       leftPlayback,
       leftStore,
       persistenceLayer.videoStore,

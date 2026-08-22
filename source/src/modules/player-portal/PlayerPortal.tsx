@@ -349,7 +349,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     if (isGuest) return;
     setCloudLoading(true);
     try {
-      const transfers = await listClarityCloudImportTransfers();
+      const transfers = await listClarityCloudImportTransfers("player");
       // Only what the server would actually hand over: the catalogue keeps
       // rows whose Drive copy has since been cleaned up, and a shell that
       // cannot be downloaded is worse than no shell at all.
@@ -379,9 +379,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       setVideoError("");
       setDownloadingIds((current) => new Set(current).add(savedVideoId));
       try {
-        // No receipt: pulling a copy is a read. The receipt is the coach
-        // taking custody, and it schedules the Drive original for deletion.
-        await importSavedVideoFromClarityCloud(savedVideoId, savedVideoLibrary, { sendReceipt: false });
+        // Player scope: the portal has a player session, never the coach's.
+        // The scope also settles the receipt -- pulling a copy is a read, and
+        // a receipt would schedule the coach's Drive original for deletion.
+        await importSavedVideoFromClarityCloud(savedVideoId, savedVideoLibrary, { scope: "player" });
         await refreshSavedVideos();
         await refreshCloudVideos();
       } catch (error) {

@@ -1313,7 +1313,9 @@ export const removeSavedVideoCloudTransfer = async (
  */
 export const markClarityCloudSubmissionSeen = async (savedVideoId: string): Promise<void> => {
   try {
-    await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/seen`, {
+    // Coach scope on purpose: "seen" is the coach's unread dot. There is no
+    // player route for it and there should not be one.
+    await apiFetch(transferUrl("coach", savedVideoId, "seen"), {
       method: "POST",
       headers: { Accept: "application/json" },
     });
@@ -1322,8 +1324,10 @@ export const markClarityCloudSubmissionSeen = async (savedVideoId: string): Prom
   }
 };
 
-export const listClarityCloudImportTransfers = async (): Promise<ClarityCloudImportTransfer[]> => {
-  const response = await apiFetch("/api/video-transfer/imports", { headers: { Accept: "application/json" } });
+export const listClarityCloudImportTransfers = async (
+  scope: VideoTransferScope = "coach"
+): Promise<ClarityCloudImportTransfer[]> => {
+  const response = await apiFetch(transferUrl(scope, "imports"), { headers: { Accept: "application/json" } });
   const data = await safeJson<{ transfers?: ClarityCloudImportTransfer[] }>(
     response,
     "Clarity Cloud import list did not return JSON.",
@@ -1376,7 +1380,9 @@ const sendImportReceipt = async (
   options: { deviceId?: string; deviceName?: string; platform?: string } = {}
 ) => {
   const device = getClarityDevice();
-  const response = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/import-receipt`, {
+  // Coach scope on purpose: the receipt is the coach taking custody and
+  // scheduling the Drive original for cleanup. Only they may send one.
+  const response = await apiFetch(transferUrl("coach", savedVideoId, "import-receipt"), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({
@@ -1408,8 +1414,18 @@ export interface ImportSavedVideoOptions {
    * tells the catalogue the Drive copy may be cleaned up. A player pulling
    * their own copy is only a read, so it sends no receipt -- otherwise a
    * player opening a video would schedule deletion of the coach's master.
+   *
+   * Left unset it follows the scope: true for the coach, false for everyone
+   * else, so getting the scope right is enough to get this right too.
    */
   sendReceipt?: boolean;
+  /**
+   * Which credential authorises the read. A coach reads their own Drive at
+   * /api/video-transfer/*; a portal player reads the videos filed under their
+   * own id at /api/video-transfer/player/*. Getting this wrong is invisible in
+   * a browser where the coach is also signed in, and a silent 401 in the app.
+   */
+  scope?: VideoTransferScope;
 }
 
 const finishClarityCloudImport = async (
@@ -1420,10 +1436,11 @@ const finishClarityCloudImport = async (
   transfer: PublicTransferSession,
   options: ImportSavedVideoOptions
 ): Promise<SavedVideoItem> => {
-  const receipt =
-    options.sendReceipt === false
-      ? null
-      : await sendImportReceipt(savedVideoId, item, checksumSha256, options);
+  const scope: VideoTransferScope = options.scope || "coach";
+  const wantsReceipt = options.sendReceipt ?? scope === "coach";
+  const receipt = wantsReceipt
+    ? await sendImportReceipt(savedVideoId, item, checksumSha256, options)
+    : null;
   const base = applyTransferSessionToCloud(item.cloud, receipt?.session || transfer);
   return patchCloudState(store, item, {
     ...base,
@@ -1442,7 +1459,8 @@ export const importSavedVideoFromClarityCloud = async (
   store: SavedVideoLibraryStore,
   options: ImportSavedVideoOptions = {}
 ): Promise<SavedVideoItem> => {
-  const packageResponse = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/import`, {
+  const scope: VideoTransferScope = options.scope || "coach";
+  const packageResponse = await apiFetch(transferUrl(scope, savedVideoId, "import"), {
     headers: { Accept: "application/json" },
   });
   const importPackage = await safeJson<ClarityCloudImportPackage>(
@@ -1474,7 +1492,7 @@ export const importSavedVideoFromClarityCloud = async (
     );
   }
 
-  const downloadResponse = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/download`, {
+  const downloadResponse = await apiFetch(transferUrl(scope, savedVideoId, "download"), {
     headers: { Accept: importPackage.video.mimeType || "application/octet-stream" },
   });
   if (!downloadResponse.ok) {

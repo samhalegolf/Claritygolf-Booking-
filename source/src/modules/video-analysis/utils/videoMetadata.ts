@@ -9,6 +9,26 @@ export interface VideoMetadata {
 
 const METADATA_TIMEOUT_MS = 8000;
 
+/**
+ * Every video element we make off-screen has to say it plays inline.
+ *
+ * iOS WKWebView hands playback to the fullscreen system player the moment
+ * play() is called on an element without this, even a detached one that was
+ * never in the document -- which is how a frame-rate probe or a thumbnail
+ * grab ends up throwing Apple's video player over the whole app. The
+ * property covers modern WebKit; the two attributes cover older builds that
+ * only read the markup.
+ */
+export const keepPlaybackInline = (element: HTMLVideoElement) => {
+  element.playsInline = true;
+  element.setAttribute("playsinline", "");
+  element.setAttribute("webkit-playsinline", "");
+  // Belt and braces: with no controls there is no route into the native
+  // player's own fullscreen button either.
+  element.controls = false;
+  element.disablePictureInPicture = true;
+};
+
 const readDimensions = (element: HTMLVideoElement): Omit<VideoMetadata, "fps"> => {
   const width = element.videoWidth || 0;
   const height = element.videoHeight || 0;
@@ -53,6 +73,7 @@ export const getMetadataFromUrl = async (
   { estimateFps = false }: { estimateFps?: boolean } = {}
 ): Promise<VideoMetadata> => {
   const element = document.createElement("video");
+  keepPlaybackInline(element);
   element.preload = estimateFps ? "auto" : "metadata";
   element.muted = true;
   element.src = videoUrl;
@@ -148,6 +169,10 @@ export const estimateFrameRate = (
 
     try {
       video.muted = true;
+      // The one play() call in this file, and the reason the whole app can end
+      // up behind Apple's video player. Guard it here as well as at creation,
+      // so an element handed in from anywhere else is safe too.
+      keepPlaybackInline(video);
       rafHandle = video.requestVideoFrameCallback(onFrame);
       const playResult = video.play();
       if (playResult && typeof playResult.catch === "function") {

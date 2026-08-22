@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { TimelineMarker } from "../models/Timeline";
+import { keepPlaybackInline } from "../utils/videoMetadata";
 
 const THUMBNAIL_MAX_WIDTH = 160;
 const THUMBNAIL_MAX_HEIGHT = 90;
@@ -126,6 +127,7 @@ export function useMarkerThumbnails({
       return;
     }
     const video = document.createElement("video");
+    keepPlaybackInline(video);
     video.muted = true;
     video.preload = "auto";
     video.crossOrigin = "anonymous";
