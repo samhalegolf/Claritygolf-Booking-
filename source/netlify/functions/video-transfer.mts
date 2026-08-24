@@ -2287,9 +2287,13 @@ async function updateSessionStatus(accountId: string, savedVideoId: string, stat
   return json({ ok: true, status: next.status, session: publicTransferSession(next), ...publicTransferSession(next) });
 }
 
-async function listImportableSessions(accountId: string) {
+async function listImportableSessions(accountId: string, playerId?: string) {
+  // playerId narrows the query in Postgres rather than after the fact, so a
+  // busy account's 50-row cap doesn't silently drop an older video that
+  // belongs to the one player a coach is actually picking for.
+  const playerFilter = playerId ? `&player_id=eq.${encodeURIComponent(playerId)}` : "";
   const rows = await supabase(transferSessionTable, {
-    query: `select=*&account_id=eq.${encodeURIComponent(accountId)}&catalogue_status=in.(ready_to_import,importing,imported,cleanup_scheduled,complete,repair_required)&order=ready_to_import_at.desc.nullslast,updated_at.desc&limit=50`,
+    query: `select=*&account_id=eq.${encodeURIComponent(accountId)}${playerFilter}&catalogue_status=in.(ready_to_import,importing,imported,cleanup_scheduled,complete,repair_required)&order=ready_to_import_at.desc.nullslast,updated_at.desc&limit=50`,
   });
   return rows.map(rowToSession);
 }
@@ -2325,8 +2329,8 @@ function importSummaryFromManifest(session: VideoTransferSession, manifest: any)
   };
 }
 
-async function handleImportList(accountId: string, provider: ClarityCloudProviderAdapter) {
-  const sessions = await listImportableSessions(accountId);
+async function handleImportList(accountId: string, provider: ClarityCloudProviderAdapter, playerId?: string) {
+  const sessions = await listImportableSessions(accountId, playerId);
   const transfers = await Promise.all(
     sessions.map(async (session) => importSummaryFromManifest(session, await readManifestForSession(provider, session)))
   );
@@ -3111,7 +3115,8 @@ async function routeVideoTransferRequest(req: Request) {
     }
     if (req.method === "GET" && parts[0] === "imports") {
       const accessToken = await ensureDriveReady(accountId, diagnostics);
-      return await handleImportList(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics));
+      const playerId = cleanString(url.searchParams.get("playerId"), "", 160);
+      return await handleImportList(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), playerId || undefined);
     }
     if ((req.method === "POST" || req.method === "GET") && parts[1] === "session") {
       const accessToken = req.method === "POST" ? await ensureDriveReady(accountId, diagnostics) : "";

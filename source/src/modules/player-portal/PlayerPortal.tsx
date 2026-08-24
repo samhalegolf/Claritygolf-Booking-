@@ -20,6 +20,7 @@ import {
 } from "./PlayerTerminalNav";
 import { PlayerVideoShelf } from "./PlayerVideoShelf";
 import { formatDate } from "./format";
+import { practiceAssignedLabel, practiceExpiryLabel } from "../practice/practiceModel";
 import {
   createIndexedDbSavedVideoLibrary,
   fetchGuestStatus,
@@ -77,14 +78,20 @@ type Note = {
 
 type PortalTab = "home" | "lessons" | "practice" | "notes" | "videos";
 
-/** Prescribed practice, as the player's profile hands it over. */
+type PracticeExpiryType = "next_lesson" | "set_date" | "none";
+type PracticeStatus = "active" | "completed" | "expired" | "archived";
+
+/** A Practice Block, as the player's profile hands it over. */
 type PracticeItem = {
   id: string;
-  categoryName?: string;
-  subcategoryName?: string;
-  body?: string;
-  createdAt?: string;
-  updatedAt?: string;
+  title: string;
+  content: string;
+  assignedAt: string;
+  expiryType: PracticeExpiryType;
+  expiryDate: string | null;
+  linkedVideoId: string | null;
+  status: PracticeStatus;
+  completedAt: string | null;
 };
 
 type CaddyAccess = {
@@ -176,6 +183,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [practice, setPractice] = useState<PracticeItem[]>([]);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
+  const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
+  const [completingPracticeId, setCompletingPracticeId] = useState<string | null>(null);
+  const [practiceVideos, setPracticeVideos] = useState<ClarityCloudImportTransfer[]>([]);
 
   // Videos live on this device first. Nothing leaves it until the player
   // presses Send to coach.
@@ -265,6 +275,54 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   useEffect(() => {
     void loadProfile();
   }, [loadProfile]);
+
+  // Titles for any linked videos, fetched once a practice block actually
+  // references one. Best-effort: a linked video that's since become
+  // unavailable must never block the rest of the Practice tab from loading.
+  useEffect(() => {
+    if (isGuest || !practice.some((block) => block.linkedVideoId)) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const transfers = await listClarityCloudImportTransfers("player");
+        if (!cancelled) setPracticeVideos(transfers);
+      } catch {
+        // Leave practiceVideos empty -- detail view falls back to "unavailable".
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest, practice]);
+
+  const markPracticeComplete = useCallback(
+    async (id: string) => {
+      if (completingPracticeId) return;
+      setCompletingPracticeId(id);
+      try {
+        const res = await apiFetch("/api/practice-blocks/complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id }),
+        });
+        if (res.status === 401) {
+          onSignedOut();
+          return;
+        }
+        if (!res.ok) throw new Error("Could not mark that complete.");
+        const data = (await res.json().catch(() => ({}))) as { block?: PracticeItem };
+        setPractice((current) =>
+          current.map((block) => (block.id === id && data.block ? { ...block, ...data.block } : block)),
+        );
+      } catch {
+        // The list still reflects the last successful load; a retry from the
+        // same button is the simplest recovery here.
+      } finally {
+        setCompletingPracticeId(null);
+      }
+    },
+    [completingPracticeId, onSignedOut],
+  );
 
   // Caddy is a separate product with its own source of truth. The portal only
   // asks where it is and what this player has, and stays usable if it cannot
@@ -700,24 +758,23 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     [notes],
   );
 
+  /** What's outstanding -- the portal's Practice landing view leads with this. */
+  const activePractice = useMemo(() => practice.filter((block) => block.status === "active"), [practice]);
+
   /**
-   * Practice, grouped under its category heading.
-   *
-   * Insertion order rather than alphabetical: the server hands these over
-   * newest first, so the category a coach touched most recently is the one at
-   * the top of the screen. Alphabetical would put "Chipping" above whatever
-   * was set after this morning's lesson.
+   * Completed and expired blocks, newest-finished first. Kept apart from
+   * activePractice (never combined into one list) so completing a block
+   * always reads as "done," not as it quietly vanishing.
    */
-  const practiceGroups = useMemo(() => {
-    const groups = new Map<string, PracticeItem[]>();
-    for (const block of practice) {
-      const name = block.categoryName?.trim() || "Practice";
-      const existing = groups.get(name);
-      if (existing) existing.push(block);
-      else groups.set(name, [block]);
-    }
-    return [...groups].map(([name, blocks]) => ({ name, blocks }));
-  }, [practice]);
+  const practiceHistory = useMemo(
+    () =>
+      [...practice]
+        .filter((block) => block.status === "completed" || block.status === "expired")
+        .sort((a, b) =>
+          String(b.completedAt || b.assignedAt).localeCompare(String(a.completedAt || a.assignedAt)),
+        ),
+    [practice],
+  );
 
   const nextLesson = upcomingBookings[0] || null;
   const laterLessons = upcomingBookings.slice(1);
@@ -910,8 +967,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           <span className="player-portal-home-card-sub">
                             {profileLoading && !practice.length
                               ? "Loading…"
-                              : practice.length
-                                ? `${practice.length} thing${practice.length === 1 ? "" : "s"} to work on`
+                              : activePractice.length
+                                ? `${activePractice.length} thing${activePractice.length === 1 ? "" : "s"} to work on`
                                 : "Nothing set yet"}
                           </span>
                         </button>
@@ -1126,32 +1183,81 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                   </p>
                   {profileLoading && !practice.length ? (
                     <p className="player-portal-empty">Loading your practice…</p>
-                  ) : practiceGroups.length ? (
-                    // Grouped by category, so a screen full of blocks reads as
-                    // "here is the drilling, here is the playing" rather than
-                    // as one long undifferentiated list.
-                    practiceGroups.map((group) => (
-                      <div className="player-portal-practice-group" key={group.name}>
-                        <h3>{group.name}</h3>
-                        <ul className="player-portal-list">
-                          {group.blocks.map((block) => (
-                            <li className="player-portal-practice" key={block.id}>
+                  ) : activePractice.length ? (
+                    <ul className="player-portal-list">
+                      {activePractice.map((block) => {
+                        const expanded = expandedPracticeId === block.id;
+                        const video = block.linkedVideoId
+                          ? practiceVideos.find((t) => t.savedVideo?.savedVideoId === block.linkedVideoId)
+                          : null;
+                        return (
+                          <li className="player-portal-practice" key={block.id}>
+                            <button
+                              type="button"
+                              className="player-portal-practice-toggle"
+                              onClick={() => setExpandedPracticeId(expanded ? null : block.id)}
+                            >
                               <div className="player-portal-note-head">
-                                <strong>{block.subcategoryName || group.name}</strong>
-                                {formatDate(block.updatedAt || block.createdAt) && (
-                                  <span>{formatDate(block.updatedAt || block.createdAt)}</span>
-                                )}
+                                <strong>{block.title}</strong>
+                                <span>{practiceAssignedLabel(block)}</span>
                               </div>
-                              {block.body && <p>{block.body}</p>}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))
+                              <span className="player-portal-practice-expiry">{practiceExpiryLabel(block)}</span>
+                            </button>
+                            {expanded && (
+                              <div className="player-portal-practice-detail">
+                                <p>{block.content}</p>
+                                {block.linkedVideoId && (
+                                  <button
+                                    type="button"
+                                    className="player-portal-practice-video"
+                                    onClick={() => setOpenVideoId(block.linkedVideoId as string)}
+                                  >
+                                    {video ? `Watch: ${video.savedVideo?.title || "Saved video"}` : "Watch linked video"}
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="player-portal-primary"
+                                  disabled={completingPracticeId === block.id}
+                                  onClick={() => void markPracticeComplete(block.id)}
+                                >
+                                  {completingPracticeId === block.id ? "Marking complete…" : "Mark Complete"}
+                                </button>
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
                   ) : (
                     <p className="player-portal-empty">
                       Nothing to practise yet. Your coach will put it here after your next lesson.
                     </p>
+                  )}
+
+                  {practiceHistory.length > 0 && (
+                    <div className="player-portal-practice-history">
+                      <h3>Completed</h3>
+                      <ul className="player-portal-list">
+                        {practiceHistory.map((block) => (
+                          <li className="player-portal-practice player-portal-practice-history-item" key={block.id}>
+                            <div className="player-portal-note-head">
+                              <strong>{block.title}</strong>
+                              <span
+                                className={`player-portal-practice-status player-portal-practice-status-${block.status}`}
+                              >
+                                {block.status === "completed" ? "Completed" : "Expired"}
+                              </span>
+                            </div>
+                            <span>
+                              {block.status === "completed" && block.completedAt
+                                ? formatDate(block.completedAt)
+                                : practiceAssignedLabel(block)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </section>
               )}

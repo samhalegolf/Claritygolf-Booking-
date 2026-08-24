@@ -230,10 +230,10 @@ const VideoAnalysisPage = lazy(() =>
 const ClarityVoiceTextPanel = lazy(() =>
   import("./modules/clarity-voice/ClarityVoiceTextPanel").then((module) => ({ default: module.ClarityVoiceTextPanel })),
 );
-// Owns its own loading, its own category library and its own writes. The
-// console only tells it which player is open.
-const PracticeFeeder = lazy(() =>
-  import("./modules/practice/PracticeFeeder").then((module) => ({ default: module.PracticeFeeder })),
+// Owns its own loading and its own writes. The console only tells it which
+// player is open.
+const PracticeBlockPanel = lazy(() =>
+  import("./modules/practice/PracticeBlockPanel").then((module) => ({ default: module.PracticeBlockPanel })),
 );
 
 type EditableBlockStatus = "idle" | "editing" | "saving" | "saved" | "error";
@@ -21820,7 +21820,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             ) : playerToolExpanded && playerProfileTool === "practice" ? (
                               <div className="player-tool-body">
                                 <Suspense fallback={<div className="module-loading">Loading practice…</div>}>
-                                  <PracticeFeeder
+                                  <PracticeBlockPanel
                                     // Keyed so switching player remounts rather
                                     // than showing the previous player's blocks
                                     // until the fetch lands.

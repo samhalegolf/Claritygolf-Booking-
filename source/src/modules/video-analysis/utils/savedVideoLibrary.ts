@@ -1325,9 +1325,11 @@ export const markClarityCloudSubmissionSeen = async (savedVideoId: string): Prom
 };
 
 export const listClarityCloudImportTransfers = async (
-  scope: VideoTransferScope = "coach"
+  scope: VideoTransferScope = "coach",
+  playerId?: string
 ): Promise<ClarityCloudImportTransfer[]> => {
-  const response = await apiFetch(transferUrl(scope, "imports"), { headers: { Accept: "application/json" } });
+  const url = playerId ? `${transferUrl(scope, "imports")}?playerId=${encodeURIComponent(playerId)}` : transferUrl(scope, "imports");
+  const response = await apiFetch(url, { headers: { Accept: "application/json" } });
   const data = await safeJson<{ transfers?: ClarityCloudImportTransfer[] }>(
     response,
     "Clarity Cloud import list did not return JSON.",

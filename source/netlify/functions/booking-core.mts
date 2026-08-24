@@ -3405,166 +3405,297 @@ async function deleteLessonNote(noteId, accountId = defaultWorkspaceAccountFromC
   return { notes };
 }
 
-/* --- Practice -------------------------------------------------------------
+/* --- Practice blocks --------------------------------------------------------
  *
- * A practice block is prescribed practice: a coach picks a category and a
- * sub-category, writes what to do, and it lands in the player's Practice
- * section. The pair is the title -- "Drill · At home", "Play · Golf course" --
- * so the coach never types a heading, only chooses one.
+ * A Practice Block is a coach-authored practice prescription assigned
+ * directly to a player: a title, the prescription text, an optional expiry,
+ * an optional linked video. It is a real table (not settings JSON like lesson
+ * notes) because the player portal reads "my active blocks" on every profile
+ * load and status transitions server-side (active -> completed/expired/
+ * archived) -- both want indexed per-player, per-status queries rather than a
+ * whole document read-and-rewritten each time.
  *
- * The categories are one library per workspace rather than one per player.
- * A coach's vocabulary for practice is their own and does not change from
- * player to player; making it per-player would mean rebuilding the same tree
- * every time somebody new came along.
- *
- * Stored as settings JSON, exactly like lesson notes above. Same reasoning:
- * this is a small, coach-authored list read as a whole, and a table would buy
- * nothing a settings row does not already give.
+ * Self-creating like guest_senders/player_sessions above: a deploy that
+ * reaches production before the migration is applied by hand must not 500.
+ * The repo migration (netlify/database/migrations/20260825000100_create_practice_blocks)
+ * is the schema record.
  * ------------------------------------------------------------------------- */
 
-const PRACTICE_CATEGORIES_SETTING_PREFIX = "practiceCategories.v1";
-const PRACTICE_BLOCKS_SETTING_PREFIX = "practiceBlocks.v1";
-
-function practiceCategoriesSettingKey(accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  return `${PRACTICE_CATEGORIES_SETTING_PREFIX}.${cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id)}`;
+let practiceBlocksTableReady = false;
+async function ensurePracticeBlocksTable() {
+  if (practiceBlocksTableReady) return;
+  const ddl = ddlBatch();
+  ddl.sql`
+    CREATE TABLE IF NOT EXISTS practice_blocks (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      player_id TEXT NOT NULL,
+      player_name TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expiry_type TEXT NOT NULL DEFAULT 'none',
+      expiry_date TIMESTAMPTZ,
+      resolved_from_calendar_item_id TEXT,
+      linked_video_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      completed_at TIMESTAMPTZ,
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  ddl.sql`CREATE INDEX IF NOT EXISTS practice_blocks_player_history_idx ON practice_blocks (account_id, player_id, created_at DESC)`;
+  ddl.sql`CREATE INDEX IF NOT EXISTS practice_blocks_player_active_idx ON practice_blocks (account_id, player_id) WHERE status = 'active'`;
+  ddl.sql`CREATE INDEX IF NOT EXISTS practice_blocks_expiry_sweep_idx ON practice_blocks (account_id, expiry_date) WHERE status = 'active' AND expiry_date IS NOT NULL`;
+  await ddl.run();
+  practiceBlocksTableReady = true;
 }
 
-function practiceBlocksSettingKey(accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  return `${PRACTICE_BLOCKS_SETTING_PREFIX}.${cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id)}`;
-}
-
-function rowToPracticeCategory(category) {
-  const subcategories = (Array.isArray(category?.subcategories) ? category.subcategories : [])
-    .map((sub) => ({
-      id: cleanString(sub?.id, "", 120) || randomUUID(),
-      name: cleanString(sub?.name, "", 80),
-    }))
-    .filter((sub) => sub.name)
-    .slice(0, 60);
+function rowToApiPracticeBlock(row) {
   return {
-    id: cleanString(category?.id, "", 120) || randomUUID(),
-    name: cleanString(category?.name, "", 80),
-    subcategories,
+    id: row.id,
+    playerId: row.player_id,
+    playerName: row.player_name || "",
+    title: row.title,
+    content: row.content,
+    assignedAt: row.assigned_at,
+    expiryType: row.expiry_type,
+    expiryDate: row.expiry_date || null,
+    linkedVideoId: row.linked_video_id || null,
+    status: row.status,
+    completedAt: row.completed_at || null,
+    createdBy: row.created_by || "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
-async function readPracticeCategories(accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  const parsed = safeJsonParse(await getSetting(practiceCategoriesSettingKey(cleanAccountId)), []);
-  return Array.isArray(parsed)
-    ? parsed.map(rowToPracticeCategory).filter((category) => category.name)
-    : [];
-}
-
-async function writePracticeCategories(categories, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  const scoped = (Array.isArray(categories) ? categories : [])
-    .map(rowToPracticeCategory)
-    .filter((category) => category.name)
-    .slice(0, 40);
-  await setSetting(practiceCategoriesSettingKey(cleanAccountId), JSON.stringify(scoped));
-  return scoped;
-}
-
-function rowToPracticeBlock(block, fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const createdAt = cleanString(block?.createdAt || block?.created_at, "", 80) || nowIso();
-  const updatedAt = cleanString(block?.updatedAt || block?.updated_at, "", 80) || createdAt;
+/** The player-facing shape -- no createdBy/playerName, nothing internal. */
+function rowToPlayerPracticeBlock(row) {
   return {
-    id: cleanString(block?.id, "", 120) || randomUUID(),
-    accountId: cleanSlug(block?.accountId || block?.account_id, fallbackAccountId),
-    playerId: cleanString(block?.playerId || block?.player_id, "", 160),
-    playerName: cleanString(block?.playerName || block?.player_name, "", 180),
-    categoryId: cleanString(block?.categoryId || block?.category_id, "", 120),
-    // The names are stored alongside the ids, not instead of them. Which one
-    // wins is decided at read time -- see readPracticeBlocks.
-    categoryName: cleanString(block?.categoryName || block?.category_name, "", 80),
-    subcategoryId: cleanString(block?.subcategoryId || block?.subcategory_id, "", 120),
-    subcategoryName: cleanString(block?.subcategoryName || block?.subcategory_name, "", 80),
-    body: cleanString(block?.body || block?.text || block?.description, "", 4000),
-    createdAt,
-    updatedAt,
+    id: row.id,
+    title: row.title,
+    content: row.content,
+    assignedAt: row.assigned_at,
+    expiryType: row.expiry_type,
+    expiryDate: row.expiry_date || null,
+    linkedVideoId: row.linked_video_id || null,
+    status: row.status,
+    completedAt: row.completed_at || null,
   };
 }
 
 /**
- * Reads the blocks with their titles resolved against the current category
- * library.
- *
- * A block keeps both the id and the name it was filed under. The id is tried
- * first, so renaming "DRILL" to "Drill" retitles every block that used it --
- * a typo fixed once is fixed everywhere. The stored name is the fallback, so
- * deleting a category leaves its blocks readable rather than untitled. Neither
- * on its own gets both of those.
+ * Flips any active block whose expiry has passed to 'expired'. Run at the top
+ * of every read path (coach list, player profile) so a status='active' filter
+ * can never return a row whose expiry_date is already behind NOW() -- lazy,
+ * on-read expiry, the same spirit as readPlayerSession destroying an expired
+ * session token when it happens to be the one read.
  */
-async function readPracticeBlocks(accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  const parsed = safeJsonParse(await getSetting(practiceBlocksSettingKey(cleanAccountId)), []);
-  if (!Array.isArray(parsed)) return [];
-  const categories = await readPracticeCategories(cleanAccountId);
-  const categoryById = new Map(categories.map((category) => [category.id, category]));
-  const subcategoryById = new Map(
-    categories.flatMap((category) => category.subcategories.map((sub) => [sub.id, sub])),
-  );
-  return parsed
-    .map((block) => rowToPracticeBlock(block, cleanAccountId))
-    .filter((block) => block.playerId && block.body)
-    .map((block) => ({
-      ...block,
-      categoryName: categoryById.get(block.categoryId)?.name || block.categoryName,
-      subcategoryName: subcategoryById.get(block.subcategoryId)?.name || block.subcategoryName,
-    }))
-    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+async function expirePracticeBlocksDue(accountId) {
+  await ensurePracticeBlocksTable();
+  await db().sql`
+    UPDATE practice_blocks
+    SET status = 'expired', updated_at = NOW()
+    WHERE account_id = ${accountId}
+      AND status = 'active'
+      AND expiry_date IS NOT NULL
+      AND expiry_date <= NOW()
+  `;
 }
 
-async function writePracticeBlocks(blocks, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  const scoped = (Array.isArray(blocks) ? blocks : [])
-    .map((block) => rowToPracticeBlock(block, cleanAccountId))
-    .filter((block) => block.playerId && block.body);
-  await setSetting(practiceBlocksSettingKey(cleanAccountId), JSON.stringify(scoped));
-  return scoped.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+/** Coach view: history included (completed/expired), archived excluded. */
+async function readPracticeBlocksForPlayer(accountId, playerId) {
+  await expirePracticeBlocksDue(accountId);
+  const rows = await db().sql`
+    SELECT * FROM practice_blocks
+    WHERE account_id = ${accountId} AND player_id = ${playerId} AND status != 'archived'
+    ORDER BY created_at DESC
+  `;
+  return rows.map(rowToApiPracticeBlock);
 }
 
-async function upsertPracticeBlock(rawBlock, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
+/**
+ * Player-portal view. Filed against the same player id candidates as notes
+ * (playerProfileIdCandidates), so a player who exists under more than one
+ * historical id still sees everything filed under any of them.
+ */
+async function readPracticeBlocksForCandidates(accountId, candidates) {
+  await expirePracticeBlocksDue(accountId);
+  const ids = Array.from(candidates);
+  if (!ids.length) return [];
+  const rows = await db().sql`
+    SELECT * FROM practice_blocks
+    WHERE account_id = ${accountId} AND player_id = ANY(${ids}) AND status != 'archived'
+    ORDER BY created_at DESC
+  `;
+  return rows.map(rowToPlayerPracticeBlock);
+}
+
+async function findPracticeBlockRow(accountId, id) {
+  const rows = await db().sql`SELECT * FROM practice_blocks WHERE id = ${id} AND account_id = ${accountId} LIMIT 1`;
+  return rows[0] || null;
+}
+
+async function createPracticeBlock(input, requestContext) {
+  await ensurePracticeBlocksTable();
+  const accountId = requestContext.accountId;
+  const playerId = cleanString(input?.playerId, "", 160);
+  const title = cleanString(input?.title, "", 200);
+  const content = cleanString(input?.content, "", 8000);
+  if (!playerId) throw Object.assign(new Error("A practice block needs a player id."), { status: 400 });
+  if (!title) throw Object.assign(new Error("A practice block needs a title."), { status: 400 });
+  if (!content) throw Object.assign(new Error("A practice block needs a description."), { status: 400 });
+
+  const expiryTypeRequested = ["next_lesson", "set_date", "none"].includes(input?.expiryType)
+    ? input.expiryType
+    : "none";
+  let expiryType = expiryTypeRequested;
+  let expiryDate = null;
+  let resolvedFromCalendarItemId = null;
+  let warning;
+
+  if (expiryTypeRequested === "set_date") {
+    expiryDate = cleanString(input?.expiryDate, "", 80);
+    if (!expiryDate) throw Object.assign(new Error("Pick a date for this block's expiry."), { status: 400 });
+  } else if (expiryTypeRequested === "next_lesson") {
+    const resolved = await resolveNextLessonExpiry(playerId, accountId);
+    if (resolved) {
+      expiryDate = resolved.expiryDate;
+      resolvedFromCalendarItemId = resolved.calendarItemId;
+    } else {
+      // Confirmed fallback: save anyway with no expiry rather than inventing
+      // a fake date or blocking the save outright.
+      expiryType = "none";
+      warning = "no_upcoming_booking";
+    }
+  }
+
+  const id = randomUUID();
   const now = nowIso();
-  const current = await readPracticeBlocks(cleanAccountId);
-  const block = rowToPracticeBlock(
-    {
-      ...rawBlock,
-      accountId: cleanAccountId,
-      id: rawBlock?.id || randomUUID(),
-      createdAt: rawBlock?.createdAt || now,
-      updatedAt: now,
-    },
-    cleanAccountId,
-  );
-  if (!block.playerId) {
-    throw Object.assign(new Error("A practice block needs a player id."), { status: 400 });
-  }
-  if (!block.body.trim()) {
-    throw Object.assign(new Error("A practice block needs a description."), { status: 400 });
-  }
-  if (!block.categoryName) {
-    throw Object.assign(new Error("A practice block needs a category."), { status: 400 });
-  }
-  const next = [block, ...current.filter((entry) => entry.id !== block.id)];
-  const blocks = await writePracticeBlocks(next, cleanAccountId);
-  return { block, blocks };
+  const rows = await db().sql`
+    INSERT INTO practice_blocks (
+      id, account_id, player_id, player_name, title, content,
+      assigned_at, expiry_type, expiry_date, resolved_from_calendar_item_id,
+      linked_video_id, status, created_by, created_at, updated_at
+    ) VALUES (
+      ${id}, ${accountId}, ${playerId}, ${cleanString(input?.playerName, "", 180)},
+      ${title}, ${content}, ${now}, ${expiryType}, ${expiryDate}, ${resolvedFromCalendarItemId},
+      ${cleanString(input?.linkedVideoId, "", 160) || null}, 'active',
+      ${requestContext.userId || requestContext.user?.email || ""}, ${now}, ${now}
+    )
+    RETURNING *
+  `;
+  return { block: rowToApiPracticeBlock(rows[0]), ...(warning ? { warning } : {}) };
 }
 
-async function deletePracticeBlock(blockId, accountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  const cleanAccountId = cleanSlug(accountId, defaultWorkspaceAccountFromCoachAccount().id);
-  const cleanId = cleanString(blockId, "", 120);
-  if (!cleanId) {
-    throw Object.assign(new Error("A practice block id is required."), { status: 400 });
+async function updatePracticeBlock(id, input, requestContext) {
+  await ensurePracticeBlocksTable();
+  const accountId = requestContext.accountId;
+  const cleanId = cleanString(id, "", 120);
+  if (!cleanId) throw Object.assign(new Error("A practice block id is required."), { status: 400 });
+  const current = await findPracticeBlockRow(accountId, cleanId);
+  if (!current) throw Object.assign(new Error("That practice block was not found."), { status: 404, code: "not_found" });
+  if (current.status !== "active") {
+    throw Object.assign(new Error("Only an active practice block can be edited."), { status: 409, code: "not_editable" });
   }
-  const current = await readPracticeBlocks(cleanAccountId);
-  const blocks = await writePracticeBlocks(
-    current.filter((block) => block.id !== cleanId),
-    cleanAccountId,
-  );
-  return { blocks };
+
+  const title = cleanString(input?.title, current.title, 200);
+  const content = cleanString(input?.content, current.content, 8000);
+  const expiryTypeRequested = ["next_lesson", "set_date", "none"].includes(input?.expiryType)
+    ? input.expiryType
+    : current.expiry_type;
+
+  let expiryType = expiryTypeRequested;
+  let expiryDate = current.expiry_date;
+  let resolvedFromCalendarItemId = current.resolved_from_calendar_item_id;
+  let warning;
+
+  // Re-resolving next_lesson only happens when the coach explicitly (re-)picks
+  // it -- editing title/content alone must never move an already-assigned
+  // expiry.
+  if (expiryTypeRequested === "set_date" && expiryTypeRequested !== current.expiry_type) {
+    expiryDate = cleanString(input?.expiryDate, "", 80) || null;
+    resolvedFromCalendarItemId = null;
+  } else if (expiryTypeRequested === "set_date" && input?.expiryDate) {
+    expiryDate = cleanString(input.expiryDate, "", 80);
+    resolvedFromCalendarItemId = null;
+  } else if (expiryTypeRequested === "none" && expiryTypeRequested !== current.expiry_type) {
+    expiryDate = null;
+    resolvedFromCalendarItemId = null;
+  } else if (expiryTypeRequested === "next_lesson" && expiryTypeRequested !== current.expiry_type) {
+    const resolved = await resolveNextLessonExpiry(current.player_id, accountId);
+    if (resolved) {
+      expiryDate = resolved.expiryDate;
+      resolvedFromCalendarItemId = resolved.calendarItemId;
+    } else {
+      expiryType = "none";
+      expiryDate = null;
+      resolvedFromCalendarItemId = null;
+      warning = "no_upcoming_booking";
+    }
+  }
+
+  const linkedVideoId =
+    input?.linkedVideoId !== undefined
+      ? cleanString(input.linkedVideoId, "", 160) || null
+      : current.linked_video_id;
+
+  const rows = await db().sql`
+    UPDATE practice_blocks
+    SET title = ${title}, content = ${content}, expiry_type = ${expiryType},
+        expiry_date = ${expiryDate}, resolved_from_calendar_item_id = ${resolvedFromCalendarItemId},
+        linked_video_id = ${linkedVideoId},
+        updated_at = NOW()
+    WHERE id = ${cleanId} AND account_id = ${accountId}
+    RETURNING *
+  `;
+  return { block: rowToApiPracticeBlock(rows[0]), ...(warning ? { warning } : {}) };
+}
+
+/** Soft-delete only -- "Remove" archives, it never issues a SQL DELETE. */
+async function archivePracticeBlock(id, requestContext) {
+  await ensurePracticeBlocksTable();
+  const cleanId = cleanString(id, "", 120);
+  if (!cleanId) throw Object.assign(new Error("A practice block id is required."), { status: 400 });
+  const rows = await db().sql`
+    UPDATE practice_blocks
+    SET status = 'archived', updated_at = NOW()
+    WHERE id = ${cleanId} AND account_id = ${requestContext.accountId}
+    RETURNING *
+  `;
+  if (!rows[0]) throw Object.assign(new Error("That practice block was not found."), { status: 404, code: "not_found" });
+  return { block: rowToApiPracticeBlock(rows[0]) };
+}
+
+/**
+ * Player-side "Mark Complete". A block completed after it expired still
+ * counts -- a player who did the work late shouldn't be blocked from getting
+ * credit -- so the only rejected states are "doesn't belong to this player"
+ * and "archived" (the coach removed it; no longer actionable).
+ */
+async function completePracticeBlockForPlayer(id, session) {
+  await ensurePracticeBlocksTable();
+  const cleanId = cleanString(id, "", 120);
+  if (!cleanId) throw Object.assign(new Error("A practice block id is required."), { status: 400 });
+  const accountId = session.accountId || publicWorkspaceAccount(await readPublicCatalogState()).id;
+  await expirePracticeBlocksDue(accountId);
+  const row = await findPracticeBlockRow(accountId, cleanId);
+  const candidates = playerProfileIdCandidates(session);
+  if (!row || !candidates.has(row.player_id)) {
+    throw Object.assign(new Error("That practice block was not found."), { status: 404, code: "not_found" });
+  }
+  if (row.status === "archived") {
+    throw Object.assign(new Error("That practice block was not found."), { status: 404, code: "not_found" });
+  }
+  const rows = await db().sql`
+    UPDATE practice_blocks
+    SET status = 'completed', completed_at = NOW(), updated_at = NOW()
+    WHERE id = ${cleanId}
+    RETURNING *
+  `;
+  return { block: rowToPlayerPracticeBlock(rows[0]) };
 }
 
 /**
@@ -5883,6 +6014,64 @@ function isAppointmentInPast(item, timeZone = accountTimeZone()) {
   return Number(item.start ?? 0) < now.minutes;
 }
 
+// Converts one {week, day, start} slot's wall-clock time in the workspace
+// timezone into a true UTC instant. Existing helpers above (slotDateParts,
+// nowInTimeZoneParts, isAppointmentInPast) deliberately never do this -- they
+// only ever compare wall-clock parts against each other. A Practice Block's
+// expiry_date is a real TIMESTAMPTZ compared against Postgres NOW(), so the
+// one slot chosen as "next lesson" needs an actual instant, not a parts label.
+function slotWallTimeToUtcMillis(week, day, start, timeZone = accountTimeZone()) {
+  const { year, month, day: dayOfMonth } = slotDateParts(Number(week || 0), Number(day || 0));
+  const hour = Math.floor(Number(start || 0) / 60);
+  const minute = Number(start || 0) % 60;
+  const guess = Date.UTC(year, month - 1, dayOfMonth, hour, minute, 0);
+  // Format that guess back in the target zone; the delta between what we
+  // asked for and what came back is the zone's offset at that instant
+  // (handles DST without a timezone-database dependency).
+  const parts = new Intl.DateTimeFormat(CLOCK_PARTS_LOCALE, {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).formatToParts(new Date(guess));
+  const value = (type) => Number(parts.find((part) => part.type === type)?.value || 0);
+  const observed = Date.UTC(value("year"), value("month") - 1, value("day"), value("hour") % 24, value("minute"), value("second"));
+  return guess - (observed - guess);
+}
+
+/**
+ * Resolves a player's next future lesson to a frozen expiry instant, for
+ * Practice Block expiry_type='next_lesson'. Called exactly once, at
+ * assignment time (createPracticeBlock / updatePracticeBlock when the coach
+ * explicitly re-picks next_lesson) -- never from a read path, so a later
+ * reschedule cannot silently move an already-assigned block's expiry.
+ *
+ * Deliberately reuses readPublicAppointmentsForContact, the same source the
+ * player portal's own "next lesson" is built from client-side
+ * (PlayerPortal.tsx upcomingBookings), so the server-resolved expiry matches
+ * what the player already sees as their next lesson rather than introducing a
+ * second, differently-behaved notion of it. That function requires both an
+ * email and a phone on file for the contact match; if the player has neither,
+ * or has no future booking, this returns null and the caller falls back to
+ * no expiry.
+ */
+async function resolveNextLessonExpiry(playerId, accountId) {
+  const rows = await db().sql`SELECT * FROM people WHERE id = ${playerId} LIMIT 1`;
+  const person = rows[0] ? rowToPerson(rows[0], accountId) : null;
+  if (!person?.email || !person?.phone) return null;
+  const { items } = await readPublicAppointmentsForContact({
+    accountId,
+    email: person.email,
+    phone: person.phone,
+  });
+  const timeZone = accountTimeZone();
+  const future = items
+    .filter((item) => !isInactiveForConflict(item) && !isAppointmentInPast(item, timeZone))
+    .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
+  const winner = future[0];
+  if (!winner) return null;
+  const atMillis = slotWallTimeToUtcMillis(winner.week, winner.day, winner.start, timeZone);
+  return { expiryDate: new Date(atMillis).toISOString(), calendarItemId: winner.id };
+}
+
 function cleanPendingAdminNotification(value) {
   const calendarItemId = cleanString(value?.calendarItemId, "", 180);
   const action =
@@ -7932,16 +8121,7 @@ async function readPlayerProfile(session) {
   // Prescribed practice. Filed against the same player id candidates as the
   // notes above, so a player who exists under more than one historical id
   // still sees everything filed under any of them.
-  const practice = (await readPracticeBlocks(accountId))
-    .filter((block) => block.playerId && candidates.has(block.playerId))
-    .map((block) => ({
-      id: block.id,
-      categoryName: block.categoryName,
-      subcategoryName: block.subcategoryName,
-      body: block.body,
-      createdAt: block.createdAt,
-      updatedAt: block.updatedAt,
-    }));
+  const practice = await readPracticeBlocksForCandidates(accountId, candidates);
 
   // Surface display name + original-formatted phone (from the matched
   // appointment) so the client can pre-fill the booking form on hand-off
@@ -9915,6 +10095,17 @@ async function routeBookingApiRequest(
       return json(await readPlayerProfile(session));
     }
 
+    // Player-side "Mark Complete." Player-session-authenticated, ahead of the
+    // admin gate below, same shape as /api/player/profile above.
+    if (req.method === "POST" && pathname === "/api/practice-blocks/complete") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      const body = await parseBody(req);
+      return json(await completePracticeBlockForPlayer(body?.id, session));
+    }
+
     // The player's own view of Clarity Caddy. Deliberately not the coach deep
     // link: that one names a player for a coach to open, and hands a coach's
     // view to whoever holds it. A player opens Caddy as themselves, so all this
@@ -10679,51 +10870,45 @@ async function routeBookingApiRequest(
       return json(await deleteLessonNote(noteId, requestContext.accountId));
     }
 
-    // The category library. One list per workspace, saved whole rather than
-    // item by item -- it is a short tree the coach edits as a tree.
-    if (req.method === "GET" && pathname === "/api/practice/categories") {
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountFeature(requestContext.account, "clients");
-      return json({ categories: await readPracticeCategories(requestContext.accountId) });
-    }
-
-    if (req.method === "PUT" && pathname === "/api/practice/categories") {
-      const body = await parseBody(req);
-      const state = await readCalendarState();
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountFeature(requestContext.account, "clients");
-      return json({
-        categories: await writePracticeCategories(body.categories || body, requestContext.accountId),
-      });
-    }
-
-    if (req.method === "GET" && pathname === "/api/practice") {
+    // Practice Blocks -- the coach's side. /api/practice-blocks/complete (the
+    // player's side) lives further up, alongside the other player-session
+    // routes, since it authenticates differently and must run before the
+    // blanket requireAdmin gate below.
+    if (req.method === "GET" && pathname === "/api/practice-blocks") {
       const state = await readCalendarState();
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const playerId = cleanString(url.searchParams.get("playerId"), "", 160);
-      const blocks = (await readPracticeBlocks(requestContext.accountId)).filter(
-        (block) => !playerId || block.playerId === playerId,
-      );
-      return json({ blocks });
+      if (!playerId) {
+        return json({ error: "invalid", message: "A player id is required." }, 400);
+      }
+      return json({ blocks: await readPracticeBlocksForPlayer(requestContext.accountId, playerId) });
     }
 
-    if ((req.method === "POST" || req.method === "PUT") && pathname === "/api/practice") {
+    if (req.method === "POST" && pathname === "/api/practice-blocks") {
       const body = await parseBody(req);
       const state = await readCalendarState();
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
-      const result = await upsertPracticeBlock(body.block || body, requestContext.accountId);
-      return json(result, req.method === "POST" ? 201 : 200);
+      const result = await createPracticeBlock(body.block || body, requestContext);
+      return json(result, 201);
     }
 
-    if (req.method === "DELETE" && pathname === "/api/practice") {
+    if (req.method === "PUT" && pathname === "/api/practice-blocks") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const result = await updatePracticeBlock(body.id || body.block?.id, body.block || body, requestContext);
+      return json(result);
+    }
+
+    if (req.method === "DELETE" && pathname === "/api/practice-blocks") {
       const state = await readCalendarState();
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const blockId = cleanString(url.searchParams.get("id"), "", 120);
-      return json(await deletePracticeBlock(blockId, requestContext.accountId));
+      return json(await archivePracticeBlock(blockId, requestContext));
     }
 
 	    if (req.method === "POST" && (pathname === "/api/people/import" || pathname === "/api/people/import-lite")) {
