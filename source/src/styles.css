@@ -6187,6 +6187,9 @@ button {
   }
 
   .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
     min-height: auto;
     flex-direction: row;
     align-items: center;
@@ -6248,44 +6251,81 @@ button {
     padding: 12px;
   }
 
+  /* A sticky strip like the player portal's nav, not a stacked block: a
+     coach who came here to check the calendar shouldn't spend the top of
+     the phone on a brand row and a grid of buttons before seeing it. */
   .sidebar {
-    position: static;
+    position: sticky;
+    top: 0;
     z-index: 30;
     width: 100%;
     min-width: 0;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-    padding: 12px;
+    min-height: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    /* max() clears a notch; everywhere else this is the same 10px as before. */
+    padding: max(10px, env(safe-area-inset-top)) 10px 10px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+    background: #fbfbf9;
     overflow: visible;
   }
 
   .brand {
+    flex-shrink: 0;
     min-width: 0;
+    gap: 8px;
   }
 
   .brand-mark {
-    width: 38px;
-    height: 38px;
+    width: 30px;
+    height: 30px;
+  }
+
+  /* The wordmark repeats what the page title already says; the mark alone
+     is enough to say "this is Clarity" without spending scroll-row width.
+     (:not(.brand-mark) because that's a div too, and needs to stay.) */
+  .brand > div:not(.brand-mark) {
+    display: none;
   }
 
   .side-nav {
-    display: grid;
-    grid-auto-flow: row;
-    grid-auto-columns: auto;
-    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
-    width: 100%;
+    display: flex;
+    flex-wrap: nowrap;
+    flex: 1;
     min-width: 0;
-    gap: 6px;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .side-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .side-nav button {
-    height: 40px;
-    padding: 0 10px;
+    height: 36px;
+    flex-shrink: 0;
+    padding: 0 12px;
+    border-radius: 999px;
     min-width: 0;
     justify-content: center;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+
+  /* The label is raw text in the button, not a separate element, so it
+     can't be hidden the way an icon-only bar usually hides it -- shrinking
+     the icon instead keeps every destination legible without wrapping. */
+  .side-nav button svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  .side-nav button.nav-logout {
+    color: var(--c-text-soft, #76736d);
   }
 
   .topbar,
@@ -6588,7 +6628,9 @@ button {
   }
 
   .sidebar {
-    padding: 10px;
+    /* Same notch clearance as the 760px rule -- this breakpoint only tightens
+       side/bottom spacing further, not whether the top clears a notch. */
+    padding: max(10px, env(safe-area-inset-top)) 10px 10px;
   }
 
   .brand strong {
