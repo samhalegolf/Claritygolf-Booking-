@@ -1,8 +1,10 @@
 import React from "react";
 import { DrawingTool } from "../models/Drawing";
 import {
+  IconFocus,
   IconPause,
   IconPlay,
+  IconSettings,
   IconToolAngle,
   IconToolCircle,
   IconToolLine,
@@ -66,6 +68,8 @@ export type PlayerToolRailProps = {
   canUndo: boolean;
   onClear: () => void;
   canClear: boolean;
+  /** Coach-only. The player has no focus palette, so this stays unset there. */
+  onFocusOpen?: () => void;
 };
 
 /**
@@ -84,6 +88,7 @@ export function PlayerToolRail({
   canUndo,
   onClear,
   canClear,
+  onFocusOpen,
 }: PlayerToolRailProps) {
   return (
     <div
@@ -124,6 +129,19 @@ export function PlayerToolRail({
       >
         <IconTrash />
       </button>
+      {onFocusOpen ? (
+        <>
+          <span className="va-rail-rule" aria-hidden="true" />
+          <button
+            type="button"
+            className="va-rail-btn"
+            aria-label="Focus palette"
+            onClick={onFocusOpen}
+          >
+            <IconFocus />
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -135,13 +153,17 @@ export type PlayerActionBarProps = {
   onTogglePlay: () => void;
   onStepFrame: (direction: -1 | 1) => void;
   onSave: () => void;
-  onSend: () => void;
+  onSend?: () => void;
   canSend: boolean;
   busy: boolean;
   saving: boolean;
   sending: boolean;
   status: string;
   statusTone: "idle" | "saved" | "error";
+  /** Coach-only. Everything that isn't drawing or transport lives behind
+   *  this gear, so it stays unset on the player's bar. */
+  settingsOpen?: boolean;
+  onSettingsToggle?: () => void;
 };
 
 /**
@@ -165,6 +187,8 @@ export function PlayerActionBar({
   sending,
   status,
   statusTone,
+  settingsOpen,
+  onSettingsToggle,
 }: PlayerActionBarProps) {
   return (
     <div className="va-player-bar">
@@ -207,10 +231,21 @@ export function PlayerActionBar({
         </div>
 
         <div className="va-player-destinations">
+          {onSettingsToggle ? (
+            <button
+              type="button"
+              className={`va-bar-btn${settingsOpen ? " is-active" : ""}`}
+              aria-label={settingsOpen ? "Hide settings" : "Show settings"}
+              aria-pressed={Boolean(settingsOpen)}
+              onClick={onSettingsToggle}
+            >
+              <IconSettings />
+            </button>
+          ) : null}
           <button type="button" className="va-bar-text-btn" onClick={onSave} disabled={busy}>
             {saving ? "Saving…" : "Save"}
           </button>
-          {canSend ? (
+          {canSend && onSend ? (
             <button type="button" className="va-bar-send" onClick={onSend} disabled={busy}>
               {sending ? "Sending…" : "Send to coach"}
             </button>

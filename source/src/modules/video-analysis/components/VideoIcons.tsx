@@ -158,6 +158,27 @@ export const IconTrash = ({ className }: IconProps) => (
   </Svg>
 );
 
+export const IconSettings = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <circle cx="12" cy="12" r="3.2" />
+    <path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" />
+  </Svg>
+);
+
+export const IconLibrary = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M12 3v12M6 11l6 6 6-6" />
+    <path d="M5 21h14" />
+  </Svg>
+);
+
+export const IconDiagnostics = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 8v5M12 16h.01" />
+  </Svg>
+);
+
 export const IconFocusTrackBeta = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M5 9V6h3" />

@@ -15,10 +15,11 @@ import { FocusAreaRect } from "./models/Focus";
 import { FocusSnapshot, VideoAnalysis } from "./models/Analysis";
 import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
-import { Toolbar } from "./components/Toolbar";
 import { VideoCanvas } from "./components/VideoCanvas";
-import { IconPlay, IconPause, IconRecord, IconUpload } from "./components/VideoIcons";
+import { IconBack, IconPlay, IconPause, IconRecord, IconUpload } from "./components/VideoIcons";
 import { PlayerActionBar, PlayerToolRail } from "./components/PlayerVideoControls";
+import { VideoSettingsSheet } from "./components/VideoSettingsSheet";
+import { ToolButton } from "./components/ToolButton";
 import {
   ComparisonSide,
   ComparisonWorkspaceState,
@@ -510,6 +511,11 @@ export function VideoWorkspace({
   // open means a drag draws. One flag rather than two, because a player who
   // has put the tools away has said which of the two they wanted.
   const [toolRailOpen, setToolRailOpen] = useState(false);
+  // Coach-only. Everything that isn't drawing or transport -- compare mode,
+  // linked playback, sync, screen recording, the library save, diagnostics,
+  // swapping the active clip -- lives behind this gear instead of an
+  // always-on console bar.
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const timelineEngine = useMemo(() => new TimelineEngine(), []);
   const modeIsCompare = comparisonMode === "compare";
@@ -1801,7 +1807,6 @@ export function VideoWorkspace({
     showFocusWindow ||
     comparisonMode === "compare" ||
     Boolean(onNavigateBack);
-  const canClearDrawings = activeDrawing.objects.length > 0;
 
   const analysisRecorderRef = useRef<AnalysisViewRecorder | null>(null);
   const [screenRecordingStatus, setScreenRecordingStatus] = useState<ScreenRecordingStatus>("idle");
@@ -2654,8 +2659,13 @@ export function VideoWorkspace({
         {/* The player has no header row at all. Play is the video itself,
             and choosing or replacing a clip is what the Videos screen they
             arrived from is for -- repeating it here put four controls around
-            a picture that only needed to be looked at. */}
-        {isPlayerVariant ? null : (
+            a picture that only needed to be looked at. Single mode on the
+            coach console now works the same way: Play moved to the action
+            bar, Record/Replace/Clear moved into settings, so there is
+            nothing left this row said that isn't said somewhere else.
+            Compare mode keeps it -- two videos on screen at once is the one
+            case "which side, which clip" is still worth a permanent label. */}
+        {isPlayerVariant || !modeIsCompare ? null : (
           <div className="comparison-video-header">
             <div className="comparison-side-chip">
               <span>
@@ -2751,17 +2761,18 @@ export function VideoWorkspace({
             }}
           />
           {hasSelectionDraft ? <div className="focus-selection-overlay" style={draftStyle || undefined} /> : null}
-          {isPlayerVariant ? (
-            <PlayerToolRail
-              open={toolRailOpen}
-              selectedTool={drawingState.selectedTool}
-              onToolChange={updateActiveDrawingTool}
-              onUndo={drawingState.undo}
-              canUndo={drawingState.canUndo}
-              onClear={clearActiveDrawing}
-              canClear={drawingState.objects.length > 0}
-            />
-          ) : null}
+          <PlayerToolRail
+            open={toolRailOpen}
+            selectedTool={drawingState.selectedTool}
+            onToolChange={updateActiveDrawingTool}
+            onUndo={drawingState.undo}
+            canUndo={drawingState.canUndo}
+            onClear={clearActiveDrawing}
+            canClear={drawingState.objects.length > 0}
+            onFocusOpen={
+              isPlayerVariant ? undefined : () => setFocusPaletteOpen((previous) => !previous)
+            }
+          />
         </div>
         <Timeline
           duration={Math.max(1, playback.duration || (isLeft ? leftCurrentDuration : rightCurrentDuration) || 0)}
@@ -2806,16 +2817,42 @@ export function VideoWorkspace({
       <style>{videoAnalysisThemeCss}</style>
       {/* The player already knows whose swing this is and how they got here --
           the terminal's own bar says Videos and offers the way back. A title
-          and a subtitle here spend the top of a phone screen restating it. */}
-      {isPlayerVariant ? null : (
-        <>
-          <h1>{playerName ? `${playerName} Video Analysis` : "Clarity Golf Video Analysis"}</h1>
-          <p className="subtitle">
-            {resolvedPlayerName
-              ? `${resolvedPlayerName} • ${lessonTitle || "Unlinked"} lesson context`
-              : "Premium, protected, and reusable workspace foundation."}
-          </p>
-        </>
+          and a subtitle here spend the top of a phone screen restating it.
+          The coach console keeps the back button always, but the full title
+          block is only worth its space before there is a video to look at --
+          once one loads, a compact strip replaces it so the picture gets the
+          room instead. */}
+      {isPlayerVariant ? null : workspaceHasVideo ? (
+        <div className="video-analysis-header is-compact">
+          <ToolButton
+            icon={<IconBack />}
+            label="Back"
+            tooltip="Back"
+            className="is-subtle video-header-back"
+            disabled={!canGoBack}
+            onClick={handleBackAction}
+          />
+          {playerName ? <span className="video-header-compact-title">{playerName}</span> : null}
+        </div>
+      ) : (
+        <div className="video-analysis-header">
+          <ToolButton
+            icon={<IconBack />}
+            label="Back"
+            tooltip="Back"
+            className="is-subtle video-header-back"
+            disabled={!canGoBack}
+            onClick={handleBackAction}
+          />
+          <div className="video-analysis-header-titles">
+            <h1>{playerName ? `${playerName} Video Analysis` : "Clarity Golf Video Analysis"}</h1>
+            <p className="subtitle">
+              {resolvedPlayerName
+                ? `${resolvedPlayerName} • ${lessonTitle || "Unlinked"} lesson context`
+                : "Premium, protected, and reusable workspace foundation."}
+            </p>
+          </div>
+        </div>
       )}
 
       <input
@@ -2887,88 +2924,11 @@ export function VideoWorkspace({
         </section>
       ) : null}
 
-      {/* The console bar is the coach's. A player's controls are the rail
-          over the video and the one row under it, both rendered below. */}
-      {workspaceHasVideo && !isPlayerVariant ? (
-        <div className="video-analysis-toolbar">
-          <Toolbar
-            selected={leftDrawing.selectedTool}
-            onToolChange={updateActiveDrawingTool}
-            showAngleTool
-            onFocusOpen={() => setFocusPaletteOpen((previous) => !previous)}
-            mode={comparisonMode}
-            onModeChange={updateMode}
-            onLinkedPlaybackToggle={() => setLinkedPlayback((previous) => !previous)}
-            linkedPlayback={linkedPlayback}
-            onSyncPlayheads={syncPlayheads}
-            syncPlayheadsEnabled={Boolean(playerVideoLeft && playerVideoRight)}
-            onBack={handleBackAction}
-            canGoBack={canGoBack}
-            onClearDrawings={clearActiveDrawing}
-            canClearDrawings={canClearDrawings}
-            onUndo={activeDrawing.undo}
-            canUndo={activeDrawing.canUndo}
-          />
-          <div className="analysis-save-controls" aria-label="Video analysis save controls">
-            <button
-              type="button"
-              className="upload-button video-save-button"
-              onClick={handleManualSave}
-              disabled={saveBusy}
-            >
-              {saveStatus === "saving" ? "Saving..." : "Save"}
-            </button>
-            <button
-              type="button"
-              className="upload-button video-save-button"
-              onClick={handleMyLibrarySave}
-              disabled={saveBusy}
-            >
-              Save permanently to My Library
-            </button>
-            <span className={`analysis-save-status is-${saveStatus}`} role="status">
-              {saveMessage}
-            </span>
-          </div>
-          {isPlayerVariant ? null : (
-            <div className="analysis-record-controls" aria-label="Screen recording">
-              <button
-                type="button"
-                className={`upload-button video-record-button${
-                  screenRecordingStatus === "recording" ? " is-recording" : ""
-                }`}
-                onClick={() =>
-                  screenRecordingStatus === "recording"
-                    ? void stopScreenRecording()
-                    : void startScreenRecording()
-                }
-                disabled={screenRecordingStatus === "saving"}
-              >
-                <IconRecord />
-                {screenRecordingStatus === "recording"
-                  ? "Stop recording"
-                  : screenRecordingStatus === "saving"
-                    ? "Saving..."
-                    : "Screen record"}
-              </button>
-              {screenRecordingMessage ? (
-                <span className={`analysis-record-status is-${screenRecordingStatus}`} role="status">
-                  {screenRecordingMessage}
-                </span>
-              ) : null}
-            </div>
-          )}
-          {isPlayerVariant ? null : (
-            <button
-              type="button"
-              className="upload-button"
-              onClick={() => setShowDiagnostics((previous) => !previous)}
-            >
-              {showDiagnostics ? "Hide diagnostics" : "Show diagnostics"}
-            </button>
-          )}
-        </div>
-      ) : null}
+      {/* The always-on console bar is gone. Drawing tools live on the rail
+          over the video (rendered per panel above); everything else --
+          compare mode, linked playback, sync, screen recording, the library
+          save, diagnostics, swapping the active clip -- lives behind the
+          settings gear on the action bar below. */}
 
       {liveRecording ? (
         <section className="live-recording-panel" aria-label="Live recording">
@@ -3058,28 +3018,19 @@ export function VideoWorkspace({
           )}
           {/* A player is always on their own phone -- tapping the video card
               above already opens iOS's native camera/photo sheet, so a
-              second "record from camera" control here is just a duplicate
+              "record from camera" control here would just be a duplicate
               tap target. Coaches keep it: this is how they pull in a shot
               from an external or desktop-attached camera, which has no
-              native picker to fall back on. */}
+              native picker to fall back on. One button, not two -- both used
+              to call openLiveRecording with nothing distinguishing them. */}
           {!isPlayerVariant && (
             <div className="video-intake-actions">
               <button
                 type="button"
-                className="video-tool-btn"
-                aria-label="Record clip"
+                className="upload-button video-record-button"
                 onClick={() => void openLiveRecording("left")}
               >
                 <IconRecord />
-                <span className="video-tool-tip" aria-hidden="true">
-                  Record clip
-                </span>
-              </button>
-              <button
-                type="button"
-                className="upload-button"
-                onClick={() => void openLiveRecording("left")}
-              >
                 Record from camera
               </button>
             </div>
@@ -3136,7 +3087,7 @@ export function VideoWorkspace({
         </div>
       ) : null}
 
-      {workspaceHasVideo && isPlayerVariant ? (
+      {workspaceHasVideo ? (
         <PlayerActionBar
           railOpen={toolRailOpen}
           onRailToggle={() => setToolRailOpen((previous) => !previous)}
@@ -3144,8 +3095,8 @@ export function VideoWorkspace({
           onTogglePlay={() => playPauseSide(effectiveActiveSide)}
           onStepFrame={(direction) => activePlayback.stepFrame(direction)}
           onSave={handleManualSave}
-          onSend={() => void handleSaveAndSend()}
-          canSend={Boolean(onSaveAndSend)}
+          onSend={isPlayerVariant ? () => void handleSaveAndSend() : undefined}
+          canSend={isPlayerVariant && Boolean(onSaveAndSend)}
           busy={saveBusy}
           saving={saveStatus === "saving"}
           sending={saveStatus === "sending"}
@@ -3153,6 +3104,45 @@ export function VideoWorkspace({
           statusTone={
             saveStatus === "error" ? "error" : saveStatus === "saved" ? "saved" : "idle"
           }
+          settingsOpen={isPlayerVariant ? undefined : settingsOpen}
+          onSettingsToggle={
+            isPlayerVariant ? undefined : () => setSettingsOpen((previous) => !previous)
+          }
+        />
+      ) : null}
+
+      {workspaceHasVideo && !isPlayerVariant ? (
+        <VideoSettingsSheet
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          mode={comparisonMode}
+          onModeChange={updateMode}
+          linkedPlayback={linkedPlayback}
+          onLinkedPlaybackToggle={() => setLinkedPlayback((previous) => !previous)}
+          onSyncPlayheads={syncPlayheads}
+          syncPlayheadsEnabled={Boolean(playerVideoLeft && playerVideoRight)}
+          isRecordingScreen={screenRecordingStatus === "recording"}
+          screenRecordingBusy={screenRecordingStatus === "saving"}
+          screenRecordingMessage={screenRecordingMessage}
+          onToggleScreenRecording={() =>
+            screenRecordingStatus === "recording"
+              ? void stopScreenRecording()
+              : void startScreenRecording()
+          }
+          onMyLibrarySave={handleMyLibrarySave}
+          saveBusy={saveBusy}
+          showDiagnostics={showDiagnostics}
+          onToggleDiagnostics={() => setShowDiagnostics((previous) => !previous)}
+          activeSideLabel={getSideTitle(effectiveActiveSide)}
+          hasActiveClip={Boolean(
+            effectiveActiveSide === "left" ? playerVideoLeft : playerVideoRight
+          )}
+          onReplaceClip={() => openUpload(effectiveActiveSide)}
+          onRecordReplacement={() => void openLiveRecording(effectiveActiveSide)}
+          onClearClip={() => {
+            clearCurrentSide(effectiveActiveSide);
+            setSettingsOpen(false);
+          }}
         />
       ) : null}
 
