@@ -929,9 +929,22 @@
    full screen of their own and push the page into a scroll it does not need. */
 .player-terminal {
   min-height: 100vh;
+  /* svh excludes the address bar, so the terminal doesn't measure itself
+     taller than what's actually visible and force a stray scroll. Declared
+     second so it only overrides where supported; unsupported browsers keep
+     the vh above. */
+  min-height: 100svh;
   display: flex;
   flex-direction: column;
   background: var(--pt-page);
+  /* Clears the home-indicator strip on a notched phone; 0 everywhere else.
+     The native build adds the same padding again via .native-app in
+     nativeApp.css -- that rule is more specific and wins there, this is
+     just what a browser tab gets on its own. */
+  padding-bottom: env(safe-area-inset-bottom);
+  /* Buttons should feel pressed, not flash grey -- a browser default that
+     reads as "website" rather than "app". */
+  -webkit-tap-highlight-color: transparent;
 }
 
 .player-terminal * {
@@ -989,7 +1002,10 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 10px 16px;
+  /* Clears the notch on a phone browser -- max() keeps the usual 10px
+     everywhere the inset is 0. The native build's own rule in nativeApp.css
+     is more specific and overrides this there. */
+  padding: max(10px, env(safe-area-inset-top)) 16px 10px;
 }
 
 .player-terminal-nav-lead {
@@ -1097,7 +1113,9 @@
   .player-terminal-nav-inner {
     flex-wrap: wrap;
     gap: 8px;
-    padding: 8px 10px;
+    /* Same notch clearance as the base rule -- this breakpoint only changes
+       the side/bottom spacing, not whether the top clears a notch. */
+    padding: max(8px, env(safe-area-inset-top)) 10px 8px;
   }
 
   .player-terminal-nav-lead {

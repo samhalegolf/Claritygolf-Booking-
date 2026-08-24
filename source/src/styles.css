@@ -50,9 +50,14 @@ button {
 
 .login-shell {
   min-height: 100vh;
+  /* Excludes the address bar on a phone browser; unsupported browsers keep
+     the vh above since this only overrides where svh is understood. */
+  min-height: 100svh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  /* max() so a notched phone's browser clears the notch/home-indicator;
+     everywhere else this is just the same 24px it always was. */
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
   background: #f5f5f3;
 }
 

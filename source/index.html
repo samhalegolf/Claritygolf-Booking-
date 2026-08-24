@@ -2,7 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover is what makes env(safe-area-inset-*) report real
+         values on a notched phone's browser instead of silently resolving to
+         0 -- several rules already lean on it (the player portal's nav and
+         trash zone, the video screen's action bar and settings sheet) and
+         were quietly no-ops on mobile Safari/Chrome until this was set. Safe
+         everywhere else: it only changes anything on a notched device, and
+         doesn't touch zoom or scrolling like the native app's stricter tag
+         does. See src/nativeApp.css and app/index.html for that one. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
     <title>Clarity Golf Booking</title>
     <!-- The manifest is what lets iOS install Clarity to the home screen, which
          is the only way Safari allows web push at all. Harmless everywhere else. -->
