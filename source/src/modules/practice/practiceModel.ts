@@ -24,6 +24,29 @@ export type PracticeBlock = {
   updatedAt: string;
 };
 
+/**
+ * A coach's saved template. Account-scoped, so it has no player and no
+ * expiry -- those are decided when a block is assigned from it, not here.
+ */
+export type PracticePreset = {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * A "used often" starter, derived from the account's assignment history
+ * rather than stored. `uses` is how many blocks share this title, which is
+ * the whole reason it's being suggested -- show it.
+ */
+export type PracticeSuggestion = {
+  title: string;
+  content: string;
+  uses: number;
+};
+
 /** The player-facing shape -- no createdBy/playerName, nothing internal. */
 export type PlayerPracticeBlock = Pick<
   PracticeBlock,

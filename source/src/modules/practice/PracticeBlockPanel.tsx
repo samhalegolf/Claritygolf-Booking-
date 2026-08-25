@@ -8,6 +8,8 @@ import {
   practiceExpiryLabel,
   type ExpiryType,
   type PracticeBlock,
+  type PracticePreset,
+  type PracticeSuggestion,
 } from "./practiceModel";
 
 /* The coach's end of Practice. Owns its own loading, its own writes. The
@@ -17,6 +19,11 @@ import {
  * mattering (expiry), and optionally a video that shows what "it" looks
  * like. Nothing here is a category picker -- that was the old feature; this
  * one is plain text plus an expiry a coach barely has to think about.
+ *
+ * The composer opens on two rows of starter chips so the common case isn't
+ * retyping: presets the coach saved, and the titles they assign most across
+ * the roster. Both only fill the text fields -- expiry and video stay this
+ * assignment's decision, because those are about this player right now.
  */
 
 export type PracticeBlockPanelProps = {
@@ -67,6 +74,9 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
   const [warning, setWarning] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  const [presets, setPresets] = useState<PracticePreset[]>([]);
+  const [suggestions, setSuggestions] = useState<PracticeSuggestion[]>([]);
+
   const [videoPickerOpen, setVideoPickerOpen] = useState(false);
   const [videoOptions, setVideoOptions] = useState<ClarityCloudImportTransfer[]>([]);
   const [videoLoading, setVideoLoading] = useState(false);
@@ -82,6 +92,9 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         message?: string;
         block?: PracticeBlock;
         blocks?: PracticeBlock[];
+        preset?: PracticePreset;
+        presets?: PracticePreset[];
+        suggestions?: PracticeSuggestion[];
         warning?: string;
       };
       if (!response.ok) throw new Error(data?.message || "Practice request failed.");
@@ -89,6 +102,22 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     },
     [onUnauthorized],
   );
+
+  /**
+   * Presets and suggestions in one call -- the composer wants both at the same
+   * moment. A failure here is swallowed: starters are a shortcut, and losing
+   * them shouldn't put an error above a composer that still works fine.
+   */
+  const loadStarters = useCallback(async () => {
+    try {
+      const data = await request(`/api/practice-block-presets?playerId=${encodeURIComponent(player.id)}`);
+      setPresets(Array.isArray(data.presets) ? data.presets : []);
+      setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+    } catch {
+      setPresets([]);
+      setSuggestions([]);
+    }
+  }, [player.id, request]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,7 +130,10 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     } finally {
       setLoading(false);
     }
-  }, [player.id, request]);
+    // After the list, always: assigning a block changes both the use counts
+    // and what this player already has active, so the chips must re-read.
+    await loadStarters();
+  }, [loadStarters, player.id, request]);
 
   useEffect(() => {
     void load();
@@ -125,6 +157,65 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     if (!composer?.linkedVideoId) return "";
     return videoOptions.find((t) => t.savedVideo?.savedVideoId === composer.linkedVideoId)?.savedVideo?.title || "";
   }, [composer?.linkedVideoId, videoOptions]);
+
+  /**
+   * Fills the text fields from a chip. Expiry and linked video are left alone
+   * -- a starter says what to practise, not for how long or against which
+   * swing. Anything already typed is confirmed before it's overwritten,
+   * because a misclick here would otherwise wipe a paragraph.
+   */
+  const applyStarter = useCallback(
+    (title: string, content: string) => {
+      if (!composer) return;
+      const hasText = Boolean(composer.title.trim() || composer.content.trim());
+      if (hasText && !window.confirm("Replace what you've written with this one?")) return;
+      setComposer({ ...composer, title, content });
+    },
+    [composer],
+  );
+
+  const saveAsPreset = useCallback(async () => {
+    if (!composer || busy) return;
+    const title = composer.title.trim();
+    const content = composer.content.trim();
+    if (!title || !content) return;
+    const replacing = presets.some((preset) => preset.title.toLowerCase() === title.toLowerCase());
+    setBusy(true);
+    setError("");
+    try {
+      await request("/api/practice-block-presets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, content }),
+      });
+      await loadStarters();
+      onToast(replacing ? `Preset "${title}" updated.` : `Saved "${title}" as a preset.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save that preset.");
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, composer, loadStarters, onToast, presets, request]);
+
+  const removePreset = useCallback(
+    async (preset: PracticePreset) => {
+      if (busy) return;
+      if (!window.confirm(`Delete the preset "${preset.title}"? Blocks already assigned from it stay as they are.`)) {
+        return;
+      }
+      setBusy(true);
+      setError("");
+      try {
+        await request(`/api/practice-block-presets?id=${encodeURIComponent(preset.id)}`, { method: "DELETE" });
+        await loadStarters();
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not delete that preset.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, loadStarters, request],
+  );
 
   const save = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
@@ -217,6 +308,53 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
 
       {composer && (
         <form className="practice-composer" onSubmit={save}>
+          {/* New blocks only. Editing an existing one is a correction to that
+              block, not a fresh start, so the chips would only be in the way. */}
+          {!composer.id && (presets.length > 0 || suggestions.length > 0) && (
+            <div className="practice-starters">
+              {presets.length > 0 && (
+                <div className="practice-starter-group">
+                  <span className="practice-starter-label">Your presets</span>
+                  <ul className="practice-starter-chips">
+                    {presets.map((preset) => (
+                      <li className="practice-starter-chip" key={preset.id}>
+                        <button type="button" onClick={() => applyStarter(preset.title, preset.content)}>
+                          {preset.title}
+                        </button>
+                        <button
+                          type="button"
+                          className="practice-starter-remove"
+                          title={`Delete the preset "${preset.title}"`}
+                          aria-label={`Delete the preset ${preset.title}`}
+                          disabled={busy}
+                          onClick={() => void removePreset(preset)}
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {suggestions.length > 0 && (
+                <div className="practice-starter-group">
+                  <span className="practice-starter-label">Used often</span>
+                  <ul className="practice-starter-chips">
+                    {suggestions.map((suggestion) => (
+                      <li className="practice-starter-chip" key={suggestion.title}>
+                        <button type="button" onClick={() => applyStarter(suggestion.title, suggestion.content)}>
+                          {suggestion.title}
+                          <em>×{suggestion.uses}</em>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           <label className="practice-field">
             <span>Title</span>
             <input
@@ -322,6 +460,14 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
           <div className="practice-composer-actions">
             <button type="submit" className="primary-button" disabled={busy || !composer.title.trim() || !composer.content.trim()}>
               {composer.id ? "Save changes" : "Assign"}
+            </button>
+            <button
+              type="button"
+              className="outline-button"
+              disabled={busy || !composer.title.trim() || !composer.content.trim()}
+              onClick={() => void saveAsPreset()}
+            >
+              Save as preset
             </button>
             <button
               type="button"

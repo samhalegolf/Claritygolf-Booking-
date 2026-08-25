@@ -56,6 +56,7 @@ export const config: Config = {
     "/api/people/migrate",
     "/api/practice-blocks",
     "/api/practice-blocks/complete",
+    "/api/practice-block-presets",
     "/api/public-booking",
     "/api/public-booking-catalog",
     "/api/public-booking-notifications",

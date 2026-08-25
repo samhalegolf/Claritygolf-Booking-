@@ -3698,6 +3698,164 @@ async function completePracticeBlockForPlayer(id, session) {
   return { block: rowToPlayerPracticeBlock(rows[0]) };
 }
 
+/* --- Practice block presets and suggestions ---------------------------------
+ *
+ * Two ways to start a block without retyping it, both feeding the same
+ * composer:
+ *
+ *   Presets      -- what the coach chose to keep. A real table, because the
+ *                   coach decides what goes in it and expects it to stay put.
+ *   Suggestions  -- what the coach actually assigns most, derived on read from
+ *                   practice_blocks. No table: anything stored would drift
+ *                   from the assignment history it claims to summarise.
+ *
+ * They are read together by one route, because the composer wants both at the
+ * same moment and a second round trip buys nothing.
+ * ------------------------------------------------------------------------- */
+
+let practiceBlockPresetsTableReady = false;
+async function ensurePracticeBlockPresetsTable() {
+  if (practiceBlockPresetsTableReady) return;
+  const ddl = ddlBatch();
+  ddl.sql`
+    CREATE TABLE IF NOT EXISTS practice_block_presets (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  ddl.sql`CREATE INDEX IF NOT EXISTS practice_block_presets_account_idx ON practice_block_presets (account_id, created_at DESC)`;
+  // The save path's ON CONFLICT target -- must exist before any preset is
+  // saved, not just before the migration is applied by hand.
+  ddl.sql`CREATE UNIQUE INDEX IF NOT EXISTS practice_block_presets_title_key ON practice_block_presets (account_id, lower(title))`;
+  await ddl.run();
+  practiceBlockPresetsTableReady = true;
+}
+
+function rowToApiPracticePreset(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    content: row.content,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function readPracticeBlockPresets(accountId) {
+  await ensurePracticeBlockPresetsTable();
+  const rows = await db().sql`
+    SELECT * FROM practice_block_presets
+    WHERE account_id = ${accountId}
+    ORDER BY created_at DESC
+  `;
+  return rows.map(rowToApiPracticePreset);
+}
+
+/**
+ * Save-as-preset. Saving under a title that already exists rewrites that
+ * preset rather than sitting a near-duplicate next to it -- a coach who edits
+ * a block and saves it again means "the preset says this now", and a list of
+ * three subtly different "Start Line Control"s helps nobody.
+ */
+async function savePracticeBlockPreset(input, requestContext) {
+  await ensurePracticeBlockPresetsTable();
+  const title = cleanString(input?.title, "", 200);
+  const content = cleanString(input?.content, "", 8000);
+  if (!title) throw Object.assign(new Error("A preset needs a title."), { status: 400 });
+  if (!content) throw Object.assign(new Error("A preset needs a description."), { status: 400 });
+
+  const now = nowIso();
+  const rows = await db().sql`
+    INSERT INTO practice_block_presets (id, account_id, title, content, created_by, created_at, updated_at)
+    VALUES (
+      ${randomUUID()}, ${requestContext.accountId}, ${title}, ${content},
+      ${requestContext.userId || requestContext.user?.email || ""}, ${now}, ${now}
+    )
+    ON CONFLICT (account_id, lower(title)) DO UPDATE
+      SET title = EXCLUDED.title, content = EXCLUDED.content, updated_at = NOW()
+    RETURNING *
+  `;
+  return { preset: rowToApiPracticePreset(rows[0]) };
+}
+
+/**
+ * Hard delete, unlike a practice block's archive. A preset is a convenience
+ * with no history worth keeping -- the blocks already assigned from it are
+ * their own rows and are untouched by this.
+ */
+async function deletePracticeBlockPreset(id, requestContext) {
+  await ensurePracticeBlockPresetsTable();
+  const cleanId = cleanString(id, "", 120);
+  if (!cleanId) throw Object.assign(new Error("A preset id is required."), { status: 400 });
+  const rows = await db().sql`
+    DELETE FROM practice_block_presets
+    WHERE id = ${cleanId} AND account_id = ${requestContext.accountId}
+    RETURNING id
+  `;
+  if (!rows[0]) throw Object.assign(new Error("That preset was not found."), { status: 404, code: "not_found" });
+  return { deletedId: cleanId };
+}
+
+/**
+ * "Used often" -- the account's most-assigned block titles, carrying the most
+ * recent wording of each.
+ *
+ * Grouped by title rather than by title+content on purpose: the same drill
+ * gets its text tweaked per player, and grouping on the pair would scatter one
+ * popular block across a dozen rows that each look assigned once. The newest
+ * version of the text wins, since that is the phrasing the coach settled on.
+ *
+ * Titles the player already has active are dropped -- suggesting what they are
+ * currently working on is the one suggestion that is never useful.
+ */
+async function readPracticeSuggestions(accountId, playerId) {
+  await ensurePracticeBlocksTable();
+  const rows = await db().sql`
+    WITH ranked AS (
+      SELECT
+        title,
+        content,
+        created_at,
+        COUNT(*) OVER (PARTITION BY lower(title)) AS uses,
+        ROW_NUMBER() OVER (PARTITION BY lower(title) ORDER BY created_at DESC) AS recency
+      FROM practice_blocks
+      WHERE account_id = ${accountId} AND status <> 'archived'
+    )
+    SELECT title, content, uses, created_at
+    FROM ranked
+    WHERE recency = 1
+      AND lower(title) NOT IN (
+        SELECT lower(title) FROM practice_blocks
+        WHERE account_id = ${accountId} AND player_id = ${playerId} AND status = 'active'
+      )
+    ORDER BY uses DESC, created_at DESC
+    LIMIT 8
+  `;
+  return rows.map((row) => ({ title: row.title, content: row.content, uses: Number(row.uses) || 1 }));
+}
+
+/**
+ * The composer's whole "start from something" payload. Suggestions that
+ * duplicate a preset are dropped here rather than in the panel -- one chip per
+ * idea, and the preset is the better chip because the coach can delete it.
+ */
+async function readPracticeComposerStarters(accountId, playerId) {
+  const [presets, suggestions] = await Promise.all([
+    readPracticeBlockPresets(accountId),
+    readPracticeSuggestions(accountId, playerId),
+  ]);
+  const presetTitles = new Set(presets.map((preset) => preset.title.toLowerCase()));
+  return {
+    presets,
+    suggestions: suggestions.filter((suggestion) => !presetTitles.has(suggestion.title.toLowerCase())),
+  };
+}
+
 /**
  * True when writing this person would leave the stored row exactly as it is.
  *
@@ -10909,6 +11067,34 @@ async function routeBookingApiRequest(
       assertAccountFeature(requestContext.account, "clients");
       const blockId = cleanString(url.searchParams.get("id"), "", 120);
       return json(await archivePracticeBlock(blockId, requestContext));
+    }
+
+    // Presets and "used often" suggestions -- what the composer offers before
+    // the coach types anything. One GET returns both; playerId is optional and
+    // only narrows the suggestions (it drops what that player already has
+    // active), so a call without it is still valid.
+    if (req.method === "GET" && pathname === "/api/practice-block-presets") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const playerId = cleanString(url.searchParams.get("playerId"), "", 160);
+      return json(await readPracticeComposerStarters(requestContext.accountId, playerId));
+    }
+
+    if (req.method === "POST" && pathname === "/api/practice-block-presets") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json(await savePracticeBlockPreset(body.preset || body, requestContext), 201);
+    }
+
+    if (req.method === "DELETE" && pathname === "/api/practice-block-presets") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const presetId = cleanString(url.searchParams.get("id"), "", 120);
+      return json(await deletePracticeBlockPreset(presetId, requestContext));
     }
 
 	    if (req.method === "POST" && (pathname === "/api/people/import" || pathname === "/api/people/import-lite")) {

@@ -16,6 +16,91 @@
   gap: var(--c-space-3);
 }
 
+/* Starter chips above the fields: presets first (the coach's own), then what
+ * they assign most. Two rows of the same chip so the eye doesn't have to learn
+ * two shapes -- only the label above them differs. */
+.practice-starters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-3);
+  padding-bottom: var(--c-space-1);
+}
+
+.practice-starter-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-2);
+}
+
+.practice-starter-label {
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  color: var(--c-text-soft);
+}
+
+.practice-starter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* The chip is the pair -- apply on the left, delete on the right -- sharing
+ * one border so the × reads as part of the preset rather than loose beside it. */
+.practice-starter-chip {
+  display: inline-flex;
+  align-items: stretch;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  overflow: hidden;
+}
+
+.practice-starter-chip > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--c-h-pill);
+  padding: 0 12px;
+  border: 0;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.practice-starter-chip > button:hover:not(:disabled) {
+  background: var(--c-surface-soft, var(--c-surface));
+}
+
+.practice-starter-chip > button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* The use count, not the title -- quieter, and it must never be what wraps. */
+.practice-starter-chip em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--c-muted);
+}
+
+.practice-starter-remove {
+  padding: 0 10px;
+  border-left: 1px solid var(--c-border-soft);
+  color: var(--c-muted);
+  font-size: var(--c-size-body);
+  line-height: 1;
+}
+
 .practice-field {
   display: flex;
   flex-direction: column;
