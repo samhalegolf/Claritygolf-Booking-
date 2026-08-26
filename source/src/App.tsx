@@ -1000,11 +1000,13 @@ type Toast = {
   undo?: () => void;
 };
 
+// The sidebar's destinations. Lesson types and availability used to be two of
+// them; they are Settings sections now (SETTINGS_SECTIONS "services" and the
+// "availability" group under Booking), reached by switchView("settings") plus a
+// settings tab, so they are not views any more.
 type View =
   | "calendar"
   | "clients"
-  | "services"
-  | "availability"
   | "booking"
   | "sell"
   | "billing"
@@ -2298,10 +2300,6 @@ function sectionTitle(view: View) {
   switch (view) {
     case "clients":
       return "Clients";
-    case "services":
-      return "Services";
-    case "availability":
-      return "Availability";
     case "booking":
       return "Booking Page";
     case "sell":
