@@ -348,56 +348,16 @@
 }
 
 .player-portal-booking,
-.player-portal-note,
-.player-portal-practice {
+.player-portal-note {
   border: 1px solid var(--pt-border-soft);
   border-radius: 10px;
   padding: 12px 14px;
   background: var(--pt-surface-soft);
 }
 
-/* A prescription is read, not skimmed: keep the coach's own line breaks and
-   hold the measure to something readable on a phone held at arm's length. */
-.player-portal-practice p {
-  margin: 8px 0 0;
-  max-width: var(--c-w-prose);
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--pt-text-body);
-  white-space: pre-wrap;
-}
-
-/* The whole card is the tap target -- no fixed width anywhere here, so it
-   wraps cleanly at phone width instead of forcing horizontal scroll. */
-.player-portal-practice-toggle {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-  border: 0;
-  padding: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.player-portal-practice-expiry {
-  font-size: 12px;
-  color: var(--pt-muted);
-}
-
-.player-portal-practice-detail {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--pt-border-soft);
-}
-
+/* Practice itself is now the wall (modules/practice/practice.css), read the
+   same way on both ends of the app. All that is left here is the one control
+   the portal owns and the coach's side does not: the jump to a linked video. */
 .player-portal-practice-video {
   border: 1px solid var(--pt-border);
   border-radius: 999px;
@@ -410,46 +370,12 @@
   cursor: pointer;
 }
 
-.player-portal-practice-detail .player-portal-primary {
-  min-height: 40px;
-  padding: 0 18px;
-}
 
-.player-portal-practice-history {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 4px;
-}
 
-.player-portal-practice-history h3 {
-  margin: 6px 0 0;
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--pt-muted);
-}
 
-.player-portal-practice-history-item {
-  opacity: 0.85;
-}
 
-.player-portal-practice-status {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
 
-.player-portal-practice-status-completed {
-  color: var(--pt-accent);
-}
 
-.player-portal-practice-status-expired {
-  color: var(--pt-muted);
-}
 
 .player-portal-booking {
   display: flex;

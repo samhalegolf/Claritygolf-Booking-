@@ -3433,6 +3433,8 @@ async function ensurePracticeBlocksTable() {
       player_name TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL,
       content TEXT NOT NULL,
+      block_type TEXT NOT NULL DEFAULT 'custom',
+      dose TEXT NOT NULL DEFAULT '',
       assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       expiry_type TEXT NOT NULL DEFAULT 'none',
       expiry_date TIMESTAMPTZ,
@@ -3445,11 +3447,25 @@ async function ensurePracticeBlocksTable() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  // Added after the first release of this table, so ALTER rather than only
+  // the CREATE above: a deployed account already has practice_blocks without
+  // these two, and both reads and writes below assume the columns exist.
+  ddl.sql`ALTER TABLE practice_blocks ADD COLUMN IF NOT EXISTS block_type TEXT NOT NULL DEFAULT 'custom'`;
+  ddl.sql`ALTER TABLE practice_blocks ADD COLUMN IF NOT EXISTS dose TEXT NOT NULL DEFAULT ''`;
   ddl.sql`CREATE INDEX IF NOT EXISTS practice_blocks_player_history_idx ON practice_blocks (account_id, player_id, created_at DESC)`;
   ddl.sql`CREATE INDEX IF NOT EXISTS practice_blocks_player_active_idx ON practice_blocks (account_id, player_id) WHERE status = 'active'`;
   ddl.sql`CREATE INDEX IF NOT EXISTS practice_blocks_expiry_sweep_idx ON practice_blocks (account_id, expiry_date) WHERE status = 'active' AND expiry_date IS NOT NULL`;
   await ddl.run();
   practiceBlocksTableReady = true;
+}
+
+/* The five kinds of block, in one place. The kind is a label and a colour --
+ * it does not change what a block *is*, so an unrecognised value (an older
+ * row, a hand-edited one) falls back to "custom" rather than being rejected. */
+const PRACTICE_BLOCK_TYPES = ["drill", "skill", "game", "routine", "custom"];
+
+function practiceBlockType(value) {
+  return PRACTICE_BLOCK_TYPES.includes(value) ? value : "custom";
 }
 
 function rowToApiPracticeBlock(row) {
@@ -3459,6 +3475,8 @@ function rowToApiPracticeBlock(row) {
     playerName: row.player_name || "",
     title: row.title,
     content: row.content,
+    blockType: practiceBlockType(row.block_type),
+    dose: row.dose || "",
     assignedAt: row.assigned_at,
     expiryType: row.expiry_type,
     expiryDate: row.expiry_date || null,
@@ -3477,6 +3495,8 @@ function rowToPlayerPracticeBlock(row) {
     id: row.id,
     title: row.title,
     content: row.content,
+    blockType: practiceBlockType(row.block_type),
+    dose: row.dose || "",
     assignedAt: row.assigned_at,
     expiryType: row.expiry_type,
     expiryDate: row.expiry_date || null,
@@ -3576,12 +3596,13 @@ async function createPracticeBlock(input, requestContext) {
   const now = nowIso();
   const rows = await db().sql`
     INSERT INTO practice_blocks (
-      id, account_id, player_id, player_name, title, content,
+      id, account_id, player_id, player_name, title, content, block_type, dose,
       assigned_at, expiry_type, expiry_date, resolved_from_calendar_item_id,
       linked_video_id, status, created_by, created_at, updated_at
     ) VALUES (
       ${id}, ${accountId}, ${playerId}, ${cleanString(input?.playerName, "", 180)},
-      ${title}, ${content}, ${now}, ${expiryType}, ${expiryDate}, ${resolvedFromCalendarItemId},
+      ${title}, ${content}, ${practiceBlockType(input?.blockType)}, ${cleanString(input?.dose, "", 60)},
+      ${now}, ${expiryType}, ${expiryDate}, ${resolvedFromCalendarItemId},
       ${cleanString(input?.linkedVideoId, "", 160) || null}, 'active',
       ${requestContext.userId || requestContext.user?.email || ""}, ${now}, ${now}
     )
@@ -3642,9 +3663,13 @@ async function updatePracticeBlock(id, input, requestContext) {
       ? cleanString(input.linkedVideoId, "", 160) || null
       : current.linked_video_id;
 
+  const blockType = input?.blockType !== undefined ? practiceBlockType(input.blockType) : practiceBlockType(current.block_type);
+  const dose = input?.dose !== undefined ? cleanString(input.dose, "", 60) : current.dose || "";
+
   const rows = await db().sql`
     UPDATE practice_blocks
-    SET title = ${title}, content = ${content}, expiry_type = ${expiryType},
+    SET title = ${title}, content = ${content}, block_type = ${blockType}, dose = ${dose},
+        expiry_type = ${expiryType},
         expiry_date = ${expiryDate}, resolved_from_calendar_item_id = ${resolvedFromCalendarItemId},
         linked_video_id = ${linkedVideoId},
         updated_at = NOW()
@@ -3723,12 +3748,22 @@ async function ensurePracticeBlockPresetsTable() {
       account_id TEXT NOT NULL,
       title TEXT NOT NULL,
       content TEXT NOT NULL,
+      block_type TEXT NOT NULL DEFAULT 'custom',
+      dose TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
       created_by TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
-  ddl.sql`CREATE INDEX IF NOT EXISTS practice_block_presets_account_idx ON practice_block_presets (account_id, created_at DESC)`;
+  // Added after this table's first release -- see the matching ALTERs on
+  // practice_blocks. sort_order exists because the rail is hand-ordered by
+  // drag: the coach's order is a decision, not a side effect of when they
+  // happened to save each one.
+  ddl.sql`ALTER TABLE practice_block_presets ADD COLUMN IF NOT EXISTS block_type TEXT NOT NULL DEFAULT 'custom'`;
+  ddl.sql`ALTER TABLE practice_block_presets ADD COLUMN IF NOT EXISTS dose TEXT NOT NULL DEFAULT ''`;
+  ddl.sql`ALTER TABLE practice_block_presets ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0`;
+  ddl.sql`CREATE INDEX IF NOT EXISTS practice_block_presets_account_idx ON practice_block_presets (account_id, sort_order, created_at DESC)`;
   // The save path's ON CONFLICT target -- must exist before any preset is
   // saved, not just before the migration is applied by hand.
   ddl.sql`CREATE UNIQUE INDEX IF NOT EXISTS practice_block_presets_title_key ON practice_block_presets (account_id, lower(title))`;
@@ -3741,17 +3776,25 @@ function rowToApiPracticePreset(row) {
     id: row.id,
     title: row.title,
     content: row.content,
+    blockType: practiceBlockType(row.block_type),
+    dose: row.dose || "",
+    sortOrder: Number(row.sort_order) || 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
+/**
+ * The coach's favourites rail, in the order they dragged it into. New ones
+ * are saved at sort_order 0 so they land at the top of the rail where the
+ * coach is looking; created_at breaks ties between anything never dragged.
+ */
 async function readPracticeBlockPresets(accountId) {
   await ensurePracticeBlockPresetsTable();
   const rows = await db().sql`
     SELECT * FROM practice_block_presets
     WHERE account_id = ${accountId}
-    ORDER BY created_at DESC
+    ORDER BY sort_order ASC, created_at DESC
   `;
   return rows.map(rowToApiPracticePreset);
 }
@@ -3770,14 +3813,84 @@ async function savePracticeBlockPreset(input, requestContext) {
   if (!content) throw Object.assign(new Error("A preset needs a description."), { status: 400 });
 
   const now = nowIso();
+  // Everything already in the rail is pushed down one so this lands at the
+  // top. Done before the insert, and the insert then claims 0, so two saves in
+  // a row still come out newest-first rather than tied.
+  await db().sql`
+    UPDATE practice_block_presets SET sort_order = sort_order + 1
+    WHERE account_id = ${requestContext.accountId}
+  `;
   const rows = await db().sql`
-    INSERT INTO practice_block_presets (id, account_id, title, content, created_by, created_at, updated_at)
+    INSERT INTO practice_block_presets (
+      id, account_id, title, content, block_type, dose, sort_order, created_by, created_at, updated_at
+    )
     VALUES (
       ${randomUUID()}, ${requestContext.accountId}, ${title}, ${content},
+      ${practiceBlockType(input?.blockType)}, ${cleanString(input?.dose, "", 60)}, 0,
       ${requestContext.userId || requestContext.user?.email || ""}, ${now}, ${now}
     )
     ON CONFLICT (account_id, lower(title)) DO UPDATE
-      SET title = EXCLUDED.title, content = EXCLUDED.content, updated_at = NOW()
+      SET title = EXCLUDED.title, content = EXCLUDED.content,
+          block_type = EXCLUDED.block_type, dose = EXCLUDED.dose,
+          sort_order = 0, updated_at = NOW()
+    RETURNING *
+  `;
+  return { preset: rowToApiPracticePreset(rows[0]) };
+}
+
+/**
+ * Rename in place, and reorder the rail. Two edits of the same kind -- both
+ * are the coach saying "this rail is wrong, fix it" without changing what any
+ * block prescribes -- so they share a route rather than each getting one.
+ *
+ * A rename that collides with another preset's title is rejected rather than
+ * silently merged: the unique index means one of the two would have to go, and
+ * which one is not this route's call to make.
+ */
+async function updatePracticeBlockPreset(input, requestContext) {
+  await ensurePracticeBlockPresetsTable();
+  const accountId = requestContext.accountId;
+
+  const order = Array.isArray(input?.order) ? input.order.map((id) => cleanString(id, "", 120)).filter(Boolean) : null;
+  if (order && order.length) {
+    // One statement per row: the list is a handful of ids, and a CASE-based
+    // bulk update would need dynamic SQL the tagged-template client can't take.
+    for (let index = 0; index < order.length; index += 1) {
+      await db().sql`
+        UPDATE practice_block_presets SET sort_order = ${index}, updated_at = NOW()
+        WHERE id = ${order[index]} AND account_id = ${accountId}
+      `;
+    }
+    return { presets: await readPracticeBlockPresets(accountId) };
+  }
+
+  const cleanId = cleanString(input?.id, "", 120);
+  if (!cleanId) throw Object.assign(new Error("A preset id is required."), { status: 400 });
+  const existing = await db().sql`
+    SELECT * FROM practice_block_presets WHERE id = ${cleanId} AND account_id = ${accountId} LIMIT 1
+  `;
+  const current = existing[0];
+  if (!current) throw Object.assign(new Error("That preset was not found."), { status: 404, code: "not_found" });
+
+  const title = cleanString(input?.title, current.title, 200);
+  if (!title) throw Object.assign(new Error("A preset needs a title."), { status: 400 });
+  const clash = await db().sql`
+    SELECT id FROM practice_block_presets
+    WHERE account_id = ${accountId} AND lower(title) = ${title.toLowerCase()} AND id <> ${cleanId}
+    LIMIT 1
+  `;
+  if (clash[0]) {
+    throw Object.assign(new Error(`You already have a preset called "${title}".`), { status: 409, code: "duplicate_title" });
+  }
+
+  const content = cleanString(input?.content, current.content, 8000);
+  const blockType = input?.blockType !== undefined ? practiceBlockType(input.blockType) : practiceBlockType(current.block_type);
+  const dose = input?.dose !== undefined ? cleanString(input.dose, "", 60) : current.dose || "";
+
+  const rows = await db().sql`
+    UPDATE practice_block_presets
+    SET title = ${title}, content = ${content}, block_type = ${blockType}, dose = ${dose}, updated_at = NOW()
+    WHERE id = ${cleanId} AND account_id = ${accountId}
     RETURNING *
   `;
   return { preset: rowToApiPracticePreset(rows[0]) };
@@ -3815,28 +3928,79 @@ async function deletePracticeBlockPreset(id, requestContext) {
  */
 async function readPracticeSuggestions(accountId, playerId) {
   await ensurePracticeBlocksTable();
+  // Read before the query, not after it: filtering dismissals out of an
+  // already-capped result would let a coach who has waved away the top few
+  // end up with a short rail while plenty more were available below the cap.
+  const dismissed = Array.from(await readPracticeDismissedSuggestions(accountId));
   const rows = await db().sql`
     WITH ranked AS (
       SELECT
         title,
         content,
+        block_type,
+        dose,
         created_at,
         COUNT(*) OVER (PARTITION BY lower(title)) AS uses,
         ROW_NUMBER() OVER (PARTITION BY lower(title) ORDER BY created_at DESC) AS recency
       FROM practice_blocks
       WHERE account_id = ${accountId} AND status <> 'archived'
     )
-    SELECT title, content, uses, created_at
+    SELECT title, content, block_type, dose, uses, created_at
     FROM ranked
     WHERE recency = 1
+      AND NOT (lower(title) = ANY(${dismissed}))
       AND lower(title) NOT IN (
         SELECT lower(title) FROM practice_blocks
         WHERE account_id = ${accountId} AND player_id = ${playerId} AND status = 'active'
       )
     ORDER BY uses DESC, created_at DESC
-    LIMIT 8
+    LIMIT 24
   `;
-  return rows.map((row) => ({ title: row.title, content: row.content, uses: Number(row.uses) || 1 }));
+  return rows.map((row) => ({
+    title: row.title,
+    content: row.content,
+    blockType: practiceBlockType(row.block_type),
+    dose: row.dose || "",
+    uses: Number(row.uses) || 1,
+  }));
+}
+
+/* Dismissed suggestions.
+ *
+ * A suggestion is derived, so "hide this one" has nowhere on practice_blocks
+ * to live -- the only alternative would be marking the underlying blocks,
+ * which would rewrite history to change a chip. A settings key instead: a
+ * list of titles the coach has waved away, account-scoped like the
+ * suggestions themselves.
+ *
+ * Titles, not ids, because that is what a suggestion is grouped by. Assigning
+ * the same title again does not resurrect it -- the coach still meant "stop
+ * offering me this" -- but un-hiding it is one click in the same rail. */
+function practiceDismissedSuggestionsKey(accountId) {
+  return `practice.dismissedSuggestions.v1.${cleanSlug(accountId, "default")}`;
+}
+
+async function readPracticeDismissedSuggestions(accountId) {
+  const raw = await getSetting(practiceDismissedSuggestionsKey(accountId));
+  const parsed = safeJsonParse(raw, []);
+  return new Set(
+    Array.isArray(parsed) ? parsed.map((title) => String(title).toLowerCase()).filter(Boolean) : [],
+  );
+}
+
+async function dismissPracticeSuggestion(input, requestContext) {
+  const title = cleanString(input?.title, "", 200);
+  if (!title) throw Object.assign(new Error("A suggestion title is required."), { status: 400 });
+  const accountId = requestContext.accountId;
+  const dismissed = await readPracticeDismissedSuggestions(accountId);
+  if (input?.restore) dismissed.delete(title.toLowerCase());
+  else dismissed.add(title.toLowerCase());
+  // Capped so one coach dismissing steadily for a year cannot grow a settings
+  // row without bound. Oldest dismissals fall off first, which just means a
+  // long-forgotten suggestion may be offered again.
+  const kept = Array.from(dismissed).slice(-200);
+  await setSetting(practiceDismissedSuggestionsKey(accountId), JSON.stringify(kept));
+  return { dismissed: kept };
 }
 
 /**
@@ -11087,6 +11251,26 @@ async function routeBookingApiRequest(
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       return json(await savePracticeBlockPreset(body.preset || body, requestContext), 201);
+    }
+
+    // Rename a favourite, or hand back the whole rail in a new order. Both are
+    // edits to the rail rather than to any block, so both are PUT here.
+    if (req.method === "PUT" && pathname === "/api/practice-block-presets") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json(await updatePracticeBlockPreset(body.preset || body, requestContext));
+    }
+
+    // "Stop offering me this one." Suggestions are derived from assignment
+    // history, so hiding one is a preference, not an edit to any block.
+    if (req.method === "POST" && pathname === "/api/practice-block-presets/dismiss") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json(await dismissPracticeSuggestion(body, requestContext));
     }
 
     if (req.method === "DELETE" && pathname === "/api/practice-block-presets") {

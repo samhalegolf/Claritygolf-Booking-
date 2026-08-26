@@ -20,7 +20,15 @@ import {
 } from "./PlayerTerminalNav";
 import { PlayerVideoShelf } from "./PlayerVideoShelf";
 import { formatDate } from "./format";
-import { practiceAssignedLabel, practiceExpiryLabel } from "../practice/practiceModel";
+import "../practice/practice.css";
+import { PracticeWall } from "../practice/PracticeWall";
+import {
+  practiceBlockMeta,
+  practiceExpiryLabel,
+  practiceSteps,
+  practiceTypeMeta,
+  type PracticeBlockType,
+} from "../practice/practiceModel";
 import {
   createIndexedDbSavedVideoLibrary,
   fetchGuestStatus,
@@ -86,6 +94,8 @@ type PracticeItem = {
   id: string;
   title: string;
   content: string;
+  blockType: PracticeBlockType;
+  dose: string;
   assignedAt: string;
   expiryType: PracticeExpiryType;
   expiryDate: string | null;
@@ -762,18 +772,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const activePractice = useMemo(() => practice.filter((block) => block.status === "active"), [practice]);
 
   /**
-   * Completed and expired blocks, newest-finished first. Kept apart from
-   * activePractice (never combined into one list) so completing a block
-   * always reads as "done," not as it quietly vanishing.
+   * The one block the player has opened off the wall. Nothing is expanded by
+   * default: the wall is the view, and a brick is a thing you choose to read.
    */
-  const practiceHistory = useMemo(
-    () =>
-      [...practice]
-        .filter((block) => block.status === "completed" || block.status === "expired")
-        .sort((a, b) =>
-          String(b.completedAt || b.assignedAt).localeCompare(String(a.completedAt || a.assignedAt)),
-        ),
-    [practice],
+  const openPracticeBlock = useMemo(
+    () => practice.find((block) => block.id === expandedPracticeId) || null,
+    [expandedPracticeId, practice],
   );
 
   const nextLesson = upcomingBookings[0] || null;
@@ -1178,86 +1182,96 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
               {tab === "practice" && !isGuest && (
                 <section className="player-portal-section">
                   <h2>Practice</h2>
+                  {/* The wall, not a list. Every block the coach has ever set,
+                      oldest at the bottom -- so what a player sees first is how
+                      much they have built, and only then what is outstanding. */}
                   <p className="player-portal-lead">
-                    What your coach has asked you to work on between lessons.
+                    {activePractice.length
+                      ? `${activePractice.length} thing${activePractice.length === 1 ? "" : "s"} to work on. Tap a block to read it.`
+                      : "Everything your coach has set you. Tap a block to read it."}
                   </p>
                   {profileLoading && !practice.length ? (
                     <p className="player-portal-empty">Loading your practice…</p>
-                  ) : activePractice.length ? (
-                    <ul className="player-portal-list">
-                      {activePractice.map((block) => {
-                        const expanded = expandedPracticeId === block.id;
-                        const video = block.linkedVideoId
-                          ? practiceVideos.find((t) => t.savedVideo?.savedVideoId === block.linkedVideoId)
-                          : null;
-                        return (
-                          <li className="player-portal-practice" key={block.id}>
-                            <button
-                              type="button"
-                              className="player-portal-practice-toggle"
-                              onClick={() => setExpandedPracticeId(expanded ? null : block.id)}
-                            >
-                              <div className="player-portal-note-head">
-                                <strong>{block.title}</strong>
-                                <span>{practiceAssignedLabel(block)}</span>
-                              </div>
-                              <span className="player-portal-practice-expiry">{practiceExpiryLabel(block)}</span>
-                            </button>
-                            {expanded && (
-                              <div className="player-portal-practice-detail">
-                                <p>{block.content}</p>
-                                {block.linkedVideoId && (
-                                  <button
-                                    type="button"
-                                    className="player-portal-practice-video"
-                                    onClick={() => setOpenVideoId(block.linkedVideoId as string)}
-                                  >
-                                    {video ? `Watch: ${video.savedVideo?.title || "Saved video"}` : "Watch linked video"}
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  className="player-portal-primary"
-                                  disabled={completingPracticeId === block.id}
-                                  onClick={() => void markPracticeComplete(block.id)}
-                                >
-                                  {completingPracticeId === block.id ? "Marking complete…" : "Mark Complete"}
-                                </button>
-                              </div>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
                   ) : (
-                    <p className="player-portal-empty">
-                      Nothing to practise yet. Your coach will put it here after your next lesson.
-                    </p>
-                  )}
+                    <>
+                      <PracticeWall
+                        blocks={practice}
+                        openId={expandedPracticeId}
+                        onOpen={(id) => setExpandedPracticeId(expandedPracticeId === id ? null : id)}
+                        emptyNote="Nothing to practise yet. Your coach will put it here after your next lesson."
+                      />
 
-                  {practiceHistory.length > 0 && (
-                    <div className="player-portal-practice-history">
-                      <h3>Completed</h3>
-                      <ul className="player-portal-list">
-                        {practiceHistory.map((block) => (
-                          <li className="player-portal-practice player-portal-practice-history-item" key={block.id}>
-                            <div className="player-portal-note-head">
-                              <strong>{block.title}</strong>
-                              <span
-                                className={`player-portal-practice-status player-portal-practice-status-${block.status}`}
-                              >
-                                {block.status === "completed" ? "Completed" : "Expired"}
+                      {openPracticeBlock && (
+                        <div className="practice-detail" data-practice-type={openPracticeBlock.blockType}>
+                          <div className="practice-detail-head">
+                            <div>
+                              <span className="practice-detail-kind">
+                                {practiceTypeMeta(openPracticeBlock.blockType).label}
+                              </span>
+                              <strong>{openPracticeBlock.title}</strong>
+                              <span className="practice-detail-meta">
+                                {practiceBlockMeta(openPracticeBlock)} · {practiceExpiryLabel(openPracticeBlock)}
                               </span>
                             </div>
-                            <span>
-                              {block.status === "completed" && block.completedAt
-                                ? formatDate(block.completedAt)
-                                : practiceAssignedLabel(block)}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
+                            <button
+                              type="button"
+                              className="practice-detail-close"
+                              title="Close"
+                              aria-label="Close"
+                              onClick={() => setExpandedPracticeId(null)}
+                            >
+                              ×
+                            </button>
+                          </div>
+
+                          <ol>
+                            {practiceSteps(openPracticeBlock.content).map((line, index) => (
+                              <li key={index}>{line}</li>
+                            ))}
+                          </ol>
+
+                          <div className="practice-detail-actions">
+                            {openPracticeBlock.linkedVideoId && (
+                              <button
+                                type="button"
+                                className="player-portal-practice-video"
+                                onClick={() => setOpenVideoId(openPracticeBlock.linkedVideoId as string)}
+                              >
+                                {practiceVideos.find(
+                                  (t) => t.savedVideo?.savedVideoId === openPracticeBlock.linkedVideoId,
+                                )?.savedVideo?.title
+                                  ? `Watch: ${
+                                      practiceVideos.find(
+                                        (t) => t.savedVideo?.savedVideoId === openPracticeBlock.linkedVideoId,
+                                      )?.savedVideo?.title
+                                    }`
+                                  : "Watch linked video"}
+                              </button>
+                            )}
+                            {openPracticeBlock.status === "active" ? (
+                              <button
+                                type="button"
+                                className="player-portal-primary"
+                                disabled={completingPracticeId === openPracticeBlock.id}
+                                onClick={() => void markPracticeComplete(openPracticeBlock.id)}
+                              >
+                                {completingPracticeId === openPracticeBlock.id ? "Marking complete…" : "Mark Complete"}
+                              </button>
+                            ) : (
+                              <span
+                                className={`practice-status-badge practice-status-${openPracticeBlock.status}`}
+                              >
+                                {openPracticeBlock.status === "completed"
+                                  ? openPracticeBlock.completedAt
+                                    ? `Completed ${formatDate(openPracticeBlock.completedAt)}`
+                                    : "Completed"
+                                  : "Expired"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </section>
               )}

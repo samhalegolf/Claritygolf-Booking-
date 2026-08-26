@@ -73,6 +73,11 @@
   --dark-pencil: rgba(244, 247, 242, 0.5);
   --dark-pencil-hover: rgba(244, 247, 242, 0.76);
   --dark-text-disabled: rgba(244, 247, 242, 0.38);
+  /* The wall's surfaces, unlike the bricks laid into it, are surfaces: mortar
+     and unfilled slots follow the page. */
+  --dark-mortar: #14180f;
+  --dark-brick-blank: #1e2219;
+  --dark-brick-blank-border: rgba(244, 247, 242, 0.1);
 
   /* --- Geometry ---------------------------------------------------------- */
   --c-radius-control: 9px;
@@ -122,6 +127,43 @@
   --c-size-meta: 13px;
   --c-size-group: 12px;
 
+  /* --- Practice block types -----------------------------------------------
+   * One colour per kind of block, carried the whole way through: the composer
+   * tab, the frame that tab opens, the rail tile it fills, and the brick it
+   * becomes on the wall. Five, because five is what a coach can tell apart at
+   * brick size -- past that the wall stops being readable at a glance.
+   *
+   * Fixed in both schemes, like --c-scrim above. A brick is an object with a
+   * colour, not a surface that follows the page, and the wall reads the same
+   * whichever way the reader's phone is set. --c-on-tone is fixed with them
+   * for the same reason: it is the label printed on the brick.
+   *
+   * The soft pair is the same hue drained: a completed block keeps its
+   * identity while stepping back from the active ones beside it. */
+  --c-tone-drill: #2f5d3a;
+  --c-tone-skill: #2c4a75;
+  --c-tone-game: #8a4a1c;
+  --c-tone-routine: #5a3a63;
+  --c-tone-custom: #57544d;
+
+  --c-tone-drill-soft: #cbdccf;
+  --c-tone-skill-soft: #c9d4e3;
+  --c-tone-game-soft: #e8d3c1;
+  --c-tone-routine-soft: #dbcfe0;
+  --c-tone-custom-soft: #d9d7d1;
+
+  --c-on-tone: #f4f7f2;
+  /* Printed on the drained pair. Fixed with them: the soft tones are the same
+     pale colour in both schemes, so their text has to be too -- reading it
+     from --c-text-body would put light text on a pastel in dark mode. */
+  --c-on-tone-soft: #33312c;
+
+  /* The wall the bricks are laid into: mortar courses showing through the
+     joints, and the blank half-bricks that stop a short course ending ragged. */
+  --c-mortar: #eeeee9;
+  --c-brick-blank: #e6e5df;
+  --c-brick-blank-border: #dcdbd4;
+
   /* --- Field widths (Rule 05) -------------------------------------------- */
   /* A field is as wide as its content. A bare width:100% is a bug — only
      notes and search get it, and they have their own token so the exception
@@ -158,6 +200,9 @@
   --c-pencil: var(--dark-pencil);
   --c-pencil-hover: var(--dark-pencil-hover);
   --c-text-disabled: var(--dark-text-disabled);
+  --c-mortar: var(--dark-mortar);
+  --c-brick-blank: var(--dark-brick-blank);
+  --c-brick-blank-border: var(--dark-brick-blank-border);
 }
 
 /* --- Dark, trigger two: the player's own device setting --------------------
@@ -186,6 +231,9 @@
     --c-pencil: var(--dark-pencil);
     --c-pencil-hover: var(--dark-pencil-hover);
     --c-text-disabled: var(--dark-text-disabled);
+    --c-mortar: var(--dark-mortar);
+    --c-brick-blank: var(--dark-brick-blank);
+    --c-brick-blank-border: var(--dark-brick-blank-border);
   }
 }
 

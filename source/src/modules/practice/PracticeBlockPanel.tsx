@@ -1,12 +1,22 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import "./practice.css";
 import { apiFetch } from "../auth/apiFetch";
 import { listClarityCloudImportTransfers, type ClarityCloudImportTransfer } from "../video-analysis/utils/savedVideoLibrary";
 import {
-  practiceAssignedLabel,
+  PracticeBlockBuilder,
+  emptyPracticeDraft,
+  practiceDraftContent,
+  practiceDraftFromBlock,
+  practiceDraftIsWritten,
+  type PracticeDraft,
+} from "./PracticeBlockBuilder";
+import { PracticeWall } from "./PracticeWall";
+import {
+  practiceBlockMeta,
   practiceExpiryLabel,
-  type ExpiryType,
+  practiceSteps,
+  practiceTypeMeta,
   type PracticeBlock,
   type PracticePreset,
   type PracticeSuggestion,
@@ -15,15 +25,16 @@ import {
 /* The coach's end of Practice. Owns its own loading, its own writes. The
  * console only tells it which player is open.
  *
- * A block is three things: what to do (title + content), when it stops
- * mattering (expiry), and optionally a video that shows what "it" looks
- * like. Nothing here is a category picker -- that was the old feature; this
- * one is plain text plus an expiry a coach barely has to think about.
+ * Two halves, and the order matters: the composer is at the top because the
+ * reason a coach opens this tab is nearly always to assign something, and the
+ * wall is underneath because what this player has already been given is the
+ * context for what to give them next. Nothing is behind a "+ New block"
+ * button -- a form that is already open is one fewer click on the only action
+ * anybody comes here for.
  *
- * The composer opens on two rows of starter chips so the common case isn't
- * retyping: presets the coach saved, and the titles they assign most across
- * the roster. Both only fill the text fields -- expiry and video stay this
- * assignment's decision, because those are about this player right now.
+ * A block is: what kind of work it is, what to do (a title and numbered
+ * steps), how much of it (the dose), when it stops mattering (expiry), and
+ * optionally a video showing what "it" looks like.
  */
 
 export type PracticeBlockPanelProps = {
@@ -32,30 +43,6 @@ export type PracticeBlockPanelProps = {
   onUnauthorized: () => void;
   onToast: (message: string) => void;
 };
-
-type ComposerState = {
-  id: string | null; // set when editing an existing block
-  title: string;
-  content: string;
-  expiryType: ExpiryType;
-  expiryDate: string; // yyyy-mm-dd, only meaningful when expiryType === "set_date"
-  linkedVideoId: string;
-};
-
-function emptyComposer(): ComposerState {
-  return { id: null, title: "", content: "", expiryType: "none", expiryDate: "", linkedVideoId: "" };
-}
-
-function composerFromBlock(block: PracticeBlock): ComposerState {
-  return {
-    id: block.id,
-    title: block.title,
-    content: block.content,
-    expiryType: block.expiryType,
-    expiryDate: block.expiryType === "set_date" && block.expiryDate ? block.expiryDate.slice(0, 10) : "",
-    linkedVideoId: block.linkedVideoId || "",
-  };
-}
 
 const STATUS_LABEL: Record<PracticeBlock["status"], string> = {
   active: "Active",
@@ -69,10 +56,10 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-
-  const [composer, setComposer] = useState<ComposerState | null>(null);
   const [warning, setWarning] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const [draft, setDraft] = useState<PracticeDraft>(() => emptyPracticeDraft());
+  const [openBrickId, setOpenBrickId] = useState<string | null>(null);
 
   const [presets, setPresets] = useState<PracticePreset[]>([]);
   const [suggestions, setSuggestions] = useState<PracticeSuggestion[]>([]);
@@ -104,9 +91,9 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
   );
 
   /**
-   * Presets and suggestions in one call -- the composer wants both at the same
-   * moment. A failure here is swallowed: starters are a shortcut, and losing
-   * them shouldn't put an error above a composer that still works fine.
+   * Favourites and suggestions in one call -- the composer wants both at the
+   * same moment. A failure here is swallowed: the rails are a shortcut, and
+   * losing them shouldn't put an error above a composer that still works.
    */
   const loadStarters = useCallback(async () => {
     try {
@@ -131,7 +118,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       setLoading(false);
     }
     // After the list, always: assigning a block changes both the use counts
-    // and what this player already has active, so the chips must re-read.
+    // and what this player already has active, so the rails must re-read.
     await loadStarters();
   }, [loadStarters, player.id, request]);
 
@@ -154,53 +141,155 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
   }, [player.id, videoOptions.length, videoLoading]);
 
   const selectedVideoTitle = useMemo(() => {
-    if (!composer?.linkedVideoId) return "";
-    return videoOptions.find((t) => t.savedVideo?.savedVideoId === composer.linkedVideoId)?.savedVideo?.title || "";
-  }, [composer?.linkedVideoId, videoOptions]);
+    if (!draft.linkedVideoId) return "";
+    return videoOptions.find((t) => t.savedVideo?.savedVideoId === draft.linkedVideoId)?.savedVideo?.title || "";
+  }, [draft.linkedVideoId, videoOptions]);
 
-  /**
-   * Fills the text fields from a chip. Expiry and linked video are left alone
-   * -- a starter says what to practise, not for how long or against which
-   * swing. Anything already typed is confirmed before it's overwritten,
-   * because a misclick here would otherwise wipe a paragraph.
-   */
-  const applyStarter = useCallback(
-    (title: string, content: string) => {
-      if (!composer) return;
-      const hasText = Boolean(composer.title.trim() || composer.content.trim());
-      if (hasText && !window.confirm("Replace what you've written with this one?")) return;
-      setComposer({ ...composer, title, content });
-    },
-    [composer],
+  const openBlock = useMemo(
+    () => blocks.find((block) => block.id === openBrickId) || null,
+    [blocks, openBrickId],
   );
 
-  const saveAsPreset = useCallback(async () => {
-    if (!composer || busy) return;
-    const title = composer.title.trim();
-    const content = composer.content.trim();
-    if (!title || !content) return;
-    const replacing = presets.some((preset) => preset.title.toLowerCase() === title.toLowerCase());
-    setBusy(true);
-    setError("");
-    try {
-      await request("/api/practice-block-presets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, content }),
-      });
+  /**
+   * Saves the draft, then reloads. Returns the new block's id -- and only for
+   * a create, because the flight animation is "this became a brick", which an
+   * edit to a brick already on the wall is not.
+   */
+  const save = useCallback(
+    async (candidate: PracticeDraft, alsoFavourite: boolean): Promise<string | null> => {
+      if (busy) return null;
+      const content = practiceDraftContent(candidate);
+      const title = candidate.title.trim() || practiceTypeMeta(candidate.blockType).titleHint;
+      if (!content) {
+        setError("Write at least one step before saving.");
+        return null;
+      }
+      if (candidate.expiryType === "set_date" && !candidate.expiryDate) {
+        setError("Pick a date for this block's expiry.");
+        return null;
+      }
+      setBusy(true);
+      setError("");
+      setWarning("");
+      try {
+        const body = {
+          id: candidate.id || undefined,
+          playerId: player.id,
+          playerName: player.name,
+          title,
+          content,
+          blockType: candidate.blockType,
+          dose: candidate.dose.trim(),
+          expiryType: candidate.expiryType,
+          // End of the picked day, not its start -- a block set to expire
+          // "31 Aug" should still be usable on the 31st, not vanish at its
+          // first moment.
+          expiryDate: candidate.expiryType === "set_date" ? `${candidate.expiryDate}T23:59:59Z` : undefined,
+          linkedVideoId: candidate.linkedVideoId || undefined,
+        };
+        const data = await request("/api/practice-blocks", {
+          method: candidate.id ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (alsoFavourite) {
+          // Its own request, and its own failure: a favourite that didn't save
+          // must not read as an assignment that didn't happen.
+          try {
+            await request("/api/practice-block-presets", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ title, content, blockType: candidate.blockType, dose: candidate.dose.trim() }),
+            });
+          } catch {
+            onToast(`Assigned, but "${title}" could not be saved to favourites.`);
+          }
+        }
+
+        if (data.warning === "no_upcoming_booking") {
+          setWarning(`${player.name} has no upcoming lesson. Saved with no expiry instead.`);
+        }
+        setDraft(emptyPracticeDraft(candidate.blockType));
+        setVideoPickerOpen(false);
+        await load();
+        onToast(candidate.id ? "Practice block updated." : `Practice block assigned to ${player.name}.`);
+        return candidate.id ? null : data.block?.id || null;
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not save that block.");
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, load, onToast, player.id, player.name, request],
+  );
+
+  const archive = useCallback(
+    async (blockId: string) => {
+      const block = blocks.find((item) => item.id === blockId);
+      if (block && !window.confirm(`Remove "${block.title}" from ${player.name}'s wall?`)) return;
+      setBusy(true);
+      setError("");
+      try {
+        await request(`/api/practice-blocks?id=${encodeURIComponent(blockId)}`, { method: "DELETE" });
+        setOpenBrickId((current) => (current === blockId ? null : current));
+        await load();
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not remove that block.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [blocks, load, player.name, request],
+  );
+
+  const saveFavourite = useCallback(
+    async (favourite: { title: string; content: string; blockType: PracticeBlock["blockType"]; dose: string }) => {
+      if (busy) return;
+      const replacing = presets.some((preset) => preset.title.toLowerCase() === favourite.title.toLowerCase());
+      setBusy(true);
+      setError("");
+      try {
+        await request("/api/practice-block-presets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(favourite),
+        });
+        await loadStarters();
+        onToast(replacing ? `Favourite "${favourite.title}" updated.` : `Saved "${favourite.title}" to favourites.`);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not save that favourite.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, loadStarters, onToast, presets, request],
+  );
+
+  const renamePreset = useCallback(
+    async (preset: PracticePreset, title: string) => {
+      // Optimistic: a rename is one word changing on a tile the coach is
+      // looking at, and a round trip's worth of stale text reads as a bug.
+      setPresets((current) => current.map((item) => (item.id === preset.id ? { ...item, title } : item)));
+      try {
+        await request("/api/practice-block-presets", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: preset.id, title }),
+        });
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not rename that favourite.");
+      }
       await loadStarters();
-      onToast(replacing ? `Preset "${title}" updated.` : `Saved "${title}" as a preset.`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save that preset.");
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, composer, loadStarters, onToast, presets, request]);
+    },
+    [loadStarters, request],
+  );
 
   const removePreset = useCallback(
     async (preset: PracticePreset) => {
       if (busy) return;
-      if (!window.confirm(`Delete the preset "${preset.title}"? Blocks already assigned from it stay as they are.`)) {
+      if (!window.confirm(`Remove "${preset.title}" from favourites? Blocks already assigned from it stay as they are.`)) {
         return;
       }
       setBusy(true);
@@ -209,7 +298,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         await request(`/api/practice-block-presets?id=${encodeURIComponent(preset.id)}`, { method: "DELETE" });
         await loadStarters();
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not delete that preset.");
+        setError(caught instanceof Error ? caught.message : "Could not remove that favourite.");
       } finally {
         setBusy(false);
       }
@@ -217,328 +306,212 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     [busy, loadStarters, request],
   );
 
-  const save = useCallback(
-    async (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      if (!composer || busy) return;
-      const title = composer.title.trim();
-      const content = composer.content.trim();
-      if (!title || !content) return;
-      if (composer.expiryType === "set_date" && !composer.expiryDate) {
-        setError("Pick a date for this block's expiry.");
-        return;
-      }
-      setBusy(true);
-      setError("");
-      setWarning("");
+  const reorderPresets = useCallback(
+    async (orderedIds: string[]) => {
+      // The rail is filtered by the picked type, so the ids handed back are a
+      // slice of the whole list. Everything not in that slice keeps the
+      // position it had, and the slice is written into the gaps it occupied --
+      // otherwise dragging inside "Drill" would silently shuffle "Game".
+      const positions = presets
+        .map((preset, index) => ({ preset, index }))
+        .filter((entry) => orderedIds.includes(entry.preset.id))
+        .map((entry) => entry.index);
+      const next = presets.slice();
+      orderedIds.forEach((id, slot) => {
+        const preset = presets.find((item) => item.id === id);
+        if (preset && positions[slot] !== undefined) next[positions[slot]] = preset;
+      });
+      setPresets(next);
       try {
-        const body = {
-          id: composer.id || undefined,
-          playerId: player.id,
-          playerName: player.name,
-          title,
-          content,
-          expiryType: composer.expiryType,
-          // End of the picked day, not its start -- a block set to expire
-          // "31 Aug" should still be usable on the 31st, not vanish at its
-          // first moment.
-          expiryDate: composer.expiryType === "set_date" ? `${composer.expiryDate}T23:59:59Z` : undefined,
-          linkedVideoId: composer.linkedVideoId || undefined,
-        };
-        const data = composer.id
-          ? await request("/api/practice-blocks", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(body),
-            })
-          : await request("/api/practice-blocks", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(body),
-            });
-        if (data.warning === "no_upcoming_booking") {
-          setWarning(`${player.name} has no upcoming lesson. Saved with no expiry instead.`);
-        } else {
-          setComposer(null);
-        }
-        await load();
-        onToast(composer.id ? "Practice block updated." : `Practice block assigned to ${player.name}.`);
+        await request("/api/practice-block-presets", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order: next.map((preset) => preset.id) }),
+        });
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not save that block.");
-      } finally {
-        setBusy(false);
+        setError(caught instanceof Error ? caught.message : "Could not save that order.");
+        await loadStarters();
       }
     },
-    [busy, composer, load, onToast, player.id, player.name, request],
+    [loadStarters, presets, request],
   );
 
-  const archive = useCallback(
-    async (blockId: string) => {
-      setBusy(true);
-      setError("");
+  const dismissSuggestion = useCallback(
+    async (suggestion: PracticeSuggestion) => {
+      setSuggestions((current) => current.filter((item) => item.title !== suggestion.title));
       try {
-        await request(`/api/practice-blocks?id=${encodeURIComponent(blockId)}`, { method: "DELETE" });
-        await load();
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not archive that block.");
-      } finally {
-        setBusy(false);
+        await request("/api/practice-block-presets/dismiss", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: suggestion.title }),
+        });
+      } catch {
+        // It's back on the next load if this failed -- no error worth showing
+        // above the composer for a chip the coach has already stopped seeing.
       }
     },
-    [load, request],
+    [request],
+  );
+
+  const editBlock = useCallback(
+    (block: PracticeBlock) => {
+      if (practiceDraftIsWritten(draft) && !window.confirm("Replace what you've written with this block?")) return;
+      setDraft(practiceDraftFromBlock(block));
+      setWarning("");
+      setVideoPickerOpen(false);
+    },
+    [draft],
   );
 
   if (loading) return <div className="module-loading">Loading practice…</div>;
 
-  return (
-    <div className="practice-panel">
-      {!composer && (
-        <button
-          type="button"
-          className="primary-button"
-          onClick={() => {
-            setComposer(emptyComposer());
-            setWarning("");
-            setVideoPickerOpen(false);
-          }}
-        >
-          + New Practice Block
+  const videoControl = (
+    <div className="practice-video-field">
+      {draft.linkedVideoId ? (
+        <span className="practice-video-selected">
+          <span>{selectedVideoTitle || "Linked video"}</span>
+          <button
+            type="button"
+            className="practice-video-cancel"
+            onClick={() => setDraft({ ...draft, linkedVideoId: "" })}
+          >
+            Remove
+          </button>
+        </span>
+      ) : (
+        <button type="button" className="practice-clear" onClick={() => void openVideoPicker()}>
+          Link a video
         </button>
       )}
-
-      {composer && (
-        <form className="practice-composer" onSubmit={save}>
-          {/* New blocks only. Editing an existing one is a correction to that
-              block, not a fresh start, so the chips would only be in the way. */}
-          {!composer.id && (presets.length > 0 || suggestions.length > 0) && (
-            <div className="practice-starters">
-              {presets.length > 0 && (
-                <div className="practice-starter-group">
-                  <span className="practice-starter-label">Your presets</span>
-                  <ul className="practice-starter-chips">
-                    {presets.map((preset) => (
-                      <li className="practice-starter-chip" key={preset.id}>
-                        <button type="button" onClick={() => applyStarter(preset.title, preset.content)}>
-                          {preset.title}
-                        </button>
-                        <button
-                          type="button"
-                          className="practice-starter-remove"
-                          title={`Delete the preset "${preset.title}"`}
-                          aria-label={`Delete the preset ${preset.title}`}
-                          disabled={busy}
-                          onClick={() => void removePreset(preset)}
-                        >
-                          ×
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {suggestions.length > 0 && (
-                <div className="practice-starter-group">
-                  <span className="practice-starter-label">Used often</span>
-                  <ul className="practice-starter-chips">
-                    {suggestions.map((suggestion) => (
-                      <li className="practice-starter-chip" key={suggestion.title}>
-                        <button type="button" onClick={() => applyStarter(suggestion.title, suggestion.content)}>
-                          {suggestion.title}
-                          <em>×{suggestion.uses}</em>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          <label className="practice-field">
-            <span>Title</span>
-            <input
-              value={composer.title}
-              onChange={(event) => setComposer({ ...composer, title: event.target.value })}
-              placeholder="Start Line Control"
-              maxLength={200}
-              autoFocus
-              required
-            />
-          </label>
-
-          <label className="practice-field">
-            <span>What to practise</span>
-            <textarea
-              value={composer.content}
-              onChange={(event) => setComposer({ ...composer, content: event.target.value })}
-              rows={5}
-              placeholder="Hit 10 balls using the alignment gate. Focus only on starting the ball inside the intended window."
-              required
-            />
-          </label>
-
-          <fieldset className="practice-expiry-field">
-            <legend>Expiry</legend>
-            <div className="practice-expiry-options">
-              {(["none", "set_date", "next_lesson"] as ExpiryType[]).map((option) => (
-                <label className="practice-expiry-option" key={option}>
-                  <input
-                    type="radio"
-                    name="expiryType"
-                    checked={composer.expiryType === option}
-                    onChange={() => setComposer({ ...composer, expiryType: option })}
-                  />
-                  {option === "none" ? "No expiry" : option === "set_date" ? "Set date" : "Next lesson"}
-                </label>
+      {videoPickerOpen && !draft.linkedVideoId && (
+        <div className="practice-video-picker">
+          {videoLoading ? (
+            <p className="practice-video-empty">Loading {player.name}'s videos…</p>
+          ) : videoOptions.length ? (
+            <ul className="practice-video-options">
+              {videoOptions.map((transfer) => (
+                <li key={transfer.savedVideo?.savedVideoId}>
+                  <button
+                    type="button"
+                    className="outline-button"
+                    onClick={() => {
+                      setDraft({ ...draft, linkedVideoId: transfer.savedVideo?.savedVideoId || "" });
+                      setVideoPickerOpen(false);
+                    }}
+                  >
+                    {transfer.savedVideo?.title || "Saved video"}
+                  </button>
+                </li>
               ))}
-            </div>
-            {composer.expiryType === "set_date" && (
-              <input
-                type="date"
-                className="practice-expiry-date"
-                value={composer.expiryDate}
-                onChange={(event) => setComposer({ ...composer, expiryDate: event.target.value })}
-                required
-              />
-            )}
-          </fieldset>
-
-          <div className="practice-video-field">
-            {composer.linkedVideoId ? (
-              <div className="practice-video-selected">
-                <span>Linked video: {selectedVideoTitle || "Saved video"}</span>
-                <button type="button" className="outline-button" onClick={() => setComposer({ ...composer, linkedVideoId: "" })}>
-                  Remove
-                </button>
-              </div>
-            ) : videoPickerOpen ? (
-              <div className="practice-video-picker">
-                {videoLoading ? (
-                  <p className="practice-video-empty">Loading {player.name}'s videos…</p>
-                ) : videoOptions.length ? (
-                  <ul className="practice-video-options">
-                    {videoOptions.map((transfer) => (
-                      <li key={transfer.savedVideo?.savedVideoId}>
-                        <button
-                          type="button"
-                          className="outline-button"
-                          onClick={() =>
-                            setComposer({ ...composer, linkedVideoId: transfer.savedVideo?.savedVideoId || "" })
-                          }
-                        >
-                          {transfer.savedVideo?.title || "Saved video"}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="practice-video-empty">No videos for {player.name} yet.</p>
-                )}
-                <button type="button" className="practice-video-cancel" onClick={() => setVideoPickerOpen(false)}>
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button type="button" className="outline-button" onClick={() => void openVideoPicker()}>
-                Link a video
-              </button>
-            )}
-          </div>
-
-          {warning && (
-            <p className="practice-warning" role="alert">
-              {warning}
-            </p>
+            </ul>
+          ) : (
+            <p className="practice-video-empty">No videos for {player.name} yet.</p>
           )}
-          {error && (
-            <p className="practice-error" role="alert">
-              {error}
-            </p>
-          )}
-
-          <div className="practice-composer-actions">
-            <button type="submit" className="primary-button" disabled={busy || !composer.title.trim() || !composer.content.trim()}>
-              {composer.id ? "Save changes" : "Assign"}
-            </button>
-            <button
-              type="button"
-              className="outline-button"
-              disabled={busy || !composer.title.trim() || !composer.content.trim()}
-              onClick={() => void saveAsPreset()}
-            >
-              Save as preset
-            </button>
-            <button
-              type="button"
-              className="outline-button"
-              onClick={() => {
-                setComposer(null);
-                setError("");
-                setWarning("");
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
+          <button type="button" className="practice-video-cancel" onClick={() => setVideoPickerOpen(false)}>
+            Cancel
+          </button>
+        </div>
       )}
+    </div>
+  );
 
-      <div className="practice-block-list">
-        {blocks.length ? (
-          blocks.map((block) => (
-            <article className="practice-block-card" key={block.id}>
-              <div className="practice-block-head">
-                <div>
-                  <strong>{block.title}</strong>
-                  <span className={`practice-status-badge practice-status-${block.status}`}>
-                    {STATUS_LABEL[block.status]}
-                  </span>
-                </div>
-                <span className="practice-block-meta">
-                  {practiceAssignedLabel(block)} · {practiceExpiryLabel(block)}
-                </span>
-              </div>
-              <p className={expandedId === block.id ? "" : "practice-block-clamped"}>{block.content}</p>
-              <div className="practice-block-actions">
-                <button
-                  type="button"
-                  className="practice-block-toggle"
-                  onClick={() => setExpandedId(expandedId === block.id ? null : block.id)}
-                >
-                  {expandedId === block.id ? "Show less" : "Show full text"}
-                </button>
-                {block.status === "active" && (
-                  <>
-                    <button
-                      type="button"
-                      className="outline-button"
-                      disabled={busy}
-                      onClick={() => {
-                        setComposer(composerFromBlock(block));
-                        setWarning("");
-                        setVideoPickerOpen(false);
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button type="button" className="outline-button" disabled={busy} onClick={() => void archive(block.id)}>
-                      Archive
-                    </button>
-                  </>
-                )}
-              </div>
-            </article>
-          ))
-        ) : (
-          <p className="notes-empty">No practice blocks yet.</p>
-        )}
-      </div>
+  return (
+    <div className="practice-panel">
+      <PracticeBlockBuilder
+        draft={draft}
+        onDraftChange={setDraft}
+        presets={presets}
+        suggestions={suggestions}
+        busy={busy}
+        onSave={save}
+        onCancelEdit={() => {
+          setDraft(emptyPracticeDraft(draft.blockType));
+          setError("");
+          setWarning("");
+          setVideoPickerOpen(false);
+        }}
+        onRenamePreset={(preset, title) => void renamePreset(preset, title)}
+        onRemovePreset={(preset) => void removePreset(preset)}
+        onReorderPresets={(ids) => void reorderPresets(ids)}
+        onDismissSuggestion={(suggestion) => void dismissSuggestion(suggestion)}
+        videoControl={videoControl}
+      />
 
-      {error && !composer && (
+      {warning && (
+        <p className="practice-warning" role="alert">
+          {warning}
+        </p>
+      )}
+      {error && (
         <p className="practice-error" role="alert">
           {error}
         </p>
+      )}
+
+      <PracticeWall
+        blocks={blocks}
+        openId={openBrickId}
+        onOpen={(id) => setOpenBrickId((current) => (current === id ? null : id))}
+        onRemove={(id) => void archive(id)}
+        emptyNote={`Nothing assigned to ${player.name} yet. The first block you save starts the wall.`}
+      />
+
+      {openBlock && (
+        <div className="practice-detail" data-practice-type={openBlock.blockType}>
+          <div className="practice-detail-head">
+            <div>
+              <span className="practice-detail-kind">{practiceTypeMeta(openBlock.blockType).label}</span>
+              <strong>{openBlock.title}</strong>
+              <span className="practice-detail-meta">
+                {practiceBlockMeta(openBlock)} · {practiceExpiryLabel(openBlock)}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="practice-detail-close"
+              title="Close"
+              aria-label="Close"
+              onClick={() => setOpenBrickId(null)}
+            >
+              ×
+            </button>
+          </div>
+
+          <ol>
+            {practiceSteps(openBlock.content).map((line, index) => (
+              <li key={index}>{line}</li>
+            ))}
+          </ol>
+
+          <div className="practice-detail-actions">
+            <span className={`practice-status-badge practice-status-${openBlock.status}`}>
+              {STATUS_LABEL[openBlock.status]}
+            </span>
+            {openBlock.status === "active" && (
+              <button type="button" className="outline-button" disabled={busy} onClick={() => editBlock(openBlock)}>
+                Edit
+              </button>
+            )}
+            <button
+              type="button"
+              className="outline-button"
+              disabled={busy}
+              onClick={() =>
+                void saveFavourite({
+                  title: openBlock.title,
+                  content: openBlock.content,
+                  blockType: openBlock.blockType,
+                  dose: openBlock.dose,
+                })
+              }
+            >
+              ★ Favourite
+            </button>
+            <button type="button" className="outline-button" disabled={busy} onClick={() => void archive(openBlock.id)}>
+              Remove
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

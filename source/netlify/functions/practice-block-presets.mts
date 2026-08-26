@@ -7,13 +7,20 @@ import { handleBookingApiRoute } from "./booking-core.mts";
  * suggestions derived from their assignment history. Coach-only; the player
  * portal never sees either.
  *
- * One path, three methods (list, save, delete), so unlike practice-blocks.mts
- * there is nothing to disambiguate here.
+ * The collection path carries list/save/rename-and-reorder/delete. /dismiss is
+ * its own path because it writes a preference rather than a preset, and is
+ * resolved here rather than left to the router -- Netlify may hand this
+ * handler its own /.netlify/functions/ form and the two must stay
+ * distinguishable.
  */
 export default async function handler(req: Request, context: Context) {
-  return handleBookingApiRoute(req, "/api/practice-block-presets", context);
+  const pathname = new URL(req.url).pathname;
+  const route = pathname.endsWith("/dismiss")
+    ? "/api/practice-block-presets/dismiss"
+    : "/api/practice-block-presets";
+  return handleBookingApiRoute(req, route, context);
 }
 
 export const config: Config = {
-  path: "/api/practice-block-presets",
+  path: ["/api/practice-block-presets", "/api/practice-block-presets/dismiss"],
 };

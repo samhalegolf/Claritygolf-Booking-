@@ -1,206 +1,1068 @@
-/* The coach's Practice Block panel, inside the Player Profiles tool panel.
+/* Practice: the coach's builder, the wall, and the block detail that opens
+ * from it. The wall and the type tones are shared with the player portal --
+ * everything here that starts .practice- is used on both ends.
  *
- * The panel around this is already a bordered box, so nothing here draws a
- * second one: the composer is a stack of fields, and the blocks below it are
- * separated by hairlines rather than boxed individually. */
+ * The panel around this is already a bordered box (Rule 01: a box means you
+ * can act on it), so the builder draws no outer border of its own. The two
+ * things that *are* boxed are the ones you press: the tone frame you type
+ * into, and the wall you click a brick on.
+ */
+
+/* --- Type tone plumbing -----------------------------------------------------
+ *
+ * Every element that carries a block's kind gets data-practice-type, and reads
+ * --practice-tone / --practice-tone-soft from here. One declaration per type,
+ * in one place, so a tab, a rail tile, a frame and a brick can never disagree
+ * about what "drill" looks like -- and adding a sixth type later is five lines,
+ * not a sweep.
+ * ------------------------------------------------------------------------- */
+[data-practice-type="drill"] {
+  --practice-tone: var(--c-tone-drill);
+  --practice-tone-soft: var(--c-tone-drill-soft);
+}
+[data-practice-type="skill"] {
+  --practice-tone: var(--c-tone-skill);
+  --practice-tone-soft: var(--c-tone-skill-soft);
+}
+[data-practice-type="game"] {
+  --practice-tone: var(--c-tone-game);
+  --practice-tone-soft: var(--c-tone-game-soft);
+}
+[data-practice-type="routine"] {
+  --practice-tone: var(--c-tone-routine);
+  --practice-tone-soft: var(--c-tone-routine-soft);
+}
+[data-practice-type="custom"] {
+  --practice-tone: var(--c-tone-custom);
+  --practice-tone-soft: var(--c-tone-custom-soft);
+}
 
 .practice-panel {
   display: flex;
   flex-direction: column;
   gap: var(--c-space-5);
+  min-width: 0;
 }
 
-.practice-composer {
+/* --- The builder row --------------------------------------------------------
+ * Often | form | Saved. The form holds a 330px floor and the rails give way
+ * around it: full titles first, then their width, then the row entirely.
+ * ------------------------------------------------------------------------- */
+.practice-builder {
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--c-space-5);
+  min-width: 0;
+}
+
+.practice-builder[data-tier="top"] {
+  flex-wrap: wrap;
   gap: var(--c-space-3);
 }
 
-/* Starter chips above the fields: presets first (the coach's own), then what
- * they assign most. Two rows of the same chip so the eye doesn't have to learn
- * two shapes -- only the label above them differs. */
-.practice-starters {
+.practice-form {
   display: flex;
   flex-direction: column;
-  gap: var(--c-space-3);
-  padding-bottom: var(--c-space-1);
+  gap: 14px;
+  flex: 1 1 330px;
+  min-width: 330px;
 }
 
-.practice-starter-group {
+.practice-builder[data-tier="top"] .practice-form {
+  /* Last in the source order would put the rails' markup before the fields for
+     a screen reader too; they are ordered here instead, where it is only the
+     visual stacking that changes. */
+  order: 3;
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+/* --- Rails ------------------------------------------------------------------ */
+.practice-rail {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--c-space-2);
+  gap: var(--c-space-1);
+  flex: 0 0 96px;
+  width: 96px;
+  min-width: 0;
+  /* Drops the rail's head to the frame's top edge, past the tab strip beside
+     it, so the two columns start on the same line. */
+  padding-top: 42px;
 }
 
-.practice-starter-label {
-  font-size: var(--c-size-meta);
+.practice-builder[data-tier="short"] .practice-rail {
+  flex-basis: 56px;
+  width: 56px;
+}
+
+/* Narrow: each rail becomes its own box, half the row, above the fields. */
+.practice-rail-narrow {
+  flex: 1 1 0;
+  width: auto;
+  padding: 7px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
+}
+
+/* Narrow only. In the wide tiers the three columns are already in source
+   order -- Often, form, Saved -- and an order on two of the three would put
+   the form in front of both. */
+.practice-builder[data-tier="top"] .practice-rail-often {
+  order: 1;
+}
+.practice-builder[data-tier="top"] .practice-rail-saved {
+  order: 2;
+}
+
+.practice-rail-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 0 1px;
+  min-width: 0;
+}
+
+.practice-rail-head > strong {
+  font-size: var(--c-size-group);
   font-weight: 700;
   color: var(--c-text-soft);
-}
-
-.practice-starter-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--c-space-2);
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-/* The chip is the pair -- apply on the left, delete on the right -- sharing
- * one border so the × reads as part of the preset rather than loose beside it. */
-.practice-starter-chip {
-  display: inline-flex;
-  align-items: stretch;
   min-width: 0;
-  max-width: 100%;
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-pill);
-  overflow: hidden;
-}
-
-.practice-starter-chip > button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: var(--c-h-pill);
-  padding: 0 12px;
-  border: 0;
-  background: var(--c-surface);
-  color: var(--c-text);
-  font: inherit;
-  font-size: var(--c-size-meta);
-  font-weight: 600;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.practice-rail-more {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface-soft);
+  color: var(--c-text-soft);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
   cursor: pointer;
 }
 
-.practice-starter-chip > button:hover:not(:disabled) {
-  background: var(--c-surface-soft, var(--c-surface));
+.practice-rail-edit {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--c-pencil);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
 }
 
-.practice-starter-chip > button:disabled {
-  cursor: default;
-  opacity: 0.5;
+.practice-rail-edit[data-on] {
+  background: var(--c-border-soft);
+  color: var(--c-text);
 }
 
-/* The use count, not the title -- quieter, and it must never be what wraps. */
-.practice-starter-chip em {
-  font-style: normal;
-  font-weight: 700;
-  color: var(--c-muted);
-}
-
-.practice-starter-remove {
-  padding: 0 10px;
-  border-left: 1px solid var(--c-border-soft);
-  color: var(--c-muted);
-  font-size: var(--c-size-body);
-  line-height: 1;
-}
-
-.practice-field {
+.practice-rail-list {
   display: flex;
   flex-direction: column;
   gap: var(--c-space-1);
   min-width: 0;
 }
 
-.practice-field > span {
-  font-size: var(--c-size-meta);
-  font-weight: 700;
-  color: var(--c-text-soft);
+/* One line, clipped -- whatever does not fit lives behind the +N expander. */
+.practice-rail-narrow .practice-rail-list {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
-.practice-field input,
-.practice-field textarea {
+.practice-rail-empty {
+  padding: var(--c-space-1) 2px;
+  font-size: 10px;
+  line-height: 1.3;
+  color: var(--c-muted);
+}
+
+.practice-rail-popup {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-1);
+  max-height: 168px;
+  overflow-y: auto;
+  margin-top: var(--c-space-1);
+  padding: 7px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  box-shadow: 0 12px 28px rgba(8, 18, 12, 0.16);
+}
+
+/* --- Rail tiles ------------------------------------------------------------- */
+.practice-tile-wrap {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.practice-rail-popup .practice-tile-wrap {
+  flex: 0 1 88px;
+}
+
+/* Fixed width, not stretched: a narrow rail shows as many whole tiles as fit
+   on its line and parks the rest behind the +N. One tile stretched across the
+   whole box would read as a banner rather than as the first of several. */
+.practice-rail-narrow .practice-tile-wrap {
+  flex: 0 0 88px;
+}
+
+.practice-tile-wrap-fav {
+  cursor: grab;
+}
+
+.practice-tile-wrap-fav[data-dragging] {
+  opacity: 0.8;
+}
+
+.practice-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--practice-tone);
+  border-radius: var(--c-radius-control, 9px);
+  background: var(--practice-tone);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.practice-tile:hover {
+  filter: brightness(0.97);
+}
+
+.practice-tile > strong {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--c-on-tone);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* The × on a suggestion: full-height, hinged off the tile's right edge, so it
+   reads as part of the tile rather than loose beside it. */
+.practice-tile-remove {
+  align-self: stretch;
+  flex: 0 0 20px;
+  width: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 0 var(--c-radius-control, 9px) var(--c-radius-control, 9px) 0;
+  background: var(--practice-tone);
+  color: rgba(255, 255, 255, 0.8);
+  font: inherit;
+  font-size: var(--c-size-group);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.practice-tile-remove:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+/* A favourite's two tools live inside the tile, under a hairline, and only
+   while the rail is in edit mode -- at rest a tile is one target, not three. */
+.practice-tile-tools {
+  display: flex;
+  gap: 2px;
+  justify-content: flex-end;
+  width: 100%;
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.practice-tile-tools > [role="button"] {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.practice-tile-tools > [role="button"]:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.practice-tile-rename {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--c-accent);
+  border-radius: var(--c-radius-control);
+  padding: 0 6px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-group);
+}
+
+/* --- Type tabs and the frame they open --------------------------------------
+ *
+ * The picked type stops being a chip and becomes the tab the editing frame
+ * hangs off: same fill, no seam between them. So the colour you are about to
+ * assign is the colour you are typing inside, and it is already the colour of
+ * the brick it will become.
+ * ------------------------------------------------------------------------- */
+.practice-type-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.practice-type-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.practice-type-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 10px 3px;
+  border: 2px solid var(--practice-tone);
+  border-radius: 10px 10px 0 0;
+  background: var(--practice-tone);
+  color: var(--c-on-tone);
+  opacity: 0.62;
+  font: inherit;
+  font-size: var(--c-size-group);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    padding var(--c-t-expand),
+    opacity var(--c-t-hover);
+}
+
+.practice-type-tab > strong {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.practice-type-tab[data-on] {
+  padding: 11px 3px 13px;
+  opacity: 1;
+  font-size: var(--c-size-meta);
+}
+
+/* Custom sits apart from the four shapes and keeps its natural width. Its fill
+   runs on past the strip so it meets the frame with no gap. */
+.practice-type-tab-custom {
+  flex: 0 0 auto;
+  margin-bottom: -8px;
+  padding-bottom: 18px;
+  border-bottom: 0;
+}
+
+.practice-type-tab-custom[data-on] {
+  padding-bottom: 22px;
+}
+
+.practice-frame {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-4);
+  min-width: 0;
+  padding: 14px;
+  margin-top: -2px;
+  position: relative;
+  z-index: 2;
+  border: 2px solid var(--practice-tone);
+  border-radius: 0 var(--c-radius-card) var(--c-radius-card) var(--c-radius-card);
+  background: var(--practice-tone);
+  box-shadow: 0 10px 24px rgba(8, 18, 12, 0.05);
+}
+
+.practice-title-input {
+  min-height: var(--c-h-touch);
   border: 1px solid var(--c-border);
   border-radius: var(--c-radius-control);
-  padding: 0 10px;
+  padding: 0 12px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+/* --- Steps ------------------------------------------------------------------
+ * One instruction per row, numbered. The rows share one box and are separated
+ * by hairlines -- the box is the body of the block, a row is a line of it.
+ * ------------------------------------------------------------------------- */
+.practice-steps {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  overflow: hidden;
+}
+
+.practice-step {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: var(--c-space-4);
+  padding: var(--c-space-4) var(--c-space-5);
+  border-top: 1px solid var(--c-border-soft);
+}
+
+.practice-step:first-child {
+  border-top: 0;
+}
+
+.practice-step-number {
+  flex: 0 0 auto;
+  margin-top: 12px;
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  color: var(--c-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.practice-step textarea {
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+  padding: var(--c-space-3) var(--c-space-4);
   background: var(--c-surface);
   color: var(--c-text);
   font: inherit;
   font-size: var(--c-size-body);
-}
-
-.practice-field input {
-  min-height: var(--c-h-control);
-  max-width: var(--c-w-prose);
-}
-
-.practice-field textarea {
-  max-width: var(--c-w-prose);
-  padding: 8px 10px;
   line-height: 1.45;
   resize: vertical;
 }
 
-.practice-expiry-field {
-  display: flex;
-  flex-direction: column;
+/* The dose rides on the first step because that is the one it qualifies: "hit
+   ten balls" is one instruction with a number in it, not two facts. */
+.practice-dose {
+  display: inline-flex;
+  align-items: center;
   gap: var(--c-space-2);
-  border: 0;
-  padding: 0;
-  margin: 0;
+  flex: 0 0 auto;
+  height: 28px;
+  margin-top: 6px;
+  padding: 0 var(--c-space-1) 0 var(--c-space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface-soft);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.practice-expiry-field legend {
+.practice-dose input {
+  width: 9ch;
+  border: 0;
   padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+}
+
+.practice-dose input:focus {
+  outline: none;
+}
+
+.practice-dose button {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--c-radius-pill);
+  background: none;
+  color: var(--c-muted);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.practice-dose button:hover {
+  background: var(--c-border-soft);
+  color: var(--c-text-body);
+}
+
+.practice-step-remove {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-top: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--c-radius-control);
+  background: none;
+  color: var(--c-muted);
+  font: inherit;
+  font-size: var(--c-size-body);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.practice-step-remove:hover {
+  background: var(--c-hover);
+  color: var(--c-text-body);
+}
+
+.practice-step-add {
+  align-self: flex-start;
+  border: 0;
+  padding: var(--c-space-3) var(--c-space-5);
+  background: none;
+  color: var(--c-text-soft);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.practice-step-add:hover {
+  color: var(--c-text);
+}
+
+/* --- Action row -------------------------------------------------------------
+ * Expiry pushed left because it is the one decision that is about this player
+ * rather than about the block; the buttons collect on the right.
+ * ------------------------------------------------------------------------- */
+.practice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--c-space-4);
+  margin-top: -6px;
+  padding: 0 2px;
+}
+
+.practice-expiry {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: var(--c-control-h, var(--c-h-control));
+  margin-right: auto;
+  min-width: 0;
+}
+
+.practice-expiry > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: var(--c-size-meta);
   font-weight: 700;
   color: var(--c-text-soft);
+  white-space: nowrap;
 }
 
-.practice-expiry-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--c-space-3);
+.practice-expiry em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--c-muted);
 }
 
-.practice-expiry-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--c-size-body);
+/* The real select, laid over its own label: the control is the words, and the
+   native picker is what opens. */
+.practice-expiry select {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
   cursor: pointer;
 }
 
 .practice-expiry-date {
+  min-height: var(--c-control-h, var(--c-h-control));
   border: 1px solid var(--c-border);
   border-radius: var(--c-radius-control);
-  padding: 0 10px;
-  min-height: var(--c-h-control);
-  max-width: var(--c-w-name);
+  padding: 0 var(--c-space-4);
   background: var(--c-surface);
   color: var(--c-text);
   font: inherit;
   font-size: var(--c-size-body);
 }
 
-.practice-video-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--c-space-2);
+.practice-star {
+  width: var(--c-control-h, var(--c-h-control));
+  height: var(--c-control-h, var(--c-h-control));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+  color: var(--c-muted);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
 }
 
-.practice-video-selected {
+.practice-star:hover:not(:disabled) {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+
+.practice-star:disabled {
+  color: var(--c-text-disabled);
+  cursor: default;
+}
+
+.practice-clear {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--c-muted);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* --- The wall ---------------------------------------------------------------
+ * Laid bottom-up in column-reverse, so the newest course is on top. The
+ * background is the mortar showing through the joints.
+ * ------------------------------------------------------------------------- */
+.practice-wall {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  overflow: hidden;
+  background: repeating-linear-gradient(
+    180deg,
+    var(--c-hover),
+    var(--c-hover) 2px,
+    var(--c-mortar) 2px,
+    var(--c-mortar) 4px
+  );
+}
+
+.practice-wall-course {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 5px;
+  width: 100%;
+}
+
+/* Half a brick at each end of every other course: what makes the joints
+   stagger, and what keeps both edges of the wall flush. */
+.practice-brick-closer {
+  flex: 0.5 1 0;
+  height: 68px;
+  border-radius: 3px;
+  background: var(--c-brick-blank);
+  border: 1px solid var(--c-brick-blank-border);
+}
+
+.practice-brick-blank {
+  flex-shrink: 1;
+  flex-basis: 0;
+  height: 68px;
+  border-radius: 3px;
+  background: var(--c-brick-blank);
+  border: 1px solid var(--c-brick-blank-border);
+}
+
+.practice-brick-slot {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.practice-brick {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 68px;
+  box-sizing: border-box;
+  padding: var(--c-space-3) var(--c-space-4);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.practice-brick > strong {
+  font-size: var(--c-size-group);
+  font-weight: 700;
+  line-height: 1.25;
+  padding-right: 16px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  text-wrap: pretty;
+}
+
+/* Three states, three weights of the same colour: doing it, done it, and
+   never got to it. */
+.practice-brick[data-status="active"] {
+  background: var(--practice-tone);
+  border-color: var(--practice-tone);
+  color: var(--c-on-tone);
+}
+
+.practice-brick[data-status="completed"] {
+  background: var(--practice-tone-soft);
+  border-color: var(--practice-tone-soft);
+  color: var(--c-on-tone-soft);
+}
+
+.practice-brick[data-status="expired"],
+.practice-brick[data-status="archived"] {
+  background: var(--c-surface-soft);
+  border: 1px dashed color-mix(in srgb, var(--practice-tone) 40%, transparent);
+  color: color-mix(in srgb, var(--practice-tone) 60%, transparent);
+  box-shadow: none;
+}
+
+.practice-brick[aria-current="true"] {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 1px;
+}
+
+/* Held invisible while its stand-in flies down to this slot. */
+.practice-brick[data-pending] {
+  visibility: hidden;
+}
+
+.practice-brick[data-just-laid] {
+  animation: practiceBrickSettle 460ms cubic-bezier(0.33, 0.9, 0.4, 1);
+}
+
+@keyframes practiceBrickSettle {
+  0% {
+    transform: translateY(-3px);
+  }
+  45% {
+    transform: translateY(1.5px) scaleY(0.985);
+  }
+  75% {
+    transform: translateY(-0.5px) scaleY(1.004);
+  }
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+.practice-brick-remove {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: currentColor;
+  opacity: 0.45;
+  font: inherit;
+  font-size: var(--c-size-meta);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.practice-brick-slot:hover .practice-brick-remove:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.practice-wall-empty {
+  margin: 0;
+  padding: var(--c-space-6);
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-card);
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  text-align: center;
+}
+
+/* --- The opened brick -------------------------------------------------------
+ * A brick shows a title; everything else about the block waits here, once you
+ * ask for it.
+ * ------------------------------------------------------------------------- */
+.practice-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-3);
+  padding: var(--c-space-5) 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+}
+
+.practice-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--c-space-5);
+}
+
+.practice-detail-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.practice-detail-kind {
+  font-size: var(--c-size-group);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  /* The tone pulled towards whichever way the page reads. Not the raw tone:
+     these are dark saturated colours, and on a dark surface the label would
+     all but disappear. The mix keeps the hue and lets the scheme decide the
+     lightness. */
+  color: color-mix(in srgb, var(--practice-tone, var(--c-muted)), var(--c-text) 45%);
+}
+
+.practice-detail-head strong {
+  font-size: var(--c-size-card-heading);
+  color: var(--c-text);
+}
+
+.practice-detail-meta {
+  font-size: var(--c-size-meta);
+  color: var(--c-muted);
+}
+
+.practice-detail-close {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+  color: var(--c-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.practice-detail-close:hover {
+  background: var(--c-hover);
+  color: var(--c-text-body);
+}
+
+.practice-detail ol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-1);
+  margin: 0;
+  padding-left: 20px;
+  color: var(--c-text-body);
+  line-height: 1.5;
+}
+
+.practice-detail-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: var(--c-space-3);
+}
+
+.practice-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--c-h-pill);
+  padding: 0 var(--c-space-4);
+  border-radius: var(--c-radius-pill);
+  border: 1px solid var(--c-border);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+}
+
+.practice-status-active {
+  color: var(--c-success-text);
+  border-color: var(--c-success-text);
+}
+
+.practice-status-expired {
+  color: var(--c-error-text);
+  border-color: var(--c-error-text);
+}
+
+/* --- The flight -------------------------------------------------------------
+ * The composer's own footprint, shrinking to brick size on its way down to the
+ * slot it just filled. Lives on document.body, outside React -- see
+ * PracticeBlockBuilder's startFlight.
+ * ------------------------------------------------------------------------- */
+.practice-flight {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: var(--c-space-3) var(--c-space-4);
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: 0 14px 34px rgba(8, 18, 12, 0.16);
+  pointer-events: none;
+  transition:
+    left 620ms cubic-bezier(0.4, 0.05, 0.2, 1),
+    top 620ms cubic-bezier(0.42, 0, 0.35, 1),
+    width 620ms cubic-bezier(0.4, 0.05, 0.2, 1),
+    height 620ms cubic-bezier(0.4, 0.05, 0.2, 1),
+    border-radius 460ms ease,
+    background 500ms ease,
+    color 360ms ease,
+    box-shadow 620ms ease;
+}
+
+.practice-flight > strong {
+  font-size: var(--c-size-group);
+  font-weight: 700;
+  line-height: 1.25;
+  overflow: hidden;
+}
+
+.practice-flight[data-moving] {
+  border-color: var(--practice-tone);
+  border-radius: 3px;
+  background: var(--practice-tone);
+  color: var(--c-on-tone);
+  box-shadow: 0 2px 6px rgba(8, 18, 12, 0.18);
+}
+
+/* --- Panel odds and ends ---------------------------------------------------- */
+.practice-warning,
+.practice-error {
+  margin: 0;
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+.practice-warning {
+  color: var(--c-text-soft);
+  background: var(--c-surface-soft);
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+  padding: var(--c-space-2) var(--c-space-3);
+}
+
+.practice-error {
+  color: var(--c-error-text);
+}
+
+.practice-video-field {
+  display: inline-flex;
+  align-items: center;
   gap: var(--c-space-2);
+  min-width: 0;
+}
+
+.practice-video-selected {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  max-width: 22ch;
   font-size: var(--c-size-meta);
   color: var(--c-text-soft);
 }
 
+.practice-video-selected > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .practice-video-picker {
+  position: absolute;
+  z-index: 30;
   display: flex;
   flex-direction: column;
   gap: var(--c-space-2);
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 4px;
   padding: var(--c-space-3);
-  border: 1px solid var(--c-border-soft);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  box-shadow: 0 12px 28px rgba(8, 18, 12, 0.16);
 }
 
 .practice-video-options {
@@ -226,123 +1088,6 @@
   color: var(--c-muted);
   font: inherit;
   font-size: var(--c-size-meta);
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-.practice-composer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--c-space-3);
-}
-
-.practice-warning {
-  margin: 0;
-  font-size: var(--c-size-meta);
-  font-weight: 600;
-  color: var(--c-text-soft);
-  background: var(--c-surface-soft, var(--c-surface));
-  border: 1px solid var(--c-border-soft);
-  border-radius: var(--c-radius-control);
-  padding: var(--c-space-2) var(--c-space-3);
-}
-
-.practice-error {
-  margin: 0;
-  font-size: var(--c-size-meta);
-  font-weight: 600;
-  color: var(--c-error-text);
-}
-
-.practice-block-list {
-  display: flex;
-  flex-direction: column;
-}
-
-/* Hairlines between, not a box around each -- the tool panel is the box. */
-.practice-block-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--c-space-2);
-  padding: var(--c-space-3) 0;
-  border-top: 1px solid var(--c-border-soft);
-  align-items: flex-start;
-}
-
-.practice-block-head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.practice-block-head > div {
-  display: flex;
-  align-items: center;
-  gap: var(--c-space-2);
-}
-
-.practice-block-head strong {
-  font-size: var(--c-size-card-heading);
-}
-
-.practice-block-meta {
-  font-size: var(--c-size-meta);
-  color: var(--c-muted);
-}
-
-.practice-status-badge {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--c-h-pill);
-  padding: 0 10px;
-  border-radius: var(--c-radius-pill);
-  font-size: var(--c-size-meta);
-  font-weight: 700;
-  border: 1px solid var(--c-border);
-  color: var(--c-text-soft);
-}
-
-.practice-status-active {
-  color: var(--c-success-text, var(--c-text-soft));
-  border-color: var(--c-success-text, var(--c-border));
-}
-
-.practice-status-expired {
-  color: var(--c-error-text);
-  border-color: var(--c-error-text);
-}
-
-.practice-block-card p {
-  margin: 0;
-  max-width: var(--c-w-prose);
-  color: var(--c-text-body);
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-
-.practice-block-clamped {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.practice-block-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--c-space-2);
-}
-
-.practice-block-toggle {
-  border: 0;
-  padding: 0;
-  background: none;
-  color: var(--c-muted);
-  font: inherit;
-  font-size: var(--c-size-meta);
-  font-weight: 700;
   text-decoration: underline;
   cursor: pointer;
 }
