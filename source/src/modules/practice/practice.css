@@ -10,31 +10,19 @@
 
 /* --- Type tone plumbing -----------------------------------------------------
  *
- * Every element that carries a block's kind gets data-practice-type, and reads
- * --practice-tone / --practice-tone-soft from here. One declaration per type,
- * in one place, so a tab, a rail tile, a frame and a brick can never disagree
- * about what "drill" looks like -- and adding a sixth type later is five lines,
- * not a sweep.
+ * Every element that carries a block's kind gets data-practice-type plus an
+ * inline --practice-tone, and everything else follows from that one value. So
+ * a tab, a rail tile, a frame and a brick cannot disagree about what a type
+ * looks like, and a coach adding a sixth type needs no CSS at all.
  * ------------------------------------------------------------------------- */
-[data-practice-type="drill"] {
-  --practice-tone: var(--c-tone-drill);
-  --practice-tone-soft: var(--c-tone-drill-soft);
-}
-[data-practice-type="skill"] {
-  --practice-tone: var(--c-tone-skill);
-  --practice-tone-soft: var(--c-tone-skill-soft);
-}
-[data-practice-type="game"] {
-  --practice-tone: var(--c-tone-game);
-  --practice-tone-soft: var(--c-tone-game-soft);
-}
-[data-practice-type="routine"] {
-  --practice-tone: var(--c-tone-routine);
-  --practice-tone-soft: var(--c-tone-routine-soft);
-}
-[data-practice-type="custom"] {
-  --practice-tone: var(--c-tone-custom);
-  --practice-tone-soft: var(--c-tone-custom-soft);
+[data-practice-type] {
+  /* Overridden inline, per element, with the colour the coach chose for that
+     type. The fallback covers a block whose type has since been deleted. */
+  --practice-tone: var(--c-tone-fallback);
+  /* Derived, never stored. A coach picks one colour and the drained version
+     for a completed block follows from it -- asking for two colours per type
+     would be asking them to keep a relationship consistent by hand. */
+  --practice-tone-soft: color-mix(in srgb, var(--practice-tone) 26%, var(--c-tone-wash));
 }
 
 .practice-panel {
@@ -599,6 +587,12 @@
   gap: var(--c-space-4);
   margin-top: -6px;
   padding: 0 2px;
+}
+
+/* Stands in for the expiry control on a type that has none, so the buttons do
+   not slide left the moment the coach picks a different tab. */
+.practice-actions-spacer {
+  margin-right: auto;
 }
 
 .practice-expiry {

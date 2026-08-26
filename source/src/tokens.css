@@ -128,29 +128,21 @@
   --c-size-group: 12px;
 
   /* --- Practice block types -----------------------------------------------
-   * One colour per kind of block, carried the whole way through: the composer
-   * tab, the frame that tab opens, the rail tile it fills, and the brick it
-   * becomes on the wall. Five, because five is what a coach can tell apart at
-   * brick size -- past that the wall stops being readable at a glance.
+   * A block's colour is carried the whole way through: the composer tab, the
+   * frame that tab opens, the rail tile it fills, and the brick it becomes on
+   * the wall. It arrives as a style attribute from the account's own list of
+   * types, so the value is data, not a token.
    *
-   * Fixed in both schemes, like --c-scrim above. A brick is an object with a
-   * colour, not a surface that follows the page, and the wall reads the same
-   * whichever way the reader's phone is set. --c-on-tone is fixed with them
-   * for the same reason: it is the label printed on the brick.
-   *
-   * The soft pair is the same hue drained: a completed block keeps its
-   * identity while stepping back from the active ones beside it. */
-  --c-tone-drill: #2f5d3a;
-  --c-tone-skill: #2c4a75;
-  --c-tone-game: #8a4a1c;
-  --c-tone-routine: #5a3a63;
-  --c-tone-custom: #57544d;
-
-  --c-tone-drill-soft: #cbdccf;
-  --c-tone-skill-soft: #c9d4e3;
-  --c-tone-game-soft: #e8d3c1;
-  --c-tone-routine-soft: #dbcfe0;
-  --c-tone-custom-soft: #d9d7d1;
+   * All of this is fixed in both schemes, like --c-scrim above. A brick is an
+   * object with a colour, not a surface that follows the page, and the wall
+   * reads the same whichever way the reader's phone is set. */
+  /* The colours themselves are not here: a workspace picks its own, and the
+     five it starts with are defined once in modules/practice/practiceModel.ts
+     so there is no second copy to drift. What lives here is what surrounds
+     them -- the fallback for a type whose definition is gone, the wash the
+     drained pair is mixed against, and the two label colours. */
+  --c-tone-fallback: #57544d;
+  --c-tone-wash: #ffffff;
 
   --c-on-tone: #f4f7f2;
   /* Printed on the drained pair. Fixed with them: the soft tones are the same

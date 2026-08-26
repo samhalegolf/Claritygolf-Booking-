@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
 import {
-  PRACTICE_TYPES,
-  practiceContentFromSteps,
+  practiceOfferedTypes,
   practiceRailLabel,
   practiceSteps,
+  practiceTypeHasField,
   practiceTypeMeta,
   type ExpiryType,
-  type PracticeBlock,
   type PracticeBlockType,
   type PracticePreset,
   type PracticeSuggestion,
+  type PracticeTypeMeta,
 } from "./practiceModel";
+import { practiceDraftIsWritten, type PracticeDraft } from "./practiceStore";
 
 /* The composer.
  *
@@ -27,61 +28,6 @@ import {
  * "Drill" is therefore also a filter, which is the whole reason the tabs are
  * above the rails' content rather than beside the title field.
  */
-
-export type PracticeDraftStep = { id: number; text: string };
-
-export type PracticeDraft = {
-  /** Set when editing an existing block; null for a new one. */
-  id: string | null;
-  blockType: PracticeBlockType;
-  title: string;
-  steps: PracticeDraftStep[];
-  dose: string;
-  expiryType: ExpiryType;
-  /** yyyy-mm-dd, only meaningful when expiryType === "set_date". */
-  expiryDate: string;
-  linkedVideoId: string;
-  nextStepId: number;
-};
-
-export function emptyPracticeDraft(blockType: PracticeBlockType = "drill"): PracticeDraft {
-  return {
-    id: null,
-    blockType,
-    title: "",
-    steps: [{ id: 1, text: "" }],
-    dose: "",
-    // A block a coach writes between lessons is nearly always for the gap
-    // before the next one, so that is the default rather than "no expiry".
-    expiryType: "next_lesson",
-    expiryDate: "",
-    linkedVideoId: "",
-    nextStepId: 2,
-  };
-}
-
-export function practiceDraftFromBlock(block: PracticeBlock): PracticeDraft {
-  const steps = practiceSteps(block.content);
-  return {
-    id: block.id,
-    blockType: block.blockType,
-    title: block.title,
-    steps: (steps.length ? steps : [""]).map((text, index) => ({ id: index + 1, text })),
-    dose: block.dose || "",
-    expiryType: block.expiryType,
-    expiryDate: block.expiryType === "set_date" && block.expiryDate ? block.expiryDate.slice(0, 10) : "",
-    linkedVideoId: block.linkedVideoId || "",
-    nextStepId: Math.max(steps.length, 1) + 1,
-  };
-}
-
-export function practiceDraftContent(draft: PracticeDraft) {
-  return practiceContentFromSteps(draft.steps.map((step) => step.text));
-}
-
-export function practiceDraftIsWritten(draft: PracticeDraft) {
-  return Boolean(draft.title.trim()) || draft.steps.some((step) => step.text.trim());
-}
 
 /* Rail tiers.
  *
@@ -100,6 +46,8 @@ const NARROW_TILE = 92;
 export type PracticeBlockBuilderProps = {
   draft: PracticeDraft;
   onDraftChange: (draft: PracticeDraft) => void;
+  /** The account's own kinds of block, already resolved and un-archived. */
+  types: PracticeTypeMeta[];
   presets: PracticePreset[];
   suggestions: PracticeSuggestion[];
   busy: boolean;
@@ -119,6 +67,7 @@ export type PracticeBlockBuilderProps = {
 export function PracticeBlockBuilder({
   draft,
   onDraftChange,
+  types,
   presets,
   suggestions,
   busy,
@@ -163,7 +112,24 @@ export function PracticeBlockBuilder({
   }, []);
 
   const narrow = tier === "top";
-  const typeMeta = practiceTypeMeta(draft.blockType);
+  const offered = useMemo(() => practiceOfferedTypes(types), [types]);
+  const typeMeta = practiceTypeMeta(types, draft.blockType);
+  const tone = typeMeta.tone;
+  /* Which halves of the composer this kind offers. A type with steps switched
+   * off still has a body -- it is one box instead of a numbered list, because
+   * "no steps" means "don't make me number a single instruction", not "no
+   * instructions". */
+  const showSteps = practiceTypeHasField(typeMeta, "steps");
+  const showDose = practiceTypeHasField(typeMeta, "dose");
+  const showExpiry = practiceTypeHasField(typeMeta, "expiry");
+  const showVideo = practiceTypeHasField(typeMeta, "video");
+
+  /* The last type in the list is picked out on its own at the right, the way
+   * "Custom" always was: the ones before it are the shapes a coach reaches
+   * for, and the last is the escape hatch. With one type there is no strip to
+   * split and it simply sits alone. */
+  const stripTypes = offered.length > 1 ? offered.slice(0, -1) : offered;
+  const lastType = offered.length > 1 ? offered[offered.length - 1] : null;
 
   /** How many tiles a narrow rail can show on its one line before it clips. */
   const fitCount = useMemo(() => {
@@ -246,12 +212,32 @@ export function PracticeBlockBuilder({
   const submit = useCallback(
     async (alsoFavourite: boolean) => {
       if (busy || !canSave) return;
-      const frame = frameRef.current;
-      const from = frame ? frame.getBoundingClientRect() : null;
+      const from = frameRef.current?.getBoundingClientRect() ?? null;
       const savedId = await onSave(draft, alsoFavourite);
-      if (savedId && from) startFlight(savedId, from, draft.blockType, draft.title.trim() || typeMeta.titleHint);
+
+      /* Hold the composer still.
+       *
+       * Saving changes the height of everything above the fold at once: the
+       * composer collapses back to one empty step, and the wall below it gains
+       * a brick and sometimes a whole new course. A coach scrolled down to the
+       * composer would find the page had moved several hundred pixels under
+       * them, which reads as being thrown out of Practice rather than as a
+       * successful save. Measured either side and corrected, so from the
+       * coach's point of view the composer does not move at all.
+       *
+       * After a frame, so React has painted the new heights -- and before the
+       * flight, whose start and end rects are both viewport-relative and would
+       * otherwise be measured against two different scroll positions.
+       */
+      window.requestAnimationFrame(() => {
+        if (from && frameRef.current) {
+          const drift = frameRef.current.getBoundingClientRect().top - from.top;
+          if (Math.abs(drift) > 1) window.scrollBy(0, drift);
+        }
+        if (savedId && from) startFlight(savedId, from, tone, draft.title.trim() || typeMeta.titleHint);
+      });
     },
-    [busy, canSave, draft, onSave, typeMeta.titleHint],
+    [busy, canSave, draft, onSave, tone, typeMeta.titleHint],
   );
 
   const onSubmit = useCallback(
@@ -293,6 +279,7 @@ export function PracticeBlockBuilder({
         type="button"
         className="practice-tile"
         data-practice-type={suggestion.blockType}
+        style={{ "--practice-tone": practiceTypeMeta(types, suggestion.blockType).tone } as CSSProperties}
         title={`${suggestion.title} — ${practiceSteps(suggestion.content).length} steps${
           suggestion.dose ? ` · ${suggestion.dose}` : ""
         } · used ${suggestion.uses}×`}
@@ -359,6 +346,7 @@ export function PracticeBlockBuilder({
           type="button"
           className="practice-tile"
           data-practice-type={preset.blockType}
+          style={{ "--practice-tone": practiceTypeMeta(types, preset.blockType).tone } as CSSProperties}
           title={`${preset.title} — ${practiceSteps(preset.content).length} steps${preset.dose ? ` · ${preset.dose}` : ""}`}
           onClick={() => applyStarter(preset)}
         >
@@ -444,35 +432,44 @@ export function PracticeBlockBuilder({
       <form className="practice-form" onSubmit={onSubmit}>
         <div className="practice-type-strip">
           <div className="practice-type-tabs">
-            {PRACTICE_TYPES.filter((type) => type.id !== "custom").map((type) => (
+            {stripTypes.map((type) => (
               <button
                 type="button"
                 key={type.id}
                 className="practice-type-tab"
                 data-practice-type={type.id}
+                style={{ "--practice-tone": type.tone } as CSSProperties}
                 data-on={draft.blockType === type.id ? "1" : undefined}
                 aria-pressed={draft.blockType === type.id}
-                title={`${type.label} — ${type.hint}`}
+                title={type.hint ? `${type.label} — ${type.hint}` : type.label}
                 onClick={() => onDraftChange({ ...draft, blockType: type.id })}
               >
                 <strong>{type.label}</strong>
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            className="practice-type-tab practice-type-tab-custom"
-            data-practice-type="custom"
-            data-on={draft.blockType === "custom" ? "1" : undefined}
-            aria-pressed={draft.blockType === "custom"}
-            title="Custom — set your own"
-            onClick={() => onDraftChange({ ...draft, blockType: "custom" })}
-          >
-            <strong>Custom</strong>
-          </button>
+          {lastType && (
+            <button
+              type="button"
+              className="practice-type-tab practice-type-tab-custom"
+              data-practice-type={lastType.id}
+              style={{ "--practice-tone": lastType.tone } as CSSProperties}
+              data-on={draft.blockType === lastType.id ? "1" : undefined}
+              aria-pressed={draft.blockType === lastType.id}
+              title={lastType.hint ? `${lastType.label} — ${lastType.hint}` : lastType.label}
+              onClick={() => onDraftChange({ ...draft, blockType: lastType.id })}
+            >
+              <strong>{lastType.label}</strong>
+            </button>
+          )}
         </div>
 
-        <div className="practice-frame" data-practice-type={draft.blockType} ref={frameRef}>
+        <div
+          className="practice-frame"
+          data-practice-type={draft.blockType}
+          style={{ "--practice-tone": typeMeta.tone } as CSSProperties}
+          ref={frameRef}
+        >
           <input
             className="practice-title-input"
             value={draft.title}
@@ -483,19 +480,23 @@ export function PracticeBlockBuilder({
           />
 
           <div className="practice-steps">
-            {draft.steps.map((step, index) => (
+            {(showSteps ? draft.steps : draft.steps.slice(0, 1)).map((step, index) => (
               <div className="practice-step" key={step.id}>
-                <span className="practice-step-number" aria-hidden="true">
-                  {index + 1}
-                </span>
+                {showSteps && (
+                  <span className="practice-step-number" aria-hidden="true">
+                    {index + 1}
+                  </span>
+                )}
                 <textarea
-                  rows={2}
+                  rows={showSteps ? 2 : 4}
                   value={step.text}
                   onChange={(event) => setStepText(step.id, event.target.value)}
-                  placeholder={index === 0 ? "What to do, in one instruction." : "Then…"}
-                  aria-label={`Step ${index + 1}`}
+                  placeholder={
+                    !showSteps ? "What to practise." : index === 0 ? "What to do, in one instruction." : "Then…"
+                  }
+                  aria-label={showSteps ? `Step ${index + 1}` : "What to practise"}
                 />
-                {index === 0 && (
+                {showDose && index === 0 && (
                   <span className="practice-dose">
                     <input
                       value={draft.dose}
@@ -516,7 +517,7 @@ export function PracticeBlockBuilder({
                     )}
                   </span>
                 )}
-                {draft.steps.length > 1 && (
+                {showSteps && draft.steps.length > 1 && (
                   <button
                     type="button"
                     className="practice-step-remove"
@@ -529,13 +530,16 @@ export function PracticeBlockBuilder({
                 )}
               </div>
             ))}
-            <button type="button" className="practice-step-add" onClick={addStep}>
-              + Add step
-            </button>
+            {showSteps && (
+              <button type="button" className="practice-step-add" onClick={addStep}>
+                + Add step
+              </button>
+            )}
           </div>
         </div>
 
         <div className="practice-actions">
+          {showExpiry ? (
           <label className="practice-expiry">
             <span>
               {draft.expiryType === "none"
@@ -555,8 +559,13 @@ export function PracticeBlockBuilder({
               <option value="next_lesson">Expires next lesson</option>
             </select>
           </label>
+          ) : (
+            // Nothing to decide, but the row still needs its left edge pushed
+            // out so the buttons stay where they always are.
+            <span className="practice-actions-spacer" />
+          )}
 
-          {draft.expiryType === "set_date" && (
+          {showExpiry && draft.expiryType === "set_date" && (
             <input
               type="date"
               className="practice-expiry-date"
@@ -567,7 +576,7 @@ export function PracticeBlockBuilder({
             />
           )}
 
-          {videoControl}
+          {showVideo && videoControl}
 
           <button type="submit" className="primary-button" disabled={busy || !canSave}>
             {draft.id ? "Save changes" : "Save"}
@@ -648,7 +657,7 @@ export function PracticeBlockBuilder({
  * it is state, it cannot be interacted with, and it must not re-render the
  * wall it is flying towards.
  * ------------------------------------------------------------------------- */
-function startFlight(id: string, from: DOMRect, blockType: PracticeBlockType, title: string) {
+function startFlight(id: string, from: DOMRect, tone: string, title: string) {
   if (typeof window === "undefined" || typeof document === "undefined") return;
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
 
@@ -658,7 +667,8 @@ function startFlight(id: string, from: DOMRect, blockType: PracticeBlockType, ti
 
     const card = document.createElement("div");
     card.className = "practice-flight";
-    card.dataset.practiceType = blockType;
+    card.dataset.practiceType = "flight";
+    card.style.setProperty("--practice-tone", tone);
     card.setAttribute("aria-hidden", "true");
     const label = document.createElement("strong");
     label.textContent = title;

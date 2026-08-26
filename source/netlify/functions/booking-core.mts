@@ -3459,13 +3459,88 @@ async function ensurePracticeBlocksTable() {
   practiceBlocksTableReady = true;
 }
 
-/* The five kinds of block, in one place. The kind is a label and a colour --
- * it does not change what a block *is*, so an unrecognised value (an older
- * row, a hand-edited one) falls back to "custom" rather than being rejected. */
-const PRACTICE_BLOCK_TYPES = ["drill", "skill", "game", "routine", "custom"];
+/* A block's kind is a label, a colour and a set of composer fields -- all of
+ * it account-configurable, none of it changing what a block *is*. So the
+ * backend does not police the value: it stores the id the client sent, and the
+ * client resolves it against the account's list when it renders.
+ *
+ * That is deliberate. The alternative -- validating against the stored list --
+ * would mean a coach deleting a type could make an already-assigned block
+ * unwritable, and would put a read of the settings blob in the path of every
+ * save. Ids are slugs, so the only thing worth enforcing is the shape. */
+export function practiceBlockType(value) {
+  const clean = cleanString(value, "", 60).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+  return clean || "custom";
+}
 
-function practiceBlockType(value) {
-  return PRACTICE_BLOCK_TYPES.includes(value) ? value : "custom";
+/* --- Block types -----------------------------------------------------------
+ *
+ * Account config, so a settings key rather than a table: read whole, written
+ * whole, a handful of rows, and never queried by anything but "give me the
+ * list". A table would buy indexes nothing needs.
+ *
+ * Nothing is stored until a coach edits something. An untouched workspace
+ * reads back an empty list and the client falls back to its own defaults --
+ * which is what keeps the five built-in types defined in exactly one place
+ * (src/modules/practice/practiceModel.ts) instead of here as well, drifting.
+ * ------------------------------------------------------------------------- */
+function practiceBlockTypesKey(accountId) {
+  return `practice.blockTypes.v1.${cleanSlug(accountId, "default")}`;
+}
+
+const PRACTICE_FIELD_KEYS = ["steps", "dose", "expiry", "video"];
+
+export function cleanPracticeBlockType(raw, taken) {
+  const label = cleanString(raw?.label, "", 60);
+  if (!label) return null;
+  let id = practiceBlockType(raw?.id || label);
+  // Ids are what every assigned block points at, so a collision inside one
+  // save must not silently merge two types into one.
+  if (taken.has(id)) {
+    let n = 2;
+    while (taken.has(`${id}-${n}`)) n += 1;
+    id = `${id}-${n}`;
+  }
+  taken.add(id);
+  const fields = {};
+  PRACTICE_FIELD_KEYS.forEach((key) => {
+    fields[key] = raw?.fields?.[key] !== false;
+  });
+  return {
+    id,
+    label,
+    hint: cleanString(raw?.hint, "", 80),
+    // #rgb or #rrggbb only. A colour is painted straight into a style
+    // attribute, so anything else is refused rather than sanitised into
+    // something the coach did not pick.
+    tone: /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(String(raw?.tone || "")) ? String(raw.tone) : "#57544d",
+    titleHint: cleanString(raw?.titleHint, "", 80),
+    doseHint: cleanString(raw?.doseHint, "", 40),
+    fields,
+    archived: raw?.archived === true,
+  };
+}
+
+async function readPracticeBlockTypes(accountId) {
+  const parsed = safeJsonParse(await getSetting(practiceBlockTypesKey(accountId)), []);
+  if (!Array.isArray(parsed)) return [];
+  const taken = new Set();
+  return parsed.map((raw) => cleanPracticeBlockType(raw, taken)).filter(Boolean);
+}
+
+async function writePracticeBlockTypes(input, requestContext) {
+  const raw = Array.isArray(input?.blockTypes) ? input.blockTypes : null;
+  if (!raw) throw Object.assign(new Error("A list of block types is required."), { status: 400 });
+  if (raw.length > 24) {
+    throw Object.assign(new Error("That is more block types than a wall can stay readable with."), { status: 400 });
+  }
+  const taken = new Set();
+  const blockTypes = raw.map((entry) => cleanPracticeBlockType(entry, taken)).filter(Boolean);
+  if (!blockTypes.length) {
+    throw Object.assign(new Error("Keep at least one block type."), { status: 400 });
+  }
+  await setSetting(practiceBlockTypesKey(requestContext.accountId), JSON.stringify(blockTypes));
+  return { blockTypes };
 }
 
 function rowToApiPracticeBlock(row) {
@@ -4009,14 +4084,18 @@ async function dismissPracticeSuggestion(input, requestContext) {
  * idea, and the preset is the better chip because the coach can delete it.
  */
 async function readPracticeComposerStarters(accountId, playerId) {
-  const [presets, suggestions] = await Promise.all([
+  const [presets, suggestions, blockTypes] = await Promise.all([
     readPracticeBlockPresets(accountId),
     readPracticeSuggestions(accountId, playerId),
+    // Carried here rather than on a third call: the composer cannot render a
+    // type tab without them, so they are wanted at exactly this moment.
+    readPracticeBlockTypes(accountId),
   ]);
   const presetTitles = new Set(presets.map((preset) => preset.title.toLowerCase()));
   return {
     presets,
     suggestions: suggestions.filter((suggestion) => !presetTitles.has(suggestion.title.toLowerCase())),
+    blockTypes,
   };
 }
 
@@ -8444,6 +8523,10 @@ async function readPlayerProfile(session) {
   // notes above, so a player who exists under more than one historical id
   // still sees everything filed under any of them.
   const practice = await readPracticeBlocksForCandidates(accountId, candidates);
+  // The player's wall is the coach's wall, so it needs the same names and
+  // colours. Empty means the workspace never edited them and the portal falls
+  // back to the same defaults the coach's app does.
+  const practiceBlockTypes = await readPracticeBlockTypes(accountId);
 
   // Surface display name + original-formatted phone (from the matched
   // appointment) so the client can pre-fill the booking form on hand-off
@@ -8462,6 +8545,7 @@ async function readPlayerProfile(session) {
     bookings,
     notes,
     practice,
+    practiceBlockTypes,
   };
 }
 
@@ -11261,6 +11345,26 @@ async function routeBookingApiRequest(
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       return json(await updatePracticeBlockPreset(body.preset || body, requestContext));
+    }
+
+    // Block types -- the account's own list of kinds. Read by the settings
+    // screen; the composer gets them free with its starters call above.
+    if (req.method === "GET" && pathname === "/api/practice-block-types") {
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json({ blockTypes: await readPracticeBlockTypes(requestContext.accountId) });
+    }
+
+    // The whole list at once, not one type at a time: order matters, ids must
+    // stay unique across the set, and "at least one" is a rule about the list
+    // rather than about any member of it.
+    if (req.method === "PUT" && pathname === "/api/practice-block-types") {
+      const body = await parseBody(req);
+      const state = await readCalendarState();
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json(await writePracticeBlockTypes(body, requestContext));
     }
 
     // "Stop offering me this one." Suggestions are derived from assignment

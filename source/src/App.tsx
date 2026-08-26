@@ -236,6 +236,33 @@ const PracticeBlockPanel = lazy(() =>
   import("./modules/practice/PracticeBlockPanel").then((module) => ({ default: module.PracticeBlockPanel })),
 );
 
+// The kinds of block, and the favourites rail. Preferences, not work -- see
+// UI_FILING_AND_CLASSIFICATION.md -- so it lives in Settings.
+const PracticeSettingsPanel = lazy(() =>
+  import("./modules/practice/PracticeSettingsPanel").then((module) => ({ default: module.PracticeSettingsPanel })),
+);
+
+/**
+ * Starts a player's practice read the moment their profile opens, rather than
+ * when the Practice tab is clicked.
+ *
+ * Practice is the only player tool that has to go to the server -- notes and
+ * videos are already in hydrated state -- so it was the only one that felt
+ * slow. Opening a profile is a good enough signal: the module and the two
+ * requests are on their way while the coach reads the Recent tab, and the tab
+ * paints from memory when they get to it. Dynamic, so nothing about the
+ * practice module is pulled into the console's own bundle.
+ */
+function prefetchPracticeForPlayer(playerId: string) {
+  if (!playerId) return;
+  void import("./modules/practice/practiceStore")
+    .then((module) => module.prefetchPractice(playerId))
+    .catch(() => {
+      // A prefetch that fails is not an error the coach needs: the panel does
+      // its own read when it mounts, and reports its own failure.
+    });
+}
+
 type EditableBlockStatus = "idle" | "editing" | "saving" | "saved" | "error";
 type EditableBlockState = {
   status: EditableBlockStatus;
@@ -1189,6 +1216,7 @@ const SETTINGS_SECTIONS: Array<{
   { key: "business", label: "Business", icon: Building2, adminOnly: true },
   { key: "booking", label: "Booking", icon: CalendarDays },
   { key: "services", label: "Lesson types", icon: ScissorsLineDashed },
+  { key: "practice", label: "Practice", icon: ClipboardList },
   { key: "notifications", label: "Notifications", icon: Bell, adminOnly: true },
   { key: "account", label: "Account", icon: User, adminOnly: true },
   // Two lists, two questions. Integrations is "what have I plugged in" — the
@@ -1203,6 +1231,7 @@ type SettingsTab =
   | "business"
   | "booking"
   | "services"
+  | "practice"
   | "notifications"
   | "account"
   | "developer"
@@ -11601,6 +11630,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   }
 
   function selectPlayerProfileTool(client: Pick<Person, "id" | "name">, tool: PlayerProfileTool = "recent") {
+    prefetchPracticeForPlayer(client.id);
     setNotesContext({ playerId: client.id, playerName: client.name });
     setPlayerProfileTool(tool);
     setPlayerToolExpanded(true);
@@ -25635,6 +25665,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
             <SettingsGroups>
             <div className={`settings-grid settings-tab-${settingsTab}`}>
+              <SettingsGroup id="practice-blocks" section="practice" title="Practice blocks">
+                <Suspense fallback={<div className="module-loading">Loading practice settings…</div>}>
+                  <PracticeSettingsPanel onToast={(message) => setToast({ message })} />
+                </Suspense>
+              </SettingsGroup>
               {settingsTab === "developer" ? <IntegrationsPanel audience="integration" /> : null}
               {settingsTab === "admin" ? <IntegrationsPanel audience="admin" /> : null}
               {isAdminUser ? <BrowserNotificationsPanel /> : null}

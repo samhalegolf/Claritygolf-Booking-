@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
 } from "react";
 
@@ -26,8 +27,10 @@ import {
   practiceBlockMeta,
   practiceExpiryLabel,
   practiceSteps,
+  practiceTypeList,
   practiceTypeMeta,
   type PracticeBlockType,
+  type PracticeTypeMeta,
 } from "../practice/practiceModel";
 import {
   createIndexedDbSavedVideoLibrary,
@@ -191,6 +194,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [practice, setPractice] = useState<PracticeItem[]>([]);
+  const [practiceBlockTypes, setPracticeBlockTypes] = useState<PracticeTypeMeta[]>([]);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
   const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
@@ -267,11 +271,16 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         bookings?: Booking[];
         notes?: Note[];
         practice?: PracticeItem[];
+        practiceBlockTypes?: PracticeTypeMeta[];
       };
       if (!res.ok) throw new Error(data?.message || "We couldn't load your profile.");
       setBookings(Array.isArray(data.bookings) ? data.bookings : []);
       setNotes(Array.isArray(data.notes) ? data.notes : []);
       setPractice(Array.isArray(data.practice) ? data.practice : []);
+      // The coach's own names and colours, so the player's wall is the same
+      // object the coach is looking at. Empty means this workspace never
+      // edited them and both ends fall back to the same defaults.
+      setPracticeBlockTypes(Array.isArray(data.practiceBlockTypes) ? data.practiceBlockTypes : []);
       if (data.player?.email) setPlayerEmail(data.player.email);
       if (data.player?.name) setPlayerName(data.player.name);
       if (data.player?.id) setPlayerId(data.player.id);
@@ -775,6 +784,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
    * The one block the player has opened off the wall. Nothing is expanded by
    * default: the wall is the view, and a brick is a thing you choose to read.
    */
+  const practiceTypes = useMemo(() => practiceTypeList(practiceBlockTypes), [practiceBlockTypes]);
+
   const openPracticeBlock = useMemo(
     () => practice.find((block) => block.id === expandedPracticeId) || null,
     [expandedPracticeId, practice],
@@ -1196,17 +1207,26 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     <>
                       <PracticeWall
                         blocks={practice}
+                        types={practiceTypes}
                         openId={expandedPracticeId}
                         onOpen={(id) => setExpandedPracticeId(expandedPracticeId === id ? null : id)}
                         emptyNote="Nothing to practise yet. Your coach will put it here after your next lesson."
                       />
 
                       {openPracticeBlock && (
-                        <div className="practice-detail" data-practice-type={openPracticeBlock.blockType}>
+                        <div
+                          className="practice-detail"
+                          data-practice-type={openPracticeBlock.blockType}
+                          style={
+                            {
+                              "--practice-tone": practiceTypeMeta(practiceTypes, openPracticeBlock.blockType).tone,
+                            } as CSSProperties
+                          }
+                        >
                           <div className="practice-detail-head">
                             <div>
                               <span className="practice-detail-kind">
-                                {practiceTypeMeta(openPracticeBlock.blockType).label}
+                                {practiceTypeMeta(practiceTypes, openPracticeBlock.blockType).label}
                               </span>
                               <strong>{openPracticeBlock.title}</strong>
                               <span className="practice-detail-meta">

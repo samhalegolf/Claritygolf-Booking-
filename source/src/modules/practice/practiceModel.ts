@@ -9,44 +9,112 @@ export type PracticeBlockStatus = "active" | "completed" | "expired" | "archived
 export type ExpiryType = "next_lesson" | "set_date" | "none";
 
 /**
- * The five kinds of block. Presentation only -- a kind is a label and a
- * colour, and nothing about a block behaves differently because of it. That is
- * why an unrecognised value degrades to "custom" everywhere rather than being
- * rejected: an older row, or one written by hand, is still a perfectly good
- * block.
+ * A kind of block is presentation, not behaviour: a name, a colour, and which
+ * fields the composer offers for it. Nothing about a block *works* differently
+ * because of its kind, which is what makes the whole set safe to hand to a
+ * coach to rename, recolour and add to.
+ *
+ * The id is therefore free text, not a union: a coach can add "Pressure Test"
+ * and blocks will carry `blockType: "pressure-test"` forever after. Ids are
+ * never reused and never rewritten, because every block ever assigned points
+ * at one.
  */
-export type PracticeBlockType = "drill" | "skill" | "game" | "routine" | "custom";
+export type PracticeBlockType = string;
+
+/** The optional halves of the composer, each switchable per type. */
+export type PracticeFieldKey = "steps" | "dose" | "expiry" | "video";
+
+export const PRACTICE_FIELDS: Array<{ key: PracticeFieldKey; label: string; hint: string }> = [
+  { key: "steps", label: "Multi-step body", hint: "Numbered instructions rather than one box" },
+  { key: "dose", label: "Dose", hint: "The quantity beside step one — “20 balls”" },
+  { key: "expiry", label: "Expiry", hint: "When the block stops mattering" },
+  { key: "video", label: "Link a video", hint: "Attach one of the player’s saved swings" },
+];
 
 export type PracticeTypeMeta = {
   id: PracticeBlockType;
   label: string;
-  /** Sits under the label in the type picker -- what this kind is *for*. */
+  /** Sits in the picker's tooltip -- what this kind is *for*. */
   hint: string;
+  /** The colour it carries the whole way through, as a hex. */
+  tone: string;
   /** Placeholder title, so an empty composer still shows the shape of one. */
   titleHint: string;
   /** Placeholder dose, same idea: "20 balls" reads faster than "e.g. a number". */
   doseHint: string;
+  fields: Record<PracticeFieldKey, boolean>;
+  /**
+   * Retired, not deleted. Blocks already assigned under this type keep their
+   * name and colour on the wall -- the type just stops being offered.
+   */
+  archived: boolean;
 };
 
+const ALL_FIELDS: Record<PracticeFieldKey, boolean> = { steps: true, dose: true, expiry: true, video: true };
+
 /**
+ * What a workspace starts with, and the single place these five are written
+ * down. The server stores nothing until a coach edits something, and hands
+ * back an empty list until then -- so there is one definition of "the
+ * defaults", here, rather than one here and a copy in the backend drifting
+ * against it.
+ *
  * Custom is last and is picked out on its own in the composer: the four before
  * it are the shapes a coach reaches for, and Custom is the escape hatch when
  * none of them fit.
  */
-export const PRACTICE_TYPES: PracticeTypeMeta[] = [
-  { id: "drill", label: "Drill", hint: "one thing, reps", titleHint: "Gate Drill", doseHint: "20 balls" },
-  { id: "skill", label: "Skill test", hint: "scored", titleHint: "Start Line Test", doseHint: "10 shots" },
-  { id: "game", label: "Game", hint: "pressure", titleHint: "Up & Down 9", doseHint: "9 holes" },
-  { id: "routine", label: "Routine", hint: "every session", titleHint: "Warm-up Routine", doseHint: "10 min" },
-  { id: "custom", label: "Custom", hint: "set your own", titleHint: "Name this block", doseHint: "" },
+export const DEFAULT_PRACTICE_TYPES: PracticeTypeMeta[] = [
+  { id: "drill", label: "Drill", hint: "one thing, reps", tone: "#2f5d3a", titleHint: "Gate Drill", doseHint: "20 balls", fields: { ...ALL_FIELDS }, archived: false },
+  { id: "skill", label: "Skill test", hint: "scored", tone: "#2c4a75", titleHint: "Start Line Test", doseHint: "10 shots", fields: { ...ALL_FIELDS }, archived: false },
+  { id: "game", label: "Game", hint: "pressure", tone: "#8a4a1c", titleHint: "Up & Down 9", doseHint: "9 holes", fields: { ...ALL_FIELDS }, archived: false },
+  { id: "routine", label: "Routine", hint: "every session", tone: "#5a3a63", titleHint: "Warm-up Routine", doseHint: "10 min", fields: { ...ALL_FIELDS }, archived: false },
+  { id: "custom", label: "Custom", hint: "set your own", tone: "#57544d", titleHint: "Name this block", doseHint: "", fields: { ...ALL_FIELDS }, archived: false },
 ];
 
-export function practiceTypeMeta(type: string | null | undefined): PracticeTypeMeta {
-  return PRACTICE_TYPES.find((meta) => meta.id === type) || PRACTICE_TYPES[PRACTICE_TYPES.length - 1];
+/** The stored list, or the defaults when a workspace has never edited them. */
+export function practiceTypeList(stored: PracticeTypeMeta[] | null | undefined): PracticeTypeMeta[] {
+  return stored && stored.length ? stored : DEFAULT_PRACTICE_TYPES;
 }
 
-export function practiceBlockType(value: string | null | undefined): PracticeBlockType {
-  return practiceTypeMeta(value).id;
+/** What the composer offers: everything not retired. */
+export function practiceOfferedTypes(types: PracticeTypeMeta[]): PracticeTypeMeta[] {
+  return types.filter((type) => !type.archived);
+}
+
+/**
+ * Resolves a block's stored type id against the account's list.
+ *
+ * A block whose type has since been deleted outright still has to render, so
+ * the fallback keeps the id and titles it from that id rather than silently
+ * relabelling the block as something it was not. It is grey, because a colour
+ * nobody chose is worse than no colour.
+ */
+export function practiceTypeMeta(types: PracticeTypeMeta[], id: string | null | undefined): PracticeTypeMeta {
+  const found = types.find((type) => type.id === id);
+  if (found) return found;
+  const fallback = types.find((type) => type.id === "custom") || DEFAULT_PRACTICE_TYPES[DEFAULT_PRACTICE_TYPES.length - 1];
+  if (!id) return fallback;
+  return { ...fallback, id, label: practiceLabelFromId(id), hint: "no longer offered", tone: "#57544d" };
+}
+
+/** "pressure-test" -> "Pressure test", for a type whose definition is gone. */
+export function practiceLabelFromId(id: string) {
+  const words = String(id).replace(/[-_]+/g, " ").trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : "Block";
+}
+
+/** A new type's id, derived from its name and kept unique within the list. */
+export function practiceTypeId(label: string, taken: string[]) {
+  const base = String(label).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "type";
+  if (!taken.includes(base)) return base;
+  let n = 2;
+  while (taken.includes(`${base}-${n}`)) n += 1;
+  return `${base}-${n}`;
+}
+
+/** Whether a type offers a given field. A missing flag reads as "yes". */
+export function practiceTypeHasField(type: PracticeTypeMeta, field: PracticeFieldKey) {
+  return type.fields?.[field] !== false;
 }
 
 export type PracticeBlock = {

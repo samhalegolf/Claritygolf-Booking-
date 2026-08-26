@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
-import { practiceShortDate, type PracticeBlockStatus, type PracticeBlockType } from "./practiceModel";
+import {
+  practiceShortDate,
+  practiceTypeMeta,
+  type PracticeBlockStatus,
+  type PracticeBlockType,
+  type PracticeTypeMeta,
+} from "./practiceModel";
 
 /* The wall.
  *
@@ -36,6 +42,8 @@ export type PracticeWallBlock = {
 export type PracticeWallProps = {
   /** Newest first, exactly as the API hands them over. */
   blocks: PracticeWallBlock[];
+  /** The account's kinds, for the colour each brick is laid in. */
+  types: PracticeTypeMeta[];
   openId: string | null;
   onOpen: (id: string) => void;
   /** Coach only. Absent on the player's wall -- a player cannot unassign work. */
@@ -53,6 +61,7 @@ const NARROW_WALL = 420;
 
 export function PracticeWall({
   blocks,
+  types,
   openId,
   onOpen,
   onRemove,
@@ -104,6 +113,7 @@ export function PracticeWall({
                 type="button"
                 className="practice-brick"
                 data-practice-type={block.blockType}
+                style={{ "--practice-tone": practiceTypeMeta(types, block.blockType).tone } as CSSProperties}
                 data-status={block.status}
                 /* data-brick is the flight animation's handle on this slot;
                    it sets data-pending/data-just-laid on it directly, since

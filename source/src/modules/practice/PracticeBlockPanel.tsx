@@ -1,26 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import "./practice.css";
 import { apiFetch } from "../auth/apiFetch";
 import { listClarityCloudImportTransfers, type ClarityCloudImportTransfer } from "../video-analysis/utils/savedVideoLibrary";
-import {
-  PracticeBlockBuilder,
-  emptyPracticeDraft,
-  practiceDraftContent,
-  practiceDraftFromBlock,
-  practiceDraftIsWritten,
-  type PracticeDraft,
-} from "./PracticeBlockBuilder";
+import { PracticeBlockBuilder } from "./PracticeBlockBuilder";
 import { PracticeWall } from "./PracticeWall";
 import {
   practiceBlockMeta,
   practiceExpiryLabel,
+  practiceOfferedTypes,
   practiceSteps,
+  practiceTypeHasField,
+  practiceTypeList,
   practiceTypeMeta,
   type PracticeBlock,
   type PracticePreset,
   type PracticeSuggestion,
+  type PracticeTypeMeta,
 } from "./practiceModel";
+import {
+  cachedPractice,
+  clearPracticeDraft,
+  emptyPracticeDraft,
+  invalidatePractice,
+  loadPractice,
+  practiceDraftContent,
+  practiceDraftFromBlock,
+  practiceDraftIsWritten,
+  readPracticeDraft,
+  writePracticeDraft,
+  type PracticeDraft,
+} from "./practiceStore";
 
 /* The coach's end of Practice. Owns its own loading, its own writes. The
  * console only tells it which player is open.
@@ -68,19 +78,35 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     handlers.current = { onUnauthorized, onToast };
   });
 
-  const [blocks, setBlocks] = useState<PracticeBlock[]>([]);
-  /** True until the first read lands. Never set again -- a later refresh
-   *  updates in place rather than replacing the panel with a spinner. */
-  const [firstLoad, setFirstLoad] = useState(true);
+  /* Whatever the profile's own prefetch already got. Opening Practice from a
+   * player whose profile has been on screen for a moment therefore paints
+   * fully-formed, and the read below only revalidates. */
+  const seed = cachedPractice(playerId);
+
+  const [blocks, setBlocks] = useState<PracticeBlock[]>(seed?.blocks || []);
+  const [firstLoad, setFirstLoad] = useState(!seed);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
 
-  const [draft, setDraft] = useState<PracticeDraft>(() => emptyPracticeDraft());
-  const [openBrickId, setOpenBrickId] = useState<string | null>(null);
+  const [presets, setPresets] = useState<PracticePreset[]>(seed?.presets || []);
+  const [suggestions, setSuggestions] = useState<PracticeSuggestion[]>(seed?.suggestions || []);
+  const [storedTypes, setStoredTypes] = useState<PracticeTypeMeta[]>(seed?.blockTypes || []);
 
-  const [presets, setPresets] = useState<PracticePreset[]>([]);
-  const [suggestions, setSuggestions] = useState<PracticeSuggestion[]>([]);
+  const types = useMemo(() => practiceTypeList(storedTypes), [storedTypes]);
+  const offeredTypes = useMemo(() => practiceOfferedTypes(types), [types]);
+
+  /* The composer survives the panel being unmounted -- which happens more
+   * often than it looks, since the console re-derives the client this panel
+   * hangs off and a blink in that list takes it down and back up. */
+  const [draft, setDraft] = useState<PracticeDraft>(
+    () => readPracticeDraft(playerId) || emptyPracticeDraft(seed?.blockTypes?.[0]?.id || "drill"),
+  );
+  useEffect(() => {
+    writePracticeDraft(playerId, draft);
+  }, [draft, playerId]);
+
+  const [openBrickId, setOpenBrickId] = useState<string | null>(null);
 
   const [videoPickerOpen, setVideoPickerOpen] = useState(false);
   const [videoOptions, setVideoOptions] = useState<ClarityCloudImportTransfer[]>([]);
@@ -111,56 +137,50 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
   /* Reads that overtake each other. A save triggers a reload while an earlier
    * one may still be in flight, and a rename triggers another on top of that
    * -- the slower response must not win just because it landed last. Each read
-   * claims a number and only writes if it is still the newest of its kind. */
+   * claims a number and only writes if it is still the newest. */
   const readToken = useRef(0);
-  const startersToken = useRef(0);
 
   /**
-   * Favourites and suggestions in one call -- the composer wants both at the
-   * same moment. A failure here is swallowed: the rails are a shortcut, and
-   * losing them shouldn't put an error above a composer that still works.
+   * One read, through the store, so it is shared with whatever the profile
+   * already prefetched. Everything the panel shows arrives together.
    */
-  const loadStarters = useCallback(async () => {
-    const token = (startersToken.current += 1);
-    try {
-      const data = await request(`/api/practice-block-presets?playerId=${encodeURIComponent(playerId)}`);
-      if (token !== startersToken.current) return;
-      setPresets(Array.isArray(data.presets) ? data.presets : []);
-      setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
-    } catch {
-      if (token !== startersToken.current) return;
-      setPresets([]);
-      setSuggestions([]);
-    }
-  }, [playerId, request]);
-
   const load = useCallback(async () => {
     const token = (readToken.current += 1);
-    setError("");
-    // Both at once. They are independent reads and the panel wants both before
-    // it is worth looking at, so running them in series only ever meant the
-    // coach waited for the sum of two round trips instead of the longer one.
-    const [blocksResult] = await Promise.all([
-      request(`/api/practice-blocks?playerId=${encodeURIComponent(playerId)}`).then(
-        (data) => ({ ok: true as const, data }),
-        (caught: unknown) => ({ ok: false as const, caught }),
-      ),
-      // Assigning a block changes both the use counts and what this player
-      // already has active, so the rails re-read alongside the list.
-      loadStarters(),
-    ]);
-    if (token !== readToken.current) return;
-    if (blocksResult.ok) {
-      setBlocks(Array.isArray(blocksResult.data.blocks) ? blocksResult.data.blocks : []);
-    } else {
-      setError(blocksResult.caught instanceof Error ? blocksResult.caught.message : "Could not load practice.");
+    try {
+      const snapshot = await loadPractice(playerId);
+      if (token !== readToken.current) return;
+      setBlocks(snapshot.blocks);
+      setPresets(snapshot.presets);
+      setSuggestions(snapshot.suggestions);
+      setStoredTypes(snapshot.blockTypes);
+      setError(snapshot.error);
+    } catch (caught) {
+      if (token !== readToken.current) return;
+      if ((caught as { code?: string })?.code === "unauthorized") handlers.current.onUnauthorized();
+      else setError(caught instanceof Error ? caught.message : "Could not load practice.");
+    } finally {
+      setFirstLoad(false);
     }
-    setFirstLoad(false);
-  }, [loadStarters, playerId, request]);
+  }, [playerId]);
+
+  /** After a write: drop the cache so the next read is real, then re-read. */
+  const reload = useCallback(async () => {
+    invalidatePractice(playerId);
+    await load();
+  }, [load, playerId]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  /* The composer opens on whichever kind the coach picked last. If that kind
+   * has since been retired or deleted in settings, fall back to the first one
+   * still offered rather than leaving a tab selected that no longer exists. */
+  useEffect(() => {
+    if (!offeredTypes.length) return;
+    if (offeredTypes.some((type) => type.id === draft.blockType)) return;
+    setDraft((current) => ({ ...current, blockType: offeredTypes[0].id }));
+  }, [draft.blockType, offeredTypes]);
 
   const openVideoPicker = useCallback(async () => {
     setVideoPickerOpen(true);
@@ -195,12 +215,16 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     async (candidate: PracticeDraft, alsoFavourite: boolean): Promise<string | null> => {
       if (busy) return null;
       const content = practiceDraftContent(candidate);
-      const title = candidate.title.trim() || practiceTypeMeta(candidate.blockType).titleHint;
+      const title = candidate.title.trim() || practiceTypeMeta(types, candidate.blockType).titleHint;
       if (!content) {
         setError("Write at least one step before saving.");
         return null;
       }
-      if (candidate.expiryType === "set_date" && !candidate.expiryDate) {
+      if (
+        candidate.expiryType === "set_date" &&
+        !candidate.expiryDate &&
+        practiceTypeHasField(practiceTypeMeta(types, candidate.blockType), "expiry")
+      ) {
         setError("Pick a date for this block's expiry.");
         return null;
       }
@@ -208,6 +232,13 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       setError("");
       setWarning("");
       try {
+        /* A field the type does not offer is not saved, even if the draft is
+         * still carrying a value for it -- from a starter, or from the tab the
+         * coach was on before they switched. The composer is the only place
+         * that field was visible, so leaving it on the block would put an
+         * expiry or a linked video on something that shows neither. */
+        const meta = practiceTypeMeta(types, candidate.blockType);
+        const expiryType = practiceTypeHasField(meta, "expiry") ? candidate.expiryType : "none";
         const body = {
           id: candidate.id || undefined,
           playerId,
@@ -215,13 +246,13 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
           title,
           content,
           blockType: candidate.blockType,
-          dose: candidate.dose.trim(),
-          expiryType: candidate.expiryType,
+          dose: practiceTypeHasField(meta, "dose") ? candidate.dose.trim() : "",
+          expiryType,
           // End of the picked day, not its start -- a block set to expire
           // "31 Aug" should still be usable on the 31st, not vanish at its
           // first moment.
-          expiryDate: candidate.expiryType === "set_date" ? `${candidate.expiryDate}T23:59:59Z` : undefined,
-          linkedVideoId: candidate.linkedVideoId || undefined,
+          expiryDate: expiryType === "set_date" ? `${candidate.expiryDate}T23:59:59Z` : undefined,
+          linkedVideoId: practiceTypeHasField(meta, "video") ? candidate.linkedVideoId || undefined : undefined,
         };
         const data = await request("/api/practice-blocks", {
           method: candidate.id ? "PUT" : "POST",
@@ -248,7 +279,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         }
         setDraft(emptyPracticeDraft(candidate.blockType));
         setVideoPickerOpen(false);
-        await load();
+        await reload();
         handlers.current.onToast(candidate.id ? "Practice block updated." : `Practice block assigned to ${playerName}.`);
         return candidate.id ? null : data.block?.id || null;
       } catch (caught) {
@@ -258,7 +289,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         setBusy(false);
       }
     },
-    [busy, load, playerId, playerName, request],
+    [busy, playerId, playerName, reload, request, types],
   );
 
   const archive = useCallback(
@@ -270,14 +301,14 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       try {
         await request(`/api/practice-blocks?id=${encodeURIComponent(blockId)}`, { method: "DELETE" });
         setOpenBrickId((current) => (current === blockId ? null : current));
-        await load();
+        await reload();
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not remove that block.");
       } finally {
         setBusy(false);
       }
     },
-    [blocks, load, playerName, request],
+    [blocks, playerName, reload, request],
   );
 
   const saveFavourite = useCallback(
@@ -292,7 +323,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(favourite),
         });
-        await loadStarters();
+        await reload();
         handlers.current.onToast(replacing ? `Favourite "${favourite.title}" updated.` : `Saved "${favourite.title}" to favourites.`);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not save that favourite.");
@@ -300,7 +331,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         setBusy(false);
       }
     },
-    [busy, loadStarters, presets, request],
+    [busy, presets, reload, request],
   );
 
   const renamePreset = useCallback(
@@ -317,9 +348,9 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not rename that favourite.");
       }
-      await loadStarters();
+      await reload();
     },
-    [loadStarters, request],
+    [reload, request],
   );
 
   const removePreset = useCallback(
@@ -332,14 +363,14 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       setError("");
       try {
         await request(`/api/practice-block-presets?id=${encodeURIComponent(preset.id)}`, { method: "DELETE" });
-        await loadStarters();
+        await reload();
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not remove that favourite.");
       } finally {
         setBusy(false);
       }
     },
-    [busy, loadStarters, request],
+    [busy, reload, request],
   );
 
   const reorderPresets = useCallback(
@@ -366,10 +397,10 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         });
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not save that order.");
-        await loadStarters();
+        await reload();
       }
     },
-    [loadStarters, presets, request],
+    [presets, reload, request],
   );
 
   const dismissSuggestion = useCallback(
@@ -464,6 +495,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       <PracticeBlockBuilder
         draft={draft}
         onDraftChange={setDraft}
+        types={types}
         presets={presets}
         suggestions={suggestions}
         busy={busy}
@@ -495,6 +527,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
 
       <PracticeWall
         blocks={blocks}
+        types={types}
         openId={openBrickId}
         onOpen={(id) => setOpenBrickId((current) => (current === id ? null : id))}
         onRemove={(id) => void archive(id)}
@@ -506,10 +539,14 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       />
 
       {openBlock && (
-        <div className="practice-detail" data-practice-type={openBlock.blockType}>
+        <div
+          className="practice-detail"
+          data-practice-type={openBlock.blockType}
+          style={{ "--practice-tone": practiceTypeMeta(types, openBlock.blockType).tone } as CSSProperties}
+        >
           <div className="practice-detail-head">
             <div>
-              <span className="practice-detail-kind">{practiceTypeMeta(openBlock.blockType).label}</span>
+              <span className="practice-detail-kind">{practiceTypeMeta(types, openBlock.blockType).label}</span>
               <strong>{openBlock.title}</strong>
               <span className="practice-detail-meta">
                 {practiceBlockMeta(openBlock)} · {practiceExpiryLabel(openBlock)}
