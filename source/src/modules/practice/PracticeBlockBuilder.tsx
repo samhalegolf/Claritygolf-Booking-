@@ -110,6 +110,8 @@ export type PracticeBlockBuilderProps = {
   onRemovePreset: (preset: PracticePreset) => void;
   onReorderPresets: (orderedIds: string[]) => void;
   onDismissSuggestion: (suggestion: PracticeSuggestion) => void;
+  /** First read still in flight. The form works without it; the rails don't. */
+  loading?: boolean;
   /** Rendered into the action row -- the video picker, which is the panel's. */
   videoControl?: React.ReactNode;
 };
@@ -126,6 +128,7 @@ export function PracticeBlockBuilder({
   onRemovePreset,
   onReorderPresets,
   onDismissSuggestion,
+  loading = false,
   videoControl,
 }: PracticeBlockBuilderProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -432,7 +435,9 @@ export function PracticeBlockBuilder({
           </button>
         </div>
         <div className="practice-rail-list">{visibleSuggestions.map(suggestionTile)}</div>
-        {!shownSuggestions.length && <span className="practice-rail-empty">{emptyNote}</span>}
+        {/* Silence, not "none yet", until the read lands -- otherwise every
+            open of the tab flashes an empty state that turns out to be wrong. */}
+        {!shownSuggestions.length && !loading && <span className="practice-rail-empty">{emptyNote}</span>}
         {openRail === "often" && <div className="practice-rail-popup">{shownSuggestions.map(suggestionTile)}</div>}
       </div>
 
@@ -617,7 +622,7 @@ export function PracticeBlockBuilder({
           </button>
         </div>
         <div className="practice-rail-list">{visiblePresets.map((preset) => favouriteTile(preset, !narrow))}</div>
-        {!shownPresets.length && (
+        {!shownPresets.length && !loading && (
           <span className="practice-rail-empty">
             {presets.length ? emptyNote : "Save one with ★"}
           </span>

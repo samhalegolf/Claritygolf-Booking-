@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import "./practice.css";
 import { apiFetch } from "../auth/apiFetch";
@@ -52,8 +52,26 @@ const STATUS_LABEL: Record<PracticeBlock["status"], string> = {
 };
 
 export function PracticeBlockPanel({ player, onUnauthorized, onToast }: PracticeBlockPanelProps) {
+  const playerId = player.id;
+  const playerName = player.name;
+
+  /* The console re-renders on a timer (a notification poll, a clock), and
+   * hands this panel fresh prop identities each time -- new callbacks, a new
+   * `player` object. None of that is a change to *which* player is open, so
+   * none of it may restart a fetch: an effect keyed on those identities
+   * refires every few seconds, and each refire used to blank the composer
+   * mid-sentence. The callbacks are held by reference and everything below
+   * keys on the player's id alone.
+   */
+  const handlers = useRef({ onUnauthorized, onToast });
+  useEffect(() => {
+    handlers.current = { onUnauthorized, onToast };
+  });
+
   const [blocks, setBlocks] = useState<PracticeBlock[]>([]);
-  const [loading, setLoading] = useState(true);
+  /** True until the first read lands. Never set again -- a later refresh
+   *  updates in place rather than replacing the panel with a spinner. */
+  const [firstLoad, setFirstLoad] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
@@ -72,7 +90,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     async (path: string, init: RequestInit = {}) => {
       const response = await apiFetch(path, init);
       if (response.status === 401) {
-        onUnauthorized();
+        handlers.current.onUnauthorized();
         throw new Error("Admin login required");
       }
       const data = (await response.json().catch(() => ({}))) as {
@@ -87,8 +105,15 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       if (!response.ok) throw new Error(data?.message || "Practice request failed.");
       return data;
     },
-    [onUnauthorized],
+    [],
   );
+
+  /* Reads that overtake each other. A save triggers a reload while an earlier
+   * one may still be in flight, and a rename triggers another on top of that
+   * -- the slower response must not win just because it landed last. Each read
+   * claims a number and only writes if it is still the newest of its kind. */
+  const readToken = useRef(0);
+  const startersToken = useRef(0);
 
   /**
    * Favourites and suggestions in one call -- the composer wants both at the
@@ -96,31 +121,42 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
    * losing them shouldn't put an error above a composer that still works.
    */
   const loadStarters = useCallback(async () => {
+    const token = (startersToken.current += 1);
     try {
-      const data = await request(`/api/practice-block-presets?playerId=${encodeURIComponent(player.id)}`);
+      const data = await request(`/api/practice-block-presets?playerId=${encodeURIComponent(playerId)}`);
+      if (token !== startersToken.current) return;
       setPresets(Array.isArray(data.presets) ? data.presets : []);
       setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
     } catch {
+      if (token !== startersToken.current) return;
       setPresets([]);
       setSuggestions([]);
     }
-  }, [player.id, request]);
+  }, [playerId, request]);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const token = (readToken.current += 1);
     setError("");
-    try {
-      const data = await request(`/api/practice-blocks?playerId=${encodeURIComponent(player.id)}`);
-      setBlocks(Array.isArray(data.blocks) ? data.blocks : []);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load practice.");
-    } finally {
-      setLoading(false);
+    // Both at once. They are independent reads and the panel wants both before
+    // it is worth looking at, so running them in series only ever meant the
+    // coach waited for the sum of two round trips instead of the longer one.
+    const [blocksResult] = await Promise.all([
+      request(`/api/practice-blocks?playerId=${encodeURIComponent(playerId)}`).then(
+        (data) => ({ ok: true as const, data }),
+        (caught: unknown) => ({ ok: false as const, caught }),
+      ),
+      // Assigning a block changes both the use counts and what this player
+      // already has active, so the rails re-read alongside the list.
+      loadStarters(),
+    ]);
+    if (token !== readToken.current) return;
+    if (blocksResult.ok) {
+      setBlocks(Array.isArray(blocksResult.data.blocks) ? blocksResult.data.blocks : []);
+    } else {
+      setError(blocksResult.caught instanceof Error ? blocksResult.caught.message : "Could not load practice.");
     }
-    // After the list, always: assigning a block changes both the use counts
-    // and what this player already has active, so the rails must re-read.
-    await loadStarters();
-  }, [loadStarters, player.id, request]);
+    setFirstLoad(false);
+  }, [loadStarters, playerId, request]);
 
   useEffect(() => {
     void load();
@@ -131,14 +167,14 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     if (videoOptions.length || videoLoading) return;
     setVideoLoading(true);
     try {
-      const transfers = await listClarityCloudImportTransfers("coach", player.id);
+      const transfers = await listClarityCloudImportTransfers("coach", playerId);
       setVideoOptions(transfers.filter((transfer) => transfer.savedVideo?.savedVideoId));
     } catch {
       // A picker that fails to load still lets the coach save without a video.
     } finally {
       setVideoLoading(false);
     }
-  }, [player.id, videoOptions.length, videoLoading]);
+  }, [playerId, videoOptions.length, videoLoading]);
 
   const selectedVideoTitle = useMemo(() => {
     if (!draft.linkedVideoId) return "";
@@ -174,8 +210,8 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       try {
         const body = {
           id: candidate.id || undefined,
-          playerId: player.id,
-          playerName: player.name,
+          playerId,
+          playerName,
           title,
           content,
           blockType: candidate.blockType,
@@ -203,17 +239,17 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
               body: JSON.stringify({ title, content, blockType: candidate.blockType, dose: candidate.dose.trim() }),
             });
           } catch {
-            onToast(`Assigned, but "${title}" could not be saved to favourites.`);
+            handlers.current.onToast(`Assigned, but "${title}" could not be saved to favourites.`);
           }
         }
 
         if (data.warning === "no_upcoming_booking") {
-          setWarning(`${player.name} has no upcoming lesson. Saved with no expiry instead.`);
+          setWarning(`${playerName} has no upcoming lesson. Saved with no expiry instead.`);
         }
         setDraft(emptyPracticeDraft(candidate.blockType));
         setVideoPickerOpen(false);
         await load();
-        onToast(candidate.id ? "Practice block updated." : `Practice block assigned to ${player.name}.`);
+        handlers.current.onToast(candidate.id ? "Practice block updated." : `Practice block assigned to ${playerName}.`);
         return candidate.id ? null : data.block?.id || null;
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not save that block.");
@@ -222,13 +258,13 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         setBusy(false);
       }
     },
-    [busy, load, onToast, player.id, player.name, request],
+    [busy, load, playerId, playerName, request],
   );
 
   const archive = useCallback(
     async (blockId: string) => {
       const block = blocks.find((item) => item.id === blockId);
-      if (block && !window.confirm(`Remove "${block.title}" from ${player.name}'s wall?`)) return;
+      if (block && !window.confirm(`Remove "${block.title}" from ${playerName}'s wall?`)) return;
       setBusy(true);
       setError("");
       try {
@@ -241,7 +277,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         setBusy(false);
       }
     },
-    [blocks, load, player.name, request],
+    [blocks, load, playerName, request],
   );
 
   const saveFavourite = useCallback(
@@ -257,14 +293,14 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
           body: JSON.stringify(favourite),
         });
         await loadStarters();
-        onToast(replacing ? `Favourite "${favourite.title}" updated.` : `Saved "${favourite.title}" to favourites.`);
+        handlers.current.onToast(replacing ? `Favourite "${favourite.title}" updated.` : `Saved "${favourite.title}" to favourites.`);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not save that favourite.");
       } finally {
         setBusy(false);
       }
     },
-    [busy, loadStarters, onToast, presets, request],
+    [busy, loadStarters, presets, request],
   );
 
   const renamePreset = useCallback(
@@ -363,7 +399,15 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     [draft],
   );
 
-  if (loading) return <div className="module-loading">Loading practice…</div>;
+  /* Nothing here waits for the server.
+   *
+   * The composer needs no data to be usable -- a coach opening Practice is
+   * almost always about to write a block, and holding the whole tab behind a
+   * spinner made the one thing they came for the last thing to arrive. The
+   * rails and the wall fill in around it. A later refresh does not blank
+   * anything either: replacing a half-written block with a spinner is how a
+   * coach loses work.
+   */
 
   const videoControl = (
     <div className="practice-video-field">
@@ -386,7 +430,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       {videoPickerOpen && !draft.linkedVideoId && (
         <div className="practice-video-picker">
           {videoLoading ? (
-            <p className="practice-video-empty">Loading {player.name}'s videos…</p>
+            <p className="practice-video-empty">Loading {playerName}'s videos…</p>
           ) : videoOptions.length ? (
             <ul className="practice-video-options">
               {videoOptions.map((transfer) => (
@@ -405,7 +449,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
               ))}
             </ul>
           ) : (
-            <p className="practice-video-empty">No videos for {player.name} yet.</p>
+            <p className="practice-video-empty">No videos for {playerName} yet.</p>
           )}
           <button type="button" className="practice-video-cancel" onClick={() => setVideoPickerOpen(false)}>
             Cancel
@@ -434,6 +478,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         onRemovePreset={(preset) => void removePreset(preset)}
         onReorderPresets={(ids) => void reorderPresets(ids)}
         onDismissSuggestion={(suggestion) => void dismissSuggestion(suggestion)}
+        loading={firstLoad}
         videoControl={videoControl}
       />
 
@@ -453,7 +498,11 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         openId={openBrickId}
         onOpen={(id) => setOpenBrickId((current) => (current === id ? null : id))}
         onRemove={(id) => void archive(id)}
-        emptyNote={`Nothing assigned to ${player.name} yet. The first block you save starts the wall.`}
+        emptyNote={
+          firstLoad
+            ? "Loading the wall…"
+            : `Nothing assigned to ${playerName} yet. The first block you save starts the wall.`
+        }
       />
 
       {openBlock && (
