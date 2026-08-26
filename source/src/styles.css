@@ -594,10 +594,16 @@ button {
   display: none !important;
 }
 
-/* Seven sections, each panel filed under exactly one of them. There used to be
+/* Eight sections, each panel filed under exactly one of them. There used to be
    eleven, and four panels were classed onto two tabs at once — which is how
-   "Customer Experience" and "Coach Branding" ended up being the same screen. */
+   "Customer Experience" and "Coach Branding" ended up being the same screen.
+
+   This is an allowlist over a blanket `display: none`, so a new tab that is
+   not named here is invisible on every tab rather than visible on the wrong
+   one. The uiRules test "every settings tab has a panel that can show" keeps
+   the two lists in step. */
 .settings-grid.settings-tab-services > .settings-services,
+.settings-grid.settings-tab-practice > .settings-practice,
 .settings-grid.settings-tab-booking > .settings-booking {
   display: block !important;
 }
@@ -611,6 +617,7 @@ button {
 }
 
 .settings-services,
+.settings-practice,
 .settings-business,
 .settings-booking,
 .settings-notifications,

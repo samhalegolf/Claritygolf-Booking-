@@ -221,6 +221,36 @@ test("every connection archetype has two integrations, or a stated reason", () =
  * Notes and search legitimately fill their row; --c-w-prose exists so that
  * exception is written down rather than remembered.
  */
+/**
+ * Settings panels are hidden by a blanket `display: none` and shown again by an
+ * allowlist, one selector pair per tab. So a tab added to SETTINGS_SECTIONS
+ * without its matching CSS is not merely unstyled -- it is invisible on every
+ * tab, including its own, and looks exactly like a panel that failed to load.
+ *
+ * The stylesheet's own comment records the other direction of the same bug:
+ * panels once classed onto two tabs at once, which is how two settings screens
+ * became one. Both directions are checked here.
+ */
+test("every settings tab has a panel that can show, and vice versa", () => {
+  const app = readFileSync(path.join(SRC, "App.tsx"), "utf8");
+  const block = app.slice(app.indexOf("const SETTINGS_SECTIONS"), app.indexOf("type SettingsTab"));
+  const tabs = [...block.matchAll(/key:\s*"([a-z-]+)"/g)].map((match) => match[1]);
+  assert.ok(tabs.length >= 5, "SETTINGS_SECTIONS not found — has App.tsx been restructured?");
+
+  const css = read(path.join(SRC, "styles.css"));
+  const shown = new Set(
+    [...css.matchAll(/\.settings-grid\.settings-tab-([a-z-]+)\s*>\s*\.settings-([a-z-]+)/g)]
+      .filter((match) => match[1] === match[2])
+      .map((match) => match[1]),
+  );
+
+  const invisible = tabs.filter((tab) => !shown.has(tab));
+  assert.deepEqual(invisible, [], `Settings tab(s) with no panel that can ever show: ${invisible.join(", ")}`);
+
+  const orphaned = [...shown].filter((section) => !tabs.includes(section));
+  assert.deepEqual(orphaned, [], `Show rule(s) for a settings tab that no longer exists: ${orphaned.join(", ")}`);
+});
+
 test("bare width:100% is not spreading on fields", () => {
   const BASELINE = 10;
   const offenders: string[] = [];

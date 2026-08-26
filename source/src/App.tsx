@@ -25665,11 +25665,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
             <SettingsGroups>
             <div className={`settings-grid settings-tab-${settingsTab}`}>
-              <SettingsGroup id="practice-blocks" section="practice" title="Practice blocks">
-                <Suspense fallback={<div className="module-loading">Loading practice settings…</div>}>
-                  <PracticeSettingsPanel onToast={(message) => setToast({ message })} />
-                </Suspense>
-              </SettingsGroup>
+              {/* Mounted only on its own tab, like the integrations panels
+                  below: it reads block types and favourites on mount, and
+                  those are two requests nobody visiting Booking asked for. */}
+              {settingsTab === "practice" ? (
+                <SettingsGroup id="practice-blocks" section="practice" title="Practice blocks">
+                  <Suspense fallback={<div className="module-loading">Loading practice settings…</div>}>
+                    <PracticeSettingsPanel onToast={(message) => setToast({ message })} />
+                  </Suspense>
+                </SettingsGroup>
+              ) : null}
               {settingsTab === "developer" ? <IntegrationsPanel audience="integration" /> : null}
               {settingsTab === "admin" ? <IntegrationsPanel audience="admin" /> : null}
               {isAdminUser ? <BrowserNotificationsPanel /> : null}
