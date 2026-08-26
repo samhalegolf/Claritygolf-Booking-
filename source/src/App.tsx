@@ -1023,6 +1023,20 @@ type BillingSection =
   | "transactions"
   | "settings";
 
+// The Billing sections named once, so the tab bar and the topbar's subtitle
+// cannot drift into two different words for the same place.
+const BILLING_SECTION_LABELS: Record<Exclude<BillingSection, "none">, string> = {
+  dashboard: "Dashboard",
+  "new-invoice": "New Invoice",
+  invoices: "Invoices",
+  expenses: "Expenses",
+  products: "Products",
+  coupons: "Coupons",
+  reports: "Reports",
+  transactions: "Transaction History",
+  settings: "Settings",
+};
+
 // Which completed bookings the "ready to pull" lists show.
 //
 // "all" is the default because a counter payment no longer settles a lesson for
@@ -6255,10 +6269,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const bookingBrandPrimary = bookingBrandWords.slice(0, -1).join(" ") || bookingBrandName;
   const bookingBrandSecondary = bookingBrandWords.length > 1 ? bookingBrandWords.at(-1) : "";
   const showBookingBrandLogo = brandSettings.showLogo && !isBookingLogoHiddenByUrl();
-  const calendarTitle =
+  // Which calendar you are pointed at. That is one level below the Calendar
+  // destination itself, so it belongs in the topbar's subtitle rather than in
+  // its title -- see pageHeading.
+  const calendarScopeName =
     effectiveCalendarPerspective === "location"
-      ? `Location Calendar · ${locationById(locations, selectedCalendarLocationId)?.shortName || locationById(locations, selectedCalendarLocationId)?.name || defaultLocation.shortName || defaultLocation.name}`
-      : `Coach Calendar · ${selectedCalendarCoach.displayName || selectedCalendarCoach.name}`;
+      ? locationById(locations, selectedCalendarLocationId)?.shortName ||
+        locationById(locations, selectedCalendarLocationId)?.name ||
+        defaultLocation.shortName ||
+        defaultLocation.name
+      : selectedCalendarCoach.displayName || selectedCalendarCoach.name;
   const isEmailLinkReschedule = Boolean(
     bookingMode === "reschedule" &&
       initialRescheduleLoginRef.current?.appointmentId &&
@@ -20197,6 +20217,36 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const calendarSummaryText = adminWorkspaceLoading
     ? "Loading calendar bookings"
     : `${appointments} appointments · ${blocks} blocked ${blocks === 1 ? "time" : "times"}`;
+  /**
+   * The app's one page header, decided in one place.
+   *
+   * `title` is the destination you clicked in the sidebar -- exactly one per
+   * area, and nothing rendered below the topbar restates it. `subtitle` is
+   * filled in only when you are standing a level deeper than the destination:
+   * the Billing or Settings section you opened, or the calendar you are
+   * pointed at. A destination with no second level gets no subtitle at all,
+   * which is why the old eyebrow line is gone -- it only ever repeated the
+   * title back in capitals.
+   */
+  const pageHeading: { title: string; subtitle?: string } =
+    activeView === "calendar"
+      ? {
+          title: "Calendar",
+          subtitle: adminWorkspaceLoading
+            ? calendarSummaryText
+            : `${calendarScopeName} · ${calendarSummaryText}`,
+        }
+      : activeView === "billing"
+        ? {
+            title: "Billing",
+            subtitle: billingSection === "none" ? undefined : BILLING_SECTION_LABELS[billingSection],
+          }
+        : activeView === "settings"
+          ? {
+              title: "Settings",
+              subtitle: SETTINGS_SECTIONS.find((section) => section.key === settingsTab)?.label,
+            }
+          : { title: sectionTitle(activeView) };
   const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
   const latestDiagnosticEvent = diagnosticEvents[0];
   const latestDiagnosticError = failedDiagnosticEvents[0];
@@ -20293,12 +20343,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       )}
 
       <main className="main-panel">
-        {!isEmbedMode && (
+        {/* Video analysis is the one destination that brings its own header
+            and its own way back, so the global one would sit on top of it. */}
+        {!isEmbedMode && activeView !== "video" && (
         <header className="topbar">
           <div>
-            <p className="eyebrow">{activeView === "booking" ? "Public Booking" : activeView}</p>
-            <h1>{activeView === "calendar" ? calendarTitle : sectionTitle(activeView)}</h1>
-            {activeView === "calendar" && <span>{calendarSummaryText}</span>}
+            <h1>{pageHeading.title}</h1>
+            {pageHeading.subtitle ? <span>{pageHeading.subtitle}</span> : null}
           </div>
           {activeView === "calendar" && (
             <div className="top-actions">
@@ -21496,7 +21547,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           <section className="module-page player-profiles-page">
             <div className="player-profiles-toolbar">
               <div className="player-profiles-heading">
-                <h2>Player Profiles</h2>
                 <p>Clients with lesson notes or video, plus anyone you add.</p>
               </div>
               <div className="player-profiles-actions">
@@ -25643,7 +25693,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 the rest are plain until hovered. Highlight and open section are
                 the same state value, so they cannot disagree. */}
             <nav className="settings-subnav" aria-label="Settings sections">
-              <span className="settings-subnav-heading">Settings</span>
               {SETTINGS_SECTIONS.filter((section) => isAdminUser || !section.adminOnly).map((section) => (
                 <button
                   key={section.key}

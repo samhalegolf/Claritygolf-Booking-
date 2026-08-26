@@ -521,15 +521,6 @@ button {
   border-right: 1px solid var(--c-border-soft);
 }
 
-.settings-subnav-heading {
-  margin-bottom: 6px;
-  color: var(--c-muted);
-  font-size: var(--c-size-group);
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
 .settings-subnav button {
   height: var(--c-h-subnav-row);
   display: flex;
