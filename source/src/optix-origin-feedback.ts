@@ -42,25 +42,44 @@ async function loadRecords(): Promise<OptixOriginRecord[]> {
   return Array.isArray(payload?.records) ? payload.records : [];
 }
 
-function score(record: OptixOriginRecord, text: string) {
-  const haystack = text.toLowerCase();
-  let result = 0;
-  if (record.external_booking_id && haystack.includes(record.external_booking_id.toLowerCase())) result += 100;
-  if (record.client && haystack.includes(record.client.toLowerCase())) result += 8;
-  if (record.title && haystack.includes(record.title.toLowerCase())) result += 4;
-  return result;
-}
-
-function candidates() {
-  return Array.from(
-    document.querySelectorAll<HTMLElement>(
-      "[role='dialog'],[aria-modal='true'],.modal,.drawer,.sheet,.appointment-card,.booking-card,[data-calendar-item-id]",
-    ),
+/**
+ * Every open booking modal, paired with the booking it is showing.
+ *
+ * This used to guess, by scoring each Optix record against the modal's
+ * rendered text: +8 if the record's client name appeared anywhere in it. An
+ * inbound Optix booking under the one-word client name "Hale" therefore
+ * matched every card in the calendar, because they all carry the coach's name
+ * — Sam Hale. Every Clarity booking Sam made himself was stamped OPTIX and
+ * given an "External booking" card belonging to someone else's lesson.
+ *
+ * The modal now carries the booking id it is rendering (App.tsx), so there is
+ * nothing left to guess. A card without one is skipped rather than matched
+ * approximately.
+ */
+function openBookingCards() {
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-calendar-item-id]")).flatMap(
+    (node) => {
+      const id = String(node.dataset.calendarItemId || "").trim();
+      return id ? [{ node, id }] : [];
+    },
   );
 }
 
+/** Strip every trace of a previous booking's Optix decoration from this modal. */
+function undecorate(node: HTMLElement) {
+  delete node.dataset.optixOrigin;
+  node.querySelector(".optix-origin-badge")?.remove();
+  node.querySelector(".optix-origin-card")?.remove();
+}
+
 function decorate(node: HTMLElement, record: OptixOriginRecord) {
-  node.dataset.optixOrigin = "true";
+  // React reuses this modal for whichever booking is open, so a decoration
+  // left over from the last one has to be cleared before the new one goes in
+  // — otherwise the badge and card from the previously viewed lesson simply
+  // stay put. Cheap: at most one badge and one card per open modal.
+  if (node.dataset.optixOrigin !== record.id) undecorate(node);
+  node.dataset.optixOrigin = record.id;
+
   if (!node.querySelector(".optix-origin-badge")) {
     const heading =
       node.querySelector<HTMLElement>("h1,h2,h3,h4,h5,h6,strong") ||
@@ -76,7 +95,11 @@ function decorate(node: HTMLElement, record: OptixOriginRecord) {
   ) {
     const card = document.createElement("section");
     card.className = "optix-origin-card";
-    card.innerHTML = `<strong>External booking · Optix</strong><div>Bay status: ${esc(record.external_sync_state === "bay_booked" ? "Bay booked" : "Bay assignment required")}</div><div>Customer email: ${esc(record.external_sync_state || "No Clarity email")}</div><details><summary>Source details</summary><div>Inbound lesson booking ID: ${esc(record.external_booking_id)}</div><div>Outbound bay booking is shown separately under Resource booking.</div></details>`;
+    // The old "Customer email" line printed external_sync_state — the same
+    // value as Bay status, one line below it, under a label it has nothing to
+    // do with. There is no email on this record (see optix-origin-status.mts,
+    // which does not select one), so the line is gone rather than patched.
+    card.innerHTML = `<strong>External booking · Optix</strong><div>Bay status: ${esc(record.external_sync_state === "bay_booked" ? "Bay booked" : "Bay assignment required")}</div><details><summary>Source details</summary><div>Inbound lesson booking ID: ${esc(record.external_booking_id)}</div><div>Outbound bay booking is shown separately under Resource booking.</div></details>`;
     node.appendChild(card);
   }
   // This is a standard editable Clarity appointment. In particular, keep the
@@ -84,13 +107,20 @@ function decorate(node: HTMLElement, record: OptixOriginRecord) {
 }
 
 async function refresh() {
+  const cards = openBookingCards();
+  if (!cards.length) return;
   const records = await loadRecords();
-  if (!records.length) return;
-  for (const node of candidates()) {
-    const best = records
-      .map((record) => ({ record, score: score(record, node.textContent || "") }))
-      .sort((a, b) => b.score - a.score)[0];
-    if (best && best.score >= 8) decorate(node, best.record);
+  const byId = new Map(records.map((record) => [record.id, record]));
+  for (const { node, id } of cards) {
+    const record = byId.get(id);
+    // No record for this booking means Clarity owns it. Strip anything a
+    // previous card left behind — the panel is injected into a modal React
+    // reuses between bookings, so "render nothing" is not enough on its own.
+    if (!record) {
+      undecorate(node);
+      continue;
+    }
+    decorate(node, record);
   }
 }
 

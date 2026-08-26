@@ -17,7 +17,11 @@ import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
 import { VideoCanvas } from "./components/VideoCanvas";
 import { IconBack, IconPlay, IconPause, IconRecord, IconUpload } from "./components/VideoIcons";
-import { PlayerActionBar, PlayerToolRail } from "./components/PlayerVideoControls";
+import {
+  PlayerActionBar,
+  PlayerToolRail,
+  PlayerToolRailToggle,
+} from "./components/PlayerVideoControls";
 import { VideoSettingsSheet } from "./components/VideoSettingsSheet";
 import { ToolButton } from "./components/ToolButton";
 import {
@@ -2761,6 +2765,10 @@ export function VideoWorkspace({
             }}
           />
           {hasSelectionDraft ? <div className="focus-selection-overlay" style={draftStyle || undefined} /> : null}
+          <PlayerToolRailToggle
+            open={toolRailOpen}
+            onToggle={() => setToolRailOpen((previous) => !previous)}
+          />
           <PlayerToolRail
             open={toolRailOpen}
             selectedTool={drawingState.selectedTool}
@@ -2925,7 +2933,8 @@ export function VideoWorkspace({
       ) : null}
 
       {/* The always-on console bar is gone. Drawing tools live on the rail
-          over the video (rendered per panel above); everything else --
+          over the video, opened by the pencil in the frame's top-left corner
+          (both rendered per panel above); everything else --
           compare mode, linked playback, sync, screen recording, the library
           save, diagnostics, swapping the active clip -- lives behind the
           settings gear on the action bar below. */}
@@ -3089,8 +3098,6 @@ export function VideoWorkspace({
 
       {workspaceHasVideo ? (
         <PlayerActionBar
-          railOpen={toolRailOpen}
-          onRailToggle={() => setToolRailOpen((previous) => !previous)}
           isPlaying={activePlayback.isPlaying}
           onTogglePlay={() => playPauseSide(effectiveActiveSide)}
           onStepFrame={(direction) => activePlayback.stepFrame(direction)}

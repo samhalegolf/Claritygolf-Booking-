@@ -24,6 +24,8 @@ import {
 //
 //   - the rail of drawing tools is tucked off the video until asked for, and
 //     while it is away the video surface is a scrubber rather than a canvas
+//   - the button that fetches it sits on the video, in the corner the rail
+//     comes out of, not out in the row of transport
 //   - what is left is one row: step, play, step, and the send action
 //
 // Nothing here is a box around other boxes. The rail and the bar are surfaces
@@ -45,6 +47,35 @@ const IconTools = () => (
     <path d="m13.5 6.5 4 4" />
   </svg>
 );
+
+export type PlayerToolRailToggleProps = {
+  open: boolean;
+  onToggle: () => void;
+};
+
+/**
+ * The button that fetches the rail.
+ *
+ * It sits in the top-left corner of the video rather than out on the action
+ * bar. Two reasons: it is the only bar control that acts on the picture
+ * instead of the playhead, so it was the odd one out in a row of transport;
+ * and on the coach console the bar sits on the app's white page card, where a
+ * near-white icon button had nothing to read against. Over the video it has a
+ * surface of its own, and it stands where the rail it opens comes out.
+ */
+export function PlayerToolRailToggle({ open, onToggle }: PlayerToolRailToggleProps) {
+  return (
+    <button
+      type="button"
+      className={`va-rail-toggle${open ? " is-active" : ""}`}
+      aria-label={open ? "Hide drawing tools" : "Show drawing tools"}
+      aria-pressed={open}
+      onClick={onToggle}
+    >
+      <IconTools />
+    </button>
+  );
+}
 
 const IconStepBack = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
@@ -147,8 +178,6 @@ export function PlayerToolRail({
 }
 
 export type PlayerActionBarProps = {
-  railOpen: boolean;
-  onRailToggle: () => void;
   isPlaying: boolean;
   onTogglePlay: () => void;
   onStepFrame: (direction: -1 | 1) => void;
@@ -169,13 +198,11 @@ export type PlayerActionBarProps = {
 /**
  * The one row of controls under the video.
  *
- * Transport sits left because it is used constantly; the destination sits
- * right because it is used once. The save state is a line of text under the
+ * Transport sits centred under the picture because it is used constantly; the
+ * destination sits right because it is used once. The save state is a line of text under the
  * row, not a third button and not a box.
  */
 export function PlayerActionBar({
-  railOpen,
-  onRailToggle,
   isPlaying,
   onTogglePlay,
   onStepFrame,
@@ -193,16 +220,6 @@ export function PlayerActionBar({
   return (
     <div className="va-player-bar">
       <div className="va-player-bar-row">
-        <button
-          type="button"
-          className={`va-bar-btn${railOpen ? " is-active" : ""}`}
-          aria-label={railOpen ? "Hide drawing tools" : "Show drawing tools"}
-          aria-pressed={railOpen}
-          onClick={onRailToggle}
-        >
-          <IconTools />
-        </button>
-
         <div className="va-transport">
           <button
             type="button"

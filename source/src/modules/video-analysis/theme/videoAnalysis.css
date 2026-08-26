@@ -1523,14 +1523,55 @@
 
 /* --- The tool rail -------------------------------------------------------- */
 
-/* Tucked against the left edge of the video and slid out of frame when
-   closed. It stays mounted so the selected tool survives being put away, and
-   it overlays rather than occupying a column, so opening it never resizes
-   the video underneath. */
+/* The pencil that fetches the rail, in the frame's top-left corner. It used
+   to be the leftmost button on the action bar, which put the one control
+   that acts on the picture in a row of controls that act on the playhead --
+   and on the coach console that row sits on the app's white page card, where
+   a near-white icon button had nothing to read against. Here it has a
+   surface of its own and it stands at the corner the rail comes out of. */
+.va-rail-toggle {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 7;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(8, 12, 22, 0.82);
+  backdrop-filter: blur(8px);
+  color: var(--va-text);
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.va-rail-toggle svg {
+  width: 19px;
+  height: 19px;
+}
+
+.va-rail-toggle:hover {
+  background: rgba(20, 28, 46, 0.88);
+}
+
+/* Pressed-in rather than a second colour: the rail being open is a state of
+   this button, not a different button. */
+.va-rail-toggle.is-active {
+  background: var(--va-text);
+  color: var(--va-bg);
+}
+
+/* Tucked against the left edge of the video, directly under the pencil that
+   opens it, and slid out of frame when closed. It stays mounted so the
+   selected tool survives being put away, and it overlays rather than
+   occupying a column, so opening it never resizes the video underneath. */
 .va-tool-rail {
   position: absolute;
   left: 8px;
-  top: 50%;
+  top: 56px;
   z-index: 6;
   display: flex;
   flex-direction: column;
@@ -1540,14 +1581,14 @@
   border-radius: var(--c-radius-pill, 999px);
   background: rgba(8, 12, 22, 0.82);
   backdrop-filter: blur(8px);
-  transform: translate(calc(-100% - 12px), -50%);
+  transform: translateX(calc(-100% - 12px));
   opacity: 0;
   visibility: hidden;
   transition: transform 180ms ease, opacity 180ms ease, visibility 180ms;
 }
 
 .va-tool-rail.is-open {
-  transform: translate(0, -50%);
+  transform: translateX(0);
   opacity: 1;
   visibility: visible;
 }
@@ -1603,11 +1644,19 @@
   padding-bottom: max(4px, env(safe-area-inset-bottom));
 }
 
+/* Three columns rather than space-between: with the rail toggle gone the row
+   is transport plus one destination, and a two-item space-between would drag
+   the play button off the centre of the picture it belongs under. The first
+   column is deliberately empty. */
 .va-player-bar-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
+}
+
+.va-player-bar-row .va-transport {
+  grid-column: 2;
 }
 
 .va-transport {
@@ -1653,8 +1702,10 @@
 }
 
 .va-player-destinations {
+  grid-column: 3;
   display: inline-flex;
   align-items: center;
+  justify-self: end;
   gap: 4px;
 }
 
@@ -1728,6 +1779,60 @@
 
 .va-player-status.is-error {
   color: var(--va-danger);
+}
+
+/* --- The coach console's bar sits on the app's page card ------------------
+
+   The player's action bar sits on --va-bg, so the workspace's near-white ink
+   is right there. The coach's does not: the console is embedded in the app's
+   .module-page, and every control in this row was inheriting the workspace's
+   near-white ink onto a white card. Save read as a white smudge and the settings gear was all but
+   invisible.
+
+   The fix is the one place the workspace should read the app's palette rather
+   than its own. --va-* is for what sits on video, where it has to stay legible
+   over grass and sky and a white shirt; this strip is under the picture, on
+   the app's own surface, so it takes the app's own ink and follows the coach's
+   light/dark toggle for free. */
+
+.video-analysis-shell.is-coach .va-bar-btn {
+  color: var(--c-text);
+}
+
+.video-analysis-shell.is-coach .va-bar-btn:hover {
+  background: var(--c-hover);
+}
+
+.video-analysis-shell.is-coach .va-bar-btn.is-active {
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+/* Save is the filled control here. On the player's dark screen it is the
+   quiet text button standing next to Send; on this card there is no Send for
+   it to be quieter than, and a text button in the workspace's own light ink
+   had no contrast at all. So it becomes the app's own button -- black on
+   white, and it inverts with the theme rather than staying black into dark
+   mode. */
+.video-analysis-shell.is-coach .va-bar-text-btn {
+  padding: 0 18px;
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+  font-weight: 700;
+}
+
+.video-analysis-shell.is-coach .va-bar-text-btn:hover:not(:disabled) {
+  background: var(--c-text-body);
+  color: var(--c-accent-text);
+}
+
+.video-analysis-shell.is-coach .va-player-status {
+  color: var(--c-muted);
+}
+
+.video-analysis-shell.is-coach .va-player-status.is-saved {
+  /* The mint accent is tuned to sit on video, not on a page card. */
+  color: var(--c-success-text);
 }
 
 /* --- The settings sheet -----------------------------------------------

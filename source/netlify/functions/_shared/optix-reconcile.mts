@@ -92,6 +92,46 @@ export function datePartsForSlot(week: number, day: number) {
   };
 }
 
+/**
+ * True when a bay booking still covers the lesson it is attached to.
+ *
+ * optix_booking_sync.sync_status = 'synced' only says Optix accepted a booking
+ * at some point — not that the booking is at the lesson's time. A reschedule
+ * whose rebook never ran leaves a perfectly 'synced' row pointing at the old
+ * slot, and the calendar would paint a confident orange "bay booked" ring over
+ * a lesson with no bay. Comparing the stored timestamp against the lesson's
+ * current slot is what tells those two apart.
+ *
+ * Conservative by design: anything it cannot confirm reads as no bay. A lesson
+ * moved to a venue in another timezone will recompute to a different second and
+ * lose its ring until the next reconcile — an unbooked-looking bay the coach
+ * then books is a much cheaper mistake than a booked-looking bay that is not.
+ */
+export function bayBookingMatchesSlot(
+  appointment: {
+    week?: number | null;
+    day?: number | null;
+    start?: number | null;
+    location?: { timezone?: string } | null;
+  },
+  bayStartTimestamp: number,
+  defaultTimeZone = "Pacific/Auckland",
+): boolean {
+  const stamp = Number(bayStartTimestamp || 0);
+  if (!Number.isFinite(stamp) || stamp <= 0) return false;
+  const date = datePartsForSlot(Number(appointment.week || 0), Number(appointment.day || 0));
+  const timeZone = String(appointment.location?.timezone || "").trim() || defaultTimeZone;
+  // Same conversion buildOptixAppointmentInput used to produce the stored
+  // value, so a lesson that has not moved compares equal to the second.
+  return (
+    wallClockToUnixSeconds({
+      ...date,
+      minutes: Number(appointment.start || 0),
+      timeZone,
+    }) === stamp
+  );
+}
+
 function zonedParts(timestamp: number, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone,

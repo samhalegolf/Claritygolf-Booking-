@@ -92,39 +92,6 @@ async function loadRecords(): Promise<OptixStatusRecord[]> {
   return Array.isArray(payload?.records) ? payload.records : [];
 }
 
-function slotDate(record: OptixStatusRecord) {
-  const date = new Date(Date.UTC(2026, 5, 1));
-  date.setUTCDate(date.getUTCDate() + Number(record.week || 0) * 7 + Number(record.day || 0));
-  return date;
-}
-
-function minuteLabel(minutes: number) {
-  const hour24 = Math.floor(Number(minutes || 0) / 60);
-  const minute = Number(minutes || 0) % 60;
-  const suffix = hour24 >= 12 ? "pm" : "am";
-  const hour12 = hour24 % 12 || 12;
-  return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
-}
-
-function scoreRecord(record: OptixStatusRecord, cardText: string) {
-  const text = cardText.toLowerCase().replace(/\s+/g, " ");
-  let score = 0;
-  if (record.client && text.includes(record.client.toLowerCase())) score += 20;
-  if (record.title && text.includes(record.title.toLowerCase())) score += 8;
-  if (record.serviceId && text.includes(record.serviceId.toLowerCase())) score += 2;
-
-  const date = slotDate(record);
-  const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(date).toLowerCase();
-  const monthDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(date).toLowerCase();
-  const start = minuteLabel(record.start);
-  const end = minuteLabel(record.start + record.duration);
-  if (text.includes(weekday)) score += 6;
-  if (text.includes(monthDay)) score += 12;
-  if (text.includes(start)) score += 12;
-  if (text.includes(end)) score += 4;
-  return score;
-}
-
 function findBookingRecordsAnchor(card: HTMLElement) {
   const candidates = Array.from(card.querySelectorAll<HTMLElement>("button,[role='tab'],a,h1,h2,h3,h4,h5,h6,div,span,p"));
   const exact = candidates.find((node) => /^booking records$/i.test((node.textContent || "").trim()));
@@ -136,27 +103,19 @@ function findBookingRecordsAnchor(card: HTMLElement) {
   return null;
 }
 
-function findBookingCard(anchor: HTMLElement) {
-  const explicit = anchor.closest<HTMLElement>("[role='dialog'],[aria-modal='true'],.modal,.drawer,.sheet,.appointment-card,.booking-card,aside");
-  if (explicit) return explicit;
-  let node: HTMLElement | null = anchor;
-  while (node && node !== document.body) {
-    const text = node.textContent || "";
-    if (/booking records/i.test(text) && /resend confirmation|no email records/i.test(text)) return node;
-    node = node.parentElement;
-  }
-  return null;
-}
-
+/**
+ * Every open booking modal, paired with the booking it is showing.
+ *
+ * The modal carries its own booking id (App.tsx), which removes the guesswork
+ * this file used to depend on — see selectUnambiguousRecord below for what
+ * that guesswork cost. A modal with a Booking records section but no id is
+ * skipped: showing no bay panel is safe, showing another lesson's bay is not.
+ */
 function findOpenBookingCards() {
-  const anchors = Array.from(document.querySelectorAll<HTMLElement>("button,[role='tab'],a,h1,h2,h3,h4,h5,h6,div,span,p"))
-    .filter((node) => /^(booking records|resend confirmation|no email records)$/i.test((node.textContent || "").trim()));
-  const cards = new Set<HTMLElement>();
-  for (const anchor of anchors) {
-    const card = findBookingCard(anchor);
-    if (card && findBookingRecordsAnchor(card)) cards.add(card);
-  }
-  return Array.from(cards);
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-calendar-item-id]")).flatMap((card) => {
+    const id = String(card.dataset.calendarItemId || "").trim();
+    return id && findBookingRecordsAnchor(card) ? [{ card, id }] : [];
+  });
 }
 
 function renderPanel(card: HTMLElement, record: OptixStatusRecord) {
@@ -238,15 +197,14 @@ function clearPanel(card: HTMLElement) {
   card.querySelector<HTMLElement>(".optix-booking-feedback")?.remove();
 }
 
-function selectUnambiguousRecord(records: OptixStatusRecord[], card: HTMLElement) {
-  const ranked = records
-    .map((record) => ({ record, score: scoreRecord(record, card.textContent || "") }))
-    .filter((entry) => entry.score >= 20)
-    .sort((a, b) => b.score - a.score);
-  if (!ranked.length) return null;
-  if (ranked.length > 1 && ranked[0].score === ranked[1].score) return null;
-  return ranked[0].record;
-}
+// Removed: selectUnambiguousRecord(), which picked this card's bay by scoring
+// every Optix record against the modal's rendered text — +20 for the client
+// name alone, and it only refused to choose on an exact tie. A client with
+// three bookings therefore had all three score above the threshold on any one
+// of their cards, and the highest scorer won: a lesson with no bay at all
+// showed the bay belonging to a different lesson. scoreRecord/slotDate/
+// minuteLabel existed only to feed it and went with it. The modal now says
+// which booking it is showing.
 
 async function bookResource(button: HTMLButtonElement) {
   const calendarItemId = String(button.dataset.calendarItemId || "").trim();
@@ -285,10 +243,14 @@ async function bookResource(button: HTMLButtonElement) {
 }
 
 async function refreshPanels() {
-  const records = await loadRecords();
   const cards = findOpenBookingCards();
-  for (const card of cards) {
-    const record = selectUnambiguousRecord(records, card);
+  if (!cards.length) return;
+  const records = await loadRecords();
+  const byId = new Map(records.map((record) => [record.calendarItemId, record]));
+  for (const { card, id } of cards) {
+    const record = byId.get(id);
+    // No sync row means this lesson has never had a bay attempted. Clear any
+    // panel left behind by the booking previously open in this modal.
     if (!record) {
       clearPanel(card);
       continue;

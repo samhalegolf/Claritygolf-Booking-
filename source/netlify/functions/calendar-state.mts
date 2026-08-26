@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency } from "./_shared/locale.mts";
 import { setActivePhoneCountry } from "./_shared/phone.mts";
+import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 
 type BookingCoreModule = {
   handleBookingApiRoute: (req: Request, forcedPathname?: string, context?: Context) => Promise<Response> | Response;
@@ -564,6 +565,16 @@ function rowToItem(row: Record<string, unknown>) {
   const status = ["completed", "cancelled", "no_show"].includes(String(row.status || "")) ? String(row.status) : "booked";
   const customGroup = cleanCustomGroupData(row.custom_group);
   const cancelledGroupSession = isCancelledGroupSessionLike(row);
+  const location = cleanBookingLocationSnapshot(row.location);
+  // A synced sync row is not on its own proof of a bay: it can be left over
+  // from before the lesson was moved. See bayBookingMatchesSlot.
+  const bayBooked =
+    row.bay_booked === true &&
+    bayBookingMatchesSlot(
+      { week: Number(row.week ?? 0), day: Number(row.day ?? 0), start: Number(row.start ?? 0), location },
+      Number(row.bay_start_timestamp ?? 0),
+      env("CLARITY_TIMEZONE", "Pacific/Auckland"),
+    );
   return {
     id: cleanString(row.id, "", 140),
     accountId: cleanSlug(row.account_id, defaultWorkspaceAccountFromCoachAccount().id),
@@ -582,7 +593,7 @@ function rowToItem(row: Record<string, unknown>) {
     note: cleanString(row.note, "", 1200),
     personId: cleanString(row.person_id, "", 140),
     coach: cleanBookingCoachSnapshot(row.coach),
-    location: cleanBookingLocationSnapshot(row.location),
+    location,
     status: cancelledGroupSession ? "cancelled" : status,
     // Ownership and bay fields, mirroring booking-core's rowToItem. The shell
     // is just a faster route to the same calendar: dropping these here made
@@ -591,7 +602,7 @@ function rowToItem(row: Record<string, unknown>) {
     origin: cleanString(row.origin, "clarity", 80),
     externalProvider: cleanString(row.external_provider, "", 80),
     externalBookingId: cleanString(row.external_booking_id, "", 160),
-    bayBooked: row.bay_booked === true,
+    bayBooked,
     bayResourceId: cleanString(row.bay_resource_id, "", 80),
     updatedAt: cleanString(typeof row.updated_at === "string" ? row.updated_at : String(row.updated_at || ""), "", 120),
     completedAt: cleanString(typeof row.completed_at === "string" ? row.completed_at : String(row.completed_at || ""), "", 120),
@@ -665,7 +676,8 @@ async function readItems() {
     SELECT ci.*,
            (s.optix_booking_id IS NOT NULL AND s.optix_booking_id <> ''
             AND s.sync_status = 'synced') AS bay_booked,
-           s.resource_id AS bay_resource_id
+           s.resource_id AS bay_resource_id,
+           s.start_timestamp AS bay_start_timestamp
     FROM calendar_items ci
     LEFT JOIN optix_booking_sync s ON s.calendar_item_id = ci.id
     ORDER BY ci.week, ci.day, ci.start, ci.id

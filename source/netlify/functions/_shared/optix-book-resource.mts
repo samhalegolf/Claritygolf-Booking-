@@ -40,6 +40,63 @@ async function ensureOptixSyncTable() {
   `;
 }
 
+/**
+ * Append-only history of bay bookings this lesson used to hold. See the
+ * migration 20260826000200_create_optix_bay_bookings for why it exists;
+ * created here too so the rebook path works on an environment whose
+ * migrations have not run, matching ensureOptixSyncTable above.
+ */
+async function ensureOptixBayHistoryTable() {
+  await db().sql`
+    CREATE TABLE IF NOT EXISTS optix_bay_bookings (
+      id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      calendar_item_id TEXT NOT NULL,
+      optix_booking_id TEXT NOT NULL DEFAULT '',
+      optix_booking_session_id TEXT NOT NULL DEFAULT '',
+      resource_id TEXT NOT NULL DEFAULT '',
+      start_timestamp BIGINT NOT NULL DEFAULT 0,
+      end_timestamp BIGINT NOT NULL DEFAULT 0,
+      reason TEXT NOT NULL DEFAULT 'reschedule',
+      cancelled BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+}
+
+/**
+ * Record a bay booking that is about to stop being this lesson's bay.
+ *
+ * Called immediately before the sync row's Optix IDs are cleared, because
+ * after that UPDATE there is nothing left to record. Never throws: losing the
+ * audit row must not abort a rebook that is already half done (the Optix
+ * booking has been cancelled by this point).
+ */
+async function recordSupersededBayBooking(
+  record: OptixSyncRecord,
+  options: { reason: "reschedule" | "reschedule_failed"; cancelled: boolean },
+) {
+  try {
+    await ensureOptixBayHistoryTable();
+    await db().sql`
+      INSERT INTO optix_bay_bookings (
+        calendar_item_id, optix_booking_id, optix_booking_session_id,
+        resource_id, start_timestamp, end_timestamp, reason, cancelled
+      ) VALUES (
+        ${record.calendarItemId}, ${record.optixBookingId},
+        ${record.optixBookingSessionId}, ${record.resourceId},
+        ${record.startTimestamp}, ${record.endTimestamp},
+        ${options.reason}, ${options.cancelled}
+      )
+    `;
+  } catch (error) {
+    console.error("optix_bay_history_write_failed", {
+      calendarItemId: record.calendarItemId,
+      optixBookingId: record.optixBookingId,
+      error: error instanceof Error ? error.message.slice(0, 300) : String(error || "").slice(0, 300),
+    });
+  }
+}
+
 function rowToAppointment(row: any): ClarityOptixAppointment {
   return {
     id: String(row.id || ""),
@@ -296,10 +353,25 @@ export async function rebookResourceAfterReschedule(calendarItemId: string): Pro
     if (!existing?.optixBookingId || existing.syncStatus !== "synced") {
       return { moved: false, skipped: "no_synced_bay" };
     }
-    await cancelOptixBayForCalendarItem(cleanId);
+    let cancelled = false;
+    try {
+      await cancelOptixBayForCalendarItem(cleanId);
+      cancelled = true;
+    } finally {
+      // Write the history row here, not after the cancel succeeds: a refused
+      // cancel is the case that most needs a record, because it leaves a bay
+      // held in Optix at a time no lesson occupies any more. `cancelled` is
+      // what separates "released cleanly" from "go and check Optix".
+      await recordSupersededBayBooking(existing, {
+        reason: cancelled ? "reschedule" : "reschedule_failed",
+        cancelled,
+      });
+    }
     // The cancelled booking is dead. Clear its IDs so the rebook creates a
     // fresh booking — left in place, buildOptixAppointmentInput would reuse
-    // them and try to resurrect the cancelled booking instead.
+    // them and try to resurrect the cancelled booking instead. The IDs now
+    // live on in optix_bay_bookings, which is the only place they survive
+    // this UPDATE.
     await db().sql`
       UPDATE optix_booking_sync
       SET optix_booking_id = '', optix_booking_session_id = '', updated_at = NOW()

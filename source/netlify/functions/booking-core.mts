@@ -16,6 +16,7 @@ import {
 import { inferBookingAction, notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
 import { cancelOptixBayForCalendarItem, cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
 import { autoBookResourceForNewBooking, rebookResourceAfterReschedule } from "./_shared/optix-book-resource.mts";
+import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
@@ -2262,6 +2263,16 @@ function rowToItem(row) {
     : "booked";
   const customGroup = cleanCustomGroupData(row.custom_group);
   const cancelledGroupSession = isCancelledGroupSessionLike(row);
+  const location = cleanBookingLocationSnapshot(row.location);
+  // A synced sync row is not on its own proof of a bay: it can be left over
+  // from before the lesson was moved. See bayBookingMatchesSlot.
+  const bayBooked =
+    row.bay_booked === true &&
+    bayBookingMatchesSlot(
+      { week: Number(row.week ?? 0), day: Number(row.day ?? 0), start: Number(row.start ?? 0), location },
+      Number(row.bay_start_timestamp ?? 0),
+      accountTimeZone(),
+    );
   return {
     id: row.id,
     accountId: row.accountId || row.account_id || defaultWorkspaceAccountFromCoachAccount().id,
@@ -2280,7 +2291,7 @@ function rowToItem(row) {
     personId: row.person_id || "",
     note: row.note || "",
     coach: cleanBookingCoachSnapshot(row.coach),
-    location: cleanBookingLocationSnapshot(row.location),
+    location,
     status: cancelledGroupSession ? "cancelled" : status,
     // Who owns this booking. The calendar needs this to tell a native lesson
     // from one an external system owns -- without it the UI cannot label an
@@ -2290,7 +2301,7 @@ function rowToItem(row) {
     origin: row.origin || "clarity",
     externalProvider: row.external_provider || "",
     externalBookingId: row.external_booking_id || "",
-    bayBooked: row.bay_booked === true,
+    bayBooked,
     bayResourceId: row.bay_resource_id || "",
     updatedAt,
     completedAt,
@@ -2968,7 +2979,8 @@ async function readItems() {
     SELECT ci.*,
            (s.optix_booking_id IS NOT NULL AND s.optix_booking_id <> ''
             AND s.sync_status = 'synced') AS bay_booked,
-           s.resource_id AS bay_resource_id
+           s.resource_id AS bay_resource_id,
+           s.start_timestamp AS bay_start_timestamp
     FROM calendar_items ci
     LEFT JOIN optix_booking_sync s ON s.calendar_item_id = ci.id
     ORDER BY ci.week, ci.day, ci.start, ci.id
@@ -2985,7 +2997,8 @@ async function readCalendarItemById(itemId) {
     SELECT ci.*,
            (s.optix_booking_id IS NOT NULL AND s.optix_booking_id <> ''
             AND s.sync_status = 'synced') AS bay_booked,
-           s.resource_id AS bay_resource_id
+           s.resource_id AS bay_resource_id,
+           s.start_timestamp AS bay_start_timestamp
     FROM calendar_items ci
     LEFT JOIN optix_booking_sync s ON s.calendar_item_id = ci.id
     WHERE ci.id = ${cleanId}
@@ -6161,11 +6174,17 @@ function schedulePublicBookingSideEffects(context, appointment, options = {}) {
     // Lesson types with Auto-book ticked in Resources get their Optix bay
     // booked here — after the booking is already on the calendar — instead of
     // holding up the client's booking flow. Only for newly created client
-    // bookings (reschedules move an existing bay via deferOptixBayRebook on
-    // the calendar save paths instead). Never throws; on failure the card
-    // simply shows no bay and the coach books it manually as before.
+    // bookings. Never throws; on failure the card simply shows no bay and the
+    // coach books it manually as before.
     if (options.autoBookResource === true) {
       await autoBookResourceForNewBooking(appointment.id, appointment.serviceId);
+    }
+    // A client rescheduled: cancel the bay at the old slot and book a fresh
+    // one at the new slot. Same helper the admin drag uses, deferred the same
+    // way — the client's confirmation screen must not wait on two Optix round
+    // trips. Never throws, and skips lessons that had no bay to begin with.
+    if (options.rebookResource === true) {
+      await rebookResourceAfterReschedule(appointment.id);
     }
     // A client just booked. This path sends its confirmation through
     // sendBookingNotifications above rather than notifyBookingEvent, so the
@@ -9783,6 +9802,13 @@ async function reschedulePublicBooking(payload, context = null) {
     state,
     updatedAppointment,
     context,
+    // A client confirming a reschedule moves the lesson exactly like a coach
+    // dragging it, so the Optix bay has to move too. The admin paths get this
+    // from deferOptixBayRebook on the calendar save; this one writes the
+    // appointment row directly and never touched the bay, so a client
+    // reschedule used to leave the bay held at the old time — still 'synced',
+    // still painting the orange ring over a lesson that had no bay.
+    { rebookResource: appointmentSlotChanged(appointment, updatedAppointment) },
   );
   let notifications = [];
   try {

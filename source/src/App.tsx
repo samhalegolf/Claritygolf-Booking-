@@ -27741,6 +27741,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="appointment-details-title"
+            // The two Optix panels are injected into this modal from outside
+            // React (optix-booking-feedback / optix-origin-feedback). Without
+            // this they had nothing to go on but the rendered text, and matched
+            // the wrong booking. This is the booking the modal is actually
+            // showing; it is the only thing they should match on.
+            data-calendar-item-id={selected?.id || ""}
             onPointerDown={(event) => event.stopPropagation()}
           >
             {selectedDetails}
