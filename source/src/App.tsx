@@ -6259,7 +6259,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     effectiveCalendarPerspective === "location"
       ? `Location Calendar · ${locationById(locations, selectedCalendarLocationId)?.shortName || locationById(locations, selectedCalendarLocationId)?.name || defaultLocation.shortName || defaultLocation.name}`
       : `Coach Calendar · ${selectedCalendarCoach.displayName || selectedCalendarCoach.name}`;
-  const settingsLocationLine = `${coachAccount.venueName} · ${coachAccount.timezone}`;
   const isEmailLinkReschedule = Boolean(
     bookingMode === "reschedule" &&
       initialRescheduleLoginRef.current?.appointmentId &&
@@ -20299,11 +20298,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           <div>
             <p className="eyebrow">{activeView === "booking" ? "Public Booking" : activeView}</p>
             <h1>{activeView === "calendar" ? calendarTitle : sectionTitle(activeView)}</h1>
-            {activeView === "calendar" ? (
-              <span>{calendarSummaryText}</span>
-            ) : (
-              <span>{settingsLocationLine}</span>
-            )}
+            {activeView === "calendar" && <span>{calendarSummaryText}</span>}
           </div>
           {activeView === "calendar" && (
             <div className="top-actions">
