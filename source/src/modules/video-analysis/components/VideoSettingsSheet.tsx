@@ -109,29 +109,38 @@ export function VideoSettingsSheet({
           <span>Sync playheads</span>
         </button>
 
-        <span className="va-sheet-divider" aria-hidden="true" />
-
-        <button
-          type="button"
-          className="va-sheet-row va-sheet-row-btn"
-          onClick={onRecordReplacement}
-        >
-          <IconRecord />
-          <span>Record {activeSideLabel.toLowerCase()} clip</span>
-        </button>
-        <button type="button" className="va-sheet-row va-sheet-row-btn" onClick={onReplaceClip}>
-          <IconUpload />
-          <span>Replace {activeSideLabel.toLowerCase()} clip</span>
-        </button>
+        {/* What to do with the clip that is loaded on the active side --
+            swap it for a recording, swap it for a file, or take it away.
+            All three need a clip to act on, so the whole group waits for
+            one. A side with nothing on it is filled from its own panel,
+            which is showing a drop zone and a record button precisely
+            because it is empty; offering the same two here as well is how
+            the console used to grow a second copy of everything. */}
         {hasActiveClip ? (
-          <button
-            type="button"
-            className="va-sheet-row va-sheet-row-btn va-sheet-row-danger"
-            onClick={onClearClip}
-          >
-            <IconTrash />
-            <span>Clear {activeSideLabel.toLowerCase()} clip</span>
-          </button>
+          <>
+            <span className="va-sheet-divider" aria-hidden="true" />
+
+            <button
+              type="button"
+              className="va-sheet-row va-sheet-row-btn"
+              onClick={onRecordReplacement}
+            >
+              <IconRecord />
+              <span>Record {activeSideLabel.toLowerCase()} clip</span>
+            </button>
+            <button type="button" className="va-sheet-row va-sheet-row-btn" onClick={onReplaceClip}>
+              <IconUpload />
+              <span>Replace {activeSideLabel.toLowerCase()} clip</span>
+            </button>
+            <button
+              type="button"
+              className="va-sheet-row va-sheet-row-btn va-sheet-row-danger"
+              onClick={onClearClip}
+            >
+              <IconTrash />
+              <span>Clear {activeSideLabel.toLowerCase()} clip</span>
+            </button>
+          </>
         ) : null}
 
         <span className="va-sheet-divider" aria-hidden="true" />

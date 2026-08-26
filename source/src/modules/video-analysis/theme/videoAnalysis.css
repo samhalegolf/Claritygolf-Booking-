@@ -294,45 +294,6 @@
   pointer-events: none;
 }
 
-.comparison-video-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
-}
-
-.comparison-side-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #9eb0cf;
-}
-
-.comparison-side-chip .comparison-mode-label {
-  font-size: 11px;
-  color: var(--va-muted);
-  opacity: 0.9;
-  border: 1px solid rgba(148, 169, 222, 0.24);
-  border-radius: 999px;
-  padding: 2px 7px;
-  background: rgba(13, 20, 34, 0.82);
-}
-
-.comparison-video-actions {
-  display: inline-flex;
-  gap: 6px;
-}
-
-.comparison-video-actions .video-action-button {
-  font-size: 12px;
-}
-
-.video-action-button--clear {
-  opacity: 0.82;
-}
-
 .video-canvas-shell {
   border: 1px solid rgba(148, 169, 222, 0.2);
   background: #05070d;

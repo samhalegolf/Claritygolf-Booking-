@@ -16,7 +16,7 @@ import { FocusSnapshot, VideoAnalysis } from "./models/Analysis";
 import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
 import { VideoCanvas } from "./components/VideoCanvas";
-import { IconBack, IconPlay, IconPause, IconRecord, IconUpload } from "./components/VideoIcons";
+import { IconBack, IconRecord, IconUpload } from "./components/VideoIcons";
 import {
   PlayerActionBar,
   PlayerToolRail,
@@ -2530,7 +2530,6 @@ export function VideoWorkspace({
 
   const renderVideoCard = (
     side: ComparisonSide,
-    metadataReady: boolean,
     overlayDimensions: { width: number; height: number },
     setOverlayDimensions: (dimensions: { width: number; height: number }) => void
   ) => {
@@ -2607,48 +2606,36 @@ export function VideoWorkspace({
         );
       }
 
+      /* The second side of a comparison, still empty. It is the same job as
+         the intake panel above -- fill a side -- so it is the same two
+         controls: the drop zone, which takes a click or a drag, and the
+         record button coaches get because they are not on a phone with a
+         native camera sheet. Both name the side in their own label.
+
+         There is no header row over them any more. It held a "Right / empty"
+         chip restating what the drop zone says, and an upload chip that
+         opened the very picker the drop zone underneath it opens. */
       return (
         <div
           className={`comparison-video-panel ${isActive ? "is-active" : ""}`}
           onMouseDown={() => setActiveSideInCompare(side)}
         >
-          <div className="comparison-video-header">
-            <div className="comparison-side-chip">
-              <span>{sideTitle}</span>
-              <span className="comparison-mode-label">empty</span>
-            </div>
-            <div className="comparison-video-actions">
+          {renderUploadDropZone()}
+          {isPlayerVariant ? null : (
+            <div className="video-intake-actions">
               <button
                 type="button"
-                className="video-tool-btn"
-                aria-label={`Record ${sideTitle.toLowerCase()} clip`}
+                className="upload-button video-record-button"
                 onClick={(event) => {
                   event.stopPropagation();
                   void openLiveRecording(side);
                 }}
               >
                 <IconRecord />
-                <span className="video-tool-tip" aria-hidden="true">
-                  Record {sideTitle.toLowerCase()} clip
-                </span>
-              </button>
-              <button
-                type="button"
-                className="video-tool-btn"
-                aria-label={`Upload ${sideTitle.toLowerCase()} clip`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openUpload(side);
-                }}
-              >
-                <IconUpload />
-                <span className="video-tool-tip" aria-hidden="true">
-                  Upload {sideTitle.toLowerCase()} clip
-                </span>
+                Record {sideTitle.toLowerCase()} clip
               </button>
             </div>
-          </div>
-          {renderUploadDropZone(!workspaceHasVideo && side === "left")}
+          )}
         </div>
       );
     }
@@ -2660,77 +2647,21 @@ export function VideoWorkspace({
         }`}
         onMouseDown={() => setActiveSideInCompare(side)}
       >
-        {/* The player has no header row at all. Play is the video itself,
-            and choosing or replacing a clip is what the Videos screen they
-            arrived from is for -- repeating it here put four controls around
-            a picture that only needed to be looked at. Single mode on the
-            coach console now works the same way: Play moved to the action
-            bar, Record/Replace/Clear moved into settings, so there is
-            nothing left this row said that isn't said somewhere else.
-            Compare mode keeps it -- two videos on screen at once is the one
-            case "which side, which clip" is still worth a permanent label. */}
-        {isPlayerVariant || !modeIsCompare ? null : (
-          <div className="comparison-video-header">
-            <div className="comparison-side-chip">
-              <span>
-                {sideTitle} • {getSideLabel(side)}
-              </span>
-              <span className="comparison-mode-label">
-                {metadataReady ? "ready" : "loading"}
-              </span>
-            </div>
-            <div className="comparison-video-actions">
-              <button
-                type="button"
-                className="video-tool-btn"
-                aria-label={`Record ${sideTitle.toLowerCase()} clip`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void openLiveRecording(side);
-                }}
-              >
-                <IconRecord />
-                <span className="video-tool-tip" aria-hidden="true">
-                  Record {sideTitle.toLowerCase()} clip
-                </span>
-              </button>
-              <button
-                type="button"
-                className="video-tool-btn"
-                aria-label={playback.isPlaying ? "Pause" : "Play"}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  playPauseSide(side);
-                }}
-              >
-                {playback.isPlaying ? <IconPause /> : <IconPlay />}
-                <span className="video-tool-tip" aria-hidden="true">
-                  {playback.isPlaying ? "Pause" : "Play"}
-                </span>
-              </button>
-              <button
-                type="button"
-                className="upload-button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openUpload(side);
-                }}
-              >
-                Replace {sideTitle.toLowerCase()} clip
-              </button>
-              <button
-                type="button"
-                className="upload-button video-action-button video-action-button--clear"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  clearCurrentSide(side);
-                }}
-              >
-                Clear {sideTitle.toLowerCase()} clip
-              </button>
-            </div>
-          </div>
-        )}
+        {/* No header row over the picture, in either mode.
+
+            Everything it held has a home that does not depend on which mode
+            you are in. Play is the action bar, and the picture itself.
+            Record, Replace and Clear are the settings sheet, which names the
+            side it is about to act on and follows whichever panel you last
+            touched. Which side this panel is reads off the timeline caption
+            under it ("L Left timeline"), and which one is active reads off
+            the panel's own highlight.
+
+            Compare mode used to keep the row on the grounds that two videos
+            at once is when "which side, which clip" is worth a permanent
+            label. But the timeline caption was already saying it, and the
+            four buttons next to it were not labels -- they were the console
+            coming back the moment you opened a second video. */}
         <div className="video-canvas-shell">
           <VideoCanvas
             sourceUrl={mountedSource}
@@ -3021,7 +2952,6 @@ export function VideoWorkspace({
         <section className="video-intake-panel" aria-label="Add video">
           {renderVideoCard(
             "left",
-            leftMetadataReady,
             leftOverlayDimensions,
             setLeftOverlayDimensions
           )}
@@ -3079,19 +3009,17 @@ export function VideoWorkspace({
             <>
               {renderVideoCard(
                 "left",
-                leftMetadataReady,
                 leftOverlayDimensions,
                 setLeftOverlayDimensions
               )}
               {renderVideoCard(
                 "right",
-                rightMetadataReady,
                 rightOverlayDimensions,
                 setRightOverlayDimensions
               )}
             </>
           ) : (
-            renderVideoCard("left", leftMetadataReady, leftOverlayDimensions, setLeftOverlayDimensions)
+            renderVideoCard("left", leftOverlayDimensions, setLeftOverlayDimensions)
           )}
         </div>
       ) : null}
