@@ -33,6 +33,7 @@ import {
   recordBelongsToAccountStrict,
 } from "./_shared/coach-auth.mts";
 import type { CoachActor } from "./_shared/coach-auth.mts";
+import { authSessionResponse } from "./_shared/auth-contract.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
 import {
   caddyAppUrl,
@@ -10775,7 +10776,9 @@ async function routeBookingApiRequest(
         const adminUserId = legacyUser?.id || authUserId;
         const session = await createAdminSession(adminUserId, authUserId);
         return json(
-          {
+          // Wrapped so the union is checked here: an object literal in this
+          // file infers `role: string` and would accept anything.
+          authSessionResponse({
             authenticated: true,
             // The session vocabulary the app shell routes on -- NOT the
             // membership role, which is reported separately below.
@@ -10784,7 +10787,7 @@ async function routeBookingApiRequest(
             email: loginEmail,
             accountId: membership.accountId,
             expiresAt: session.expiresAt,
-          },
+          }),
           200,
           { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
         );
@@ -10885,13 +10888,36 @@ async function routeBookingApiRequest(
           400,
         );
       }
-      const session = await createAdminSession(result.user);
+      // Mint the session the same way the login route does: linked to the
+      // Supabase identity and checked against a membership. Without the link
+      // the session carries no auth_user_id, so requireCoachActor refuses every
+      // request after it -- a reset that "succeeds" and then cannot do anything.
+      const resetAuthUserId = await findCoachAuthUserId(result.user.email);
+      const resetMembership = resetAuthUserId
+        ? await resolveMembershipForAuthUser(resetAuthUserId)
+        : null;
+      if (!resetMembership) {
+        return json(
+          authSessionResponse({
+            authenticated: false,
+            role: "guest",
+            error: "membership_required",
+            message:
+              "Your password was changed, but this login is not attached to a business workspace yet.",
+          }),
+          403,
+        );
+      }
+      const session = await createAdminSession(result.user, resetAuthUserId);
       return json(
-        {
+        authSessionResponse({
           authenticated: true,
+          role: sessionRoleForMembership(resetMembership.role),
+          accountRole: resetMembership.role,
           email: result.user.email,
+          accountId: resetMembership.accountId,
           expiresAt: session.expiresAt,
-        },
+        }),
         200,
         { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
       );
@@ -10940,13 +10966,21 @@ async function routeBookingApiRequest(
           400,
         );
       }
-      const session = await createAdminSession(result.user);
+      // The new session must carry the same Supabase identity the old one did,
+      // or the coach is signed out in all but name: requireCoachActor would
+      // find no auth_user_id and refuse every request. requireAdmin above
+      // already resolved this actor, so it is cached.
+      const changeActor = await currentActor(req);
+      const session = await createAdminSession(result.user, changeActor.authUserId);
       return json(
-        {
+        authSessionResponse({
           authenticated: true,
+          role: sessionRoleForMembership(changeActor.role),
+          accountRole: changeActor.role,
           email: result.user.email,
+          accountId: changeActor.accountId,
           expiresAt: session.expiresAt,
-        },
+        }),
         200,
         { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
       );
@@ -10980,20 +11014,24 @@ async function routeBookingApiRequest(
           // renders as the sign-in screen. A non-2xx here is read as the
           // session API being down, which is a worse and less true story. Every
           // route that actually returns data still refuses with 403.
-          return json({
-            authenticated: false,
-            role: "guest",
-            error: "membership_required",
-            message: "This login is not attached to a business workspace yet.",
-          });
+          return json(
+            authSessionResponse({
+              authenticated: false,
+              role: "guest",
+              error: "membership_required",
+              message: "This login is not attached to a business workspace yet.",
+            }),
+          );
         }
-        return json({
-          authenticated: true,
-          role: sessionRoleForMembership(membership.role),
-          accountRole: membership.role,
-          email: session.email,
-          accountId: membership.accountId,
-        });
+        return json(
+          authSessionResponse({
+            authenticated: true,
+            role: sessionRoleForMembership(membership.role),
+            accountRole: membership.role,
+            email: session.email,
+            accountId: membership.accountId,
+          }),
+        );
       }
       const player = await readPlayerSession(playerSessionTokenFromRequest(req));
       if (player) {

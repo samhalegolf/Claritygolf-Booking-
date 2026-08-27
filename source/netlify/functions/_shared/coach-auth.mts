@@ -11,6 +11,7 @@
 
 import { getDatabase } from "@netlify/database";
 import { LEGACY_DEFAULT_ACCOUNT_ID } from "./account.mts";
+import type { AccountRole, AppUserRole, SessionRole } from "./auth-contract.mts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 const sessionCookieName = "clarity_session";
@@ -74,7 +75,8 @@ function parseCookies(req: Request): Record<string, string> {
   );
 }
 
-export type CoachRole = "owner" | "admin" | "coach";
+/** The membership vocabulary. Defined once, in _shared/auth-contract.mts. */
+export type CoachRole = AccountRole;
 
 export type CoachActor = {
   authUserId: string;
@@ -444,13 +446,13 @@ export async function createCoachSession(input: {
  * exist so that translation happens in one place instead of being re-guessed
  * at each boundary.
  */
-export function sessionRoleForMembership(_role: CoachRole): "coach" {
+export function sessionRoleForMembership(_role: CoachRole): SessionRole {
   // Every account membership is a coach-app session. The player portal has its
   // own login path and never comes through here.
   return "coach";
 }
 
-export function appUserRoleForMembership(role: CoachRole): "account_admin" | "coach" {
+export function appUserRoleForMembership(role: CoachRole): AppUserRole {
   // An owner and an account admin get the same permissions inside the app; the
   // difference between them is ownership, which lives on the membership row.
   return role === "coach" ? "coach" : "account_admin";

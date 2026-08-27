@@ -10,8 +10,16 @@
 // would put the token somewhere the portal and the coach app cannot see.
 
 import { apiFetch, clearAuthToken, setAuthToken } from "./apiFetch";
+// The same definitions the auth endpoints answer with. Imported rather than
+// restated so the client cannot expect a vocabulary the server does not send --
+// which is what let a successful login read as a guest. src/ already imports
+// from _shared for this reason (see phone.mts).
+import type {
+  AuthSessionResponse,
+  SessionRole as WireSessionRole,
+} from "../../../netlify/functions/_shared/auth-contract.mts";
 
-export type SessionRole = "guest" | "coach" | "player";
+export type SessionRole = WireSessionRole;
 
 export type Session = {
   role: SessionRole;
@@ -21,15 +29,7 @@ export type Session = {
 
 export const guestSession: Session = { role: "guest", email: "", name: "" };
 
-type SessionResponse = {
-  authenticated?: boolean;
-  role?: string;
-  email?: string;
-  name?: string;
-  message?: string;
-  /** Native clients only -- the browser gets a cookie instead. */
-  token?: string;
-};
+type SessionResponse = Partial<AuthSessionResponse>;
 
 function toSession(data: SessionResponse | null | undefined): Session {
   if (!data?.authenticated) return guestSession;

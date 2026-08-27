@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } 
 
 import { apiFetch } from "./apiFetch";
 import { login, sessionFromLoginResponse, type Session } from "./session";
+import type { AuthSessionResponse } from "../../../netlify/functions/_shared/auth-contract.mts";
 
 // The single front door. It used to live inside App.tsx, which meant a player
 // had to download the whole coach workspace just to reach a sign-in form. It is
@@ -177,19 +178,15 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: resetToken, password: newPassword }),
       });
-      const data = (await response.json().catch(() => ({}))) as {
-        authenticated?: boolean;
-        role?: string;
-        email?: string;
-        message?: string;
-      };
+      const data = (await response.json().catch(() => ({}))) as Partial<AuthSessionResponse>;
       if (!response.ok || !data.authenticated) {
         setError(data.message || "Could not reset password.");
         return;
       }
       clearQueryString();
-      // The reset route only ever signs a coach in.
-      onSignedIn(sessionFromLoginResponse({ ...data, role: data.role || "coach" }));
+      // The route answers with a session role of its own now, so there is
+      // nothing to fill in here.
+      onSignedIn(sessionFromLoginResponse(data));
     } catch {
       setError("Could not reach the booking server.");
     } finally {
