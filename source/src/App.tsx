@@ -5528,6 +5528,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     const now = new Date();
     return now.getHours() * 60 + now.getMinutes();
   });
+  // Which calendar day it currently is. buildWeekDays reads new Date() when it
+  // runs and is memoised on the week, so a calendar left open overnight kept
+  // yesterday labelled Today and drew the now line down yesterday's column
+  // until the week was changed. Ticked by the same interval as the minute
+  // above; a string date so re-renders happen once a day, not once a minute.
+  const [todayStamp, setTodayStamp] = useState(() => new Date().toDateString());
   const [calendarPerspective, setCalendarPerspective] = useState<CalendarPerspective>("all");
   const [calendarCoachFilterId, setCalendarCoachFilterId] = useState("");
   const [calendarLocationFilterId, setCalendarLocationFilterId] = useState("");
@@ -5797,6 +5803,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // grid is driven from it and never scrolled directly.
   const weekStripRef = useRef<HTMLDivElement | null>(null);
   const weekPanelsRef = useRef<HTMLDivElement | null>(null);
+  // The vertical scroller (.calendar-scroll). The week pager owns the
+  // horizontal axis; this is the only thing that moves up and down.
+  const calendarScrollRef = useRef<HTMLDivElement | null>(null);
   const weekSettleTimerRef = useRef<number | null>(null);
   const weekLandingTimerRef = useRef<number | null>(null);
   // Set while the pager repositions itself, so the scroll events that causes
@@ -5988,7 +5997,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         day: "numeric",
       })
     : "";
-  const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek]);
+  // todayStamp is a dependency, not decoration: isToday is baked in here.
+  const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek, todayStamp]);
   const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
   const accountItems = useMemo(
     () =>
@@ -8433,10 +8443,36 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     return () => window.removeEventListener("resize", sync);
   }, []);
 
+  // Opening the calendar lands on the current time. Deliberately keyed off the
+  // calendar becoming visible and not off the week: paging to next week, or
+  // opening a lesson, must not yank the grid back to now under the coach.
+  const calendarOpenedRef = useRef(false);
+  useEffect(() => {
+    // adminWorkspaceReady itself is declared further down the component, so
+    // this uses the two values it is built from.
+    const ready = isEmbedMode || adminWorkspaceLoadStatus === "loaded";
+    if (activeView !== "calendar" || !ready) {
+      calendarOpenedRef.current = false;
+      return;
+    }
+    if (calendarOpenedRef.current) return;
+    calendarOpenedRef.current = true;
+    // One frame, so .calendar-scroll has been laid out and has a height to
+    // measure before anything tries to scroll it.
+    const frame = window.requestAnimationFrame(() => scrollCalendarToNow());
+    return () => window.cancelAnimationFrame(frame);
+    // scrollCalendarToNow reads refs and the axis, both current by the time
+    // the frame runs; re-running this on either would defeat the point.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, adminWorkspaceLoadStatus, isEmbedMode]);
+
   useEffect(() => {
     const tick = window.setInterval(() => {
       const now = new Date();
       setCalendarNowMinutes(now.getHours() * 60 + now.getMinutes());
+      // Unchanged on 1439 of every 1440 ticks, and React drops a set to the
+      // same string, so this costs nothing until the date actually rolls over.
+      setTodayStamp(now.toDateString());
     }, 60_000);
     return () => window.clearInterval(tick);
   }, []);
@@ -9724,6 +9760,51 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     setActiveWeek(nextWeek);
     closeCalendarDetails();
     setQuickCreate(null);
+  }
+
+  /**
+   * Put the current time near the top of the grid.
+   *
+   * The grid is a full trading day tall, and nothing ever scrolled it, so the
+   * calendar always opened on the small hours — every evening lesson meant
+   * scrolling down first. A fifth of the way down rather than centred: enough
+   * of the lesson that just finished to orient by, without handing half the
+   * screen to a part of the day that is already over.
+   */
+  function scrollCalendarToNow() {
+    const scroller = calendarScrollRef.current;
+    if (!scroller) return;
+    const now = new Date();
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    // Before the calendar's first hour or after its last there is no "now" on
+    // the grid to aim at, and the top of the day is the honest answer.
+    if (minutes < calendarStartMinutes || minutes > calendarEndMinutes) {
+      scroller.scrollTop = 0;
+      return;
+    }
+    scroller.scrollTop = Math.max(0, calendarMinutesToTop(minutes) - scroller.clientHeight * 0.2);
+  }
+
+  /**
+   * Today has to do its work even when the week number does not change — which
+   * is the case you hit most. setActiveWeek with the value it already holds is
+   * a no-op in React, so the effect that re-centres the pager never re-ran and
+   * a strip parked mid-swipe stayed parked. Everything is therefore called
+   * outright here rather than left for a state change to trigger.
+   */
+  function goToToday() {
+    const week = getCurrentWeekOffset();
+    setActiveWeekState(week);
+    // Null means the desktop week view, which has no single focused day. On a
+    // phone the focus is otherwise only ever set when the viewport crosses the
+    // breakpoint, so Today changed the week and left you on, say, Friday.
+    setCalendarDayFocus((current) => {
+      if (current === null) return null;
+      const index = buildWeekDays(week).findIndex((day) => day.isToday);
+      return index >= 0 ? index : current;
+    });
+    centreWeekPager();
+    scrollCalendarToNow();
   }
 
   // --- Week pager ----------------------------------------------------------
@@ -20640,7 +20721,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 <ArrowLeft size={16} />
                 Prev
               </button>
-              <button className="outline-button" onClick={() => setActiveWeekState(getCurrentWeekOffset())}>
+              <button className="outline-button" onClick={goToToday}>
                 Today
               </button>
               <button className="outline-button" onClick={() => moveWeek(1)}>
@@ -21032,7 +21113,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               </div>
             </div>
 
-            <div className="calendar-scroll">
+            <div className="calendar-scroll" ref={calendarScrollRef}>
               <div className="time-column" style={{ height: gridHeight }}>
                 {visibleCalendarHourMarks.map(({ hour, top }) => {
                   return (
