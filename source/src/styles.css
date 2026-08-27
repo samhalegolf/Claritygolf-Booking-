@@ -9291,10 +9291,41 @@ button {
   opacity: 0.6;
 }
 
+/* A saved rule reads back as a sentence rather than the form that made it. */
+.gcal-rule-card.is-summary {
+  gap: 10px;
+}
+
 .gcal-rule-head {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.gcal-rule-summary {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.gcal-rule-summary strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.gcal-rule-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.gcal-rule-summary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .gcal-rule-name {
