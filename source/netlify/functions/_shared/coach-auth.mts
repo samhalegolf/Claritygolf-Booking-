@@ -430,6 +430,32 @@ export async function createCoachSession(input: {
   return { token, expiresAt };
 }
 
+/**
+ * Three different role vocabularies meet at the login response, and they are
+ * not interchangeable:
+ *
+ *   membership role   owner | admin | coach          -- which account you act for
+ *   session role      guest | coach | player         -- which app shell loads
+ *   app user role     account_admin | coach | staff  -- permissions inside it
+ *
+ * Sending a membership role where a session role was expected is what made a
+ * successful login sit on the sign-in screen with no error: "owner" is not in
+ * the session vocabulary, so the client read it as a guest. These two mappers
+ * exist so that translation happens in one place instead of being re-guessed
+ * at each boundary.
+ */
+export function sessionRoleForMembership(_role: CoachRole): "coach" {
+  // Every account membership is a coach-app session. The player portal has its
+  // own login path and never comes through here.
+  return "coach";
+}
+
+export function appUserRoleForMembership(role: CoachRole): "account_admin" | "coach" {
+  // An owner and an account admin get the same permissions inside the app; the
+  // difference between them is ownership, which lives on the membership row.
+  return role === "coach" ? "coach" : "account_admin";
+}
+
 /** Strict account membership check — no NULL accountId passes. */
 export function userBelongsToAccountStrict(
   user: { accountId?: string | null } | null | undefined,

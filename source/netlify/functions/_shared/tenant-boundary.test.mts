@@ -26,9 +26,11 @@ import test from "node:test";
 
 import { setDatabaseForTests } from "./database.mts";
 import {
+  appUserRoleForMembership,
   recordBelongsToAccountStrict,
   requireCoachActor,
   resolvePublicAccount,
+  sessionRoleForMembership,
   userBelongsToAccountStrict,
 } from "./coach-auth.mts";
 import {
@@ -504,4 +506,43 @@ test("a new business's invoices carry no reference to the original one", () => {
   // not a broken one.
   assert.equal(account.invoiceSettings.prefix, "INV");
   assert.equal(account.invoiceSettings.enabled, true);
+});
+
+// --- The login response's role vocabulary -----------------------------------
+//
+// Three vocabularies meet here and are not interchangeable: the membership role
+// (owner/admin/coach), the session role the app shell routes on
+// (guest/coach/player), and the app-user role permissions are read from
+// (account_admin/coach/staff). Sending a membership role where a session role
+// was expected made a *successful* login sit on the sign-in screen with no
+// error at all -- 200, authenticated: true, and the client read "owner" as a
+// guest. These pin the translation.
+
+test("an owner signs in as a coach session, not as their membership role", () => {
+  // "owner" is not a value the app shell knows; it would fall through to guest.
+  assert.equal(sessionRoleForMembership("owner"), "coach");
+  assert.equal(sessionRoleForMembership("admin"), "coach");
+  assert.equal(sessionRoleForMembership("coach"), "coach");
+});
+
+test("the session role is always one the client can route on", () => {
+  const routable = new Set(["guest", "coach", "player"]);
+  for (const role of ["owner", "admin", "coach"] as const) {
+    assert.ok(
+      routable.has(sessionRoleForMembership(role)),
+      `${role} must map into the session vocabulary`,
+    );
+  }
+});
+
+test("an owner gets admin permissions in the app, under a role the app knows", () => {
+  // cleanAppUser only accepts account_admin | coach | staff | platform_admin |
+  // admin. "owner" would be discarded and the user silently demoted.
+  const known = new Set(["account_admin", "coach", "staff", "platform_admin", "admin"]);
+  assert.equal(appUserRoleForMembership("owner"), "account_admin");
+  assert.equal(appUserRoleForMembership("admin"), "account_admin");
+  assert.equal(appUserRoleForMembership("coach"), "coach");
+  for (const role of ["owner", "admin", "coach"] as const) {
+    assert.ok(known.has(appUserRoleForMembership(role)), `${role} must map into the app-user vocabulary`);
+  }
 });

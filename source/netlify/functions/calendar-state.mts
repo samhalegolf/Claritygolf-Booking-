@@ -5,7 +5,11 @@ import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/accoun
 import { activeCurrency } from "./_shared/locale.mts";
 import { setActivePhoneCountry } from "./_shared/phone.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
-import { requireCoachActor, recordBelongsToAccountStrict } from "./_shared/coach-auth.mts";
+import {
+  requireCoachActor,
+  recordBelongsToAccountStrict,
+  appUserRoleForMembership,
+} from "./_shared/coach-auth.mts";
 
 type BookingCoreModule = {
   handleBookingApiRoute: (req: Request, forcedPathname?: string, context?: Context) => Promise<Response> | Response;
@@ -757,7 +761,9 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
     id: actor.authUserId,
     accountId,
     name: coachName,
-    role: actor.role,
+    // The app-user vocabulary the calendar reads permissions from, not the
+    // membership vocabulary -- "owner" is not a role this app knows.
+    role: appUserRoleForMembership(actor.role),
     coachId: actor.coachId || defaultCoachId,
     permissions: actor.isAdmin
       ? {

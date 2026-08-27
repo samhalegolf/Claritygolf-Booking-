@@ -22,6 +22,8 @@ import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/accoun
 import {
   requireCoachActor,
   resolveMembershipForAuthUser,
+  sessionRoleForMembership,
+  appUserRoleForMembership,
   resolvePublicAccount,
   ensureLegacyOwnerMembershipIfMissing,
   createCoachSession,
@@ -9080,7 +9082,7 @@ function appUserForActor(actor, settings = {}) {
     accountId: actor.accountId,
     name: cleanString(settingValue(settings, "accountCoachName"), "", 120) || "Coach",
     email: "",
-    role: actor.isAdmin ? "admin" : "coach",
+    role: appUserRoleForMembership(actor.role),
     coachId: actor.coachId,
     active: true,
     permissions: actor.isAdmin
@@ -10775,7 +10777,10 @@ async function routeBookingApiRequest(
         return json(
           {
             authenticated: true,
-            role: membership.role,
+            // The session vocabulary the app shell routes on -- NOT the
+            // membership role, which is reported separately below.
+            role: sessionRoleForMembership(membership.role),
+            accountRole: membership.role,
             email: loginEmail,
             accountId: membership.accountId,
             expiresAt: session.expiresAt,
@@ -10984,7 +10989,8 @@ async function routeBookingApiRequest(
         }
         return json({
           authenticated: true,
-          role: membership.role,
+          role: sessionRoleForMembership(membership.role),
+          accountRole: membership.role,
           email: session.email,
           accountId: membership.accountId,
         });
