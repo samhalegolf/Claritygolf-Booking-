@@ -1,6 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { createExternalPerson, matchPersonByEmail, integrationRequest, rowsOf } from "./db.mts";
+import {
+  createExternalPerson,
+  integrationRequest,
+  matchPersonByEmail,
+  matchPersonByProviderCustomerId,
+  rowsOf,
+  type PersonLinkSource,
+} from "./db.mts";
 import { recordPassPurchase } from "./purchases.mts";
 import { text } from "./payload.mts";
 import { canonicalPhoneKey } from "../phone.mts";
@@ -213,6 +220,10 @@ export function isDeletedInClarityLink(link: any): boolean {
   return Boolean(link) && text(link?.processing_status) === "deleted_in_clarity";
 }
 
+function isCancelledWithoutLesson(link: any): boolean {
+  return Boolean(link) && text(link?.processing_status) === "cancelled" && !text(link?.clarity_item_id);
+}
+
 export async function findExternalLink(provider: ExternalProvider, externalBookingId: string, purpose = "lesson") {
   const rows = await integrationRequest(`external_booking_links?provider=eq.${provider}&purpose=eq.${purpose}&external_booking_id=eq.${encodeURIComponent(externalBookingId)}&limit=1`);
   return Array.isArray(rows) ? rows[0] || null : null;
@@ -258,10 +269,19 @@ async function findMapping(event: NormalizedBookingEvent, provider: ExternalProv
   };
 }
 
-async function resolvePerson(event: NormalizedBookingEvent, accountId: string, provider: ExternalProvider) {
+async function resolvePerson(
+  event: NormalizedBookingEvent,
+  accountId: string,
+  provider: ExternalProvider,
+): Promise<{ personId: string; linkSource: PersonLinkSource }> {
   const name = customerName(event);
   if (!name) throw Object.assign(new Error("Optix customer identity is missing."), { code: "missing_customer_identity" });
   const account = encodeURIComponent(accountId);
+
+  if (event.providerCustomerId) {
+    const matched = await matchPersonByProviderCustomerId(provider, event.providerCustomerId);
+    if (matched) return { personId: matched, linkSource: "provider_customer" };
+  }
 
   // Email is the only auto-match. When it matches exactly one person —
   // external or main — the booking files under that client id; anything less
@@ -269,14 +289,64 @@ async function resolvePerson(event: NormalizedBookingEvent, accountId: string, p
   if (event.email) {
     const rows = await integrationRequest(`people?account_id=eq.${account}&email=ilike.${encodeURIComponent(event.email)}&select=id,name,email,phone&limit=10`);
     const matched = matchPersonByEmail(rowsOf(rows), event.email);
-    if (matched) return matched;
+    if (matched) return { personId: matched, linkSource: "email" };
   }
 
-  return createExternalPerson(accountId, provider, { name, email: event.email || null, phone: event.phone || null });
+  return {
+    personId: await createExternalPerson(accountId, provider, {
+      name,
+      email: event.email || null,
+      phone: event.phone || null,
+    }),
+    linkSource: "new",
+  };
 }
 
 async function updateEvent(eventKey: string, values: Record<string, unknown>) {
   await integrationRequest(`optix_webhook_events?event_key=eq.${encodeURIComponent(eventKey)}`, { method: "PATCH", body: JSON.stringify({ ...values, updated_at: new Date().toISOString() }) });
+}
+
+async function writeCancelledLink(args: {
+  provider: ExternalProvider;
+  event: NormalizedBookingEvent;
+  personId?: string | null;
+  personLinkSource?: PersonLinkSource;
+}) {
+  await integrationRequest("external_booking_links?on_conflict=provider,purpose,external_booking_id", {
+    method: "POST",
+    headers: { prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify([{
+      provider: args.provider,
+      purpose: "lesson",
+      external_booking_id: args.event.bookingId,
+      clarity_item_id: null,
+      person_id: args.personId || null,
+      person_link_source: args.personLinkSource || null,
+      provider_customer_id: args.event.providerCustomerId || null,
+      origin: args.provider,
+      workspace_id: args.event.workspaceId,
+      organisation_id: args.event.organisationId,
+      processing_status: "cancelled",
+      email_status: "suppressed",
+      updated_at: new Date().toISOString(),
+    }]),
+  });
+}
+
+async function hasNewerCancellationRecorded(
+  eventKey: string,
+  externalBookingId: string,
+  receivedAt: string,
+) {
+  if (!externalBookingId || !receivedAt) return false;
+  const rows = await integrationRequest(
+    `optix_webhook_events?external_booking_id=eq.${encodeURIComponent(externalBookingId)}` +
+      `&received_at=gt.${encodeURIComponent(receivedAt)}` +
+      `&event_type=eq.member_booking_cancelled` +
+      `&event_key=neq.${encodeURIComponent(eventKey)}` +
+      `&select=event_key&order=received_at.asc&limit=1`,
+  ).catch(() => []);
+  return Array.isArray(rows) && rows.length > 0;
 }
 
 /**
@@ -362,8 +432,11 @@ export async function processStoredExternalEvent(
     await updateEvent(eventKey, { processing_status: "failed", failure_code: String(error?.code || "invalid_event"), error_message: error instanceof Error ? error.message.slice(0, 1000) : "Event failed validation." }).catch(() => undefined);
     throw error;
   }
-  const attemptRows = await integrationRequest(`optix_webhook_events?event_key=eq.${encodeURIComponent(eventKey)}&select=attempt_count&limit=1`).catch(() => []);
+  const attemptRows = await integrationRequest(
+    `optix_webhook_events?event_key=eq.${encodeURIComponent(eventKey)}&select=attempt_count,received_at&limit=1`,
+  ).catch(() => []);
   const attemptCount = Number(attemptRows?.[0]?.attempt_count || 0) + 1;
+  const receivedAt = text(attemptRows?.[0]?.received_at);
   await updateEvent(eventKey, { processing_status: "processing", attempt_count: attemptCount });
   try {
     const mapping = await findMapping(event, provider);
@@ -389,6 +462,35 @@ export async function processStoredExternalEvent(
       });
       return { status: "ignored", reason: "deleted_in_clarity" };
     }
+    if (isCancelledWithoutLesson(existing) && event.kind !== "booking.cancelled") {
+      await updateEvent(eventKey, {
+        processing_status: "ignored",
+        failure_code: "superseded_by_cancelled",
+        error_message: "A newer Optix cancellation is already stored for this booking, so the older event was ignored.",
+        processed_at: new Date().toISOString(),
+      });
+      return { status: "ignored", reason: "superseded_by_cancelled" };
+    }
+    if (!existing && event.kind === "booking.created" && await hasNewerCancellationRecorded(eventKey, event.bookingId, receivedAt)) {
+      await writeCancelledLink({ provider, event });
+      await updateEvent(eventKey, {
+        processing_status: "ignored",
+        failure_code: "superseded_by_cancelled",
+        error_message: "A newer Optix cancellation already exists for this booking, so the older create was not imported.",
+        processed_at: new Date().toISOString(),
+      });
+      return { status: "ignored", reason: "superseded_by_cancelled" };
+    }
+    if (!existing && event.kind === "booking.cancelled") {
+      await writeCancelledLink({ provider, event });
+      await updateEvent(eventKey, {
+        processing_status: "processed",
+        failure_code: null,
+        error_message: null,
+        processed_at: new Date().toISOString(),
+      });
+      return { status: "processed", clarityItemId: null, created: false, mapping, item: { id: "", status: "cancelled" } };
+    }
     if (!existing && event.kind !== "booking.created") {
       await updateEvent(eventKey, { processing_status: "ignored", failure_code: "missing_lesson_link", processed_at: new Date().toISOString() });
       return { status: "ignored", reason: "missing_lesson_link" };
@@ -402,7 +504,11 @@ export async function processStoredExternalEvent(
       });
       await integrationRequest(`external_booking_links?provider=eq.${provider}&purpose=eq.lesson&external_booking_id=eq.${encodeURIComponent(event.bookingId)}`, {
         method: "PATCH",
-        body: JSON.stringify({ processing_status: "cancelled", updated_at: new Date().toISOString() }),
+        body: JSON.stringify({
+          processing_status: "cancelled",
+          provider_customer_id: event.providerCustomerId || null,
+          updated_at: new Date().toISOString(),
+        }),
       });
       await updateEvent(eventKey, { processing_status: "processed", clarity_item_id: itemId, failure_code: null, error_message: null, processed_at: new Date().toISOString() });
       return { status: "processed", clarityItemId: itemId, created: false, mapping, item: { id: itemId, status: "cancelled" } };
@@ -422,7 +528,13 @@ export async function processStoredExternalEvent(
         return { status: "ignored", reason: "duplicate_existing_booking", clarityItemId: duplicateOf };
       }
     }
-    const personId = existing?.person_id || linkedItem?.person_id || await resolvePerson(event, mapping.accountId, provider);
+    const resolvedPerson = existing?.person_id || linkedItem?.person_id
+      ? {
+          personId: existing?.person_id || linkedItem?.person_id,
+          linkSource: "" as PersonLinkSource,
+        }
+      : await resolvePerson(event, mapping.accountId, provider);
+    const personId = resolvedPerson.personId;
     const item = createCalendarItemFromOptixBooking(event, mapping, { itemId, personId });
     if (existing) {
       // Patch only what Optix owns. Rebuilding the whole item here is what used
@@ -436,7 +548,11 @@ export async function processStoredExternalEvent(
       headers: { prefer: "resolution=merge-duplicates,return=representation" },
       body: JSON.stringify([{
         provider, purpose: "lesson", external_booking_id: event.bookingId,
-        clarity_item_id: itemId, person_id: personId, origin: provider,
+        clarity_item_id: itemId,
+        person_id: personId,
+        person_link_source: resolvedPerson.linkSource || null,
+        provider_customer_id: event.providerCustomerId || null,
+        origin: provider,
         workspace_id: event.workspaceId, organisation_id: event.organisationId,
         processing_status: item.status === "cancelled" ? "cancelled" : "bay_required",
         email_status: mapping.emailBehaviour === "immediate" ? "pending" : mapping.emailBehaviour === "after_bay" ? "waiting_for_bay" : "suppressed",

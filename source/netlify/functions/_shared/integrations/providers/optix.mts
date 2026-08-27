@@ -67,6 +67,23 @@ export function normalizeOptixBooking(payload: any): NormalizedBookingEvent {
     kind: optixEventKind(payload),
     rawEventType: optixRawEventType(payload),
     bookingId: text(pick(payload, "booking_id", "booking.id", "id")),
+    // Top-level client_id is the Optix app credential used to sign the webhook,
+    // not the customer. Reusing it here would collapse every booking onto one
+    // fake "customer" identity, so only member/customer/account identifiers
+    // that vary per person are allowed.
+    providerCustomerId: text(
+      pick(
+        payload,
+        "member.id",
+        "member.member_id",
+        "member_id",
+        "customer.id",
+        "customer.customer_id",
+        "customer_id",
+        "account_id",
+        "account",
+      ),
+    ),
     organisationId: text(pick(payload, "organization_id", "organisation_id", "booking.organization_id", "booking.organisation_id")),
     workspaceId: text(pick(payload, "workspace_id", "workspace.id", "booking.workspace_id", "booking.workspace.id")),
     workspaceName: text(pick(payload, "workspace_name", "workspace.name", "booking.workspace_name", "booking.workspace.name")),

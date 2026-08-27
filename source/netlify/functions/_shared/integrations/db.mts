@@ -118,6 +118,8 @@ function isDuplicateEmailError(error: any) {
 
 export type NewExternalPerson = { name: string; email?: string | null; phone?: string | null };
 
+export type PersonLinkSource = "email" | "provider_customer" | "new" | "";
+
 /**
  * Files someone Clarity has never seen arriving from a provider, whether that
  * provider sent a booking or a purchase.
@@ -148,4 +150,26 @@ export async function createExternalPerson(accountId: string, provider: string, 
     if (matched) return matched;
     throw error;
   }
+}
+
+/**
+ * A provider-issued customer id is safer than a name guess and survives across
+ * multiple bookings. Reuse it only when every existing link points at the same
+ * person; conflicting history is ambiguity, not a tiebreaker.
+ */
+export async function matchPersonByProviderCustomerId(
+  provider: string,
+  providerCustomerId: string,
+  purpose = "lesson",
+): Promise<string | null> {
+  const customerId = text(providerCustomerId);
+  if (!customerId) return null;
+  const rows = await integrationRequest(
+    `external_booking_links?provider=eq.${encodeURIComponent(provider)}` +
+      `&purpose=eq.${encodeURIComponent(purpose)}` +
+      `&provider_customer_id=eq.${encodeURIComponent(customerId)}` +
+      `&select=person_id&limit=50`,
+  ).catch(() => []);
+  const unique = [...new Set(rowsOf(rows).map((row) => text((row as any)?.person_id)).filter(Boolean))];
+  return unique.length === 1 ? unique[0] : null;
 }

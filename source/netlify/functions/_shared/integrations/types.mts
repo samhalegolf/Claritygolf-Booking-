@@ -79,6 +79,7 @@ export type NormalizedBookingEvent = {
   kind: IntegrationEventKind;
   rawEventType: string;
   bookingId: string;
+  providerCustomerId: string;
   organisationId: string;
   workspaceId: string;
   workspaceName: string;

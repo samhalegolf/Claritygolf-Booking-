@@ -17,8 +17,32 @@ const payload = {
   event: "new_member_booking", booking_id: "swing-123", organization_id: "org-1",
   workspace_id: 637949, workspace_name: "Swing Analysis",
   check_in_timestamp: "2026-08-03T02:00:00.000Z", check_out_timestamp: "2026-08-03T03:00:00.000Z",
-  timezone: "Pacific/Auckland", member: { first_name: "Ada", last_name: "Lovelace", email: "ADA@example.com", phone: "0211" },
+  timezone: "Pacific/Auckland", member: { id: "member-77", first_name: "Ada", last_name: "Lovelace", email: "ADA@example.com", phone: "0211" },
 };
+
+function withMockSupabase(handlers: Record<string, (url: string, init: RequestInit) => Response>) {
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.SUPABASE_URL;
+  const originalKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.SUPABASE_URL = "https://supabase.example";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key";
+  const calls: { url: string; init: RequestInit }[] = [];
+  globalThis.fetch = async (input: any, init: RequestInit = {}) => {
+    const url = String(input);
+    calls.push({ url, init });
+    const handler = Object.entries(handlers).find(([table]) => url.includes(`/rest/v1/${table}`))?.[1];
+    if (!handler) throw new Error(`No mock handler for ${url}`);
+    return handler(url, init);
+  };
+  return {
+    calls,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+      if (originalUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = originalUrl;
+      if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = originalKey;
+    },
+  };
+}
 
 test("workspace 637949 creates the canonical calendar appointment contract", () => {
   const event = normalizeOptixBooking(payload);
@@ -32,6 +56,27 @@ test("workspace 637949 creates the canonical calendar appointment contract", () 
   assert.equal(item.person_id, "person-1");
   assert.equal(item.external_booking_id, "swing-123");
   assert.equal(item.external_sync_state, "bay_required");
+});
+
+test("provider customer identity comes from the member, not the webhook app client id", () => {
+  const event = normalizeOptixBooking({
+    ...payload,
+    client_id: "optix-app-client",
+    member: undefined,
+    member_id: "member-99",
+    member_name: "Ada",
+    member_last_name: "Lovelace",
+  });
+  assert.equal(event.providerCustomerId, "member-99");
+
+  const noMemberId = normalizeOptixBooking({
+    ...payload,
+    member: undefined,
+    client_id: "optix-app-client",
+    member_name: "Ada",
+    member_last_name: "Lovelace",
+  });
+  assert.equal(noMemberId.providerCustomerId, "");
 });
 
 test("reads Optix form payload member_name instead of creating an Optix customer placeholder", () => {
@@ -235,4 +280,88 @@ test("a tombstoned booking is recognised whatever event arrives about it", () =>
   assert.equal(isDeletedInClarityLink({ processing_status: "cancelled", clarity_item_id: "optix-1" }), false);
   assert.equal(isDeletedInClarityLink(null), false);
   assert.equal(isDeletedInClarityLink(undefined), false);
+});
+
+test("a booking reuses the person already linked to the same provider customer", async () => {
+  const { processStoredExternalEvent } = await import("./ingest.mts");
+  const mock = withMockSupabase({
+    optix_webhook_events: (url, init) => {
+      if (init.method === "PATCH") return new Response("[]", { status: 200 });
+      if (url.includes("event_key=eq.event-1")) {
+        return new Response(JSON.stringify([{ attempt_count: 0, received_at: "2026-08-27T00:00:00.000Z" }]), { status: 200 });
+      }
+      if (url.includes("external_booking_id=eq.swing-123")) return new Response("[]", { status: 200 });
+      return new Response("[]", { status: 200 });
+    },
+    external_booking_mappings: () => new Response(JSON.stringify([{
+      provider: "optix", organisation_id: "org-1", workspace_id: "637949", workspace_name: "Swing Analysis",
+      account_id: "sam-hale-golf", location_id: "three-kings", default_coach_id: "sam-hale", enabled: true, expected_duration: 60, bay_profile_id: "standard", email_behaviour: "none",
+    }]), { status: 200 }),
+    external_booking_links: (url, init) => {
+      if (!init.method || init.method === "GET") {
+        if (url.includes("provider_customer_id=eq.member-77")) {
+          return new Response(JSON.stringify([{ person_id: "existing-person" }]), { status: 200 });
+        }
+        return new Response("[]", { status: 200 });
+      }
+      return new Response(JSON.stringify([{ ok: true }]), { status: 201 });
+    },
+    calendar_items: (_url, init) => {
+      if (init.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        assert.equal(body[0].origin, "optix");
+        assert.equal(body[0].person_id, "existing-person");
+      }
+      return new Response(JSON.stringify([{ id: "optix-item-1" }]), { status: 201 });
+    },
+    people: () => new Response("[]", { status: 200 }),
+  });
+  try {
+    const result: any = await processStoredExternalEvent("optix", "event-1", payload);
+    assert.equal(result.status, "processed");
+    const linkWrite = mock.calls.find((call) => call.url.includes("/rest/v1/external_booking_links") && call.init.method === "POST");
+    assert.ok(linkWrite);
+    const written = JSON.parse(String(linkWrite?.init.body))[0];
+    assert.equal(written.person_id, "existing-person");
+    assert.equal(written.person_link_source, "provider_customer");
+    assert.equal(written.provider_customer_id, "member-77");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("a newer stored cancellation prevents an older create from resurrecting the booking", async () => {
+  const { processStoredExternalEvent } = await import("./ingest.mts");
+  const mock = withMockSupabase({
+    optix_webhook_events: (url, init) => {
+      if (init.method === "PATCH") return new Response("[]", { status: 200 });
+      if (url.includes("event_key=eq.event-create")) {
+        return new Response(JSON.stringify([{ attempt_count: 0, received_at: "2026-08-27T00:00:00.000Z" }]), { status: 200 });
+      }
+      if (url.includes("received_at=gt.2026-08-27T00%3A00%3A00.000Z") && url.includes("event_type=eq.member_booking_cancelled")) {
+        return new Response(JSON.stringify([{ event_key: "event-cancel" }]), { status: 200 });
+      }
+      return new Response("[]", { status: 200 });
+    },
+    external_booking_mappings: () => new Response(JSON.stringify([{
+      provider: "optix", organisation_id: "org-1", workspace_id: "637949", workspace_name: "Swing Analysis",
+      account_id: "sam-hale-golf", location_id: "three-kings", default_coach_id: "sam-hale", enabled: true, expected_duration: 60, bay_profile_id: "standard", email_behaviour: "none",
+    }]), { status: 200 }),
+    external_booking_links: (_url, init) => {
+      if (!init.method || init.method === "GET") return new Response("[]", { status: 200 });
+      return new Response(JSON.stringify([{ ok: true }]), { status: 201 });
+    },
+    calendar_items: () => new Response("[]", { status: 200 }),
+  });
+  try {
+    const result: any = await processStoredExternalEvent("optix", "event-create", payload);
+    assert.equal(result.status, "ignored");
+    assert.equal(result.reason, "superseded_by_cancelled");
+    assert.equal(
+      mock.calls.some((call) => call.url.includes("/rest/v1/calendar_items") && call.init.method === "POST"),
+      false,
+    );
+  } finally {
+    mock.restore();
+  }
 });
