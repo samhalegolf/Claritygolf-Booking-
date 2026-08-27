@@ -5237,22 +5237,9 @@ async function readAdminCalendarShellState() {
     settings: adminSettingsFromSettings(settingsMap),
     brand: brandSettingsFromSettings(settingsMap, account),
     account,
-    googleCalendar: {
-      configured: false,
-      connected: false,
-      calendarId: "primary",
-      autoSync: false,
-      manualOnly: true,
-      accountEmail: "",
-      lastSyncAt: "",
-      lastSyncStatus: "",
-      lastSyncError: "",
-      connectedAt: "",
-      redirectUri: "",
-      scope: "",
-      ok: true,
-      skipped: true,
-    },
+    // No googleCalendar here on purpose: this route does not read the Google
+    // status. The placeholder it used to send said configured: false, which the
+    // client applied over the real status and greyed out Connect Google.
     diagnostics: {
       calendarState: {
         routeUsed: "shell",

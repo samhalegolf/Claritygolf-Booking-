@@ -454,9 +454,10 @@ function bookingLocationDisplay(location: any) {
   return [location?.name, location?.address].filter(Boolean).join(" · ");
 }
 
-function configuredRedirectUri(req: Request) {
+function configuredRedirectUri(req?: Request) {
   const configured = env("GOOGLE_CALENDAR_REDIRECT_URI", "");
   if (configured) return configured;
+  if (!req) return "https://claritygolf.app/api/google-calendar/callback";
   const url = new URL(req.url);
   const isLocalHost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   if (!isLocalHost) return "https://claritygolf.app/api/google-calendar/callback";
@@ -481,13 +482,23 @@ function configuredRedirectUri(req: Request) {
  * The redirect URI is deliberately NOT shared: Google returns to
  * /api/google-calendar/callback here and /api/google-drive/callback for Drive,
  * and those are separately registered with Google.
+ *
+ * The redirect URI does not depend on having a Request either (found 28 Aug
+ * 2026). It used to fall back to the bare env var when req was absent, so every
+ * status read taken off a request — the calendar-state payload, the response to
+ * saving source visibility — came back with an empty redirect URI and therefore
+ * configured: false. The settings screen applies whichever status arrives last,
+ * so a correct status from GET /api/google-calendar/status was routinely
+ * overwritten by a req-less one and the screen flipped to "Needs OAuth
+ * credentials" with Connect Google greyed out, on an install whose credentials
+ * were fine. Drive already had this fallback; Calendar now matches.
  */
 export function googleConfig(req?: Request) {
   const shared = getClarityCloudGoogleConfig(req);
   return {
     clientId: env("GOOGLE_CALENDAR_CLIENT_ID", "") || shared.clientId,
     clientSecret: env("GOOGLE_CALENDAR_CLIENT_SECRET", "") || shared.clientSecret,
-    redirectUri: req ? configuredRedirectUri(req) : env("GOOGLE_CALENDAR_REDIRECT_URI", ""),
+    redirectUri: configuredRedirectUri(req),
   };
 }
 
@@ -530,7 +541,7 @@ async function listGoogleCalendarSources(accessToken: string) {
 export async function getGoogleCalendarSyncStatus(req?: Request) {
   const settings = await readSettings();
   const config = googleConfig(req);
-  const configured = Boolean(config.clientId && config.clientSecret && (config.redirectUri || req));
+  const configured = Boolean(config.clientId && config.clientSecret && config.redirectUri);
   const accountId = resolveGoogleAccountId(settings);
   const connection = await loadGoogleProviderConnection(accountId);
   const providerStatus = publicGoogleProviderStatus(connection, googleScopes);
@@ -569,7 +580,7 @@ export async function getGoogleCalendarSyncStatus(req?: Request) {
       ? "Legacy Google Calendar token must be migrated to encrypted provider storage."
       : providerStatus.lastErrorCode || settings.googleCalendarLastSyncError || "",
     connectedAt: providerStatus.connectedAt || settings.googleCalendarConnectedAt || "",
-    redirectUri: req ? configuredRedirectUri(req) : config.redirectUri,
+    redirectUri: config.redirectUri,
     scope: googleScopes.join(" "),
     grantedScopes: providerStatus.grantedScopes,
     missingScopes: providerStatus.missingScopes,

@@ -7940,7 +7940,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     applyNotificationSettings(data.settings);
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
-    applyGoogleCalendarStatus(data.googleCalendar);
+    // The shell route does not read the Google status -- it says so with
+    // googleSyncStatusDeferred, exactly like people and notifications above.
+    // Applying its placeholder anyway was what greyed out Connect Google: the
+    // real status from /api/google-calendar/status arrived first and this
+    // overwrote it with configured: false. refreshGoogleCalendarStatus() runs
+    // right after hydration, so skipping here loses nothing.
+    if (!googleSyncStatusDeferred) applyGoogleCalendarStatus(data.googleCalendar);
     hasLoadedCalendarApiRef.current = true;
     finishDiagnosticTimer(timer, "success", {
       httpStatus: response.status,

@@ -77,6 +77,24 @@ test("calendar falls back to the shared Google credentials", () => {
   }
 });
 
+// A status read taken off a request (the calendar-state payload, the response
+// to saving source visibility) must still report a redirect URI. When it did
+// not, those payloads carried configured: false, the settings screen applied
+// whichever status landed last, and Connect Google greyed out on an install
+// whose credentials were fine.
+test("the redirect URI does not depend on having a request", () => {
+  const before = { ...process.env };
+  try {
+    delete process.env.GOOGLE_CALENDAR_REDIRECT_URI;
+    delete process.env.GOOGLE_DRIVE_REDIRECT_URI;
+    assert.equal(googleConfig().redirectUri, "https://claritygolf.app/api/google-calendar/callback");
+    process.env.GOOGLE_CALENDAR_REDIRECT_URI = "https://example.test/api/google-calendar/callback";
+    assert.equal(googleConfig().redirectUri, "https://example.test/api/google-calendar/callback");
+  } finally {
+    process.env = before;
+  }
+});
+
 test("a calendar-specific Google app still overrides the shared one", () => {
   // Reserved for wiring Calendar to its own Google app later; setting it must
   // take precedence rather than being ignored in favour of the shared pair.
