@@ -78,7 +78,7 @@ test("calendar falls back to the shared Google credentials", () => {
 });
 
 // A status read taken off a request (the calendar-state payload, the response
-// to saving source visibility) must still report a redirect URI. When it did
+// to saving import rules) must still report a redirect URI. When it did
 // not, those payloads carried configured: false, the settings screen applied
 // whichever status landed last, and Connect Google greyed out on an install
 // whose credentials were fine.

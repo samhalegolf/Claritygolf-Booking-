@@ -9272,42 +9272,113 @@ button {
   line-height: 1.55;
 }
 
-.google-calendar-source-list {
+/* Selective external calendar import: one card per named outside source. */
+.gcal-rule-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
-.google-calendar-source-card {
+.gcal-rule-card {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 12px;
+  padding: 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel-soft);
 }
 
-.google-calendar-source-head {
+.gcal-rule-card.is-off {
+  opacity: 0.6;
+}
+
+.gcal-rule-head {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
 }
 
-.google-calendar-source-head > div {
-  display: grid;
-  gap: 3px;
-}
-
-.google-calendar-source-head strong {
+.gcal-rule-name {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
   color: var(--text);
   font-size: 14px;
+  font-weight: 600;
 }
 
-.google-calendar-source-head span,
-.google-calendar-source-head em {
+.gcal-rule-field {
+  display: grid;
+  gap: 6px;
+}
+
+.gcal-rule-field > span {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gcal-rule-field input[type="text"] {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.gcal-rule-field em {
   color: var(--muted);
   font-size: 12px;
   font-style: normal;
+  line-height: 1.5;
+}
+
+.gcal-rule-calendars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gcal-rule-calendar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.gcal-rule-calendar input {
+  accent-color: var(--coach-primary);
+}
+
+.gcal-rule-calendar em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.gcal-rule-toggles {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.gcal-rule-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .google-calendar-source-toggle {
@@ -9327,11 +9398,6 @@ button {
 
 .google-calendar-source-toggle input {
   accent-color: var(--coach-primary);
-}
-
-.google-calendar-source-toggle.is-disabled {
-  color: var(--quiet);
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
 }
 
 .gcal-debug-toolbar {

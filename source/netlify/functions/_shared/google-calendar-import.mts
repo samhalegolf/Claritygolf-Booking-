@@ -45,6 +45,10 @@ export type GoogleEvent = {
   id?: string;
   status?: string;
   summary?: string;
+  description?: string;
+  location?: string;
+  organizer?: { email?: string; displayName?: string; self?: boolean };
+  creator?: { email?: string; displayName?: string; self?: boolean };
   transparency?: string;
   start?: { dateTime?: string; date?: string; timeZone?: string };
   end?: { dateTime?: string; date?: string; timeZone?: string };

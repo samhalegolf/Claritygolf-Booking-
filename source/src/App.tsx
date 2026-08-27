@@ -1552,17 +1552,32 @@ type GoogleCalendarSyncStatus = {
   legacyMigrationRequired?: boolean;
   sources?: GoogleCalendarSourceStatus[];
   sourceListError?: string;
+  importRules?: GoogleCalendarImportRule[];
   ok?: boolean;
   skipped?: boolean;
 };
+/** A calendar on the connected Google account, offered as a scope for a rule. */
 type GoogleCalendarSourceStatus = {
   id: string;
   name: string;
   primary: boolean;
   hidden: boolean;
   accessRole: string;
-  showOnClarity: boolean;
+};
+/**
+ * One external source the coach wants pulled in — "Golf HQ Portal" and the
+ * spellings that identify it. Keywords narrow further; empty means everything
+ * from that source. See netlify/functions/_shared/google-calendar-import-rules.
+ */
+type GoogleCalendarImportRule = {
+  id: string;
+  name: string;
+  aliases: string[];
+  keywords: string[];
+  /** Calendars to scan. Empty means every calendar on the account. */
+  calendarIds: string[];
   showLabel: boolean;
+  enabled: boolean;
 };
 type GoogleCalendarDebugRequest = {
   method: string;
@@ -4918,7 +4933,37 @@ const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
   scope: "",
   sources: [],
   sourceListError: "",
+  importRules: [],
 };
+
+function cleanImportRuleTerms(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .map((term) => (typeof term === "string" ? term.trim() : ""))
+        .filter((term, index, all) => term && all.indexOf(term) === index)
+    : [];
+}
+
+function cleanImportRule(rule: Partial<GoogleCalendarImportRule>, index: number): GoogleCalendarImportRule {
+  return {
+    id: typeof rule?.id === "string" && rule.id.trim() ? rule.id : `rule-${index + 1}`,
+    name: typeof rule?.name === "string" ? rule.name : "",
+    aliases: cleanImportRuleTerms(rule?.aliases),
+    keywords: cleanImportRuleTerms(rule?.keywords),
+    calendarIds: Array.isArray(rule?.calendarIds) ? rule.calendarIds.filter((id) => typeof id === "string" && id) : [],
+    showLabel: rule?.showLabel !== false,
+    enabled: rule?.enabled !== false,
+  };
+}
+
+/** Comma or newline separated, because that is how people type a short list. */
+function importRuleTermsToText(terms: string[]) {
+  return terms.join(", ");
+}
+
+function importRuleTermsFromText(value: string) {
+  return cleanImportRuleTerms(value.split(/[,\n]/).map((term) => term.trim()));
+}
 
 const defaultGoogleDriveTransferStatus: GoogleDriveTransferStatus = {
   configured: false,
@@ -7371,11 +7416,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             primary: source?.primary === true,
             hidden: source?.hidden === true,
             accessRole: typeof source?.accessRole === "string" ? source.accessRole : "",
-            showOnClarity: source?.showOnClarity === true,
-            showLabel: source?.showOnClarity === true && source?.showLabel !== false,
           }))
         : [],
       sourceListError: typeof status?.sourceListError === "string" ? status.sourceListError : "",
+      importRules: Array.isArray(status?.importRules) ? status.importRules.map(cleanImportRule) : [],
     });
   }
 
@@ -17276,15 +17320,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         body: JSON.stringify({
           calendarId: nextStatus.calendarId,
           autoSync: nextStatus.autoSync,
-          sourcePreferences: Object.fromEntries(
-            (nextStatus.sources || []).map((source) => [
-              source.id,
-              {
-                showOnClarity: source.showOnClarity === true,
-                showLabel: source.showOnClarity === true && source.showLabel !== false,
-              },
-            ]),
-          ),
+          importRules: nextStatus.importRules || [],
         }),
       });
       const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & { message?: string };
@@ -17303,21 +17339,49 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     }
   }
 
-  function updateGoogleCalendarSource(sourceId: string, updates: Partial<GoogleCalendarSourceStatus>) {
+  function updateGoogleCalendarImportRule(ruleId: string, updates: Partial<GoogleCalendarImportRule>) {
     setGoogleCalendar((current) => ({
       ...current,
-      sources: (current.sources || []).map((source) => {
-        if (source.id !== sourceId) return source;
-        const showOnClarity = Object.prototype.hasOwnProperty.call(updates, "showOnClarity")
-          ? updates.showOnClarity === true
-          : source.showOnClarity;
-        const showLabel = showOnClarity && (Object.prototype.hasOwnProperty.call(updates, "showLabel") ? updates.showLabel !== false : source.showLabel);
-        return {
-          ...source,
-          ...updates,
-          showOnClarity,
-          showLabel,
-        };
+      importRules: (current.importRules || []).map((rule) => (rule.id === ruleId ? { ...rule, ...updates } : rule)),
+    }));
+  }
+
+  function addGoogleCalendarImportRule() {
+    setGoogleCalendar((current) => ({
+      ...current,
+      importRules: [
+        ...(current.importRules || []),
+        {
+          // Empty aliases, so the rule imports nothing until it is described.
+          id: `rule-${Date.now().toString(36)}`,
+          name: "",
+          aliases: [],
+          keywords: [],
+          calendarIds: [],
+          showLabel: true,
+          enabled: true,
+        },
+      ],
+    }));
+  }
+
+  function removeGoogleCalendarImportRule(ruleId: string) {
+    setGoogleCalendar((current) => ({
+      ...current,
+      importRules: (current.importRules || []).filter((rule) => rule.id !== ruleId),
+    }));
+  }
+
+  /** Toggle one calendar in a rule's scope. Empty scope means every calendar. */
+  function toggleGoogleCalendarImportRuleCalendar(ruleId: string, calendarId: string, include: boolean) {
+    setGoogleCalendar((current) => ({
+      ...current,
+      importRules: (current.importRules || []).map((rule) => {
+        if (rule.id !== ruleId) return rule;
+        const next = include
+          ? [...rule.calendarIds.filter((id) => id !== calendarId), calendarId]
+          : rule.calendarIds.filter((id) => id !== calendarId);
+        return { ...rule, calendarIds: next };
       }),
     }));
   }
@@ -27123,18 +27187,19 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   <summary className="settings-subsection-title">
                     <CalendarDays size={18} />
                     <div>
-                      <span>Source visibility</span>
+                      <span>Selective external calendar import</span>
                       <strong>
-                        {googleCalendar.sources?.length
-                          ? `${googleCalendar.sources.filter((source) => source.showOnClarity).length} of ${googleCalendar.sources.length} showing`
-                          : "Choose which Google sources Clarity respects"}
+                        {googleCalendar.importRules?.length
+                          ? `${googleCalendar.importRules.filter((rule) => rule.enabled && rule.aliases.length).length} of ${googleCalendar.importRules.length} rule${googleCalendar.importRules.length === 1 ? "" : "s"} active`
+                          : "Name the outside sources Clarity should pull in"}
                       </strong>
                     </div>
                   </summary>
 
                   <p className="google-calendar-source-intro">
-                    Choose which Google Calendar sources appear in Clarity, and whether each visible source shows its label or
-                    just blocks the time as busy.
+                    Clarity only imports Google events that match a rule below. Name the source — "Golf HQ Portal" — list the
+                    spellings that identify it, and Clarity will match them against the event's organiser, title, description
+                    and location. Add keywords to narrow it further; leave them blank to take everything from that source.
                   </p>
 
                   {googleCalendar.sourceListError ? (
@@ -27143,52 +27208,142 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     </p>
                   ) : null}
 
-                  {!googleCalendar.sources?.length ? (
+                  {!googleCalendar.importRules?.length ? (
                     <p className="google-calendar-source-empty">
-                      {googleCalendar.connected
-                        ? "No Google Calendar sources are available yet. If this connection was created before source access was added, reconnect Google and refresh this panel."
-                        : "Connect Google Calendar to load the available sources for this account."}
+                      No import rules yet, so nothing from Google appears on the calendar. Add one to start pulling a source in.
                     </p>
                   ) : (
-                    <div className="google-calendar-source-list">
-                      {googleCalendar.sources.map((source) => (
-                        <div className="google-calendar-source-card" key={source.id}>
-                          <div className="google-calendar-source-head">
-                            <div>
-                              <strong>{source.name}</strong>
-                              <span>{source.primary ? "Primary calendar" : source.accessRole || source.id}</span>
-                            </div>
-                            {source.hidden ? <em>Hidden in Google</em> : null}
+                    <div className="gcal-rule-list">
+                      {googleCalendar.importRules.map((rule) => (
+                        <div className={`gcal-rule-card ${rule.enabled ? "" : "is-off"}`} key={rule.id}>
+                          <div className="gcal-rule-head">
+                            <input
+                              className="gcal-rule-name"
+                              type="text"
+                              value={rule.name}
+                              placeholder="Source name, e.g. Golf HQ Portal"
+                              disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                              onChange={(event) => updateGoogleCalendarImportRule(rule.id, { name: event.target.value })}
+                            />
+                            <button
+                              className="icon-button"
+                              type="button"
+                              aria-label="Remove rule"
+                              disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                              onClick={() => removeGoogleCalendarImportRule(rule.id)}
+                            >
+                              <Trash2 size={16} />
+                            </button>
                           </div>
 
-                          <label className="google-calendar-source-toggle">
-                            <span>Show on Clarity</span>
+                          <label className="gcal-rule-field">
+                            <span>Aliases</span>
                             <input
-                              type="checkbox"
-                              checked={source.showOnClarity}
+                              type="text"
+                              value={importRuleTermsToText(rule.aliases)}
+                              placeholder="Golf HQ, golfhq.com, bookings@golfhq.co.nz"
                               disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
                               onChange={(event) =>
-                                updateGoogleCalendarSource(source.id, {
-                                  showOnClarity: event.target.checked,
-                                  showLabel: event.target.checked ? source.showLabel : false,
-                                })
+                                updateGoogleCalendarImportRule(rule.id, { aliases: importRuleTermsFromText(event.target.value) })
                               }
                             />
+                            <em>Comma separated. An event must contain one of these to match. No aliases means the rule is off.</em>
                           </label>
 
-                          <label className={`google-calendar-source-toggle ${source.showOnClarity ? "" : "is-disabled"}`}>
-                            <span>Show label</span>
+                          <label className="gcal-rule-field">
+                            <span>Keywords (optional)</span>
                             <input
-                              type="checkbox"
-                              checked={source.showOnClarity && source.showLabel}
-                              disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle" || !source.showOnClarity}
-                              onChange={(event) => updateGoogleCalendarSource(source.id, { showLabel: event.target.checked })}
+                              type="text"
+                              value={importRuleTermsToText(rule.keywords)}
+                              placeholder="lesson, fitting"
+                              disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                              onChange={(event) =>
+                                updateGoogleCalendarImportRule(rule.id, { keywords: importRuleTermsFromText(event.target.value) })
+                              }
                             />
+                            <em>Narrows the source. Leave blank to import everything it puts on the calendar.</em>
                           </label>
+
+                          <div className="gcal-rule-field">
+                            <span>Look in</span>
+                            {!googleCalendar.sources?.length ? (
+                              <em>
+                                {googleCalendar.connected
+                                  ? "No calendars loaded yet. Reconnect Google and refresh this panel."
+                                  : "Connect Google Calendar to choose calendars."}
+                              </em>
+                            ) : (
+                              <>
+                                <div className="gcal-rule-calendars">
+                                  {googleCalendar.sources.map((source) => (
+                                    <label className="gcal-rule-calendar" key={source.id}>
+                                      <input
+                                        type="checkbox"
+                                        checked={rule.calendarIds.includes(source.id)}
+                                        disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                                        onChange={(event) =>
+                                          toggleGoogleCalendarImportRuleCalendar(rule.id, source.id, event.target.checked)
+                                        }
+                                      />
+                                      <span>{source.name}</span>
+                                      {source.primary ? <em>Primary</em> : null}
+                                    </label>
+                                  ))}
+                                </div>
+                                <em>
+                                  {rule.calendarIds.length
+                                    ? `Scanning ${rule.calendarIds.length} calendar${rule.calendarIds.length === 1 ? "" : "s"}.`
+                                    : "Nothing ticked, so every calendar on the account is scanned."}
+                                </em>
+                              </>
+                            )}
+                          </div>
+
+                          <div className="gcal-rule-toggles">
+                            <label className="google-calendar-source-toggle">
+                              <span>Show event title</span>
+                              <input
+                                type="checkbox"
+                                checked={rule.showLabel}
+                                disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                                onChange={(event) => updateGoogleCalendarImportRule(rule.id, { showLabel: event.target.checked })}
+                              />
+                            </label>
+                            <label className="google-calendar-source-toggle">
+                              <span>Rule active</span>
+                              <input
+                                type="checkbox"
+                                checked={rule.enabled}
+                                disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                                onChange={(event) => updateGoogleCalendarImportRule(rule.id, { enabled: event.target.checked })}
+                              />
+                            </label>
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
+
+                  <div className="gcal-rule-actions">
+                    <button
+                      className="outline-button"
+                      type="button"
+                      disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                      onClick={addGoogleCalendarImportRule}
+                    >
+                      <Plus size={16} />
+                      Add source
+                    </button>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                      onClick={() => void saveGoogleCalendarSettings()}
+                    >
+                      <Check size={16} />
+                      {googleCalendarAction === "saving" ? "Saving" : "Save rules"}
+                    </button>
+                  </div>
                 </details>
 
                 <details
