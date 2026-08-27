@@ -1431,6 +1431,20 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
         busyImport = await importGoogleBusyBlocks(accessToken, settings);
       } catch (error: any) {
         busyImportError = error instanceof Error ? error.message.slice(0, 300) : "Busy import failed.";
+        // The import failing is isolated from the push, but it must not be
+        // silent. It was: a check constraint rejected every imported row and
+        // the only record of it was a string returned to a caller that ignored
+        // it, so the import produced nothing for months while every sync
+        // reported success. The debug window is where a broken sync is meant to
+        // become visible, so this gets its own failed entry.
+        await recordGoogleCalendarDebugEntry(
+          finishEntry("failed", {
+            stage: "busy_import",
+            reason: busyImportError,
+            error: debugErrorFromUnknown(error, "busy_import"),
+          }),
+          settings,
+        );
       }
     }
     await recordGoogleCalendarDebugEntry(
