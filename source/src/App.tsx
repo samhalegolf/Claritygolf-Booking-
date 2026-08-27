@@ -19848,7 +19848,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           {isInformationSectionOpen ? (
             <div className="booking-progressive-body">
               <div className="booking-form">
-                <label className="booking-required-field">
+                <label className="booking-required-field w-name">
                   <input
                     value={bookingForm.firstName}
                     aria-label="First name required"
@@ -19861,7 +19861,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   />
                   <span className="booking-required-mark" aria-hidden="true">*</span>
                 </label>
-                <label className="booking-required-field">
+                <label className="booking-required-field w-name">
                   <input
                     value={bookingForm.lastName}
                     aria-label="Last name required"
@@ -19875,6 +19875,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   <span className="booking-required-mark" aria-hidden="true">*</span>
                 </label>
                 <input
+                  className="w-name"
                   value={bookingForm.phone}
                   autoComplete="tel"
                   inputMode="tel"
@@ -19883,7 +19884,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   placeholder="Phone"
                   type="tel"
                 />
-                <label className="booking-required-field">
+                <label className="booking-required-field w-email">
                   <input
                     value={bookingForm.email}
                     aria-label="Email required"
@@ -21648,7 +21649,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <label>
                       <span>Name</span>
                       <div className="quick-match-anchor">
-                        <div className="quick-client-search">
+                        <div className="quick-client-search w-name">
                           <Search size={15} />
                           <input
                             value={quickClientSearch}
@@ -21676,6 +21677,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       <span>Phone</span>
                       <div className="quick-match-anchor">
                           <input
+                            className="w-name"
                             value={quickCreate.phone}
                             autoComplete="tel"
                             inputMode="tel"
@@ -21695,6 +21697,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       <span>Email</span>
                       <div className="quick-match-anchor">
                           <input
+                            className="w-email"
                             value={quickCreate.email}
                             autoComplete="email"
                             inputMode="email"
@@ -21713,6 +21716,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <label>
                       <span>Lesson note</span>
                       <textarea
+                        className="w-prose"
                         value={quickCreate.note}
                         onChange={(event) => updateQuickCreateField("note", event.target.value)}
                         placeholder="Optional"
@@ -23778,7 +23782,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     </div>
                     <input
                       type="search"
-                      className="invoice-search-input"
+                      className="invoice-search-input w-name"
                       placeholder="Search number, customer or status…"
                       value={invoiceSearch}
                       onChange={(event) => setInvoiceSearch(event.target.value)}
@@ -24025,6 +24029,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             <label className="settings-field">
                               <span>Name</span>
                               <input
+                                className="w-name"
                                 value={newInvoiceCustomer.name}
                                 onChange={(event) => updateNewInvoiceCustomer("name", event.target.value)}
                                 placeholder="Customer name"
@@ -24034,6 +24039,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             <label className="settings-field">
                               <span>Email</span>
                               <input
+                                className="w-email"
                                 value={newInvoiceCustomer.email}
                                 onChange={(event) => updateNewInvoiceCustomer("email", event.target.value)}
                                 placeholder="name@example.com"
@@ -24043,13 +24049,17 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             <label className="settings-field">
                               <span>Phone</span>
                               <input
+                                className="w-name"
                                 value={newInvoiceCustomer.phone}
                                 onChange={(event) => updateNewInvoiceCustomer("phone", event.target.value)}
                                 placeholder="Optional"
                               />
                             </label>
                             <div className="invoice-new-customer-actions">
-                              <button className="outline-button" onClick={() => setNewInvoiceCustomer(null)} type="button">
+                              {/* Rule 10: Cancel is text. A box around it gives
+                                  backing out the same weight as adding the
+                                  client, which is what the form is for. */}
+                              <button className="text-button" onClick={() => setNewInvoiceCustomer(null)} type="button">
                                 Cancel
                               </button>
                               <button
@@ -24067,6 +24077,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             <label className="settings-field">
                               <span>Find or create customer</span>
                               <input
+                                className="w-prose"
                                 value={invoiceCustomerSearch}
                                 onChange={(event) => setInvoiceCustomerSearch(event.target.value)}
                                 placeholder="Search name, email, or phone"
@@ -24127,6 +24138,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           <p className="settings-static-value">{formatDateForDisplay(invoiceDraft.invoiceDate)}</p>
                         ) : (
                           <input
+                            className="w-date"
                             value={invoiceDraft.invoiceDate}
                             onChange={(event) => updateInvoiceDraft("invoiceDate", event.target.value)}
                             type="date"
@@ -24139,6 +24151,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           <p className="settings-static-value">{formatDateForDisplay(invoiceDraft.dueDate)}</p>
                         ) : (
                           <input
+                            className="w-date"
                             value={invoiceDraft.dueDate}
                             onChange={(event) => updateInvoiceDraft("dueDate", event.target.value)}
                             type="date"
@@ -24156,6 +24169,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           <p className="settings-static-value">{invoiceDraft.reference || "—"}</p>
                         ) : (
                           <input
+                            className="w-name"
                             value={invoiceDraft.reference}
                             onChange={(event) => updateInvoiceDraft("reference", event.target.value)}
                             placeholder="Optional"
@@ -24245,6 +24259,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             <label className="settings-field">
                               <span>Qty</span>
                               <input
+                                className="w-time"
                                 value={line.quantity}
                                 inputMode="numeric"
                                 onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
@@ -24340,6 +24355,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           <label className="settings-field">
                             <span>Find or add item</span>
                             <input
+                              className="w-prose"
                               value={invoiceDraft.lineSearch}
                               onChange={(event) => updateInvoiceDraft("lineSearch", event.target.value)}
                               placeholder="Search lesson types, packages, products, services..."
@@ -24390,6 +24406,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           <p className="settings-static-value">{invoiceDraft.message || "—"}</p>
                         ) : (
                           <textarea
+                            className="w-prose"
                             value={invoiceDraft.message}
                             onChange={(event) => updateInvoiceDraft("message", event.target.value)}
                             rows={3}
@@ -24429,10 +24446,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           <div className="invoice-discount-set">
                             <span>Discount applied</span>
                             <div className="invoice-discount-set-actions">
-                              <button onClick={() => setDiscountEditing(true)} type="button">
+                              <button className="text-button" onClick={() => setDiscountEditing(true)} type="button">
                                 Change
                               </button>
-                              <button onClick={clearInvoiceDiscount} type="button">
+                              <button className="text-button" onClick={clearInvoiceDiscount} type="button">
                                 Remove
                               </button>
                             </div>
@@ -24460,6 +24477,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             <label className="settings-field">
                               <span>Discount / coupon</span>
                               <input
+                                className="w-name"
                                 value={invoiceDraft.discountLabel}
                                 onFocus={() => setDiscountEditing(true)}
                                 onChange={(event) => updateInvoiceDraft("discountLabel", event.target.value)}
@@ -24546,8 +24564,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
                   <div className="invoice-actions invoice-bottom-actions">
                     {activeInvoiceId && (
-                      <button className="danger-button" onClick={deleteOpenedInvoice} type="button">
-                        <Trash2 size={16} />
+                      /* Rule 10: Delete and Void are text, not a filled red
+                         button sitting in the same row as Publish & Send. */
+                      <button className="text-button danger" onClick={deleteOpenedInvoice} type="button">
                         {openedInvoiceStatus === "draft" || openedInvoiceStatus === "void" ? "Delete" : "Void"}
                       </button>
                     )}
@@ -25189,6 +25208,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <label className="settings-field">
                       <span>Description</span>
                       <input
+                        className="w-name"
                         value={expenseDraft.description}
                         onChange={(event) => setExpenseDraft((current) => ({ ...current, description: event.target.value }))}
                         placeholder="What did you pay for?"
@@ -25198,6 +25218,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       <label className="settings-field">
                         <span>Amount</span>
                         <input
+                          className="w-price"
                           value={expenseDraft.amount}
                           inputMode="decimal"
                           onChange={(event) => setExpenseDraft((current) => ({ ...current, amount: parseMoneyInput(event.target.value) }))}
@@ -25207,6 +25228,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       <label className="settings-field">
                         <span>Date</span>
                         <input
+                          className="w-date"
                           type="date"
                           value={expenseDraft.expenseDate}
                           onChange={(event) => setExpenseDraft((current) => ({ ...current, expenseDate: event.target.value }))}
@@ -25232,6 +25254,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <label className="settings-field">
                       <span>Vendor</span>
                       <input
+                        className="w-name"
                         value={expenseDraft.vendor}
                         onChange={(event) => setExpenseDraft((current) => ({ ...current, vendor: event.target.value }))}
                         placeholder="Optional"
@@ -25240,6 +25263,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <label className="settings-field">
                       <span>Note</span>
                       <textarea
+                        className="w-prose"
                         value={expenseDraft.note}
                         onChange={(event) => setExpenseDraft((current) => ({ ...current, note: event.target.value }))}
                         rows={2}
@@ -25251,7 +25275,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       {expenseDraft.id ? (expenseSaveState === "saving" ? "Saving..." : "Save Changes") : expenseSaveState === "saving" ? "Saving..." : "Log Expense"}
                     </button>
                     {Boolean(expenseDraft.id) && (
-                      <button className="outline-button" onClick={resetExpenseDraft} type="button">
+                      <button className="text-button" onClick={resetExpenseDraft} type="button">
                         Cancel Edit
                       </button>
                     )}
@@ -25685,6 +25709,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <label className="settings-field">
                       <span>Name</span>
                       <input
+                        className="w-name"
                         value={posMethodEditor.name}
                         onChange={(event) => setPosMethodEditor((current) => ({ ...current, name: event.target.value }))}
                         placeholder="e.g. Eftpos"
@@ -25719,7 +25744,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     </button>
                     {Boolean(posMethodEditor.id) && (
                       <button
-                        className="outline-button"
+                        className="text-button"
                         onClick={() => setPosMethodEditor({ id: "", name: "", settlesImmediately: true })}
                         type="button"
                       >
@@ -25782,6 +25807,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <label className="settings-field">
                       <span>Name</span>
                       <input
+                        className="w-name"
                         value={discountEditor.name}
                         onChange={(event) => setDiscountEditor((current) => ({ ...current, name: event.target.value }))}
                         placeholder="e.g. Member discount"
@@ -25806,6 +25832,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       <label className="settings-field">
                         <span>{discountEditor.discountType === "percentage" ? "Percent off" : "Amount off"}</span>
                         <input
+                          className="w-price"
                           value={discountEditor.value}
                           inputMode="decimal"
                           onChange={(event) =>
@@ -25817,6 +25844,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       <label className="settings-field">
                         <span>Coupon code (optional)</span>
                         <input
+                          className="w-name"
                           value={discountEditor.couponCode}
                           onChange={(event) => setDiscountEditor((current) => ({ ...current, couponCode: event.target.value }))}
                           placeholder="Optional"
@@ -25829,7 +25857,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     </button>
                     {Boolean(discountEditor.id) && (
                       <button
-                        className="outline-button"
+                        className="text-button"
                         onClick={() => setDiscountEditor({ id: "", name: "", discountType: "percentage", value: 10, couponCode: "" })}
                         type="button"
                       >
@@ -25878,6 +25906,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <label className="settings-field">
                       <span>Name</span>
                       <input
+                        className="w-name"
                         value={expenseCategoryEditor.name}
                         onChange={(event) => setExpenseCategoryEditor((current) => ({ ...current, name: event.target.value }))}
                         placeholder="e.g. Range fees"
@@ -25899,7 +25928,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           : "Add Category"}
                     </button>
                     {Boolean(expenseCategoryEditor.id) && (
-                      <button className="outline-button" onClick={() => setExpenseCategoryEditor({ id: "", name: "" })} type="button">
+                      <button className="text-button" onClick={() => setExpenseCategoryEditor({ id: "", name: "" })} type="button">
                         Cancel Edit
                       </button>
                     )}
@@ -26244,7 +26273,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     {isInformationSectionOpen ? (
                       <div className="booking-progressive-body">
                         <div className="booking-form">
-                          <label className="booking-required-field">
+                          <label className="booking-required-field w-name">
                             <input
                               value={bookingForm.firstName}
                               aria-label="First name required"
@@ -26257,7 +26286,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             />
                             <span className="booking-required-mark" aria-hidden="true">*</span>
                           </label>
-                          <label className="booking-required-field">
+                          <label className="booking-required-field w-name">
                             <input
                               value={bookingForm.lastName}
                               aria-label="Last name required"
@@ -26271,6 +26300,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             <span className="booking-required-mark" aria-hidden="true">*</span>
                           </label>
                           <input
+                            className="w-name"
                             value={bookingForm.phone}
                             autoComplete="tel"
                             inputMode="tel"
@@ -26279,7 +26309,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             placeholder="Phone"
                             type="tel"
                           />
-                          <label className="booking-required-field">
+                          <label className="booking-required-field w-email">
                             <input
                               value={bookingForm.email}
                               aria-label="Email required"

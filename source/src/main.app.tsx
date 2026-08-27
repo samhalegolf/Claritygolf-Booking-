@@ -20,6 +20,8 @@ import PlayerPortal from "./modules/player-portal/PlayerPortal";
 // Tokens first: styles.css and every module stylesheet read --c-*.
 import "./tokens.css";
 import "./styles.css";
+// Same app-wide switch as the web entry -- see switches.css.
+import "./switches.css";
 import "./nativeApp.css";
 
 function Splash({ label }: { label: string }) {

@@ -51,8 +51,11 @@
   font-weight: 650;
 }
 
+/* Rule 05: --c-w-prose rather than a bare 100%. A transcript has no natural
+   width -- it is whatever was said -- which is what the prose exception is
+   for, and saying so is the difference between the exception and an oversight. */
 .clarityVoiceTextOutput textarea {
-  width: 100%;
+  width: var(--c-w-prose);
   min-height: 138px;
   resize: vertical;
   border: 1px solid rgba(15, 23, 42, 0.16);

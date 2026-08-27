@@ -7,8 +7,9 @@ import test from "node:test";
  * The UI rules that can be checked without a browser.
  *
  * These live as tests rather than as a script because a script has to be
- * remembered. Two of the four are absolute; two are ratchets — a count that is
- * allowed to fall and not to rise. The ratchets matter more than they look:
+ * remembered. Three of the four are absolute; one is still a ratchet — a count
+ * that is allowed to fall and not to rise. The field-width check was the
+ * second ratchet until it reached zero and was promoted. The ratchets matter more than they look:
  * the alternative to a ratchet is a big-bang cleanup nobody has time for, and
  * a rule with no enforcement, which is where the four token systems came from.
  *
@@ -220,6 +221,11 @@ test("every connection archetype has two integrations, or a stated reason", () =
  *
  * Notes and search legitimately fill their row; --c-w-prose exists so that
  * exception is written down rather than remembered.
+ *
+ * This was a ratchet from 10 down to 0 and is now absolute — there is nothing
+ * left for a baseline to permit, and a ratchet parked at zero is just a slower
+ * way of saying none. A field that needs the whole row still gets it; it says
+ * so with --c-w-prose, which is a declaration this check reads straight past.
  */
 /**
  * Settings panels are hidden by a blanket `display: none` and shown again by an
@@ -251,8 +257,7 @@ test("every settings tab has a panel that can show, and vice versa", () => {
   assert.deepEqual(orphaned, [], `Show rule(s) for a settings tab that no longer exists: ${orphaned.join(", ")}`);
 });
 
-test("bare width:100% is not spreading on fields", () => {
-  const BASELINE = 10;
+test("no field is a bare width:100%", () => {
   const offenders: string[] = [];
   for (const file of files) {
     const text = read(file);
@@ -265,14 +270,12 @@ test("bare width:100% is not spreading on fields", () => {
       offenders.push(`${rel(file)}: ${selector.trim().replace(/\s+/g, " ").slice(0, 70)}`);
     }
   }
-  assert.ok(
-    offenders.length <= BASELINE,
-    `Fields at width:100% went from ${BASELINE} to ${offenders.length}. Use a ` +
-      `--c-w-* width, or --c-w-prose if this really is notes or search.\n  ${offenders.join("\n  ")}`,
+  assert.deepEqual(
+    offenders,
+    [],
+    "Rule 05: a field is as wide as its content. Use a --c-w-* width, or " +
+      `--c-w-prose if this really is notes or search.\n  ${offenders.join("\n  ")}`,
   );
-  if (offenders.length < BASELINE) {
-    console.log(`  ↓ fields at width:100% down to ${offenders.length} (baseline ${BASELINE}) — lower it.`);
-  }
 });
 
 /**
@@ -283,7 +286,7 @@ test("bare width:100% is not spreading on fields", () => {
  * has always had rough edges.
  */
 test("literal hex colours are not spreading", () => {
-  const BASELINE = 870;
+  const BASELINE = 772;
   let count = 0;
   for (const file of files) {
     if (file === TOKENS) continue;

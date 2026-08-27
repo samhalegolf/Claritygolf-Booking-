@@ -137,11 +137,7 @@ button {
 }
 
 .show-password-toggle input {
-  min-height: 0;
-  width: 16px;
-  height: 16px;
   margin: 0;
-  accent-color: #07100a;
 }
 
 .show-password-toggle span {
@@ -817,7 +813,7 @@ button {
   content: "+";
   align-self: center;
   margin-left: auto;
-  color: #76736d;
+  color: var(--c-muted);
   font-weight: 800;
   font-size: 20px;
 }
@@ -843,20 +839,22 @@ button {
 }
 
 .reconcile-type-chip {
-  border: 1px solid #d4d8cf;
-  background: #f5f7f2;
-  color: #76736d;
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 13px;
+  min-height: var(--c-h-pill);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface-soft);
+  color: var(--c-muted);
+  padding: 0 12px;
+  font-size: var(--c-size-meta);
   font-weight: 700;
   cursor: pointer;
+  transition: background var(--c-t-hover);
 }
 
 .reconcile-type-chip.active {
-  border-color: #101510;
-  background: #101510;
-  color: #fff;
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .reconcile-type-chip:not(.active) {
@@ -892,9 +890,8 @@ button {
   gap: 12px;
   margin: 0 0 12px;
   padding: 8px 12px;
-  border: 1px solid #d4d8cf;
-  border-radius: 10px;
-  background: #f5f7f2;
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
 }
 
 .bank-filter {
@@ -911,10 +908,11 @@ button {
 .bank-filter select,
 .bank-filter input {
   padding: 6px 10px;
-  border: 1px solid #d4d8cf;
-  border-radius: 8px;
-  background: #fff;
-  font-size: 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font-size: var(--c-size-secondary);
   font-weight: 600;
 }
 
@@ -924,10 +922,10 @@ button {
   gap: 6px;
   min-width: min(100%, 220px);
   padding: 0 10px;
-  border: 1px solid #d4d8cf;
-  border-radius: 8px;
-  background: #fff;
-  color: var(--muted);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-muted);
 }
 
 .bank-search-field input {
@@ -970,7 +968,7 @@ button {
 
 .bank-sort-button:hover,
 .bank-sort-button:focus-visible {
-  color: #101510;
+  color: var(--c-text);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -1348,6 +1346,10 @@ button {
   align-items: start;
 }
 
+/* Rule 05: the field here is this bordered wrapper, and it is a search -- one
+   of the two things the rule lets fill its row. The input inside is a grid
+   item, so releasing its intrinsic min-width is all it needs to follow the
+   track; the width:100% it used to carry was saying the same thing twice. */
 .client-search {
   position: relative;
   min-height: 42px;
@@ -1361,7 +1363,6 @@ button {
 }
 
 .client-search input {
-  width: 100%;
   min-width: 0;
   min-height: 40px;
   padding-right: 252px;
@@ -2056,8 +2057,10 @@ button {
   margin: 0 0 12px;
 }
 
+/* Rule 05: it holds a lesson type name, so it is as wide as one. */
 .booking-lesson-type select {
-  width: 100%;
+  width: var(--c-w-name);
+  max-width: 100%;
   height: 32px;
   padding: 0 6px;
   border: 1px solid transparent;
@@ -2533,14 +2536,19 @@ button {
   font: inherit;
 }
 
+/* The asterisk is positioned against this wrapper, so the wrapper has to be
+   the width of the input rather than the width of the row -- otherwise the
+   mark floats off to the right of a field it no longer belongs to. Grid, so
+   the input fills the wrapper without a width of its own, and the wrapper
+   carries the Rule 05 class from the JSX. */
 .booking-required-field {
   position: relative;
-  display: block;
+  display: grid;
 }
 
 .booking-required-field input {
   box-sizing: border-box;
-  width: 100%;
+  min-width: 0;
   padding-right: 24px;
 }
 
@@ -3252,9 +3260,7 @@ button {
 }
 
 .settings-toggle input {
-  width: 18px;
-  height: 18px;
-  accent-color: #111;
+  margin: 0;
 }
 
 .settings-save {
@@ -4069,7 +4075,13 @@ button {
   position: relative;
 }
 
-.quick-client-search input {
+/* Qualified deliberately. `.quick-create-form input` matches this input too,
+   at the same specificity and later in the file, so it has been winning the
+   border and white fill back -- a bordered input sitting inside the bordered
+   search box that already frames it. This rule's whole job is to take those
+   off, and it has never actually done it. */
+.quick-create-form .quick-client-search input {
+  min-width: 0;
   min-height: 36px;
   border: 0;
   outline: 0;
@@ -4185,9 +4197,12 @@ button {
   text-transform: uppercase;
 }
 
+/* Rule 05: the width comes from the .w-* class each field carries in the
+   JSX. Releasing the intrinsic min-width is what lets a field narrower than
+   its label still sit in a single-column grid. */
 .quick-create-form input,
 .quick-create-form textarea {
-  width: 100%;
+  min-width: 0;
   min-height: 38px;
   padding: 9px 10px;
   border: 1px solid #deded8;
@@ -4890,10 +4905,6 @@ button {
   color: var(--text);
 }
 
-.show-password-toggle input {
-  accent-color: var(--primary);
-}
-
 .login-hint,
 .meta-row span,
 .booking-summary,
@@ -4920,10 +4931,6 @@ button {
 .sync-card .data-card-header svg,
 .booking-brand span {
   color: var(--coach-secondary);
-}
-
-.settings-toggle input {
-  accent-color: var(--coach-primary);
 }
 
 .appointment-dock {
@@ -7513,11 +7520,10 @@ button {
   display: grid;
   gap: 16px;
   padding: 22px;
-  border: 1px solid #d8ded3;
-  border-radius: 8px;
-  background: #fff;
-  color: #1d211d;
-  box-shadow: 0 18px 42px rgba(7, 16, 10, 0.12);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  color: var(--c-text-body);
 }
 
 .invoice-side-panel {
@@ -7529,7 +7535,7 @@ button {
 .invoice-document-card em,
 .invoice-template-note,
 .invoice-footer {
-  color: #626a60;
+  color: var(--c-muted);
 }
 
 .invoice-document-header {
@@ -7538,7 +7544,7 @@ button {
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 14px;
-  border-bottom: 2px solid #101510;
+  border-bottom: 2px solid var(--c-text);
 }
 
 .invoice-brand-block {
@@ -7556,7 +7562,7 @@ button {
 }
 
 .invoice-brand-block strong {
-  color: #101510;
+  color: var(--c-text);
   font-size: 16px;
 }
 
@@ -7568,7 +7574,7 @@ button {
 .invoice-title-block h2,
 .invoice-document-card h2 {
   margin: 0;
-  color: #0c110d;
+  color: var(--c-text);
   font-size: 30px;
 }
 
@@ -7577,15 +7583,17 @@ button {
   font-weight: 800;
 }
 
+/* Rule 01: the tile is the logo, not a container you can press. A filled
+   plate with no border, so an account with no logo still has somewhere for
+   its initials to sit. */
 .invoice-logo-mark {
   width: 58px;
   height: 58px;
   display: grid;
   place-items: center;
   overflow: hidden;
-  border: 1px solid #d8ded3;
-  border-radius: 8px;
-  background: #eef5ed;
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
 }
 
 .invoice-logo-mark img {
@@ -7595,7 +7603,7 @@ button {
 }
 
 .invoice-logo-mark strong {
-  color: #142019;
+  color: var(--c-text);
   font-size: 17px;
 }
 
@@ -7605,30 +7613,11 @@ button {
   line-height: 1.5;
 }
 
-.invoice-document-alerts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
-  border: 1px solid #e0e6dc;
-  border-radius: 8px;
-  background: #f8faf6;
-}
-
-.invoice-document-alerts > span {
-  color: #7a4e1e;
-  font-size: 12px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
 .invoice-section {
   display: grid;
   gap: 10px;
   padding-top: 16px;
-  border-top: 1px solid #e0e6dc;
+  border-top: 1px solid var(--c-border-soft);
 }
 
 .invoice-section-heading,
@@ -7661,15 +7650,18 @@ button {
   padding: 0;
   border: 0;
   background: none;
-  color: #2f6b46;
-  font-size: 12px;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
   font-weight: 600;
   cursor: pointer;
+  transition: color var(--c-t-hover);
 }
 
 .invoice-inline-edit:hover,
 .invoice-inline-edit:focus-visible {
+  color: var(--c-text);
   text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* "+ Add …" prompt shown where an optional, unset settings-driven block would be
@@ -7681,19 +7673,22 @@ button {
   padding: 6px 0;
   border: 0;
   background: none;
-  color: #2f6b46;
-  font-size: 13px;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
   font-weight: 600;
   cursor: pointer;
+  transition: color var(--c-t-hover);
 }
 
 .invoice-add-detail:hover,
 .invoice-add-detail:focus-visible {
+  color: var(--c-text);
   text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .invoice-section-heading strong {
-  color: #626a60;
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -7718,13 +7713,29 @@ button {
   min-width: 0;
 }
 
-.invoice-form-grid input,
-.invoice-line-search input,
-.invoice-document-line-row input,
-.invoice-discount-controls input,
+/* The same for the input itself. A grid item's min-width is auto, which for an
+   input is the ~20 characters of its `size` attribute -- so an untagged field
+   stops at that width rather than following its column. This is what the old
+   blanket width:100% was really doing, and it is the part worth keeping: it
+   lets a field take the room it is given without claiming a width of its own,
+   so a .w-* class on it still wins. */
+.invoice-form-grid .settings-field input,
+.invoice-line-search .settings-field input,
+.invoice-document-line-row .settings-field input,
+.invoice-document-line-row .settings-field select,
+.invoice-discount-controls .settings-field input,
+.invoice-note-block textarea {
+  min-width: 0;
+}
+
+/* Rule 05: no blanket width anywhere here now. .settings-field is a grid, so
+   an untagged input already fills its track once its intrinsic min-width is
+   released below; the fields that hold something of a known size say so with
+   a .w-* class in the JSX instead. */
 .billing-catalog-editor input,
-.billing-catalog-editor select {
-  width: 100%;
+.billing-catalog-editor select,
+.billing-catalog-editor textarea {
+  min-width: 0;
 }
 
 .invoice-customer-search {
@@ -7795,16 +7806,16 @@ button {
 /* Completed lesson that belongs to the chosen billing customer: floated to the
    top of the pull list and accented. */
 .completed-booking-list button.for-billing-client {
-  background: #f1fbf5;
-  box-shadow: inset 3px 0 0 #1fbf6a;
+  background: var(--c-hover);
+  box-shadow: inset 3px 0 0 var(--c-accent);
 }
 
 .pull-billing-flag {
   margin-left: 8px;
   padding: 1px 7px;
-  border-radius: 999px;
-  background: #dff5e8;
-  color: #1c7a49;
+  border-radius: var(--c-radius-pill);
+  background: var(--c-hover);
+  color: var(--c-success-text);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.02em;
@@ -7827,7 +7838,7 @@ button {
 .invoice-option-list strong,
 .completed-booking-list strong {
   overflow: hidden;
-  color: #101510;
+  color: var(--c-text);
   font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7842,23 +7853,25 @@ button {
   font-style: normal;
 }
 
+/* Rule 01: who the invoice is billed to is something you read, not something
+   you press -- the Change control beside it is the only pressable thing here,
+   and it carries its own affordance. Was a bordered, filled box inside the
+   invoice card, which is also the nesting law's L3-inside-L3. */
 .invoice-customer-settled {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  padding: 12px;
-  border: 1px solid #d8ded3;
-  border-radius: 8px;
-  background: #f8faf6;
+  padding: 4px 0;
 }
 
+/* The nesting law: this was a bordered, filled box holding a search field and
+   .invoice-option-list -- which draws its own border -- inside the invoice
+   card, three bordered boxes deep. The list keeps its border because it is a
+   list of pressable rows; the wrapper around it does not need one to say the
+   picker is open. Being open is what says that. */
 .invoice-line-picker {
   display: grid;
   gap: 10px;
   margin: 4px 0 14px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-soft);
 }
 
 .invoice-line-search {
@@ -7884,13 +7897,13 @@ button {
 }
 
 .invoice-document-line-head {
-  min-height: 38px;
+  min-height: var(--c-h-subnav-row);
   padding: 0 10px;
-  background: #f1f5ee;
+  background: var(--c-surface-soft);
 }
 
 .invoice-document-line-head span {
-  color: #626a60;
+  color: var(--c-muted);
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
@@ -7898,12 +7911,12 @@ button {
 
 .invoice-document-line-row {
   padding: 10px;
-  border-top: 1px solid #eef1ea;
+  border-top: 1px solid var(--c-border-soft);
 }
 
 .invoice-document-line-row > strong {
   align-self: center;
-  color: #101510;
+  color: var(--c-text);
   text-align: right;
   white-space: nowrap;
 }
@@ -7911,14 +7924,21 @@ button {
 /* Money/percent input adornment: a currency symbol, "-$", or "%" pinned inside
    the input via a data-prefix / data-suffix attribute, so numbers in the invoice
    editor never render without their unit. */
+/* Rule 05: a money field is as wide as money. A grid rather than a block so
+   the input stretches to the wrapper without a width of its own, and the
+   wrapper is the one that carries the content width. */
 .affixed-field {
   position: relative;
-  display: block;
-  width: 100%;
+  display: grid;
+  width: var(--c-w-price);
+  max-width: 100%;
 }
 
+/* A grid item's min-width is auto, which for an input is its `size` attribute
+   -- about 20 characters. Without this the input keeps that intrinsic width
+   and overflows the money-sized wrapper around it. */
 .affixed-field > input {
-  width: 100%;
+  min-width: 0;
 }
 
 .affixed-field[data-prefix]::before {
@@ -7927,10 +7947,18 @@ button {
   left: 11px;
   top: 50%;
   transform: translateY(-50%);
-  color: #76736d;
+  color: var(--c-muted);
   font-weight: 700;
   font-size: 14px;
   pointer-events: none;
+}
+
+/* The width token is the width of the number. The symbol pinned inside the
+   field needs its own room on top, or a four-figure price reads as "1200.0" --
+   and the max-width above still stops the whole thing outgrowing its column,
+   which is the same shape as the token's own min(Nch, 100%). */
+.affixed-field[data-prefix] {
+  width: calc(var(--c-w-price) + 23px);
 }
 
 .affixed-field[data-prefix] > input {
@@ -7943,10 +7971,14 @@ button {
   right: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: #76736d;
+  color: var(--c-muted);
   font-weight: 700;
   font-size: 14px;
   pointer-events: none;
+}
+
+.affixed-field[data-suffix] {
+  width: calc(var(--c-w-price) + 17px);
 }
 
 .affixed-field[data-suffix] > input {
@@ -7954,9 +7986,10 @@ button {
 }
 
 /* Per-line discount cell: a preset/custom dropdown with an optional value input
-   stacked beneath it. */
+   stacked beneath it. Rule 05 -- the select holds a preset name and its value,
+   so it is sized as a name rather than stretched to the column. */
 .invoice-line-discount select {
-  width: 100%;
+  width: var(--c-w-name);
 }
 
 .invoice-line-discount .affixed-field {
@@ -7968,7 +8001,7 @@ button {
    of its own - the invoice card is the only container. */
 .invoice-plain-line {
   padding: 12px 0;
-  border-top: 1px solid #eef1ea;
+  border-top: 1px solid var(--c-border-soft);
 }
 
 .invoice-document-lines > .invoice-plain-line:first-child {
@@ -7984,11 +8017,11 @@ button {
 
 .invoice-plain-line-desc {
   font-weight: 600;
-  color: #101510;
+  color: var(--c-text);
 }
 
 .invoice-plain-line-main > strong {
-  color: #101510;
+  color: var(--c-text);
   white-space: nowrap;
 }
 
@@ -7998,8 +8031,8 @@ button {
   align-items: center;
   gap: 12px;
   margin-top: 3px;
-  color: #626a60;
-  font-size: 13px;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
 }
 
 .invoice-plain-line-remove {
@@ -8008,13 +8041,14 @@ button {
   padding: 2px;
   border: 0;
   background: none;
-  color: #a22c24;
+  color: var(--c-danger);
   cursor: pointer;
+  transition: color var(--c-t-hover);
 }
 
 .invoice-plain-line-remove:hover,
 .invoice-plain-line-remove:focus-visible {
-  color: #7e1c17;
+  color: var(--c-text);
 }
 
 /* A fixed field value rendered as plain text on the card (locked invoice, or an
@@ -8022,7 +8056,7 @@ button {
 .settings-static-value {
   margin: 0;
   padding: 6px 0;
-  color: #101510;
+  color: var(--c-text);
   font-weight: 500;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -8032,30 +8066,39 @@ button {
   margin-top: 12px;
 }
 
+/* Rule 10: Delete is not a box. This was a red-bordered, red-filled 52px tab
+   at the end of every line -- the loudest thing on a screen whose job is
+   adding items, repeated once per row. Same control, same column, carrying
+   its meaning in the icon's colour instead. */
 .invoice-line-delete-tab {
   width: 52px;
   min-width: 52px;
-  height: 42px;
+  height: var(--c-control-h);
   display: grid;
   place-items: center;
   align-self: end;
-  border: 1px solid #c9493d;
-  border-radius: 8px;
-  background: #fff1ef;
-  color: #a22c24;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-danger);
   cursor: pointer;
+  transition: color var(--c-t-hover);
 }
 
 .invoice-line-delete-tab:hover,
 .invoice-line-delete-tab:focus-visible {
-  border-color: #a22c24;
-  background: #ffdeda;
-  color: #7e1c17;
+  color: var(--c-text);
+}
+
+.invoice-line-delete-tab:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: var(--c-radius-control);
 }
 
 .invoice-empty-line {
   padding: 18px;
-  border-top: 1px solid #eef1ea;
+  border-top: 1px solid var(--c-border-soft);
   text-align: center;
 }
 
@@ -8073,11 +8116,11 @@ button {
   gap: 12px;
 }
 
+/* The nesting law: a list of hairline-separated editor rows inside a settings
+   accordion body, which already draws the box. Was a second bordered, filled
+   container inside it. */
 .custom-field-list {
-  padding: 12px;
-  border: 1px solid #d8ded3;
-  border-radius: 8px;
-  background: #f6f8f3;
+  padding: 12px 0;
 }
 
 /* Payment details are fixed (they come from settings, not editable here). Per
@@ -8091,13 +8134,13 @@ button {
 
 .invoice-payment-block p {
   margin: 0;
-  color: #343a34;
+  color: var(--c-text-body);
   line-height: 1.45;
 }
 
 .invoice-payment-block strong,
 .invoice-custom-fields strong {
-  color: #101510;
+  color: var(--c-text);
 }
 
 .invoice-discount-controls {
@@ -8120,26 +8163,14 @@ button {
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
-  color: #626a60;
+  color: var(--c-muted);
 }
 
+/* Rule 10: Change and Remove are .text-button in the JSX now, so the second
+   copy of that treatment has gone -- only the row that holds them is left. */
 .invoice-discount-set-actions {
   display: flex;
   gap: 14px;
-}
-
-.invoice-discount-set-actions button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: #2f6b46;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.invoice-discount-set-actions button:hover,
-.invoice-discount-set-actions button:focus-visible {
-  text-decoration: underline;
 }
 
 .invoice-discount-done {
@@ -8153,33 +8184,37 @@ button {
 }
 
 /* GST included / not-included segmented toggle above the totals. */
+/* A segmented pick-one control: genuinely pressable, so Rule 01 lets it keep
+   its box. Rule 04 sets the height -- it is a pill, not a control. */
 .invoice-tax-toggle {
   display: flex;
   gap: 0;
   margin-bottom: 10px;
-  border: 1px solid #d8ded3;
-  border-radius: 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
   overflow: hidden;
 }
 
 .invoice-tax-toggle button {
   flex: 1;
-  padding: 8px 10px;
+  min-height: var(--c-h-pill);
+  padding: 0 10px;
   border: 0;
-  background: #f6f8f3;
-  color: #3c433a;
-  font-size: 12px;
+  background: var(--c-surface-soft);
+  color: var(--c-text-body);
+  font-size: var(--c-size-group);
   font-weight: 700;
   cursor: pointer;
+  transition: background var(--c-t-hover);
 }
 
 .invoice-tax-toggle button + button {
-  border-left: 1px solid #d8ded3;
+  border-left: 1px solid var(--c-border);
 }
 
 .invoice-tax-toggle button.active {
-  background: #1fbf6a;
-  color: #07100a;
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .invoice-total-lines span {
@@ -8195,14 +8230,14 @@ button {
 }
 
 .invoice-total-lines strong {
-  color: #101510;
+  color: var(--c-text);
   white-space: nowrap;
 }
 
 .invoice-grand-total {
   margin-top: 4px;
   padding-top: 10px;
-  border-top: 2px solid #101510;
+  border-top: 2px solid var(--c-text);
 }
 
 .invoice-grand-total strong {
@@ -8211,7 +8246,7 @@ button {
 
 .invoice-bottom-actions {
   padding-top: 16px;
-  border-top: 1px solid #d8ded3;
+  border-top: 1px solid var(--c-border);
 }
 
 .invoice-actions {
@@ -8229,16 +8264,16 @@ button {
   gap: 8px;
 }
 
+/* Rule 01: these are values off the invoice template -- a PO number, an ABN.
+   You read them; there is nothing to press. Each one was a bordered, filled
+   box, so a footer of four read-only values looked like a row of four
+   buttons. */
 .invoice-custom-fields span {
   display: grid;
   gap: 2px;
-  min-height: 48px;
   align-content: center;
-  padding: 8px 10px;
-  border: 1px solid #e0e6dc;
-  border-radius: 8px;
-  background: #f8faf6;
-  font-size: 12px;
+  padding: 8px 0;
+  font-size: var(--c-size-group);
 }
 
 .invoice-footer-fields:empty {
@@ -8248,7 +8283,7 @@ button {
 .custom-field-row {
   grid-template-columns: minmax(120px, 0.75fr) minmax(160px, 1fr) minmax(140px, 0.7fr) 40px;
   padding-top: 10px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--c-border-soft);
 }
 
 .lesson-status-panel {
@@ -8511,21 +8546,24 @@ button {
   flex-shrink: 0;
 }
 
+/* Rule 04: a pill is 34px. These were 32, which is not a size the app has. */
 .revenue-period-toggle button {
-  min-height: 32px;
+  min-height: var(--c-h-pill);
   padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--muted);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-muted);
   font-weight: 800;
-  font-size: 12px;
+  font-size: var(--c-size-group);
+  cursor: pointer;
+  transition: background var(--c-t-hover);
 }
 
 .revenue-period-toggle button.active {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: var(--primary-text);
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .revenue-chart {
@@ -8534,7 +8572,7 @@ button {
   gap: 8px;
   height: 120px;
   padding-top: 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .revenue-chart-bar-track {
@@ -8553,18 +8591,18 @@ button {
   max-width: 34px;
   min-height: 2px;
   border-radius: 4px 4px 0 0;
-  background: var(--primary);
+  background: var(--c-accent);
 }
 
 .revenue-chart-bar-track span {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
   white-space: nowrap;
 }
 
 .revenue-comparison {
   margin: 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
 }
 
@@ -8613,54 +8651,55 @@ button {
 .report-toggle-label {
   font-weight: 800;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
   margin-right: 2px;
 }
 
 .report-section-toggle button,
 .report-category-toggle button {
-  min-height: 32px;
+  min-height: var(--c-h-pill);
   padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--muted);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-muted);
   font-weight: 800;
-  font-size: 12px;
+  font-size: var(--c-size-group);
   cursor: pointer;
+  transition: background var(--c-t-hover);
 }
 
 .report-section-toggle button.active,
 .report-category-toggle button.active {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: var(--primary-text);
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .report-category-subtotal {
   margin: 10px 0 0;
 }
 
-/* Prominent notice that the report's expense figures are filtered, so an
-   on-screen or exported P&L is never mistaken for the full picture. */
+/* Notice that the report's expense figures are filtered, so an on-screen or
+   exported P&L is never mistaken for the full picture.
+
+   Rule 09: feedback is one line of coloured text -- no fill, no border, no
+   icon. It was an amber-filled box with a 4px left bar, which is the loudest
+   thing on a page of figures and outshouted the figures themselves. The
+   colour still says "read me"; the border was saying it twice. */
 .report-filter-banner {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  border: 1px solid #e6b800;
-  border-left: 4px solid #e6b800;
-  border-radius: 10px;
-  background: #fff9e6;
-  color: #5c4a00;
-  font-size: 13px;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--c-info-text);
+  font-size: var(--c-size-meta);
   font-weight: 600;
 }
 
-.report-filter-banner .outline-button {
-  flex-shrink: 0;
+.report-filter-banner > span {
+  min-width: 0;
+  flex: 1 1 20ch;
 }
 
 .report-custom-range {
@@ -8688,7 +8727,7 @@ button {
 }
 
 .report-stat > span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
@@ -8700,16 +8739,18 @@ button {
 }
 
 .report-stat > small {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
 }
 
+/* Profit and loss, so these say which one. --c-accent is the app's ink, and a
+   net loss printed in ink reads as just another figure. */
 .report-positive {
-  color: var(--primary);
+  color: var(--c-success-text);
 }
 
 .report-negative {
-  color: #c02121;
+  color: var(--c-danger);
 }
 
 .report-legend {
@@ -8717,7 +8758,7 @@ button {
   gap: 12px;
   flex-shrink: 0;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .report-legend span {
@@ -8734,11 +8775,11 @@ button {
 }
 
 .report-legend-income::before {
-  background: var(--primary);
+  background: var(--c-accent);
 }
 
 .report-legend-expense::before {
-  background: var(--muted);
+  background: var(--c-muted);
 }
 
 .report-chart {
@@ -8747,7 +8788,7 @@ button {
   gap: 8px;
   height: 140px;
   padding-top: 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .report-chart-track {
@@ -8778,16 +8819,16 @@ button {
 }
 
 .report-chart-bar-income {
-  background: var(--primary);
+  background: var(--c-accent);
 }
 
 .report-chart-bar-expense {
-  background: var(--muted);
+  background: var(--c-muted);
 }
 
 .report-chart-track span {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
   white-space: nowrap;
 }
 
@@ -8805,7 +8846,7 @@ button {
   justify-content: space-between;
   gap: 12px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .report-breakdown li:last-child {
@@ -8813,7 +8854,7 @@ button {
 }
 
 .report-breakdown li span small {
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .report-aging-grid {
@@ -8823,23 +8864,25 @@ button {
   margin: 12px 0;
 }
 
+/* Rule 01 and the nesting law: five read-only buckets, each in its own
+   bordered box, inside the A/R card that already draws one. Same shape as
+   .report-stat above, which is the compliant version of exactly this. */
 .report-aging-cell {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 10px 0;
 }
 
 .report-aging-cell span {
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
 }
 
-.report-aging-danger {
-  border-color: #e6b0b0;
-  background: #fbeaea;
+/* The 90-plus bucket when there is money in it. Carried by the figure rather
+   than by a pink box around it -- the same move as the invoice status pills. */
+.report-aging-danger strong {
+  color: var(--c-danger);
 }
 
 .report-aging-table {
@@ -8852,11 +8895,11 @@ button {
 .report-aging-table td {
   text-align: left;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .report-aging-table th {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -8884,9 +8927,9 @@ button {
 }
 
 .pull-range-summary > span {
-  color: #101510;
+  color: var(--c-text);
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--c-size-meta);
 }
 
 .pull-range-actions {
@@ -8950,60 +8993,86 @@ button {
   border-bottom: 1px solid var(--border);
 }
 
+/* Status pills. Five states, four of them carrying a colour that could not
+   follow the theme -- five separate tinted fills, each with its own literal
+   text colour. The state is written on the pill, so colour is reinforcement
+   rather than the only carrier: one neutral tint under all of them, and the
+   word takes the state's colour. --c-info-text was added to tokens.css for
+   this, because "published" and "sent" are not successes and green said they
+   were. */
 .invoice-status-pill {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
   font-size: 11px;
   font-weight: 800;
   text-transform: capitalize;
-  background: var(--panel-soft, #f2f2f2);
-  color: var(--text);
+  background: var(--c-hover);
 }
 
-.invoice-status-published {
-  background: #eef3fb;
-  color: #2b5cb8;
+/* Colour, chained deliberately. `.data-card span` paints every span inside a
+   card with --muted and outranks a lone status class, so the five status
+   colours here have never actually reached the screen -- every pill rendered
+   the same grey, and only the tinted background said which state it was.
+   Found by measuring the computed colour rather than by reading the file. */
+.invoice-status-pill,
+.data-card .invoice-status-pill {
+  color: var(--c-text-soft);
 }
 
-.invoice-status-sent {
-  background: #eaf3ec;
-  color: #1c7a49;
+.invoice-status-pill.invoice-status-published,
+.invoice-status-pill.invoice-status-sent {
+  color: var(--c-info-text);
 }
 
-.invoice-status-paid {
-  background: var(--success-soft, #eaf8ed);
-  color: #1a7431;
+.invoice-status-pill.invoice-status-paid {
+  color: var(--c-success-text);
 }
 
-.invoice-status-overdue {
-  background: var(--danger-soft, #fff1ed);
-  color: var(--danger, #b52f1f);
+.invoice-status-pill.invoice-status-overdue {
+  color: var(--c-danger);
 }
 
-.invoice-status-void {
+.invoice-status-pill.invoice-status-void {
+  color: var(--c-muted);
   text-decoration: line-through;
 }
 
+/* Rule 08: one border around the list, hairlines between the rows. This was
+   the same stack of separately boxed, gapped, rounded cards that the customer
+   results and the pull list used to be -- four screens of it, since payment
+   methods, discount presets, expense categories and the product catalog all
+   render through here. */
 .billing-catalog-list {
   display: grid;
-  gap: 6px;
   margin-top: 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  overflow: hidden;
 }
 
 .billing-catalog-list-item {
+  min-height: var(--c-row-h);
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--c-border-soft);
   text-align: left;
+  transition: background var(--c-t-hover);
+}
+
+.billing-catalog-list-item:last-child {
+  border-bottom: 0;
+}
+
+.billing-catalog-list-item:hover {
+  background: var(--c-hover);
 }
 
 .billing-catalog-list-item.inactive {
@@ -9011,12 +9080,13 @@ button {
 }
 
 .billing-catalog-list-item em {
-  color: var(--muted);
-  font-size: 12px;
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
   font-style: normal;
 }
 
 .billing-catalog-list-item > button:first-child {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -9031,15 +9101,47 @@ button {
   color: inherit;
 }
 
+.billing-catalog-list-item > button:first-child span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.billing-catalog-list-item strong {
+  overflow: hidden;
+  color: var(--c-text);
+  font-size: var(--c-size-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Rule 10, and a bug: --coach-primary is not defined anywhere, so `color`
+   was dropped and these inherited body text with no underline -- they did not
+   read as pressable at all. Same treatment as .text-button now, at the meta
+   size the rows they sit in are set in. */
 .text-link-button {
   flex-shrink: 0;
-  background: none;
-  border: none;
   padding: 0;
-  color: var(--coach-primary);
-  font-size: 12px;
-  font-weight: 700;
+  border: 0;
+  background: none;
+  color: var(--c-text-soft);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
+  transition: color var(--c-t-hover);
+}
+
+.text-link-button:hover {
+  color: var(--c-text);
+  font-weight: 700;
+}
+
+.text-link-button:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
 }
 
 /* Billing forms reuse .settings-field inside .service-form-row exactly like
@@ -9389,10 +9491,6 @@ button {
   font-size: 13px;
 }
 
-.gcal-rule-calendar input {
-  accent-color: var(--coach-primary);
-}
-
 .gcal-rule-calendar em {
   color: var(--muted);
   font-size: 11px;
@@ -9427,10 +9525,6 @@ button {
   font-weight: 600;
 }
 
-.google-calendar-source-toggle input {
-  accent-color: var(--coach-primary);
-}
-
 .gcal-debug-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -9455,7 +9549,6 @@ button {
 }
 
 .gcal-debug-toggle input {
-  accent-color: var(--coach-primary, #1f9d55);
   cursor: pointer;
 }
 
@@ -9902,6 +9995,7 @@ button {
 }
 
 .pos-settles-toggle {
+  display: flex;
   flex-direction: row;
   align-items: center;
   gap: 8px;
@@ -11076,8 +11170,13 @@ button {
   cursor: pointer;
 }
 
+/* Rule 05: --c-w-prose, deliberately. What sits in here is a webhook URL, an
+   API key, or a "Set - 64 chars - a1b2c3d4" fingerprint -- opaque strings with
+   no natural width, monospace and read-only, where seeing the whole value is
+   the entire point. That is the same case notes and search make for filling
+   the row, so it says so with the token rather than a bare 100%. */
 .integration-credential input {
-  width: 100%;
+  width: var(--c-w-prose);
   font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   padding: 7px 9px;
   border: 1px solid #deded8;
@@ -11302,13 +11401,18 @@ button {
 }
 
 /* Rule 05. A field is as wide as its content — never a bare 100%, never a 1fr
-   column, never a stretching flex child. */
-.inline-edit-field .w-time { width: var(--c-w-time); }
-.inline-edit-field .w-price { width: var(--c-w-price); }
-.inline-edit-field .w-date { width: var(--c-w-date); }
-.inline-edit-field .w-name { width: var(--c-w-name); }
-.inline-edit-field .w-email { width: var(--c-w-email); }
-.inline-edit-field .w-prose { width: var(--c-w-prose); }
+   column, never a stretching flex child.
+   
+   Global rather than scoped to .inline-edit-field: the rule is about what a
+   field holds, not about which component holds it, and a second copy of these
+   six lines per screen is how the four token systems started. The invoice
+   editor is the first screen outside inline editing to use them. */
+.w-time { width: var(--c-w-time); }
+.w-price { width: var(--c-w-price); }
+.w-date { width: var(--c-w-date); }
+.w-name { width: var(--c-w-name); }
+.w-email { width: var(--c-w-email); }
+.w-prose { width: var(--c-w-prose); }
 
 /* Wraps rather than pushing into the padding. */
 .inline-edit-actions {

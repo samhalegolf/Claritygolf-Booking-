@@ -10,6 +10,9 @@ import { installBoxAudit } from "./lib/boxAudit";
 // Tokens first: styles.css and every module stylesheet read --c-*.
 import "./tokens.css";
 import "./styles.css";
+// After styles.css: the app-wide switch settles the ties with the per-screen
+// rules that used to size these as tick boxes.
+import "./switches.css";
 
 // The nesting law is a property of the rendered page, not the stylesheet, so
 // it is checked in the browser rather than by uiRules.test.ts. Dev only.

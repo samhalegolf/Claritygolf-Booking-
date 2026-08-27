@@ -123,11 +123,11 @@ export function BillingReportsPanel({
           <div className="report-custom-range">
             <label className="settings-field">
               <span>From</span>
-              <input type="date" value={customStart} onChange={(event) => onCustomStartChange(event.target.value)} />
+              <input className="w-date" type="date" value={customStart} onChange={(event) => onCustomStartChange(event.target.value)} />
             </label>
             <label className="settings-field">
               <span>To</span>
-              <input type="date" value={customEnd} onChange={(event) => onCustomEndChange(event.target.value)} />
+              <input className="w-date" type="date" value={customEnd} onChange={(event) => onCustomEndChange(event.target.value)} />
             </label>
             <button className="outline-button" onClick={onApplyCustom} disabled={!customStart || !customEnd} type="button">
               Apply
@@ -179,7 +179,7 @@ export function BillingReportsPanel({
                 <strong>Filtered report</strong> — expense figures (total, net profit, {summary.taxName}, chart) exclude:{" "}
                 {summary.expenses.excludedCategoryNames.join(", ")}. Income, top customers and A/R are unaffected.
               </span>
-              <button className="outline-button" type="button" onClick={onClearCategories}>
+              <button className="text-button" type="button" onClick={onClearCategories}>
                 Show all categories
               </button>
             </div>

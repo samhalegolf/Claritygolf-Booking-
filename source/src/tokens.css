@@ -35,6 +35,10 @@
   --c-danger: #a52e15;
   --c-error-text: #6f1d1d;
   --c-success-text: #225b2f;
+  /* Neither good news nor bad: a state that has happened and is waiting on
+     someone else. Added for the invoice status pills, where "published" and
+     "sent" are not successes and colouring them green said they were. */
+  --c-info-text: #23508f;
   /* Overlays drawn on top of video imagery -- a duration badge, an upload
      bar. Deliberately the same in both schemes, so they are not swapped in
      the dark blocks below: a dark scrim with light text reads on any
@@ -70,6 +74,7 @@
   --dark-danger: #ff8a8a;
   --dark-error-text: #ffd9d9;
   --dark-success-text: #b7e0bd;
+  --dark-info-text: #a8c8f5;
   --dark-pencil: rgba(244, 247, 242, 0.5);
   --dark-pencil-hover: rgba(244, 247, 242, 0.76);
   --dark-text-disabled: rgba(244, 247, 242, 0.38);
@@ -189,6 +194,7 @@
   --c-danger: var(--dark-danger);
   --c-error-text: var(--dark-error-text);
   --c-success-text: var(--dark-success-text);
+  --c-info-text: var(--dark-info-text);
   --c-pencil: var(--dark-pencil);
   --c-pencil-hover: var(--dark-pencil-hover);
   --c-text-disabled: var(--dark-text-disabled);
@@ -220,6 +226,7 @@
     --c-danger: var(--dark-danger);
     --c-error-text: var(--dark-error-text);
     --c-success-text: var(--dark-success-text);
+  --c-info-text: var(--dark-info-text);
     --c-pencil: var(--dark-pencil);
     --c-pencil-hover: var(--dark-pencil-hover);
     --c-text-disabled: var(--dark-text-disabled);

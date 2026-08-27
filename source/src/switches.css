@@ -1,0 +1,97 @@
+/* Switches, everywhere.
+ *
+ * The video settings sheet drew its own pill switch (.va-sheet-toggle) while
+ * every other screen still rendered the browser's native tick box, so the same
+ * on/off idea had two different shapes depending on where you met it. This
+ * file promotes the sheet's switch to the app-wide shape for
+ * input[type="checkbox"]: same track, same white knob, same 140ms slide, sized
+ * up a little for a finger rather than a mouse.
+ *
+ * It is a restyle, not a rewrite -- the markup stays a checkbox, so labels,
+ * keyboard focus, Space to toggle, form state and every existing onChange
+ * carry on untouched.
+ *
+ * Loaded after styles.css so it settles the ties with the per-screen rules
+ * that used to size these (.settings-toggle input, .show-password-toggle
+ * input). Opt out with class="tickbox" if a genuine tick box is ever wanted
+ * back.
+ */
+
+input[type="checkbox"]:not(.tickbox) {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--c-radius-pill);
+  /* Mixed from the text colour rather than named as a grey, so the off track
+     is a light grey on the light scheme and a translucent light on the dark
+     one -- which is what the sheet's rgba(233, 240, 255, 0.18) was doing by
+     hand. */
+  background: color-mix(in srgb, var(--c-text) 22%, transparent);
+  cursor: pointer;
+  transition: background var(--c-t-hover);
+  vertical-align: middle;
+}
+
+/* --c-on-scrim rather than --c-surface: the knob is white in both schemes, and
+   on the dark scheme a surface-coloured knob would disappear into its own
+   track. */
+input[type="checkbox"]:not(.tickbox)::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--c-on-scrim);
+  box-shadow: 0 1px 2px var(--c-scrim-soft);
+  transition: left var(--c-t-hover);
+}
+
+input[type="checkbox"]:not(.tickbox):checked {
+  background: var(--c-accent);
+}
+
+input[type="checkbox"]:not(.tickbox):checked::after {
+  left: 16px;
+}
+
+input[type="checkbox"]:not(.tickbox):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+input[type="checkbox"]:not(.tickbox):focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+/* A select-all that covers some of what it lists: knob parked mid-track. */
+input[type="checkbox"]:not(.tickbox):indeterminate {
+  background: color-mix(in srgb, var(--c-accent) 45%, transparent);
+}
+
+input[type="checkbox"]:not(.tickbox):indeterminate::after {
+  left: 9px;
+}
+
+/* Rows of settings read like the sheet did: the label on the left, the switch
+   parked on the right edge. Only the full-width settings rows do this; the
+   inline chips (Show password, Record sync attempts, a preview row's include
+   box) keep the switch next to the words it belongs to. */
+.settings-toggle input[type="checkbox"]:not(.tickbox) {
+  order: 2;
+  margin-left: auto;
+}
+
+/* Selection columns were sized for a 16px tick box, so a 34px switch would be
+   clipped by the column rather than by the cell. */
+.bank-select-cell {
+  width: 48px;
+}
