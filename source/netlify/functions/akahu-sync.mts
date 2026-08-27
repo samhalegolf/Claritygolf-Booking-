@@ -1,6 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { createHash } from "node:crypto";
-import { defaultAccountId } from "./_shared/account.mts";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { listAkahuAccounts, syncAkahuTransactions } from "./_shared/akahu.mts";
 
 // Admin backfill / poll endpoint for the Akahu bank feed: pulls transactions
@@ -12,7 +11,6 @@ import { listAkahuAccounts, syncAkahuTransactions } from "./_shared/akahu.mts";
 // POST /api/akahu-sync  { action?: "sync" | "accounts", since?: string }
 //   since: ISO date-time (exclusive start); omit for all available history.
 
-const sessionCookieName = "clarity_session";
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -25,45 +23,15 @@ function json(value: unknown, status = 200) {
   });
 }
 
-function parseCookies(req: Request) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
-      }),
-  );
-}
-
 // Same session check as billing-api.mts / stripe-billing-sync.mts.
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return false;
-  const url = env("SUPABASE_URL").replace(/\/$/, "");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
-  if (!url || !key) return false;
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const response = await fetch(
-    `${url}/rest/v1/admin_sessions?select=id&token_hash=eq.${encodeURIComponent(tokenHash)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
-    { headers: { apikey: key, Authorization: `Bearer ${key}` } },
-  );
-  if (!response.ok) return false;
-  const rows = await response.json();
-  return Array.isArray(rows) && rows.length > 0;
-}
-
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed", message: "POST only." }, 405);
 
   try {
-    if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-    const accountId = defaultAccountId();
+    // Bank feeds, expenses and reconciliation are per business. This used to
+    // check only that a session existed and then act on the original
+    // workspace regardless of who was signed in.
+    const accountId = (await requireCoachActor(req)).accountId;
 
     const raw = await req.text();
     const body = raw ? JSON.parse(raw) : {};
@@ -83,7 +51,10 @@ export default async function handler(req: Request) {
     console.error("akahu_sync:failed", error);
     const status = Number((error as { status?: unknown })?.status);
     return json(
-      { error: "akahu_sync_error", message: error instanceof Error ? error.message : "Sync failed." },
+      {
+        error: (error as { code?: string })?.code || "akahu_sync_error",
+        message: error instanceof Error ? error.message : "Sync failed." ,
+      },
       Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500,
     );
   }

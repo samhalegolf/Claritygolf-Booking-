@@ -1,10 +1,11 @@
 import type { Config, Context } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { createHash, randomUUID } from "node:crypto";
-import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
+import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import { activeCurrency } from "./_shared/locale.mts";
 import { setActivePhoneCountry } from "./_shared/phone.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
+import { requireCoachActor, recordBelongsToAccountStrict } from "./_shared/coach-auth.mts";
 
 type BookingCoreModule = {
   handleBookingApiRoute: (req: Request, forcedPathname?: string, context?: Context) => Promise<Response> | Response;
@@ -194,8 +195,10 @@ async function readAdminSession(req: Request) {
 }
 
 function defaultCoachAccount() {
+  // Original-workspace bootstrapping only — never used as auth fallback or
+  // account resolution. New workspaces get their own values from DB settings.
   return {
-    id: fallbackAccountId(),
+    id: legacyOriginalWorkspaceId(),
     coachName: env("CLARITY_COACH_NAME", "Sam Hale"),
     businessName: env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
     venueName: env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
@@ -234,7 +237,7 @@ function cleanCoachAccount(account: Record<string, unknown> = {}) {
 
 function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
-  const slug = cleanSlug(clean.calendarSlug || clean.businessName, fallbackAccountId());
+  const slug = cleanSlug(clean.calendarSlug || clean.businessName, legacyOriginalWorkspaceId());
   return {
     id: slug,
     name: clean.businessName || "Sam Hale Golf",
@@ -250,7 +253,7 @@ function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
   const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(clean);
   return {
-    id: clean.id || fallbackAccountId(),
+    id: clean.id || legacyOriginalWorkspaceId(),
     accountId: workspaceAccount.id,
     name: clean.coachName,
     displayName: clean.coachName || clean.businessName,
@@ -312,8 +315,37 @@ function parseSettingJson<T>(settings: Record<string, string>, key: string, fall
   return safeJsonParse(settingValue(settings, key), fallback);
 }
 
-function coachAccountFromSettings(settings: Record<string, string>) {
-  const defaults = defaultCoachAccount();
+/** True only for the business this deployment started life as. */
+function isOriginalWorkspace(accountId: string) {
+  return cleanSlug(accountId, "") === legacyOriginalWorkspaceId();
+}
+
+/**
+ * Product defaults for a business that has not been set up yet.
+ *
+ * The fast shell renders before anything else, so it is where the original
+ * coach's name and venue would show up first on a new business's very first
+ * login. Mirrors neutralCoachAccount() in booking-core.mts.
+ */
+function neutralCoachAccount(accountId: string) {
+  return {
+    ...defaultCoachAccount(),
+    id: cleanSlug(accountId, ""),
+    coachName: "",
+    businessName: "",
+    venueName: "",
+    venueShortName: "",
+    contactEmail: "",
+    calendarSlug: cleanSlug(accountId, ""),
+  };
+}
+
+function coachAccountFromSettings(settings: Record<string, string>, accountId = "") {
+  const scopedAccountId = cleanSlug(settingValue(settings, "accountId") || accountId, "");
+  const defaults =
+    !scopedAccountId || isOriginalWorkspace(scopedAccountId)
+      ? defaultCoachAccount()
+      : neutralCoachAccount(scopedAccountId);
   return cleanCoachAccount({
     id: settingValue(settings, "accountId") || defaults.id,
     coachName: settingValue(settings, "accountCoachName") || defaults.coachName,
@@ -577,7 +609,7 @@ function rowToItem(row: Record<string, unknown>) {
     );
   return {
     id: cleanString(row.id, "", 140),
-    accountId: cleanSlug(row.account_id, defaultWorkspaceAccountFromCoachAccount().id),
+    accountId: cleanSlug(row.account_id, ""),
     kind: row.kind === "block" ? "block" : "appointment",
     week: Number(row.week ?? 0),
     day: Number(row.day ?? 0),
@@ -612,7 +644,7 @@ function rowToItem(row: Record<string, unknown>) {
 }
 
 function recordBelongsToAccount(record: Record<string, unknown>, accountId: string) {
-  return (record.accountId || accountId) === accountId;
+  return record.accountId === accountId;
 }
 
 function isAdminUser(user: Record<string, unknown> | null | undefined) {
@@ -661,14 +693,14 @@ function publicCalendarState(state: Record<string, unknown>) {
   };
 }
 
-async function readSettingsMap() {
+async function readSettingsMap(accountId: string) {
   // See _shared/settings-keys.mts: the bulk read deliberately leaves the heavy
   // diagnostic keys behind. This one runs on every calendar shell load.
-  const rows = await db().sql`SELECT key, value FROM settings WHERE key <> 'googleCalendarDebugLogJson'`;
+  const rows = await db().sql`SELECT key, value FROM settings WHERE key <> 'googleCalendarDebugLogJson' AND account_id = ${accountId}`;
   return Object.fromEntries(rows.map((row: Record<string, string>) => [row.key, row.value || ""]));
 }
 
-async function readItems() {
+async function readItems(accountId: string) {
   // Same join booking-core's readItems() uses: the bay comes along with the
   // lesson so the calendar can show which ones are covered on first load.
   // Only a live booking counts: a failed or cancelled sync row means no bay.
@@ -680,6 +712,7 @@ async function readItems() {
            s.start_timestamp AS bay_start_timestamp
     FROM calendar_items ci
     LEFT JOIN optix_booking_sync s ON s.calendar_item_id = ci.id
+    WHERE ci.account_id = ${accountId}
     ORDER BY ci.week, ci.day, ci.start, ci.id
   `;
   return rows.map(rowToItem);
@@ -691,32 +724,62 @@ function appUsersFromSettings(settings: Record<string, string>, account: ReturnT
 }
 
 async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
-  const session = await readAdminSession(req);
-  if (!session) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+  let actor: Awaited<ReturnType<typeof requireCoachActor>>;
+  try {
+    actor = await requireCoachActor(req);
+  } catch (error) {
+    return jsonError(req, error, "shell");
+  }
 
   const shellStartedAt = Date.now();
   console.info("CALENDAR_SHELL_STATE_LOAD_STARTED", {
     route: "/api/calendar-state",
     routeUsed: "shell",
     entrypoint: "tiny",
+    accountId: actor.accountId,
+    role: actor.role,
   });
 
-  const [settingsMap, items] = await Promise.all([readSettingsMap(), readItems()]);
+  const [settingsMap, items] = await Promise.all([readSettingsMap(actor.accountId), readItems(actor.accountId)]);
   // Resolve the workspace's country before any date or price is formatted, so
   // this lambda uses the coach's conventions rather than New Zealand's.
   setActivePhoneCountry(settingValue(settingsMap, "accountCountry"));
-  const account = coachAccountFromSettings(settingsMap);
+  const account = coachAccountFromSettings(settingsMap, actor.accountId);
   const workspaceAccounts = normalizeWorkspaceAccounts(parseSettingJson(settingsMap, "workspaceAccountsJson", []), account);
-  const accountId = workspaceAccounts.find((workspaceAccount) => workspaceAccount.active)?.id || workspaceAccounts[0]?.id || defaultWorkspaceAccountFromCoachAccount(account).id;
-  const users = appUsersFromSettings(settingsMap, account);
-  const sessionEmail = cleanEmail(session.email, "");
-  const currentUser =
-    users.find((user: Record<string, unknown>) => cleanEmail(user.email, "") === sessionEmail && (!user.accountId || user.accountId === accountId)) ||
-    users.find((user: Record<string, unknown>) => user.accountId === accountId && isAdminUser(user)) ||
-    { ...defaultAppUserFromAccount(account), accountId };
+  // The original workspace's seeds are its own real data; any other business
+  // starts empty rather than inheriting them.
+  const original = isOriginalWorkspace(actor.accountId);
+  const accountId = actor.accountId;
+  const coaches = normalizeCoachProfiles(parseSettingJson(settingsMap, "coachProfilesJson", []), account);
+  const defaultCoachId = coaches.find((coach) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || "";
+  const coachName = settingValue(settingsMap, "accountCoachName") || account.coachName;
+  const currentUser = {
+    id: actor.authUserId,
+    accountId,
+    name: coachName,
+    role: actor.role,
+    coachId: actor.coachId || defaultCoachId,
+    permissions: actor.isAdmin
+      ? {
+          bookings: "all",
+          services: "all",
+          availability: "all",
+          locations: "all",
+          clients: "all",
+          settings: "all",
+        }
+      : {
+          bookings: "own",
+          services: "own",
+          availability: "own",
+          locations: "none",
+          clients: "own",
+          settings: "none",
+        },
+  };
   const context = {
     accountId,
-    isAdmin: isAdminUser(currentUser),
+    isAdmin: actor.isAdmin,
     coachId: cleanSlug(currentUser.coachId, ""),
   };
   const shellLoadDurationMs = Date.now() - shellStartedAt;
@@ -745,6 +808,7 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
     shellLoadDurationMs,
     responseDurationMs,
     itemCount: items.length,
+    accountId,
     peopleDeferred: deferred.people,
     notificationsDeferred: deferred.notifications,
     googleSyncStatusDeferred: deferred.googleSyncStatus,
@@ -754,12 +818,14 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
     syncKey: settingValue(settingsMap, "syncKey") || env("CLARITY_CALENDAR_SYNC_KEY") || `cg_${randomUUID().replaceAll("-", "")}`,
     updatedAt: settingValue(settingsMap, "updatedAt") || nowIso(),
     items,
-    services: normalizeServices(parseSettingJson(settingsMap, "servicesJson", defaultServices)),
+    services: normalizeServices(parseSettingJson(settingsMap, "servicesJson", original ? defaultServices : [])),
     workspaceAccounts,
-    coaches: normalizeCoachProfiles(parseSettingJson(settingsMap, "coachProfilesJson", []), account),
+    coaches,
     currentUser,
     locations: normalizeLocations(parseSettingJson(settingsMap, "locationsJson", []), account),
-    availability: normalizeAvailability(parseSettingJson(settingsMap, "availabilityJson", defaultAvailability)),
+    availability: normalizeAvailability(
+      parseSettingJson(settingsMap, "availabilityJson", original ? defaultAvailability : [[], [], [], [], [], [], []]),
+    ),
     people: [],
     notifications: [],
     settings: adminSettingsFromSettings(settingsMap),

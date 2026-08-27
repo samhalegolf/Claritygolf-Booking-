@@ -14,8 +14,8 @@ import {
   syncGoogleCalendarNow,
   updateGoogleCalendarSyncSettings,
 } from "./google-calendar-sync.mts";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 
-const sessionCookieName = "clarity_session";
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -35,26 +35,6 @@ function html(value: string, status = 200) {
   });
 }
 
-function hashToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-function parseCookies(req: Request) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
-      }),
-  );
-}
-
 function supabaseConfig() {
   const url = env("SUPABASE_URL").replace(/\/$/, "");
   const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
@@ -70,16 +50,6 @@ async function supabase(table: string, query: string) {
   const text = await response.text();
   if (!response.ok) throw new Error(`Supabase GET ${table} failed ${response.status}: ${text.slice(0, 500)}`);
   return text ? JSON.parse(text) : [];
-}
-
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return false;
-  const rows = await supabase(
-    "admin_sessions",
-    `select=id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
-  );
-  return rows.length > 0;
 }
 
 async function parseBody(req: Request) {
@@ -126,24 +96,26 @@ export default async function handler(req: Request) {
       return html(callbackPage(true, `Connected${status.accountEmail ? ` as ${status.accountEmail}` : ""}. You can close this tab.`));
     }
 
-    if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+    // Google is connected per business, so every route below needs the
+    // business the caller actually administers -- not "a session exists".
+    const accountId = (await requireCoachActor(req)).accountId;
 
-    if (req.method === "GET" && action === "status") return json(await getGoogleCalendarSyncStatus(req));
-    if ((req.method === "GET" || req.method === "POST") && action === "connect") return json(await createGoogleCalendarAuthUrl(req));
-    if (req.method === "POST" && action === "migrate-provider-token") return json(await migrateLegacyGoogleCalendarConnection(req));
-    if (req.method === "POST" && action === "sync") return json(await syncGoogleCalendarNow("manual_sync_now"));
-    if (req.method === "POST" && action === "disconnect") return json(await disconnectGoogleCalendar(req));
+    if (req.method === "GET" && action === "status") return json(await getGoogleCalendarSyncStatus(accountId, req));
+    if ((req.method === "GET" || req.method === "POST") && action === "connect") return json(await createGoogleCalendarAuthUrl(accountId, req));
+    if (req.method === "POST" && action === "migrate-provider-token") return json(await migrateLegacyGoogleCalendarConnection(accountId, req));
+    if (req.method === "POST" && action === "sync") return json(await syncGoogleCalendarNow(accountId, "manual_sync_now"));
+    if (req.method === "POST" && action === "disconnect") return json(await disconnectGoogleCalendar(accountId, req));
     if ((req.method === "PUT" || req.method === "POST") && action === "settings") {
-      return json(await updateGoogleCalendarSyncSettings(await parseBody(req)));
+      return json(await updateGoogleCalendarSyncSettings(accountId, await parseBody(req)));
     }
 
     // Sync diagnostics: every trigger, the Google failure code, and the event
     // body that was sent. Read by the Integrations tab debug window.
-    if (req.method === "GET" && action === "debug") return json(await getGoogleCalendarDebugLog());
-    if (req.method === "POST" && action === "debug/clear") return json(await clearGoogleCalendarDebugLog());
+    if (req.method === "GET" && action === "debug") return json(await getGoogleCalendarDebugLog(accountId));
+    if (req.method === "POST" && action === "debug/clear") return json(await clearGoogleCalendarDebugLog(accountId));
     if (req.method === "POST" && action === "debug/toggle") {
       const body = await parseBody(req);
-      return json(await setGoogleCalendarDebugEnabled(body?.enabled !== false));
+      return json(await setGoogleCalendarDebugEnabled(accountId, body?.enabled !== false));
     }
 
     return json({ error: "not_found", message: "Google Calendar route not found." }, 404);

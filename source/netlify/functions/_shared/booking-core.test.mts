@@ -86,6 +86,7 @@ function service(overrides = {}) {
 
 function calendarState(overrides = {}) {
   return {
+    accountId,
     syncKey: "sync-test",
     updatedAt: "2026-07-12T00:00:00.000Z",
     account: {
@@ -245,6 +246,7 @@ test("public booking slots endpoint requires serviceId", async () => {
   try {
     const response = await handlePublicBookingSlotsRequest(
       new Request(`https://example.test/api/public-booking-slots?week=${testWeek}`),
+      { resolveAccountId: async () => accountId },
     );
     const body = await response.json() as any;
 
@@ -276,11 +278,6 @@ test("public slot calendar item query scopes by account and requested week", () 
 
 test("public appointment read query scopes by account and appointment only", () => {
   const query = publicAppointmentReadQuery({ appointmentId: "booking-123", accountId });
-  const fallbackQuery = publicAppointmentReadQuery({
-    appointmentId: "booking-123",
-    accountId,
-    useAccountScope: false,
-  });
 
   assert.match(query, /select=\*/);
   assert.match(query, /(?:^|&)id=eq\.booking-123(?:&|$)/);
@@ -288,18 +285,19 @@ test("public appointment read query scopes by account and appointment only", () 
   assert.match(query, /(?:^|&)limit=1(?:&|$)/);
   assert.doesNotMatch(query, /week=eq\./);
   assert.doesNotMatch(query, /order=/);
-  assert.doesNotMatch(fallbackQuery, /account_id=eq\./);
-  assert.match(fallbackQuery, /(?:^|&)id=eq\.booking-123(?:&|$)/);
-  assert.match(fallbackQuery, /(?:^|&)limit=1(?:&|$)/);
+});
+
+test("an appointment read with no account cannot be built at all", () => {
+  // There is no unscoped variant any more. Knowing a booking id must not be
+  // enough to read it out of another business.
+  assert.throws(
+    () => publicAppointmentReadQuery({ appointmentId: "booking-123", accountId: "" }),
+    (error: any) => error?.code === "account_scope_unavailable",
+  );
 });
 
 test("public appointment contact query scopes by account and customer email", () => {
   const query = publicAppointmentContactQuery({ accountId, email: "SAM@Example.test" });
-  const fallbackQuery = publicAppointmentContactQuery({
-    accountId,
-    email: "SAM@Example.test",
-    useAccountScope: false,
-  });
 
   assert.match(query, /select=\*/);
   assert.match(query, /(?:^|&)kind=eq\.appointment(?:&|$)/);
@@ -307,15 +305,31 @@ test("public appointment contact query scopes by account and customer email", ()
   assert.match(query, new RegExp(`(?:^|&)account_id=eq\\.${accountId}(?:&|$)`));
   assert.match(query, /(?:^|&)limit=50(?:&|$)/);
   assert.doesNotMatch(query, /week=eq\./);
-  assert.doesNotMatch(fallbackQuery, /account_id=eq\./);
-  assert.match(fallbackQuery, /(?:^|&)email=ilike\.sam%40example\.test(?:&|$)/);
 });
 
-test("public slot item read falls back to week-only when the account column is missing", async () => {
+test("a reschedule lookup with no account cannot be built at all", () => {
+  // The same address can belong to a client of two different businesses. An
+  // unscoped email lookup would return both.
+  assert.throws(
+    () => publicAppointmentContactQuery({ accountId: "", email: "sam@example.test" }),
+    (error: any) => error?.code === "account_scope_unavailable",
+  );
+});
+
+test("a public slot query with no account cannot be built at all", () => {
+  assert.throws(
+    () => publicSlotCalendarItemsQuery({ accountId: "", week: testWeek }),
+    (error: any) => error?.code === "account_scope_unavailable",
+  );
+});
+
+test("a missing account_id column fails the public slot read instead of falling back", async () => {
+  // This used to retry with a week-only query and return every business's
+  // bookings for that week. A schema fault is now a failure, not a wider read.
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.SUPABASE_URL;
   const originalKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const originalInfo = console.warn;
+  const originalWarn = console.warn;
   const requests: string[] = [];
   process.env.SUPABASE_URL = "https://supabase.example";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key";
@@ -323,41 +337,23 @@ test("public slot item read falls back to week-only when the account column is m
   globalThis.fetch = async (input) => {
     const url = String(input);
     requests.push(url);
-    if (url.includes("account_id=eq.")) {
-      return Response.json(
-        {
-          code: "PGRST204",
-          message: "Could not find the 'account_id' column of 'calendar_items' in the schema cache",
-        },
-        { status: 400 },
-      );
-    }
-    assert.match(url, new RegExp(`(?:\\?|&)week=eq\\.${testWeek}(?:&|$)`));
-    assert.doesNotMatch(url, /account_id=eq\./);
-    return Response.json([
+    assert.match(url, /account_id=eq\./);
+    return Response.json(
       {
-        id: "legacy-week-row",
-        kind: "block",
-        week: testWeek,
-        day,
-        start: firstSlot,
-        duration: 30,
-        title: "Busy",
+        code: "PGRST204",
+        message: "Could not find the 'account_id' column of 'calendar_items' in the schema cache",
       },
-    ]);
+      { status: 400 },
+    );
   };
 
   try {
-    const result = await readPublicSlotItemsForWeek({ accountId, week: testWeek });
-
-    assert.equal(result.usedLegacySchemaFallback, true);
-    assert.equal(result.queryMode, "week_only_legacy_schema");
-    assert.equal(result.rowsFetched, 1);
-    assert.equal(result.items[0].id, "legacy-week-row");
-    assert.equal(requests.length, 2);
+    await assert.rejects(() => readPublicSlotItemsForWeek({ accountId, week: testWeek }));
+    // One attempt, not two: there is no second, unscoped request.
+    assert.equal(requests.length, 1);
   } finally {
     globalThis.fetch = originalFetch;
-    console.warn = originalInfo;
+    console.warn = originalWarn;
     if (originalUrl === undefined) delete process.env.SUPABASE_URL;
     else process.env.SUPABASE_URL = originalUrl;
     if (originalKey === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -415,7 +411,7 @@ test("public slot context keeps requested-week relevant resource records only", 
   ];
 
   const context = await readPublicSlotContext(
-    { serviceId, week: testWeek },
+    { accountId, serviceId, week: testWeek },
     {
       settingsSnapshot: settingsSnapshotFromState(),
       metrics,
@@ -446,7 +442,7 @@ test("public slot context keeps requested-week relevant resource records only", 
 
 test("public slot context retains same-service group bookings for capacity", async () => {
   const context = await readPublicSlotContext(
-    { serviceId: groupServiceId, week: testWeek },
+    { accountId, serviceId: groupServiceId, week: testWeek },
     {
       settingsSnapshot: settingsSnapshotFromState(),
       readItemsForWeek: async () => ({
@@ -489,9 +485,10 @@ test("public booking slots endpoint uses the narrow slot context reader", async 
     const response = await handlePublicBookingSlotsRequest(
       new Request(`https://example.test/api/public-booking-slots?serviceId=${serviceId}&week=${testWeek}`),
       {
+        resolveAccountId: async () => accountId,
         readPublicSlotContext: async (params: any) => {
           calls += 1;
-          assert.deepEqual(params, { serviceId, week: testWeek });
+          assert.deepEqual(params, { accountId, serviceId, week: testWeek });
           return calendarState();
         },
       },
@@ -513,7 +510,7 @@ test("public slot context preserves invalid serviceId error behaviour", async ()
   await assert.rejects(
     () =>
       readPublicSlotContext(
-        { serviceId: "missing-service", week: testWeek },
+        { accountId, serviceId: "missing-service", week: testWeek },
         {
           settingsSnapshot: settingsSnapshotFromState(),
           readItemsForWeek: async () => {

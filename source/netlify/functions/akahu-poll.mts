@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { defaultAccountId } from "./_shared/account.mts";
+import { legacyOriginalWorkspaceId as defaultAccountId } from "./_shared/account.mts";
 import { autoReconcileCredits, syncAkahuTransactions } from "./_shared/akahu.mts";
 
 // Nightly safety net for the Akahu bank feed. Re-syncs the last ~10 days of
@@ -7,6 +7,18 @@ import { autoReconcileCredits, syncAkahuTransactions } from "./_shared/akahu.mts
 // auto-reconciles. Runs on Netlify's scheduler — it isn't a public endpoint, so
 // no auth is needed; nobody can trigger it over HTTP.
 
+// KNOWN BOUNDARY GAP, deliberately left for the Billing pass.
+//
+// There is no session here to resolve a business from, and the Akahu/Stripe
+// credentials in the environment belong to the original workspace, so this
+// still writes into legacyOriginalWorkspaceId(). That is correct while the
+// original workspace is the only one with a bank or Stripe connection, and it
+// is wrong the moment a second business connects one: their transactions would
+// land in the first business's ledger.
+//
+// The fix is to resolve the business from the inbound payload -- the Akahu
+// connection or the Stripe customer/subscription -- rather than statically.
+// Until then, do not connect banking or Stripe for a second business.
 export default async function handler() {
   const accountId = defaultAccountId();
   const since = new Date(Date.now() - 10 * 86400000).toISOString();

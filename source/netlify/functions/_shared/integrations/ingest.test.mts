@@ -314,7 +314,15 @@ test("a booking reuses the person already linked to the same provider customer",
       }
       return new Response(JSON.stringify([{ id: "optix-item-1" }]), { status: 201 });
     },
-    people: () => new Response("[]", { status: 200 }),
+    // external_booking_links has no owner column, so the provider-customer
+    // match confirms the person it points at belongs to this business before
+    // reusing them. Answer that check for the account this event maps to.
+    people: (url) => {
+      if (url.includes("id=eq.existing-person") && url.includes("account_id=eq.sam-hale-golf")) {
+        return new Response(JSON.stringify([{ id: "existing-person" }]), { status: 200 });
+      }
+      return new Response("[]", { status: 200 });
+    },
   });
   try {
     const result: any = await processStoredExternalEvent("optix", "event-1", payload);
@@ -325,6 +333,48 @@ test("a booking reuses the person already linked to the same provider customer",
     assert.equal(written.person_id, "existing-person");
     assert.equal(written.person_link_source, "provider_customer");
     assert.equal(written.provider_customer_id, "member-77");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("a provider customer id cannot attach another business's client to this booking", async () => {
+  // external_booking_links is provider-level with no owner column, so a
+  // provider_customer_id seen in one business would otherwise hand its person
+  // id straight to another business's inbound booking.
+  const { processStoredExternalEvent } = await import("./ingest.mts");
+  const mock = withMockSupabase({
+    optix_webhook_events: (url, init) => {
+      if (init.method === "PATCH") return new Response("[]", { status: 200 });
+      if (url.includes("event_key=eq.event-1")) {
+        return new Response(JSON.stringify([{ attempt_count: 0, received_at: "2026-08-27T00:00:00.000Z" }]), { status: 200 });
+      }
+      return new Response("[]", { status: 200 });
+    },
+    external_booking_mappings: () => new Response(JSON.stringify([{
+      provider: "optix", organisation_id: "org-1", workspace_id: "637949", workspace_name: "Swing Analysis",
+      account_id: "sam-hale-golf", location_id: "three-kings", default_coach_id: "sam-hale", enabled: true, expected_duration: 60, bay_profile_id: "standard", email_behaviour: "none",
+    }]), { status: 200 }),
+    external_booking_links: (url, init) => {
+      if (!init.method || init.method === "GET") {
+        if (url.includes("provider_customer_id=eq.member-77")) {
+          // The link points at a person owned by a DIFFERENT business.
+          return new Response(JSON.stringify([{ person_id: "other-business-person" }]), { status: 200 });
+        }
+        return new Response("[]", { status: 200 });
+      }
+      return new Response(JSON.stringify([{ ok: true }]), { status: 201 });
+    },
+    calendar_items: () => new Response(JSON.stringify([{ id: "optix-item-1" }]), { status: 201 }),
+    // The ownership check finds nothing: that person is not this account's.
+    people: () => new Response("[]", { status: 200 }),
+  });
+  try {
+    await processStoredExternalEvent("optix", "event-1", payload);
+    const linkWrite = mock.calls.find((call) => call.url.includes("/rest/v1/external_booking_links") && call.init.method === "POST");
+    const written = JSON.parse(String(linkWrite?.init.body))[0];
+    assert.notEqual(written.person_id, "other-business-person");
+    assert.notEqual(written.person_link_source, "provider_customer");
   } finally {
     mock.restore();
   }

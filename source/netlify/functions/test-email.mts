@@ -1,7 +1,7 @@
 import type { Config } from "@netlify/functions";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 
-const sessionCookieName = "clarity_session";
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -30,26 +30,6 @@ function cleanEmail(value: unknown, fallback = "") {
   return email.includes("@") ? email : fallback;
 }
 
-function hashToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-function parseCookies(req: Request) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
-      }),
-  );
-}
-
 function supabaseConfig() {
   const url = env("SUPABASE_URL").replace(/\/$/, "");
   const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
@@ -74,13 +54,13 @@ async function supabase(table: string, options: { method?: string; query?: strin
   return text ? JSON.parse(text) : [];
 }
 
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return false;
-  const rows = await supabase("admin_sessions", {
-    query: `select=id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
-  });
-  return rows.length > 0;
+/**
+ * A test send writes a notification_history row, and that table is
+ * account-owned now, so this needs the business -- not just "a session row
+ * exists", which is all the old check established.
+ */
+async function requireAccountId(req: Request): Promise<string> {
+  return (await requireCoachActor(req)).accountId;
 }
 
 async function parseBody(req: Request) {
@@ -100,7 +80,7 @@ export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
   try {
-    if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+    const accountId = await requireAccountId(req);
 
     const body = await parseBody(req);
     const recipient = cleanEmail(body.email);
@@ -154,6 +134,7 @@ export default async function handler(req: Request) {
     const notificationId = randomUUID();
     await recordNotification({
       id: notificationId,
+      account_id: accountId,
       person_key: recipient,
       calendar_item_id: null,
       recipient,
@@ -194,6 +175,17 @@ export default async function handler(req: Request) {
       ],
     });
   } catch (error) {
+    const status = (error as { status?: number })?.status;
+    if (status === 401 || status === 403) {
+      return json(
+        {
+          ok: false,
+          error: (error as { code?: string })?.code || "unauthorized",
+          message: error instanceof Error ? error.message : "Admin login required.",
+        },
+        status,
+      );
+    }
     console.error("test_email:failed", error);
     return json(
       { ok: false, message: error instanceof Error ? error.message : "Could not send test email." },

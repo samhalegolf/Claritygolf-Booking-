@@ -1,7 +1,9 @@
 import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
+import { defaultCalendarSlug } from "./_shared/account.mts";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 
 // Billing is a new, isolated top-level app section. This function owns its
 // own tables (billing_products_services, billing_invoices,
@@ -132,26 +134,19 @@ function encodeFilter(value: unknown) {
 
 // --- Auth + account scoping ------------------------------------------------
 
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return false;
-  const rows = await supabase("admin_sessions", {
-    query: `select=id&token_hash=eq.${encodeFilter(hashToken(token))}&expires_at=gt.${encodeFilter(nowIso())}&limit=1`,
-  });
-  return rows.length > 0;
-}
-
-// Billing is read-only here against the shared settings table: it mirrors
-// how calendar-state.mts resolves the active workspace account id, without
-// importing booking-core.mts or writing to any booking/calendar table.
-async function resolveAccountId() {
-  const rows = await supabase("settings", {
-    query: `select=key,value&key=in.(${["accountCalendarSlug", "accountBusinessName", "coachName"].join(",")})`,
-  });
-  const map = Object.fromEntries(rows.map((row: { key: string; value: string }) => [row.key, row.value]));
-  const businessName = map.accountBusinessName || map.coachName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf");
-  const slugSource = map.accountCalendarSlug || businessName;
-  return cleanSlug(slugSource, fallbackAccountId());
+/**
+ * The business this request acts for.
+ *
+ * Billing used to answer that question for itself: requireAdmin only proved a
+ * session row existed, and resolveAccountId then derived the account from the
+ * global settings table -- accountCalendarSlug, else accountBusinessName, else
+ * coachName, else "Sam Hale Golf" -- so every till, invoice and report resolved
+ * to the original business no matter who was signed in. It now uses the same
+ * actor resolver Booking does, so there is one notion of "the current business"
+ * rather than two that can disagree.
+ */
+async function requireAccountId(req: Request): Promise<string> {
+  return (await requireCoachActor(req)).accountId;
 }
 
 async function parseBody(req: Request) {
@@ -307,9 +302,12 @@ function lessonTypeToCatalogItem(service: Record<string, unknown>, taxRate: numb
   };
 }
 
-async function lessonTypeItems(taxRate: number) {
+async function lessonTypeItems(accountId: string, taxRate: number) {
   const rows = await supabase("settings", {
-    query: `select=value&key=eq.${encodeFilter("servicesJson")}&limit=1`,
+    query: settingsSelectQuery(accountId, {
+      select: "value",
+      filters: [`key=eq.${encodeFilter("servicesJson")}`, "limit=1"],
+    }),
   });
   let parsed: unknown = null;
   try {
@@ -334,9 +332,9 @@ async function listProducts(accountId: string) {
     supabase("billing_products_services", {
       query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=active.desc,name.asc`,
     }),
-    resolveReportTaxConfig(),
+    resolveReportTaxConfig(accountId),
   ]);
-  const lessons = await lessonTypeItems(tax.taxRate);
+  const lessons = await lessonTypeItems(accountId, tax.taxRate);
   return { products: [...rows.map(productRowToApi), ...lessons] };
 }
 
@@ -979,9 +977,12 @@ function invoiceSequenceForPrefix(invoiceNumber: string, prefix: string): number
   return Number.isFinite(value) ? value : null;
 }
 
-async function resolveInvoicePrefix() {
+async function resolveInvoicePrefix(accountId: string) {
   const rows = await supabase("settings", {
-    query: `select=value&key=eq.${encodeFilter("accountInvoiceSettingsJson")}&limit=1`,
+    query: settingsSelectQuery(accountId, {
+      select: "value",
+      filters: [`key=eq.${encodeFilter("accountInvoiceSettingsJson")}`, "limit=1"],
+    }),
   });
   try {
     const parsed = rows[0]?.value ? JSON.parse(rows[0].value) : null;
@@ -997,7 +998,7 @@ async function resolveInvoicePrefix() {
 // series. prefixInput is accepted for back-compat but only used if settings
 // have no prefix at all.
 async function nextInvoiceNumber(accountId: string, prefixInput?: unknown) {
-  const storedPrefix = await resolveInvoicePrefix();
+  const storedPrefix = await resolveInvoicePrefix(accountId);
   const prefix = storedPrefix || normalizeInvoicePrefix(prefixInput);
   // Pull just the numbers already used for this prefix and compute the max in JS.
   // Charges (ORD-###) and un-numbered Stripe rows (in_…) use other prefixes and
@@ -1381,9 +1382,12 @@ function bucketizeRevenue(period: RevenuePeriod, start: Date, end: Date, rows: A
   return buckets;
 }
 
-async function resolveDefaultCurrency() {
+async function resolveDefaultCurrency(accountId: string) {
   const rows = await supabase("settings", {
-    query: `select=value&key=eq.${encodeFilter("accountInvoiceSettingsJson")}&limit=1`,
+    query: settingsSelectQuery(accountId, {
+      select: "value",
+      filters: [`key=eq.${encodeFilter("accountInvoiceSettingsJson")}`, "limit=1"],
+    }),
   });
   try {
     const parsed = rows[0]?.value ? JSON.parse(rows[0].value) : null;
@@ -1403,7 +1407,7 @@ async function revenueReport(accountId: string, url: URL) {
   const previousEnd = shiftYearsUTC(end, -1);
 
   const [currency, rows] = await Promise.all([
-    resolveDefaultCurrency(),
+    resolveDefaultCurrency(accountId),
     supabase("billing_invoices", {
       query: `select=issue_date,total&account_id=eq.${encodeFilter(accountId)}&status=in.(${REVENUE_STATUSES.join(",")})&issue_date=gte.${encodeFilter(formatDateOnly(previousStart))}&issue_date=lte.${encodeFilter(formatDateOnly(end))}`,
     }),
@@ -1443,9 +1447,12 @@ async function revenueReport(accountId: string, url: URL) {
 // Outstanding = committed but not fully paid. Drafts/void never count as owed.
 const AGING_STATUSES = ["sent", "overdue"];
 
-async function resolveReportTaxConfig() {
+async function resolveReportTaxConfig(accountId: string) {
   const rows = await supabase("settings", {
-    query: `select=value&key=eq.${encodeFilter("accountInvoiceSettingsJson")}&limit=1`,
+    query: settingsSelectQuery(accountId, {
+      select: "value",
+      filters: [`key=eq.${encodeFilter("accountInvoiceSettingsJson")}`, "limit=1"],
+    }),
   });
   try {
     const parsed = rows[0]?.value ? JSON.parse(rows[0].value) : {};
@@ -1497,7 +1504,7 @@ async function buildReportSummary(accountId: string, url: URL) {
   const rangeStart = formatDateOnly(rangeStartDate);
   const rangeEnd = formatDateOnly(rangeEndDate);
 
-  const tax = await resolveReportTaxConfig();
+  const tax = await resolveReportTaxConfig(accountId);
 
   const [invoiceRows, expenseRows, outstandingRows] = (await Promise.all([
     supabase("billing_invoices", {
@@ -1681,9 +1688,9 @@ type InvoiceBranding = {
   accentColor: string;
 };
 
-async function resolveInvoiceBranding(): Promise<InvoiceBranding> {
+async function resolveInvoiceBranding(accountId: string): Promise<InvoiceBranding> {
   const rows = await supabase("settings", {
-    query: `select=key,value&key=in.(${[
+    query: settingsSelectQuery(accountId, { filters: [`key=in.(${[
       "accountBusinessName",
       "accountCoachName",
       "coachName",
@@ -1693,7 +1700,7 @@ async function resolveInvoiceBranding(): Promise<InvoiceBranding> {
       "brandLogoPreview",
       "brandPrimary",
       "brandAccent",
-    ].join(",")})`,
+    ].join(",")})`] }),
   });
   const map = Object.fromEntries(rows.map((row: { key: string; value: string }) => [row.key, row.value]));
   let invoice: Record<string, unknown> = {};
@@ -2105,7 +2112,7 @@ async function sendInvoice(accountId: string, id: string, body: Record<string, u
     throw Object.assign(new Error("This invoice has no customer email to send to."), { status: 400, code: "MISSING_RECIPIENT" });
   }
 
-  const branding = await resolveInvoiceBranding();
+  const branding = await resolveInvoiceBranding(accountId);
   const pdf = await renderInvoicePdf(invoice, branding);
   const subject = `Invoice ${invoice.invoiceNumber} from ${branding.businessName}`;
   const bodyLines = [
@@ -2248,7 +2255,7 @@ async function createInvoiceCheckout(accountId: string, id: string, req: Request
   const invoice = await getInvoiceWithItems(accountId, id);
   if (!invoice) throw Object.assign(new Error("Invoice not found."), { status: 404 });
 
-  const branding = await resolveInvoiceBranding();
+  const branding = await resolveInvoiceBranding(accountId);
   const origin = new URL(req.url).origin;
   const invoiceNumber = String(invoice.invoiceNumber);
 
@@ -2268,7 +2275,7 @@ async function createInvoiceCheckout(accountId: string, id: string, req: Request
 async function invoicePdfResponse(accountId: string, id: string) {
   const invoice = await getInvoiceWithItems(accountId, id);
   if (!invoice) return json({ error: "not_found", message: "Invoice not found." }, 404);
-  const branding = await resolveInvoiceBranding();
+  const branding = await resolveInvoiceBranding(accountId);
   const pdf = await renderInvoicePdf(invoice, branding);
   return new Response(Buffer.from(pdf), {
     status: 200,
@@ -2466,7 +2473,7 @@ async function renderReportPdf(
 
 async function reportPdfResponse(accountId: string, url: URL) {
   const summary = await buildReportSummary(accountId, url);
-  const branding = await resolveInvoiceBranding();
+  const branding = await resolveInvoiceBranding(accountId);
   const pdf = await renderReportPdf(summary, branding, parseReportSections(url), parseExcludedCategories(url));
   return new Response(Buffer.from(pdf), {
     status: 200,
@@ -2718,8 +2725,8 @@ async function resolvePosItems(accountId: string, raw: unknown) {
   }
 
   if (ids.length > productIds.length) {
-    const { taxRate } = await resolveReportTaxConfig();
-    for (const item of await lessonTypeItems(taxRate)) {
+    const { taxRate } = await resolveReportTaxConfig(accountId);
+    for (const item of await lessonTypeItems(accountId, taxRate)) {
       // A lesson has no shelf and issues no voucher, so nothing here can move
       // stock or mint a coupon.
       byId.set(item.id, { name: item.name, price: item.price, sku: "", trackStock: false, isVoucher: false });
@@ -2868,7 +2875,7 @@ async function listOptixPosRecords(accountId: string, range: { from: string; to:
       `&${filters.join("&")}&order=purchased_at.desc&limit=${range.limit}`,
   }).catch(() => [])) as Array<Record<string, unknown>>;
   if (!rows.length) return [];
-  const defaultCurrency = await resolveDefaultCurrency();
+  const defaultCurrency = await resolveDefaultCurrency(accountId);
   return rows.map((row) => {
     const quantity = Number(row.quantity) || 1;
     const name = String(row.item_name ?? "") || "Optix sale";
@@ -3070,7 +3077,7 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
         ? itemsTotal
         : null
       : round2(cleanNumber(listedAmountRaw, 0, { min: 0 })),
-    currency: cleanString(body?.currency, await resolveDefaultCurrency(), 10),
+    currency: cleanString(body?.currency, await resolveDefaultCurrency(accountId), 10),
     customer_id: cleanString(body?.customerId, "", 160)
       || await resolveCustomerIdByEmail(accountId, body?.customerEmail),
     customer_name: cleanString(body?.customerName, "", 140) || null,
@@ -3175,7 +3182,7 @@ async function createPosCheckout(accountId: string, id: string, req: Request) {
     throw Object.assign(new Error(`${transaction.receiptNumber} is already paid.`), { status: 409, code: "POS_ALREADY_PAID" });
   }
 
-  const branding = await resolveInvoiceBranding();
+  const branding = await resolveInvoiceBranding(accountId);
   const origin = new URL(req.url).origin;
   const receiptNumber = String(transaction.receiptNumber);
 
@@ -3289,7 +3296,7 @@ async function posSummary(accountId: string, url: URL) {
   if (couponTotal > 0) addToMethod("Coupons redeemed", couponTotal, false);
 
   return {
-    currency: paid[0]?.currency || (await resolveDefaultCurrency()),
+    currency: paid[0]?.currency || (await resolveDefaultCurrency(accountId)),
     paidCount: paid.length,
     pendingCount: transactions.filter((entry) => entry.status === "pending").length,
     // The headline stays the full value of what went out the door; the method
@@ -3461,7 +3468,7 @@ async function issueCoupon(
     status: "active",
     original_value: value,
     remaining_value: value,
-    currency: cleanString(input.currency, await resolveDefaultCurrency(), 10),
+    currency: cleanString(input.currency, await resolveDefaultCurrency(accountId), 10),
     issued_to_name: cleanString(input.issuedToName, "", 140) || null,
     issued_to_email: cleanString(input.issuedToEmail, "", 180) || null,
     customer_id: cleanString(input.customerId, "", 160) || null,
@@ -3751,8 +3758,7 @@ export default async function handler(req: Request) {
   const action = url.pathname.replace(/^\/api\/billing\/?/, "").replace(/\/$/, "");
 
   try {
-    if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-    const accountId = await resolveAccountId();
+    const accountId = await requireAccountId(req);
 
     if (action === "products" && req.method === "GET") return json(await listProducts(accountId));
     if (action === "products" && req.method === "POST") return json(await createProduct(accountId, await parseBody(req)));

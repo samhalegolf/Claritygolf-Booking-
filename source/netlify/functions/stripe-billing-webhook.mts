@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { defaultAccountId } from "./_shared/account.mts";
+import { legacyOriginalWorkspaceId as defaultAccountId } from "./_shared/account.mts";
 import {
   deleteStripeInvoice,
   syncStripeCharge,
@@ -62,8 +62,18 @@ function verifyStripeSignature(rawBody: string, signatureHeader: string, secret:
   return JSON.parse(rawBody);
 }
 
-// Static account resolution on purpose: webhooks have no session, and the
-// billing tables all belong to the workspace account.
+// KNOWN BOUNDARY GAP, deliberately left for the Billing pass.
+//
+// There is no session here to resolve a business from, and the Akahu/Stripe
+// credentials in the environment belong to the original workspace, so this
+// still writes into legacyOriginalWorkspaceId(). That is correct while the
+// original workspace is the only one with a bank or Stripe connection, and it
+// is wrong the moment a second business connects one: their transactions would
+// land in the first business's ledger.
+//
+// The fix is to resolve the business from the inbound payload -- the Akahu
+// connection or the Stripe customer/subscription -- rather than statically.
+// Until then, do not connect banking or Stripe for a second business.
 function accountId() {
   return defaultAccountId();
 }
@@ -95,7 +105,7 @@ export default async function handler(req: Request) {
       case "invoice.marked_uncollectible":
         return json({ received: true, result: await syncStripeInvoice(object, accountId()) });
       case "invoice.deleted":
-        return json({ received: true, result: await deleteStripeInvoice(String(object?.id || "")) });
+        return json({ received: true, result: await deleteStripeInvoice(accountId(), String(object?.id || "")) });
       case "charge.succeeded":
       case "charge.updated":
       case "charge.captured":

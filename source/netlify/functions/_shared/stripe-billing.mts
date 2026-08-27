@@ -235,12 +235,28 @@ async function upsertInvoice(invoice: Record<string, any>, lines: Record<string,
   // would keep reverting it to sent/overdue. If the row was reconciled locally,
   // preserve its paid status/amount/date and only refresh the rest.
   const existing = await supabase("billing_invoices", {
-    query: `select=reconciled_locally&id=eq.${encodeFilter(invoice.id)}&limit=1`,
+    query: `select=reconciled_locally&id=eq.${encodeFilter(invoice.id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
   });
   if (Array.isArray(existing) && existing[0]?.reconciled_locally) {
     delete body.status;
     delete body.amount_paid;
     delete body.paid_at;
+  }
+  // Refuse to re-own an invoice that already belongs to another business. The
+  // Stripe credentials are deployment-level, so without this a coach running
+  // the sync would re-stamp account_id on every Stripe-sourced invoice in the
+  // table -- including other businesses' -- to their own account.
+  const owner = await supabase("billing_invoices", {
+    query: `select=account_id&id=eq.${encodeFilter(invoice.id)}&limit=1`,
+  });
+  const existingOwner = Array.isArray(owner) ? String(owner[0]?.account_id || "") : "";
+  if (existingOwner && existingOwner !== accountId) {
+    console.warn("stripe_billing:invoice_owned_by_other_account", {
+      invoiceId: invoice.id,
+      existingOwner,
+      attemptedBy: accountId,
+    });
+    return;
   }
   await supabase("billing_invoices", {
     method: "POST",
@@ -249,7 +265,10 @@ async function upsertInvoice(invoice: Record<string, any>, lines: Record<string,
     body,
   });
   // Replace line items wholesale so removed/edited Stripe lines never linger.
-  await supabase("billing_invoice_items", { method: "DELETE", query: `invoice_id=eq.${encodeFilter(invoice.id)}` });
+  await supabase("billing_invoice_items", {
+    method: "DELETE",
+    query: `invoice_id=eq.${encodeFilter(invoice.id)}&account_id=eq.${encodeFilter(accountId)}`,
+  });
   const rows = lines.map((line) => mapLine(line, invoice, accountId));
   if (rows.length) await supabase("billing_invoice_items", { method: "POST", body: rows });
 }
@@ -263,11 +282,12 @@ export async function syncStripeInvoice(invoice: Record<string, any>, accountId:
 }
 
 /** Remove a deleted (draft) Stripe invoice and its rows. */
-export async function deleteStripeInvoice(invoiceId: string) {
-  if (!invoiceId) return null;
-  await supabase("billing_invoice_items", { method: "DELETE", query: `invoice_id=eq.${encodeFilter(invoiceId)}` });
-  await supabase("billing_booking_invoice_links", { method: "DELETE", query: `invoice_id=eq.${encodeFilter(invoiceId)}` });
-  await supabase("billing_invoices", { method: "DELETE", query: `id=eq.${encodeFilter(invoiceId)}` });
+export async function deleteStripeInvoice(accountId: string, invoiceId: string) {
+  if (!invoiceId || !accountId) return null;
+  const scope = `&account_id=eq.${encodeFilter(accountId)}`;
+  await supabase("billing_invoice_items", { method: "DELETE", query: `invoice_id=eq.${encodeFilter(invoiceId)}${scope}` });
+  await supabase("billing_booking_invoice_links", { method: "DELETE", query: `invoice_id=eq.${encodeFilter(invoiceId)}${scope}` });
+  await supabase("billing_invoices", { method: "DELETE", query: `id=eq.${encodeFilter(invoiceId)}${scope}` });
   return { invoiceId, deleted: true };
 }
 

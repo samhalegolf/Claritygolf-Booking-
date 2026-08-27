@@ -1,4 +1,6 @@
 import type { Config, Context } from "@netlify/functions";
+import { resolvePublicAccount } from "./_shared/coach-auth.mts";
+import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 
 import { handlePublicRescheduleRequest } from "./booking-core.mts";
 import { activeLocale } from "./_shared/locale.mts";
@@ -56,9 +58,38 @@ function settingMap(rows: Array<{ key: string; value: string }>) {
   return Object.fromEntries(rows.map((row) => [row.key, row.value]));
 }
 
-async function readBookingRuleSettings() {
-  const rows = await supabase("settings", { query: "select=key,value" });
-  return settingMap(rows);
+/**
+ * The booking rules for one business.
+ *
+ * This read had no account filter, so once a second business exists it returns
+ * both businesses' rows and whichever arrives last wins -- the notice period
+ * and timezone a customer is held to would be somebody else's. The business
+ * comes from the validated public identifier on the request; a deployment with
+ * exactly one active business needs no identifier, because there is nothing to
+ * disambiguate.
+ */
+async function readBookingRuleSettings(req: Request) {
+  const url = new URL(req.url);
+  const slug =
+    url.searchParams.get("business") ||
+    url.searchParams.get("account") ||
+    url.searchParams.get("slug") ||
+    "";
+  const publicAccount = slug ? await resolvePublicAccount(slug) : null;
+  let accountId = publicAccount?.id || "";
+  if (!accountId) {
+    const rows = await supabase("accounts", {
+      query: "select=id&status=eq.active&order=created_at.asc&limit=2",
+    });
+    accountId = rows.length === 1 ? String(rows[0]?.id || "") : "";
+  }
+  if (!accountId) {
+    throw Object.assign(new Error("This booking page is not available."), {
+      status: 404,
+      code: "unknown_business",
+    });
+  }
+  return settingMap(await supabase("settings", { query: settingsSelectQuery(accountId) }));
 }
 
 function cleanMinBookingNoticeMinutes(value: unknown) {
@@ -120,7 +151,7 @@ async function assertRescheduleIsFuture(req: Request) {
   const start = Number(payload?.start);
   if (!Number.isInteger(week) || !Number.isInteger(day) || !Number.isInteger(start) || day < 0 || day > 6) return;
 
-  const settings = await readBookingRuleSettings();
+  const settings = await readBookingRuleSettings(req);
   // Resolve the workspace's country before any date is formatted, so this
   // lambda formats dates the coach's way rather than New Zealand's.
   setActivePhoneCountry((settings as any).accountCountry);

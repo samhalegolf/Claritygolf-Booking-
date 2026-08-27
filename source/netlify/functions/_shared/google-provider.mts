@@ -1,7 +1,12 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import { getClarityCloudGoogleConfig } from "./clarity-cloud-google-config.mts";
-import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./account.mts";
-import { SETTINGS_BULK_SELECT_QUERY } from "./settings-keys.mts";
+import { legacyOriginalWorkspaceId as fallbackAccountId, defaultCalendarSlug } from "./account.mts";
+import { SETTINGS_BULK_EXCLUDE_FILTER } from "./settings-keys.mts";
+import {
+  SETTINGS_UPSERT_QUERY,
+  settingsSelectQuery,
+  settingsUpsertRows,
+} from "./settings-scope.mts";
 
 export const googleCalendarScopes = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -193,17 +198,23 @@ async function supabase(table: string, options: { method?: string; query?: strin
   return text ? JSON.parse(text) : [];
 }
 
-export async function readSettings() {
-  const rows = await supabase("settings", { query: SETTINGS_BULK_SELECT_QUERY });
+// Google is connected per business, so these operate inside one. They used to
+// read and write the settings table with no account filter -- so a second
+// business's Drive connection would have been written over the first's, and
+// read back as the first's.
+export async function readSettings(accountId: string) {
+  const rows = await supabase("settings", {
+    query: settingsSelectQuery(accountId, { filters: [SETTINGS_BULK_EXCLUDE_FILTER] }),
+  });
   return Object.fromEntries(rows.map((row: { key: string; value: string }) => [row.key, row.value || ""]));
 }
 
-export async function setSettings(values: Record<string, unknown>) {
-  const rows = Object.entries(values).map(([key, value]) => ({ key, value: String(value ?? ""), updated_at: nowIso() }));
+export async function setSettings(accountId: string, values: Record<string, unknown>) {
+  const rows = settingsUpsertRows(accountId, values, nowIso());
   if (!rows.length) return;
   await supabase("settings", {
     method: "POST",
-    query: "on_conflict=key",
+    query: SETTINGS_UPSERT_QUERY,
     prefer: "resolution=merge-duplicates,return=minimal",
     body: rows,
   });
@@ -225,11 +236,16 @@ function cleanSlug(value: unknown, fallback = fallbackAccountId()) {
   return trimmed || fallback;
 }
 
-export function resolveGoogleAccountId(settings: Record<string, string>) {
-  const accounts = parseJson<Array<{ id?: string; active?: boolean }>>(settings.workspaceAccountsJson, []);
-  const active = accounts.find((account) => account?.active !== false)?.id || accounts[0]?.id;
-  return cleanSlug(active || settings.accountCalendarSlug || settings.accountId, fallbackAccountId());
-}
+/**
+ * Removed on purpose.
+ *
+ * This used to derive Google ownership from the settings blob -- the first
+ * active entry in workspaceAccountsJson, else accountCalendarSlug, else the
+ * legacy account id -- which meant every Google connection, in every function,
+ * resolved to the original business regardless of who was signed in. Callers
+ * now pass the authenticated actor's accountId (or a player/guest session's),
+ * and there is no code path left that can invent one.
+ */
 
 export function mergeGoogleScopes(existing: string[] = [], next: string[] = []) {
   return Array.from(new Set([...existing, ...next].map((scope) => cleanString(scope, "", 400)).filter(Boolean))).sort();
@@ -517,10 +533,9 @@ export async function disconnectGoogleService(accountId: string, service: "calen
   });
 }
 
-export async function migrateLegacyGoogleCalendarToken(settings?: Record<string, string>) {
-  const currentSettings = settings || (await readSettings());
+export async function migrateLegacyGoogleCalendarToken(accountId: string, settings?: Record<string, string>) {
+  const currentSettings = settings || (await readSettings(accountId));
   const legacyToken = cleanString(currentSettings.googleCalendarRefreshToken, "", 5000);
-  const accountId = resolveGoogleAccountId(currentSettings);
   const existing = await loadGoogleProviderConnection(accountId);
   if (!legacyToken) {
     return { ok: true, migrated: false, accountId, reason: existing ? "already_migrated" : "no_legacy_token" };
@@ -538,7 +553,7 @@ export async function migrateLegacyGoogleCalendarToken(settings?: Record<string,
       status: 500,
     });
   }
-  await setSettings({ googleCalendarRefreshToken: "" });
+  await setSettings(accountId, { googleCalendarRefreshToken: "" });
   return { ok: true, migrated: true, accountId };
 }
 

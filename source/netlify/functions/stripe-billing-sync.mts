@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { createHash } from "node:crypto";
-import { defaultAccountId } from "./_shared/account.mts";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { DEFAULT_SINCE_EPOCH, syncChargesSince, syncInvoicesSince } from "./_shared/stripe-billing.mts";
 
 // Admin backfill endpoint: pulls Stripe invoices and charges (card payments
@@ -14,7 +14,6 @@ import { DEFAULT_SINCE_EPOCH, syncChargesSince, syncInvoicesSince } from "./_sha
 //   { action?: "syncAll" | "syncInvoices" | "syncCharges",
 //     since?: string | number }   // since "all" (or 0) backfills full history
 
-const sessionCookieName = "clarity_session";
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -27,64 +26,17 @@ function json(value: unknown, status = 200) {
   });
 }
 
-function parseCookies(req: Request) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
-      }),
-  );
-}
-
 // Same session check as billing-api.mts.
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return false;
-  const url = env("SUPABASE_URL").replace(/\/$/, "");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
-  if (!url || !key) return false;
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const response = await fetch(
-    `${url}/rest/v1/admin_sessions?select=id&token_hash=eq.${encodeURIComponent(tokenHash)}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
-    { headers: { apikey: key, Authorization: `Bearer ${key}` } },
-  );
-  if (!response.ok) return false;
-  const rows = await response.json();
-  return Array.isArray(rows) && rows.length > 0;
-}
-
-// Mirrors billing-api.mts's account resolution (settings-driven with the
-// shared fallback), without importing booking code.
-async function resolveAccountId() {
-  const url = env("SUPABASE_URL").replace(/\/$/, "");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
-  if (!url || !key) return defaultAccountId();
-  try {
-    const response = await fetch(
-      `${url}/rest/v1/settings?select=key,value&key=in.(accountCalendarSlug,accountBusinessName,coachName)`,
-      { headers: { apikey: key, Authorization: `Bearer ${key}` } },
-    );
-    if (!response.ok) return defaultAccountId();
-    const rows = (await response.json()) as { key: string; value: string }[];
-    const map = Object.fromEntries(rows.map((row) => [row.key, row.value]));
-    const businessName = map.accountBusinessName || map.coachName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf");
-    const slugSource = map.accountCalendarSlug || businessName;
-    const slug = String(slugSource)
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-    return slug || defaultAccountId();
-  } catch {
-    return defaultAccountId();
-  }
+/**
+ * The business this sync writes into.
+ *
+ * It used to mirror billing-api's old settings-driven resolution -- and, like
+ * that one, always answered with the original business. Stripe invoices and
+ * charges land in whichever business the caller administers, resolved the same
+ * way every other private route resolves it.
+ */
+async function requireAccountId(req: Request): Promise<string> {
+  return (await requireCoachActor(req)).accountId;
 }
 
 function normaliseSince(value: unknown) {
@@ -113,8 +65,7 @@ export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed", message: "POST only." }, 405);
 
   try {
-    if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-    const accountId = await resolveAccountId();
+    const accountId = await requireAccountId(req);
 
     const raw = await req.text();
     const body = raw ? JSON.parse(raw) : {};
@@ -148,7 +99,10 @@ export default async function handler(req: Request) {
     console.error("stripe_billing_sync:failed", error);
     const status = Number((error as { status?: unknown })?.status);
     return json(
-      { error: "stripe_billing_sync_error", message: error instanceof Error ? error.message : "Sync failed." },
+      {
+        error: (error as { code?: string })?.code || "stripe_billing_sync_error",
+        message: error instanceof Error ? error.message : "Sync failed.",
+      },
       Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500,
     );
   }

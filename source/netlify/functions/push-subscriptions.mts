@@ -1,7 +1,7 @@
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
-import { defaultAccountId } from "./_shared/account.mts";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 import {
   countPushSubscriptions,
   deletePushSubscription,
@@ -21,7 +21,6 @@ import {
  * DELETE -> forget this browser
  */
 
-const SESSION_COOKIE = "clarity_session";
 
 function db() {
   return getDatabase();
@@ -37,46 +36,32 @@ function json(value: unknown, status = 200) {
   });
 }
 
-function parseCookies(req: Request) {
-  return Object.fromEntries(
-    (req.headers.get("cookie") || "")
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const index = part.indexOf("=");
-        return index < 0
-          ? [decodeURIComponent(part), ""]
-          : [decodeURIComponent(part.slice(0, index)), decodeURIComponent(part.slice(index + 1))];
-      }),
-  );
-}
-
 /** Returns the signed-in admin's user id, or "" when the session is not valid. */
-async function adminUserId(req: Request): Promise<string> {
-  const token = parseCookies(req)[SESSION_COOKIE] || "";
-  if (!token) return "";
-  const { createHash } = await import("node:crypto");
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const rows = await db().sql`
-    SELECT user_id
-    FROM admin_sessions
-    WHERE token_hash = ${tokenHash}
-      AND expires_at > NOW()
-    LIMIT 1
-  `;
-  return String(rows[0]?.user_id || "");
-}
-
 function cleanText(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
 export default async function handler(req: Request) {
-  const userId = await adminUserId(req);
-  if (!userId) return json({ error: "unauthorized" }, 401);
-
-  const accountId = defaultAccountId();
+  // A push subscription belongs to one coach in one business: it is how that
+  // business's booking alerts reach that device. Resolving the account
+  // statically meant a second coach's device would have been registered
+  // against the original business.
+  let accountId = "";
+  let userId = "";
+  try {
+    const actor = await requireCoachActor(req);
+    accountId = actor.accountId;
+    userId = actor.authUserId;
+  } catch (error) {
+    const status = (error as { status?: number })?.status === 403 ? 403 : 401;
+    return json(
+      {
+        error: (error as { code?: string })?.code || "unauthorized",
+        message: error instanceof Error ? error.message : "Admin login required.",
+      },
+      status,
+    );
+  }
 
   if (req.method === "GET") {
     const endpoint = cleanText(new URL(req.url).searchParams.get("endpoint"), 600);

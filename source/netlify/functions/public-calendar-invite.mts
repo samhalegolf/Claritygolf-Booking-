@@ -1,5 +1,7 @@
 import type { Config } from "@netlify/functions";
-import { defaultAccountId as fallbackAccountId, defaultCalendarSlug } from "./_shared/account.mts";
+import { LEGACY_DEFAULT_ACCOUNT_ID as LEGACY_ORIGINAL_WORKSPACE_ID, defaultCalendarSlug } from "./_shared/account.mts";
+import { resolvePublicAccount } from "./_shared/coach-auth.mts";
+import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
@@ -77,8 +79,33 @@ async function supabase(table: string, query: string) {
   return text ? JSON.parse(text) : [];
 }
 
-async function readSettings() {
-  const rows = await supabase("settings", "select=key,value");
+/**
+ * One business's public-facing details, for the .ics.
+ *
+ * The read had no account filter and then picked the first active entry out of
+ * workspaceAccountsJson, so a second business's invite would have carried the
+ * first business's name, venue and contact address.
+ */
+async function readSettings(req: Request) {
+  const url = new URL(req.url);
+  const slug =
+    url.searchParams.get("business") ||
+    url.searchParams.get("account") ||
+    url.searchParams.get("slug") ||
+    "";
+  const publicAccount = slug ? await resolvePublicAccount(slug) : null;
+  let accountId = publicAccount?.id || "";
+  if (!accountId) {
+    const accountRows = await supabase("accounts", "select=id&status=eq.active&order=created_at.asc&limit=2");
+    accountId = accountRows.length === 1 ? String(accountRows[0]?.id || "") : "";
+  }
+  if (!accountId) {
+    throw Object.assign(new Error("This booking page is not available."), {
+      status: 404,
+      code: "unknown_business",
+    });
+  }
+  const rows = await supabase("settings", settingsSelectQuery(accountId));
   const settings = Object.fromEntries(rows.map((row: any) => [row.key, row.value]));
   let services: any[] = [];
   let workspaceAccounts: any[] = [];
@@ -92,21 +119,31 @@ async function readSettings() {
   } catch {
     workspaceAccounts = [];
   }
-  const fallbackAccount = {
-    id: settings.accountCalendarSlug || settings.accountId || fallbackAccountId(),
-    planKey: "founder",
-    subscriptionStatus: "comped",
-    active: true,
-  };
-  const account = workspaceAccounts.find((candidate: any) => candidate?.active !== false) || fallbackAccount;
+  const account =
+    workspaceAccounts.find((candidate: any) => candidate?.id === accountId) || {
+      id: accountId,
+      planKey: "founder",
+      subscriptionStatus: "comped",
+      active: true,
+    };
+  // The env-backed defaults are the ORIGINAL business's real details, so they
+  // are only a fallback for that business. A second business with a setting
+  // unset would otherwise have sent calendar invites carrying the original
+  // coach's name, venue and contact address.
+  const original = account.id === LEGACY_ORIGINAL_WORKSPACE_ID;
+  const orDefault = (value: string, envKey: string, legacy: string) =>
+    value || (original ? env(envKey, legacy) : "");
   return {
     account,
     services,
-    businessName: settings.accountBusinessName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
-    coachName: settings.accountCoachName || env("CLARITY_COACH_NAME", "Sam Hale"),
-    venueName: settings.accountVenueName || env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
+    businessName: orDefault(settings.accountBusinessName, "CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
+    coachName: orDefault(settings.accountCoachName, "CLARITY_COACH_NAME", "Sam Hale"),
+    venueName: orDefault(settings.accountVenueName, "CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
+    // Timezone is a formatting concern, not an identity one: a business with no
+    // timezone set still needs the invite to render, so the platform default
+    // applies to everyone.
     timezone: settings.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
-    contactEmail: cleanEmail(settings.accountContactEmail, env("CLARITY_CONTACT_EMAIL", "")),
+    contactEmail: cleanEmail(settings.accountContactEmail, original ? env("CLARITY_CONTACT_EMAIL", "") : ""),
     bookingUrl: settings.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
   };
 }
@@ -205,7 +242,11 @@ function manageUrl(appointment: any, settings: any) {
 }
 
 function generateInvite(appointment: any, settings: any) {
-  const service = settings.services.find((candidate: any) => candidate.id === appointment.service_id && (!candidate.accountId || candidate.accountId === settings.account.id));
+  // Strict: a lesson type with no owner belongs to nobody, not to every
+  // business that happens to ask.
+  const service = settings.services.find(
+    (candidate: any) => candidate.id === appointment.service_id && candidate.accountId === settings.account.id,
+  );
   const serviceName = cleanText(service?.name, "Golf Lesson", 160);
   const client = cleanText(appointment.client || appointment.title, "Client", 160);
   const location = cleanBookingLocationSnapshot(appointment.location, {
@@ -281,12 +322,12 @@ export default async function handler(req: Request) {
       return json({ error: "not_found", message: "Booking could not be verified." }, 404);
     }
 
-    const settings = await readSettings();
+    const settings = await readSettings(req);
     if (!accountHasPublicBooking(settings.account)) {
       return json({ error: "feature_unavailable", message: "Public booking is not available for this account." }, 403);
     }
-    const appointmentAccountId = appointment.account_id || settings.account.id;
-    if (appointmentAccountId !== settings.account.id) {
+    // Strict: a booking row with no owner belongs to nobody.
+    if (appointment.account_id !== settings.account.id) {
       return json({ error: "not_found", message: "Booking not found." }, 404);
     }
     const ics = generateInvite(appointment, settings);

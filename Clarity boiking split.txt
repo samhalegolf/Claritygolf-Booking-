@@ -1,0 +1,878 @@
+Yes. The code research makes the boundary punch list much more concrete. There are a few places where the agent should change the architecture rather than simply add account_id filters.
+The most important discoveries are that the current workspace resolver always returns the default account, an unmatched authenticated admin can fall through to the default admin user, calendar shell reads are unscoped before filtering, and several “legacy compatibility” paths deliberately retry without account_id. Those are exactly the behaviours we want gone before creating the clean second business.
+Here’s the coding-agent version I’d use.
+Clarity Booking — Business Account Boundary / Multi-Tenant Isolation Pass
+Goal
+Prepare Clarity Booking so we can create a second real Business Owner account using Supabase Auth and use it as an isolation test.
+The objective is not yet to build a polished public signup/onboarding flow.
+The objective is to establish a hard production boundary:
+Authenticated user
+        ↓
+account membership
+        ↓
+authoritative account_id
+        ↓
+all account-owned reads/writes
+A user from Business B must never:
+	•	see Business A people;
+	•	see Business A calendar items;
+	•	inherit Business A settings;
+	•	see Business A services/prices;
+	•	access Business A integrations;
+	•	write records into Business A;
+	•	fall back to Business A if account resolution fails.
+The existing production workspace must continue to work.
+Treat this as a boundary/security migration, not general refactoring.
+
+⸻
+
+P0 — Fix workspace resolution before creating the test user
+Target
+source/netlify/functions/booking-core.mts
+Current problem:
+resolveWorkspaceAccount()
+The current implementation effectively ignores the request:
+resolveWorkspaceAccount(_req, settings)
+    ↓
+defaultWorkspaceAccount(settings)
+So authenticated requests do not actually resolve a workspace from the signed-in identity.
+resolveBackendRequestContext() then takes that default account and builds the entire authorization context around it.
+Required change
+Introduce one authoritative server-side function, conceptually:
+requireCoachActor(req)
+returning something like:
+{
+  authUserId,
+  accountId,
+  membershipRole,
+  coachId,
+  isOwner,
+  isAdmin
+}
+The accountId must come from a database membership belonging to the authenticated Supabase user.
+Do not accept accountId from:
+	•	request body;
+	•	query string;
+	•	browser state;
+	•	local storage;
+	•	workspaceAccountsJson;
+	•	environment fallback.
+If no valid membership exists:
+401 if unauthenticated
+403 if authenticated but no workspace membership
+Do not fall back to the original workspace.
+
+⸻
+
+P0 — Remove the current admin fallback escalation
+Target
+source/netlify/functions/booking-core.mts
+Functions
+	•	readCurrentSessionUser()
+	•	defaultAppUserForAccount()
+	•	userBelongsToAccount()
+	•	resolveBackendRequestContext()
+Current problem
+readCurrentSessionUser() currently:
+	1	reads the signed-in admin session;
+	2	looks for an app user matching the session email;
+	3	if it cannot find one, looks for an admin belonging to the default account;
+	4	if that fails, produces a default admin user.
+That means an authenticated admin whose mapping is missing can effectively be promoted into the default workspace instead of being rejected.
+userBelongsToAccount() is also currently permissive:
+!user.accountId || user.accountId === accountId
+A user with no account ID therefore passes the account-membership check.
+Required behaviour
+Change this to strict membership:
+user.accountId === accountId
+Missing accountId must mean:
+not authorised
+Remove all paths where failure to find a matching user produces:
+	•	another admin;
+	•	the first admin;
+	•	default admin;
+	•	original workspace owner.
+The invariant should be:
+Authenticated ≠ authorised.
+
+Authenticated + explicit membership = authorised.
+
+⸻
+
+P0 — Introduce real Accounts + Memberships
+Create proper relational ownership rather than storing the workspace identity inside JSON settings.
+Suggested schema:
+accounts
+--------
+id
+slug
+business_name
+status
+created_at
+updated_at
+account_memberships
+-------------------
+id
+account_id
+auth_user_id
+role
+coach_id nullable
+active
+created_at
+updated_at
+Suggested initial roles:
+owner
+admin
+coach
+Do not store security-critical role/account information in Supabase user_metadata.
+Use database membership rows as the authoritative source.
+Supabase Auth should prove identity; account_memberships should determine authorization.
+Existing owner migration:
+existing Supabase Auth user
+        ↓
+account_memberships
+        ↓
+sam-hale-golf
+        ↓
+owner
+Second test user:
+new Supabase Auth user
+        ↓
+account_memberships
+        ↓
+new-test-business
+        ↓
+owner
+Keep coach identity separate from account ownership.
+An owner may also have a coach profile, but those are different concepts.
+
+⸻
+
+P0 — Coach authentication should use Supabase Auth
+Current targets
+source/netlify/functions/booking-core.mts
+Functions/areas:
+	•	ensureAdminUser()
+	•	verifyAdminPassword()
+	•	createAdminSession()
+	•	readAdminSession()
+	•	requireAdmin()
+	•	/api/auth/login
+	•	/api/auth/session
+The current coach authentication still uses:
+admin_users
+admin_sessions
+CLARITY_ADMIN_EMAIL
+CLARITY_ADMIN_PASSWORD
+clarity_session
+The player side already uses Supabase Auth as its credential source, whereas coach login still uses the older internal password store.
+/api/auth/login currently checks admin_users first and only uses Supabase Auth for player credentials.
+Required direction
+Move coach/business-owner password verification to Supabase Auth.
+Do not necessarily remove clarity_session in the same pass if maintaining the app-issued HttpOnly session cookie is useful.
+A safe transitional architecture is:
+email/password
+      ↓
+Supabase Auth verifies credentials
+      ↓
+auth_user_id
+      ↓
+account_memberships
+      ↓
+mint Clarity coach session
+      ↓
+session records auth_user_id
+Then admin_sessions can remain temporarily as application sessions, but they must identify the Supabase user.
+Suggested change:
+admin_sessions
++ auth_user_id UUID
+or replace it with a renamed general coach_sessions table later.
+The important part for this pass is:
+a coach session must resolve back to a Supabase Auth user and then to an explicit account membership.
+Do not seed additional business owners through CLARITY_ADMIN_EMAIL.
+
+⸻
+
+P0 — Account-scope the Settings table
+Current production structure
+The current settings model is globally keyed:
+key
+value
+updated_at
+booking-core.mts creates it with key as the primary key, and helpers such as:
+	•	setSettingsBulk()
+	•	getSetting()
+	•	readSettingsMap()
+operate globally.
+admin-settings.mts independently does the same thing: reads every settings row and upserts using on_conflict=key.
+Target schema
+Change to:
+account_id
+key
+value
+updated_at
+Unique/primary boundary:
+UNIQUE(account_id, key)
+Backfill every existing settings row with:
+sam-hale-golf
+Required helper API
+Stop exposing:
+getSetting(key)
+setSetting(key, value)
+readSettingsMap()
+setSettingsBulk(values)
+as account-agnostic helpers.
+Move toward:
+getSetting(accountId, key)
+setSetting(accountId, key, value)
+readSettingsMap(accountId)
+setSettingsBulk(accountId, values)
+Ideally make accountId required, not optional.
+This allows the compiler/tests to find missed call sites.
+
+⸻
+
+P0 — Fix the fast Calendar shell
+Target
+source/netlify/functions/calendar-state.mts
+This file currently duplicates significant account/auth logic from booking-core.mts.
+Critical target 1 —
+readSettingsMap()
+Current:
+SELECT key, value
+FROM settings
+No account filter.
+Change to require the authenticated account.
+
+⸻
+
+Critical target 2 —
+readItems()
+Current query reads the entire calendar_items table:
+FROM calendar_items ci
+LEFT JOIN optix_booking_sync ...
+ORDER BY ...
+with no account_id predicate.
+It subsequently filters in JavaScript.
+Do not rely on post-read filtering for tenant separation.
+Change the actual SQL query to:
+WHERE ci.account_id = $accountId
+and similarly scope the joined Optix row where appropriate.
+This is both safer and cheaper.
+
+⸻
+
+Critical target 3 —
+recordBelongsToAccount()
+Current:
+(record.accountId || accountId) === accountId
+This means a record with no account ID is treated as belonging to whichever account is currently being checked.
+That is fail-open.
+Change to strict behaviour:
+record.accountId === accountId
+Legacy NULL/unscoped data should be migrated once, not assigned dynamically while reading.
+
+⸻
+
+Critical target 4 —
+readTinyCalendarShell()
+Current logic resolves:
+settings
+→ active workspaceAccount
+→ session email
+→ matching appUser
+→ if no match, another admin
+→ if no match, default admin
+This must be replaced by the shared authenticated actor resolver.
+Do not have calendar-state.mts invent its own account/user context.
+Prefer:
+const actor = await requireCoachActor(req)
+then:
+readSettingsMap(actor.accountId)
+readItems(actor.accountId)
+
+⸻
+
+P0 — Remove legacy unscoped retry paths
+The code currently contains compatibility behaviour designed for a schema where account_id might not exist.
+That compatibility is unsafe once the app becomes truly multi-tenant.
+Target
+source/netlify/functions/booking-core.mts
+Public slot reads
+readPublicSlotItemsForWeek() currently:
+	1	tries an account-scoped query;
+	2	if Supabase reports account_id missing;
+	3	retries with a week-only unscoped query.
+Remove:
+week_only_legacy_schema
+fallback.
+
+⸻
+
+Public appointment read
+readPublicAppointmentById() currently retries an appointment lookup without account_id if the column is considered missing.
+Remove the unscoped fallback.
+
+⸻
+
+Public reschedule lookup
+readPublicAppointmentsForContact() similarly retries by email without account scope.
+Remove the unscoped fallback.
+
+⸻
+
+Lesson completion
+completeCalendarItemById() currently deliberately sets:
+usedAccountScope = false
+and retries the update/read without account scope if account_id is reported missing.
+That is not acceptable after the tenant migration.
+If the production schema unexpectedly loses account_id, return a server error.
+Do not complete an appointment globally by ID.
+
+⸻
+
+P0 — Make calendar writes reject missing account ownership
+Target
+source/netlify/functions/booking-core.mts
+calendarItemParams()
+Current:
+item.accountId || defaultWorkspaceAccountFromCoachAccount().id
+A write missing its tenant gets stamped into the default workspace.
+Change this to require an explicit authoritative account ID.
+Prefer:
+calendarItemParams(item, accountId)
+and always stamp:
+account_id = accountId
+from server context.
+Ignore/reject any client-supplied competing account ID.
+
+⸻
+
+writeItems()
+Require options.accountId.
+Do not support an authenticated calendar write without it.
+For replace/delete behaviour, query only:
+WHERE account_id = $1
+rather than loading the whole table and filtering stale IDs in JavaScript.
+
+⸻
+
+Calendar deletes
+deleteCalendarItemById() eventually issues:
+DELETE FROM calendar_items WHERE id = $1
+after an earlier authorization check.
+For defence in depth change the destructive SQL itself to:
+DELETE FROM calendar_items
+WHERE id = $1
+  AND account_id = $2
+Same principle for verification reads.
+
+⸻
+
+P0 — Remove the production database default
+There is currently an existing migration that gives:
+calendar_items.account_id DEFAULT 'sam-hale-golf'
+The original migration explicitly installed this default.
+The live production database still has that default today.
+Create a new migration which:
+	1	confirms/backfills all existing rows;
+	2	removes the default;
+	3	makes account_id NOT NULL once safe.
+Target end state:
+account_id TEXT NOT NULL
+with no default.
+A broken write should fail instead of silently entering the original workspace.
+Do the same audit across every account-owned table.
+
+⸻
+
+P1 — People
+Target
+source/netlify/functions/booking-core.mts
+readPeople()
+Current query:
+SELECT * FROM people
+ORDER BY ...
+It reads all businesses and supplies a fallback account ID when converting rows.
+Change to:
+readPeople(accountId)
+with SQL:
+SELECT *
+FROM people
+WHERE account_id = $accountId
+Remove fallbackAccountId from rowToPerson().
+A person whose account_id is NULL should not magically belong to the current business.
+Audit:
+	•	imports;
+	•	create;
+	•	update;
+	•	merge;
+	•	delete;
+	•	lookup by email;
+	•	lookup by phone;
+	•	appointment-person linking.
+Every email/phone lookup must include account_id.
+The existing account-scoped email uniqueness migration is a good basis and should be retained.
+
+⸻
+
+P1 — Services, coaches, locations and availability
+These currently live largely inside global settings JSON:
+servicesJson
+coachProfilesJson
+locationsJson
+availabilityJson
+workspaceAccountsJson
+appUsersJson
+The immediate pass does not need to relationalise all of these.
+It is acceptable to keep them as JSON provided the settings row itself is account-scoped.
+Targets in booking-core.mts:
+	•	readServices()/writeServices()
+	•	readCoachProfiles()/writeCoachProfiles()
+	•	readLocations()/writeLocations()
+	•	readAvailability()/writeAvailability()
+	•	readCoachAccount()/writeCoachAccount()
+	•	readBrandSettings()/writeBrandSettings()
+These currently call global setting helpers. For example writeLocations() and writeAvailability() eventually save global JSON setting keys.
+Change all of them to accept an authoritative accountId.
+
+⸻
+
+P1 — Remove personal/business defaults from new accounts
+Targets
+Primarily:
+	•	booking-core.mts
+	•	calendar-state.mts
+	•	_shared/account.mts
+The current defaults still include:
+Sam Hale
+Sam Hale Golf
+The Range 24/7 - Three Kings
+The Range 24/7
+and invoice footer text:
+Thank you for training with Sam Hale Golf.
+booking-core.mts also contains seeded lesson types/prices tailored to the original business.
+calendar-state.mts duplicates several of those same defaults.
+Required distinction
+Existing original account:
+keep its actual values through migrated settings.
+New account:
+use neutral product defaults.
+For example:
+business name        required during provisioning
+coach name           derive from owner setup
+location             empty/unconfigured
+notification email   empty
+Google               disconnected
+Optix                 disconnected
+banking               disconnected
+clients               none
+calendar              empty
+Starter lesson templates are okay only if intentionally product-level templates.
+Do not use the original coach’s actual lesson names/prices as accidental defaults.
+
+⸻
+
+P1 —
+_shared/account.mts
+The file currently says itself that:
+sam-hale-golf
+is the original legacy workspace and must not become a generic default.
+That is correct historically, but defaultAccountId() is still callable from runtime paths and returns it.
+Desired direction
+Keep:
+LEGACY_DEFAULT_ACCOUNT_ID
+only for:
+	•	migrations;
+	•	explicit original-workspace bootstrapping;
+	•	one-time compatibility/backfill code.
+Do not use it in authenticated runtime authorization or record ownership.
+Consider renaming helpers to make misuse difficult:
+legacyOriginalWorkspaceId()
+rather than a generic-sounding:
+defaultAccountId()
+
+⸻
+
+P1 — Billing
+Target
+source/netlify/functions/billing-api.mts
+This function independently implements authentication and account resolution.
+Current auth problem
+requireAdmin() only verifies that the session token exists in admin_sessions.
+It does not resolve which account that session belongs to.
+Current account problem
+resolveAccountId() reads the global settings table and derives:
+accountCalendarSlug
+→ accountBusinessName
+→ coachName
+→ Sam Hale Golf fallback
+then eventually falls back to the original account ID.
+Required change
+Billing must use the same shared actor resolver as Booking:
+const actor = await requireCoachActor(req)
+const accountId = actor.accountId
+Do not maintain a separate notion of who the current business is.
+Also change lessonTypeItems() to read:
+servicesJson
+from:
+settings WHERE account_id = actor.accountId
+Audit every billing table query for:
+account_id = actor.accountId
+especially:
+	•	products;
+	•	invoices;
+	•	invoice items;
+	•	booking/invoice links;
+	•	coupons;
+	•	POS;
+	•	stock movements;
+	•	expenses;
+	•	payment methods;
+	•	bank transactions.
+
+⸻
+
+P1 — Google / Drive integrations
+Target
+source/netlify/functions/_shared/google-provider.mts
+The actual google_provider_connections table is already correctly modelled with:
+account_id
+provider
+and connection reads use account_id. That part is good.
+The weak point is how the account ID is determined.
+resolveGoogleAccountId() still derives it from global settings / workspaceAccountsJson and finally falls back to the legacy account ID.
+Required change
+Do not resolve Google account ownership from settings.
+Callers must supply the authenticated actor’s accountId.
+Change APIs conceptually toward:
+loadGoogleProviderConnection(actor.accountId)
+connectGoogle(actor.accountId, ...)
+disconnectGoogle(actor.accountId)
+Public/OAuth callback state should contain a cryptographically validated account/flow reference rather than simply trusting a slug supplied by the browser.
+Also update this file’s:
+readSettings()
+setSettings()
+because they currently operate on the global settings namespace.
+
+⸻
+
+P1 — Notifications
+notification_history currently has no account ownership column in the code that creates it.
+readNotificationHistory() reads the latest 500 rows globally, then other code attempts to infer visibility using calendar item IDs.
+Add:
+account_id NOT NULL
+to:
+notification_history
+and ideally webhook/event linkage as appropriate.
+Then:
+readNotificationHistory(accountId)
+readNotificationHistoryForAppointment(accountId, appointmentId)
+recordNotification({ accountId, ... })
+This avoids relying on an appointment join/filter as the tenant boundary.
+The scheduled reminder/debounce systems must also iterate/work per account rather than using one global settings/account state.
+
+⸻
+
+P1 — Public booking needs an explicit public workspace selector
+Current public booking essentially resolves:
+publicWorkspaceAccount(state)
+→ defaultWorkspaceAccount(state)
+and resolveWorkspaceAccount() itself just returns the default workspace.
+That works for a one-business deployment but will not work for multiple businesses.
+Required public pattern
+Public routes need to resolve an account by a stable public identifier:
+/book/<business-slug>
+or equivalent validated hostname/slug.
+Conceptually:
+const publicAccount = await requirePublicAccount(slug)
+then:
+services
+availability
+coaches
+locations
+brand
+calendar occupancy
+booking creation
+reschedule
+cancel
+all use publicAccount.id.
+Do not use the logged-in account resolver for public booking.
+Do not fall back to the original business when an unknown slug is supplied.
+Unknown business:
+404
+
+⸻
+
+P1 — Public guest/video route
+The guest registration route currently says the account is resolved server-side, which is good in principle, but it calls:
+resolveWorkspaceAccount(req, state)
+and that resolver currently always returns the default workspace.
+Once multiple businesses exist, guest registration must resolve the target business from a validated public workspace context.
+Do not let a guest body choose accountId.
+Keep that existing principle.
+
+⸻
+
+P1 — Practice / video
+Practice Blocks themselves are largely in good shape because their reads/writes already commonly contain explicit:
+WHERE account_id = ...
+For example practice block creation uses requestContext.accountId and update/archive operations include account_id in their SQL.
+Preserve that pattern.
+However audit:
+	•	practice block presets;
+	•	push subscriptions;
+	•	video transfer sessions;
+	•	guest senders;
+	•	storage object paths;
+	•	linked video lookup.
+The live Supabase security advisor currently reports RLS disabled on:
+practice_block_presets
+push_subscriptions
+Enable RLS and verify their intended server/client access.
+
+⸻
+
+P1 — Supabase privileged RPC cleanup
+The current production Supabase security advisor reports public execution exposure on the billing SECURITY DEFINER functions:
+billing_adjust_stock(...)
+billing_redeem_coupon(...)
+billing_restore_coupon(...)
+for anon, and also signed-in users.
+Audit these before considering the app public multi-tenant ready.
+They accept account_id parameters, which makes arbitrary tenant selection particularly important to inspect.
+The preferred boundary is that untrusted clients cannot call privileged inventory/coupon functions with an arbitrary account ID.
+
+⸻
+
+P2 — Eliminate duplicated auth/account resolvers
+The following functions currently reimplement their own session check/account determination:
+	•	booking-core.mts
+	•	calendar-state.mts
+	•	admin-settings.mts
+	•	billing-api.mts
+	•	Google/integration helpers
+Create a shared module, for example:
+source/netlify/functions/_shared/coach-auth.mts
+Conceptual API:
+requireCoachIdentity(req)
+requireCoachActor(req)
+requireAccountAdmin(req)
+resolvePublicAccount(slug)
+The shared actor should be something like:
+type CoachActor = {
+  authUserId: string;
+  accountId: string;
+  role: "owner" | "admin" | "coach";
+  coachId?: string;
+};
+Do not let individual functions reconstruct the account from settings.
+
+⸻
+
+Migration order
+Do this in a safe order.
+Migration A — tenancy backbone
+Create:
+accounts
+account_memberships
+Populate original workspace.
+Link existing owner’s Supabase Auth user.
+Do not change runtime behaviour yet.
+
+⸻
+
+Migration B — settings ownership
+Add:
+settings.account_id
+Backfill existing rows.
+Replace primary/unique key:
+key
+with:
+(account_id, key)
+Keep original values intact.
+
+⸻
+
+Migration C — strict calendar ownership
+Backfill all missing calendar_items.account_id.
+Remove:
+DEFAULT 'sam-hale-golf'
+then set:
+account_id NOT NULL
+Do equivalent null/default audit for other account-owned tables.
+
+⸻
+
+Runtime D — shared actor
+Implement Supabase Auth → membership → account resolution.
+No default account fallback.
+
+⸻
+
+Runtime E — core surfaces
+Convert in this order:
+Calendar shell
+Settings
+People
+Services
+Coaches
+Locations
+Availability
+Then create the second test account.
+Do not wait for every secondary integration before doing the first isolation test.
+
+⸻
+
+Required tests before creating the test business
+Add automated tests specifically for boundary failure.
+Test 1 — unknown authenticated owner
+Supabase user exists.
+No account_memberships row.
+Expected:
+403
+Must NOT receive original account.
+
+⸻
+
+Test 2 — Business B calendar
+Business A has calendar item A.
+Business B has calendar item B.
+B requests calendar.
+Expected:
+B only
+
+⸻
+
+Test 3 — missing account_id calendar row
+Insert/fixture a malformed calendar item with no account.
+Expected:
+visible to nobody
+Not:
+visible to whichever account is currently loading
+
+⸻
+
+Test 4 — People
+Same email can exist:
+A / player@example.com
+B / player@example.com
+Each owner only receives their own row.
+
+⸻
+
+Test 5 — settings
+A.businessName = "Business A"
+B.businessName = "Business B"
+Loading B must never return A’s:
+	•	business name;
+	•	coach name;
+	•	location;
+	•	services;
+	•	notification address;
+	•	branding.
+
+⸻
+
+Test 6 — forged account ID
+Authenticated B sends:
+{
+  "accountId": "sam-hale-golf"
+}
+Expected:
+request still operates as B, or rejects the conflicting field.
+Never operates as A.
+
+⸻
+
+Test 7 — cross-account object ID
+B learns the UUID/id of A’s:
+	•	person;
+	•	appointment;
+	•	invoice;
+	•	practice block.
+B attempts GET/PUT/DELETE by ID.
+Expected:
+404 or 403
+No mutation.
+
+⸻
+
+Test 8 — public account slug
+Valid Business B public URL:
+only B services/calendar/branding.
+Unknown slug:
+404
+Never original account fallback.
+
+⸻
+
+Manual production smoke test after the core boundary lands
+Then create the real second Business Owner using Supabase Auth.
+Give them:
+account: boundary-test-business
+role: owner
+First login must contain:
+People:        0
+Calendar:      empty
+Invoices:      0
+Integrations:  disconnected
+Videos:        0
+and absolutely none of:
+Sam Hale
+Sam Hale Golf
+existing clients
+existing appointments
+existing invoice information
+existing Google connection
+existing Optix data
+existing videos
+existing notification recipient
+Clarity product branding is obviously allowed.
+Then create in Business B:
+Boundary Test Client
+Boundary Test Lesson
+Boundary Test Service
+Boundary Test Invoice
+Sign back into the original account.
+None may appear there.
+Then return to Business B and confirm they remain present.
+
+⸻
+
+Hard boundary acceptance rule
+Do not consider this pass complete until this statement is true:
+Every private request derives its account from an authenticated Supabase identity plus explicit account membership. Every public request derives its account from a validated public workspace identifier. Missing ownership fails closed. No runtime path assigns the original workspace as a fallback.
+The legacy sam-hale-golf identifier may remain for explicit migration/backfill of the original business, but it must not participate in ordinary runtime account resolution.
+
+⸻
+
+Important scope control
+Do not attempt a complete architecture rewrite.
+Preserve:
+	•	existing calendar UI;
+	•	current player portal;
+	•	existing booking behaviour;
+	•	existing account data;
+	•	existing integrations where possible.
+The first milestone is:
+Accounts
++ Supabase owner identity
++ Membership
++ scoped Settings
++ scoped Calendar
++ scoped People
++ scoped Services/Coaches/Locations/Availability
+Once those are proven with the second Business Owner, continue the same boundary through:
+Billing
+Notifications
+Google/Drive
+Optix
+Video
+Practice
+Public booking
+other integrations
+Do not build the public owner signup wizard yet.
+Provisioning the second test account manually is fine for this stage.
+The biggest change from the earlier punch list is that I would now explicitly tell the coding agent not to trust the existing JavaScript filtering as the boundary. For example, the fast calendar shell currently reads every calendar row and then filters, and its filter actually treats a row with no account ID as belonging to the current account.
+I’d also make P0 end at Settings + Calendar + People + core configuration, then create your second Supabase owner and test it. That gives us a real clean-room account early; we can then use that account to expose remaining leaks in Billing, Google, Optix, videos, notifications, etc., rather than trying to theoretically fix every subsystem before we have the best testing tool.

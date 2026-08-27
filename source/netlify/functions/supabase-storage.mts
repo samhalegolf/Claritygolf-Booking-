@@ -1,3 +1,18 @@
+// NOT WIRED TO ANYTHING, AND NOT SAFE TO RE-ENABLE AS IT STANDS.
+//
+// @netlify/database resolves to local-db/index.mjs, which re-exports
+// _shared/database.mts -- direct Postgres. This SQL-to-REST adapter has no
+// importers left (people-migrate.mts was the last one and now uses the same
+// direct connection as everything else).
+//
+// It is kept for reference only. Its statement patterns predate the business
+// account boundary: several match on a prefix ("select * from people") and
+// therefore ignore any WHERE clause the caller wrote, and its settings upsert
+// still targets `on_conflict=key` when the table's unique index is now
+// (account_id, key). Re-pointing anything at this file without first rescoping
+// every pattern would silently reintroduce cross-business reads and break
+// settings writes.
+//
 // Documentation-only guardrail: this direct Supabase helper is part of the
 // active source/ app's Supabase-backed persistence path.
 // source/package.json also intentionally aliases @netlify/database to

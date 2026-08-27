@@ -23,6 +23,10 @@
 // one needs the logo served from its own endpoint by URL.
 export const BULK_EXCLUDED_SETTING_KEYS = ["googleCalendarDebugLogJson"];
 
+// The exclusion on its own, for callers composing it with an account filter
+// (see _shared/settings-scope.mts).
+export const SETTINGS_BULK_EXCLUDE_FILTER =
+  `key=not.in.(${BULK_EXCLUDED_SETTING_KEYS.join(",")})`;
+
 // PostgREST query for a bulk settings read with the heavy keys left behind.
-export const SETTINGS_BULK_SELECT_QUERY =
-  `select=key,value&key=not.in.(${BULK_EXCLUDED_SETTING_KEYS.join(",")})`;
+export const SETTINGS_BULK_SELECT_QUERY = `select=key,value&${SETTINGS_BULK_EXCLUDE_FILTER}`;

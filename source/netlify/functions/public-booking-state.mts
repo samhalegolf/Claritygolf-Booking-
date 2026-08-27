@@ -18,8 +18,8 @@ function withPublicReadCache(response: Response) {
   });
 }
 
-export default async function handler() {
-  return withPublicReadCache(await handlePublicBookingStateRequest());
+export default async function handler(req: Request) {
+  return withPublicReadCache(await handlePublicBookingStateRequest(req));
 }
 
 export const config: Config = { path: "/api/public-booking-state" };

@@ -18,12 +18,11 @@ import {
   hasGoogleScopes,
   loadGoogleProviderConnection,
   readSettings,
-  resolveGoogleAccountId,
   setSettings,
 } from "./_shared/google-provider.mts";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { canonicalPhoneKey } from "./_shared/phone.mts";
 
-const sessionCookieName = "clarity_session";
 // Player portal sessions (see booking-core.mts). Player video routes are scoped
 // to the player's own player_id; the admin transfer surface is untouched.
 const playerSessionCookieName = "clarity_player_session";
@@ -512,16 +511,9 @@ async function supabase(table: string, options: { method?: string; query?: strin
   return text ? JSON.parse(text) : [];
 }
 
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return false;
-  const rows = await supabase("admin_sessions", {
-    query: `select=id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
-  });
-  return rows.length > 0;
-}
-
 type PlayerScope = {
+  /** The business the player's session belongs to. */
+  accountId: string;
   personId: string;
   email: string;
   phone: string;
@@ -565,21 +557,28 @@ async function readPlayerScope(req: Request): Promise<PlayerScope | null> {
     bearerTokenFromRequest(req) || parseCookies(req)[playerSessionCookieName] || "";
   if (!token) return null;
   const rows = await supabase("player_sessions", {
-    query: `select=person_id,email,phone,portal_player_id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
+    query:
+      `select=account_id,person_id,email,phone,portal_player_id` +
+      `&token_hash=eq.${encodeURIComponent(hashToken(token))}` +
+      `&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
   });
   const row = rows[0];
   if (!row) return null;
   const personId = cleanString(row.person_id, "", 160);
   // The display name is only used to label the submission for the coach, so a
   // failed lookup is not worth failing the upload over.
+  const accountId = cleanString(row.account_id, "", 120);
   let name = "";
-  if (personId) {
+  if (personId && accountId) {
     const people = await supabase("people", {
-      query: `select=name&id=eq.${encodeURIComponent(personId)}&limit=1`,
+      // Scoped: a person id from a session must not read another business's
+      // client record, even for something as small as a display name.
+      query: `select=name&id=eq.${encodeURIComponent(personId)}&account_id=eq.${encodeURIComponent(accountId)}&limit=1`,
     }).catch(() => []);
     name = cleanString(people[0]?.name, "", 180);
   }
   return {
+    accountId,
     personId,
     email: cleanString(row.email, "", 180).toLowerCase(),
     phone: cleanString(row.phone, "", 80),
@@ -1207,7 +1206,7 @@ export async function ensureTransferFolders(
     imported.id !== settings.googleDriveImportedFolderId ||
     failed.id !== settings.googleDriveFailedFolderId
   ) {
-    await setSettings({
+    await setSettings(accountId, {
       googleDriveRootFolderId: root.id,
       googleDriveTransferFolderId: transfer.id,
       googleDriveInboxFolderId: inbox.id,
@@ -2455,6 +2454,8 @@ async function handleImportReceipt(req: Request, accountId: string, savedVideoId
  * has already landed in Drive.
  */
 async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
+  // The transfer session names the business whose coach is being notified.
+  const accountId = cleanString(session.accountId, "", 120);
   const apiKey = env("RESEND_API_KEY");
   const to = env("CLARITY_ALERT_EMAIL") || env("CLARITY_COACH_EMAIL");
   const playerName = cleanString(session.submittedByName, "A player", 180);
@@ -2488,6 +2489,10 @@ async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
     prefer: "return=minimal",
     body: {
       id: randomUUID(),
+      // notification_history is account-owned since the boundary migration and
+      // the column is NOT NULL, so this insert needs the business the session
+      // belongs to -- it used to write no owner at all.
+      account_id: accountId,
       person_key: session.playerId,
       recipient: to || "",
       subject,
@@ -2514,6 +2519,7 @@ async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
  * variant is ever added, every one of those three must go through escapeHtml.
  */
 async function notifyCoachOfGuestSubmission(session: VideoTransferSession, coachViewToken: string) {
+  const accountId = cleanString(session.accountId, "", 120);
   const apiKey = env("RESEND_API_KEY");
   const to = env("CLARITY_ALERT_EMAIL") || env("CLARITY_COACH_EMAIL");
   const senderName = cleanString(session.submittedByName, "Someone", 180);
@@ -2559,6 +2565,10 @@ async function notifyCoachOfGuestSubmission(session: VideoTransferSession, coach
     prefer: "return=minimal",
     body: {
       id: randomUUID(),
+      // notification_history is account-owned since the boundary migration and
+      // the column is NOT NULL, so this insert needs the business the session
+      // belongs to -- it used to write no owner at all.
+      account_id: accountId,
       person_key: session.playerId,
       recipient: to || "",
       subject,
@@ -2592,11 +2602,14 @@ async function handleGuestVideoRoute(
   diagnostics: ProviderDiagnostics,
 ) {
   assertClarityCloudServerConfigured(req);
-  const settings = await readSettings();
-  const accountId = resolveGoogleAccountId(settings);
-  // The recipient seam: a guest token minted against another account may not
-  // spend this one's Drive. Inert while there is one workspace, load-bearing
-  // the moment there is more than one.
+  // The guest token names the business it was minted against. It used to be
+  // compared against a settings-derived account, which was the same one for
+  // everybody -- so the comparison below could never fail.
+  const accountId = cleanString(scope.accountId, "", 120);
+  if (!accountId) {
+    throw Object.assign(new Error("This guest link is not attached to a business."), { status: 403 });
+  }
+  const settings = await readSettings(accountId);
   if (scope.accountId && scope.accountId !== accountId) {
     return json({ error: "not_found", message: "Video route not found." }, 404);
   }
@@ -2736,8 +2749,11 @@ async function handleShareRoute(
     });
   }
 
-  const settings = await readSettings();
-  const accountId = session.accountId || resolveGoogleAccountId(settings);
+  const accountId = cleanString(session.accountId, "", 120);
+  if (!accountId) {
+    throw Object.assign(new Error("This share link is not attached to a business."), { status: 403 });
+  }
+  const settings = await readSettings(accountId);
 
   if (!action) {
     let manifest: any = {};
@@ -2809,8 +2825,12 @@ async function handlePlayerVideoRoute(
   diagnostics: ProviderDiagnostics,
 ) {
   assertClarityCloudServerConfigured(req);
-  const settings = await readSettings();
-  const accountId = resolveGoogleAccountId(settings);
+  // The player's session names their coach's business.
+  const accountId = cleanString(scope.accountId, "", 120);
+  if (!accountId) {
+    throw Object.assign(new Error("This player session is not attached to a business."), { status: 403 });
+  }
+  const settings = await readSettings(accountId);
   const candidates = playerVideoIdCandidates(scope);
 
   if (req.method === "GET" && sub[0] === "imports") {
@@ -2948,12 +2968,22 @@ async function handlePlayerVideoRoute(
   return json({ error: "not_found", message: "Player video route not found." }, 404);
 }
 
-export default async function handler(req: Request) {
+/**
+ * `options.resolveAccountId` is a test seam, the same shape
+ * handlePublicBookingSlotsRequest uses: auth now resolves through Postgres, and
+ * a unit test asserting the Drive-configuration error shapes has no database.
+ * Netlify never passes it, so production always goes through requireCoachActor.
+ */
+export default async function handler(
+  req: Request,
+  _context?: unknown,
+  options: { resolveAccountId?: (req: Request) => Promise<string> } = {},
+) {
   const cors = corsHeaders(req);
-  if (!cors) return routeVideoTransferRequest(req);
+  if (!cors) return routeVideoTransferRequest(req, options);
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
 
-  const response = await routeVideoTransferRequest(req);
+  const response = await routeVideoTransferRequest(req, options);
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(cors)) headers.set(name, value);
   return new Response(response.body, {
@@ -2992,13 +3022,20 @@ export async function purgeExpiredGuestSubmissions(limit = 25) {
   const sessions = (Array.isArray(rows) ? rows : []).map(rowToSession);
   if (!sessions.length) return { scanned: 0, purged: 0, failed: 0 };
 
-  const settings = await readSettings();
   let purged = 0;
   let failed = 0;
 
   for (const session of sessions) {
     try {
-      const accountId = session.accountId || resolveGoogleAccountId(settings);
+      // Each expired session names its own business; the purge walks them
+      // rather than assuming one Drive for everybody.
+      const accountId = cleanString(session.accountId, "", 120);
+      if (!accountId) {
+        console.warn("video_transfer:purge_session_without_account", session.transferId);
+        failed += 1;
+        continue;
+      }
+      const settings = await readSettings(accountId);
       const accessToken = await ensureDriveReady(accountId, {});
       const provider = googleDriveProviderAdapter(accessToken, settings, {});
       await provider.deleteTransferAsset({ assetFolderId: session.driveAssetFolderId });
@@ -3060,7 +3097,10 @@ export async function purgeStaleGuestSenders(days = 90) {
   return { removed };
 }
 
-async function routeVideoTransferRequest(req: Request) {
+async function routeVideoTransferRequest(
+  req: Request,
+  options: { resolveAccountId?: (req: Request) => Promise<string> } = {},
+) {
   const url = new URL(req.url);
   const parts = url.pathname
     .replace(/^\/api\/video-transfer\/?/, "")
@@ -3092,13 +3132,17 @@ async function routeVideoTransferRequest(req: Request) {
       return await handleShareRoute(req, parts[1] || "", parts[2] || "", diagnostics);
     }
 
-    if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
+    // Drive, folders and saved videos all belong to one business, so the coach
+    // routes need the business the caller administers rather than "a session
+    // exists". requireCoachActor throws 401/403 and the outer catch renders it.
+    const accountId = options.resolveAccountId
+      ? await options.resolveAccountId(req)
+      : (await requireCoachActor(req)).accountId;
     if (req.method === "GET" && parts[0] === "diagnostics") {
       return json(getSafeClarityCloudGoogleRuntimeDiagnostic(req));
     }
     assertClarityCloudServerConfigured(req);
-    const settings = await readSettings();
-    const accountId = resolveGoogleAccountId(settings);
+    const settings = await readSettings(accountId);
     // Only routes that talk to the Drive API need an access token. Chunk
     // uploads go straight to the stored resumable URL, so skipping the
     // refresh-token exchange here removes several round-trips per chunk.
@@ -3162,6 +3206,20 @@ async function routeVideoTransferRequest(req: Request) {
         phase: error.options.phase,
         retryable: error.options.retryable,
       });
+    }
+    // The auth boundary answers for itself. Without this, "not logged in" and
+    // "no workspace membership" were both flattened into
+    // CLARITY_CLOUD_PROVIDER_FAILED, which reads as a Google outage.
+    if (error?.status === 401 || error?.status === 403) {
+      // Same shape the old inline gate returned, so the client's handling of
+      // "you are signed out" is unchanged.
+      return json(
+        {
+          error: error.code || "unauthorized",
+          message: error instanceof Error ? error.message : "Admin login required.",
+        },
+        error.status,
+      );
     }
     const code =
       error?.code === "CLOUD_OAUTH_NOT_CONFIGURED"

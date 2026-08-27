@@ -1,10 +1,9 @@
-import { createHash } from "node:crypto";
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 import { processStoredExternalEvent } from "./_shared/integrations/ingest.mts";
 import { integrationRequest } from "./_shared/integrations/db.mts";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 
-const SESSION_COOKIE = "clarity_session";
 /**
  * The provider this endpoint serves.
  *
@@ -20,28 +19,32 @@ const UNPROCESSED_STATUSES = "received,stored,failed";
 const PENDING_REPLAY_LIMIT = 150;
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 
-function cookies(req: Request) {
-  return Object.fromEntries((req.headers.get("cookie") || "").split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
-    const at = part.indexOf("=");
-    return at < 0 ? [decodeURIComponent(part), ""] : [decodeURIComponent(part.slice(0, at)), decodeURIComponent(part.slice(at + 1))];
-  }));
-}
-
-async function requireAdmin(req: Request) {
-  const token = cookies(req)[SESSION_COOKIE] || "";
-  if (!token) return false;
-  const hash = createHash("sha256").update(token).digest("hex");
-  const rows = await getDatabase().sql`SELECT id FROM admin_sessions WHERE token_hash = ${hash} AND expires_at > NOW() LIMIT 1`;
-  return rows.length > 0;
+/**
+ * The old check proved a session row existed and nothing more.
+ *
+ * KNOWN BOUNDARY GAP, partial. The catalogue read and the two provider tables
+ * that carry an owner (external_booking_mappings, optix_pass_purchases) are
+ * scoped below. optix_webhook_events, external_booking_links and
+ * optix_booking_sync have no account_id column yet, so this panel still shows
+ * every business's inbound webhook traffic. Giving those three an owner is a
+ * migration and belongs with the Optix pass; until then this route at least
+ * requires a real workspace membership rather than any signed-in session.
+ */
+async function requireAccountId(req: Request): Promise<string> {
+  return (await requireCoachActor(req)).accountId;
 }
 
 function parse(value: unknown, fallback: any) {
   try { return typeof value === "string" ? JSON.parse(value) : fallback; } catch { return fallback; }
 }
 
-async function catalogue() {
+async function catalogue(accountId: string) {
   const keys = "servicesJson,locationsJson,coachProfilesJson";
-  const rows = await integrationRequest(`settings?key=in.(${keys})&select=key,value`).catch(() => []);
+  // Scoped: unfiltered this merged every business's services, locations and
+  // coach profiles into one arbitrary catalogue.
+  const rows = await integrationRequest(
+    `settings?key=in.(${keys})&account_id=eq.${encodeURIComponent(accountId)}&select=key,value`,
+  ).catch(() => []);
   const settings = Object.fromEntries((rows || []).map((row: any) => [row.key, row.value]));
   return {
     services: parse(settings.servicesJson, []), locations: parse(settings.locationsJson, []), coaches: parse(settings.coachProfilesJson, []),
@@ -86,15 +89,22 @@ function observedWorkspaces(rows: any[]) {
   return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 
-async function getState() {
+async function getState(accountId: string) {
   const [mappings, events, pending, purchases, links, resources, workspaceRows, catalog] = await Promise.all([
-    integrationRequest(`external_booking_mappings?provider=eq.${PROVIDER}&order=workspace_id.asc`),
+    integrationRequest(
+      `external_booking_mappings?provider=eq.${PROVIDER}` +
+        `&account_id=eq.${encodeURIComponent(accountId)}&order=workspace_id.asc`,
+    ),
     integrationRequest("optix_webhook_events?select=id,event_key,event_type,external_booking_id,received_at,processing_status,processed_at,failure_code,error_message,attempt_count,clarity_item_id,payload_json&order=received_at.desc&limit=50"),
     // Just the keys, so the panel can show how many events are still waiting
     // without pulling their payloads.
     integrationRequest(`optix_webhook_events?processing_status=in.(${UNPROCESSED_STATUSES})&select=event_key,received_at&order=received_at.asc&limit=2000`).catch(() => []),
     // Recorded pass purchases, newest first. Absent until the migration runs.
-    integrationRequest("optix_pass_purchases?select=id,event_type,external_purchase_id,sale_number,member_email,member_name,person_id,item_name,quantity,amount_cents,currency,purchased_at,paid_at,is_pass,classification,payload_json&order=purchased_at.desc&limit=100").catch(() => []),
+    integrationRequest(
+      "optix_pass_purchases?select=id,event_type,external_purchase_id,sale_number,member_email,member_name," +
+        "person_id,item_name,quantity,amount_cents,currency,purchased_at,paid_at,is_pass,classification,payload_json" +
+        `&account_id=eq.${encodeURIComponent(accountId)}&order=purchased_at.desc&limit=100`,
+    ).catch(() => []),
     integrationRequest(`external_booking_links?provider=eq.${PROVIDER}&purpose=eq.lesson&select=external_booking_id,clarity_item_id,processing_status,email_status,confirmation_sent_at,workspace_id&order=updated_at.desc&limit=100`),
     integrationRequest("optix_booking_sync?select=calendar_item_id,optix_booking_id,resource_id,sync_status,last_synced_at&order=updated_at.desc&limit=100").catch(() => []),
     // Slim projection: three JSON fields, not the payloads. Enough to build the
@@ -104,7 +114,7 @@ async function getState() {
       "workspace_name:payload_json->>workspace_name,workspace_type:payload_json->>workspace_type" +
       "&order=received_at.desc&limit=3000",
     ).catch(() => []),
-    catalogue(),
+    catalogue(accountId),
   ]);
   const linkByBooking = new Map((links || []).map((row: any) => [row.external_booking_id, row]));
   const resourceByItem = new Map((resources || []).map((row: any) => [row.calendar_item_id, row]));
@@ -137,9 +147,9 @@ async function getState() {
 }
 
 export default async function handler(req: Request) {
-  if (!(await requireAdmin(req))) return json({ error: "unauthorized" }, 401);
   try {
-    if (req.method === "GET") return json(await getState());
+    const accountId = await requireAccountId(req);
+    if (req.method === "GET") return json(await getState(accountId));
     const body: any = await req.json().catch(() => ({}));
     if (req.method === "PUT") {
       // Was: a literal check against one workspace id. A saved mapping is the
@@ -160,7 +170,7 @@ export default async function handler(req: Request) {
           email_behaviour: emailBehaviour, updated_at: new Date().toISOString(),
         }),
       });
-      return json({ ok: true, state: await getState() });
+      return json({ ok: true, state: await getState(accountId) });
     }
     if (req.method === "POST" && body.action === "retry") {
       const eventKey = String(body.eventKey || "").trim();
@@ -170,7 +180,7 @@ export default async function handler(req: Request) {
       const rows = await integrationRequest(`optix_webhook_events?event_key=eq.${encodeURIComponent(eventKey)}&processing_status=in.(${UNPROCESSED_STATUSES})&select=event_key,payload_json&limit=1`);
       if (!rows?.[0]) return json({ error: "retryable_event_not_found" }, 404);
       const result = await processStoredExternalEvent(PROVIDER, eventKey, rows[0].payload_json);
-      return json({ ok: true, result, state: await getState() });
+      return json({ ok: true, result, state: await getState(accountId) });
     }
     // Replays every event still waiting, oldest first, from a cutoff date.
     // Sequential by design: two events for one booking must not race, and the
@@ -191,10 +201,20 @@ export default async function handler(req: Request) {
           summary[key] = (summary[key] || 0) + 1;
         }
       }
-      return json({ ok: true, attempted: (rows || []).length, summary, state: await getState() });
+      return json({ ok: true, attempted: (rows || []).length, summary, state: await getState(accountId) });
     }
     return json({ error: "method_not_allowed" }, 405);
   } catch (error: any) {
+    const status = Number(error?.status);
+    if (status === 401 || status === 403) {
+      return json(
+        {
+          error: String(error?.code || "unauthorized"),
+          message: error instanceof Error ? error.message : "Admin login required.",
+        },
+        status,
+      );
+    }
     return json({ error: String(error?.code || "external_bookings_failed"), message: error instanceof Error ? error.message : "External bookings request failed." }, 500);
   }
 }

@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { createVerify } from "node:crypto";
-import { defaultAccountId } from "./_shared/account.mts";
+import { legacyOriginalWorkspaceId as defaultAccountId } from "./_shared/account.mts";
 import { autoReconcileCredits, syncAkahuTransactionsByIds } from "./_shared/akahu.mts";
 
 // Akahu webhook — keeps the bank feed live. On a TRANSACTION webhook Akahu sends
@@ -66,6 +66,18 @@ export default async function handler(req: Request) {
     return json({ error: "invalid_json" }, 400);
   }
 
+  // KNOWN BOUNDARY GAP, deliberately left for the Billing pass.
+  //
+  // There is no session here to resolve a business from, and the Akahu/Stripe
+  // credentials in the environment belong to the original workspace, so this
+  // still writes into legacyOriginalWorkspaceId(). That is correct while the
+  // original workspace is the only one with a bank or Stripe connection, and it
+  // is wrong the moment a second business connects one: their transactions would
+  // land in the first business's ledger.
+  //
+  // The fix is to resolve the business from the inbound payload -- the Akahu
+  // connection or the Stripe customer/subscription -- rather than statically.
+  // Until then, do not connect banking or Stripe for a second business.
   const accountId = defaultAccountId();
   try {
     if (event?.webhook_type === "TRANSACTION") {

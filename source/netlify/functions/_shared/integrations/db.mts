@@ -158,12 +158,14 @@ export async function createExternalPerson(accountId: string, provider: string, 
  * person; conflicting history is ambiguity, not a tiebreaker.
  */
 export async function matchPersonByProviderCustomerId(
+  accountId: string,
   provider: string,
   providerCustomerId: string,
   purpose = "lesson",
 ): Promise<string | null> {
   const customerId = text(providerCustomerId);
-  if (!customerId) return null;
+  const account = text(accountId);
+  if (!customerId || !account) return null;
   const rows = await integrationRequest(
     `external_booking_links?provider=eq.${encodeURIComponent(provider)}` +
       `&purpose=eq.${encodeURIComponent(purpose)}` +
@@ -171,5 +173,14 @@ export async function matchPersonByProviderCustomerId(
       `&select=person_id&limit=50`,
   ).catch(() => []);
   const unique = [...new Set(rowsOf(rows).map((row) => text((row as any)?.person_id)).filter(Boolean))];
-  return unique.length === 1 ? unique[0] : null;
+  if (unique.length !== 1) return null;
+  // external_booking_links has no owner column of its own, so confirm the
+  // person it points at belongs to this business before linking a booking to
+  // them. Without this, one provider customer id could attach another
+  // business's client to this business's calendar row.
+  const owned = await integrationRequest(
+    `people?id=eq.${encodeURIComponent(unique[0])}` +
+      `&account_id=eq.${encodeURIComponent(account)}&select=id&limit=1`,
+  ).catch(() => []);
+  return rowsOf(owned).length === 1 ? unique[0] : null;
 }

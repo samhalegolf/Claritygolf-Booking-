@@ -52,7 +52,7 @@ const item = (overrides: Record<string, unknown> = {}) => ({
 
 test("a batch of items is one statement, not one per item", async () => {
   const client = recordingClient();
-  await upsertCalendarItemChunk(client, [item({ id: "a" }), item({ id: "b" }), item({ id: "c" })]);
+  await upsertCalendarItemChunk(client, [item({ id: "a" }), item({ id: "b" }), item({ id: "c" })], "clarity");
 
   assert.equal(client.calls.length, 1, "three items still cost a single round trip");
   const { text, params } = client.calls[0];
@@ -62,7 +62,7 @@ test("a batch of items is one statement, not one per item", async () => {
 
 test("every parameter lands in its own placeholder, numbered in order", async () => {
   const client = recordingClient();
-  await upsertCalendarItemChunk(client, [item({ id: "a" }), item({ id: "b" })]);
+  await upsertCalendarItemChunk(client, [item({ id: "a" }), item({ id: "b" })], "clarity");
 
   const { text, params } = client.calls[0];
   const placeholders = (text.match(/\$\d+/g) || []).map((token) => Number(token.slice(1)));
@@ -77,9 +77,11 @@ test("every parameter lands in its own placeholder, numbered in order", async ()
 
 test("only the JSON columns are cast to jsonb", async () => {
   const client = recordingClient();
-  await upsertCalendarItemChunk(client, [
-    item({ coach: { coachId: "coach-a", name: "Sam Hale" }, location: { name: "Bay 1" } }),
-  ]);
+  await upsertCalendarItemChunk(
+    client,
+    [item({ coach: { coachId: "coach-a", name: "Sam Hale" }, location: { name: "Bay 1" } })],
+    "clarity",
+  );
 
   const { text, params } = client.calls[0];
   const cast = (text.match(/\$(\d+)::jsonb/g) || []).map((token) => Number(token.slice(1).split(":")[0]));
@@ -100,7 +102,7 @@ test("only the JSON columns are cast to jsonb", async () => {
 
 test("an item with no snapshots writes NULL rather than the string \"undefined\"", async () => {
   const client = recordingClient();
-  await upsertCalendarItemChunk(client, [item({ kind: "block", title: "Busy" })]);
+  await upsertCalendarItemChunk(client, [item({ kind: "block", title: "Busy" })], "clarity");
 
   const { params } = client.calls[0];
   [17, 18, 19].forEach((index) => {
@@ -113,7 +115,7 @@ test("an item with no snapshots writes NULL rather than the string \"undefined\"
 
 test("a conflicting row updates every column except the id it matched on", async () => {
   const client = recordingClient();
-  await upsertCalendarItemChunk(client, [item()]);
+  await upsertCalendarItemChunk(client, [item()], "clarity");
 
   const { text } = client.calls[0];
   const updated = text.slice(text.indexOf("DO UPDATE SET"));
@@ -209,6 +211,7 @@ test("the source a contact arrived from is part of the comparison", () => {
 test("a group of settings is written in one statement", async () => {
   const statements: { text: string; params: unknown[] }[] = [];
   await setSettingsBulk(
+    "clarity",
     { accountCoachName: "Sam Hale", accountCountry: "NZ", accountTimezone: "Pacific/Auckland" },
     async (text: string, params: unknown[]) => {
       statements.push({ text, params });
@@ -219,16 +222,32 @@ test("a group of settings is written in one statement", async () => {
   assert.equal(statements.length, 1, "three keys still cost a single round trip");
   const { text, params } = statements[0];
   assert.deepEqual(params, [
+    "clarity",
     "accountCoachName",
     "Sam Hale",
+    "clarity",
     "accountCountry",
     "NZ",
+    "clarity",
     "accountTimezone",
     "Pacific/Auckland",
   ]);
   const placeholders = (text.match(/\$\d+/g) || []).map((token) => Number(token.slice(1)));
-  assert.deepEqual(placeholders, [1, 2, 3, 4, 5, 6], "key/value pairs stay in step");
+  assert.deepEqual(placeholders, [1, 2, 3, 4, 5, 6, 7, 8, 9], "account/key/value triples stay in step");
   assert.ok(text.includes("DO UPDATE"), "an existing key is overwritten, not ignored");
+  assert.ok(
+    text.includes("ON CONFLICT (account_id, key)"),
+    "the uniqueness boundary is the business plus the key, not the key alone",
+  );
+});
+
+test("a settings write with no account is refused", async () => {
+  // The old helper wrote into a globally-keyed table, so a caller that had lost
+  // track of the business still wrote -- into everyone's settings.
+  await assert.rejects(
+    () => setSettingsBulk("", { accountCoachName: "Sam Hale" }, async () => ({ rows: [] })),
+    /accountId is required/,
+  );
 });
 
 test("settings with no keys to write skip the database entirely", async () => {
@@ -237,16 +256,20 @@ test("settings with no keys to write skip the database entirely", async () => {
     called = true;
     return { rows: [] };
   };
-  await setSettingsBulk({}, run);
-  await setSettingsBulk(null, run);
+  await setSettingsBulk("clarity", {}, run);
+  await setSettingsBulk("clarity", null, run);
   assert.equal(called, false, "an empty update is not a statement with no values");
 });
 
 test("a null or undefined setting is stored as an empty string, not \"null\"", async () => {
   let captured: unknown[] = [];
-  await setSettingsBulk({ notificationEmail: null, smsFromNumber: undefined }, async (_t, params) => {
-    captured = params;
-    return { rows: [] };
-  });
-  assert.deepEqual(captured, ["notificationEmail", "", "smsFromNumber", ""]);
+  await setSettingsBulk(
+    "clarity",
+    { notificationEmail: null, smsFromNumber: undefined },
+    async (_t, params) => {
+      captured = params;
+      return { rows: [] };
+    },
+  );
+  assert.deepEqual(captured, ["clarity", "notificationEmail", "", "clarity", "smsFromNumber", ""]);
 });

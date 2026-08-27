@@ -100,6 +100,7 @@ async function recordSupersededBayBooking(
 function rowToAppointment(row: any): ClarityOptixAppointment {
   return {
     id: String(row.id || ""),
+    accountId: String(row.account_id || ""),
     kind: row.kind || "",
     week: Number(row.week || 0),
     day: Number(row.day || 0),
@@ -136,12 +137,17 @@ function rowToSyncRecord(row: any): OptixSyncRecord {
   } as OptixSyncRecord;
 }
 
-async function readAppointment(calendarItemId: string) {
+// Scoped by account as well as id. Deriving the account from the row it found
+// meant a booking id was on its own enough to act on another business's lesson:
+// the caller supplied the id, and the row then supplied its own authority.
+async function readAppointment(accountId: string, calendarItemId: string) {
+  if (!accountId) return null;
   const rows = await db().sql`
-    SELECT id, kind, week, day, start, duration, title, client, note,
+    SELECT id, account_id, kind, week, day, start, duration, title, client, note,
            service_id, location_id, location, status, email, phone, coach_id, person_id
     FROM calendar_items
     WHERE id = ${calendarItemId}
+      AND account_id = ${accountId}
       AND kind = 'appointment'
     LIMIT 1
   `;
@@ -158,11 +164,19 @@ async function readSyncRecord(calendarItemId: string) {
   return rows[0] ? rowToSyncRecord(rows[0]) : null;
 }
 
-export async function readBookingTypeConfig(serviceId: string): Promise<Record<string, any> | null> {
+// The Optix booking-type mapping is per business: which Optix resource a
+// lesson type books, and whether it books automatically. Read without an
+// account filter it would return both businesses' rows and pick one.
+export async function readBookingTypeConfig(
+  accountId: string,
+  serviceId: string,
+): Promise<Record<string, any> | null> {
+  if (!accountId) return null;
   const rows = await db().sql`
     SELECT value
     FROM settings
-    WHERE key = 'optixBookingTypeConfigJson'
+    WHERE account_id = ${accountId}
+      AND key = 'optixBookingTypeConfigJson'
     LIMIT 1
   `;
   try {
@@ -233,9 +247,9 @@ function timeoutRecord(
  * after a client's public booking lands on the calendar (booking-core.mts).
  * Idempotent: an already-synced booking returns { alreadyBooked: true }.
  */
-export async function bookOneResource(calendarItemId: string) {
+export async function bookOneResource(accountId: string, calendarItemId: string) {
   await ensureOptixSyncTable();
-  const appointment = await readAppointment(calendarItemId);
+  const appointment = await readAppointment(accountId, calendarItemId);
   if (!appointment) {
     return { ok: false, error: "appointment_not_found", message: "Clarity appointment not found." };
   }
@@ -247,7 +261,7 @@ export async function bookOneResource(calendarItemId: string) {
 
   const config = readOptixReconcileConfig(env);
   const serviceId = String(appointment.serviceId || appointment.service_id || "");
-  const bookingType = await readBookingTypeConfig(serviceId);
+  const bookingType = await readBookingTypeConfig(accountId, serviceId);
 
   const operation = reconcileOptixAppointmentWithAutoSelect({
     appointment,
@@ -345,7 +359,10 @@ export type BayRebookOutcome = {
  * rebook fails, the bay is released but not re-held — the lesson loses its
  * orange outline and Book resource on the card retries as usual.
  */
-export async function rebookResourceAfterReschedule(calendarItemId: string): Promise<BayRebookOutcome> {
+export async function rebookResourceAfterReschedule(
+  accountId: string,
+  calendarItemId: string,
+): Promise<BayRebookOutcome> {
   const cleanId = String(calendarItemId || "").trim();
   try {
     await ensureOptixSyncTable();
@@ -377,7 +394,7 @@ export async function rebookResourceAfterReschedule(calendarItemId: string): Pro
       SET optix_booking_id = '', optix_booking_session_id = '', updated_at = NOW()
       WHERE calendar_item_id = ${cleanId}
     `;
-    const outcome = await bookOneResource(cleanId);
+    const outcome = await bookOneResource(accountId, cleanId);
     const errorMessage =
       (outcome as { message?: string }).message ||
       (outcome as { result?: OptixSyncRecord }).result?.errorMessage ||
@@ -406,13 +423,14 @@ export async function rebookResourceAfterReschedule(calendarItemId: string): Pro
  * press Book resource on the card as before.
  */
 export async function autoBookResourceForNewBooking(
+  accountId: string,
   calendarItemId: string,
   serviceId: string,
 ): Promise<void> {
   try {
-    const bookingType = await readBookingTypeConfig(String(serviceId || ""));
+    const bookingType = await readBookingTypeConfig(accountId, String(serviceId || ""));
     if (bookingType?.enabled !== true || bookingType?.autoBook !== true) return;
-    const outcome = await bookOneResource(calendarItemId);
+    const outcome = await bookOneResource(accountId, calendarItemId);
     console.info("optix_auto_book_resource", {
       calendarItemId,
       serviceId,

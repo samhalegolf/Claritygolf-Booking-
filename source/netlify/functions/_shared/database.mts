@@ -131,6 +131,21 @@ export function ddlBatch() {
   };
 }
 
+/**
+ * Swap the database for a stand-in.
+ *
+ * The tenant-boundary tests need to see the SQL a read or write actually
+ * issues -- whether the account filter is in the statement or only in a
+ * JavaScript filter afterwards -- and to answer it with fixture rows. Passing
+ * `null` restores the real pool.
+ *
+ * Test-only: nothing in the request path calls this, and the real getDatabase()
+ * is unchanged when it has not been called.
+ */
+export function setDatabaseForTests(fake: { sql: Function; pool: unknown } | null) {
+  cachedDatabase = fake as typeof cachedDatabase;
+}
+
 export async function closeDatabase() {
   if (cachedPool) {
     await cachedPool.end();

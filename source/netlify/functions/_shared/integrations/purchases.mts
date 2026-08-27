@@ -49,9 +49,20 @@ export function classifyPassPurchase(purchase: Pick<NormalizedPurchaseEvent, "ki
  */
 export async function purchaseAccountId(provider: ExternalProvider) {
   const rows = await integrationRequest(
-    `external_booking_mappings?provider=eq.${provider}&select=account_id&order=updated_at.desc&limit=1`,
+    `external_booking_mappings?provider=eq.${provider}&select=account_id`,
   ).catch(() => []);
-  return text(rowsOf(rows)[0]?.["account_id" as keyof object]) || "sam-hale-golf";
+  const accounts = new Set(
+    rowsOf(rows)
+      .map((row) => text(row["account_id" as keyof object]))
+      .filter(Boolean),
+  );
+  // Exactly one business has this provider mapped: unambiguous, so use it.
+  // Two or more and there is no way to tell whose purchase this is from the
+  // payload alone -- this used to take the most recently updated mapping and,
+  // failing that, the literal "sam-hale-golf", so a second business's pass
+  // purchases would have been filed against the first.
+  if (accounts.size === 1) return [...accounts][0];
+  return "";
 }
 
 /** How a purchase came to be attached to the client it is attached to. */
@@ -129,7 +140,16 @@ export async function recordPassPurchase(
   if (!adapter.normalizePurchase) {
     throw Object.assign(new Error(`${adapter.label} does not send purchase events.`), { code: "purchases_unsupported" });
   }
-  const account = accountId || await purchaseAccountId(adapter.id);
+  const account = accountId || (await purchaseAccountId(adapter.id));
+  if (!account) {
+    throw Object.assign(
+      new Error(
+        `${adapter.label} purchase events cannot be attributed to a business: ` +
+          "either no workspace mapping exists, or more than one business has one.",
+      ),
+      { code: "purchase_account_ambiguous" },
+    );
+  }
   const purchase = adapter.normalizePurchase(payload);
   const classification = classifyPassPurchase(purchase);
   const { personId, linkSource } = await resolvePurchasePerson(purchase, account, adapter.id);

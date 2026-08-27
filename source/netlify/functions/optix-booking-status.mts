@@ -1,7 +1,7 @@
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 
-const SESSION_COOKIE = "clarity_session";
 const BAY_NAMES: Record<string, string> = {
   "600009": "Bay #1",
   "600004": "Bay #2",
@@ -26,34 +26,12 @@ function json(value: unknown, status = 200) {
   });
 }
 
-function parseCookies(req: Request) {
-  return Object.fromEntries(
-    (req.headers.get("cookie") || "")
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const index = part.indexOf("=");
-        return index < 0
-          ? [decodeURIComponent(part), ""]
-          : [decodeURIComponent(part.slice(0, index)), decodeURIComponent(part.slice(index + 1))];
-      }),
-  );
-}
-
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[SESSION_COOKIE] || "";
-  if (!token) return false;
-  const { createHash } = await import("node:crypto");
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const rows = await db().sql`
-    SELECT id
-    FROM admin_sessions
-    WHERE token_hash = ${tokenHash}
-      AND expires_at > NOW()
-    LIMIT 1
-  `;
-  return rows.length > 0;
+/**
+ * The old check proved a session row existed and nothing more, while the query
+ * below read every business's appointments -- client names, emails and slots.
+ */
+async function requireAccountId(req: Request): Promise<string> {
+  return (await requireCoachActor(req)).accountId;
 }
 
 async function ensureTable() {
@@ -78,8 +56,21 @@ async function ensureTable() {
 }
 
 export default async function handler(req: Request) {
-  if (!(await requireAdmin(req))) return json({ error: "unauthorized" }, 401);
   if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+
+  let accountId = "";
+  try {
+    accountId = await requireAccountId(req);
+  } catch (error) {
+    const status = (error as { status?: number })?.status === 403 ? 403 : 401;
+    return json(
+      {
+        error: (error as { code?: string })?.code || "unauthorized",
+        message: error instanceof Error ? error.message : "Admin login required.",
+      },
+      status,
+    );
+  }
 
   await ensureTable();
   const rows = await db().sql`
@@ -104,6 +95,7 @@ export default async function handler(req: Request) {
     FROM calendar_items c
     LEFT JOIN optix_booking_sync s ON s.calendar_item_id = c.id
     WHERE c.kind = 'appointment'
+      AND c.account_id = ${accountId}
     ORDER BY COALESCE(s.updated_at, c.updated_at) DESC
     LIMIT 100
   `;

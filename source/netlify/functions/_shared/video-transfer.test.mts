@@ -74,6 +74,11 @@ function useCloudRuntimeEnv(values: Record<string, string | undefined>) {
   return () => restoreEnv(snapshot);
 }
 
+// Auth resolves through Postgres now (Supabase identity -> account membership),
+// which these tests have no access to and are not about. They stand in for the
+// resolved business so the Drive-configuration assertions below still run.
+const testAccount = async () => "test-business";
+
 function mockSupabaseFetch() {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {
@@ -180,9 +185,13 @@ test("transfer routes return typed setup JSON when OAuth configuration is missin
   process.env.GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_V1 = "a".repeat(43);
   globalThis.fetch = async () => Response.json([{ id: "session-1" }]);
   try {
-    const response = await videoTransferHandler(new Request("https://example.test/api/video-transfer/imports", {
-      headers: { cookie: "clarity_session=session-token" },
-    }));
+    const response = await videoTransferHandler(
+      new Request("https://example.test/api/video-transfer/imports", {
+        headers: { cookie: "clarity_session=session-token" },
+      }),
+      undefined,
+      { resolveAccountId: testAccount },
+    );
     const body = await response.json() as any;
 
     assert.equal(response.status, 503);
@@ -206,9 +215,13 @@ test("status and transfer routes share legacy Calendar OAuth resolution", async 
   });
   const restoreFetch = mockSupabaseFetch();
   try {
-    const statusResponse = await googleDriveHandler(new Request("https://claritygolf.app/api/google-drive/status", {
-      headers: { cookie: "clarity_session=session-token" },
-    }));
+    const statusResponse = await googleDriveHandler(
+      new Request("https://claritygolf.app/api/google-drive/status", {
+        headers: { cookie: "clarity_session=session-token" },
+      }),
+      undefined,
+      { resolveAccountId: testAccount },
+    );
     const statusBody = await statusResponse.json() as any;
 
     assert.equal(statusResponse.status, 200);
@@ -216,9 +229,13 @@ test("status and transfer routes share legacy Calendar OAuth resolution", async 
     assert.equal(statusBody.safeErrorCode, "PROVIDER_STORAGE_UNAVAILABLE");
     assert.notEqual(statusBody.safeErrorCode, "CLOUD_OAUTH_NOT_CONFIGURED");
 
-    const transferResponse = await videoTransferHandler(new Request("https://claritygolf.app/api/video-transfer/imports", {
-      headers: { cookie: "clarity_session=session-token" },
-    }));
+    const transferResponse = await videoTransferHandler(
+      new Request("https://claritygolf.app/api/video-transfer/imports", {
+        headers: { cookie: "clarity_session=session-token" },
+      }),
+      undefined,
+      { resolveAccountId: testAccount },
+    );
     const transferBody = await transferResponse.json() as any;
 
     assert.equal(transferResponse.status, 503);
@@ -241,9 +258,13 @@ test("safe transfer runtime diagnostics expose no values or lengths", async () =
   });
   const restoreFetch = mockSupabaseFetch();
   try {
-    const response = await videoTransferHandler(new Request("https://claritygolf.app/api/video-transfer/diagnostics", {
-      headers: { cookie: "clarity_session=session-token" },
-    }));
+    const response = await videoTransferHandler(
+      new Request("https://claritygolf.app/api/video-transfer/diagnostics", {
+        headers: { cookie: "clarity_session=session-token" },
+      }),
+      undefined,
+      { resolveAccountId: testAccount },
+    );
     const body = await response.json() as any;
     const serialized = JSON.stringify(body);
 

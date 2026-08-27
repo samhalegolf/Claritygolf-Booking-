@@ -9,8 +9,7 @@
 // The literal survives here, exactly once, because it is not arbitrary: it is
 // the real account id already stamped on every existing person and calendar item
 // in production. Changing it would orphan that data. It is the migration default
-// for the original workspace, nothing more — set CLARITY_COACH_ACCOUNT_ID and
-// the entire app follows, with no code change.
+// for the original workspace, nothing more.
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -28,17 +27,26 @@ export function slugify(value: unknown, fallback = ""): string {
   return slug || fallback;
 }
 
-/** The original workspace's account id. Do not reuse as a generic default. */
+/** The original workspace's account id. For migrations/backfill ONLY. */
 export const LEGACY_DEFAULT_ACCOUNT_ID = "sam-hale-golf";
 
-/** The account id every workspace-scoped read and write should fall back to. */
-export function defaultAccountId(): string {
-  return (
-    slugify(env("CLARITY_COACH_ACCOUNT_ID"), "") || LEGACY_DEFAULT_ACCOUNT_ID
-  );
+/**
+ * The original workspace's account id for migration/backfill use only.
+ * NOT for runtime authorization paths.
+ */
+export function legacyOriginalWorkspaceId(): string {
+  return LEGACY_DEFAULT_ACCOUNT_ID;
 }
 
-/** The public calendar slug. Falls back to the account id. */
+/**
+ * Validates and slugifies an account id without falling back to legacy id.
+ * Returns empty string if the input is invalid.
+ */
+export function slugifyAccountId(value: unknown): string {
+  return slugify(value, "");
+}
+
+/** The public calendar slug. For original workspace bootstrapping only. */
 export function defaultCalendarSlug(): string {
-  return slugify(env("CLARITY_CALENDAR_SLUG"), "") || defaultAccountId();
+  return slugify(env("CLARITY_CALENDAR_SLUG"), "") || legacyOriginalWorkspaceId();
 }

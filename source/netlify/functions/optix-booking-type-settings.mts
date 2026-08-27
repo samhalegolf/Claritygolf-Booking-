@@ -1,5 +1,6 @@
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 
 const SETTINGS_KEY = "optixBookingTypeConfigJson";
 const PROFILES_KEY = "optixResourceProfilesJson";
@@ -43,19 +44,13 @@ function parseCookies(req: Request) {
   );
 }
 
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[SESSION_COOKIE] || "";
-  if (!token) return false;
-  const { createHash } = await import("node:crypto");
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const rows = await db().sql`
-    SELECT id
-    FROM admin_sessions
-    WHERE token_hash = ${tokenHash}
-      AND expires_at > NOW()
-    LIMIT 1
-  `;
-  return rows.length > 0;
+/**
+ * Optix booking-type mappings are per business, so this needs the business,
+ * not "a session row exists" -- which is all the old check established, while
+ * the settings it guarded were read and written globally.
+ */
+async function requireAccountId(req: Request): Promise<string> {
+  return (await requireCoachActor(req)).accountId;
 }
 
 function cleanIds(value: unknown): string[] {
@@ -111,69 +106,81 @@ function cleanProfiles(value: unknown) {
 async function ensureSettingsTable() {
   await db().sql`
     CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      key TEXT NOT NULL,
       value TEXT NOT NULL,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (account_id, key)
     )
   `;
 }
 
-async function readSetting(key: string) {
+async function readSetting(accountId: string, key: string) {
   await ensureSettingsTable();
-  const rows = await db().sql`SELECT value FROM settings WHERE key = ${key}`;
+  const rows = await db().sql`
+    SELECT value FROM settings WHERE account_id = ${accountId} AND key = ${key}
+  `;
   return rows[0]?.value || "";
 }
 
-async function readState() {
+async function readState(accountId: string) {
   let config = {};
   let profiles: any[] = [];
   try {
-    config = cleanConfig(JSON.parse(await readSetting(SETTINGS_KEY) || "{}"));
+    config = cleanConfig(JSON.parse(await readSetting(accountId, SETTINGS_KEY) || "{}"));
   } catch {
     config = {};
   }
   try {
-    profiles = cleanProfiles(JSON.parse(await readSetting(PROFILES_KEY) || "[]"));
+    profiles = cleanProfiles(JSON.parse(await readSetting(accountId, PROFILES_KEY) || "[]"));
   } catch {
     profiles = [];
   }
   return { config, profiles };
 }
 
-async function writeSetting(key: string, value: unknown) {
+async function writeSetting(accountId: string, key: string, value: unknown) {
   await ensureSettingsTable();
   await db().sql`
-    INSERT INTO settings (key, value, updated_at)
-    VALUES (${key}, ${JSON.stringify(value)}, NOW())
-    ON CONFLICT (key) DO UPDATE
+    INSERT INTO settings (account_id, key, value, updated_at)
+    VALUES (${accountId}, ${key}, ${JSON.stringify(value)}, NOW())
+    ON CONFLICT (account_id, key) DO UPDATE
       SET value = EXCLUDED.value,
           updated_at = EXCLUDED.updated_at
   `;
 }
 
-async function writeState(value: any) {
+async function writeState(accountId: string, value: any) {
   const profiles = cleanProfiles(value?.profiles);
   const config = cleanConfig(value?.config);
   await Promise.all([
-    writeSetting(PROFILES_KEY, profiles),
-    writeSetting(SETTINGS_KEY, config),
+    writeSetting(accountId, PROFILES_KEY, profiles),
+    writeSetting(accountId, SETTINGS_KEY, config),
   ]);
   return { config, profiles };
 }
 
 export default async function handler(req: Request) {
   try {
-    if (!(await requireAdmin(req))) {
-      return json({ error: "unauthorized", message: "Admin login required." }, 401);
-    }
-    if (req.method === "GET") return json(await readState());
+    const accountId = await requireAccountId(req);
+    if (req.method === "GET") return json(await readState(accountId));
     if (req.method === "PUT") {
       const raw = await req.text();
       const body = raw ? JSON.parse(raw) : {};
-      return json(await writeState(body));
+      return json(await writeState(accountId, body));
     }
     return json({ error: "method_not_allowed" }, 405);
   } catch (error) {
+    const status = (error as { status?: number })?.status;
+    if (status === 401 || status === 403) {
+      return json(
+        {
+          error: (error as { code?: string })?.code || "unauthorized",
+          message: error instanceof Error ? error.message : "Admin login required.",
+        },
+        status,
+      );
+    }
     console.error("optix_booking_type_settings:failed", error);
     return json({
       error: "optix_booking_type_settings_failed",

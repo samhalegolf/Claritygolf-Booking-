@@ -279,7 +279,7 @@ async function resolvePerson(
   const account = encodeURIComponent(accountId);
 
   if (event.providerCustomerId) {
-    const matched = await matchPersonByProviderCustomerId(provider, event.providerCustomerId);
+    const matched = await matchPersonByProviderCustomerId(accountId, provider, event.providerCustomerId);
     if (matched) return { personId: matched, linkSource: "provider_customer" };
   }
 

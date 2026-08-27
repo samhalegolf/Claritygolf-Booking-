@@ -1,9 +1,9 @@
 import type { Config, Context } from "@netlify/functions";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
-import { getSupabaseDatabase } from "./supabase-storage.mts";
+import { getDatabase } from "@netlify/database";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 
-const sessionCookieName = "clarity_session";
 
 function json(value, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -18,29 +18,6 @@ function json(value, status = 200) {
 function cleanString(value, fallback = "", max = 600) {
   if (typeof value !== "string") return fallback;
   return value.trim().slice(0, max);
-}
-
-function parseCookies(req: Request) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [
-              decodeURIComponent(pair.slice(0, index)),
-              decodeURIComponent(pair.slice(index + 1)),
-            ];
-      }),
-  );
-}
-
-function hashToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
 }
 
 async function parseBody(req: Request) {
@@ -111,29 +88,28 @@ function keyForPerson(person: any) {
   return `name:${name}`;
 }
 
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return null;
-  const rows = await getSupabaseDatabase().sql`
-    SELECT admin_users.id, admin_users.email, admin_sessions.expires_at
-    FROM admin_sessions
-    JOIN admin_users ON admin_users.id = admin_sessions.user_id
-    WHERE admin_sessions.token_hash = ${hashToken(token)}
-  `;
-  const session = rows[0];
-  if (!session) return null;
-  if (new Date(session.expires_at).getTime() <= Date.now()) return null;
-  return session;
+/**
+ * The business whose clients are being migrated.
+ *
+ * This route used to check only that a session row existed, then read every
+ * business's calendar items and people and write person rows with no owner at
+ * all. It now runs inside one business, resolved the same way every other
+ * private route resolves it.
+ */
+async function requireAccountId(req: Request): Promise<string> {
+  return (await requireCoachActor(req)).accountId;
 }
 
-async function migrateClients(rawPeople: any[] = []) {
-  const db = getSupabaseDatabase();
+async function migrateClients(accountId: string, rawPeople: any[] = []) {
+  const db = getDatabase();
   const items = await db.sql`
     SELECT * FROM calendar_items
+    WHERE account_id = ${accountId}
     ORDER BY week, day, start, id
   `;
   const existingPeople = await db.sql`
     SELECT * FROM people
+    WHERE account_id = ${accountId}
     ORDER BY LOWER(name), LOWER(email), id
   `;
 
@@ -183,7 +159,8 @@ async function migrateClients(rawPeople: any[] = []) {
              caddy_profile_id = NULLIF($7, ''),
              caddy_profile_url = NULLIF($8, ''),
              updated_at = NOW()
-         WHERE id = $1`,
+         WHERE id = $1
+           AND account_id = $9`,
         [
           existing.id,
           person.name,
@@ -193,6 +170,7 @@ async function migrateClients(rawPeople: any[] = []) {
           person.source,
           person.caddyProfileId,
           person.caddyProfileUrl,
+          accountId,
         ],
       );
       updated += 1;
@@ -206,8 +184,8 @@ async function migrateClients(rawPeople: any[] = []) {
 
     await client.query(
       `INSERT INTO people (
-        id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
-      ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), NOW())`,
+        id, account_id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, created_at, updated_at
+      ) VALUES ($1, $9, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NOW(), NOW())`,
       [
         person.id || randomUUID(),
         person.name,
@@ -217,6 +195,7 @@ async function migrateClients(rawPeople: any[] = []) {
         person.source,
         person.caddyProfileId,
         person.caddyProfileUrl,
+        accountId,
       ],
     );
     imported += 1;
@@ -225,6 +204,7 @@ async function migrateClients(rawPeople: any[] = []) {
 
   const people = await db.sql`
     SELECT * FROM people
+    WHERE account_id = ${accountId}
     ORDER BY LOWER(name), LOWER(email), id
   `;
 
@@ -246,15 +226,20 @@ export default async (req: Request, _context: Context) => {
   try {
     if (req.method !== "POST")
       return json({ error: "method_not_allowed" }, 405);
-    if (!(await requireAdmin(req))) {
+    const accountId = await requireAccountId(req);
+    const body = await parseBody(req);
+    return json(await migrateClients(accountId, body.people), 201);
+  } catch (error) {
+    const status = (error as { status?: number })?.status;
+    if (status === 401 || status === 403) {
       return json(
-        { error: "unauthorized", message: "Admin login required." },
-        401,
+        {
+          error: (error as { code?: string })?.code || "unauthorized",
+          message: error instanceof Error ? error.message : "Admin login required.",
+        },
+        status,
       );
     }
-    const body = await parseBody(req);
-    return json(await migrateClients(body.people), 201);
-  } catch (error) {
     console.error("people_migrate_failed", error);
     return json(
       {

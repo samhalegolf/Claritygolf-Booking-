@@ -1,10 +1,9 @@
-import { createHash } from "node:crypto";
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
 import { bookOneResource } from "./_shared/optix-book-resource.mts";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 
-const SESSION_COOKIE = "clarity_session";
 
 function db() {
   return getDatabase();
@@ -20,38 +19,32 @@ function json(value: unknown, status = 200) {
   });
 }
 
-function parseCookies(req: Request) {
-  return Object.fromEntries(
-    (req.headers.get("cookie") || "")
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const index = part.indexOf("=");
-        return index < 0
-          ? [decodeURIComponent(part), ""]
-          : [decodeURIComponent(part.slice(0, index)), decodeURIComponent(part.slice(index + 1))];
-      }),
-  );
-}
-
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[SESSION_COOKIE] || "";
-  if (!token) return false;
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const rows = await db().sql`
-    SELECT id
-    FROM admin_sessions
-    WHERE token_hash = ${tokenHash}
-      AND expires_at > NOW()
-    LIMIT 1
-  `;
-  return rows.length > 0;
+/**
+ * Booking an Optix resource acts on one Clarity booking by id. The old check
+ * proved only that a session row existed, and readAppointment then took the
+ * account from whatever row that id found -- so a signed-in coach could book a
+ * bay against another business's lesson just by knowing its id.
+ */
+async function requireAccountId(req: Request): Promise<string> {
+  return (await requireCoachActor(req)).accountId;
 }
 
 export default async function handler(req: Request) {
-  if (!(await requireAdmin(req))) return json({ error: "unauthorized" }, 401);
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+  let accountId = "";
+  try {
+    accountId = await requireAccountId(req);
+  } catch (error) {
+    const status = (error as { status?: number })?.status === 403 ? 403 : 401;
+    return json(
+      {
+        error: (error as { code?: string })?.code || "unauthorized",
+        message: error instanceof Error ? error.message : "Admin login required.",
+      },
+      status,
+    );
+  }
 
   let body: any = null;
   try {
@@ -74,7 +67,7 @@ export default async function handler(req: Request) {
   }
 
   try {
-    const result = await bookOneResource(calendarItemId);
+    const result = await bookOneResource(accountId, calendarItemId);
     return json(result, result.ok ? 200 : 207);
   } catch (error: any) {
     const code = String(error?.code || "optix_reconcile_failed");

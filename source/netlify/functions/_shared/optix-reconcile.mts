@@ -8,6 +8,10 @@ import {
 
 export type ClarityOptixAppointment = {
   id: string;
+  /** The business the booking belongs to. Snake and camel both occur: rows come
+   *  straight from Postgres on some paths and through rowToItem on others. */
+  accountId?: string;
+  account_id?: string;
   kind?: string;
   week: number;
   day: number;

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 
 import { allIntegrations, integrationById, integrationsFor } from "./_shared/integrations/catalogue.mts";
 import { integrationRequest } from "./_shared/integrations/db.mts";
@@ -20,26 +21,19 @@ import type { ConnectionSpec, FieldSpec, IntegrationDescriptor } from "./_shared
  * rejects every request, and nowhere near enough to reconstruct one.
  */
 
-const SESSION_COOKIE = "clarity_session";
 const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), {
     status,
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
   });
 
-function cookies(req: Request) {
-  return Object.fromEntries((req.headers.get("cookie") || "").split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
-    const at = part.indexOf("=");
-    return at < 0 ? [decodeURIComponent(part), ""] : [decodeURIComponent(part.slice(0, at)), decodeURIComponent(part.slice(at + 1))];
-  }));
-}
-
-async function requireAdmin(req: Request) {
-  const token = cookies(req)[SESSION_COOKIE] || "";
-  if (!token) return false;
-  const hash = createHash("sha256").update(token).digest("hex");
-  const rows = await getDatabase().sql`SELECT id FROM admin_sessions WHERE token_hash = ${hash} AND expires_at > NOW() LIMIT 1`;
-  return rows.length > 0;
+/**
+ * The old check proved a session row existed and nothing more, while the
+ * Google connection read below took whichever business connected most recently
+ * -- so one coach's panel could show another coach's Google account email.
+ */
+async function requireAccountId(req: Request): Promise<string> {
+  return (await requireCoachActor(req)).accountId;
 }
 
 function env(name: string) {
@@ -155,9 +149,11 @@ function integrationStatus(descriptor: IntegrationDescriptor) {
  * is what the Google Calendar panel has always read — this makes the card agree
  * with it instead of contradicting it one screen higher.
  */
-async function oauthState() {
+async function oauthState(accountId: string) {
   const rows = await integrationRequest(
-    "google_provider_connections?select=provider_email,connection_status,granted_scopes_json,last_error_code,last_successful_use_at,revoked_at&order=updated_at.desc&limit=1",
+    "google_provider_connections?select=provider_email,connection_status,granted_scopes_json," +
+      "last_error_code,last_successful_use_at,revoked_at" +
+      `&account_id=eq.${encodeURIComponent(accountId)}&order=updated_at.desc&limit=1`,
   ).catch(() => []);
   const row = (rows || [])[0];
   if (!row || row.revoked_at) return { connected: false, account: "", scopes: [] as string[], lastUsed: "", error: "" };
@@ -192,8 +188,21 @@ function card(descriptor: IntegrationDescriptor) {
 }
 
 export default async function handler(req: Request) {
-  if (!(await requireAdmin(req))) return json({ error: "unauthorized" }, 401);
   if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+
+  let accountId = "";
+  try {
+    accountId = await requireAccountId(req);
+  } catch (error) {
+    const status = (error as { status?: number })?.status === 403 ? 403 : 401;
+    return json(
+      {
+        error: (error as { code?: string })?.code || "unauthorized",
+        message: error instanceof Error ? error.message : "Admin login required.",
+      },
+      status,
+    );
+  }
 
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
@@ -209,7 +218,7 @@ export default async function handler(req: Request) {
   if (!id) {
     const list = audience === "admin" || audience === "integration" ? integrationsFor(audience) : allIntegrations();
     const cards = list.map(card);
-    const oauth = await oauthState();
+    const oauth = await oauthState(accountId);
     return json({
       integrations: cards.map((entry) =>
         // An OAuth integration reports what the token store says, not what the
@@ -232,7 +241,7 @@ export default async function handler(req: Request) {
   }
 
   const oauth = descriptor.connections.some((connection) => connection.kind === "oauth2")
-    ? await oauthState()
+    ? await oauthState(accountId)
     : null;
 
   return json({

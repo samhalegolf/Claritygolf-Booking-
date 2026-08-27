@@ -14,12 +14,11 @@ import {
   loadGoogleProviderConnection,
   publicGoogleProviderStatus,
   readSettings,
-  resolveGoogleAccountId,
   saveGoogleAuthorization,
   setSettings,
 } from "./_shared/google-provider.mts";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
 
-const sessionCookieName = "clarity_session";
 const driveFileScope = googleDriveFileScope;
 const requiredDriveScopes = [...googleCalendarScopes, googleDriveFileScope];
 
@@ -49,26 +48,6 @@ function cleanString(value: unknown, fallback = "", max = 1200) {
   return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
 }
 
-function hashToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-function parseCookies(req: Request) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
-      }),
-  );
-}
-
 function supabaseConfig() {
   const url = env("SUPABASE_URL").replace(/\/$/, "");
   const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
@@ -91,15 +70,6 @@ async function supabase(table: string, options: { method?: string; query?: strin
   const text = await response.text();
   if (!response.ok) throw new Error(`Supabase ${options.method || "GET"} ${table} failed ${response.status}: ${text.slice(0, 500)}`);
   return text ? JSON.parse(text) : [];
-}
-
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return false;
-  const rows = await supabase("admin_sessions", {
-    query: `select=id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
-  });
-  return rows.length > 0;
 }
 
 async function tokenRequest(params: Record<string, string>) {
@@ -141,10 +111,9 @@ function requireConfiguredGoogleConfig(config: ClarityCloudGoogleConfig) {
   });
 }
 
-async function driveStatusFromSettings(req: Request, settings: Record<string, string>) {
+async function driveStatusFromSettings(accountId: string, req: Request, settings: Record<string, string>) {
   const config = getClarityCloudGoogleConfig(req);
   const configured = config.configured;
-  const accountId = resolveGoogleAccountId(settings);
   const connection = await loadGoogleProviderConnection(accountId);
   const providerStatus = publicGoogleProviderStatus(connection, requiredDriveScopes);
   const calendarConnected = Boolean(connection?.calendarEnabled && hasGoogleScopes(connection, googleCalendarScopes));
@@ -215,11 +184,10 @@ async function driveStatusFromSettings(req: Request, settings: Record<string, st
   };
 }
 
-async function createGoogleDriveAuthUrl(req: Request, settings: Record<string, string>) {
+async function createGoogleDriveAuthUrl(accountId: string, req: Request) {
   const config = requireConfiguredGoogleConfig(getClarityCloudGoogleConfig(req));
-  const accountId = resolveGoogleAccountId(settings);
   const state = randomUUID().replaceAll("-", "");
-  await setSettings({
+  await setSettings(accountId, {
     googleDriveOAuthState: state,
     googleDriveOAuthAccountId: accountId,
     googleDriveOAuthStartedAt: new Date().toISOString(),
@@ -241,6 +209,28 @@ async function createGoogleDriveAuthUrl(req: Request, settings: Record<string, s
   };
 }
 
+/**
+ * Which business started this Drive OAuth flow.
+ *
+ * The state is a 128-bit random value written into that business's settings
+ * when the authorize URL was built, so the lookup is the CSRF check and the
+ * account resolution at once. A browser cannot simply assert a slug.
+ */
+async function accountForOAuthState(state: string): Promise<string> {
+  if (!state) return "";
+  const rows = await supabase("settings", {
+    query: [
+      "select=account_id",
+      `key=eq.${encodeURIComponent("googleDriveOAuthState")}`,
+      `value=eq.${encodeURIComponent(state)}`,
+      "limit=2",
+    ].join("&"),
+  });
+  // Exactly one business may hold a given nonce; anything else is a collision
+  // or tampering, and neither should pick a winner.
+  return rows.length === 1 ? cleanString(rows[0]?.account_id, "", 80) : "";
+}
+
 async function finishGoogleDriveOAuth(req: Request) {
   const url = new URL(req.url);
   const oauthError = cleanString(url.searchParams.get("error"), "", 200);
@@ -253,7 +243,15 @@ async function finishGoogleDriveOAuth(req: Request) {
   if (!code || !state) {
     throw Object.assign(new Error("Google did not return the required authorization code."), { status: 400 });
   }
-  const settings = await readSettings();
+  // The callback carries no session, so the business comes out of the flow
+  // itself: the state is a 128-bit value this server wrote into that business's
+  // settings when it built the authorize URL, so looking the account up by the
+  // state is both the CSRF check and the account resolution.
+  const accountId = await accountForOAuthState(state);
+  if (!accountId) {
+    throw Object.assign(new Error("Google Drive connection could not be verified."), { status: 400 });
+  }
+  const settings = await readSettings(accountId);
   const expectedState = settings.googleDriveOAuthState || "";
   if (!expectedState || state !== expectedState) {
     throw Object.assign(new Error("Google Drive connection could not be verified."), { status: 400 });
@@ -273,7 +271,7 @@ async function finishGoogleDriveOAuth(req: Request) {
   });
   const profile = token.access_token ? await userProfile(token.access_token) : { email: "", id: "" };
   await saveGoogleAuthorization({
-    accountId: settings.googleDriveOAuthAccountId || resolveGoogleAccountId(settings),
+    accountId,
     refreshToken: cleanString(token.refresh_token, "", 4000) || undefined,
     grantedScopes: cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean).length
       ? cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean)
@@ -285,12 +283,12 @@ async function finishGoogleDriveOAuth(req: Request) {
     enableCalendar: true,
     enableDrive: true,
   });
-  await setSettings({
+  await setSettings(accountId, {
     googleDriveOAuthState: "",
     googleDriveOAuthAccountId: "",
     googleDriveOAuthStartedAt: "",
   });
-  return driveStatusFromSettings(req, await readSettings());
+  return driveStatusFromSettings(accountId, req, await readSettings(accountId));
 }
 
 function html(value: string, status = 200) {
@@ -326,7 +324,16 @@ function callbackPage(ok: boolean, message: string) {
 </html>`;
 }
 
-export default async function handler(req: Request) {
+/**
+ * `options.resolveAccountId` is a test seam (see video-transfer.mts): auth now
+ * resolves through Postgres, and the unit tests covering the Drive setup error
+ * shapes have no database. Netlify never passes it.
+ */
+export default async function handler(
+  req: Request,
+  _context?: unknown,
+  options: { resolveAccountId?: (req: Request) => Promise<string> } = {},
+) {
   const url = new URL(req.url);
   const action =
     url.pathname
@@ -339,9 +346,13 @@ export default async function handler(req: Request) {
       return html(callbackPage(true, `Connected${status.accountEmail ? ` as ${status.accountEmail}` : ""}. Clarity Cloud can send saved videos.`));
     }
 
-    if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-    const settings = await readSettings();
-    const status = await driveStatusFromSettings(req, settings);
+    // Drive is connected per business, so the route needs the business the
+    // caller administers, not just "a session exists".
+    const accountId = options.resolveAccountId
+      ? await options.resolveAccountId(req)
+      : (await requireCoachActor(req)).accountId;
+    const settings = await readSettings(accountId);
+    const status = await driveStatusFromSettings(accountId, req, settings);
 
     if (req.method === "GET" && action === "status") return json(status);
     if (req.method === "POST" && action === "test") {
@@ -383,7 +394,7 @@ export default async function handler(req: Request) {
           },
         }, 412);
       }
-      return json({ ...status, ...(await createGoogleDriveAuthUrl(req, settings)) });
+      return json({ ...status, ...(await createGoogleDriveAuthUrl(accountId, req)) });
     }
     if (req.method === "POST" && action === "disconnect") {
       return json({

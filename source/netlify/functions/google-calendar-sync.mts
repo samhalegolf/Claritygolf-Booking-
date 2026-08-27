@@ -10,11 +10,15 @@ import {
   migrateLegacyGoogleCalendarToken,
   noteGoogleApiFailure,
   publicGoogleProviderStatus,
-  resolveGoogleAccountId,
   saveGoogleAuthorization,
 } from "./_shared/google-provider.mts";
 import { unavailableSpans } from "./_shared/availability-blocks.mts";
-import { defaultAccountId } from "./_shared/account.mts";
+import { requireCoachActor } from "./_shared/coach-auth.mts";
+import {
+  SETTINGS_UPSERT_QUERY,
+  settingsSelectQuery,
+  settingsUpsertRows,
+} from "./_shared/settings-scope.mts";
 import { getClarityCloudGoogleConfig } from "./_shared/clarity-cloud-google-config.mts";
 import {
   GOOGLE_IMPORT_ORIGIN,
@@ -32,7 +36,6 @@ import {
   type GoogleCalendarImportRule,
 } from "./_shared/google-calendar-import-rules.mts";
 
-const sessionCookieName = "clarity_session";
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 // Auto-sync every booking change to Google Calendar. Each booking mutation path
 // (admin save/delete, single-item upsert, public booking + cancel) calls
@@ -56,26 +59,6 @@ function nowIso() {
 
 function cleanString(value: unknown, fallback = "", max = 1200) {
   return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
-}
-
-function hashToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-function parseCookies(req: Request) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
-      }),
-  );
 }
 
 function supabaseConfig() {
@@ -102,38 +85,29 @@ async function supabase(table: string, options: { method?: string; query?: strin
   return text ? JSON.parse(text) : [];
 }
 
-async function requireAdmin(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return false;
-  const rows = await supabase("admin_sessions", {
-    query: `select=id&token_hash=eq.${encodeURIComponent(hashToken(token))}&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&limit=1`,
-  });
-  return rows.length > 0;
-}
-
 function settingMap(rows: Array<{ key: string; value: string }>) {
   return Object.fromEntries(rows.map((row) => [row.key, row.value || ""]));
 }
 
-async function readSettings() {
-  return settingMap(await supabase("settings", { query: "select=key,value" }));
+// Every settings read and write here is scoped to one business. Google is a
+// per-business connection -- the calendar id, the refresh token, the busy-block
+// import rules -- and a global read would have handed a second coach the first
+// coach's Google account, while a global upsert (on_conflict=key) no longer
+// even matches the table's unique index.
+async function readSettings(accountId: string) {
+  return settingMap(await supabase("settings", { query: settingsSelectQuery(accountId) }));
 }
 
-async function setSetting(key: string, value: unknown) {
-  await supabase("settings", {
-    method: "POST",
-    query: "on_conflict=key",
-    prefer: "resolution=merge-duplicates,return=minimal",
-    body: [{ key, value: String(value ?? ""), updated_at: nowIso() }],
-  });
+async function setSetting(accountId: string, key: string, value: unknown) {
+  await setSettings(accountId, { [key]: value });
 }
 
-async function setSettings(values: Record<string, unknown>) {
-  const rows = Object.entries(values).map(([key, value]) => ({ key, value: String(value ?? ""), updated_at: nowIso() }));
+async function setSettings(accountId: string, values: Record<string, unknown>) {
+  const rows = settingsUpsertRows(accountId, values, nowIso());
   if (!rows.length) return;
   await supabase("settings", {
     method: "POST",
-    query: "on_conflict=key",
+    query: SETTINGS_UPSERT_QUERY,
     prefer: "resolution=merge-duplicates,return=minimal",
     body: rows,
   });
@@ -292,8 +266,8 @@ function debugErrorFromUnknown(error: any, fallbackStage: string): GoogleCalenda
   return base;
 }
 
-async function readGoogleCalendarDebugEntries(settings?: Record<string, string>): Promise<GoogleCalendarDebugEntry[]> {
-  const map = settings || (await readSettings());
+async function readGoogleCalendarDebugEntries(accountId: string, settings?: Record<string, string>): Promise<GoogleCalendarDebugEntry[]> {
+  const map = settings || (await readSettings(accountId));
   const entries = parseJson<GoogleCalendarDebugEntry[]>(map[debugLogSettingKey], []);
   return Array.isArray(entries) ? entries : [];
 }
@@ -333,22 +307,23 @@ function newDebugEntry(overrides: Partial<Omit<GoogleCalendarDebugEntry, "id">>)
 }
 
 async function recordGoogleCalendarDebugEntry(
+  accountId: string,
   entry: Omit<GoogleCalendarDebugEntry, "id">,
   settings?: Record<string, string>,
 ) {
   try {
     if (!debugLoggingEnabled(settings)) return;
-    const existing = await readGoogleCalendarDebugEntries();
+    const existing = await readGoogleCalendarDebugEntries(accountId);
     const next = trimDebugEntries([{ id: randomUUID(), ...entry }, ...existing]);
-    await setSetting(debugLogSettingKey, JSON.stringify(next));
+    await setSetting(accountId, debugLogSettingKey, JSON.stringify(next));
   } catch (error) {
     // The debug log must never be the reason a sync fails.
     console.error("google_calendar_sync:debug_log_write_failed", error);
   }
 }
 
-export async function getGoogleCalendarDebugLog() {
-  const settings = await readSettings();
+export async function getGoogleCalendarDebugLog(accountId: string) {
+  const settings = await readSettings(accountId);
   return {
     ok: true,
     enabled: debugLoggingEnabled(settings),
@@ -356,18 +331,18 @@ export async function getGoogleCalendarDebugLog() {
     autoSync: googleCalendarManualSyncOnly ? false : settings.googleCalendarAutoSync !== "false",
     manualOnly: googleCalendarManualSyncOnly,
     calendarId: settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"),
-    entries: await readGoogleCalendarDebugEntries(settings),
+    entries: await readGoogleCalendarDebugEntries(accountId, settings),
   };
 }
 
-export async function clearGoogleCalendarDebugLog() {
-  await setSetting(debugLogSettingKey, "[]");
-  return getGoogleCalendarDebugLog();
+export async function clearGoogleCalendarDebugLog(accountId: string) {
+  await setSetting(accountId, debugLogSettingKey, "[]");
+  return getGoogleCalendarDebugLog(accountId);
 }
 
-export async function setGoogleCalendarDebugEnabled(enabled: boolean) {
-  await setSetting(debugEnabledSettingKey, enabled ? "true" : "false");
-  return getGoogleCalendarDebugLog();
+export async function setGoogleCalendarDebugEnabled(accountId: string, enabled: boolean) {
+  await setSetting(accountId, debugEnabledSettingKey, enabled ? "true" : "false");
+  return getGoogleCalendarDebugLog(accountId);
 }
 
 function cleanUrl(value: unknown, fallback = "") {
@@ -489,11 +464,10 @@ async function listGoogleCalendarSources(accessToken: string) {
   });
 }
 
-export async function getGoogleCalendarSyncStatus(req?: Request) {
-  const settings = await readSettings();
+export async function getGoogleCalendarSyncStatus(accountId: string, req?: Request) {
+  const settings = await readSettings(accountId);
   const config = googleConfig(req);
   const configured = Boolean(config.clientId && config.clientSecret && config.redirectUri);
-  const accountId = resolveGoogleAccountId(settings);
   const connection = await loadGoogleProviderConnection(accountId);
   const providerStatus = publicGoogleProviderStatus(connection, googleScopes);
   const legacyMigrationRequired = Boolean(settings.googleCalendarRefreshToken);
@@ -539,7 +513,7 @@ export async function getGoogleCalendarSyncStatus(req?: Request) {
   };
 }
 
-export async function updateGoogleCalendarSyncSettings(body: any) {
+export async function updateGoogleCalendarSyncSettings(accountId: string, body: any) {
   const values: Record<string, unknown> = {};
   if (Object.prototype.hasOwnProperty.call(body || {}, "calendarId")) {
     values.googleCalendarId = cleanCalendarId(body.calendarId);
@@ -554,19 +528,18 @@ export async function updateGoogleCalendarSyncSettings(body: any) {
       normalizeGoogleCalendarImportRules(body.importRules),
     );
   }
-  await setSettings(values);
-  return getGoogleCalendarSyncStatus();
+  await setSettings(accountId, values);
+  return getGoogleCalendarSyncStatus(accountId);
 }
 
-export async function createGoogleCalendarAuthUrl(req: Request) {
+export async function createGoogleCalendarAuthUrl(accountId: string, req: Request) {
   const config = googleConfig(req);
   if (!config.clientId || !config.clientSecret) {
     throw Object.assign(new Error("Google Calendar OAuth is not configured."), { status: 400 });
   }
   const state = randomUUID().replaceAll("-", "");
-  const settings = await readSettings();
-  const accountId = resolveGoogleAccountId(settings);
-  await setSettings({
+  const settings = await readSettings(accountId);
+  await setSettings(accountId, {
     googleCalendarOAuthState: state,
     googleCalendarOAuthAccountId: accountId,
     googleCalendarOAuthStartedAt: nowIso(),
@@ -615,6 +588,32 @@ async function userEmail(accessToken: string) {
   }
 }
 
+/**
+ * Which business started this OAuth flow.
+ *
+ * The callback arrives from Google with no session, so the account has to come
+ * out of the flow itself. The state is a 128-bit random value this server wrote
+ * into that business's settings when it built the authorize URL, so looking the
+ * account up *by* the state is both the CSRF check and the account resolution:
+ * an attacker would have to guess the nonce to name a business, and a browser
+ * cannot simply assert a slug.
+ */
+async function accountForOAuthState(state: string): Promise<string> {
+  if (!state) return "";
+  const rows = await supabase("settings", {
+    query: [
+      "select=account_id",
+      `key=eq.${encodeURIComponent("googleCalendarOAuthState")}`,
+      `value=eq.${encodeURIComponent(state)}`,
+      "limit=2",
+    ].join("&"),
+  });
+  // Exactly one business may hold a given nonce. Anything else is a collision
+  // or tampering, and neither should pick a winner.
+  if (rows.length !== 1) return "";
+  return cleanString(rows[0]?.account_id, "", 80);
+}
+
 export async function finishGoogleCalendarOAuth(req: Request) {
   const url = new URL(req.url);
   const oauthError = cleanString(url.searchParams.get("error"), "", 200);
@@ -627,7 +626,11 @@ export async function finishGoogleCalendarOAuth(req: Request) {
   if (!code || !state) {
     throw Object.assign(new Error("Google did not return the required authorization code."), { status: 400 });
   }
-  const settings = await readSettings();
+  const accountId = await accountForOAuthState(state);
+  if (!accountId) {
+    throw Object.assign(new Error("Google Calendar connection could not be verified."), { status: 400 });
+  }
+  const settings = await readSettings(accountId);
   const expectedState = settings.googleCalendarOAuthState || "";
   if (!expectedState || state !== expectedState) {
     throw Object.assign(new Error("Google Calendar connection could not be verified."), { status: 400 });
@@ -636,7 +639,6 @@ export async function finishGoogleCalendarOAuth(req: Request) {
   if (!Number.isFinite(startedAt) || Date.now() - startedAt > 15 * 60 * 1000) {
     throw Object.assign(new Error("Google Calendar connection expired. Start again."), { status: 400 });
   }
-  const accountId = settings.googleCalendarOAuthAccountId || resolveGoogleAccountId(settings);
 
   const config = googleConfig(req);
   const token = await tokenRequest({
@@ -658,7 +660,7 @@ export async function finishGoogleCalendarOAuth(req: Request) {
     providerEmail: email || settings.googleCalendarAccountEmail || "",
     enableCalendar: true,
   });
-  await setSettings({
+  await setSettings(accountId, {
     googleCalendarRefreshToken: "",
     googleCalendarAccountEmail: email,
     googleCalendarConnectedAt: nowIso(),
@@ -669,13 +671,13 @@ export async function finishGoogleCalendarOAuth(req: Request) {
     googleCalendarLastSyncStatus: "connected",
     googleCalendarLastSyncError: "",
   });
-  return getGoogleCalendarSyncStatus(req);
+  return getGoogleCalendarSyncStatus(accountId, req);
 }
 
-export async function disconnectGoogleCalendar(req?: Request) {
-  const settings = await readSettings();
-  await disconnectGoogleService(resolveGoogleAccountId(settings), "calendar");
-  await setSettings({
+export async function disconnectGoogleCalendar(accountId: string, req?: Request) {
+  const settings = await readSettings(accountId);
+  await disconnectGoogleService(accountId, "calendar");
+  await setSettings(accountId, {
     googleCalendarRefreshToken: "",
     googleCalendarAccountEmail: "",
     googleCalendarConnectedAt: "",
@@ -683,14 +685,14 @@ export async function disconnectGoogleCalendar(req?: Request) {
     googleCalendarLastSyncStatus: "disconnected",
     googleCalendarLastSyncError: "",
   });
-  return getGoogleCalendarSyncStatus(req);
+  return getGoogleCalendarSyncStatus(accountId, req);
 }
 
-export async function migrateLegacyGoogleCalendarConnection(req?: Request) {
-  const result = await migrateLegacyGoogleCalendarToken();
+export async function migrateLegacyGoogleCalendarConnection(accountId: string, req?: Request) {
+  const result = await migrateLegacyGoogleCalendarToken(accountId);
   return {
     ...result,
-    status: await getGoogleCalendarSyncStatus(req),
+    status: await getGoogleCalendarSyncStatus(accountId, req),
   };
 }
 
@@ -937,7 +939,7 @@ async function listGoogleEvents(accessToken: string, calendarId: string, timeMin
  * caller wraps this, and the outcome is reported either way rather than
  * swallowed — a silent import is how a broken sync hides for three days.
  */
-async function importGoogleBusyBlocks(accessToken: string, settings: Record<string, string>) {
+async function importGoogleBusyBlocks(accountId: string, accessToken: string, settings: Record<string, string>) {
   const account = accountFromSettings(settings);
   const now = new Date();
   const timeMin = new Date(now.getTime() - busyImportWeeksBack * 7 * 86_400_000).toISOString();
@@ -988,15 +990,21 @@ async function importGoogleBusyBlocks(accessToken: string, settings: Record<stri
   }
 
   // Only rows this import owns are ever read here, and therefore only they can
-  // ever be deleted below. A lesson or a coach's own block is out of reach.
+  // ever be deleted below. A lesson or a coach's own block is out of reach --
+  // and so is another business's Google import, which the origin filter alone
+  // did not exclude.
   const existingRows = (await supabase("calendar_items", {
-    query: `select=id,week,day,start,duration,title,external_source&origin=eq.${encodeURIComponent(GOOGLE_IMPORT_ORIGIN)}`,
+    query:
+      `select=id,week,day,start,duration,title,external_source` +
+      `&origin=eq.${encodeURIComponent(GOOGLE_IMPORT_ORIGIN)}` +
+      `&account_id=eq.${encodeURIComponent(accountId)}`,
   })) as Array<Record<string, unknown>>;
   const plan = planBusyBlockImport(wanted, existingRows.map((row) => ({ ...row, id: String(row.id) })));
 
   // The coach owns their own diary, so the block files under the same account
-  // and coach as everything else on this calendar.
-  const accountSlug = settings.accountCalendarSlug || defaultAccountId();
+  // and coach as everything else on this calendar. That account is the one this
+  // import is running for, not a slug read back out of settings.
+  const accountSlug = accountId;
   const rowFor = (block: (typeof wanted)[number]) => ({
     id: block.id,
     account_id: accountSlug,
@@ -1033,7 +1041,12 @@ async function importGoogleBusyBlocks(accessToken: string, settings: Record<stri
     const list = plan.deleteIds.map((id) => `"${id}"`).join(",");
     await supabase("calendar_items", {
       method: "DELETE",
-      query: `origin=eq.${encodeURIComponent(GOOGLE_IMPORT_ORIGIN)}&id=in.(${encodeURIComponent(list)})`,
+      // Account-scoped as well as origin-scoped: an id list on its own would
+      // let one business's import delete another's blocks.
+      query:
+        `origin=eq.${encodeURIComponent(GOOGLE_IMPORT_ORIGIN)}` +
+        `&account_id=eq.${encodeURIComponent(accountId)}` +
+        `&id=in.(${encodeURIComponent(list)})`,
     });
   }
   return {
@@ -1276,10 +1289,14 @@ function unavailableSyncItems(settings: Record<string, string>) {
   }));
 }
 
-async function calendarSyncPayload() {
+async function calendarSyncPayload(accountId: string) {
   const [settingsRows, itemRows] = await Promise.all([
-    supabase("settings", { query: "select=key,value" }),
-    supabase("calendar_items", { query: "select=*&order=week.asc,day.asc,start.asc,id.asc" }),
+    supabase("settings", { query: settingsSelectQuery(accountId) }),
+    supabase("calendar_items", {
+      // Scoped. Unfiltered, a coach pressing "Sync now" pushed every other
+      // business's bookings into their own Google Calendar.
+      query: `select=*&account_id=eq.${encodeURIComponent(accountId)}&order=week.asc,day.asc,start.asc,id.asc`,
+    }),
   ]);
   const settings = settingMap(settingsRows);
   return {
@@ -1290,11 +1307,11 @@ async function calendarSyncPayload() {
   };
 }
 
-export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
+export async function syncGoogleCalendarNow(accountId: string, trigger = "manual_sync_now") {
   const startedAtMs = Date.now();
   const startedAt = nowIso();
-  const { settings, items, services, locations } = await calendarSyncPayload();
-  const status = await getGoogleCalendarSyncStatus();
+  const { settings, items, services, locations } = await calendarSyncPayload(accountId);
+  const status = await getGoogleCalendarSyncStatus(accountId);
   const calendarId = cleanCalendarId(settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"));
 
   const finishEntry = (outcome: GoogleCalendarDebugEntry["outcome"], detail: Partial<Omit<GoogleCalendarDebugEntry, "id">> = {}) =>
@@ -1312,7 +1329,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
     });
 
   const skip = async (reason: string) => {
-    await recordGoogleCalendarDebugEntry(finishEntry("skipped", { reason, stage: "preflight" }), settings);
+    await recordGoogleCalendarDebugEntry(accountId, finishEntry("skipped", { reason, stage: "preflight" }), settings);
     return { ...status, ok: false, skipped: true, reason };
   };
   if (!status.configured) return skip("google_oauth_not_configured");
@@ -1333,7 +1350,6 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
   const retryBudget: GoogleRetryBudget = { spentMs: 0, retries: 0 };
   // Held rather than resolved inline, because the outcome of this run has to
   // be recorded against the same connection whether it succeeds or fails.
-  const accountId = resolveGoogleAccountId(settings);
 
   // Partial progress has to survive a mid-run failure. Without this, events
   // already created in Google are absent from the stored map, so the next run
@@ -1341,7 +1357,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
   // item instead of none, which makes each retry hit the rate limit sooner
   // than the last.
   const persistProgress = async (extra: Record<string, unknown>) =>
-    setSettings({
+    setSettings(accountId, {
       googleCalendarId: calendarId,
       googleCalendarEventMapJson: JSON.stringify({ ...previousMap, ...nextMap }),
       googleCalendarEventHashMapJson: JSON.stringify({ ...previousHashMap, ...nextHashMap }),
@@ -1407,7 +1423,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
     }
 
     const syncedAt = nowIso();
-    await setSettings({
+    await setSettings(accountId, {
       googleCalendarId: calendarId,
       googleCalendarEventMapJson: JSON.stringify(nextMap),
       googleCalendarEventHashMapJson: JSON.stringify(nextHashMap),
@@ -1428,7 +1444,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
     let busyImportError = "";
     if (settings.googleCalendarImportBusy !== "false") {
       try {
-        busyImport = await importGoogleBusyBlocks(accessToken, settings);
+        busyImport = await importGoogleBusyBlocks(accountId, accessToken, settings);
       } catch (error: any) {
         busyImportError = error instanceof Error ? error.message.slice(0, 300) : "Busy import failed.";
         // The import failing is isolated from the push, but it must not be
@@ -1438,6 +1454,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
         // reported success. The debug window is where a broken sync is meant to
         // become visible, so this gets its own failed entry.
         await recordGoogleCalendarDebugEntry(
+      accountId,
           finishEntry("failed", {
             stage: "busy_import",
             reason: busyImportError,
@@ -1448,6 +1465,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
       }
     }
     await recordGoogleCalendarDebugEntry(
+      accountId,
       finishEntry("success", {
         stage: "complete",
         upserted,
@@ -1460,7 +1478,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
       settings,
     );
     return {
-      ...(await getGoogleCalendarSyncStatus()),
+      ...(await getGoogleCalendarSyncStatus(accountId)),
       ok: true,
       skipped: false,
       upserted,
@@ -1483,6 +1501,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
     // failures leave it alone.
     await noteGoogleApiFailure(accountId, debugError.httpStatus, debugError.googleReason).catch(() => undefined);
     await recordGoogleCalendarDebugEntry(
+      accountId,
       finishEntry("failed", {
         stage: debugError.stage,
         upserted,
@@ -1504,7 +1523,7 @@ export async function syncGoogleCalendarNow(trigger = "manual_sync_now") {
 type GoogleCalendarChange = { id: string; action?: "upsert" | "delete" };
 let googleCalendarChangeQueue: Promise<unknown> = Promise.resolve();
 
-async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], trigger = "auto_sync") {
+async function syncGoogleCalendarChangesNow(accountId: string, changes: GoogleCalendarChange[], trigger = "auto_sync") {
   const startedAtMs = Date.now();
   const startedAt = nowIso();
   const normalizedById = new Map<string, { id: string; action: "upsert" | "delete" }>();
@@ -1539,8 +1558,9 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
     });
 
   if (!normalized.length) {
-    const status = await getGoogleCalendarSyncStatus();
+    const status = await getGoogleCalendarSyncStatus(accountId);
     await recordGoogleCalendarDebugEntry(
+      accountId,
       finishEntry("skipped", status.calendarId, status.accountEmail || "", {
         reason: "no_google_relevant_changes",
         stage: "preflight",
@@ -1549,19 +1569,20 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
     return { ...status, ok: true, skipped: true, reason: "no_google_relevant_changes" };
   }
 
-  const settings = await readSettings();
+  const settings = await readSettings(accountId);
   const calendarId = cleanCalendarId(settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"));
 
   const skip = async (reason: string, ok: boolean) => {
-    const status = await getGoogleCalendarSyncStatus();
+    const status = await getGoogleCalendarSyncStatus(accountId);
     await recordGoogleCalendarDebugEntry(
+      accountId,
       finishEntry("skipped", calendarId, status.accountEmail || "", { reason, stage: "preflight" }),
       settings,
     );
     return { ...status, ok, skipped: true, reason };
   };
   if (settings.googleCalendarAutoSync === "false") return skip("auto_sync_disabled", true);
-  const status = await getGoogleCalendarSyncStatus();
+  const status = await getGoogleCalendarSyncStatus(accountId);
   if (!status.configured) return skip("google_oauth_not_configured", false);
   if (status.legacyMigrationRequired) return skip("google_calendar_token_migration_required", false);
   if (!status.connected) return skip("google_calendar_not_connected", false);
@@ -1576,7 +1597,6 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
   let unchanged = 0;
   let stage = "access_token";
   const retryBudget: GoogleRetryBudget = { spentMs: 0, retries: 0 };
-  const accountId = resolveGoogleAccountId(settings);
 
   try {
     const accessToken = await getGoogleAccessToken(accountId, googleScopes);
@@ -1586,7 +1606,11 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
       let item: any = null;
       if (change.action !== "delete") {
         const rows = await supabase("calendar_items", {
-          query: `select=*&id=eq.${encodeURIComponent(change.id)}&limit=1`,
+          // Scoped by account as well as id: this decides what gets pushed to
+          // (or deleted from) this business's Google Calendar.
+          query:
+            `select=*&id=eq.${encodeURIComponent(change.id)}` +
+            `&account_id=eq.${encodeURIComponent(accountId)}&limit=1`,
         });
         item = rows[0] ? rowToItem(rows[0]) : null;
       }
@@ -1635,7 +1659,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
     }
 
     const syncedAt = nowIso();
-    await setSettings({
+    await setSettings(accountId, {
       googleCalendarId: calendarId,
       googleCalendarEventMapJson: JSON.stringify(eventMap),
       googleCalendarEventHashMapJson: JSON.stringify(hashMap),
@@ -1648,6 +1672,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
     // A run with nothing to do proves nothing, so it makes no such claim.
     if (!noWork) await markConnectionHealthy(accountId).catch(() => undefined);
     await recordGoogleCalendarDebugEntry(
+      accountId,
       finishEntry("success", calendarId, status.accountEmail || "", {
         stage: "complete",
         reason: noWork ? "unchanged" : "",
@@ -1661,7 +1686,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
       settings,
     );
     return {
-      ...(await getGoogleCalendarSyncStatus()),
+      ...(await getGoogleCalendarSyncStatus(accountId)),
       ok: true,
       skipped: noWork,
       reason: noWork ? "unchanged" : undefined,
@@ -1675,7 +1700,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
     // eventMap/hashMap are mutated in place as each change succeeds, so saving
     // them here keeps the work already accepted by Google and stops the next
     // run from re-creating those events.
-    await setSettings({
+    await setSettings(accountId, {
       googleCalendarEventMapJson: JSON.stringify(eventMap),
       googleCalendarEventHashMapJson: JSON.stringify(hashMap),
       googleCalendarLastSyncAt: nowIso(),
@@ -1684,6 +1709,7 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
     });
     await noteGoogleApiFailure(accountId, debugError.httpStatus, debugError.googleReason).catch(() => undefined);
     await recordGoogleCalendarDebugEntry(
+      accountId,
       finishEntry("failed", calendarId, status.accountEmail || "", {
         stage: debugError.stage,
         upserted,
@@ -1700,8 +1726,8 @@ async function syncGoogleCalendarChangesNow(changes: GoogleCalendarChange[], tri
   }
 }
 
-export function syncGoogleCalendarChangesIfEnabled(changes: GoogleCalendarChange[], trigger = "auto_sync") {
-  const run = googleCalendarChangeQueue.then(() => syncGoogleCalendarChangesNow(changes, trigger));
+export function syncGoogleCalendarChangesIfEnabled(accountId: string, changes: GoogleCalendarChange[], trigger = "auto_sync") {
+  const run = googleCalendarChangeQueue.then(() => syncGoogleCalendarChangesNow(accountId, changes, trigger));
   googleCalendarChangeQueue = run.catch(() => undefined);
   return run;
 }
@@ -1710,9 +1736,10 @@ export function syncGoogleCalendarChangesIfEnabled(changes: GoogleCalendarChange
 // a no-argument call must never fall back to a full-calendar rebuild. Recorded
 // in the debug log so a legacy caller shows up as a real (skipped) trigger
 // instead of looking like the sync never fired.
-export async function syncGoogleCalendarIfEnabled(trigger = "legacy_untargeted_call") {
-  const status = await getGoogleCalendarSyncStatus();
+export async function syncGoogleCalendarIfEnabled(accountId: string, trigger = "legacy_untargeted_call") {
+  const status = await getGoogleCalendarSyncStatus(accountId);
   await recordGoogleCalendarDebugEntry(
+      accountId,
     newDebugEntry({
       trigger,
       outcome: "skipped",
@@ -1734,13 +1761,13 @@ function json(value: unknown, status = 200) {
 
 export default async function googleCalendarSyncHandler(req: Request) {
   try {
-    if (req.method === "GET") {
-      if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-      return json(await getGoogleCalendarSyncStatus(req));
-    }
-    if (req.method === "POST") {
-      if (!(await requireAdmin(req))) return json({ error: "unauthorized", message: "Admin login required." }, 401);
-      return json(await syncGoogleCalendarNow("api_google_calendar_sync_post"));
+    if (req.method === "GET" || req.method === "POST") {
+      // Google is a per-business connection, so the route needs the business,
+      // not just "somebody is logged in". requireCoachActor throws 401 without
+      // a session and 403 without a workspace membership.
+      const accountId = (await requireCoachActor(req)).accountId;
+      if (req.method === "GET") return json(await getGoogleCalendarSyncStatus(accountId, req));
+      return json(await syncGoogleCalendarNow(accountId, "api_google_calendar_sync_post"));
     }
     return json({ error: "method_not_allowed", message: "Use GET for status or POST to sync." }, 405);
   } catch (error: any) {
