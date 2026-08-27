@@ -732,3 +732,520 @@
   align-items: center;
   text-decoration: none;
 }
+
+/* --- Player profile tab bar (Claude Design handoff, Aug 2026) -------------
+ *
+ * Eight tabs, but a coach opening a profile is nearly always after one of
+ * three: what's booked, what was filmed, what was set to practise. So the bar
+ * shows those three and parks the record-keeping five — Notes, Emails,
+ * Transactions, Passes, Portals — behind a toggle. The bar squares off its
+ * corners when expanded because at two rows a 999px pill reads as a lozenge
+ * with a hole in it rather than as a track.
+ */
+.player-tool-tabs.is-expanded {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 5px;
+  border-radius: 24px;
+  width: max-content;
+  max-width: 100%;
+}
+
+.player-tool-tab-divider {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  background: var(--c-border);
+}
+
+.player-tool-tabs button {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The count of unopened player submissions, printed into the Videos tab. Green
+   rather than the usual muted grey: it is the one number on this bar that
+   means "something arrived while you were away". */
+.player-tool-tab-count {
+  color: var(--c-success-text);
+  font-weight: 800;
+}
+
+.player-tool-tabs .player-tool-tab-toggle {
+  flex: none;
+  width: 34px;
+  padding: 0;
+  justify-content: center;
+  background: var(--c-brick-blank);
+  color: var(--c-text-soft);
+}
+
+/* --- One card, every tab --------------------------------------------------
+ *
+ * Bookings, Practice, Notes, Emails, Transactions, Passes and Portals are all
+ * the same object on screen: a titled card with a count, one action, and rows
+ * under it. Written once here rather than seven times.
+ */
+.player-tool-card {
+  display: grid;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  overflow: hidden;
+}
+
+.player-tool-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+}
+
+.player-tool-card-header strong {
+  font-size: var(--c-size-body);
+  color: var(--c-text);
+}
+
+.player-tool-card-header span {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+}
+
+.player-tool-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.player-tool-row:last-child {
+  border-bottom: 0;
+}
+
+/* The date column. Day over time, the time lighter, so a column of these scans
+   as dates with detail rather than as two columns of equal weight. */
+.player-tool-row-when {
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+  font-weight: 700;
+}
+
+.player-tool-row-when span {
+  font-weight: 500;
+}
+
+.player-tool-row-main {
+  min-width: 0;
+}
+
+.player-tool-row-main strong {
+  display: block;
+  font-size: var(--c-size-body);
+  color: var(--c-text);
+}
+
+.player-tool-row-main span {
+  display: block;
+  margin-top: 3px;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.player-tool-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Practice rows lead with the block type's own colour rather than a date —
+   the tone is data from the workspace's type list, so it arrives as a style
+   attribute and only the shape of the chip is set here. */
+.player-tool-row.is-practice {
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+}
+
+.player-tool-row-tone {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--c-radius-control);
+  color: var(--c-on-tone);
+  font-size: var(--c-size-meta);
+  font-weight: 800;
+}
+
+/* Portals rows lead with the mark of the thing being connected to. */
+.player-tool-row.is-portal {
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  padding: 14px;
+}
+
+.player-tool-row-mark {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  color: var(--c-muted);
+}
+
+.player-tool-row-mark img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.player-tool-row-mark.is-connected {
+  color: var(--c-success-text);
+}
+
+/* Notes are prose, not a row of fields, so they stack instead. */
+.player-tool-note {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.player-tool-note:last-child {
+  border-bottom: 0;
+}
+
+.player-tool-note-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.player-tool-note-head strong {
+  font-size: var(--c-size-body);
+  color: var(--c-text);
+}
+
+.player-tool-note-head span {
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+}
+
+.player-tool-note p {
+  margin: 0;
+  color: var(--c-text-body);
+  font-size: var(--c-size-secondary);
+  line-height: 1.5;
+}
+
+.player-tool-card-empty {
+  margin: 0;
+  padding: 18px 14px;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+/* --- Videos: ledger and shelf ---------------------------------------------
+ *
+ * Two readings of one list. The ledger is for "what happened and when" — one
+ * row per clip, newest first, with the storage state spelled out. The shelf is
+ * for "show me the lesson" — clips grouped under the session they came from,
+ * big enough to recognise by their thumbnail.
+ */
+.player-video-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.player-video-toolbar-count {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.player-video-toolbar-count strong {
+  font-size: var(--c-size-card-heading);
+  color: var(--c-text);
+}
+
+.player-video-toolbar-count span {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.player-video-view-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-active);
+}
+
+.player-video-view-toggle button {
+  flex: none;
+  width: 32px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--c-radius-pill);
+  background: transparent;
+  color: var(--c-muted);
+  cursor: pointer;
+}
+
+.player-video-view-toggle button.active {
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+.player-video-ledger {
+  display: grid;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  overflow: hidden;
+}
+
+.player-video-ledger-row {
+  display: grid;
+  grid-template-columns: 76px 108px minmax(0, 1fr) 190px auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.player-video-ledger-row:last-child {
+  border-bottom: 0;
+}
+
+.player-video-ledger-thumb {
+  position: relative;
+  width: 108px;
+  height: 70px;
+  padding: 0;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-active);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.player-video-ledger-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.player-video-ledger-thumb .player-video-thumb-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--c-on-scrim);
+  background: var(--c-scrim-soft);
+}
+
+/* A recovery record has no thumbnail to show because the blob never made it
+   into the library — the dashed slot says so rather than showing a blank. */
+.player-video-ledger-thumb.is-missing {
+  display: grid;
+  place-items: center;
+  border-style: dashed;
+  color: var(--c-text-disabled);
+  font-size: var(--c-size-group);
+  text-align: center;
+  cursor: default;
+}
+
+.player-video-ledger-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+}
+
+.player-video-ledger-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.player-video-ledger-note {
+  display: block;
+  margin-top: 3px;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-style: italic;
+}
+
+.player-video-shelf-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.player-video-shelf-group strong {
+  font-size: var(--c-size-body);
+  color: var(--c-text);
+}
+
+.player-video-shelf-group span {
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+}
+
+.player-video-shelf-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.player-video-shelf-card {
+  display: grid;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  overflow: hidden;
+}
+
+/* An unopened submission is the one card that outlines itself — the coach
+   should be able to find it without reading a single label. */
+.player-video-shelf-card.is-unseen {
+  border-color: var(--c-success-text);
+}
+
+.player-video-shelf-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  padding: 0;
+  border: 0;
+  background: var(--c-active);
+  color: var(--c-muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.player-video-shelf-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.player-video-shelf-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 7px;
+  border-radius: var(--c-radius-pill);
+  background: var(--c-success-text);
+  color: var(--c-on-tone);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.player-video-shelf-duration {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--c-scrim);
+  color: var(--c-on-scrim);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.player-video-shelf-body {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px 12px;
+  min-width: 0;
+}
+
+.player-video-shelf-body strong {
+  font-size: var(--c-size-secondary);
+  color: var(--c-text);
+}
+
+.player-video-shelf-body span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+}
+
+/* The shelf's last tile is the way to add to it, so it is a slot in the grid
+   rather than a button somewhere above it. */
+.player-video-shelf-add {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  border: 1px dashed var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: transparent;
+  color: var(--c-muted);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  cursor: pointer;
+}
+
+.player-video-shelf-add:hover {
+  border-color: var(--c-text-soft);
+  color: var(--c-text-soft);
+}
+
+@media (max-width: 1100px) {
+  .player-video-shelf-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .player-video-ledger-row {
+    grid-template-columns: 76px 108px minmax(0, 1fr);
+  }
+
+  .player-video-ledger-meta,
+  .player-tool-row-actions {
+    grid-column: 1 / -1;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 720px) {
+  .player-video-shelf-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .player-tool-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .player-tool-row.is-practice,
+  .player-tool-row.is-portal {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+}
+
+.player-video-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}

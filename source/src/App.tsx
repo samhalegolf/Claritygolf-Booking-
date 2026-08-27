@@ -16,6 +16,10 @@ import {
   Copy,
   Clock,
   Download,
+  ChevronLeft,
+  ChevronRight,
+  LayoutGrid,
+  List,
   ClipboardList,
   Eye,
   ExternalLink,
@@ -249,8 +253,8 @@ const PracticeSettingsPanel = lazy(() =>
  * Practice is the only player tool that has to go to the server -- notes and
  * videos are already in hydrated state -- so it was the only one that felt
  * slow. Opening a profile is a good enough signal: the module and the two
- * requests are on their way while the coach reads the Recent tab, and the tab
- * paints from memory when they get to it. Dynamic, so nothing about the
+ * requests are on their way while the coach reads the Bookings tab, and the
+ * tab paints from memory when they get to it. Dynamic, so nothing about the
  * practice module is pulled into the console's own bundle.
  */
 function prefetchPracticeForPlayer(playerId: string) {
@@ -1345,17 +1349,57 @@ type ClientProfileTab = "bookings" | "notes" | "notifications" | "transactions";
 type ClientTransactionRow =
   | { kind: "sale"; date: string; sale: PosTransaction }
   | { kind: "invoice"; date: string; invoice: BillingInvoiceRecord };
-type PlayerProfileTool = "recent" | "notes" | "practice" | "videos";
-type PlayerToolRecord = {
+/* The eight sections of a player profile. The first three are the coach's
+ * daily reads and sit on the bar; the last five are the record and live behind
+ * its toggle -- see .player-tool-tabs.is-expanded. */
+type PlayerProfileTool =
+  | "bookings"
+  | "videos"
+  | "practice"
+  | "notes"
+  | "emails"
+  | "transactions"
+  | "passes"
+  | "portals";
+
+/* What the Practice tab shows per block. The full practice module owns the
+ * composer and the wall; the profile only needs enough of a block to list it,
+ * so it takes a flattened copy rather than importing the module's types into
+ * the console's bundle. */
+type PlayerPracticeSummary = {
   id: string;
-  kind: "note" | "video";
   title: string;
-  subtitle: string;
-  body?: string;
-  timestamp: string;
-  lessonId?: string;
-  sourceId: string;
+  typeLabel: string;
+  tone: string;
+  dose: string;
+  steps: number;
+  assignedAt: string;
+  expiryType: string;
+  expiryDate: string | null;
+  hasVideo: boolean;
 };
+
+/* The bar itself, in order. Split into the three that are always on it and the
+ * five behind the toggle -- SECONDARY_PLAYER_TOOLS below is derived from the
+ * second list so the two can never drift apart. */
+const PRIMARY_PLAYER_TOOL_TABS = [
+  { id: "bookings", label: "Bookings", Icon: CalendarDays },
+  { id: "videos", label: "Videos", Icon: Video },
+  { id: "practice", label: "Practice", Icon: ClipboardList },
+] as const satisfies ReadonlyArray<{ id: PlayerProfileTool; label: string; Icon: typeof CalendarDays }>;
+
+const SECONDARY_PLAYER_TOOL_TABS = [
+  { id: "notes", label: "Notes", Icon: FileText },
+  { id: "emails", label: "Emails", Icon: Mail },
+  { id: "transactions", label: "Transactions", Icon: CreditCard },
+  { id: "passes", label: "Passes", Icon: Ticket },
+  { id: "portals", label: "Portals", Icon: Link2 },
+] as const satisfies ReadonlyArray<{ id: PlayerProfileTool; label: string; Icon: typeof CalendarDays }>;
+
+/** The five that only appear once the tab bar is opened out. */
+const SECONDARY_PLAYER_TOOLS: ReadonlySet<PlayerProfileTool> = new Set<PlayerProfileTool>(
+  SECONDARY_PLAYER_TOOL_TABS.map((tab) => tab.id),
+);
 
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
@@ -2623,6 +2667,53 @@ function clientNotificationKeys(name = "", email = "", phone = "") {
       normalizeMatchText(name) ? `name:${normalizeMatchText(name)}` : "",
     ].filter(Boolean),
   );
+}
+
+/* The two "everything belonging to this person" filters.
+ *
+ * They live out here, taking their inputs, because two screens need the same
+ * answer: the client profile modal and the player profile's tab bar. Written
+ * once so the modal and the profile can never disagree about which bookings
+ * are whose.
+ */
+function appointmentsForPerson(
+  person: Pick<Person, "id" | "name" | "email" | "phone">,
+  items: CalendarItem[],
+  inCoachScope: (item: CalendarItem) => boolean,
+) {
+  const key = clientKey(person.name, person.email, person.phone);
+  return items
+    .filter((item) => item.kind === "appointment")
+    .filter(inCoachScope)
+    .filter((item) =>
+      item.personId
+        ? item.personId === person.id
+        : clientKey(item.client || item.title, item.email ?? "", item.phone ?? "") === key,
+    )
+    .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
+}
+
+function notificationsForPerson(
+  person: Pick<Person, "name" | "email" | "phone">,
+  notifications: NotificationRecord[],
+  personAppointments: CalendarItem[],
+) {
+  const keys = clientNotificationKeys(person.name, person.email, person.phone);
+  const appointmentIds = new Set(personAppointments.map((appointment) => appointment.id));
+  const personEmail = safeText(person.email).trim().toLowerCase();
+  return notifications
+    .filter((notification) => {
+      const isClientFacing =
+        notification.kind.includes("client") ||
+        Boolean(personEmail && safeText(notification.recipient).toLowerCase() === personEmail);
+      if (!isClientFacing || notification.kind.includes("admin")) return false;
+      return (
+        keys.has(notification.personKey) ||
+        appointmentIds.has(notification.calendarItemId) ||
+        Boolean(personEmail && safeText(notification.recipient).toLowerCase() === personEmail)
+      );
+    })
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 
 function browserBase64(value: string) {
@@ -4261,6 +4352,27 @@ function formatTimestampForDisplay(value?: string | null) {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+/* The two-line date cell every player profile row leads with: the day on top,
+ * the clock time under it. Returns both parts rather than a formatted string
+ * because the row prints them at different weights. `time` is empty for a
+ * record that only has a date, and the cell then shows the day on its own. */
+/** Seconds to "m:ss", for the duration badge on a shelf card. */
+function formatClipDuration(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+  const whole = Math.round(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+function profileWhenParts(value?: string | null) {
+  if (!value) return { day: "", time: "" };
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { day: "", time: "" };
+  return {
+    day: date.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
+    time: date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false }),
+  };
+}
+
 // Whole days between two "YYYY-MM-DD" strings, computed via UTC midnight so
 // it isn't affected by daylight saving or the browser's local time zone.
 function isoDateDiffDays(laterIso: string, earlierIso: string) {
@@ -4979,8 +5091,17 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const [clientTransactions, setClientTransactions] = useState<ClientTransactionRow[]>([]);
   const [clientTransactionsLoadState, setClientTransactionsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [notesContext, setNotesContext] = useState<{ playerId: string; playerName: string } | null>(null);
-  const [playerProfileTool, setPlayerProfileTool] = useState<PlayerProfileTool>("recent");
+  const [playerProfileTool, setPlayerProfileTool] = useState<PlayerProfileTool>("bookings");
   const [playerToolExpanded, setPlayerToolExpanded] = useState(true);
+  /** Whether the tab bar is showing the five record tabs as well as the three. */
+  const [playerToolTabsExpanded, setPlayerToolTabsExpanded] = useState(false);
+  const [playerVideoView, setPlayerVideoView] = useState<"ledger" | "shelf">("ledger");
+  const [playerPracticeBlocks, setPlayerPracticeBlocks] = useState<PlayerPracticeSummary[]>([]);
+  const [playerPracticeLoadState, setPlayerPracticeLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  /** The Practice tab lists blocks; this flips it to the module's own composer. */
+  const [playerPracticeComposer, setPlayerPracticeComposer] = useState(false);
+  const [playerTransactions, setPlayerTransactions] = useState<ClientTransactionRow[]>([]);
+  const [playerTransactionsLoadState, setPlayerTransactionsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [selectedId, setSelectedId] = useState("");
   const [lessonTypeChangeState, setLessonTypeChangeState] = useState<"idle" | "saving">("idle");
   const [clientMergeMode, setClientMergeMode] = useState(false);
@@ -8564,16 +8685,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     !isAddingClient && selectedClientId ? clients.find((client) => client.id === selectedClientId) ?? null : null;
   const selectedClientAppointments = useMemo(() => {
     if (!selectedClient) return [];
-    const key = clientKey(selectedClient.name, selectedClient.email, selectedClient.phone);
-    return items
-      .filter((item) => item.kind === "appointment")
-      .filter(itemInCoachScope)
-      .filter((item) =>
-        item.personId
-          ? item.personId === selectedClient.id
-          : clientKey(item.client || item.title, item.email ?? "", item.phone ?? "") === key,
-      )
-      .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
+    return appointmentsForPerson(selectedClient, items, itemInCoachScope);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coachAccount, coachProfiles, isAdminUser, items, selectedClient, services, serviceScopeCoachId]);
   const notesWorkspaceClient = useMemo(() => {
     if (!notesContext) return null;
@@ -8590,6 +8703,40 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       .filter((note) => noteProfileIds.has(note.playerId))
       .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
   }, [lessonNotes, notesWorkspaceClient]);
+  // The same two filters as the client modal, pointed at whoever the player
+  // profile is open on. Separate memos rather than a shared one because the
+  // modal can be open over the profile on a different person entirely.
+  const playerToolAppointments = useMemo(() => {
+    if (!notesWorkspaceClient) return [];
+    return appointmentsForPerson(notesWorkspaceClient, items, itemInCoachScope);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coachAccount, coachProfiles, isAdminUser, items, notesWorkspaceClient, services, serviceScopeCoachId]);
+  /* Which of this person's bookings are still ahead of them. Computed from the
+   * slot's real date plus its start minute rather than from the week index
+   * alone, so a lesson earlier today counts as done and one this afternoon
+   * does not. */
+  const playerToolUpcomingIds = useMemo(() => {
+    const now = Date.now();
+    const ids = new Set<string>();
+    for (const appointment of playerToolAppointments) {
+      const date = dateForSlot(itemWeek(appointment), appointment.day);
+      date.setHours(0, appointment.start, 0, 0);
+      if (date.getTime() >= now) ids.add(appointment.id);
+    }
+    return ids;
+  }, [playerToolAppointments]);
+  const playerToolUpcomingCount = playerToolUpcomingIds.size;
+  /* Blocks tied to the next lesson. Called out on the Practice tab's header
+   * because they are the ones that stop counting the moment the player walks
+   * in, so a coach reviewing before a lesson needs to see them without
+   * counting rows. */
+  const playerPracticeExpiringCount = playerPracticeBlocks.filter(
+    (block) => block.expiryType === "next_lesson",
+  ).length;
+  const playerToolNotifications = useMemo(() => {
+    if (!notesWorkspaceClient) return [];
+    return notificationsForPerson(notesWorkspaceClient, notifications, playerToolAppointments);
+  }, [notesWorkspaceClient, notifications, playerToolAppointments]);
   const playerToolVideos = useMemo(() => {
     if (!notesWorkspaceClient) return [];
     const playerIds = profileIdsForClient(notesWorkspaceClient);
@@ -8616,6 +8763,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     }
     return counts;
   }, [clarityCloudImports, playerProfiles]);
+  /** Unopened submissions for whoever the profile is open on, for the tab count. */
+  const playerUnseenSubmissions = notesWorkspaceClient
+    ? unseenSubmissionCounts.get(notesWorkspaceClient.id) || 0
+    : 0;
   const playerToolCloudVideos = useMemo(() => {
     if (!notesWorkspaceClient) return [];
     const playerIds = profileIdsForClient(notesWorkspaceClient);
@@ -8643,6 +8794,105 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       .filter((record) => !savedVideoIds.has(record.video.id))
       .sort((a, b) => String(b.video.createdAt).localeCompare(String(a.video.createdAt)));
   }, [legacyVideoRecords, notesWorkspaceClient, savedVideoIds]);
+  /* The shelf's grouping: clips gathered under the session they came from,
+   * newest session first. The ledger answers "what happened and when" from a
+   * flat list; the shelf answers "show me that lesson", and a coach thinks of
+   * a lesson by its date, so the date is the group.
+   *
+   * Recovery-only records are grouped in with the rest rather than pushed to
+   * the end -- they belong to the session they were filmed in, and the card
+   * says what state it is in.
+   */
+  const playerVideoShelfGroups = useMemo(() => {
+    type ShelfClip = {
+      key: string;
+      savedVideoId: string;
+      title: string;
+      thumbnail: string;
+      duration: number;
+      at: string;
+      kind: "saved" | "submission" | "recovery";
+      unseen: boolean;
+      playable: boolean;
+    };
+    const clips: ShelfClip[] = [
+      ...playerToolVideos.map((video) => ({
+        key: `saved-${video.savedVideoId}`,
+        savedVideoId: video.savedVideoId,
+        title: video.title || "Video file",
+        thumbnail: video.thumbnailDataUrl || "",
+        duration: video.source?.duration || 0,
+        at: video.capturedAt || video.updatedAt || video.createdAt,
+        kind: "saved" as const,
+        unseen: false,
+        playable: true,
+      })),
+      ...playerToolCloudVideos.map((transfer) => ({
+        key: `cloud-${transfer.savedVideoId || transfer.savedVideo?.savedVideoId || ""}`,
+        savedVideoId: transfer.savedVideoId || transfer.savedVideo?.savedVideoId || "",
+        title: transfer.savedVideo?.title || "Player submission",
+        // The transfer's savedVideo summary is a catalogue record, not the
+        // saved video itself: no thumbnail, no duration. The card falls back
+        // to its placeholder, same as any clip that has not been thumbed yet.
+        thumbnail: "",
+        duration: 0,
+        at: transfer.savedVideo?.updatedAt || transfer.savedVideo?.createdAt || "",
+        kind: "submission" as const,
+        unseen: !transfer.coachSeenAt,
+        playable: true,
+      })),
+      ...playerToolLegacyVideoRecords.map((record) => ({
+        key: `legacy-${record.video.id}`,
+        savedVideoId: record.video.id,
+        title: record.video.title || "Recovery record",
+        thumbnail: "",
+        duration: 0,
+        at: record.video.createdAt,
+        kind: "recovery" as const,
+        unseen: false,
+        playable: false,
+      })),
+    ].filter((clip) => clip.savedVideoId);
+
+    const groups = new Map<string, { label: string; clips: ShelfClip[] }>();
+    for (const clip of clips) {
+      const date = new Date(clip.at);
+      const valid = !Number.isNaN(date.getTime());
+      const key = valid ? date.toISOString().slice(0, 10) : "undated";
+      const label = valid
+        ? date.toLocaleDateString(undefined, { day: "numeric", month: "long" })
+        : "No date recorded";
+      const group = groups.get(key) || { label, clips: [] };
+      group.clips.push(clip);
+      groups.set(key, group);
+    }
+    return [...groups.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, group]) => ({
+        key,
+        label: group.label,
+        clips: group.clips.sort((a, b) => String(b.at).localeCompare(String(a.at))),
+        unseen: group.clips.filter((clip) => clip.unseen).length,
+      }));
+  }, [playerToolCloudVideos, playerToolLegacyVideoRecords, playerToolVideos]);
+
+  /* The one-line summary above the two views. Counted from the same three
+   * lists the views are built from, so the count and the list can never
+   * disagree. */
+  const playerVideoSummary = useMemo(() => {
+    const inLibrary = playerToolVideos.filter((video) => video.local?.status === "available").length;
+    const parts = [
+      inLibrary ? `${inLibrary} in Local Storage` : "",
+      playerToolLegacyVideoRecords.length ? `${playerToolLegacyVideoRecords.length} recovery only` : "",
+      playerToolCloudVideos.length ? `${playerToolCloudVideos.length} from Clarity Cloud` : "",
+      playerUnseenSubmissions ? `${playerUnseenSubmissions} new submission${playerUnseenSubmissions === 1 ? "" : "s"}` : "",
+    ].filter(Boolean);
+    return {
+      total: playerToolVideos.length + playerToolCloudVideos.length + playerToolLegacyVideoRecords.length,
+      detail: parts.join(" · "),
+    };
+  }, [playerToolCloudVideos, playerToolLegacyVideoRecords, playerToolVideos, playerUnseenSubmissions]);
+
   const linkedLessonVideoIds = useMemo(() => {
     const ids = new Set<string>();
     const noteLessonIds = new Set(notesWorkspaceLessonNotes.map((note) => note.lessonId).filter(Boolean));
@@ -8652,51 +8902,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     });
     return ids;
   }, [notesWorkspaceLessonNotes, playerToolVideos]);
-  const playerToolRecentRecords = useMemo<PlayerToolRecord[]>(() => {
-    const videoLessonIds = new Set(playerToolVideos.map((video) => video.lessonId).filter(Boolean));
-    const noteRecords: PlayerToolRecord[] = notesWorkspaceLessonNotes.map((note) => {
-      const timestamp = note.updatedAt || note.createdAt;
-      const linkedVideo = Boolean(note.lessonId && videoLessonIds.has(note.lessonId));
-      return {
-        id: `note-${note.id}`,
-        kind: "note",
-        title: profileRecordTitle(notesWorkspaceClient?.name, timestamp),
-        subtitle: `${note.title || "Lesson note"} · ${note.source === "voice" ? "Voice note" : "Typed note"}${
-          linkedVideo ? " · Linked lesson video" : ""
-        }`,
-        body: note.body,
-        timestamp,
-        lessonId: note.lessonId || undefined,
-        sourceId: note.id,
-      };
-    });
-    const videoRecords: PlayerToolRecord[] = playerToolVideos.map((video) => ({
-      id: `video-${video.savedVideoId}`,
-      kind: "video",
-      title: profileRecordTitle(notesWorkspaceClient?.name, video.updatedAt || video.createdAt),
-      subtitle: `${video.title || "Video file"}${linkedLessonVideoIds.has(video.savedVideoId) ? " · Linked lesson note" : ""}`,
-      timestamp: video.updatedAt || video.createdAt,
-      lessonId: video.lessonId,
-      sourceId: video.savedVideoId,
-    }));
-    const cloudVideoRecords: PlayerToolRecord[] = playerToolCloudVideos.map((transfer) => {
-      const savedVideo = transfer.savedVideo;
-      const savedVideoId = transfer.savedVideoId || savedVideo?.savedVideoId || transfer.transferId;
-      const timestamp = savedVideo?.updatedAt || savedVideo?.createdAt || transfer.readyToImportAt || "";
-      return {
-        id: `cloud-video-${savedVideoId}`,
-        kind: "video",
-        title: profileRecordTitle(notesWorkspaceClient?.name, timestamp),
-        subtitle: `${savedVideo?.title || "Video file"} · Available in Clarity Cloud`,
-        timestamp,
-        lessonId: savedVideo?.lessonId,
-        sourceId: savedVideoId,
-      };
-    });
-    return [...noteRecords, ...videoRecords, ...cloudVideoRecords]
-      .sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
-      .slice(0, 6);
-  }, [linkedLessonVideoIds, notesWorkspaceClient?.name, notesWorkspaceLessonNotes, playerToolCloudVideos, playerToolVideos]);
   const selectedAppointmentNotifications = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return [];
     return notificationsByAppointment.get(selected.id) ?? [];
@@ -8746,20 +8951,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
   const selectedClientNotifications = useMemo(() => {
     if (!selectedClient) return [];
-    const keys = clientNotificationKeys(selectedClient.name, selectedClient.email, selectedClient.phone);
-    const appointmentIds = new Set(selectedClientAppointments.map((appointment) => appointment.id));
-    const clientEmail = safeText(selectedClient.email).trim().toLowerCase();
-    return notifications
-      .filter((notification) => {
-        const isClientFacing = notification.kind.includes("client") || Boolean(clientEmail && safeText(notification.recipient).toLowerCase() === clientEmail);
-        if (!isClientFacing || notification.kind.includes("admin")) return false;
-        return (
-          keys.has(notification.personKey) ||
-          appointmentIds.has(notification.calendarItemId) ||
-          Boolean(clientEmail && safeText(notification.recipient).toLowerCase() === clientEmail)
-        );
-      })
-      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    return notificationsForPerson(selectedClient, notifications, selectedClientAppointments);
   }, [notifications, selectedClient, selectedClientAppointments]);
   const hasSelectedClientCaddyProfile = Boolean(
     safeText(selectedClient?.caddyProfileId).trim() || safeText(selectedClient?.caddyProfileUrl).trim(),
@@ -11646,11 +11838,14 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     }
   }
 
-  function selectPlayerProfileTool(client: Pick<Person, "id" | "name">, tool: PlayerProfileTool = "recent") {
+  function selectPlayerProfileTool(client: Pick<Person, "id" | "name">, tool: PlayerProfileTool = "bookings") {
     prefetchPracticeForPlayer(client.id);
     setNotesContext({ playerId: client.id, playerName: client.name });
     setPlayerProfileTool(tool);
     setPlayerToolExpanded(true);
+    // Opening straight onto one of the record tabs has to open the bar with
+    // it, or the profile lands on a tab whose pill is not on screen.
+    if (SECONDARY_PLAYER_TOOLS.has(tool)) setPlayerToolTabsExpanded(true);
   }
 
   function openNotesForClient(client: Pick<Person, "id" | "name">) {
@@ -17285,21 +17480,23 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // The Transactions tab on a client profile: everything billed to (or
   // including) this client, fetched from the one backend endpoint that knows
   // all three ways money ties to a person.
-  async function fetchClientTransactions(personId: string) {
-    setClientTransactionsLoadState("loading");
-    try {
-      const response = await fetch(`/api/billing/customer-transactions?personId=${encodeURIComponent(personId)}`, {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        setClientTransactionsLoadState("error");
-        return;
-      }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load transactions."));
-      const data = (await response.json()) as { pos?: PosTransaction[]; invoices?: BillingInvoiceRecord[] };
-      const rows: ClientTransactionRow[] = [
+  /* One read of the transactions endpoint, shared by the client modal and the
+   * player profile's Transactions tab. It returns the rows instead of setting
+   * state so the two callers can keep their own loading state -- the modal
+   * opens over the profile, and a shared state would have each one blanking
+   * the other's list. */
+  async function loadTransactionRows(personId: string) {
+    const response = await fetch(`/api/billing/customer-transactions?personId=${encodeURIComponent(personId)}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    if (response.status === 401) {
+      setAuthStatus("guest");
+      throw new Error("unauthorized");
+    }
+    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load transactions."));
+    const data = (await response.json()) as { pos?: PosTransaction[]; invoices?: BillingInvoiceRecord[] };
+    const rows: ClientTransactionRow[] = [
         ...(Array.isArray(data.pos) ? data.pos : []).map((sale) => ({
           kind: "sale" as const,
           date: sale.createdAt || sale.paidAt || "",
@@ -17310,11 +17507,32 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           date: invoice.createdAt || invoice.issueDate || "",
           invoice,
         })),
-      ].sort((a, b) => b.date.localeCompare(a.date));
-      setClientTransactions(rows);
+    ].sort((a, b) => b.date.localeCompare(a.date));
+    return rows;
+  }
+
+  // The Transactions tab on a client profile.
+  async function fetchClientTransactions(personId: string) {
+    setClientTransactionsLoadState("loading");
+    try {
+      setClientTransactions(await loadTransactionRows(personId));
       setClientTransactionsLoadState("loaded");
     } catch (error) {
       setClientTransactionsLoadState("error");
+      if (error instanceof Error && error.message === "unauthorized") return;
+      setToast({ message: error instanceof Error ? error.message : "Could not load transactions." });
+    }
+  }
+
+  // The same tab on a player profile.
+  async function fetchPlayerTransactions(personId: string) {
+    setPlayerTransactionsLoadState("loading");
+    try {
+      setPlayerTransactions(await loadTransactionRows(personId));
+      setPlayerTransactionsLoadState("loaded");
+    } catch (error) {
+      setPlayerTransactionsLoadState("error");
+      if (error instanceof Error && error.message === "unauthorized") return;
       setToast({ message: error instanceof Error ? error.message : "Could not load transactions." });
     }
   }
@@ -17326,6 +17544,73 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     void fetchClientTransactions(selectedClientId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientProfileTab, selectedClientId]);
+
+  useEffect(() => {
+    const playerId = notesContext?.playerId || "";
+    if (playerProfileTool !== "transactions" || !playerId || playerId.startsWith("appointment-")) return;
+    void fetchPlayerTransactions(playerId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playerProfileTool, notesContext?.playerId]);
+
+  /* The Practice tab's list. The practice module is loaded on demand -- the
+   * console never imports it directly -- so this reads the same cache the
+   * panel does and flattens the blocks down to what a list row needs. A block
+   * keeps the colour of its type, and a type the workspace has since retired
+   * still has to colour the blocks assigned under it, so the lookup falls back
+   * to the module's defaults rather than to a neutral grey. */
+  useEffect(() => {
+    const playerId = notesContext?.playerId || "";
+    if (playerProfileTool !== "practice" || !playerId) return;
+    let cancelled = false;
+    setPlayerPracticeLoadState("loading");
+    void (async () => {
+      try {
+        const [store, model] = await Promise.all([
+          import("./modules/practice/practiceStore"),
+          import("./modules/practice/practiceModel"),
+        ]);
+        const snapshot = await store.loadPractice(playerId);
+        if (cancelled) return;
+        const types = snapshot.blockTypes.length ? snapshot.blockTypes : model.DEFAULT_PRACTICE_TYPES;
+        const typeById = new Map(types.map((type) => [type.id, type]));
+        setPlayerPracticeBlocks(
+          snapshot.blocks
+            .filter((block) => block.status === "active")
+            .map((block) => {
+              const meta = typeById.get(block.blockType);
+              return {
+                id: block.id,
+                title: block.title,
+                typeLabel: meta?.label || block.blockType || "Block",
+                tone: meta?.tone || "",
+                dose: block.dose,
+                steps: model.practiceSteps(block.content).length,
+                assignedAt: block.assignedAt,
+                expiryType: block.expiryType,
+                expiryDate: block.expiryDate,
+                hasVideo: Boolean(block.linkedVideoId),
+              };
+            }),
+        );
+        setPlayerPracticeLoadState(snapshot.error ? "error" : "loaded");
+      } catch {
+        if (!cancelled) setPlayerPracticeLoadState("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [playerProfileTool, notesContext?.playerId]);
+
+  // Switching player closes the composer and empties the previous player's
+  // blocks, so the tab never shows one player's practice under another's name.
+  useEffect(() => {
+    setPlayerPracticeComposer(false);
+    setPlayerPracticeBlocks([]);
+    setPlayerPracticeLoadState("idle");
+    setPlayerTransactions([]);
+    setPlayerTransactionsLoadState("idle");
+  }, [notesContext?.playerId]);
 
   // A customer cell that opens the client's profile when the transaction is
   // linked to a real client, and falls back to plain text when it is not.
@@ -21657,51 +21942,277 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             </div>
 
                             {playerToolExpanded && (
-                              <div className="player-tool-tabs" role="tablist" aria-label="Player profile tools">
+                              <div
+                                className={`player-tool-tabs${playerToolTabsExpanded ? " is-expanded" : ""}`}
+                                role="tablist"
+                                aria-label="Player profile tools"
+                              >
+                                {PRIMARY_PLAYER_TOOL_TABS.map((tab) => (
+                                  <button
+                                    type="button"
+                                    key={tab.id}
+                                    className={playerProfileTool === tab.id ? "active" : ""}
+                                    onClick={() => setPlayerProfileTool(tab.id)}
+                                    role="tab"
+                                    aria-selected={playerProfileTool === tab.id}
+                                  >
+                                    <tab.Icon size={15} />
+                                    {tab.label}
+                                    {tab.id === "videos" && playerUnseenSubmissions ? (
+                                      <span className="player-tool-tab-count">{playerUnseenSubmissions}</span>
+                                    ) : null}
+                                  </button>
+                                ))}
+                                {playerToolTabsExpanded && (
+                                  <>
+                                    <span className="player-tool-tab-divider" aria-hidden="true" />
+                                    {SECONDARY_PLAYER_TOOL_TABS.map((tab) => (
+                                      <button
+                                        type="button"
+                                        key={tab.id}
+                                        className={playerProfileTool === tab.id ? "active" : ""}
+                                        onClick={() => setPlayerProfileTool(tab.id)}
+                                        role="tab"
+                                        aria-selected={playerProfileTool === tab.id}
+                                      >
+                                        <tab.Icon size={15} />
+                                        {tab.label}
+                                      </button>
+                                    ))}
+                                  </>
+                                )}
                                 <button
                                   type="button"
-                                  className={playerProfileTool === "recent" ? "active" : ""}
-                                  onClick={() => setPlayerProfileTool("recent")}
-                                  role="tab"
-                                  aria-selected={playerProfileTool === "recent"}
+                                  className="player-tool-tab-toggle"
+                                  aria-expanded={playerToolTabsExpanded}
+                                  title={
+                                    playerToolTabsExpanded
+                                      ? "Collapse"
+                                      : "Notes, Emails, Transactions, Passes, Portals"
+                                  }
+                                  onClick={() => {
+                                    // Closing the bar while one of the five is
+                                    // open would leave the body on a tab with
+                                    // no pill, so it falls back to the first.
+                                    if (playerToolTabsExpanded && SECONDARY_PLAYER_TOOLS.has(playerProfileTool)) {
+                                      setPlayerProfileTool("bookings");
+                                    }
+                                    setPlayerToolTabsExpanded(!playerToolTabsExpanded);
+                                  }}
                                 >
-                                  <Clock size={15} />
-                                  Recent
-                                </button>
-                                <button
-                                  type="button"
-                                  className={playerProfileTool === "notes" ? "active" : ""}
-                                  onClick={() => setPlayerProfileTool("notes")}
-                                  role="tab"
-                                  aria-selected={playerProfileTool === "notes"}
-                                >
-                                  <FileText size={15} />
-                                  Notes
-                                </button>
-                                <button
-                                  type="button"
-                                  className={playerProfileTool === "practice" ? "active" : ""}
-                                  onClick={() => setPlayerProfileTool("practice")}
-                                  role="tab"
-                                  aria-selected={playerProfileTool === "practice"}
-                                >
-                                  <ClipboardList size={15} />
-                                  Practice
-                                </button>
-                                <button
-                                  type="button"
-                                  className={playerProfileTool === "videos" ? "active" : ""}
-                                  onClick={() => setPlayerProfileTool("videos")}
-                                  role="tab"
-                                  aria-selected={playerProfileTool === "videos"}
-                                >
-                                  <Video size={15} />
-                                  Videos
+                                  {playerToolTabsExpanded ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
                                 </button>
                               </div>
                             )}
 
-                            {playerToolExpanded && playerProfileTool === "recent" ? (
+                            {playerToolExpanded && playerProfileTool === "bookings" ? (
+                              <div className="player-tool-body">
+                                <div className="player-tool-card">
+                                  <div className="player-tool-card-header">
+                                    <div>
+                                      <strong>Bookings</strong>
+                                      <span>
+                                        {playerToolAppointments.length} booking
+                                        {playerToolAppointments.length === 1 ? "" : "s"}
+                                        {playerToolUpcomingCount ? ` · ${playerToolUpcomingCount} upcoming` : ""}
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="outline-button"
+                                      onClick={() => switchView("calendar")}
+                                    >
+                                      Book a lesson
+                                    </button>
+                                  </div>
+                                  {playerToolAppointments.length ? (
+                                    playerToolAppointments.map((appointment) => {
+                                      const appointmentDays = buildWeekDays(itemWeek(appointment));
+                                      const service = itemService(appointment, services);
+                                      const upcoming = playerToolUpcomingIds.has(appointment.id);
+                                      return (
+                                        <div className="player-tool-row" key={appointment.id}>
+                                          <span className="player-tool-row-when">
+                                            {appointmentDays[appointment.day].label}
+                                            <br />
+                                            <span>{formatTime(appointment.start)}</span>
+                                          </span>
+                                          <div className="player-tool-row-main">
+                                            <strong>{service?.name ?? appointment.title}</strong>
+                                            <span>
+                                              {upcoming ? "Upcoming" : "Completed"} ·{" "}
+                                              {formatRange(appointment.start, appointment.duration)}
+                                              {appointment.note ? ` · ${appointment.note}` : ""}
+                                            </span>
+                                          </div>
+                                          <div className="player-tool-row-actions">
+                                            <button
+                                              type="button"
+                                              className="outline-button"
+                                              onClick={() => {
+                                                switchView("calendar");
+                                                setSelectedId(appointment.id);
+                                              }}
+                                            >
+                                              Open
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })
+                                  ) : (
+                                    <p className="player-tool-card-empty">No bookings yet.</p>
+                                  )}
+                                </div>
+                              </div>
+                            ) : playerToolExpanded && playerProfileTool === "emails" ? (
+                              <div className="player-tool-body">
+                                <div className="player-tool-card">
+                                  <div className="player-tool-card-header">
+                                    <div>
+                                      <strong>Emails</strong>
+                                      <span>Everything sent to this person</span>
+                                    </div>
+                                  </div>
+                                  {playerToolNotifications.length ? (
+                                    playerToolNotifications.map((notification) => {
+                                      const when = profileWhenParts(notification.createdAt);
+                                      return (
+                                        <div className="player-tool-row" key={notification.id}>
+                                          <span className="player-tool-row-when">
+                                            {when.day || "—"}
+                                            {when.time ? (
+                                              <>
+                                                <br />
+                                                <span>{when.time}</span>
+                                              </>
+                                            ) : null}
+                                          </span>
+                                          <div className="player-tool-row-main">
+                                            <strong>
+                                              {notification.subject || notificationKindLabel(notification.kind)}
+                                            </strong>
+                                            <span>
+                                              {notificationKindLabel(notification.kind)} to {notification.recipient}
+                                              {" · "}
+                                              {notificationStatusLabel(notification)}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      );
+                                    })
+                                  ) : (
+                                    <p className="player-tool-card-empty">No emails sent to this person yet.</p>
+                                  )}
+                                </div>
+                              </div>
+                            ) : playerToolExpanded && playerProfileTool === "transactions" ? (
+                              <div className="player-tool-body">
+                                <div className="player-tool-card">
+                                  <div className="player-tool-card-header">
+                                    <div>
+                                      <strong>Transactions</strong>
+                                      <span>Everything billed to this person</span>
+                                    </div>
+                                    {billingWorkspaceEnabled && (
+                                      <button
+                                        type="button"
+                                        className="outline-button"
+                                        onClick={() => openPosCheckoutForClient(notesWorkspaceClient)}
+                                      >
+                                        New sale
+                                      </button>
+                                    )}
+                                  </div>
+                                  {notesWorkspaceClient.id.startsWith("appointment-") ? (
+                                    <p className="player-tool-card-empty">
+                                      Save this booking contact as a client to track their transactions.
+                                    </p>
+                                  ) : playerTransactionsLoadState === "loading" ? (
+                                    <p className="player-tool-card-empty">Loading transactions…</p>
+                                  ) : playerTransactionsLoadState === "error" ? (
+                                    <p className="player-tool-card-empty">
+                                      Could not load transactions.{" "}
+                                      <button
+                                        className="link-button"
+                                        type="button"
+                                        onClick={() => void fetchPlayerTransactions(notesWorkspaceClient.id)}
+                                      >
+                                        Retry
+                                      </button>
+                                    </p>
+                                  ) : playerTransactions.length ? (
+                                    playerTransactions.map((row) =>
+                                      row.kind === "sale" ? (
+                                        <div className="player-tool-row" key={`sale-${row.sale.id}`}>
+                                          <span className="player-tool-row-when">
+                                            {transactionDateLabel(row.date)}
+                                          </span>
+                                          <div className="player-tool-row-main">
+                                            <strong>{row.sale.description || row.sale.receiptNumber}</strong>
+                                            <span>
+                                              {formatMoney(row.sale.amount, row.sale.currency)} ·{" "}
+                                              {row.sale.paymentMethodName} · {row.sale.receiptNumber}
+                                              {row.sale.isLessonPass ? " · Lesson pass" : ""}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="player-tool-row" key={`invoice-${row.invoice.id}`}>
+                                          <span className="player-tool-row-when">
+                                            {transactionDateLabel(row.date)}
+                                          </span>
+                                          <div className="player-tool-row-main">
+                                            <strong>{row.invoice.invoiceNumber}</strong>
+                                            <span>
+                                              {formatMoney(row.invoice.total, row.invoice.currency)} ·{" "}
+                                              {row.invoice.status}
+                                              {row.invoice.relation === "included"
+                                                ? ` · billed to ${row.invoice.customerName || "someone else"}`
+                                                : ""}
+                                            </span>
+                                          </div>
+                                          <div className="player-tool-row-actions">
+                                            <button
+                                              type="button"
+                                              className="outline-button"
+                                              onClick={() => {
+                                                switchView("billing");
+                                                void openInvoiceForEdit(row.invoice);
+                                              }}
+                                            >
+                                              Invoice
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ),
+                                    )
+                                  ) : (
+                                    <p className="player-tool-card-empty">No transactions for this person yet.</p>
+                                  )}
+                                </div>
+                              </div>
+                            ) : playerToolExpanded && playerProfileTool === "passes" ? (
+                              <div className="player-tool-body">
+                                <div className="player-tool-card">
+                                  <div className="player-tool-card-header">
+                                    <div>
+                                      <strong>Passes</strong>
+                                      <span>Lesson credits held by this person</span>
+                                    </div>
+                                  </div>
+                                  {/* Passes are designed but not built -- see
+                                      PASS_SYSTEM_DESIGN.md. There is no pass
+                                      record to read, so this says so rather than
+                                      showing an empty list that reads as "this
+                                      person has none". */}
+                                  <p className="player-tool-card-empty">
+                                    Passes are not built yet. Lesson packages sold through checkout show up under
+                                    Transactions, tagged as a lesson pass.
+                                  </p>
+                                </div>
+                              </div>
+                            ) : playerToolExpanded && playerProfileTool === "portals" ? (
                               <div className="player-tool-body">
                                 {(() => {
                                   const portalPlayer = portalPlayers.find(
@@ -21816,40 +22327,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                     </div>
                                   );
                                 })()}
-                                <div className="player-record-list">
-                                  {playerToolRecentRecords.length ? (
-                                    playerToolRecentRecords.map((record) => (
-                                      <article className={`player-record-card ${record.kind}`} key={record.id}>
-                                        <div className="player-record-icon">
-                                          {record.kind === "video" ? <Video size={16} /> : <FileText size={16} />}
-                                        </div>
-                                        <div className="player-record-content">
-                                          <strong>{record.title}</strong>
-                                          <span>{record.subtitle}</span>
-                                          {record.body ? <p>{record.body}</p> : null}
-                                        </div>
-                                        {record.kind === "video" ? (
-                                          <button
-                                            type="button"
-                                            className="outline-button player-record-action"
-                                            onClick={() =>
-                                              openVideoAnalysisForClient({
-                                                id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
-                                                name: notesWorkspaceClient.name,
-                                                savedVideoId: record.sourceId,
-                                              })
-                                            }
-                                          >
-                                            <Video size={14} />
-                                            Open
-                                          </button>
-                                        ) : null}
-                                      </article>
-                                    ))
-                                  ) : (
-                                    <p className="notes-empty">No notes or videos yet.</p>
-                                  )}
-                                </div>
                               </div>
                             ) : playerToolExpanded && playerProfileTool === "notes" ? (
                               <div className="player-tool-body">
@@ -21892,35 +22369,240 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                               </div>
                             ) : playerToolExpanded && playerProfileTool === "practice" ? (
                               <div className="player-tool-body">
-                                <Suspense fallback={<div className="module-loading">Loading practice…</div>}>
-                                  <PracticeBlockPanel
-                                    // Keyed so switching player remounts rather
-                                    // than showing the previous player's blocks
-                                    // until the fetch lands.
-                                    key={notesWorkspaceClient.id}
-                                    player={{ id: notesWorkspaceClient.id, name: notesWorkspaceClient.name }}
-                                    onUnauthorized={() => setAuthStatus("guest")}
-                                    onToast={(message) => setToast({ message })}
-                                  />
-                                </Suspense>
+                                {/* Two readings of the same thing. The list
+                                    answers "what is this player working on",
+                                    which is the question the profile is open
+                                    for; the module's own panel is the composer
+                                    and the wall, and opens over it on demand. */}
+                                {playerPracticeComposer ? (
+                                  <>
+                                    <div className="player-tool-inline-actions">
+                                      <button
+                                        type="button"
+                                        className="outline-button"
+                                        onClick={() => setPlayerPracticeComposer(false)}
+                                      >
+                                        <ChevronLeft size={15} />
+                                        Back to practice list
+                                      </button>
+                                    </div>
+                                  <Suspense fallback={<div className="module-loading">Loading practice…</div>}>
+                                    <PracticeBlockPanel
+                                      // Keyed so switching player remounts rather
+                                      // than showing the previous player's blocks
+                                      // until the fetch lands.
+                                      key={notesWorkspaceClient.id}
+                                      player={{ id: notesWorkspaceClient.id, name: notesWorkspaceClient.name }}
+                                      onUnauthorized={() => setAuthStatus("guest")}
+                                      onToast={(message) => setToast({ message })}
+                                    />
+                                  </Suspense>
+                                  </>
+                                ) : (
+                                  <div className="player-tool-card">
+                                    <div className="player-tool-card-header">
+                                      <div>
+                                        <strong>Practice</strong>
+                                        <span>
+                                          {playerPracticeBlocks.length} active block
+                                          {playerPracticeBlocks.length === 1 ? "" : "s"}
+                                          {playerPracticeExpiringCount
+                                            ? ` · ${playerPracticeExpiringCount} expiring next lesson`
+                                            : ""}
+                                        </span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        className="outline-button"
+                                        onClick={() => setPlayerPracticeComposer(true)}
+                                      >
+                                        Assign a block
+                                      </button>
+                                    </div>
+                                    {playerPracticeLoadState === "loading" ? (
+                                      <p className="player-tool-card-empty">Loading practice…</p>
+                                    ) : playerPracticeLoadState === "error" ? (
+                                      <p className="player-tool-card-empty">Could not load practice for this player.</p>
+                                    ) : playerPracticeBlocks.length ? (
+                                      playerPracticeBlocks.map((block) => (
+                                        <div className="player-tool-row is-practice" key={block.id}>
+                                          <span
+                                            className="player-tool-row-tone"
+                                            style={block.tone ? { background: block.tone } : undefined}
+                                            title={block.typeLabel}
+                                          >
+                                            {block.typeLabel.slice(0, 1).toUpperCase()}
+                                          </span>
+                                          <div className="player-tool-row-main">
+                                            <strong>{block.title}</strong>
+                                            <span>
+                                              {[
+                                                block.typeLabel,
+                                                block.steps
+                                                  ? `${block.steps} step${block.steps === 1 ? "" : "s"}`
+                                                  : "",
+                                                block.dose,
+                                                block.expiryType === "next_lesson"
+                                                  ? "expires next lesson"
+                                                  : block.expiryType === "set_date" && block.expiryDate
+                                                    ? `expires ${formatTimestampForDisplay(block.expiryDate)}`
+                                                    : "no expiry",
+                                                block.hasVideo ? "video attached" : "",
+                                              ]
+                                                .filter(Boolean)
+                                                .join(" · ")}
+                                            </span>
+                                          </div>
+                                          <div className="player-tool-row-actions">
+                                            <button
+                                              type="button"
+                                              className="outline-button"
+                                              onClick={() => setPlayerPracticeComposer(true)}
+                                            >
+                                              Open
+                                            </button>
+                                          </div>
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <p className="player-tool-card-empty">Nothing set to practise yet.</p>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             ) : playerToolExpanded ? (
                               <div className="player-tool-body">
-                                <div className="player-tool-inline-actions">
-                                  <button
-                                    type="button"
-                                    className="outline-button"
-                                    onClick={() =>
-                                      openVideoAnalysisForClient({
-                                        id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
-                                        name: notesWorkspaceClient.name,
-                                      })
-                                    }
-                                  >
-                                    <Video size={15} />
-                                    Add video
-                                  </button>
+                                <div className="player-video-toolbar">
+                                  <div className="player-video-toolbar-count">
+                                    <strong>
+                                      {playerVideoSummary.total} saved video
+                                      {playerVideoSummary.total === 1 ? "" : "s"}
+                                    </strong>
+                                    <span>{playerVideoSummary.detail}</span>
+                                  </div>
+                                  <div className="player-video-toolbar-actions">
+                                    <button
+                                      type="button"
+                                      className="outline-button"
+                                      onClick={() =>
+                                        openVideoAnalysisForClient({
+                                          id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
+                                          name: notesWorkspaceClient.name,
+                                        })
+                                      }
+                                    >
+                                      <Video size={15} />
+                                      Add video
+                                    </button>
+                                    <div
+                                      className="player-video-view-toggle"
+                                      role="group"
+                                      aria-label="Video layout"
+                                    >
+                                      <button
+                                        type="button"
+                                        title="Ledger"
+                                        aria-label="Ledger"
+                                        aria-pressed={playerVideoView === "ledger"}
+                                        className={playerVideoView === "ledger" ? "active" : ""}
+                                        onClick={() => setPlayerVideoView("ledger")}
+                                      >
+                                        <List size={16} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        title="Shelf"
+                                        aria-label="Shelf"
+                                        aria-pressed={playerVideoView === "shelf"}
+                                        className={playerVideoView === "shelf" ? "active" : ""}
+                                        onClick={() => setPlayerVideoView("shelf")}
+                                      >
+                                        <LayoutGrid size={16} />
+                                      </button>
+                                    </div>
+                                  </div>
                                 </div>
+
+                                {playerVideoView === "shelf" ? (
+                                  <div>
+                                    {playerVideoShelfGroups.length ? (
+                                      playerVideoShelfGroups.map((group) => (
+                                        <div key={group.key}>
+                                          <div className="player-video-shelf-group">
+                                            <strong>{group.label}</strong>
+                                            <span>
+                                              {group.clips.length} clip{group.clips.length === 1 ? "" : "s"}
+                                              {group.unseen ? ` · ${group.unseen} new` : ""}
+                                            </span>
+                                          </div>
+                                          <div className="player-video-shelf-grid">
+                                            {group.clips.map((clip) => (
+                                              <article
+                                                className={`player-video-shelf-card${clip.unseen ? " is-unseen" : ""}`}
+                                                key={clip.key}
+                                              >
+                                                <button
+                                                  type="button"
+                                                  className="player-video-shelf-thumb"
+                                                  disabled={!clip.playable}
+                                                  title={clip.playable ? `Play ${clip.title}` : clip.title}
+                                                  onClick={() =>
+                                                    openVideoAnalysisForClient({
+                                                      id: preferredVideoPlayerId(
+                                                        notesWorkspaceClient,
+                                                        videoPlayerIds,
+                                                      ),
+                                                      name: notesWorkspaceClient.name,
+                                                      savedVideoId: clip.savedVideoId,
+                                                    })
+                                                  }
+                                                >
+                                                  {clip.thumbnail ? (
+                                                    <img src={clip.thumbnail} alt="" />
+                                                  ) : (
+                                                    <Video size={20} />
+                                                  )}
+                                                  {clip.unseen ? (
+                                                    <span className="player-video-shelf-badge">New</span>
+                                                  ) : null}
+                                                  {clip.duration ? (
+                                                    <span className="player-video-shelf-duration">
+                                                      {formatClipDuration(clip.duration)}
+                                                    </span>
+                                                  ) : null}
+                                                </button>
+                                                <div className="player-video-shelf-body">
+                                                  <strong>{clip.title}</strong>
+                                                  <span>
+                                                    {clip.kind === "submission"
+                                                      ? "Player submission"
+                                                      : clip.kind === "recovery"
+                                                        ? "Recovery only"
+                                                        : "Local Storage"}
+                                                  </span>
+                                                </div>
+                                              </article>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <p className="notes-empty">No videos yet.</p>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="player-video-shelf-add"
+                                      onClick={() =>
+                                        openVideoAnalysisForClient({
+                                          id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
+                                          name: notesWorkspaceClient.name,
+                                        })
+                                      }
+                                    >
+                                      + Add from Video Analysis
+                                    </button>
+                                  </div>
+                                ) : (
                                 <div className="player-video-list">
                                   {!managedLocalLibraryStatus.configured ? (
                                     <article className="player-video-card is-library-status">
@@ -22351,6 +23033,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                     <p className="notes-empty">No videos yet.</p>
                                   )}
                                 </div>
+                                )}
                               </div>
                             ) : null}
                           </div>
