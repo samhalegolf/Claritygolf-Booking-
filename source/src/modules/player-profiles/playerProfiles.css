@@ -35,6 +35,11 @@
 
 .player-profile-entry {
   display: grid;
+  /* minmax(0,1fr), not the default `auto`: an auto track takes its minimum
+     from its content, so one wide child (the expanded tab bar) widened the
+     whole entry and got clipped by the list's overflow:hidden instead of
+     wrapping. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
 
@@ -130,6 +135,9 @@
 
 .player-profile-tool-panel {
   display: grid;
+  /* Same reason as .player-profile-entry above -- min-width:0 on the grid
+     itself does nothing for a track that sizes to its content. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   min-width: 0;
   padding: 16px;
@@ -170,6 +178,8 @@
 
 .player-tool-tabs {
   display: inline-flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 6px;
   padding: 4px;
   border: 1px solid var(--border);
@@ -229,12 +239,14 @@
   font-size: 13px;
 }
 
+/* No border: this sits inside .player-profile-tool-panel, which sits inside
+   .player-profiles-list. Under the nesting law the outermost keeps the box and
+   these become hairline-separated groups -- and the tabs either side of this
+   one are groups, so a box here would single Videos out. */
 .player-video-list {
   display: grid;
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-card);
+  border-top: 1px solid var(--c-border);
   background: var(--c-surface);
-  overflow: hidden;
 }
 
 .player-video-card {
@@ -743,12 +755,8 @@
  * with a hole in it rather than as a track.
  */
 .player-tool-tabs.is-expanded {
-  display: flex;
-  flex-wrap: wrap;
   padding: 5px;
   border-radius: 24px;
-  width: max-content;
-  max-width: 100%;
 }
 
 .player-tool-tab-divider {
@@ -788,10 +796,7 @@
  */
 .player-tool-card {
   display: grid;
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-card);
   background: var(--c-surface);
-  overflow: hidden;
 }
 
 .player-tool-card-header {
@@ -800,6 +805,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
+  border-top: 1px solid var(--c-border);
   border-bottom: 1px solid var(--c-border);
   background: var(--c-surface-soft);
 }
@@ -881,65 +887,6 @@
   font-weight: 800;
 }
 
-/* Portals rows lead with the mark of the thing being connected to. */
-.player-tool-row.is-portal {
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-  padding: 14px;
-}
-
-.player-tool-row-mark {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  color: var(--c-muted);
-}
-
-.player-tool-row-mark img {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-}
-
-.player-tool-row-mark.is-connected {
-  color: var(--c-success-text);
-}
-
-/* Notes are prose, not a row of fields, so they stack instead. */
-.player-tool-note {
-  display: grid;
-  gap: 8px;
-  padding: 14px;
-  border-bottom: 1px solid var(--c-border-soft);
-}
-
-.player-tool-note:last-child {
-  border-bottom: 0;
-}
-
-.player-tool-note-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.player-tool-note-head strong {
-  font-size: var(--c-size-body);
-  color: var(--c-text);
-}
-
-.player-tool-note-head span {
-  color: var(--c-muted);
-  font-size: var(--c-size-group);
-}
-
-.player-tool-note p {
-  margin: 0;
-  color: var(--c-text-body);
-  font-size: var(--c-size-secondary);
-  line-height: 1.5;
-}
-
 .player-tool-card-empty {
   margin: 0;
   padding: 18px 14px;
@@ -958,12 +905,17 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* Wraps rather than squeezing: the count is a sentence, and a flex item that
+     cannot wrap turns it into one word per line long before the row is
+     actually too narrow for it. */
+  flex-wrap: wrap;
   gap: 12px;
 }
 
 .player-video-toolbar-count {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -1005,88 +957,6 @@
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
 }
 
-.player-video-ledger {
-  display: grid;
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-card);
-  background: var(--c-surface);
-  overflow: hidden;
-}
-
-.player-video-ledger-row {
-  display: grid;
-  grid-template-columns: 76px 108px minmax(0, 1fr) 190px auto;
-  gap: 14px;
-  align-items: center;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--c-border-soft);
-}
-
-.player-video-ledger-row:last-child {
-  border-bottom: 0;
-}
-
-.player-video-ledger-thumb {
-  position: relative;
-  width: 108px;
-  height: 70px;
-  padding: 0;
-  border: 1px solid var(--c-border);
-  border-radius: 8px;
-  background: var(--c-active);
-  overflow: hidden;
-  cursor: pointer;
-}
-
-.player-video-ledger-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.player-video-ledger-thumb .player-video-thumb-play {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: var(--c-on-scrim);
-  background: var(--c-scrim-soft);
-}
-
-/* A recovery record has no thumbnail to show because the blob never made it
-   into the library — the dashed slot says so rather than showing a blank. */
-.player-video-ledger-thumb.is-missing {
-  display: grid;
-  place-items: center;
-  border-style: dashed;
-  color: var(--c-text-disabled);
-  font-size: var(--c-size-group);
-  text-align: center;
-  cursor: default;
-}
-
-.player-video-ledger-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: var(--c-muted);
-  font-size: var(--c-size-group);
-}
-
-.player-video-ledger-meta span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.player-video-ledger-note {
-  display: block;
-  margin-top: 3px;
-  color: var(--c-text-soft);
-  font-size: var(--c-size-meta);
-  font-style: italic;
-}
-
 .player-video-shelf-group {
   display: flex;
   align-items: center;
@@ -1116,16 +986,13 @@
 
 .player-video-shelf-card {
   display: grid;
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-card);
-  background: var(--c-surface);
-  overflow: hidden;
 }
 
 /* An unopened submission is the one card that outlines itself — the coach
    should be able to find it without reading a single label. */
-.player-video-shelf-card.is-unseen {
-  border-color: var(--c-success-text);
+.player-video-shelf-card.is-unseen .player-video-shelf-thumb {
+  outline: 2px solid var(--c-success-text);
+  outline-offset: -2px;
 }
 
 .player-video-shelf-thumb {
@@ -1134,6 +1001,8 @@
   aspect-ratio: 16 / 10;
   padding: 0;
   border: 0;
+  border-radius: var(--c-radius-card);
+  overflow: hidden;
   background: var(--c-active);
   color: var(--c-muted);
   display: grid;
@@ -1196,7 +1065,7 @@
 .player-video-shelf-add {
   display: grid;
   place-items: center;
-  min-height: 120px;
+  min-height: 52px;
   border: 1px dashed var(--c-border);
   border-radius: var(--c-radius-card);
   background: transparent;
@@ -1211,23 +1080,17 @@
   color: var(--c-text-soft);
 }
 
-@media (max-width: 1100px) {
+/* 1120px is where .app-shell turns the sidebar into a horizontal bar and the
+   content column takes the full window -- the one structural breakpoint in the
+   app, so the shelf reflows with it rather than at a width of its own. */
+@media (max-width: 1120px) {
   .player-video-shelf-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .player-video-ledger-row {
-    grid-template-columns: 76px 108px minmax(0, 1fr);
-  }
-
-  .player-video-ledger-meta,
-  .player-tool-row-actions {
-    grid-column: 1 / -1;
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
 }
 
+/* 720px is this file's existing "one column" breakpoint -- see the
+   .player-video-card block above. */
 @media (max-width: 720px) {
   .player-video-shelf-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1237,8 +1100,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .player-tool-row.is-practice,
-  .player-tool-row.is-portal {
+  .player-tool-row.is-practice {
     grid-template-columns: 34px minmax(0, 1fr);
   }
 }
