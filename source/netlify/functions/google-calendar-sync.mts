@@ -20,6 +20,7 @@ import {
   GOOGLE_IMPORT_ORIGIN,
   busyBlocksFromGoogleEvents,
   planBusyBlockImport,
+  type GoogleCalendarSourceDisplay,
   type GoogleEvent,
 } from "./_shared/google-calendar-import.mts";
 
@@ -138,6 +139,61 @@ function parseJson<T>(value: string | undefined, fallback: T): T {
   }
 }
 
+function cleanGoogleCalendarSourcePreference(value: unknown, fallback: GoogleCalendarSourcePreference): GoogleCalendarSourcePreference {
+  const candidate = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const showOnClarity =
+    typeof candidate.showOnClarity === "boolean" ? candidate.showOnClarity : fallback.showOnClarity;
+  const showLabel = showOnClarity
+    ? typeof candidate.showLabel === "boolean"
+      ? candidate.showLabel
+      : fallback.showLabel
+    : false;
+  return { showOnClarity, showLabel };
+}
+
+function defaultGoogleCalendarSourcePreference(source: Pick<GoogleCalendarSource, "id" | "primary">, calendarId: string) {
+  const matchesTarget = source.id === calendarId || (calendarId === "primary" && source.primary);
+  return {
+    showOnClarity: matchesTarget,
+    showLabel: matchesTarget,
+  };
+}
+
+function readGoogleCalendarSourcePreferenceMap(settings: Record<string, string>) {
+  const raw = parseJson<Record<string, unknown>>(settings[googleCalendarSourcePreferencesSettingKey], {});
+  const cleaned: Record<string, GoogleCalendarSourcePreference> = {};
+  for (const [sourceId, value] of Object.entries(raw || {})) {
+    const id = cleanString(sourceId, "", 320);
+    if (!id) continue;
+    cleaned[id] = cleanGoogleCalendarSourcePreference(value, { showOnClarity: false, showLabel: false });
+  }
+  return cleaned;
+}
+
+function sourcePreferenceMapForStorage(input: unknown, knownSources: Array<Pick<GoogleCalendarSource, "id" | "primary">>, calendarId: string) {
+  const raw = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const normalized: Record<string, GoogleCalendarSourcePreference> = {};
+  const knownById = new Map(knownSources.map((source) => [source.id, source]));
+  for (const [sourceId, value] of Object.entries(raw)) {
+    const id = cleanString(sourceId, "", 320);
+    if (!id) continue;
+    const fallback = defaultGoogleCalendarSourcePreference(knownById.get(id) || { id, primary: false }, calendarId);
+    normalized[id] = cleanGoogleCalendarSourcePreference(value, fallback);
+  }
+  return normalized;
+}
+
+function applyGoogleCalendarSourcePreferences(
+  sources: GoogleCalendarSource[],
+  preferences: Record<string, GoogleCalendarSourcePreference>,
+  calendarId: string,
+) {
+  return sources.map((source) => ({
+    ...source,
+    ...cleanGoogleCalendarSourcePreference(preferences[source.id], defaultGoogleCalendarSourcePreference(source, calendarId)),
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Google Calendar sync debug log
 //
@@ -151,8 +207,10 @@ function parseJson<T>(value: string | undefined, fallback: T): T {
 
 const debugLogSettingKey = "googleCalendarDebugLogJson";
 const debugEnabledSettingKey = "googleCalendarDebugEnabled";
+const googleCalendarSourcePreferencesSettingKey = "googleCalendarSourcePreferencesJson";
 const debugLogMaxEntries = 30;
 const debugLogMaxBytes = 220_000;
+const googleCalendarSourceListMaxPages = 4;
 
 export type GoogleCalendarDebugRequest = {
   method: string;
@@ -177,6 +235,19 @@ export type GoogleCalendarDebugError = {
   googleErrors: unknown[];
   providerCode: string;
   rawBody: string;
+};
+
+export type GoogleCalendarSourcePreference = {
+  showOnClarity: boolean;
+  showLabel: boolean;
+};
+
+export type GoogleCalendarSource = GoogleCalendarSourcePreference & {
+  id: string;
+  name: string;
+  primary: boolean;
+  hidden: boolean;
+  accessRole: string;
 };
 
 export type GoogleCalendarDebugEntry = {
@@ -424,6 +495,38 @@ function cleanCalendarId(value: unknown) {
   return cleanString(value, "primary", 320) || "primary";
 }
 
+async function listGoogleCalendarSources(accessToken: string) {
+  const sources: GoogleCalendarSource[] = [];
+  let pageToken = "";
+  for (let page = 0; page < googleCalendarSourceListMaxPages; page += 1) {
+    const query = new URLSearchParams({
+      maxResults: "250",
+      showHidden: "true",
+      ...(pageToken ? { pageToken } : {}),
+    });
+    const data = await googleCalendarRequest(accessToken, `/users/me/calendarList?${query}`);
+    for (const item of Array.isArray(data?.items) ? data.items : []) {
+      const id = cleanString(item?.id, "", 320);
+      if (!id || item?.deleted === true) continue;
+      sources.push({
+        id,
+        name: cleanString(item?.summaryOverride, "", 200) || cleanString(item?.summary, id, 200) || id,
+        primary: item?.primary === true,
+        hidden: item?.hidden === true,
+        accessRole: cleanString(item?.accessRole, "", 80),
+        showOnClarity: false,
+        showLabel: false,
+      });
+    }
+    pageToken = cleanString(data?.nextPageToken, "", 320);
+    if (!pageToken) break;
+  }
+  return sources.sort((a, b) => {
+    if (a.primary !== b.primary) return a.primary ? -1 : 1;
+    return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+  });
+}
+
 export async function getGoogleCalendarSyncStatus(req?: Request) {
   const settings = await readSettings();
   const config = googleConfig(req);
@@ -437,11 +540,26 @@ export async function getGoogleCalendarSyncStatus(req?: Request) {
       connection.connectionStatus === "connected" &&
       hasGoogleScopes(connection, googleScopes)
   );
+  const calendarId = settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary");
+  const sourcePreferences = readGoogleCalendarSourcePreferenceMap(settings);
+  let sources: GoogleCalendarSource[] = [];
+  let sourceListError = "";
+  if (connected) {
+    try {
+      sources = applyGoogleCalendarSourcePreferences(
+        await listGoogleCalendarSources(await getGoogleAccessToken(accountId, googleScopes)),
+        sourcePreferences,
+        calendarId,
+      );
+    } catch (error) {
+      sourceListError = error instanceof Error ? error.message.slice(0, 300) : "Google calendar sources could not be loaded.";
+    }
+  }
   return {
     configured,
     connected,
     accountId,
-    calendarId: settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"),
+    calendarId,
     autoSync: googleCalendarManualSyncOnly ? false : settings.googleCalendarAutoSync !== "false",
     manualOnly: googleCalendarManualSyncOnly,
     accountEmail: providerStatus.accountEmail || settings.googleCalendarAccountEmail || "",
@@ -457,18 +575,43 @@ export async function getGoogleCalendarSyncStatus(req?: Request) {
     missingScopes: providerStatus.missingScopes,
     connectionStatus: providerStatus.connectionStatus,
     legacyMigrationRequired,
+    sources,
+    sourceListError,
   };
 }
 
 export async function updateGoogleCalendarSyncSettings(body: any) {
+  const currentSettings = await readSettings();
   const values: Record<string, unknown> = {};
+  const calendarId = Object.prototype.hasOwnProperty.call(body || {}, "calendarId")
+    ? cleanCalendarId(body.calendarId)
+    : cleanCalendarId(currentSettings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"));
   if (Object.prototype.hasOwnProperty.call(body || {}, "calendarId")) {
-    values.googleCalendarId = cleanCalendarId(body.calendarId);
+    values.googleCalendarId = calendarId;
   }
   if (Object.prototype.hasOwnProperty.call(body || {}, "autoSync")) {
     values.googleCalendarAutoSync = googleCalendarManualSyncOnly ? "false" : body.autoSync === false ? "false" : "true";
   } else if (googleCalendarManualSyncOnly) {
     values.googleCalendarAutoSync = "false";
+  }
+  if (Object.prototype.hasOwnProperty.call(body || {}, "sourcePreferences")) {
+    const accountId = resolveGoogleAccountId(currentSettings);
+    let knownSources: GoogleCalendarSource[] = [];
+    const connection = await loadGoogleProviderConnection(accountId);
+    if (
+      connection?.calendarEnabled &&
+      connection.connectionStatus === "connected" &&
+      hasGoogleScopes(connection, googleScopes)
+    ) {
+      try {
+        knownSources = await listGoogleCalendarSources(await getGoogleAccessToken(accountId, googleScopes));
+      } catch {
+        knownSources = [];
+      }
+    }
+    values[googleCalendarSourcePreferencesSettingKey] = JSON.stringify(
+      sourcePreferenceMapForStorage(body.sourcePreferences, knownSources, calendarId),
+    );
   }
   await setSettings(values);
   return getGoogleCalendarSyncStatus();
@@ -853,14 +996,29 @@ async function importGoogleBusyBlocks(accessToken: string, calendarId: string, s
   const now = new Date();
   const timeMin = new Date(now.getTime() - busyImportWeeksBack * 7 * 86_400_000).toISOString();
   const timeMax = new Date(now.getTime() + busyImportWeeksAhead * 7 * 86_400_000).toISOString();
-
-  const { events, truncated } = await listGoogleEvents(accessToken, calendarId, timeMin, timeMax);
-  const wanted = busyBlocksFromGoogleEvents(events, account.timezone);
+  const sourcePreferences = readGoogleCalendarSourcePreferenceMap(settings);
+  const sources = applyGoogleCalendarSourcePreferences(await listGoogleCalendarSources(accessToken), sourcePreferences, calendarId);
+  const visibleSources = sources.filter((source) => source.showOnClarity);
+  let scanned = 0;
+  let truncated = false;
+  const wanted: ReturnType<typeof busyBlocksFromGoogleEvents> = [];
+  for (const source of visibleSources) {
+    const { events, truncated: sourceTruncated } = await listGoogleEvents(accessToken, source.id, timeMin, timeMax);
+    scanned += events.length;
+    truncated ||= sourceTruncated;
+    wanted.push(
+      ...busyBlocksFromGoogleEvents(events, account.timezone, {
+        sourceId: source.id,
+        sourceName: source.name,
+        showLabel: source.showLabel,
+      } satisfies GoogleCalendarSourceDisplay),
+    );
+  }
 
   // Only rows this import owns are ever read here, and therefore only they can
   // ever be deleted below. A lesson or a coach's own block is out of reach.
   const existingRows = (await supabase("calendar_items", {
-    query: `select=id,week,day,start,duration,title&origin=eq.${encodeURIComponent(GOOGLE_IMPORT_ORIGIN)}`,
+    query: `select=id,week,day,start,duration,title,external_source&origin=eq.${encodeURIComponent(GOOGLE_IMPORT_ORIGIN)}`,
   })) as Array<Record<string, unknown>>;
   const plan = planBusyBlockImport(wanted, existingRows.map((row) => ({ ...row, id: String(row.id) })));
 
@@ -886,6 +1044,7 @@ async function importGoogleBusyBlocks(accessToken: string, calendarId: string, s
     origin: GOOGLE_IMPORT_ORIGIN,
     external_provider: GOOGLE_IMPORT_ORIGIN,
     external_booking_id: block.googleEventId,
+    external_source: block.sourceId,
     external_updated_at: nowIso(),
     updated_at: nowIso(),
   });
@@ -906,12 +1065,18 @@ async function importGoogleBusyBlocks(accessToken: string, calendarId: string, s
     });
   }
   return {
-    scanned: events.length,
+    scanned,
     imported: plan.create.length,
     updated: plan.update.length,
     removed: plan.deleteIds.length,
     unchanged: plan.unchanged,
     truncated,
+    sources: sources.map((source) => ({
+      id: source.id,
+      name: source.name,
+      showOnClarity: source.showOnClarity,
+      showLabel: source.showLabel,
+    })),
   };
 }
 

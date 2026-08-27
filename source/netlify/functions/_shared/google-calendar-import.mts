@@ -55,11 +55,19 @@ export type GoogleEvent = {
 export type ImportedBusyBlock = {
   id: string;
   googleEventId: string;
+  sourceId: string;
+  sourceName: string;
   title: string;
   week: number;
   day: number;
   start: number;
   duration: number;
+};
+
+export type GoogleCalendarSourceDisplay = {
+  sourceId: string;
+  sourceName?: string;
+  showLabel?: boolean;
 };
 
 /** Was this event put on the calendar by Clarity itself? */
@@ -99,9 +107,14 @@ export function holdsTime(event: GoogleEvent) {
  * an event that merely moved keeps its identity instead of flickering off and
  * back onto the calendar.
  */
-export function importedBlockId(googleEventId: string) {
-  const safe = googleEventId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
-  return `gcal-${safe}`;
+function safeSourceKey(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 32) || "source";
+}
+
+export function importedBlockId(googleEventId: string, sourceId = "primary") {
+  const safeSource = safeSourceKey(sourceId);
+  const safeEvent = googleEventId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+  return `gcal-${safeSource}-${safeEvent}`;
 }
 
 /**
@@ -112,9 +125,11 @@ export function importedBlockId(googleEventId: string) {
  * own calendar, so there is nothing here they cannot already read. "Busy" is
  * the fallback for an event with no summary at all.
  */
-export function busyBlockTitle(event: GoogleEvent) {
+export function busyBlockTitle(event: GoogleEvent, source?: GoogleCalendarSourceDisplay) {
+  if (source?.showLabel === false) return "Busy";
   const summary = (event.summary || "").trim();
-  return summary || "Busy";
+  const sourceName = (source?.sourceName || "").trim();
+  return summary || sourceName || "Busy";
 }
 
 /**
@@ -124,7 +139,11 @@ export function busyBlockTitle(event: GoogleEvent) {
  * Clarity should hold. Ordering is by slot so a diff against existing rows is
  * readable.
  */
-export function busyBlocksFromGoogleEvents(events: GoogleEvent[], timezone: string): ImportedBusyBlock[] {
+export function busyBlocksFromGoogleEvents(
+  events: GoogleEvent[],
+  timezone: string,
+  source: GoogleCalendarSourceDisplay = { sourceId: "primary" },
+): ImportedBusyBlock[] {
   const seen = new Set<string>();
   const blocks: ImportedBusyBlock[] = [];
   for (const event of Array.isArray(events) ? events : []) {
@@ -138,9 +157,11 @@ export function busyBlocksFromGoogleEvents(events: GoogleEvent[], timezone: stri
     const startIso = String(event.start?.dateTime);
     const slot = calendarSlot(startIso, timezone);
     blocks.push({
-      id: importedBlockId(googleEventId),
+      id: importedBlockId(googleEventId, source.sourceId),
       googleEventId,
-      title: busyBlockTitle(event),
+      sourceId: source.sourceId,
+      sourceName: source.sourceName || "",
+      title: busyBlockTitle(event, source),
       week: slot.week,
       day: slot.day,
       start: slot.start,

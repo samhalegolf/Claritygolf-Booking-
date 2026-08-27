@@ -5,6 +5,7 @@ import { SETTINGS_BULK_SELECT_QUERY } from "./settings-keys.mts";
 
 export const googleCalendarScopes = [
   "https://www.googleapis.com/auth/calendar.events",
+  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
   "https://www.googleapis.com/auth/userinfo.email",
 ];
 

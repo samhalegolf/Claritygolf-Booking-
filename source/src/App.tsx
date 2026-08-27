@@ -1550,8 +1550,19 @@ type GoogleCalendarSyncStatus = {
   missingScopes?: string[];
   connectionStatus?: string;
   legacyMigrationRequired?: boolean;
+  sources?: GoogleCalendarSourceStatus[];
+  sourceListError?: string;
   ok?: boolean;
   skipped?: boolean;
+};
+type GoogleCalendarSourceStatus = {
+  id: string;
+  name: string;
+  primary: boolean;
+  hidden: boolean;
+  accessRole: string;
+  showOnClarity: boolean;
+  showLabel: boolean;
 };
 type GoogleCalendarDebugRequest = {
   method: string;
@@ -4905,6 +4916,8 @@ const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
   connectedAt: "",
   redirectUri: "",
   scope: "",
+  sources: [],
+  sourceListError: "",
 };
 
 const defaultGoogleDriveTransferStatus: GoogleDriveTransferStatus = {
@@ -7351,6 +7364,18 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       ...(status ?? {}),
       calendarId: typeof status?.calendarId === "string" && status.calendarId.trim() ? status.calendarId : "primary",
       autoSync: status?.autoSync === true,
+      sources: Array.isArray(status?.sources)
+        ? status.sources.map((source) => ({
+            id: typeof source?.id === "string" ? source.id : "",
+            name: typeof source?.name === "string" && source.name.trim() ? source.name : "Google Calendar source",
+            primary: source?.primary === true,
+            hidden: source?.hidden === true,
+            accessRole: typeof source?.accessRole === "string" ? source.accessRole : "",
+            showOnClarity: source?.showOnClarity === true,
+            showLabel: source?.showOnClarity === true && source?.showLabel !== false,
+          }))
+        : [],
+      sourceListError: typeof status?.sourceListError === "string" ? status.sourceListError : "",
     });
   }
 
@@ -17242,7 +17267,19 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       const response = await fetch("/api/google-calendar/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ calendarId: nextStatus.calendarId, autoSync: nextStatus.autoSync }),
+        body: JSON.stringify({
+          calendarId: nextStatus.calendarId,
+          autoSync: nextStatus.autoSync,
+          sourcePreferences: Object.fromEntries(
+            (nextStatus.sources || []).map((source) => [
+              source.id,
+              {
+                showOnClarity: source.showOnClarity === true,
+                showLabel: source.showOnClarity === true && source.showLabel !== false,
+              },
+            ]),
+          ),
+        }),
       });
       const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & { message?: string };
       if (response.status === 401) {
@@ -17258,6 +17295,25 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     } finally {
       setGoogleCalendarAction("idle");
     }
+  }
+
+  function updateGoogleCalendarSource(sourceId: string, updates: Partial<GoogleCalendarSourceStatus>) {
+    setGoogleCalendar((current) => ({
+      ...current,
+      sources: (current.sources || []).map((source) => {
+        if (source.id !== sourceId) return source;
+        const showOnClarity = Object.prototype.hasOwnProperty.call(updates, "showOnClarity")
+          ? updates.showOnClarity === true
+          : source.showOnClarity;
+        const showLabel = showOnClarity && (Object.prototype.hasOwnProperty.call(updates, "showLabel") ? updates.showLabel !== false : source.showLabel);
+        return {
+          ...source,
+          ...updates,
+          showOnClarity,
+          showLabel,
+        };
+      }),
+    }));
   }
 
   async function syncGoogleCalendarNow() {
@@ -27055,6 +27111,78 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       </>
                     )}
                   </div>
+                </details>
+
+                <details className="settings-subsection">
+                  <summary className="settings-subsection-title">
+                    <CalendarDays size={18} />
+                    <div>
+                      <span>Source visibility</span>
+                      <strong>
+                        {googleCalendar.sources?.length
+                          ? `${googleCalendar.sources.filter((source) => source.showOnClarity).length} of ${googleCalendar.sources.length} showing`
+                          : "Choose which Google sources Clarity respects"}
+                      </strong>
+                    </div>
+                  </summary>
+
+                  <p className="google-calendar-source-intro">
+                    Choose which Google Calendar sources appear in Clarity, and whether each visible source shows its label or
+                    just blocks the time as busy.
+                  </p>
+
+                  {googleCalendar.sourceListError ? (
+                    <p className="gcal-debug-error" role="alert">
+                      {googleCalendar.sourceListError}
+                    </p>
+                  ) : null}
+
+                  {!googleCalendar.sources?.length ? (
+                    <p className="google-calendar-source-empty">
+                      {googleCalendar.connected
+                        ? "No Google Calendar sources are available yet. If this connection was created before source access was added, reconnect Google and refresh this panel."
+                        : "Connect Google Calendar to load the available sources for this account."}
+                    </p>
+                  ) : (
+                    <div className="google-calendar-source-list">
+                      {googleCalendar.sources.map((source) => (
+                        <div className="google-calendar-source-card" key={source.id}>
+                          <div className="google-calendar-source-head">
+                            <div>
+                              <strong>{source.name}</strong>
+                              <span>{source.primary ? "Primary calendar" : source.accessRole || source.id}</span>
+                            </div>
+                            {source.hidden ? <em>Hidden in Google</em> : null}
+                          </div>
+
+                          <label className="google-calendar-source-toggle">
+                            <span>Show on Clarity</span>
+                            <input
+                              type="checkbox"
+                              checked={source.showOnClarity}
+                              disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                              onChange={(event) =>
+                                updateGoogleCalendarSource(source.id, {
+                                  showOnClarity: event.target.checked,
+                                  showLabel: event.target.checked ? source.showLabel : false,
+                                })
+                              }
+                            />
+                          </label>
+
+                          <label className={`google-calendar-source-toggle ${source.showOnClarity ? "" : "is-disabled"}`}>
+                            <span>Show label</span>
+                            <input
+                              type="checkbox"
+                              checked={source.showOnClarity && source.showLabel}
+                              disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle" || !source.showOnClarity}
+                              onChange={(event) => updateGoogleCalendarSource(source.id, { showLabel: event.target.checked })}
+                            />
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </details>
 
                 <details

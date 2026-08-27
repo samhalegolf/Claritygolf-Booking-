@@ -82,7 +82,9 @@ test("a foreign event becomes an inert block on the right slot", () => {
   assert.equal(block.start, 420);
   assert.equal(block.duration, 60);
   assert.equal(block.title, "Golf HQ lesson - Ryan Haste");
-  assert.equal(block.id, "gcal-golfhq-1");
+  assert.equal(block.id, "gcal-primary-golfhq-1");
+  assert.equal(block.sourceId, "primary");
+  assert.equal(block.sourceName, "");
 });
 
 test("the timezone decides the day, not UTC", () => {
@@ -100,6 +102,14 @@ test("the block shows what is filling the time, falling back to Busy", () => {
   assert.equal(busyBlockTitle(foreign()), "Golf HQ lesson - Ryan Haste");
   assert.equal(busyBlockTitle(foreign({ summary: "   " })), "Busy");
   assert.equal(busyBlockTitle(foreign({ summary: undefined })), "Busy");
+  assert.equal(
+    busyBlockTitle(foreign({ summary: "" }), { sourceId: "golf-hq", sourceName: "Golf HQ Lessons", showLabel: true }),
+    "Golf HQ Lessons",
+  );
+  assert.equal(
+    busyBlockTitle(foreign(), { sourceId: "golf-hq", sourceName: "Golf HQ Lessons", showLabel: false }),
+    "Busy",
+  );
 });
 
 test("a Google id is turned into a stable, safe Clarity id", () => {
@@ -109,12 +119,29 @@ test("a Google id is turned into a stable, safe Clarity id", () => {
   assert.notEqual(importedBlockId("abc123"), importedBlockId("abc124"));
   // Google ids are alphanumeric, but nothing that reaches a row id should be
   // able to carry a slash or a quote.
-  assert.equal(importedBlockId("a/b'c d"), "gcal-abcd");
+  assert.equal(importedBlockId("a/b'c d"), "gcal-primary-abcd");
+  assert.equal(importedBlockId("abc123", "Golf HQ / Lessons"), "gcal-GolfHQLessons-abc123");
 });
 
 test("a duplicate id in one page produces one block, not two fighting rows", () => {
   const blocks = busyBlocksFromGoogleEvents([foreign(), foreign()], timezone);
   assert.equal(blocks.length, 1);
+});
+
+test("source identity keeps matching event ids from different calendars separate", () => {
+  const [lesson] = busyBlocksFromGoogleEvents([foreign()], timezone, {
+    sourceId: "golf-hq-lessons",
+    sourceName: "Golf HQ - Lessons",
+    showLabel: true,
+  });
+  const [busy] = busyBlocksFromGoogleEvents([foreign()], timezone, {
+    sourceId: "golf-hq-busy",
+    sourceName: "Golf HQ - Busy",
+    showLabel: false,
+  });
+  assert.notEqual(lesson.id, busy.id);
+  assert.equal(lesson.title, "Golf HQ lesson - Ryan Haste");
+  assert.equal(busy.title, "Busy");
 });
 
 test("a zero-length or backwards event still gets a real duration", () => {
@@ -132,11 +159,11 @@ test("reconcile creates, updates and removes only what changed", () => {
   );
   const plan = planBusyBlockImport(wanted, [
     // unchanged
-    { id: "gcal-golfhq-1", week: wanted[0].week, day: wanted[0].day, start: wanted[0].start, duration: 60, title: "Golf HQ lesson - Ryan Haste" },
+    { id: "gcal-primary-golfhq-1", week: wanted[0].week, day: wanted[0].day, start: wanted[0].start, duration: 60, title: "Golf HQ lesson - Ryan Haste" },
     // no longer in Google — the lesson was cancelled there
     { id: "gcal-gone", week: 1, day: 1, start: 600, duration: 60, title: "Old" },
   ]);
-  assert.deepEqual(plan.create.map((b) => b.id), ["gcal-golfhq-2"]);
+  assert.deepEqual(plan.create.map((b) => b.id), ["gcal-primary-golfhq-2"]);
   assert.deepEqual(plan.deleteIds, ["gcal-gone"]);
   assert.equal(plan.unchanged, 1);
   assert.equal(plan.update.length, 0);
@@ -145,9 +172,9 @@ test("reconcile creates, updates and removes only what changed", () => {
 test("an event that moved is updated in place", () => {
   const wanted = busyBlocksFromGoogleEvents([foreign()], timezone);
   const plan = planBusyBlockImport(wanted, [
-    { id: "gcal-golfhq-1", week: wanted[0].week, day: wanted[0].day, start: 900, duration: 60, title: "Golf HQ lesson - Ryan Haste" },
+    { id: "gcal-primary-golfhq-1", week: wanted[0].week, day: wanted[0].day, start: 900, duration: 60, title: "Golf HQ lesson - Ryan Haste" },
   ]);
-  assert.deepEqual(plan.update.map((b) => b.id), ["gcal-golfhq-1"]);
+  assert.deepEqual(plan.update.map((b) => b.id), ["gcal-primary-golfhq-1"]);
   assert.equal(plan.create.length, 0);
   assert.equal(plan.deleteIds.length, 0);
 });
@@ -155,7 +182,7 @@ test("an event that moved is updated in place", () => {
 test("a retitled event is an update, so the block does not go stale", () => {
   const wanted = busyBlocksFromGoogleEvents([foreign({ summary: "Moved to Bay 3" })], timezone);
   const plan = planBusyBlockImport(wanted, [
-    { id: "gcal-golfhq-1", week: wanted[0].week, day: wanted[0].day, start: wanted[0].start, duration: 60, title: "Golf HQ lesson - Ryan Haste" },
+    { id: "gcal-primary-golfhq-1", week: wanted[0].week, day: wanted[0].day, start: wanted[0].start, duration: 60, title: "Golf HQ lesson - Ryan Haste" },
   ]);
   assert.deepEqual(plan.update.map((b) => b.title), ["Moved to Bay 3"]);
 });
