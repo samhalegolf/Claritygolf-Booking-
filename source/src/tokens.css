@@ -52,6 +52,11 @@
      opacity, because it sits on tinted rows as often as on white and an
      opacity would give two different greys for one state. */
   --c-text-disabled: #a8a5a0;
+  /* Tinted fills carrying --c-success-text / --c-danger on a pill or a hover.
+     Both values were already in styles.css as literals; named here so new code
+     has somewhere to read them from. */
+  --c-success-wash: #eef8ef;
+  --c-danger-wash: #fff3f0;
 
   /* --- Dark: parked until a trigger asks for it -------------------------- */
   /* Held as their own names rather than repeated inside each trigger block,
@@ -78,6 +83,8 @@
   --dark-pencil: rgba(244, 247, 242, 0.5);
   --dark-pencil-hover: rgba(244, 247, 242, 0.76);
   --dark-text-disabled: rgba(244, 247, 242, 0.38);
+  --dark-success-wash: rgba(183, 224, 189, 0.14);
+  --dark-danger-wash: rgba(255, 138, 138, 0.14);
   /* The wall's surfaces, unlike the bricks laid into it, are surfaces: mortar
      and unfilled slots follow the page. */
   --dark-mortar: #14180f;
@@ -198,6 +205,8 @@
   --c-pencil: var(--dark-pencil);
   --c-pencil-hover: var(--dark-pencil-hover);
   --c-text-disabled: var(--dark-text-disabled);
+  --c-success-wash: var(--dark-success-wash);
+  --c-danger-wash: var(--dark-danger-wash);
   --c-mortar: var(--dark-mortar);
   --c-brick-blank: var(--dark-brick-blank);
   --c-brick-blank-border: var(--dark-brick-blank-border);
@@ -230,6 +239,8 @@
     --c-pencil: var(--dark-pencil);
     --c-pencil-hover: var(--dark-pencil-hover);
     --c-text-disabled: var(--dark-text-disabled);
+      --c-success-wash: var(--dark-success-wash);
+    --c-danger-wash: var(--dark-danger-wash);
     --c-mortar: var(--dark-mortar);
     --c-brick-blank: var(--dark-brick-blank);
     --c-brick-blank-border: var(--dark-brick-blank-border);

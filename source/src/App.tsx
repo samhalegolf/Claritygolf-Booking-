@@ -16,8 +16,10 @@ import {
   Copy,
   Clock,
   Download,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   LayoutGrid,
   List,
   ClipboardList,
@@ -5342,7 +5344,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     emptyInvoiceDraft(getStoredCoachAccount().invoiceSettings),
   );
   const [invoiceCustomerSearch, setInvoiceCustomerSearch] = useState("");
-  const [showInvoiceLinePicker, setShowInvoiceLinePicker] = useState(false);
+  // The invoice line whose discount drawer is open, or "" for none. One at a
+  // time: the drawer is a detour off a row, not a second column of the table.
+  const [openInvoiceLineId, setOpenInvoiceLineId] = useState("");
   // Invoice editor lifecycle. invoiceEditing = fields editable (new invoices start
   // editable, saved ones open read-only). openedInvoiceStatus/SentAt describe the
   // saved invoice currently open (draft | sent | paid | overdue | void; sentAt set
@@ -6690,6 +6694,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   }, [pullableCompletedAppointments, invoicePayerBookingIds]);
   const {
     lineSubtotal: invoiceLineSubtotal,
+    lineDiscountTotal: invoiceLineDiscountTotal,
     discountTotal: invoiceDiscountTotal,
     taxableSubtotal: invoiceTaxableSubtotal,
     taxRatePct: invoiceTaxRatePct,
@@ -6743,7 +6748,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       // Retiring something is meant to take it out of circulation. It stayed
       // offered here, at whatever price it was retired on.
       if (item.active === false) return false;
-      if (!invoiceSearchTerm) return false;
+      // The catalog is a standing card in the invoice rail now rather than a
+      // panel you open by typing, so an empty search lists what's on offer
+      // instead of nothing. Typing still narrows it.
+      if (!invoiceSearchTerm) return true;
       return [item.name, item.description, item.kind].join(" ").toLowerCase().includes(invoiceSearchTerm);
     })
     .slice(0, 8);
@@ -14373,6 +14381,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     return line.discountKind === "amount" || line.discountKind === "percent" ? line.discountKind : "";
   }
 
+  // "Add a line" starts a blank line you type into on the invoice itself. It
+  // used to seed the description from lineSearch and clear it, which made sense
+  // while lineSearch was the text in a pop-open picker; it is the standing
+  // catalog search in the rail now, so taking it would empty that search and
+  // put the coach's search terms on the invoice.
   function addManualInvoiceLine() {
     markInvoiceDraftDirty();
     setInvoiceDraft((current) => ({
@@ -14382,7 +14395,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         {
           id: `line-${Date.now()}`,
           source: "manual",
-          description: current.lineSearch.trim(),
+          description: "",
           quantity: 1,
           unitPrice: 0,
           taxRate: invoiceSettings.taxRate,
@@ -14391,9 +14404,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           discountAmount: 0,
         },
       ],
-      lineSearch: "",
     }));
-    setShowInvoiceLinePicker(false);
   }
 
   function removeInvoiceLine(id: string) {
@@ -14406,9 +14417,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
   function addCatalogInvoiceLine(item: BillingCatalogItem) {
     markInvoiceDraftDirty();
+    // lineSearch is left alone: it is the rail's standing catalog search, and
+    // wiping it after every add would make adding two things in a row a retype.
     setInvoiceDraft((current) => ({
       ...current,
-      lineSearch: "",
       lines: [
         ...current.lines.filter((line) => line.description.trim() || line.unitPrice > 0),
         {
@@ -14425,7 +14437,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         },
       ],
     }));
-    setShowInvoiceLinePicker(false);
   }
 
   // --- Billing backend (billing-api.mts) --------------------------------
@@ -15699,7 +15710,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         },
       ],
     }));
-    setShowInvoiceLinePicker(false);
     setBillingSection("new-invoice");
   }
 
@@ -16054,7 +16064,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   function resetInvoiceDraft() {
     setInvoiceDraft(emptyInvoiceDraft(invoiceSettings, activeCoachId));
     setInvoiceCustomerSearch("");
-    setShowInvoiceLinePicker(false);
+    setOpenInvoiceLineId("");
     setActiveInvoiceId("");
     setEditingInvoiceNumber("");
     setOpenedInvoiceStatus("");
@@ -16146,8 +16156,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       const invoice = data.invoice as Record<string, unknown>;
       setInvoiceDraft(invoiceRecordToDraft(invoice));
       setInvoiceCustomerSearch("");
-      setShowInvoiceLinePicker(false);
-      setSelectedDiscountPresetId("");
+      setOpenInvoiceLineId("");
+        setSelectedDiscountPresetId("");
       setDiscountEditing(false);
       setDatesEditing(false);
       setNewInvoiceCustomer(null);
@@ -20759,8 +20769,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const selectedDetails = selectedGroupSessionDetails
     ? selectedGroupSessionDetails
     : selectedAppointmentDetails;
-  // Shared by both "ready to pull" lists (Dashboard and the New Invoice side
-  // panel) so they can never drift apart.
+  // The Dashboard's "ready to pull" filter. The New Invoice rail shows the same
+  // bookingPullFilter as chips rather than a select, so the two controls look
+  // different but read and write one piece of state - they can disagree about
+  // shape, never about what they are showing.
   const pullFilterControl = (
     <label className="settings-field pull-filter-field">
       <span>Show</span>
@@ -24050,591 +24062,15 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
             )}
 
             {billingSection === "new-invoice" && (
-              <div className="billing-builder invoice-builder-layout">
-                <article className="invoice-document-card" aria-label="Invoice editor">
-                  <div className="invoice-document-header">
-                    <div className="invoice-brand-block">
-                      {brandSettings.logoPreview && (
-                        <div className="invoice-logo-mark">
-                          <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
-                        </div>
-                      )}
-                      <div>
-                        <strong>{coachAccount.businessName}</strong>
-                        <span>{coachAccount.contactEmail}</span>
-                        {invoiceSettings.businessAddress && <span>{invoiceSettings.businessAddress}</span>}
-                      </div>
-                    </div>
-                    <div className="invoice-title-block">
-                      <span>Invoice</span>
-                      <h2>{activeInvoiceNumber}</h2>
-                      <em>{invoiceEditing && isNewInvoice ? "Draft" : openedInvoiceStateLabel}</em>
-                    </div>
-                  </div>
-
-
-                  {invoiceSettings.headerText && <p className="invoice-template-note">{invoiceSettings.headerText}</p>}
-
-                  <section className="invoice-section">
-                    <div className="invoice-section-heading">
-                      <span>Customer</span>
-                    </div>
-                    {hasInvoiceCustomer ? (
-                      <div className="invoice-customer-settled">
-                        <div>
-                          <span>Bill to</span>
-                          <strong>{invoiceDraft.payerName || invoiceDraft.payerEmail}</strong>
-                          {invoiceDraft.payerEmail && <em>{invoiceDraft.payerEmail}</em>}
-                          {invoiceDraft.payerPhone && <em>{invoiceDraft.payerPhone}</em>}
-                        </div>
-                        {!invoiceLocked && (
-                          <button className="invoice-inline-edit" onClick={clearInvoiceCustomer} type="button" aria-label="Change customer">
-                            <Pencil size={13} />
-                            Change
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="invoice-customer-search">
-                        {newInvoiceCustomer ? (
-                          <div className="invoice-new-customer">
-                            <label className="settings-field">
-                              <span>Name</span>
-                              <input
-                                className="w-name"
-                                value={newInvoiceCustomer.name}
-                                onChange={(event) => updateNewInvoiceCustomer("name", event.target.value)}
-                                placeholder="Customer name"
-                                autoFocus
-                              />
-                            </label>
-                            <label className="settings-field">
-                              <span>Email</span>
-                              <input
-                                className="w-email"
-                                value={newInvoiceCustomer.email}
-                                onChange={(event) => updateNewInvoiceCustomer("email", event.target.value)}
-                                placeholder="name@example.com"
-                                type="email"
-                              />
-                            </label>
-                            <label className="settings-field">
-                              <span>Phone</span>
-                              <input
-                                className="w-name"
-                                value={newInvoiceCustomer.phone}
-                                onChange={(event) => updateNewInvoiceCustomer("phone", event.target.value)}
-                                placeholder="Optional"
-                              />
-                            </label>
-                            <div className="invoice-new-customer-actions">
-                              {/* Rule 10: Cancel is text. A box around it gives
-                                  backing out the same weight as adding the
-                                  client, which is what the form is for. */}
-                              <button className="text-button" onClick={() => setNewInvoiceCustomer(null)} type="button">
-                                Cancel
-                              </button>
-                              <button
-                                className="primary-button"
-                                onClick={saveNewInvoiceCustomer}
-                                disabled={newInvoiceCustomerSaving}
-                                type="button"
-                              >
-                                {newInvoiceCustomerSaving ? "Adding..." : "Add to clients"}
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <label className="settings-field">
-                              <span>Find or create customer</span>
-                              <input
-                                className="w-prose"
-                                value={invoiceCustomerSearch}
-                                onChange={(event) => setInvoiceCustomerSearch(event.target.value)}
-                                placeholder="Search name, email, or phone"
-                              />
-                            </label>
-                            {(invoiceCustomerMatches.length > 0 || invoiceCustomerCreateLabel) && (
-                              <div className="invoice-customer-results">
-                                {invoiceCustomerMatches.map((person) => (
-                                  <button key={person.id} onClick={() => selectInvoiceCustomer(person)} type="button">
-                                    <span>
-                                      <strong>{person.name}</strong>
-                                      <em>{person.email || person.phone || "No contact saved"}</em>
-                                    </span>
-                                    <Plus size={16} />
-                                  </button>
-                                ))}
-                                {invoiceCustomerCreateLabel && (
-                                  <button onClick={openNewInvoiceCustomer} type="button">
-                                    <span>
-                                      <strong>Create new customer</strong>
-                                      <em>{invoiceCustomerCreateLabel}</em>
-                                    </span>
-                                    <Plus size={16} />
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </section>
-
-                  <section className="invoice-section">
-                    <div className="invoice-section-heading">
-                      <span>Invoice details</span>
-                      {!invoiceLocked && (
-                        <button
-                          className="invoice-inline-edit"
-                          onClick={() => setDatesEditing((current) => !current)}
-                          type="button"
-                        >
-                          {datesEditing ? (
-                            "Done"
-                          ) : (
-                            <>
-                              <Pencil size={13} />
-                              Edit dates
-                            </>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                    <div className="invoice-form-grid invoice-detail-grid">
-                      <label className="settings-field">
-                        <span>Invoice date</span>
-                        {invoiceLocked || !datesEditing ? (
-                          <p className="settings-static-value">{formatDateForDisplay(invoiceDraft.invoiceDate)}</p>
-                        ) : (
-                          <input
-                            className="w-date"
-                            value={invoiceDraft.invoiceDate}
-                            onChange={(event) => updateInvoiceDraft("invoiceDate", event.target.value)}
-                            type="date"
-                          />
-                        )}
-                      </label>
-                      <label className="settings-field">
-                        <span>Due date</span>
-                        {invoiceLocked || !datesEditing ? (
-                          <p className="settings-static-value">{formatDateForDisplay(invoiceDraft.dueDate)}</p>
-                        ) : (
-                          <input
-                            className="w-date"
-                            value={invoiceDraft.dueDate}
-                            onChange={(event) => updateInvoiceDraft("dueDate", event.target.value)}
-                            type="date"
-                          />
-                        )}
-                      </label>
-                      {/* Currency is always fixed (read-only), so it's plain text, not a boxed input. */}
-                      <label className="settings-field">
-                        <span>Currency</span>
-                        <p className="settings-static-value">{invoiceSettings.currency}</p>
-                      </label>
-                      <label className="settings-field">
-                        <span>Reference</span>
-                        {invoiceLocked ? (
-                          <p className="settings-static-value">{invoiceDraft.reference || "—"}</p>
-                        ) : (
-                          <input
-                            className="w-name"
-                            value={invoiceDraft.reference}
-                            onChange={(event) => updateInvoiceDraft("reference", event.target.value)}
-                            placeholder="Optional"
-                          />
-                        )}
-                      </label>
-                    </div>
-                  </section>
-
-                  <div className="invoice-custom-fields">
-                    {invoiceSettings.customFields
-                      .filter((field) => field.placement === "header" || field.placement === "bill-to")
-                      .map((field) => (
-                        <span key={field.id}>
-                          <strong>{field.label}</strong>
-                          {field.value || "Not set"}
-                        </span>
-                      ))}
-                  </div>
-
-                  <section className="invoice-section invoice-items-section">
-                    <div className="invoice-section-heading invoice-items-heading">
-                      <div>
-                        <span>Items</span>
-                        <strong>
-                          {invoiceDraft.lines.length
-                            ? `${invoiceDraft.lines.length} line item${invoiceDraft.lines.length === 1 ? "" : "s"}`
-                            : "No items yet"}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <div className="invoice-document-lines" aria-label="Invoice lines">
-                      {invoiceDraft.lines.map((line) => {
-                        // The rule: while the invoice is being edited, every
-                        // line shows the boxed form and stays fully editable -
-                        // including its description and unit price - no matter
-                        // where it came from (manual, catalog, package, or pulled
-                        // from a booking). Pulled-in prices are only a starting
-                        // point; the coach can always override them here. A line
-                        // reads as a plain, read-only invoice line only once the
-                        // invoice itself is locked (a saved invoice opened for
-                        // viewing, before entering edit/revise mode).
-                        const lineLocked = invoiceLocked;
-                        const linePlain = lineLocked;
-                        if (linePlain) {
-                          return (
-                            <div className="invoice-plain-line" key={line.id}>
-                              <div className="invoice-plain-line-main">
-                                <span className="invoice-plain-line-desc">{line.description}</span>
-                                <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
-                              </div>
-                              <div className="invoice-plain-line-sub">
-                                <span>
-                                  {line.quantity} × {formatMoney(line.unitPrice, invoiceSettings.currency)}
-                                  {lineDiscountAmount(line) > 0
-                                    ? ` − ${formatMoney(lineDiscountAmount(line), invoiceSettings.currency)}${
-                                        line.discountKind === "percent" ? ` (${line.discountValue}%)` : ""
-                                      } discount`
-                                    : ""}
-                                </span>
-                                {!lineLocked && (
-                                  <button
-                                    className="invoice-plain-line-remove"
-                                    onClick={() => removeInvoiceLine(line.id)}
-                                    aria-label="Remove line item"
-                                    title="Remove line item"
-                                    type="button"
-                                  >
-                                    <Trash2 size={14} />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        }
-                        return (
-                          <div className="invoice-document-line-row" key={line.id}>
-                            <label className="settings-field">
-                              <span>Line item</span>
-                              <input
-                                value={line.description}
-                                onChange={(event) => updateInvoiceLine(line.id, "description", event.target.value)}
-                                placeholder="Lesson, package, product, or service"
-                              />
-                            </label>
-                            <label className="settings-field">
-                              <span>Qty</span>
-                              <input
-                                className="w-time"
-                                value={line.quantity}
-                                inputMode="numeric"
-                                onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
-                                type="text"
-                              />
-                            </label>
-                            <label className="settings-field">
-                              <span>Unit price</span>
-                              <div className="affixed-field" data-prefix={currencySymbol(invoiceSettings.currency)}>
-                                <input
-                                  value={line.unitPrice}
-                                  inputMode="decimal"
-                                  onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
-                                  type="text"
-                                />
-                              </div>
-                            </label>
-                            <label className="settings-field invoice-line-discount">
-                              <span>Discount</span>
-                              <select
-                                value={invoiceLineDiscountSelection(line)}
-                                onChange={(event) => setInvoiceLineDiscount(line.id, event.target.value)}
-                                title="Optional discount for this line"
-                              >
-                                <option value="">No discount</option>
-                                {discountPresets
-                                  .filter((preset) => preset.active)
-                                  .map((preset) => (
-                                    <option key={preset.id} value={`preset:${preset.id}`}>
-                                      {preset.name} (
-                                      {preset.discountType === "percentage"
-                                        ? `${preset.value}%`
-                                        : formatMoney(preset.value, invoiceSettings.currency)}
-                                      )
-                                    </option>
-                                  ))}
-                                <option value="amount">Custom amount</option>
-                                <option value="percent">Custom %</option>
-                              </select>
-                              {(line.discountKind === "amount" || line.discountKind === "percent") && !line.discountPresetId && (
-                                <div
-                                  className="affixed-field"
-                                  data-prefix={line.discountKind === "amount" ? `-${currencySymbol(invoiceSettings.currency)}` : undefined}
-                                  data-suffix={line.discountKind === "percent" ? "%" : undefined}
-                                >
-                                  <input
-                                    value={line.discountValue || 0}
-                                    inputMode="decimal"
-                                    onChange={(event) => updateInvoiceLine(line.id, "discountValue", parseMoneyInput(event.target.value))}
-                                    type="text"
-                                    aria-label={line.discountKind === "percent" ? "Discount percent" : "Discount amount"}
-                                  />
-                                </div>
-                              )}
-                            </label>
-                            <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
-                            <button
-                              className="invoice-line-delete-tab"
-                              onClick={() => removeInvoiceLine(line.id)}
-                              aria-label="Delete line item"
-                              title="Delete line item"
-                              type="button"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        );
-                      })}
-                      {!invoiceDraft.lines.length && (
-                        <div className="invoice-empty-line">
-                          <span>Use Add line item or pull a completed booking.</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="invoice-add-line">
-                      <button
-                        className="outline-button"
-                        onClick={() => {
-                          updateInvoiceDraft("lineSearch", "");
-                          setShowInvoiceLinePicker((current) => !current);
-                        }}
-                        type="button"
-                      >
-                        <Plus size={16} />
-                        Add line item
-                      </button>
-                    </div>
-
-                    {showInvoiceLinePicker && (
-                      <div className="invoice-line-picker">
-                        <div className="invoice-line-search">
-                          <label className="settings-field">
-                            <span>Find or add item</span>
-                            <input
-                              className="w-prose"
-                              value={invoiceDraft.lineSearch}
-                              onChange={(event) => updateInvoiceDraft("lineSearch", event.target.value)}
-                              placeholder="Search lesson types, packages, products, services..."
-                              autoFocus
-                            />
-                          </label>
-                          <button className="outline-button" onClick={addManualInvoiceLine} type="button">
-                            <Plus size={16} />
-                            Add Custom
-                          </button>
-                          <button
-                            className="icon-button"
-                            onClick={() => {
-                              updateInvoiceDraft("lineSearch", "");
-                              setShowInvoiceLinePicker(false);
-                            }}
-                            aria-label="Close line item search"
-                            type="button"
-                          >
-                            <X size={16} />
-                          </button>
-                        </div>
-
-                        {visibleInvoiceCatalogOptions.length > 0 && (
-                          <div className="invoice-option-list">
-                            {visibleInvoiceCatalogOptions.map((item) => (
-                              <button key={item.id} onClick={() => addCatalogInvoiceLine(item)} type="button">
-                                <span>
-                                  <strong>{item.name}</strong>
-                                  <em>
-                                    {item.kind.replace("-", " ")} - {formatMoney(item.price, invoiceSettings.currency)}
-                                  </em>
-                                </span>
-                                <Plus size={16} />
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </section>
-
-                  <section className="invoice-section invoice-settlement-section">
-                    <div className="invoice-note-block">
-                      <label className="settings-field">
-                        <span>Customer note</span>
-                        {invoiceLocked ? (
-                          <p className="settings-static-value">{invoiceDraft.message || "—"}</p>
-                        ) : (
-                          <textarea
-                            className="w-prose"
-                            value={invoiceDraft.message}
-                            onChange={(event) => updateInvoiceDraft("message", event.target.value)}
-                            rows={3}
-                          />
-                        )}
-                      </label>
-                      {invoiceSettings.paymentInstructions ||
-                      invoiceSettings.bankAccount ||
-                      invoiceSettings.taxNumber ||
-                      invoiceSettings.customFields.some((field) => field.placement === "payment") ? (
-                        <div className="invoice-payment-block">
-                          <span>Payment</span>
-                          {invoiceSettings.paymentInstructions && <p>{invoiceSettings.paymentInstructions}</p>}
-                          {invoiceSettings.bankAccount && <strong>{invoiceSettings.bankAccount}</strong>}
-                          {invoiceSettings.taxNumber && <em>{invoiceSettings.taxName} No. {invoiceSettings.taxNumber}</em>}
-                          {invoiceSettings.customFields
-                            .filter((field) => field.placement === "payment")
-                            .map((field) => (
-                              <em key={field.id}>
-                                {field.label}: {field.value || "Not set"}
-                              </em>
-                            ))}
-                        </div>
-                      ) : !invoiceLocked ? (
-                        <button className="invoice-add-detail" onClick={openInvoiceCoachSettings} type="button">
-                          <Plus size={15} />
-                          Add payment details
-                        </button>
-                      ) : null}
-                    </div>
-
-                    <div className="invoice-total-box">
-                      {!invoiceLocked &&
-                        (discountSet && !discountEditing ? (
-                          // A set discount is plain text (the amount shows in the
-                          // totals below); the boxed controls only appear while editing.
-                          <div className="invoice-discount-set">
-                            <span>Discount applied</span>
-                            <div className="invoice-discount-set-actions">
-                              <button className="text-button" onClick={() => setDiscountEditing(true)} type="button">
-                                Change
-                              </button>
-                              <button className="text-button" onClick={clearInvoiceDiscount} type="button">
-                                Remove
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="invoice-discount-controls">
-                            {discountPresets.some((preset) => preset.active) && (
-                              <label className="settings-field invoice-discount-preset">
-                                <span>Preset discount</span>
-                                <select
-                                  value={selectedDiscountPresetId}
-                                  onChange={(event) => applyDiscountPreset(event.target.value)}
-                                >
-                                  <option value="">None (manual)</option>
-                                  {discountPresets
-                                    .filter((preset) => preset.active)
-                                    .map((preset) => (
-                                      <option key={preset.id} value={preset.id}>
-                                        {preset.name} ({preset.discountType === "percentage" ? `${preset.value}%` : formatMoney(preset.value, invoiceSettings.currency)})
-                                      </option>
-                                    ))}
-                                </select>
-                              </label>
-                            )}
-                            <label className="settings-field">
-                              <span>Discount / coupon</span>
-                              <input
-                                className="w-name"
-                                value={invoiceDraft.discountLabel}
-                                onFocus={() => setDiscountEditing(true)}
-                                onChange={(event) => updateInvoiceDraft("discountLabel", event.target.value)}
-                                placeholder="Optional"
-                              />
-                            </label>
-                            <label className="settings-field">
-                              <span>Amount</span>
-                              <div className="affixed-field" data-prefix={`-${currencySymbol(invoiceSettings.currency)}`}>
-                                <input
-                                  value={invoiceDraft.discountAmount}
-                                  inputMode="decimal"
-                                  onFocus={() => setDiscountEditing(true)}
-                                  onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
-                                  type="text"
-                                />
-                              </div>
-                            </label>
-                            {discountSet && (
-                              <button
-                                className="outline-button small-action invoice-discount-done"
-                                onClick={() => setDiscountEditing(false)}
-                                type="button"
-                              >
-                                Done
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      {!invoiceLocked && (
-                        <div className="invoice-tax-toggle" role="group" aria-label={`${invoiceSettings.taxName} handling`}>
-                          <button
-                            className={invoiceDraft.taxInclusive ? "" : "active"}
-                            onClick={() => updateInvoiceDraft("taxInclusive", false)}
-                            type="button"
-                          >
-                            {invoiceSettings.taxName} not included
-                          </button>
-                          <button
-                            className={invoiceDraft.taxInclusive ? "active" : ""}
-                            onClick={() => updateInvoiceDraft("taxInclusive", true)}
-                            type="button"
-                          >
-                            {invoiceSettings.taxName} included
-                          </button>
-                        </div>
-                      )}
-                      <div className="invoice-total-lines">
-                        <span>
-                          <em>Subtotal</em>
-                          <strong>{formatMoney(invoiceLineSubtotal, invoiceSettings.currency)}</strong>
-                        </span>
-                        {(invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim()) && (
-                          <span>
-                            <em>{invoiceDiscountLabel}</em>
-                            <strong>-{formatMoney(invoiceDiscountTotal, invoiceSettings.currency)}</strong>
-                          </span>
-                        )}
-                        <span>
-                          <em>
-                            {invoiceSettings.taxName} ({invoiceSettings.taxRate}%){invoiceDraft.taxInclusive ? " incl" : ""}
-                          </em>
-                          <strong>{formatMoney(invoiceTaxTotal, invoiceSettings.currency)}</strong>
-                        </span>
-                        <span className="invoice-grand-total">
-                          <em>Total</em>
-                          <strong>{formatMoney(invoiceTotal, invoiceSettings.currency)}</strong>
-                        </span>
-                      </div>
-                    </div>
-                  </section>
-
-                  <div className="invoice-custom-fields invoice-footer-fields">
-                    {invoiceSettings.customFields
-                      .filter((field) => field.placement === "footer")
-                      .map((field) => (
-                        <span key={field.id}>
-                          <strong>{field.label}</strong>
-                          {field.value || "Not set"}
-                        </span>
-                      ))}
-                  </div>
-                  <p className="invoice-footer">{invoiceSettings.footerText}</p>
-
-                  <div className="invoice-actions invoice-bottom-actions">
+              /* The invoice as a sheet of paper on a mat, with the things you
+                 pull onto it in a rail alongside. Everything you can type into
+                 is dashed; everything solid came from the template, so the
+                 sheet says which of its own lines are yours without a single
+                 field label. */
+              <div className="invoice-paper-layout">
+                <div className="ip-actionbar">
+                  <p>You are typing on the invoice itself. Dashed is editable; everything else comes from your template.</p>
+                  <div className="ip-actionbar-buttons">
                     {activeInvoiceId && (
                       /* Rule 10: Delete and Void are text, not a filled red
                          button sitting in the same row as Publish & Send. */
@@ -24645,31 +24081,31 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     {invoiceEditing ? (
                       isRevisingInvoice ? (
                         <>
-                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
-                            {invoiceIssueState === "saving" ? "Saving..." : "Save"}
-                          </button>
-                          <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
-                            <Send size={16} />
-                            Save + Send
-                          </button>
                           {activeInvoiceId && (
                             <button className="outline-button" onClick={downloadInvoicePdf} type="button">
                               <Download size={16} />
                               Download PDF
                             </button>
                           )}
+                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
+                            {invoiceIssueState === "saving" ? "Saving..." : "Save"}
+                          </button>
+                          <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
+                            <Mail size={16} />
+                            Save &amp; email
+                          </button>
                         </>
                       ) : (
                         <>
                           <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
-                            {invoiceIssueState === "saving" ? "Saving..." : "Save Draft"}
+                            {invoiceIssueState === "saving" ? "Saving..." : "Save draft"}
                           </button>
                           <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">
-                            Publish Invoice
+                            Publish
                           </button>
                           <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
-                            <Send size={16} />
-                            Publish &amp; Send
+                            <Mail size={16} />
+                            Publish &amp; email
                           </button>
                         </>
                       )
@@ -24683,8 +24119,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           Publish
                         </button>
                         <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
-                          <Send size={16} />
-                          Publish &amp; Send
+                          <Mail size={16} />
+                          Publish &amp; email
                         </button>
                       </>
                     ) : (
@@ -24692,16 +24128,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                         <button className="outline-button" onClick={editOpenedInvoice} type="button">
                           <Pencil size={16} />
                           Edit
-                        </button>
-                        <button
-                          className="primary-button"
-                          disabled={invoiceSendState === "sending"}
-                          onClick={sendOpenedInvoice}
-                          type="button"
-                          title={openedInvoiceSentAt ? "Email this invoice to the customer again" : "Email this invoice to the customer"}
-                        >
-                          <Send size={16} />
-                          {invoiceSendState === "sending" ? "Sending..." : openedInvoiceSentAt ? "Resend" : "Send"}
                         </button>
                         <button className="outline-button" onClick={downloadInvoicePdf} type="button">
                           <Download size={16} />
@@ -24723,105 +24149,690 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             </button>
                           </>
                         )}
+                        <button
+                          className="primary-button"
+                          disabled={invoiceSendState === "sending"}
+                          onClick={sendOpenedInvoice}
+                          type="button"
+                          title={openedInvoiceSentAt ? "Email this invoice to the customer again" : "Email this invoice to the customer"}
+                        >
+                          <Send size={16} />
+                          {invoiceSendState === "sending" ? "Sending..." : openedInvoiceSentAt ? "Resend" : "Send"}
+                        </button>
                       </>
                     )}
                   </div>
-                </article>
+                </div>
 
-                <aside className="invoice-side-panel">
-                  <section className="data-card completed-bookings-card">
-                    <div className="data-card-header">
-                      <div>
-                        <span>Calendar Pull</span>
-                        <h2>Completed bookings</h2>
-                      </div>
-                      <CalendarDays size={24} />
-                    </div>
-                    <div className="ready-to-pull-range">
-                      {pullRangeEditing ? (
-                        <>
-                          <label className="settings-field">
-                            <span>From</span>
-                            <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
-                          </label>
-                          <label className="settings-field">
-                            <span>To</span>
-                            <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
-                          </label>
-                          <div className="pull-range-actions">
-                            <button className="invoice-inline-edit" onClick={resetPullRange} type="button">
-                              Reset to auto
-                            </button>
-                            <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">
-                              Done
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="pull-range-summary">
-                          <span>
-                            {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : "Earliest"} → {formatDateForDisplay(effectivePullTo)}
+                <div className="ip-grid">
+                  <div className="ip-mat">
+                    <article className="ip-paper" aria-label="Invoice editor">
+                      <header className="ip-paper-head">
+                        {brandSettings.logoPreview && (
+                          <span className="ip-logo">
+                            <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
                           </span>
-                          <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label="Edit pull range">
-                            <Pencil size={13} />
-                            Edit
-                          </button>
+                        )}
+                        <div className="ip-issuer">
+                          <strong>{coachAccount.businessName}</strong>
+                          <span>
+                            {invoiceSettings.businessAddress || coachAccount.contactEmail}
+                            {invoiceSettings.taxNumber && ` · ${invoiceSettings.taxName} ${invoiceSettings.taxNumber}`}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                    {pullFilterControl}
-                    <div className="completed-booking-list">
-                      {calendarPullRangeSorted.length ? (
-                        calendarPullRangeSorted.map((item) => {
-                          const service = itemService(item, services);
-                          const days = buildWeekDays(itemWeek(item));
-                          const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
-                          // A counter payment is flagged but does not disable the
-                          // row - the lesson can be paid at the till and still be
-                          // invoiced. See addCompletedBookingLine.
-                          const posPayment = posPaidBookings[item.id];
-                          const matchesPayer = invoicePayerBookingIds.has(item.id);
-                          return (
+                        <div className="ip-issue-meta">
+                          <span
+                            className={`invoice-status-pill invoice-status-${
+                              invoiceEditing && isNewInvoice
+                                ? "draft"
+                                : openedInvoiceStatus === "sent" && !openedInvoiceSentAt
+                                  ? "published"
+                                  : openedInvoiceStatus || "draft"
+                            }`}
+                          >
+                            {invoiceEditing && isNewInvoice ? "Draft" : openedInvoiceStateLabel}
+                          </span>
+                          <strong>{activeInvoiceNumber}</strong>
+                          {invoiceLocked || !datesEditing ? (
+                            <>
+                              <span>Issued {formatDateForDisplay(invoiceDraft.invoiceDate)}</span>
+                              <span>Due {formatDateForDisplay(invoiceDraft.dueDate)}</span>
+                              {!invoiceLocked && (
+                                <button className="invoice-inline-edit" onClick={() => setDatesEditing(true)} type="button">
+                                  <Pencil size={13} />
+                                  Edit dates
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <label className="ip-date-field">
+                                <span>Issued</span>
+                                <input
+                                  className="ip-dash"
+                                  value={invoiceDraft.invoiceDate}
+                                  onChange={(event) => updateInvoiceDraft("invoiceDate", event.target.value)}
+                                  type="date"
+                                />
+                              </label>
+                              <label className="ip-date-field">
+                                <span>Due</span>
+                                <input
+                                  className="ip-dash"
+                                  value={invoiceDraft.dueDate}
+                                  onChange={(event) => updateInvoiceDraft("dueDate", event.target.value)}
+                                  type="date"
+                                />
+                              </label>
+                              <button className="invoice-inline-edit" onClick={() => setDatesEditing(false)} type="button">
+                                Done
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </header>
+
+                      {invoiceSettings.headerText && <p className="ip-template-note">{invoiceSettings.headerText}</p>}
+
+                      <div className="ip-parties">
+                        <div className="ip-party">
+                          <span className="ip-label">Bill to</span>
+                          {hasInvoiceCustomer ? (
                             <button
-                              key={item.id}
-                              className={`${alreadyInvoiced ? "already-invoiced" : ""}${matchesPayer ? " for-billing-client" : ""}`.trim()}
-                              disabled={alreadyInvoiced}
-                              onClick={() => addCompletedBookingLine(item)}
+                              className="ip-payer ip-dash"
+                              onClick={invoiceLocked ? undefined : clearInvoiceCustomer}
+                              disabled={invoiceLocked}
+                              title="Pick a different client"
                               type="button"
                             >
                               <span>
-                                <strong>
-                                  {item.client || item.title}
-                                  {matchesPayer && <span className="pull-billing-flag">Billing client</span>}
-                                </strong>
-                                <em>
-                                  {service?.name ?? "Lesson"} - {days[item.day].label}, {formatRange(item.start, item.duration)}
-                                </em>
+                                <strong>{invoiceDraft.payerName || invoiceDraft.payerEmail}</strong>
+                                <em>{invoiceDraft.payerEmail || invoiceDraft.payerPhone || "No contact saved"}</em>
                               </span>
-                              {alreadyInvoiced ? (
-                                <em>Already invoiced</em>
-                              ) : (
-                                <>
-                                  {posPayment && (
-                                    <em className="pull-paid-flag">
-                                      Paid at POS - {formatMoney(posPayment.amount, posPayment.currency)}
-                                    </em>
-                                  )}
-                                  <Plus size={16} />
-                                </>
-                              )}
+                              {!invoiceLocked && <User size={13} />}
                             </button>
-                          );
-                        })
-                      ) : completedAppointments.length ? (
-                        <p>No completed bookings in this date range.</p>
-                      ) : (
-                        <p>Mark bookings completed from the calendar to pull them into invoices.</p>
-                      )}
-                    </div>
-                  </section>
+                          ) : newInvoiceCustomer ? (
+                            <div className="ip-new-customer">
+                              <label className="settings-field">
+                                <span>Name</span>
+                                <input
+                                  className="w-name"
+                                  value={newInvoiceCustomer.name}
+                                  onChange={(event) => updateNewInvoiceCustomer("name", event.target.value)}
+                                  placeholder="Customer name"
+                                  autoFocus
+                                />
+                              </label>
+                              <label className="settings-field">
+                                <span>Email</span>
+                                <input
+                                  className="w-email"
+                                  value={newInvoiceCustomer.email}
+                                  onChange={(event) => updateNewInvoiceCustomer("email", event.target.value)}
+                                  placeholder="name@example.com"
+                                  type="email"
+                                />
+                              </label>
+                              <label className="settings-field">
+                                <span>Phone</span>
+                                <input
+                                  className="w-name"
+                                  value={newInvoiceCustomer.phone}
+                                  onChange={(event) => updateNewInvoiceCustomer("phone", event.target.value)}
+                                  placeholder="Optional"
+                                />
+                              </label>
+                              <div className="ip-new-customer-actions">
+                                {/* Rule 10: Cancel is text. A box around it gives
+                                    backing out the same weight as adding the
+                                    client, which is what the form is for. */}
+                                <button className="text-button" onClick={() => setNewInvoiceCustomer(null)} type="button">
+                                  Cancel
+                                </button>
+                                <button
+                                  className="primary-button"
+                                  onClick={saveNewInvoiceCustomer}
+                                  disabled={newInvoiceCustomerSaving}
+                                  type="button"
+                                >
+                                  {newInvoiceCustomerSaving ? "Adding..." : "Add to clients"}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="ip-payer-search">
+                              <input
+                                className="ip-dash"
+                                value={invoiceCustomerSearch}
+                                onChange={(event) => setInvoiceCustomerSearch(event.target.value)}
+                                placeholder="Search name, email, or phone"
+                              />
+                              {(invoiceCustomerMatches.length > 0 || invoiceCustomerCreateLabel) && (
+                                <div className="ip-payer-results">
+                                  {invoiceCustomerMatches.map((person) => (
+                                    <button key={person.id} onClick={() => selectInvoiceCustomer(person)} type="button">
+                                      <span>
+                                        <strong>{person.name}</strong>
+                                        <em>{person.email || person.phone || "No contact saved"}</em>
+                                      </span>
+                                      <Plus size={14} />
+                                    </button>
+                                  ))}
+                                  {invoiceCustomerCreateLabel && (
+                                    <button onClick={openNewInvoiceCustomer} type="button">
+                                      <span>
+                                        <strong>Create new customer</strong>
+                                        <em>{invoiceCustomerCreateLabel}</em>
+                                      </span>
+                                      <Plus size={14} />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <div className="ip-party">
+                          <span className="ip-label">Reference</span>
+                          {invoiceLocked ? (
+                            <p className="settings-static-value">{invoiceDraft.reference || "—"}</p>
+                          ) : (
+                            <input
+                              className="ip-dash"
+                              value={invoiceDraft.reference}
+                              onChange={(event) => updateInvoiceDraft("reference", event.target.value)}
+                              placeholder="Add a reference"
+                            />
+                          )}
+                        </div>
+                      </div>
 
-                </aside>
+                      {invoiceSettings.customFields.some((field) => field.placement === "header" || field.placement === "bill-to") && (
+                        <div className="ip-custom-fields">
+                          {invoiceSettings.customFields
+                            .filter((field) => field.placement === "header" || field.placement === "bill-to")
+                            .map((field) => (
+                              <span key={field.id}>
+                                <strong>{field.label}</strong>
+                                {field.value || "Not set"}
+                              </span>
+                            ))}
+                        </div>
+                      )}
+
+                      <div className="ip-lines">
+                        <div className="ip-line-head">
+                          <span>Item</span>
+                          <span>Qty</span>
+                          <span>Unit</span>
+                          <span>Amount</span>
+                          <span />
+                          <span />
+                        </div>
+
+                        {invoiceDraft.lines.map((line) => {
+                          // Once the invoice is locked (a saved invoice opened for
+                          // viewing) a line reads as a printed line. While it is
+                          // being edited every line stays fully editable no matter
+                          // where it came from - a pulled-in price is a starting
+                          // point, not a fact.
+                          if (invoiceLocked) {
+                            return (
+                              <div className="ip-line ip-line-plain" key={line.id}>
+                                <span className="ip-line-desc">{line.description}</span>
+                                <span className="ip-line-qty">{line.quantity}</span>
+                                <span className="ip-line-unit">{formatMoney(line.unitPrice, invoiceSettings.currency)}</span>
+                                <span className="ip-line-amount">
+                                  <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
+                                  {lineDiscountAmount(line) > 0 && (
+                                    <em>{formatMoney(invoiceLineGross(line), invoiceSettings.currency)}</em>
+                                  )}
+                                </span>
+                                <span />
+                                <span />
+                              </div>
+                            );
+                          }
+                          const drawerOpen = openInvoiceLineId === line.id;
+                          return (
+                            <div className={`ip-line${drawerOpen ? " is-open" : ""}`} key={line.id}>
+                              <input
+                                className="ip-dash ip-line-desc"
+                                value={line.description}
+                                onChange={(event) => updateInvoiceLine(line.id, "description", event.target.value)}
+                                placeholder="What are you charging for?"
+                                aria-label="Line item"
+                              />
+                              <input
+                                className="ip-dash ip-line-qty"
+                                value={line.quantity}
+                                inputMode="numeric"
+                                onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
+                                type="text"
+                                aria-label="Quantity"
+                              />
+                              <input
+                                className="ip-dash ip-line-unit"
+                                value={line.unitPrice}
+                                inputMode="decimal"
+                                onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
+                                type="text"
+                                aria-label={`Unit price in ${invoiceSettings.currency}`}
+                              />
+                              <span className="ip-line-amount">
+                                <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
+                                {lineDiscountAmount(line) > 0 && (
+                                  <em>{formatMoney(invoiceLineGross(line), invoiceSettings.currency)}</em>
+                                )}
+                              </span>
+                              <button
+                                className="ip-line-remove"
+                                onClick={() => {
+                                  if (openInvoiceLineId === line.id) setOpenInvoiceLineId("");
+                                  removeInvoiceLine(line.id);
+                                }}
+                                title="Remove this line"
+                                aria-label="Remove this line"
+                                type="button"
+                              >
+                                <X size={14} />
+                              </button>
+                              <button
+                                className={`ip-line-toggle${drawerOpen ? " is-open" : ""}`}
+                                onClick={() => setOpenInvoiceLineId(drawerOpen ? "" : line.id)}
+                                title={drawerOpen ? "Close" : "Discount for this line"}
+                                aria-label={drawerOpen ? "Close line options" : "Discount for this line"}
+                                aria-expanded={drawerOpen}
+                                type="button"
+                              >
+                                {drawerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                              </button>
+
+                              {drawerOpen && (
+                                <div className="ip-line-drawer">
+                                  <label className="ip-drawer-field ip-drawer-money">
+                                    <span>{currencySymbol(invoiceSettings.currency)} Discount</span>
+                                    <input
+                                      className="ip-dash"
+                                      value={line.discountKind === "amount" ? line.discountValue || "" : ""}
+                                      inputMode="decimal"
+                                      onChange={(event) => {
+                                        const raw = event.target.value;
+                                        setInvoiceLineDiscount(line.id, raw ? "amount" : "");
+                                        if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
+                                      }}
+                                      placeholder="0.00"
+                                      type="text"
+                                    />
+                                  </label>
+                                  <label className="ip-drawer-field ip-drawer-percent">
+                                    <span>% Discount</span>
+                                    <input
+                                      className="ip-dash"
+                                      value={line.discountKind === "percent" ? line.discountValue || "" : ""}
+                                      inputMode="decimal"
+                                      onChange={(event) => {
+                                        const raw = event.target.value;
+                                        setInvoiceLineDiscount(line.id, raw ? "percent" : "");
+                                        if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
+                                      }}
+                                      placeholder="0"
+                                      type="text"
+                                    />
+                                  </label>
+                                  {discountPresets.some((preset) => preset.active) && (
+                                    <label className="ip-drawer-field ip-drawer-preset">
+                                      <span>Saved discount</span>
+                                      <select
+                                        className="ip-dash"
+                                        value={invoiceLineDiscountSelection(line)}
+                                        onChange={(event) => setInvoiceLineDiscount(line.id, event.target.value)}
+                                      >
+                                        <option value="">No discount</option>
+                                        {discountPresets
+                                          .filter((preset) => preset.active)
+                                          .map((preset) => (
+                                            <option key={preset.id} value={`preset:${preset.id}`}>
+                                              {preset.name} (
+                                              {preset.discountType === "percentage"
+                                                ? `${preset.value}%`
+                                                : formatMoney(preset.value, invoiceSettings.currency)}
+                                              )
+                                            </option>
+                                          ))}
+                                        <option value="amount">Custom amount</option>
+                                        <option value="percent">Custom %</option>
+                                      </select>
+                                    </label>
+                                  )}
+                                  <span className="ip-drawer-note">
+                                    One discount per line — filling one box clears the other. The invoice-wide discount below still applies on top.
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {!invoiceDraft.lines.length && (
+                          <p className="ip-lines-empty">No lines yet. Pull a lesson from the right, or start a blank one.</p>
+                        )}
+
+                        {!invoiceLocked && (
+                          <button className="ip-add-line" onClick={addManualInvoiceLine} type="button">
+                            <Plus size={14} />
+                            Add a line
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="ip-totals-wrap">
+                        <div className="ip-totals">
+                          <div className="ip-total-row">
+                            <span>Subtotal</span>
+                            <span>{formatMoney(invoiceLineSubtotal, invoiceSettings.currency)}</span>
+                          </div>
+                          {invoiceLineDiscountTotal > 0 && (
+                            <div className="ip-total-row">
+                              <span>Line discounts</span>
+                              <span>− {formatMoney(invoiceLineDiscountTotal, invoiceSettings.currency)}</span>
+                            </div>
+                          )}
+                          {invoiceLocked ? (
+                            (invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim()) && (
+                              <div className="ip-total-row">
+                                <span>{invoiceDiscountLabel}</span>
+                                <span>− {formatMoney(invoiceDiscountTotal, invoiceSettings.currency)}</span>
+                              </div>
+                            )
+                          ) : (
+                            <div className="ip-total-row ip-discount-row">
+                              {discountPresets.some((preset) => preset.active) && (
+                                <select
+                                  className="ip-dash ip-discount-preset"
+                                  value={selectedDiscountPresetId}
+                                  onChange={(event) => applyDiscountPreset(event.target.value)}
+                                  aria-label="Preset discount"
+                                >
+                                  <option value="">Manual</option>
+                                  {discountPresets
+                                    .filter((preset) => preset.active)
+                                    .map((preset) => (
+                                      <option key={preset.id} value={preset.id}>
+                                        {preset.name} (
+                                        {preset.discountType === "percentage"
+                                          ? `${preset.value}%`
+                                          : formatMoney(preset.value, invoiceSettings.currency)}
+                                        )
+                                      </option>
+                                    ))}
+                                </select>
+                              )}
+                              <input
+                                className="ip-dash ip-discount-label"
+                                value={invoiceDraft.discountLabel}
+                                onChange={(event) => updateInvoiceDraft("discountLabel", event.target.value)}
+                                placeholder="Invoice discount"
+                                aria-label="Invoice discount label"
+                              />
+                              <input
+                                className="ip-dash ip-discount-amount"
+                                value={invoiceDraft.discountAmount}
+                                inputMode="decimal"
+                                onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
+                                type="text"
+                                aria-label={`Invoice discount amount in ${invoiceSettings.currency}`}
+                              />
+                            </div>
+                          )}
+                          <div className="ip-total-row">
+                            <span>
+                              {invoiceSettings.taxName} {invoiceSettings.taxRate}%{invoiceDraft.taxInclusive ? " (included)" : ""}
+                            </span>
+                            <span>{formatMoney(invoiceTaxTotal, invoiceSettings.currency)}</span>
+                          </div>
+                          <div className="ip-total-row ip-total-grand">
+                            <span>Total {invoiceDraft.taxInclusive ? `incl. ${invoiceSettings.taxName}` : "due"}</span>
+                            <span>{formatMoney(invoiceTotal, invoiceSettings.currency)}</span>
+                          </div>
+                          {!invoiceLocked && (
+                            <div className="ip-tax-mode">
+                              <button
+                                onClick={() => updateInvoiceDraft("taxInclusive", !invoiceDraft.taxInclusive)}
+                                title={`Inclusive prices already contain ${invoiceSettings.taxName}; on top adds it to the total`}
+                                type="button"
+                              >
+                                {invoiceDraft.taxInclusive
+                                  ? `${invoiceSettings.taxName} inclusive`
+                                  : `${invoiceSettings.taxName} on top`}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="ip-note">
+                        <span className="ip-label">Note to the client</span>
+                        {invoiceLocked ? (
+                          <p className="settings-static-value">{invoiceDraft.message || "—"}</p>
+                        ) : (
+                          <textarea
+                            className="ip-dash"
+                            value={invoiceDraft.message}
+                            onChange={(event) => updateInvoiceDraft("message", event.target.value)}
+                            rows={2}
+                            placeholder="Anything you want on this one invoice"
+                          />
+                        )}
+                      </div>
+
+                      <footer className="ip-paper-foot">
+                        {invoiceSettings.paymentInstructions ||
+                        invoiceSettings.bankAccount ||
+                        invoiceSettings.taxNumber ||
+                        invoiceSettings.customFields.some((field) => field.placement === "payment") ? (
+                          <>
+                            {invoiceSettings.paymentInstructions && <span>{invoiceSettings.paymentInstructions}</span>}
+                            <em>
+                              {[
+                                invoiceSettings.bankAccount,
+                                coachAccount.businessName,
+                                invoiceSettings.taxNumber ? `${invoiceSettings.taxName} registered` : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </em>
+                            {invoiceSettings.customFields
+                              .filter((field) => field.placement === "payment")
+                              .map((field) => (
+                                <em key={field.id}>
+                                  {field.label}: {field.value || "Not set"}
+                                </em>
+                              ))}
+                          </>
+                        ) : !invoiceLocked ? (
+                          <button className="invoice-add-detail" onClick={openInvoiceCoachSettings} type="button">
+                            <Plus size={15} />
+                            Add payment details
+                          </button>
+                        ) : null}
+                        {invoiceSettings.customFields
+                          .filter((field) => field.placement === "footer")
+                          .map((field) => (
+                            <em key={field.id}>
+                              {field.label}: {field.value || "Not set"}
+                            </em>
+                          ))}
+                        {invoiceSettings.footerText && <em>{invoiceSettings.footerText}</em>}
+                      </footer>
+                    </article>
+                  </div>
+
+                  <aside className="ip-rail">
+                    <article className="ip-card">
+                      <strong className="ip-card-title">Completed lessons</strong>
+                      {/* Same bookingPullFilter the Dashboard's list reads, so the
+                          two can still never disagree about what they are showing -
+                          only the control is chips here instead of a select. */}
+                      <div className="ip-chips" role="group" aria-label="Show completed bookings">
+                        {(
+                          [
+                            ["all", "All"],
+                            ["unpaid", "Unpaid"],
+                            ["paid", "Paid"],
+                          ] as [BookingPullFilter, string][]
+                        ).map(([value, label]) => (
+                          <button
+                            key={value}
+                            className={bookingPullFilter === value ? "is-active" : ""}
+                            onClick={() => setBookingPullFilter(value)}
+                            aria-pressed={bookingPullFilter === value}
+                            type="button"
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="ip-card-note">
+                        {bookingPullFilter === "unpaid"
+                          ? "Lessons with nothing taken at the counter."
+                          : bookingPullFilter === "paid"
+                            ? "Already settled at the till — invoicing one again is a second transaction."
+                            : "Everything completed. A lesson paid at the counter still shows."}
+                      </p>
+                      <div className="ip-pull-range">
+                        {pullRangeEditing ? (
+                          <>
+                            <label className="settings-field">
+                              <span>From</span>
+                              <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
+                            </label>
+                            <label className="settings-field">
+                              <span>To</span>
+                              <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
+                            </label>
+                            <div className="pull-range-actions">
+                              <button className="invoice-inline-edit" onClick={resetPullRange} type="button">
+                                Reset to auto
+                              </button>
+                              <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">
+                                Done
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="pull-range-summary">
+                            <span>
+                              {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : "Earliest"} → {formatDateForDisplay(effectivePullTo)}
+                            </span>
+                            <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label="Edit pull range">
+                              <Pencil size={13} />
+                              Edit
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="ip-rail-list">
+                        {calendarPullRangeSorted.length ? (
+                          calendarPullRangeSorted.map((item) => {
+                            const service = itemService(item, services);
+                            const days = buildWeekDays(itemWeek(item));
+                            const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
+                            // A counter payment is flagged but does not disable the
+                            // row - the lesson can be paid at the till and still be
+                            // invoiced. See addCompletedBookingLine.
+                            const posPayment = posPaidBookings[item.id];
+                            const matchesPayer = invoicePayerBookingIds.has(item.id);
+                            return (
+                              <button
+                                key={item.id}
+                                className={alreadyInvoiced ? "is-used" : ""}
+                                disabled={alreadyInvoiced}
+                                onClick={() => addCompletedBookingLine(item)}
+                                type="button"
+                              >
+                                <span className="ip-rail-row-main">
+                                  <strong>{item.client || item.title}</strong>
+                                  <em>
+                                    {service?.name ?? "Lesson"} · {days[item.day].label}, {formatRange(item.start, item.duration)}
+                                  </em>
+                                </span>
+                                <span className="ip-rail-row-side">
+                                  {matchesPayer && <em className="ip-badge">Billing client</em>}
+                                  {alreadyInvoiced ? (
+                                    <em className="ip-badge">On this invoice</em>
+                                  ) : posPayment ? (
+                                    <em className="ip-badge is-paid">
+                                      Paid · {formatMoney(posPayment.amount, posPayment.currency)}
+                                    </em>
+                                  ) : (
+                                    <em className="ip-badge">Unpaid</em>
+                                  )}
+                                </span>
+                              </button>
+                            );
+                          })
+                        ) : completedAppointments.length ? (
+                          <p className="ip-card-note">No completed bookings in this date range.</p>
+                        ) : (
+                          <p className="ip-card-note">Mark bookings completed from the calendar to pull them into invoices.</p>
+                        )}
+                      </div>
+                    </article>
+
+                    <article className="ip-card">
+                      <strong className="ip-card-title">Catalog</strong>
+                      <label className="ip-search">
+                        <Search size={14} />
+                        <input
+                          value={invoiceDraft.lineSearch}
+                          onChange={(event) => updateInvoiceDraft("lineSearch", event.target.value)}
+                          placeholder="Search products and packages"
+                          aria-label="Search the catalog"
+                        />
+                      </label>
+                      <div className="ip-rail-list">
+                        {visibleInvoiceCatalogOptions.length ? (
+                          visibleInvoiceCatalogOptions.map((item) => (
+                            <button key={item.id} onClick={() => addCatalogInvoiceLine(item)} type="button">
+                              <span className="ip-rail-icon">
+                                {item.kind === "product" ? (
+                                  <ShoppingCart size={14} />
+                                ) : item.kind === "package" ? (
+                                  <Ticket size={14} />
+                                ) : (
+                                  <CalendarDays size={14} />
+                                )}
+                              </span>
+                              <span className="ip-rail-row-main">
+                                <strong>{item.name}</strong>
+                                <em>{item.description || item.kind}</em>
+                              </span>
+                              <span className="ip-rail-row-side">
+                                <strong>{formatMoney(item.price, invoiceSettings.currency)}</strong>
+                              </span>
+                            </button>
+                          ))
+                        ) : (
+                          <p className="ip-card-note">
+                            {invoiceDraft.lineSearch.trim() ? "Nothing matches that." : "Add products and services in Billing › Products."}
+                          </p>
+                        )}
+                      </div>
+                    </article>
+
+                    <article className="ip-card">
+                      <strong className="ip-card-title">From your template</strong>
+                      <p className="ip-card-note">
+                        Logo, address, {invoiceSettings.taxName} number, bank account and footer are already on this invoice.
+                      </p>
+                      <button className="outline-button" onClick={openInvoiceCoachSettings} type="button">
+                        <Pencil size={13} />
+                        Edit the template
+                      </button>
+                    </article>
+                  </aside>
+                </div>
               </div>
             )}
 
