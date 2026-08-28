@@ -74,12 +74,6 @@ const CUSTOM_GROUP_DEFAULTS = {
 };
 const ADMIN_NOTIFICATION_DEBOUNCE_MS = 30_000;
 const ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY = "adminNotificationDebounceQueueJson";
-const BOOKING_SCREEN_IDS = new Set([
-  "main",
-  "range-three-kings",
-  "group-lessons",
-  "private-lessons",
-]);
 let authReadyPromise = null;
 let authReady = false;
 let authReadyConfigSignature = "";
@@ -565,17 +559,34 @@ function cleanGroupSchedule(value, fallback = {}) {
   };
 }
 
+/**
+ * The booking screens a lesson type appears on.
+ *
+ * Unrecognised ids are KEPT, not dropped. This used to filter against
+ * a hardcoded list of known screens, and the filtered result is what gets
+ * written back -- so a
+ * plain load-and-save, with nobody touching the screens at all, silently pruned
+ * any id this build did not know about and persisted the loss. A lesson type
+ * would just stop appearing on the public booking page, with no error anywhere.
+ *
+ * That is fatal once screens become per-business: a service belonging to one
+ * workspace would be pruned by a request serving another. Deciding what to
+ * *show* is a render-time question (the public page matches on the screen it is
+ * currently rendering, so an unknown id simply never matches); deciding what to
+ * *store* is not the same question, and this function only stores.
+ *
+ * A missing field means legacy data, which defaults to the main screen. An
+ * explicit empty list means "show on no booking screens" and is preserved.
+ */
 function cleanBookingScreenIds(value) {
-  // A missing field means legacy data, which defaults to the main screen.
-  // An explicit empty list means "show on no booking screens" and is preserved.
   if (!Array.isArray(value)) return ["main"];
   return Array.from(
     new Set(
       value
-        .map((candidate) => (typeof candidate === "string" ? candidate.trim() : ""))
-        .filter((candidate) => BOOKING_SCREEN_IDS.has(candidate)),
+        .map((candidate) => (typeof candidate === "string" ? candidate.trim().slice(0, 80) : ""))
+        .filter(Boolean),
     ),
-  );
+  ).slice(0, 24);
 }
 
 function cleanEditableServiceText(value, fallback = "", max = 600) {

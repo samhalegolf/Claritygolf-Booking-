@@ -1972,17 +1972,14 @@ type BookingScreenDefinition = {
 };
 const BOOKING_SCREENS = [
   { id: "main", label: "Main booking screen", slugs: ["/", "/sam-hale-golf"] },
-  { id: "range-three-kings", label: "Range Three Kings", slugs: ["/range-three-kings"] },
   { id: "group-lessons", label: "Group Lessons", slugs: ["/group-lessons"] },
   { id: "private-lessons", label: "Private Lessons", slugs: ["/private-lessons"] },
 ] as const;
 const BOOKING_SCREEN_PATHS: BookingScreenDefinition[] = [
   { id: "main", label: "Main booking screen", path: "/sam-hale-golf" },
-  { id: "range-three-kings", label: "Range Three Kings", path: "/range-three-kings" },
   { id: "group-lessons", label: "Group Lessons", path: "/group-lessons" },
   { id: "private-lessons", label: "Private Lessons", path: "/private-lessons" },
 ];
-const BOOKING_SCREEN_IDS: Set<string> = new Set(BOOKING_SCREENS.map((screen) => screen.id));
 const CADDY_APP_URL = "https://caddy.claritygolf.app";
 const THEME_STORAGE_KEY = "clarity-booking-theme";
 const BRAND_STORAGE_KEY = "clarity-booking-brand";
@@ -2536,15 +2533,27 @@ function getBookingScreenId(pathname = "") {
   return "main";
 }
 
+/**
+ * The booking screens a lesson type appears on.
+ *
+ * Unrecognised ids are KEPT. Mirrors cleanBookingScreenIds in booking-core.mts,
+ * and for the same reason: this runs on load as well as save, so filtering
+ * against the known-screen list meant a load-and-save round trip quietly
+ * deleted any id this build did not recognise -- and the lesson type dropped
+ * off the public booking page with nothing reported.
+ *
+ * Filtering belongs at render, where the page already matches on the screen it
+ * is showing and an unknown id simply never matches.
+ *
+ * A missing field means legacy data, which defaults to the main screen. An
+ * explicit empty list means "show on no booking screens" and is preserved.
+ */
 function normalizeBookingScreenIds(value: unknown): string[] {
-  // A missing field means legacy data, which defaults to the main screen.
-  // An explicit empty list means "show on no booking screens" and is preserved.
   if (!Array.isArray(value)) return ["main"];
-  const filtered = value
-    .map((candidate) => (typeof candidate === "string" ? candidate.trim() : ""))
-    .filter((candidate) => candidate.length > 0)
-    .filter((candidate) => BOOKING_SCREEN_IDS.has(candidate));
-  return Array.from(new Set(filtered));
+  const cleaned = value
+    .map((candidate) => (typeof candidate === "string" ? candidate.trim().slice(0, 80) : ""))
+    .filter((candidate) => candidate.length > 0);
+  return Array.from(new Set(cleaned)).slice(0, 24);
 }
 
 function formatBookingScreenLabels(screenIds: string[] = []) {

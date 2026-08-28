@@ -85,3 +85,49 @@ test("private lesson capacity survives a save round trip", () => {
   const [service] = normalizeServices([lessonType({ capacity: 4 })]);
   assert.equal(service.capacity, 4);
 });
+
+// --- Booking screens survive a round trip -----------------------------------
+//
+// normalizeServices runs on load AND on save. It used to filter bookingScreenIds
+// against a hardcoded list of known screens, so loading a service and saving it
+// back -- with nobody touching its screens -- silently dropped any id this build
+// did not recognise, and persisted the loss. The lesson type then stopped
+// appearing on the public booking page with no error raised anywhere.
+//
+// This becomes actively dangerous once screens are per-business: a request
+// serving one workspace would prune ids belonging to another.
+
+test("an unrecognised booking screen id survives being loaded and saved", () => {
+  const [service] = normalizeServices([
+    lessonType({ bookingScreenIds: ["main", "a-screen-this-build-has-never-heard-of"] }),
+  ], "test-account");
+
+  assert.deepEqual(service.bookingScreenIds, ["main", "a-screen-this-build-has-never-heard-of"]);
+});
+
+test("repeated save cycles never erode the screen list", () => {
+  // The failure mode was cumulative: each round trip pruned a little more.
+  let services = [lessonType({ bookingScreenIds: ["main", "group-lessons", "another-workspaces-screen"] })];
+  for (let pass = 0; pass < 3; pass += 1) services = normalizeServices(services, "test-account");
+
+  const [service] = services;
+  assert.deepEqual(service.bookingScreenIds, ["main", "group-lessons", "another-workspaces-screen"]);
+});
+
+test("the screen list is still cleaned, just not filtered by an allowlist", () => {
+  const [service] = normalizeServices([
+    lessonType({ bookingScreenIds: ["  main  ", "main", "", 42, null, "group-lessons"] as never }),
+  ], "test-account");
+
+  // Trimmed, de-duplicated and stripped of non-strings -- but nothing dropped
+  // for being unfamiliar.
+  assert.deepEqual(service.bookingScreenIds, ["main", "group-lessons"]);
+});
+
+test("a missing screen list still means the main screen, an empty one still means none", () => {
+  const [legacy] = normalizeServices([lessonType({ bookingScreenIds: undefined })], "test-account");
+  assert.deepEqual(legacy.bookingScreenIds, ["main"], "legacy rows default to the main screen");
+
+  const [hidden] = normalizeServices([lessonType({ bookingScreenIds: [] })], "test-account");
+  assert.deepEqual(hidden.bookingScreenIds, [], "an explicit empty list is a real choice and is kept");
+});
