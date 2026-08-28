@@ -391,7 +391,7 @@ function customGroupInviteBody(appt: any, attendee: any, serviceName: string, se
   const button = confirmUrl
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 12px"><tr><td><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">Confirm attendance</a></td></tr></table>`
     : "";
-  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${escapeHtml(settings.businessName || "Sam Hale Golf")}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">Confirm your spot</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailTable(rows)}</div>${button}<p style="margin:16px 0 0;color:#526054">If the button does not work, paste this link into your browser: ${escapeHtml(confirmUrl)}</p></div></div></div>`;
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${escapeHtml(settings.businessName || settings.coachName || "Clarity Golf")}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">Confirm your spot</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailTable(rows)}</div>${button}<p style="margin:16px 0 0;color:#526054">If the button does not work, paste this link into your browser: ${escapeHtml(confirmUrl)}</p></div></div></div>`;
   const text = ["Confirm your spot", "", intro, "", ...rows.map(([label, value]) => `${label}: ${value}`), "", confirmUrl ? `Confirm attendance: ${confirmUrl}` : ""].filter(Boolean).join("\n");
   return { subject, html, text };
 }
@@ -501,7 +501,11 @@ async function sendEmail(message: { accountId: string; to: string; subject: stri
   if (!cleanEmail(message.to)) return { sent: false, reason: "missing_recipient" };
   const settings = await readSettings(message.accountId);
   const rawFromHeader = env("CLARITY_EMAIL_FROM", `${settings.businessName} <onboarding@resend.dev>`);
-  const fromNameFallback = cleanText(settings.coachName, "", 120) || cleanText(settings.businessName, "", 120) || "Sam Hale Golf";
+  // The name on the From header. Falls back to the product, never to the
+  // original business -- a second workspace was sending its booking emails
+  // signed "Sam Hale Golf".
+  const fromNameFallback =
+    cleanText(settings.coachName, "", 120) || cleanText(settings.businessName, "", 120) || "Clarity Golf";
   const fromName = cleanText(settings.notificationFromName, "", 120) || fromNameFallback;
   const from = formatFromHeader(
     fromName,
@@ -705,7 +709,7 @@ function bodyFor(
   const actionsHtml = isClient ? clientActionButtonsHtml(action, variables, settings) : "";
   const actionsText = isClient ? clientActionButtonsText(action, variables, settings) : [];
   const textRows = rows.filter(([, value]) => Boolean(value)).map(([label, value]) => `${label}: ${value}`);
-  const brandName = escapeHtml(settings.businessName || settings.coachName || "Sam Hale Golf");
+  const brandName = escapeHtml(settings.businessName || settings.coachName || "Clarity Golf");
   const detailRows = detailTable(rows);
   const detailsSection = rows.length
     ? `<p style="margin:0 0 8px;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">Booking details</p><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#f6f9f3;border:1px solid #e6ecdf;border-radius:8px;padding:12px;display:block"><tr><td style="padding:0">${detailRows}</td></tr></table>`

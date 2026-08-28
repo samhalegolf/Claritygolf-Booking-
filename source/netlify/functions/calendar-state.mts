@@ -244,7 +244,7 @@ function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()
   const slug = cleanSlug(clean.calendarSlug || clean.businessName, legacyOriginalWorkspaceId());
   return {
     id: slug,
-    name: clean.businessName || "Sam Hale Golf",
+    name: clean.businessName,
     slug,
     planKey: "founder",
     subscriptionStatus: "comped",
@@ -341,6 +341,10 @@ function neutralCoachAccount(accountId: string) {
     venueShortName: "",
     contactEmail: "",
     calendarSlug: cleanSlug(accountId, ""),
+    // Spreading defaultCoachAccount() brought its invoice settings along, whose
+    // footer reads "Thank you for training with Sam Hale Golf." -- on a second
+    // business's invoices.
+    invoiceSettings: { ...defaultInvoiceSettings, footerText: "", defaultCustomerNote: "" },
   };
 }
 

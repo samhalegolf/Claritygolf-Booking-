@@ -546,3 +546,63 @@ test("an owner gets admin permissions in the app, under a role the app knows", (
     assert.ok(known.has(appUserRoleForMembership(role)), `${role} must map into the app-user vocabulary`);
   }
 });
+
+// --- No other business's identity in the email/notification path -------------
+//
+// The database was provably clean and a second business still saw "The Range
+// 24/7 - Three Kings" as its venue and booking emails signed "Sam Hale". The
+// leak was never in the data: it was a dozen `x || "<the original's value>"`
+// fallbacks in the code, on both sides. These assert the source itself, which
+// is the only place that class of bug lives.
+
+test("no source file falls back to the original business's identity", async () => {
+  const { readFileSync, readdirSync, statSync } = await import("node:fs");
+  const path = await import("node:path");
+
+  // Strings that name the original business, its owner or its venue.
+  const identity = [/Sam Hale/, /The Range 24\/7/, /Three Kings/, /Range 24\/7 Member/];
+
+  // Where these literals are legitimate: the one-time seed of the original
+  // workspace, and the env-backed defaults guarded by isOriginalWorkspace /
+  // envIfOriginal / orDefault. Everything else must be neutral.
+  const allowed = [
+    /legacyOriginalWorkspaceId\(\)/,
+    /envIfOriginal\(/,
+    /orDefault\(/,
+    /^\s*(\/\/|\*|--)/,       // comments explaining the history
+    /defaultCoachAccount\(\)/,  // guarded by isOriginalWorkspace at its callers
+    /CLARITY_(COACH|BUSINESS|VENUE)/, // env-backed, original-workspace only
+    /'Sam Hale Golf', 'active'/,      // the accounts seed for the original
+    /name: "30min Golf Lesson \(Range 24\/7 Member\)"/, // seeded demo catalogue
+    /name: "1 Hour Golf Lesson \(Range 24\/7 Member\)"/,
+    /location: "Range 24\/7 member bay"/,
+    /id: "member-(30|60)"/,
+    /range-three-kings/,          // known outstanding: booking-screen paths
+    /Range Three Kings/,
+    /footerText: "Thank you for training with Sam Hale Golf\."/, // blanked by neutralInvoiceSettings
+  ];
+
+  const roots = ["netlify/functions", "src"];
+  const offenders: string[] = [];
+
+  function walk(dir: string) {
+    for (const entry of readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      if (entry === "node_modules" || entry.endsWith(".test.mts") || entry.endsWith(".test.ts")) continue;
+      if (statSync(full).isDirectory()) { walk(full); continue; }
+      if (!/\.(mts|ts|tsx|mjs)$/.test(entry)) continue;
+      readFileSync(full, "utf8").split("\n").forEach((line, index) => {
+        if (!identity.some((pattern) => pattern.test(line))) return;
+        if (allowed.some((pattern) => pattern.test(line))) return;
+        offenders.push(`${full}:${index + 1}  ${line.trim().slice(0, 120)}`);
+      });
+    }
+  }
+  roots.forEach(walk);
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `these lines put the original business's identity where any workspace could read it:\n${offenders.join("\n")}`,
+  );
+});

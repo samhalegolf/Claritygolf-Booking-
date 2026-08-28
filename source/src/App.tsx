@@ -1232,6 +1232,8 @@ const SETTINGS_SECTIONS: Array<{
   label: string;
   icon: typeof Settings;
   adminOnly?: boolean;
+  /** Platform staff only. Not a business owner, however senior. */
+  platformOnly?: boolean;
 }> = [
   { key: "business", label: "Business", icon: Building2, adminOnly: true },
   { key: "booking", label: "Booking", icon: CalendarDays },
@@ -1243,7 +1245,13 @@ const SETTINGS_SECTIONS: Array<{
   // coach's own accounts. Admin is "what is this software made of" — the
   // services Clarity runs on, which a coach never picks.
   { key: "developer", label: "Integrations", icon: Link2, adminOnly: true },
-  { key: "admin", label: "Admin", icon: Code2, adminOnly: true },
+  // Platform-only, not account-admin. Its own description says these are "the
+  // services Clarity itself runs on, not things a coach picks" -- shared
+  // infrastructure whose state belongs to the platform, not to any one
+  // business. Gated on adminOnly it was visible to every business owner, so a
+  // brand new workspace could see the platform's Resend, Drive and Stripe
+  // wiring and read another business's Google connection as its own.
+  { key: "admin", label: "Admin", icon: Code2, platformOnly: true },
 ];
 
 type SettingsTab =
@@ -2981,7 +2989,9 @@ const calendarColorFields: { key: keyof CalendarColorSettings; label: string; hi
 ];
 
 const defaultBrandSettings: BrandSettings = {
-  coachName: "Sam Hale Golf",
+  // Empty, not the original business's name. This is the "from" name on a
+  // workspace's emails.
+  coachName: "",
   logoName: "",
   logoPreview: "",
   showLogo: false,
@@ -2993,17 +3003,32 @@ const defaultBrandSettings: BrandSettings = {
   calendarColors: defaultCalendarColors,
 };
 
+// The shape a coach account takes before the server has said anything, and the
+// fallback for any field that arrives empty.
+//
+// It used to hold the original business's real details -- "Sam Hale", "Sam Hale
+// Golf", "The Range 24/7 - Three Kings" -- which meant the client quietly wrote
+// them back into any account whose settings left a field blank. A second
+// business's availability screen was headed "The Range 24/7 - Three Kings" and
+// its booking emails were signed by Sam Hale, even though the server had
+// correctly sent empty strings for both. The server has neutral defaults now
+// (see neutralCoachAccount in booking-core.mts); this is the other half of
+// that, and the two must stay in step.
+//
+// Only genuinely product-level values remain: Clarity's own URLs, and a
+// platform timezone/country guess for a workspace that has not chosen one.
+// Everything identifying starts empty and is filled in during setup.
 const defaultCoachAccount: CoachAccount = {
-  id: "sam-hale-golf",
-  coachName: "Sam Hale",
-  businessName: "Sam Hale Golf",
-  venueName: "The Range 24/7 - Three Kings",
-  venueShortName: "The Range 24/7",
+  id: "",
+  coachName: "",
+  businessName: "",
+  venueName: "",
+  venueShortName: "",
   timezone: "Pacific/Auckland",
   country: "NZ",
   contactEmail: "",
   bookingUrl: "https://book.claritygolf.app",
-  calendarSlug: "sam-hale-golf",
+  calendarSlug: "",
   caddyWorkspaceUrl: CADDY_APP_URL,
   invoiceSettings: defaultInvoiceSettings,
 };
@@ -3204,13 +3229,15 @@ function isAccountActive(account: WorkspaceAccount) {
 
 function defaultWorkspaceAccountFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): WorkspaceAccount {
   const cleanAccount = cleanCoachAccount(account);
-  const slug = cleanSlug(cleanAccount.calendarSlug || cleanAccount.businessName, "sam-hale-golf");
+  // No fallback to the original workspace: a shell built for a business that
+  // has not named itself yet stays unnamed rather than borrowing.
+  const slug = cleanSlug(cleanAccount.calendarSlug || cleanAccount.businessName, "");
   return {
     id: slug,
-    name: cleanAccount.businessName || "Sam Hale Golf",
+    name: cleanAccount.businessName,
     slug,
-    planKey: "founder",
-    subscriptionStatus: "comped",
+    planKey: "solo",
+    subscriptionStatus: "trialing",
     billingProvider: "none",
     active: true,
   };
@@ -3827,8 +3854,25 @@ function cleanEditableServiceText(value: unknown, fallback: string, maxLength: n
   return fallback;
 }
 
+// The per-field fallback for a service.
+//
+// This used to be defaultServices[index] -- the original coach's real lesson
+// list -- so a service arriving with a missing name, price or note had that
+// coach's name, price and "Bay hire included" written into it. Structural
+// defaults (a duration, a capacity of one) are product-level and stay; anything
+// a coach would recognise as *theirs* does not.
+const neutralServiceFallback: Service = {
+  ...defaultServices[0],
+  id: "",
+  name: "",
+  description: "",
+  lessonNote: "",
+  location: "",
+  price: 0,
+};
+
 function cleanService(service?: Partial<Service>, index = 0): Service {
-  const fallback = defaultServices[index] ?? defaultServices[0];
+  const fallback = neutralServiceFallback;
   const descriptionFallback = service ? "" : fallback.description;
   const locationFallback = service ? "" : fallback.location;
   const lessonNoteFallback = service ? service.location || "" : fallback.lessonNote || fallback.location || "";
@@ -5108,7 +5152,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const [passwordChangeState, setPasswordChangeState] = useState<"idle" | "saving" | "saved">("idle");
   const [passwordChangeMessage, setPasswordChangeMessage] = useState("");
   const [items, setItems] = useState<CalendarItem[]>(initialItems);
-  const [services, setServices] = useState<Service[]>(() => (isEmbedMode ? [] : cleanServices(defaultServices)));
+  // Empty until the server says otherwise. Seeding this with defaultServices
+  // meant every workspace flashed the original coach's lesson list and prices
+  // before its own data arrived.
+  const [services, setServices] = useState<Service[]>(() => []);
   const [locations, setLocations] = useState<Location[]>(() => (isEmbedMode ? [] : cleanLocations(undefined, getStoredCoachAccount())));
   const [locationEditor, setLocationEditor] = useState<Location>(() => defaultLocationFromCoachAccount(getStoredCoachAccount()));
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
@@ -5635,6 +5682,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const activeAccount =
     accountById(workspaceAccounts, activeAccountId) ?? defaultWorkspaceAccountFromCoachAccount(coachAccount);
   const isAdminUser = currentAppUser.role === "admin" || currentAppUser.role === "account_admin" || currentAppUser.role === "platform_admin";
+  // Running Clarity, as distinct from running a business on it.
+  const isPlatformAdmin = currentAppUser.role === "platform_admin";
   const coachAccountEditor = useEditableBlock<CoachAccount>({
     value: coachAccount,
     onSave: saveCoachAccount,
@@ -6699,19 +6748,31 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         .slice(0, 6)
     : [];
   const invoiceCustomerCreateLabel = invoiceCustomerSearch.trim();
+  // Sample values for the preview only -- no email is sent with these.
+  //
+  // The workspace's own details are used where it has them, and obviously
+  // placeholder text where it does not. A business that has not finished setup
+  // must not be shown someone else's name and venue standing in for its own:
+  // this preview once read "your booking with Sam Hale is confirmed / The Range
+  // 24/7" inside a brand new workspace, because the empty fields fell through
+  // to the original business's details.
   const emailTemplateVariables = {
-    business: coachAccount.businessName,
-    client: "Donna Steele",
-    coach: coachAccount.coachName || coachAccount.businessName,
+    business: coachAccount.businessName || "Your business",
+    // A bracketed slot, not a name. This preview shipped with a real person's
+    // name standing in for the client, which is not something to put in a
+    // product -- and any plausible-looking substitute is somebody's name too.
+    // Showing the slot is also truer to what this is: a template preview.
+    client: "[client name]",
+    coach: coachAccount.coachName || coachAccount.businessName || "your coach",
     date: "Thursday, Jun 4",
     duration: emailTemplateService ? `${emailTemplateService.duration} minutes` : "60 minutes",
-    firstName: "Donna",
+    firstName: "[first name]",
     price: servicePriceLabel(emailTemplateService),
     action: "booking",
     replyTo: notificationSettings.replyToEmail || coachAccount.contactEmail,
-    service: emailTemplateService?.name ?? "1 Hour Golf Lesson",
+    service: emailTemplateService?.name ?? "your lesson type",
     time: emailTemplateService ? formatRange(14 * 60, emailTemplateService.duration) : "2:00 PM-3:00 PM",
-    venue: coachAccount.venueShortName || coachAccount.venueName,
+    venue: coachAccount.venueShortName || coachAccount.venueName || "your venue",
   };
   const emailSubjectTemplatePreview = notificationSettings.notificationSubjectLine.trim()
     ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)
@@ -11639,7 +11700,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       setToast({ message: cloudReason });
       if (options.openSettingsOnConfigurationIssue && shouldOpenClarityCloudSettings(clarityCloudHealth)) {
         setActiveView("settings");
-        setSettingsTab("admin");
+        // Platform staff get the Admin panel; a coach gets their own
+        // Integrations tab, which is where they manage their Google connection.
+        setSettingsTab(isPlatformAdmin ? "admin" : "developer");
       }
       // eslint-disable-next-line no-console
       console.warn("clarity_cloud_transfer_blocked", {
@@ -21707,7 +21770,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             setQuickMatchField("email");
                             updateQuickCreateField("email", event.target.value);
                           }}
-                          placeholder="client@email.co.nz"
+                          placeholder="client@example.com"
                           type="email"
                         />
                         {quickClientMatchButton("email")}
@@ -23371,7 +23434,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 }
                 onOpenCloudSettings={() => {
                   setActiveView("settings");
-                  setSettingsTab("admin");
+                  setSettingsTab(isPlatformAdmin ? "admin" : "developer");
                 }}
               />
             </Suspense>
@@ -26616,7 +26679,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 the rest are plain until hovered. Highlight and open section are
                 the same state value, so they cannot disagree. */}
             <nav className="settings-subnav" aria-label="Settings sections">
-              {SETTINGS_SECTIONS.filter((section) => isAdminUser || !section.adminOnly).map((section) => (
+              {SETTINGS_SECTIONS.filter(
+                (section) =>
+                  (section.platformOnly ? isPlatformAdmin : true) &&
+                  (isAdminUser || !section.adminOnly),
+              ).map((section) => (
                 <button
                   key={section.key}
                   className={settingsTab === section.key ? "active" : ""}
@@ -26643,7 +26710,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </SettingsGroup>
               ) : null}
               {settingsTab === "developer" ? <IntegrationsPanel audience="integration" /> : null}
-              {settingsTab === "admin" ? <IntegrationsPanel audience="admin" /> : null}
+              {/* Guarded on render, not just hidden from the nav. Two Clarity
+                  Cloud error paths call setSettingsTab("admin") directly, so
+                  removing the tab button alone would still let a business owner
+                  land on the platform panel. */}
+              {settingsTab === "admin" && isPlatformAdmin ? <IntegrationsPanel audience="admin" /> : null}
               {isAdminUser ? <BrowserNotificationsPanel /> : null}
               {servicesSettingsPanel}
               {isAdminUser ? coachesSettingsPanel : null}
@@ -28164,7 +28235,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       value={emailNotificationsDraft.coachEmail}
                       readOnly={emailNotificationsIsLocked}
                       onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "coachEmail", event.target.value)}
-                      placeholder="coach@email.co.nz"
+                      placeholder="coach@example.com"
                       type="email"
                     />
                   </label>
@@ -28469,7 +28540,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   <label className="settings-field">
                     <span>Email sender name</span>
                     <input
-                      placeholder="Sam Hale Golf"
+                      placeholder="Your business name"
                       value={emailTemplateDraft.notificationFromName}
                       readOnly={emailTemplateIsLocked}
                       maxLength={120}

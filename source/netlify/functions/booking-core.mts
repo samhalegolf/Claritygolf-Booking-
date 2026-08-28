@@ -1036,7 +1036,7 @@ function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()
   const slug = cleanSlug(clean.calendarSlug || clean.businessName, legacyOriginalWorkspaceId());
   return {
     id: slug,
-    name: clean.businessName || "Sam Hale Golf",
+    name: clean.businessName,
     slug,
     planKey: "founder",
     subscriptionStatus: "comped",
@@ -11629,10 +11629,12 @@ async function routeBookingApiRequest(
         start: 14 * 60,
         duration: service.duration,
         serviceId: service.id,
-        client: "Donna Steele",
-        title: "Donna Steele",
+        // This route really does send an email, so the sample client is named
+        // as what it is. It previously used a real person's name.
+        client: "Test Client",
+        title: "Test Client",
         email: recipient,
-        phone: "+64 27 555 014",
+        phone: "",
         note: "Test email from Clarity Golf Booking.",
       };
       const results = await sendBookingNotifications(requestContext.accountId, appointment, {

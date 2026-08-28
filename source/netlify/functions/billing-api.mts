@@ -1712,7 +1712,7 @@ async function resolveInvoiceBranding(accountId: string): Promise<InvoiceBrandin
   const businessName =
     cleanString(map.accountBusinessName, "", 140) ||
     cleanString(map.coachName, "", 140) ||
-    env("CLARITY_BUSINESS_NAME", "Sam Hale Golf");
+    env("CLARITY_BUSINESS_NAME", "Clarity Golf");
   const coachName = cleanString(map.accountCoachName, "", 140) || cleanString(map.coachName, "", 140) || businessName;
   return {
     businessName,

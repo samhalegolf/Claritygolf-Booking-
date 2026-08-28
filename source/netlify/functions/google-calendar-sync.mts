@@ -13,6 +13,7 @@ import {
   saveGoogleAuthorization,
 } from "./_shared/google-provider.mts";
 import { unavailableSpans } from "./_shared/availability-blocks.mts";
+import { legacyOriginalWorkspaceId, slugify as cleanSlug } from "./_shared/account.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import {
   SETTINGS_UPSERT_QUERY,
@@ -43,11 +44,14 @@ const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 // gated only by the per-account googleCalendarAutoSync setting.
 const googleCalendarManualSyncOnly = false;
 
-const defaultServices = [
-  { id: "lesson-30", name: "30min Lesson", duration: 30, price: 100, lessonNote: "Bay hire included", location: "Bay hire included" },
-  { id: "lesson-60", name: "1 Hour Golf Lesson", duration: 60, price: 180, lessonNote: "Bay hire included", location: "Bay hire included" },
-  { id: "lesson-pair", name: "2 Person Golf Lesson", duration: 60, price: 200, lessonNote: "Bay hire included", location: "Bay hire included" },
-];
+// Deliberately empty.
+//
+// This used to hold the original coach's actual lesson list -- their names,
+// their prices, "Bay hire included" -- as the fallback when a workspace had no
+// servicesJson. Any other business syncing to Google would then have had that
+// coach's lesson names written into their own calendar events. A workspace with
+// no lesson types has no lesson types; the event falls back to a generic title.
+const defaultServices: Array<Record<string, unknown>> = [];
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
@@ -810,13 +814,28 @@ function googleEventId(itemId: string) {
   return `cg${createHash("sha256").update(itemId).digest("hex").slice(0, 30)}`;
 }
 
-function accountFromSettings(settings: Record<string, string>) {
+/**
+ * The business's own details, for the text written into Google Calendar events.
+ *
+ * The env fallbacks hold the ORIGINAL workspace's real business and venue, so
+ * they only apply to that workspace. Any other business gets its own settings
+ * or nothing -- otherwise a second coach's synced events would have been
+ * titled "Sam Hale Golf" and located at "The Range 24/7 - Three Kings", written
+ * into their personal Google Calendar.
+ */
+function accountFromSettings(accountId: string, settings: Record<string, string>) {
+  const original = cleanSlug(accountId, "") === legacyOriginalWorkspaceId();
+  const envIfOriginal = (name: string, legacy: string) => (original ? env(name, legacy) : "");
   return {
-    businessName: settings.accountBusinessName || env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
-    venueName: settings.accountVenueName || env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
-    venueShortName: settings.accountVenueShortName || env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
+    businessName:
+      settings.accountBusinessName || envIfOriginal("CLARITY_BUSINESS_NAME", "Sam Hale Golf") || "Clarity Golf",
+    venueName: settings.accountVenueName || envIfOriginal("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
+    venueShortName:
+      settings.accountVenueShortName || envIfOriginal("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
+    // Timezone is formatting, not identity: every workspace needs one to render
+    // an event at all, so the platform default applies to all of them.
     timezone: settings.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
-    contactEmail: settings.accountContactEmail || env("CLARITY_CONTACT_EMAIL", ""),
+    contactEmail: settings.accountContactEmail || envIfOriginal("CLARITY_CONTACT_EMAIL", ""),
   };
 }
 
@@ -844,8 +863,8 @@ function eventDescription(item: any, services: any[], location: any) {
   return [...rows.filter(Boolean), "", `Clarity booking ID: ${item.id}`].join("\n");
 }
 
-function googleEventForItem(item: any, settings: Record<string, string>, services: any[], locations: any[], eventId: string) {
-  const account = accountFromSettings(settings);
+function googleEventForItem(accountId: string, item: any, settings: Record<string, string>, services: any[], locations: any[], eventId: string) {
+  const account = accountFromSettings(accountId, settings);
   const service = services.find((candidate) => candidate?.id === item.serviceId);
   const location = resolveLocation(item, service, locations, account);
   const week = Number(item.week ?? 0);
@@ -940,7 +959,7 @@ async function listGoogleEvents(accessToken: string, calendarId: string, timeMin
  * swallowed — a silent import is how a broken sync hides for three days.
  */
 async function importGoogleBusyBlocks(accountId: string, accessToken: string, settings: Record<string, string>) {
-  const account = accountFromSettings(settings);
+  const account = accountFromSettings(accountId, settings);
   const now = new Date();
   const timeMin = new Date(now.getTime() - busyImportWeeksBack * 7 * 86_400_000).toISOString();
   const timeMax = new Date(now.getTime() + busyImportWeeksAhead * 7 * 86_400_000).toISOString();
@@ -1370,7 +1389,7 @@ export async function syncGoogleCalendarNow(accountId: string, trigger = "manual
     stage = "upsert";
     for (const item of items) {
       const eventId = previousMap[item.id] || googleEventId(item.id);
-      const event = googleEventForItem(item, settings, services, locations, eventId);
+      const event = googleEventForItem(accountId, item, settings, services, locations, eventId);
       const exists = Boolean(previousMap[item.id]);
       const fingerprint = googleEventFingerprint(event);
       // The targeted path already did this; the full rebuild did not, so
@@ -1624,7 +1643,7 @@ async function syncGoogleCalendarChangesNow(accountId: string, changes: GoogleCa
       }
 
       const eventId = eventMap[item.id] || googleEventId(item.id);
-      const event = googleEventForItem(item, settings, services, locations, eventId);
+      const event = googleEventForItem(accountId, item, settings, services, locations, eventId);
       const fingerprint = googleEventFingerprint(event);
       if (eventMap[item.id] && hashMap[item.id] === fingerprint) {
         unchanged += 1;
