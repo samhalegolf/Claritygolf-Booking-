@@ -12764,3 +12764,930 @@ button {
 .integration-card-dot.is-bad {
   background: var(--c-danger);
 }
+
+/* --- Settings › Notifications › Message templates -------------------------
+   The coach writes what a client reads on a preview of the message itself, so
+   a subject line's length and a sign-off's tone are judged where they land
+   rather than in a column of labelled boxes. Everything dashed is theirs;
+   everything solid is filled in per lesson. */
+
+.message-templates {
+  display: grid;
+  gap: var(--c-space-5);
+  min-width: 0;
+}
+
+.message-templates input,
+.message-templates textarea {
+  font: inherit;
+}
+
+.mt-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-4);
+  flex-wrap: wrap;
+}
+
+.mt-channel {
+  display: flex;
+  gap: var(--c-space-1);
+  padding: var(--c-space-1);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+}
+
+.mt-channel button {
+  height: 32px;
+  padding: 0 var(--c-space-5);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mt-channel button.is-active {
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.mt-width {
+  width: var(--c-h-control);
+  height: var(--c-h-control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.mt-width.is-active {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+/* Says what dashed means once, so no field below needs a label to explain it. */
+.mt-dashed-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  height: 28px;
+  padding: 0 var(--c-space-4);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-active);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+.mt-dashed-swatch {
+  width: 11px;
+  height: 8px;
+  border: 1px dashed var(--c-pencil);
+}
+
+.mt-toolbar .text-button {
+  margin-left: auto;
+}
+
+/* The practice composer's tab: the picked one grows and its fill runs into the
+   frame below with no seam, so the frame reads as that tab's contents. */
+.mt-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+  overflow-x: auto;
+}
+
+.mt-tabs button {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--c-space-2);
+  padding: var(--c-space-4) var(--c-space-2);
+  border: 2px solid var(--c-accent);
+  border-radius: var(--c-radius-control) var(--c-radius-control) 0 0;
+  background: var(--c-text-body);
+  color: var(--c-accent-text);
+  font-size: var(--c-size-group);
+  font-weight: 700;
+  white-space: nowrap;
+  opacity: 0.62;
+  cursor: pointer;
+}
+
+.mt-tabs button.is-active {
+  padding: 11px var(--c-space-2) 13px;
+  background: var(--c-accent);
+  font-size: var(--c-size-meta);
+  opacity: 1;
+}
+
+/* A tab whose wording the coach has taken over. */
+.mt-tab-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--c-radius-pill);
+  background: currentColor;
+}
+
+.mt-stage {
+  position: relative;
+  z-index: 2;
+  margin-top: -2px;
+  padding: var(--c-space-6);
+  border: 2px solid var(--c-accent);
+  border-radius: 0 var(--c-radius-card) var(--c-radius-card) var(--c-radius-card);
+  background: var(--c-accent);
+}
+
+.message-templates .mt-when,
+.message-templates .mt-note {
+  margin: 0;
+  color: var(--c-accent-text);
+  font-size: var(--c-size-group);
+  line-height: 1.5;
+  opacity: 0.62;
+}
+
+.message-templates .mt-when {
+  margin-bottom: var(--c-space-5);
+}
+
+.message-templates .mt-note {
+  margin-top: var(--c-space-5);
+}
+
+/* The mat the message sits on, so the sheet reads as a document rather than
+   another panel of the settings screen. */
+.mt-mat {
+  padding: var(--c-space-7) var(--c-space-6) var(--c-space-8);
+  border-radius: var(--c-radius-card);
+  background: var(--c-page);
+  display: flex;
+  justify-content: center;
+}
+
+/* On a phone the sheet sits inside the device rather than beside a slider. */
+.mt-mat.is-phone {
+  padding: var(--c-space-6) var(--c-space-4);
+}
+
+.mt-sheet {
+  width: min(620px, 100%);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+}
+
+.mt-sheet.is-narrow {
+  width: min(392px, 100%);
+}
+
+.mt-email-head,
+.mt-sms-head {
+  padding: var(--c-space-6) var(--c-space-7);
+  border-bottom: 1px solid var(--c-border-soft);
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-5);
+}
+
+.mt-email-head strong,
+.mt-sms-head strong {
+  display: block;
+  font-size: var(--c-size-secondary);
+}
+
+.message-templates .mt-email-head em,
+.message-templates .mt-sms-head em {
+  display: block;
+  margin-top: 3px;
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+  font-style: normal;
+}
+
+.mt-logo,
+.mt-sms-avatar {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+  color: var(--c-text-soft);
+  overflow: hidden;
+}
+
+.mt-sms-avatar {
+  border-radius: var(--c-radius-pill);
+}
+
+.mt-logo img,
+.mt-sms-avatar img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.mt-subject {
+  padding: var(--c-space-3) var(--c-space-7);
+  border-bottom: 1px solid var(--c-border-soft);
+  background: var(--c-surface-soft);
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-4);
+}
+
+.message-templates .mt-subject .mt-label {
+  flex: none;
+  color: var(--c-pencil);
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.mt-email-body {
+  padding: var(--c-space-7);
+  display: grid;
+  gap: var(--c-space-5);
+}
+
+/* One editable line of the message. Resting it reads as the text it holds, so
+   the preview stays a message rather than becoming a form. */
+.mt-slot {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--c-space-4);
+  width: min(100%, var(--c-w-prose));
+  padding: var(--c-space-3);
+  border: 1px dashed var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text-body);
+  font-size: var(--c-size-body);
+  line-height: 1.55;
+  text-align: left;
+  cursor: text;
+}
+
+.mt-slot:hover:not(:disabled) {
+  border-color: var(--c-pencil);
+  background: var(--c-surface-soft);
+}
+
+.mt-slot:disabled {
+  cursor: default;
+}
+
+.mt-slot-value {
+  min-width: 0;
+  white-space: pre-wrap;
+}
+
+.mt-slot-pencil {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  color: var(--c-pencil);
+}
+
+.mt-heading {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--c-text);
+}
+
+.mt-subject-slot {
+  font-size: var(--c-size-secondary);
+}
+
+/* Open for editing: the field, then commit and cancel beside it. */
+.mt-editing {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--c-space-3);
+  width: min(100%, var(--c-w-prose));
+}
+
+.mt-editing input,
+.mt-editing textarea {
+  flex: 1;
+  min-width: 0;
+  padding: var(--c-space-3);
+  border: 1px solid var(--c-accent);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  font-size: var(--c-size-body);
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.mt-commit,
+.mt-cancel {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--c-radius-control);
+  cursor: pointer;
+}
+
+.mt-commit {
+  border: 1px solid var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.mt-cancel {
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+/* What Clarity fills in. Solid on purpose: none of it is the coach's to write. */
+.mt-rows {
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+}
+
+.message-templates .mt-rows-head {
+  padding: var(--c-space-3) var(--c-space-5);
+  background: var(--c-surface-soft);
+  border-bottom: 1px solid var(--c-border-soft);
+  color: var(--c-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.mt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--c-space-5);
+  padding: var(--c-space-4) var(--c-space-5);
+  border-bottom: 1px solid var(--c-active);
+  font-size: var(--c-size-meta);
+}
+
+.mt-row:last-child {
+  border-bottom: 0;
+}
+
+.message-templates .mt-row > span:first-child {
+  color: var(--c-muted);
+}
+
+.mt-where-value {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-4);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.mt-where-value em {
+  font-style: normal;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Only what the map link is CALLED is the coach's; where it points is the
+   location's. Small, inline, and beside the venue it belongs to. */
+.mt-maplink {
+  width: auto;
+  padding: 1px var(--c-space-2);
+  font-size: var(--c-size-group);
+  font-weight: 600;
+  border-radius: 7px;
+}
+
+.mt-actions {
+  display: grid;
+  gap: var(--c-space-2);
+}
+
+.mt-cta {
+  width: auto;
+  justify-self: start;
+  align-items: center;
+  min-height: var(--c-h-touch);
+  padding: 0 var(--c-space-6);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+  font-size: var(--c-size-secondary);
+  font-weight: 700;
+}
+
+.mt-cta:hover:not(:disabled) {
+  background: var(--c-text-body);
+  color: var(--c-accent-text);
+}
+
+.mt-cta .mt-slot-pencil {
+  color: var(--c-accent-text);
+}
+
+.message-templates .mt-cta-note,
+.message-templates .mt-footer {
+  margin: 0;
+  color: var(--c-pencil);
+  font-size: var(--c-size-group);
+  line-height: 1.5;
+}
+
+.mt-signoff {
+  font-size: var(--c-size-secondary);
+}
+
+/* The text message. One field, and the segment count beside it, because the
+   length is part of writing one. */
+.mt-sms-body {
+  padding: var(--c-space-6) var(--c-space-5);
+  display: grid;
+  gap: var(--c-space-3);
+  justify-items: start;
+  min-height: 240px;
+}
+
+.mt-sms-bubble {
+  max-width: 88%;
+  border-radius: 18px 18px 18px 4px;
+  background: var(--c-active);
+  font-size: var(--c-size-secondary);
+}
+
+.mt-sms-bubble:hover:not(:disabled) {
+  background: var(--c-hover);
+}
+
+.message-templates .mt-sms-count {
+  padding-left: var(--c-space-1);
+  color: var(--c-pencil);
+  font-size: var(--c-size-group);
+}
+
+@media (max-width: 720px) {
+  .mt-tabs button {
+    flex: 0 0 auto;
+    padding: var(--c-space-3) var(--c-space-4);
+  }
+
+  .mt-mat {
+    padding: var(--c-space-5) var(--c-space-3) var(--c-space-6);
+  }
+
+  .mt-email-head,
+  .mt-sms-head,
+  .mt-subject,
+  .mt-email-body {
+    padding-left: var(--c-space-5);
+    padding-right: var(--c-space-5);
+  }
+}
+
+/* --- Settings › Billing › the invoice template ----------------------------
+   The standing details are the same document every client receives, so they
+   are written on a sample of it. Dashed is the coach's; the lines and totals
+   are an example, so the template can be seen in use. */
+
+.invoice-template {
+  display: grid;
+  gap: var(--c-space-5);
+  min-width: 0;
+}
+
+.invoice-template input,
+.invoice-template textarea {
+  font: inherit;
+}
+
+.it-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-4);
+  flex-wrap: wrap;
+}
+
+.it-dashed-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  height: 28px;
+  padding: 0 var(--c-space-4);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-active);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+.it-dashed-swatch {
+  width: 11px;
+  height: 8px;
+  border: 1px dashed var(--c-pencil);
+}
+
+.it-tax-mode {
+  height: 28px;
+  padding: 0 var(--c-space-5);
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface);
+  color: var(--c-text-body);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.it-tax-mode:hover {
+  border-color: var(--c-pencil);
+  color: var(--c-text);
+}
+
+.it-width {
+  width: var(--c-h-control);
+  height: var(--c-h-control);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.it-width.is-active {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.it-toolbar .text-button {
+  margin-left: auto;
+}
+
+.it-mat {
+  padding: var(--c-space-7) var(--c-space-6) var(--c-space-8);
+  border-radius: var(--c-radius-card);
+  background: var(--c-page);
+  display: flex;
+  justify-content: center;
+}
+
+.it-sheet {
+  width: min(680px, 100%);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+}
+
+.it-sheet.is-narrow {
+  width: min(392px, 100%);
+}
+
+.it-head {
+  padding: var(--c-space-7) var(--c-space-7) var(--c-space-6);
+  display: flex;
+  gap: var(--c-space-6);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.it-logo {
+  width: 56px;
+  height: 56px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+  color: var(--c-pencil);
+}
+
+.it-logo.is-empty {
+  border: 1px dashed var(--c-border);
+  background: var(--c-surface-soft);
+}
+
+.it-logo img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.it-issuer {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: grid;
+  gap: var(--c-space-2);
+  justify-items: start;
+}
+
+.it-issuer > strong {
+  font-size: 17px;
+}
+
+/* Owned by another screen, so it reads as a fact rather than a slot. */
+.invoice-template .it-from-business {
+  color: var(--c-pencil);
+  font-size: var(--c-size-meta);
+}
+
+.it-meta {
+  flex: 0 0 auto;
+  text-align: right;
+  display: grid;
+  gap: 3px;
+  justify-items: end;
+}
+
+.it-meta strong {
+  font-size: 22px;
+}
+
+.invoice-template .it-meta span {
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+  white-space: nowrap;
+}
+
+/* A standing detail. Blank reads as an invitation, never as text a client
+   would mistake for the real thing. */
+.it-slot {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--c-space-3);
+  max-width: 100%;
+  padding: var(--c-space-2) var(--c-space-3);
+  border: 1px dashed var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text-body);
+  font-size: var(--c-size-meta);
+  line-height: 1.5;
+  text-align: left;
+  cursor: text;
+}
+
+.it-slot:hover:not(:disabled) {
+  border-color: var(--c-pencil);
+  background: var(--c-surface-soft);
+}
+
+.it-slot:disabled {
+  cursor: default;
+}
+
+.invoice-template .it-slot.is-empty .it-slot-value {
+  color: var(--c-pencil);
+}
+
+.it-slot-value {
+  min-width: 0;
+  white-space: pre-wrap;
+}
+
+.it-slot-pencil {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  color: var(--c-text-disabled);
+}
+
+.it-editing {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--c-space-3);
+  width: min(100%, var(--c-w-prose));
+}
+
+.it-editing input,
+.it-editing textarea {
+  flex: 1;
+  min-width: 0;
+  padding: var(--c-space-2) var(--c-space-3);
+  border: 1px solid var(--c-accent);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  font-size: var(--c-size-meta);
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.it-commit,
+.it-cancel {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.it-commit {
+  border: 1px solid var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.it-cancel {
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.it-headertext,
+.it-block,
+.it-foot {
+  padding: 0 var(--c-space-7) var(--c-space-6);
+  display: grid;
+  gap: var(--c-space-3);
+  justify-items: start;
+}
+
+.it-foot {
+  margin-top: var(--c-space-3);
+  padding-top: var(--c-space-6);
+  border-top: 1px solid var(--c-active);
+}
+
+.invoice-template .it-label {
+  color: var(--c-pencil);
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.it-parties {
+  padding: 0 var(--c-space-7) var(--c-space-6);
+  display: flex;
+  gap: var(--c-space-7);
+  flex-wrap: wrap;
+}
+
+.it-parties > div {
+  min-width: 0;
+  flex: 1 1 200px;
+  display: grid;
+  gap: 2px;
+}
+
+.it-parties strong {
+  font-size: var(--c-size-secondary);
+}
+
+/* Says where it comes from, so a blank one is never read as a missing setting. */
+.invoice-template .it-parties em {
+  color: var(--c-pencil);
+  font-size: var(--c-size-group);
+  font-style: normal;
+}
+
+.it-lines {
+  margin: 0 var(--c-space-7);
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+}
+
+.it-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px 78px 82px;
+  gap: var(--c-space-3);
+  padding: 11px var(--c-space-5);
+  border-bottom: 1px solid var(--c-active);
+  align-items: baseline;
+}
+
+.it-line:last-child {
+  border-bottom: 0;
+}
+
+.invoice-template .it-line-head {
+  background: var(--c-surface-soft);
+  border-bottom: 1px solid var(--c-border-soft);
+  color: var(--c-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.it-line-head span:not(:first-child) {
+  text-align: right;
+}
+
+.it-line-desc {
+  min-width: 0;
+  font-size: var(--c-size-meta);
+  color: var(--c-text);
+}
+
+.invoice-template .it-line-desc em {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-pencil);
+  font-size: var(--c-size-group);
+  font-style: normal;
+}
+
+.it-line-qty,
+.it-line-unit {
+  text-align: right;
+  color: var(--c-text-body);
+  font-size: var(--c-size-meta);
+}
+
+.it-line-amount {
+  text-align: right;
+  color: var(--c-text);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+.it-totals {
+  padding: var(--c-space-5) var(--c-space-7) var(--c-space-1);
+  margin-left: auto;
+  width: min(320px, 100%);
+  display: grid;
+}
+
+.it-total-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--c-space-5);
+  padding: var(--c-space-3) 0;
+  border-bottom: 1px solid var(--c-active);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.it-total-grand {
+  border-top: 1px solid var(--c-border);
+  border-bottom: 0;
+  color: var(--c-text);
+  font-size: var(--c-size-card-heading);
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .it-mat {
+    padding: var(--c-space-5) var(--c-space-3) var(--c-space-6);
+  }
+
+  .it-head,
+  .it-headertext,
+  .it-parties,
+  .it-block,
+  .it-foot {
+    padding-left: var(--c-space-5);
+    padding-right: var(--c-space-5);
+  }
+
+  .it-lines {
+    margin: 0 var(--c-space-5);
+  }
+
+  .it-totals {
+    padding-left: var(--c-space-5);
+    padding-right: var(--c-space-5);
+  }
+
+  .it-line {
+    grid-template-columns: minmax(0, 1fr) 36px 62px 70px;
+  }
+}

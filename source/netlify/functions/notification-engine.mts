@@ -7,6 +7,17 @@ import { SETTINGS_BULK_EXCLUDE_FILTER } from "./_shared/settings-keys.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
+import {
+  DEFAULT_MAP_LINK_LABEL,
+  notificationTemplateText,
+  notificationVariantFor,
+  parseNotificationTemplates,
+} from "./_shared/notification-templates.mts";
+import type {
+  NotificationTemplateField,
+  NotificationVariantId,
+} from "./_shared/notification-templates.mts";
+
 type BookingAction = "booking" | "rescheduled" | "cancelled" | "updated" | "reminder" | "test";
 type NotificationChannel = "client" | "coach" | "admin";
 
@@ -221,6 +232,10 @@ async function readSettings(accountId: string) {
     siteUrl,
     contactEmail: cleanEmail(s.accountContactEmail, env("CLARITY_CONTACT_EMAIL", "")),
     coachProfiles: parseCoachProfiles(s.coachProfilesJson),
+    // Per-variant wording. Blank fields fall back to the shared defaults, so a
+    // workspace that has never opened the editor still sends Clarity's copy.
+    notificationTemplates: parseNotificationTemplates(s.notificationTemplatesJson),
+    mapLinkLabel: cleanText(s.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40),
   };
 }
 
@@ -563,7 +578,7 @@ function actionLabels(action: BookingAction) {
   return { title: "Booking confirmed", clientSubject: "Your golf lesson is confirmed", adminSubject: "New booking" };
 }
 
-function variablesFor(action: BookingAction, appt: any, previous: any, serviceName: string, settings: any) {
+function variablesFor(action: BookingAction, appt: any, previous: any, serviceName: string, settings: any, service?: any) {
   const rescheduleUrl = rescheduleUrlFor(appt, settings);
   const location = cleanBookingLocationSnapshot(appt.location, {
     name: settings.venueName,
@@ -573,6 +588,12 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
     client: appt.client || appt.title,
     firstName: String(appt.client || appt.title || "Client").split(/\s+/)[0] || "Client",
     coach: resolveAppointmentCoach(appt, settings).name || settings.coachName || settings.businessName,
+    // The coach's first name alone. A sign-off reads "See you on the range,
+    // Jordan" — the full name there sounds like a form letter.
+    coachFirstName:
+      String(
+        resolveAppointmentCoach(appt, settings).name || settings.coachName || settings.businessName || "",
+      ).split(/\s+/)[0] || "",
     business: settings.businessName,
     service: serviceName,
     date: slotDateLabel(appt.week, appt.day),
@@ -590,40 +611,108 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
     email: appt.email || "Not supplied",
     action,
     rescheduleUrl,
+    // The public booking page, so a cancellation or package message can point
+    // somewhere useful without inventing a link.
+    bookingUrl: settings.bookingUrl || "",
+    packageAllowance: service?.packageAllowance ? String(service.packageAllowance) : "",
     googleCalendarUrl: googleCalendarUrlFor(appt, serviceName, settings, rescheduleUrl),
     appleCalendarUrl: appleCalendarUrlFor(appt, settings),
   };
 }
 
-function templateSubjects(action: BookingAction, settings: any, variables: Record<string, string>) {
+// The wording each variant used to be able to override, before the per-variant
+// templates existed. A coach who customised one of these keeps it: upgrading
+// must not quietly revert the subject line their clients have been reading.
+// Compared against the shipped default to tell "they wrote this" from "nobody
+// ever touched it" - readSettings() defaults these, so they are never empty.
+const LEGACY_CHANGE_FOOTER = /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i;
+
+const LEGACY_CLIENT_WORDING: Record<string, { setting: string; shipped: string; variant: NotificationVariantId; field: "subject" | "body" | "signoff" }> = {
+  clientEmailSubject: { setting: "clientEmailSubject", shipped: "Your {{service}} is confirmed", variant: "booked", field: "subject" },
+  clientEmailIntro: { setting: "clientEmailIntro", shipped: "Thanks {{firstName}}, your booking with {{coach}} is confirmed.", variant: "booked", field: "body" },
+  clientEmailFooter: { setting: "clientEmailFooter", shipped: "We look forward to seeing you.", variant: "booked", field: "signoff" },
+  rescheduleClientSubject: { setting: "rescheduleClientSubject", shipped: "Your {{service}} has been rescheduled", variant: "reschedule", field: "subject" },
+  cancellationClientSubject: { setting: "cancellationClientSubject", shipped: "Your {{service}} booking has been cancelled", variant: "cancelled", field: "subject" },
+  reminderClientSubject: { setting: "reminderClientSubject", shipped: "Reminder: {{service}} at {{time}}", variant: "reminder", field: "subject" },
+};
+
+/**
+ * One piece of client-facing wording, rendered. Precedence, most specific first:
+ *
+ *   1. what the coach wrote in this variant's template
+ *   2. a legacy per-action setting they had customised before templates existed
+ *   3. Clarity's default for the variant
+ */
+function clientText(
+  variant: NotificationVariantId,
+  field: NotificationTemplateField,
+  settings: any,
+  variables: Record<string, string>,
+) {
+  const written = settings.notificationTemplates?.[variant]?.[field];
+  if (typeof written === "string" && written.trim()) return render(written, variables);
+
+  for (const legacy of Object.values(LEGACY_CLIENT_WORDING)) {
+    if (legacy.variant !== variant || legacy.field !== field) continue;
+    const value = cleanText(settings[legacy.setting], "", 1200);
+    if (!value || value === legacy.shipped) continue;
+    // An even older default footer told clients to reply in order to move a
+    // lesson, which the Manage/Reschedule button does better. Only legacy
+    // values are screened - wording typed into the new editor is the coach's.
+    if (legacy.field === "signoff" && LEGACY_CHANGE_FOOTER.test(value)) continue;
+    return render(value, variables);
+  }
+
+  return render(notificationTemplateText(settings.notificationTemplates, variant, field), variables);
+}
+
+function templateSubjects(
+  action: BookingAction,
+  variant: NotificationVariantId,
+  settings: any,
+  variables: Record<string, string>,
+) {
   const sharedSubjectTemplate = cleanText(settings.notificationSubjectLine, "", 180);
   const sharedSubject = sharedSubjectTemplate.trim() ? render(sharedSubjectTemplate, variables) : "";
   if (sharedSubject) return { client: sharedSubject, admin: sharedSubject };
 
-  if (action === "rescheduled") return { client: render(settings.rescheduleClientSubject, variables), admin: render(settings.rescheduleAdminSubject, variables) };
-  if (action === "cancelled") return { client: render(settings.cancellationClientSubject, variables), admin: render(settings.cancellationAdminSubject, variables) };
-  if (action === "updated") return { client: render(settings.updateClientSubject, variables), admin: render(settings.updateAdminSubject, variables) };
-  if (action === "reminder") return { client: render(settings.reminderClientSubject, variables), admin: `Reminder: ${variables.client}` };
-  if (action === "test") return { client: "Clarity Golf booking email test", admin: "Clarity Golf booking email test" };
-  return { client: render(settings.clientEmailSubject, variables), admin: render(settings.adminEmailSubject, variables) };
+  // The admin/coach copy is an internal alert and has no template of its own -
+  // a coach writes what their clients read, not what their own inbox says.
+  const admin =
+    action === "rescheduled"
+      ? render(settings.rescheduleAdminSubject, variables)
+      : action === "cancelled"
+        ? render(settings.cancellationAdminSubject, variables)
+        : action === "updated"
+          ? render(settings.updateAdminSubject, variables)
+          : action === "reminder"
+            ? `Reminder: ${variables.client}`
+            : action === "test"
+              ? "Clarity Golf booking email test"
+              : render(settings.adminEmailSubject, variables);
+
+  if (action === "test") return { client: "Clarity Golf booking email test", admin };
+  return { client: clientText(variant, "subject", settings, variables), admin };
 }
 
-function clientIntro(action: BookingAction, settings: any, variables: Record<string, string>) {
-  if (action === "booking") return render(settings.clientEmailIntro, variables);
-  if (action === "rescheduled") return `Thanks ${variables.firstName}, your new lesson time is confirmed.`;
-  if (action === "cancelled") return `Your ${variables.service} booking has been cancelled.`;
-  if (action === "updated") return `Your ${variables.service} booking details have been updated.`;
-  if (action === "reminder") return `A reminder for your upcoming ${variables.service}.`;
-  return "This is a test of your booking email template.";
+function clientIntro(
+  action: BookingAction,
+  variant: NotificationVariantId,
+  settings: any,
+  variables: Record<string, string>,
+) {
+  if (action === "test") return "This is a test of your booking email template.";
+  return clientText(variant, "body", settings, variables);
 }
 
-function clientFooter(action: BookingAction, settings: any, variables: Record<string, string>) {
-  const rendered = action === "booking" ? render(settings.clientEmailFooter, variables).trim() : "";
-  const isLegacyChangeFooter = /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i.test(rendered);
-  if (rendered && !isLegacyChangeFooter) return rendered;
-  if (action === "cancelled") return "If this cancellation was unexpected, reply to this email and we will help.";
+function clientFooter(
+  action: BookingAction,
+  variant: NotificationVariantId,
+  settings: any,
+  variables: Record<string, string>,
+) {
   if (action === "test") return "Email delivery is working.";
-  return "We look forward to seeing you.";
+  return clientText(variant, "signoff", settings, variables);
 }
 
 function detailTable(rows: Array<[string, string]>) {
@@ -642,10 +731,18 @@ function reviewButtonHtml(url: string) {
   return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr><td><a href="${escapeHtml(reviewHref)}" style="display:inline-block;background:#3b82c4;color:#ffffff;padding:13px 18px;text-decoration:none;border-radius:7px;font-weight:700">Leave a Google Review</a></td></tr></table>`;
 }
 
-function clientActionButtonsHtml(action: BookingAction, variables: Record<string, string>, settings: any) {
+function clientActionButtonsHtml(
+  action: BookingAction,
+  variant: NotificationVariantId,
+  variables: Record<string, string>,
+  settings: any,
+) {
   if (action === "cancelled" || action === "test") return "";
-  const manageButton = variables.rescheduleUrl
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 12px"><tr><td><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">Manage / Reschedule</a></td></tr></table>`
+  // The coach names the button; where it goes is not theirs to change. A blank
+  // label means they cleared it, so the button drops off entirely.
+  const manageLabel = clientText(variant, "cta", settings, variables).trim();
+  const manageButton = variables.rescheduleUrl && manageLabel
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 12px"><tr><td><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">${escapeHtml(manageLabel)}</a></td></tr></table>`
     : "";
   const calendarButtons = variables.googleCalendarUrl || variables.appleCalendarUrl
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px"><tr>${
@@ -662,11 +759,17 @@ function clientActionButtonsHtml(action: BookingAction, variables: Record<string
   return `${manageButton}${calendarButtons}${reviewButton}`;
 }
 
-function clientActionButtonsText(action: BookingAction, variables: Record<string, string>, settings: any) {
+function clientActionButtonsText(
+  action: BookingAction,
+  variant: NotificationVariantId,
+  variables: Record<string, string>,
+  settings: any,
+) {
   if (action === "cancelled" || action === "test") return [];
   const reviewUrl = cleanUrl(settings?.googleReviewUrl || "", "");
+  const manageLabel = clientText(variant, "cta", settings, variables).trim();
   return [
-    variables.rescheduleUrl ? `Manage / Reschedule: ${variables.rescheduleUrl}` : "",
+    variables.rescheduleUrl && manageLabel ? `${manageLabel}: ${variables.rescheduleUrl}` : "",
     variables.googleCalendarUrl ? `Google Calendar: ${variables.googleCalendarUrl}` : "",
     variables.appleCalendarUrl ? `Apple Calendar: ${variables.appleCalendarUrl}` : "",
     reviewUrl ? `Leave a Google Review: ${reviewUrl}` : "",
@@ -675,6 +778,7 @@ function clientActionButtonsText(action: BookingAction, variables: Record<string
 
 function bodyFor(
   action: BookingAction,
+  variant: NotificationVariantId,
   appt: any,
   previous: any,
   serviceName: string,
@@ -684,13 +788,19 @@ function bodyFor(
 ) {
   const labels = actionLabels(action);
   const isClient = channel === "client";
+  // The client sees the heading the coach wrote for this variant; the coach and
+  // admin copies keep the plain internal title, which says what happened.
+  const title = isClient ? clientText(variant, "heading", settings, variables) : labels.title;
   const previousValue = previous ? `${variables.previousDate}, ${variables.previousTime}` : "";
+  // "Where" carries the map link the coach named, when the location has one.
+  const mapLabel = cleanText(settings.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40);
+  const whereValue = variables.mapUrl ? `${variables.venue} — ${mapLabel}: ${variables.mapUrl}` : variables.venue;
   const rows: Array<[string, string]> = isClient
     ? [
         ["Lesson", serviceName],
         ["When", `${variables.date}, ${variables.time}`],
         ["Previous", previousValue],
-        ["Where", variables.venue],
+        ["Where", whereValue],
       ]
     : [
         ["Client", variables.client],
@@ -702,20 +812,20 @@ function bodyFor(
         ["Where", variables.venue],
         ["Booking ID", appt.id],
       ];
-  const intro = isClient ? clientIntro(action, settings, variables) : render(settings.adminEmailIntro, variables);
+  const intro = isClient ? clientIntro(action, variant, settings, variables) : render(settings.adminEmailIntro, variables);
   const footer = isClient
-    ? clientFooter(action, settings, variables)
+    ? clientFooter(action, variant, settings, variables)
     : `${channel === "coach" ? "Coach" : "Admin"} booking alert.`;
-  const actionsHtml = isClient ? clientActionButtonsHtml(action, variables, settings) : "";
-  const actionsText = isClient ? clientActionButtonsText(action, variables, settings) : [];
+  const actionsHtml = isClient ? clientActionButtonsHtml(action, variant, variables, settings) : "";
+  const actionsText = isClient ? clientActionButtonsText(action, variant, variables, settings) : [];
   const textRows = rows.filter(([, value]) => Boolean(value)).map(([label, value]) => `${label}: ${value}`);
   const brandName = escapeHtml(settings.businessName || settings.coachName || "Clarity Golf");
   const detailRows = detailTable(rows);
   const detailsSection = rows.length
     ? `<p style="margin:0 0 8px;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">Booking details</p><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#f6f9f3;border:1px solid #e6ecdf;border-radius:8px;padding:12px;display:block"><tr><td style="padding:0">${detailRows}</td></tr></table>`
     : "";
-  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${brandName}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">${escapeHtml(labels.title)}</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailsSection}</div>${actionsHtml}<p style="margin:16px 0 0;color:#526054">${escapeHtml(footer).replace(/\n/g, "<br/>")}</p><p style="margin:10px 0 0;color:#8e9a8d;font-size:12px">${brandName}</p></div></div></div>`;
-  const text = [labels.title, "", intro, "", ...textRows, "", ...actionsText, actionsText.length ? "" : "", footer]
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${brandName}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">${escapeHtml(title)}</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailsSection}</div>${actionsHtml}<p style="margin:16px 0 0;color:#526054">${escapeHtml(footer).replace(/\n/g, "<br/>")}</p><p style="margin:10px 0 0;color:#8e9a8d;font-size:12px">${brandName}</p></div></div></div>`;
+  const text = [title, "", intro, "", ...textRows, "", ...actionsText, actionsText.length ? "" : "", footer]
     .filter((line, index, lines) => !(line === "" && lines[index - 1] === ""))
     .join("\n");
   return { html, text };
@@ -823,8 +933,10 @@ export async function notifyBookingEvent(input: NotifyInput) {
   const previous = input.previousAppointment ? normaliseAppointment(input.previousAppointment) : null;
   const service = services.find((candidate: any) => candidate.id === appt.serviceId);
   const serviceName = cleanText(service?.name, "Golf Lesson", 160);
-  const variables = variablesFor(action, appt, previous, serviceName, settings);
-  const subjects = templateSubjects(action, settings, variables);
+  const variables = variablesFor(action, appt, previous, serviceName, settings, service);
+  // A new booking splits three ways on what was booked - see notificationVariantFor.
+  const variant = notificationVariantFor(action, service?.lessonFormat);
+  const subjects = templateSubjects(action, variant, settings, variables);
   const personKey = appt.email ? `email:${appt.email}` : appt.phone ? `phone:${appt.phone}` : `name:${appt.client.toLowerCase()}`;
   const signature = hash({ action, appt, previous, source: input.source }).slice(0, 24);
   const results: any[] = [];
@@ -849,7 +961,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
       await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject, kind, status: "skipped", provider: "settings", error: "missing_recipient" });
       return;
     }
-    const body = bodyFor(action, appt, previous, serviceName, settings, variables, channel);
+    const body = bodyFor(action, variant, appt, previous, serviceName, settings, variables, channel);
     const result = await sendEmail({
       accountId,
       to: recipient,
@@ -993,7 +1105,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
       const recipient = cleanEmail(attendee?.email, "");
       if (!recipient || notified.has(recipient)) continue;
       notified.add(recipient);
-      const body = bodyFor(action, appt, previous, serviceName, settings, variables, "client");
+      const body = bodyFor(action, variant, appt, previous, serviceName, settings, variables, "client");
       const kind = "cancelled_attendee_email";
       const result = await sendEmail({
         accountId,

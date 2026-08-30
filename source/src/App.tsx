@@ -77,6 +77,14 @@ import {
   setActivePhoneCountry,
 } from "../netlify/functions/_shared/phone.mts";
 import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
+import { MessageTemplatesPanel } from "./modules/notifications/MessageTemplatesPanel";
+import { InvoiceTemplatePanel } from "./modules/billing/InvoiceTemplatePanel";
+import {
+  cleanNotificationTemplates,
+  DEFAULT_MAP_LINK_LABEL,
+  emptyNotificationTemplates,
+} from "../netlify/functions/_shared/notification-templates.mts";
+import type { NotificationTemplates } from "../netlify/functions/_shared/notification-templates.mts";
 import IntegrationsPanel from "./modules/integrations/IntegrationsPanel";
 import {
   BASE_WEEK_START,
@@ -1789,6 +1797,13 @@ type NotificationSettings = {
   smsFromNumber: string;
   sendClientSms: boolean;
   sendAdminSms: boolean;
+  // The wording of each client-facing message, one template per thing that
+  // happened. Blank fields mean "use Clarity's default" - see
+  // netlify/functions/_shared/notification-templates.mts, which the send path
+  // reads from too so the preview and the email cannot drift.
+  notificationTemplates: NotificationTemplates;
+  // What the map link beside the venue is called, on every message.
+  mapLinkLabel: string;
 };
 
 type ServiceEditor = Omit<Service, "id"> & {
@@ -4980,6 +4995,8 @@ const defaultNotificationSettings: NotificationSettings = {
   smsFromNumber: "",
   sendClientSms: false,
   sendAdminSms: false,
+  notificationTemplates: emptyNotificationTemplates(),
+  mapLinkLabel: DEFAULT_MAP_LINK_LABEL,
 };
 
 const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
@@ -5717,6 +5734,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     value: notificationSettings,
     onSave: saveNotificationSettings,
   });
+  const messageTemplatesEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: saveNotificationSettings,
+  });
   const bookingNoticeEditor = useEditableBlock<NotificationSettings>({
     value: notificationSettings,
     onSave: saveNotificationSettings,
@@ -5736,6 +5757,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       { id: "email-notifications", title: "Email Notifications", editor: emailNotificationsEditor },
       { id: "text-machine", title: "Text Machine", editor: textMachineEditor },
       { id: "email-template", title: "Email Template", editor: emailTemplateEditor },
+      { id: "message-templates", title: "Message Templates", editor: messageTemplatesEditor },
       { id: "booking-page-notice", title: "Booking Page notice", editor: bookingNoticeEditor },
       { id: "booking-screen-name", title: "Booking Page screen name", editor: bookingScreenNameEditor },
     ],
@@ -5745,6 +5767,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       emailNotificationsEditor,
       textMachineEditor,
       emailTemplateEditor,
+      messageTemplatesEditor,
       bookingNoticeEditor,
       bookingScreenNameEditor,
     ],
@@ -5802,6 +5825,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const textMachineIsLocked = textMachineEditor.status !== "editing" && textMachineEditor.status !== "error";
   const emailTemplateDraft = emailTemplateEditor.draftValue;
   const emailTemplateIsLocked = emailTemplateEditor.status !== "editing" && emailTemplateEditor.status !== "error";
+  const messageTemplatesDraft = messageTemplatesEditor.draftValue;
+  const messageTemplatesIsLocked =
+    messageTemplatesEditor.status !== "editing" && messageTemplatesEditor.status !== "error";
   const bookingNoticeDraft = bookingNoticeEditor.draftValue;
   const bookingNoticeIsLocked = bookingNoticeEditor.status !== "editing" && bookingNoticeEditor.status !== "error";
   const bookingScreenNameDraft = bookingScreenNameEditor.draftValue;
@@ -6828,6 +6854,14 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     service: emailTemplateService?.name ?? "your lesson type",
     time: emailTemplateService ? formatRange(14 * 60, emailTemplateService.duration) : "2:00 PM-3:00 PM",
     venue: coachAccount.venueShortName || coachAccount.venueName || "your venue",
+    // Supplied by variablesFor() on a real send; here so the templates preview
+    // reads as a message rather than a sentence with holes in it.
+    coachFirstName: (coachAccount.coachName || coachAccount.businessName || "your coach").split(/\s+/)[0],
+    location: coachAccount.venueShortName || coachAccount.venueName || "your venue",
+    mapUrl: "[map link]",
+    bookingUrl: "[booking page]",
+    rescheduleUrl: "[reschedule link]",
+    packageAllowance: "6",
   };
   const emailSubjectTemplatePreview = notificationSettings.notificationSubjectLine.trim()
     ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)
@@ -7513,6 +7547,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(minBookingNoticeMinutes),
       reminderLeadMinutes: Number.isFinite(reminderLeadMinutes) ? clamp(reminderLeadMinutes, 60, 14 * 24 * 60) : 24 * 60,
       googleReviewUrl: cleanUrl(settings?.googleReviewUrl, ""),
+      // Always a complete set of six, whatever the server sent - the editor
+      // indexes into it directly and a missing variant would blank the tab.
+      notificationTemplates: cleanNotificationTemplates(settings?.notificationTemplates),
+      mapLinkLabel:
+        typeof settings?.mapLinkLabel === "string" && settings.mapLinkLabel.trim()
+          ? settings.mapLinkLabel
+          : DEFAULT_MAP_LINK_LABEL,
     });
   }
 
@@ -27210,44 +27251,20 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                         />
                       </label>
                     </div>
-                    <label className="settings-field">
-                      <span>Business address</span>
-                      <textarea
-                        value={invoiceSettingsDraft.businessAddress}
-                        readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("businessAddress", event.target.value)}
-                        rows={2}
-                      />
-                    </label>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>Header text</span>
-                        <textarea
-                          value={invoiceSettingsDraft.headerText}
-                          readOnly={billingSettingsIsLocked}
-                          onChange={(event) => updateBillingAccountDraft("headerText", event.target.value)}
-                          rows={2}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>Footer text</span>
-                        <textarea
-                          value={invoiceSettingsDraft.footerText}
-                          readOnly={billingSettingsIsLocked}
-                          onChange={(event) => updateBillingAccountDraft("footerText", event.target.value)}
-                          rows={2}
-                        />
-                      </label>
-                    </div>
-                    <label className="settings-field">
-                      <span>Payment instructions</span>
-                      <textarea
-                        value={invoiceSettingsDraft.paymentInstructions}
-                      readOnly={billingSettingsIsLocked}
-                      onChange={(event) => updateBillingAccountDraft("paymentInstructions", event.target.value)}
-                        rows={2}
-                      />
-                    </label>
+                    {/* Address, tax number, header, bank account, payment
+                        instructions, default note and footer were seven boxes
+                        here. They are the same document every client receives,
+                        so they are written on it — see InvoiceTemplatePanel.
+                        Numbering, currency, tax rate and terms stay fields:
+                        they are settings, not things printed on the page. */}
+                    <InvoiceTemplatePanel
+                      settings={invoiceSettingsDraft}
+                      locked={billingSettingsIsLocked}
+                      businessName={coachAccount.businessName}
+                      logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
+                      formatMoney={(value) => formatMoney(value, invoiceSettingsDraft.currency)}
+                      onChange={(field, value) => updateBillingAccountDraft(field, value)}
+                    />
                     <div className="custom-field-list">
                       <div className="services-topline">
                         <div>
@@ -28670,6 +28687,44 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </EditableSettingsBlock>
               </SettingsGroup>
 
+              <SettingsGroup
+                id="message-templates"
+                section="notifications"
+                title="Message templates"
+                className="notification-card message-templates-card"
+              >
+                <p className="settings-note">
+                  One message per thing that happens to a booking, and the wording is yours. Anything you leave alone
+                  keeps Clarity&apos;s wording, so a message you never open still reads well.
+                </p>
+                <EditableSettingsBlock
+                  id="message-templates-block"
+                  title="Message Templates"
+                  status={messageTemplatesEditor.status}
+                  dirty={messageTemplatesEditor.dirty}
+                  errorMessage={messageTemplatesEditor.errorMessage}
+                  onEdit={() => startEditableBlock("message-templates")}
+                  onCancel={() => cancelEditableBlock("message-templates")}
+                  onSave={() => void saveEditableBlock("message-templates")}
+                >
+                  <MessageTemplatesPanel
+                    templates={messageTemplatesDraft.notificationTemplates}
+                    mapLinkLabel={messageTemplatesDraft.mapLinkLabel}
+                    locked={messageTemplatesIsLocked}
+                    businessName={coachAccount.businessName}
+                    logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
+                    venueName={coachAccount.venueShortName || coachAccount.venueName}
+                    renderPreview={(template) => renderTemplate(template, emailTemplateVariables)}
+                    onChange={(templates) =>
+                      updateNotificationBlockDraft(messageTemplatesEditor, "notificationTemplates", templates)
+                    }
+                    onMapLinkLabelChange={(label) =>
+                      updateNotificationBlockDraft(messageTemplatesEditor, "mapLinkLabel", label.slice(0, 40))
+                    }
+                  />
+                </EditableSettingsBlock>
+              </SettingsGroup>
+
               <SettingsGroup id="email-template" section="notifications" title="Email template" className="notification-card email-template-card">
                 <div className="email-preview">
                   <span>Example</span>
@@ -28794,40 +28849,25 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     {testEmailState === "sending" ? "Sending..." : testEmailState === "sent" ? "Sent" : "Send Test Email"}
                   </button>
                 </details>
+                {/* The customer's subject, opening and footer used to be three
+                    boxes here, applying to every notification at once. They are
+                    per-message in Message templates now, and that wording wins,
+                    so editing them here would have quietly done nothing. What a
+                    coach already saved still applies until they write a template
+                    over it - see clientText() in notification-engine.mts. */}
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Mail size={18} />
                     <div>
                       <span>Customer email</span>
-                      <strong>{notificationSettings.clientEmailSubject}</strong>
+                      <strong>Written per message</strong>
                     </div>
                   </summary>
-                  <label className="settings-field">
-                    <span>Customer subject</span>
-                    <input
-                      value={emailTemplateDraft.clientEmailSubject}
-                      readOnly={emailTemplateIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "clientEmailSubject", event.target.value)}
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>Customer opening</span>
-                    <textarea
-                      rows={3}
-                      value={emailTemplateDraft.clientEmailIntro}
-                      readOnly={emailTemplateIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "clientEmailIntro", event.target.value)}
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>Footer / reschedule note</span>
-                    <textarea
-                      rows={3}
-                      value={emailTemplateDraft.clientEmailFooter}
-                      readOnly={emailTemplateIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "clientEmailFooter", event.target.value)}
-                    />
-                  </label>
+                  <p className="field-help">
+                    The subject, opening and sign-off a client reads are written on the message itself, one per thing
+                    that happens — new booking, rescheduled, reminder, cancelled, group and package. Open{" "}
+                    <strong>Message templates</strong> above.
+                  </p>
                 </details>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">

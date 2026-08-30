@@ -5,6 +5,11 @@ import {
   settingsSelectQuery,
   settingsUpsertRows,
 } from "./_shared/settings-scope.mts";
+import {
+  cleanNotificationTemplates,
+  DEFAULT_MAP_LINK_LABEL,
+  parseNotificationTemplates,
+} from "./_shared/notification-templates.mts";
 
 const defaultMinBookingNoticeMinutes = 240;
 
@@ -158,6 +163,8 @@ async function readAdminSettings(accountId: string) {
     smsFromNumber: settings.smsFromNumber || "",
     sendClientSms: settings.sendClientSms === "true",
     sendAdminSms: settings.sendAdminSms === "true",
+    notificationTemplates: parseNotificationTemplates(settings.notificationTemplatesJson),
+    mapLinkLabel: cleanString(settings.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40) || DEFAULT_MAP_LINK_LABEL,
   };
 }
 
@@ -192,6 +199,12 @@ async function writeAdminSettings(accountId: string, settings: any) {
   if (hasOwn(settings, "smsFromNumber")) await setSetting(accountId, "smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
   if (hasOwn(settings, "sendClientSms")) await setSetting(accountId, "sendClientSms", settings?.sendClientSms ? "true" : "false");
   if (hasOwn(settings, "sendAdminSms")) await setSetting(accountId, "sendAdminSms", settings?.sendAdminSms ? "true" : "false");
+  if (hasOwn(settings, "notificationTemplates")) {
+    await setSetting(accountId, "notificationTemplatesJson", JSON.stringify(cleanNotificationTemplates(settings?.notificationTemplates)));
+  }
+  if (hasOwn(settings, "mapLinkLabel")) {
+    await setSetting(accountId, "mapLinkLabel", cleanString(settings?.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40) || DEFAULT_MAP_LINK_LABEL);
+  }
   await setSetting(accountId, "updatedAt", nowIso());
   return readAdminSettings(accountId);
 }
