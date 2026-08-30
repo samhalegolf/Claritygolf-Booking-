@@ -2326,7 +2326,7 @@ async function ensureNotificationHistoryTable() {
 // Self-creating like the notification tables above -- the player portal is
 // additive, so its session table is provisioned on first use rather than
 // requiring a separate production migration step. A repo migration file exists
-// alongside it for the schema record (netlify/database/migrations).
+// alongside it for the schema record (database/migrations).
 let playerSessionsTableReady = false;
 async function ensurePlayerSessionsTable() {
   if (playerSessionsTableReady) return;
@@ -3631,7 +3631,7 @@ async function deleteLessonNote(noteId, accountId: string) {
  *
  * Self-creating like guest_senders/player_sessions above: a deploy that
  * reaches production before the migration is applied by hand must not 500.
- * The repo migration (netlify/database/migrations/20260825000100_create_practice_blocks)
+ * The repo migration (database/migrations/20260825000100_create_practice_blocks)
  * is the schema record.
  * ------------------------------------------------------------------------- */
 
@@ -8698,7 +8698,7 @@ function playerProfileIdCandidates({ personId, email, phone }) {
 
 // Self-creating, like player_sessions above: a deploy that reaches production
 // before the migration is applied by hand must not 500. The repo migration
-// (netlify/database/migrations/20260821000100_create_guest_senders) is the
+// (database/migrations/20260821000100_create_guest_senders) is the
 // schema record.
 let guestSendersTableReady = false;
 async function ensureGuestSendersTable() {

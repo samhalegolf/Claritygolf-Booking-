@@ -72,13 +72,7 @@ create table if not exists public.billing_invoice_items (
   tax_amount numeric not null default 0,
   discount_amount numeric not null default 0,
   line_total numeric not null default 0,
-  -- NOTE: service_date and tag are live on the Supabase database but have no
-  -- file in netlify/database/migrations. The migration that added them
-  -- (20260830000100_invoice_item_service_date_and_tag) applied here and is
-  -- recorded in public.schema_migrations, but failed every Netlify build --
-  -- the build's DATABASE_URL points at a different database from this one, and
-  -- it blocked six deploys before being removed. Do not re-add a migration for
-  -- these columns until that mismatch is resolved.
+  -- Added by database/migrations/20260830000100_invoice_item_service_date_and_tag.
   --
   -- When the work on this line actually happened, where that is not the
   -- invoice's issue date. Display only; no total is figured from it.

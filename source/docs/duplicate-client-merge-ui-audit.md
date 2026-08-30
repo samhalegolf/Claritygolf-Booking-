@@ -29,9 +29,9 @@ The app never intentionally creates two `people` rows for the same person going 
 
 Schema history backs this up — the `people` table has moved *away* from a hard uniqueness constraint, toward the app-level heuristic being the only thing preventing duplicates:
 
-- `netlify/database/migrations/20260607000200_create_people/` — original table.
-- `netlify/database/migrations/20260623000200_allow_shared_client_contacts/` and `netlify/database/migrations/20260714000200_allow_shared_client_emails/` — relaxed a unique-email constraint specifically because families/clubs legitimately share one email. Duplicates are no longer prevented at the database level, only by `compatiblePersonMatch` at write time.
-- `netlify/database/migrations/20260715000100_add_calendar_item_person_id/` — added `calendar_items.person_id` as a stable FK, reducing (but not eliminating) duplicate spin-off from re-deriving the match on every save.
+- `database/migrations/20260607000200_create_people/` — original table.
+- `database/migrations/20260623000200_allow_shared_client_contacts/` and `database/migrations/20260714000200_allow_shared_client_emails/` — relaxed a unique-email constraint specifically because families/clubs legitimately share one email. Duplicates are no longer prevented at the database level, only by `compatiblePersonMatch` at write time.
+- `database/migrations/20260715000100_add_calendar_item_person_id/` — added `calendar_items.person_id` as a stable FK, reducing (but not eliminating) duplicate spin-off from re-deriving the match on every save.
 
 **Implication for a merge UI:** none of the above finds duplicates that *already* exist. `compatiblePersonMatch` only ever compares one incoming candidate against existing rows at write time. A merge feature needs a genuinely different operation: a full-table (or paginated) scan of `people` grouped by the same matching signals, surfaced as candidate pairs/groups for a human to confirm — `compatiblePersonMatch`'s matching *logic* is reusable for this, but the scan itself doesn't exist anywhere.
 

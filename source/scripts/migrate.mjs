@@ -2,16 +2,31 @@
 //
 // Apply outstanding database migrations.
 //
-// This exists because it didn't. `netlify/database/migrations/` has always been
-// a directory of SQL files with nothing that runs them: they were applied by
-// hand, and the build was `tsc && vite build`. That was survivable while the
-// code tolerated an older schema. It stopped being survivable the moment the
-// code began to *require* a column -- a deploy shipped expecting
-// `settings.account_id`, the migration adding it had never run, and the site
-// went down with `column "account_id" does not exist`.
+// This exists because it didn't. The migrations directory has always been a set
+// of SQL files with nothing that runs them: they were applied by hand, and the
+// build was `tsc && vite build`. That was survivable while the code tolerated an
+// older schema. It stopped being survivable the moment the code began to
+// *require* a column -- a deploy shipped expecting `settings.account_id`, the
+// migration adding it had never run, and the site went down with
+// `column "account_id" does not exist`.
 //
 // So: migrations are now part of deploying, and a deploy that cannot apply them
 // fails instead of shipping code the database cannot serve.
+//
+// WHY database/migrations AND NOT netlify/database/migrations
+//
+// `netlify/database/migrations/` is Netlify DB's reserved path: the platform
+// scans it during the *Deploying* phase and applies anything pending to the
+// Netlify-provisioned Postgres. This project's schema does not live there -- it
+// lives in Supabase, which is what DATABASE_URL points at and what the
+// @netlify/database shim in package.json actually forwards to.
+//
+// While the files sat in that path, both consumers read them. A new migration
+// applied here during Building, then failed in Netlify DB during Deploying with
+// `relation "billing_invoice_items" does not exist`, because that database has
+// none of this app's tables. It blocked six production deploys before anyone
+// noticed the two phases were doing different things. Keep migrations out of
+// Netlify's path so only this runner reads them.
 //
 // Usage:
 //   node scripts/migrate.mjs              apply anything outstanding
@@ -31,7 +46,7 @@ import pg from "pg";
 const { Pool } = pg;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = path.join(HERE, "..", "netlify", "database", "migrations");
+const MIGRATIONS_DIR = path.join(HERE, "..", "database", "migrations");
 
 const flags = new Set(process.argv.slice(2).filter((arg) => arg.startsWith("--")));
 const dryRun = flags.has("--dry-run");

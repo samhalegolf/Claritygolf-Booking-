@@ -47,7 +47,7 @@ and `CLARITY_EMAIL_FROM` are all already in use elsewhere in the app.
 ## Migrations
 
 Applied to the live project already, and recorded in
-`netlify/database/migrations`:
+`database/migrations`:
 
 - `20260813000200_create_portal_players`
 - `20260813000300_add_player_session_auth_user`

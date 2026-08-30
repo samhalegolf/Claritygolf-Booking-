@@ -2,10 +2,16 @@
 -- 5 August 2026. Verified afterwards: public has 62 tables with RLS on and zero
 -- off. Nothing needs to be run to make production correct.
 --
--- Held here rather than in netlify/database/migrations because as a migration it
--- repeatedly failed the deploy with a Postgres error the build log truncates at
--- 128 characters ("pq: rela"), blocking unrelated code from shipping. It is kept
--- as the record of what was changed and as the script a fresh environment needs.
+-- Held here rather than as a migration because it repeatedly failed the deploy
+-- with a Postgres error the build log truncates at 128 characters ("pq: rela"),
+-- blocking unrelated code from shipping. It is kept as the record of what was
+-- changed and as the script a fresh environment needs.
+--
+-- The cause is now known: migrations lived in netlify/database/migrations,
+-- which Netlify DB also scans and applies to its own Postgres during the
+-- Deploying phase - a database with none of these tables, hence
+-- "pq: relation ... does not exist". They live in database/migrations now, so
+-- this could safely become a migration again. See scripts/migrate.mjs.
 -- Re-add it to the chain once the runner's failure is understood; it is safe to
 -- re-run, since to_regclass skips absent tables and enabling RLS twice is a
 -- no-op.
