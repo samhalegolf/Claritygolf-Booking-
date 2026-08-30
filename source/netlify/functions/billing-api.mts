@@ -64,6 +64,18 @@ function cleanSlug(value: unknown, fallback = "") {
   return cleaned || fallback;
 }
 
+// A calendar date on its way into a DATE column. Anything that isn't an actual
+// yyyy-mm-dd becomes null rather than reaching Postgres and 400-ing the whole
+// save - these fields are optional, so a bad one should drop, not block.
+function cleanIsoDate(value: unknown): string | null {
+  const text = cleanString(value, "", 20);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const parsed = new Date(`${text}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  // Rejects the calendar-invalid dates Date() rolls over, e.g. 2026-02-31.
+  return parsed.toISOString().slice(0, 10) === text ? text : null;
+}
+
 function cleanNumber(value: unknown, fallback = 0, { min = -1e12, max = 1e12 } = {}) {
   const num = Number(value);
   return Number.isFinite(num) ? Math.max(min, Math.min(max, num)) : fallback;
@@ -806,6 +818,8 @@ type InvoiceItemInput = {
   unitPrice?: number;
   taxRate?: number;
   discountAmount?: number;
+  serviceDate?: string;
+  tag?: string;
 };
 
 function cleanInvoiceItem(raw: InvoiceItemInput, taxInclusive = false) {
@@ -832,6 +846,10 @@ function cleanInvoiceItem(raw: InvoiceItemInput, taxInclusive = false) {
     tax_amount: taxAmount,
     discount_amount: discountAmount,
     line_total: taxInclusive ? lineAmount : round2(lineAmount + taxAmount),
+    // Both are descriptive: when the work happened, and which of the coach's own
+    // reporting labels it falls under. Neither feeds a total.
+    service_date: cleanIsoDate(raw?.serviceDate),
+    tag: cleanString(raw?.tag, "", 80) || null,
   };
 }
 
@@ -872,6 +890,8 @@ function invoiceRowToApi(row: Record<string, unknown>, items: Array<Record<strin
       taxAmount: Number(item.tax_amount) || 0,
       discountAmount: Number(item.discount_amount) || 0,
       lineTotal: Number(item.line_total) || 0,
+      serviceDate: item.service_date || "",
+      tag: item.tag || "",
     })),
   };
 }

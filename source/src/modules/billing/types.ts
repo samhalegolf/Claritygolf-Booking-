@@ -34,6 +34,10 @@ export type InvoiceSettings = {
   defaultCustomerNote: string;
   paymentInstructions: string;
   customFields: InvoiceCustomField[];
+  // The coach's own labels for invoice lines - see InvoiceLineTag. Empty by
+  // default: the Tag field only appears on a line once there is something to
+  // pick, so a coach who doesn't report this way never sees it.
+  lineTags: InvoiceLineTag[];
   // How insistently the Dashboard should call out unpaid/overdue invoices.
   // 1 = subtle count only, 2 = highlighted banner, 3 = urgent banner + row
   // highlighting in Recent Invoices. Purely a display setting - it doesn't
@@ -98,6 +102,15 @@ export type InvoiceLineSource = "manual" | "catalog" | "booking_snapshot" | "pac
 // value in the invoice currency; "percent" = a percentage of the line's gross.
 export type InvoiceLineDiscountKind = "none" | "amount" | "percent";
 
+// One entry in the coach's own list of invoice-line labels. Deliberately not a
+// fixed set: one workspace reports by coach, another by location, another just
+// wants "Retail". The list lives in InvoiceSettings.lineTags; a line stores the
+// id, so renaming a tag renames it everywhere it has ever been used.
+export type InvoiceLineTag = {
+  id: string;
+  label: string;
+};
+
 export type InvoiceLine = {
   id: string;
   source: InvoiceLineSource;
@@ -116,6 +129,14 @@ export type InvoiceLine = {
   discountValue: number;
   discountAmount: number;
   discountPresetId?: string;
+  // When the work on this line actually happened, for the common case where it
+  // is not the invoice's own issue date - a lesson given on the 4th, billed on
+  // the 12th. ISO yyyy-mm-dd, or "" when the line has no date of its own.
+  // Display only: no total is figured from it.
+  serviceDate: string;
+  // An InvoiceSettings.lineTags id, or "" when untagged. An id that is no longer
+  // in the list still round-trips, so retiring a tag doesn't rewrite history.
+  tag: string;
 };
 
 export type InvoiceDraft = {

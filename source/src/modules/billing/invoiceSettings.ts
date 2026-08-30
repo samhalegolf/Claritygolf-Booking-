@@ -7,6 +7,7 @@ import { clamp } from "../../lib/number";
 import type {
   InvoiceCustomField,
   InvoiceCustomFieldPlacement,
+  InvoiceLineTag,
   InvoiceSettings,
 } from "./types";
 
@@ -31,6 +32,8 @@ export const defaultInvoiceSettings: InvoiceSettings = {
   defaultCustomerNote: "",
   paymentInstructions: "",
   customFields: [],
+  // No tags until the coach adds some - see InvoiceSettings.lineTags.
+  lineTags: [],
   unpaidLoudness: 2,
 };
 
@@ -50,6 +53,28 @@ export function cleanInvoiceCustomField(field?: Partial<InvoiceCustomField>, ind
   };
 }
 
+/**
+ * Normalises one entry in the coach's invoice-line tag list. The id is kept as-is
+ * when it already exists, so saving the settings never renumbers tags out from
+ * under the invoice lines that reference them.
+ *
+ * An empty label is deliberately kept rather than dropped. This runs through
+ * cleanCoachAccount on every keystroke in the settings editor, so dropping a
+ * blank row would delete it the moment a coach cleared the field to retype it -
+ * and would make "Add tag" appear to do nothing at all. Unlabelled tags are
+ * filtered out where they would actually be seen (the line's Tag picker).
+ */
+export function cleanInvoiceLineTag(tag?: Partial<InvoiceLineTag>, index = 0): InvoiceLineTag | null {
+  if (!tag || typeof tag !== "object") return null;
+  return {
+    id: typeof tag.id === "string" && tag.id.trim() ? tag.id.trim().slice(0, 80) : `tag-${index + 1}`,
+    // Not trimmed: this normalises the settings draft on every keystroke, and a
+    // trim here would swallow the space in "Coach Jordan" as it was typed.
+    // Callers trim when they display or compare.
+    label: typeof tag.label === "string" ? tag.label.slice(0, 60) : "",
+  };
+}
+
 export function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): InvoiceSettings {
   const taxRate = Number(settings?.taxRate ?? defaultInvoiceSettings.taxRate);
   const paymentTermsDays = Number(settings?.paymentTermsDays ?? defaultInvoiceSettings.paymentTermsDays);
@@ -60,6 +85,19 @@ export function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): Invoi
         .filter((field): field is InvoiceCustomField => Boolean(field))
         .slice(0, 12)
     : [];
+  // Duplicate ids would make the picker ambiguous and split one tag's lines into
+  // two buckets, so the first entry to claim an id keeps it.
+  const seenTagIds = new Set<string>();
+  const lineTags: InvoiceLineTag[] = [];
+  if (Array.isArray(settings?.lineTags)) {
+    for (const [index, raw] of settings.lineTags.entries()) {
+      if (lineTags.length >= 40) break;
+      const tag = cleanInvoiceLineTag(raw, index);
+      if (!tag || seenTagIds.has(tag.id)) continue;
+      seenTagIds.add(tag.id);
+      lineTags.push(tag);
+    }
+  }
   return {
     enabled: settings?.enabled !== false,
     showBillingWorkspace: settings?.showBillingWorkspace !== false,
@@ -99,6 +137,7 @@ export function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): Invoi
         ? settings.paymentInstructions.trim().slice(0, 400)
         : defaultInvoiceSettings.paymentInstructions,
     customFields,
+    lineTags,
     unpaidLoudness: [1, 2, 3].includes(Number(settings?.unpaidLoudness))
       ? (Number(settings?.unpaidLoudness) as 1 | 2 | 3)
       : defaultInvoiceSettings.unpaidLoudness,

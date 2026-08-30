@@ -8722,6 +8722,16 @@ button {
   color: var(--c-text);
 }
 
+/* A published invoice has no drawer to open, so the line's own date and tag sit
+   under the description instead - otherwise saving them would hide them. */
+.ip-line-meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-pencil);
+  font-size: 11px;
+  font-style: normal;
+}
+
 .ip-line-plain .ip-line-qty,
 .ip-line-plain .ip-line-unit {
   padding-top: 1px;
@@ -8811,6 +8821,28 @@ button {
 }
 
 .ip-drawer-preset select {
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+/* When the line was delivered. Wider than the money boxes because a date input
+   carries its own picker chrome, and left-aligned - a date is read, not summed,
+   so the right-alignment the amount fields use would be wrong here. */
+.ip-drawer-date {
+  flex: 0 0 148px;
+}
+
+.ip-drawer-date input {
+  text-align: left;
+  cursor: pointer;
+}
+
+.ip-drawer-tag {
+  flex: 1 1 170px;
+  min-width: 0;
+}
+
+.ip-drawer-tag select {
   cursor: pointer;
   font-size: 12.5px;
 }

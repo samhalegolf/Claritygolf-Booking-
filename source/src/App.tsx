@@ -5868,6 +5868,44 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     );
   }
 
+  function updateBillingLineTagDraft(id: string, label: string) {
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          lineTags: current.invoiceSettings.lineTags.map((tag) => (tag.id === id ? { ...tag, label } : tag)),
+        },
+      }),
+    );
+  }
+
+  function addBillingLineTagDraft() {
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          lineTags: [...current.invoiceSettings.lineTags, { id: `tag-${Date.now()}`, label: "" }],
+        },
+      }),
+    );
+  }
+
+  // Retiring a tag only takes it out of the picker. Invoice lines keep the id
+  // they were saved with, so past invoices still read the way they were issued.
+  function removeBillingLineTagDraft(id: string) {
+    billingSettingsEditor.setDraftValue((current) =>
+      cleanCoachAccount({
+        ...current,
+        invoiceSettings: {
+          ...current.invoiceSettings,
+          lineTags: current.invoiceSettings.lineTags.filter((tag) => tag.id !== id),
+        },
+      }),
+    );
+  }
+
   function updateNotificationBlockDraft(
     editor: typeof emailNotificationsEditor,
     field: keyof NotificationSettings,
@@ -14381,6 +14419,19 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     return line.discountKind === "amount" || line.discountKind === "percent" ? line.discountKind : "";
   }
 
+  // The tags a line can actually be given. A settings row that has been added but
+  // not yet named is not an option - see cleanInvoiceLineTag on why blank rows
+  // survive normalisation in the first place.
+  const invoiceLineTagOptions = invoiceSettings.lineTags.filter((tag) => tag.label.trim());
+
+  // A line's tag as the coach reads it. A tag retired from the settings list
+  // after the line was saved still has to render, so an unknown id falls back to
+  // the raw id rather than disappearing off a published invoice.
+  function invoiceLineTagLabel(tagId: string): string {
+    if (!tagId) return "";
+    return invoiceSettings.lineTags.find((tag) => tag.id === tagId)?.label.trim() || tagId;
+  }
+
   // "Add a line" starts a blank line you type into on the invoice itself. It
   // used to seed the description from lineSearch and clear it, which made sense
   // while lineSearch was the text in a pop-open picker; it is the standing
@@ -14402,6 +14453,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           discountKind: "none",
           discountValue: 0,
           discountAmount: 0,
+          serviceDate: "",
+          tag: "",
         },
       ],
     }));
@@ -14434,6 +14487,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           discountKind: "none",
           discountValue: 0,
           discountAmount: 0,
+          serviceDate: "",
+          tag: "",
         },
       ],
     }));
@@ -15707,6 +15762,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           discountKind: "none",
           discountValue: 0,
           discountAmount: 0,
+          // The lesson knows when it happened, which is the whole reason the
+          // field exists - a block of August lessons billed at the end of it.
+          serviceDate: itemDateValue(item),
+          tag: "",
         },
       ],
     }));
@@ -16132,6 +16191,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         discountKind: (Number(item.discountAmount) || 0) > 0 ? "amount" : "none",
         discountValue: Number(item.discountAmount) || 0,
         discountAmount: Number(item.discountAmount) || 0,
+        serviceDate: String(item.serviceDate || ""),
+        // Kept even when the id is no longer in the coach's list, so retiring a
+        // tag doesn't silently strip it off the invoices that used it.
+        tag: String(item.tag || ""),
       })),
     };
   }
@@ -16202,6 +16265,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           taxRate: line.taxRate,
           // Resolve percent/preset discounts to a currency amount for storage.
           discountAmount: lineDiscountAmount(line),
+          serviceDate: line.serviceDate,
+          tag: line.tag,
         })),
       },
     };
@@ -24379,7 +24444,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           if (invoiceLocked) {
                             return (
                               <div className="ip-line ip-line-plain" key={line.id}>
-                                <span className="ip-line-desc">{line.description}</span>
+                                <span className="ip-line-desc">
+                                  {line.description}
+                                  {(line.serviceDate || line.tag) && (
+                                    <em className="ip-line-meta">
+                                      {[line.serviceDate ? formatDateForDisplay(line.serviceDate) : "", invoiceLineTagLabel(line.tag)]
+                                        .filter(Boolean)
+                                        .join(" · ")}
+                                    </em>
+                                  )}
+                                </span>
                                 <span className="ip-line-qty">{line.quantity}</span>
                                 <span className="ip-line-unit">{formatMoney(line.unitPrice, invoiceSettings.currency)}</span>
                                 <span className="ip-line-amount">
@@ -24505,9 +24579,51 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                       </select>
                                     </label>
                                   )}
+                                  <label className="ip-drawer-field ip-drawer-date">
+                                    <span>Date</span>
+                                    <input
+                                      className="ip-dash"
+                                      value={line.serviceDate}
+                                      onChange={(event) => updateInvoiceLine(line.id, "serviceDate", event.target.value)}
+                                      type="date"
+                                      aria-label="Date this line was delivered"
+                                    />
+                                  </label>
+                                  {/* The Tag picker only exists once the coach has
+                                      a list to pick from. A workspace that doesn't
+                                      report this way never sees an empty select. */}
+                                  {invoiceLineTagOptions.length > 0 && (
+                                    <label className="ip-drawer-field ip-drawer-tag">
+                                      <span>Tag</span>
+                                      <select
+                                        className="ip-dash"
+                                        value={line.tag}
+                                        onChange={(event) => updateInvoiceLine(line.id, "tag", event.target.value)}
+                                      >
+                                        <option value="">No tag</option>
+                                        {invoiceLineTagOptions.map((tag) => (
+                                          <option key={tag.id} value={tag.id}>
+                                            {tag.label.trim()}
+                                          </option>
+                                        ))}
+                                        {/* A tag retired from the list after this
+                                            line was saved still has to be pickable,
+                                            or opening the draft would silently
+                                            clear it on the next save. */}
+                                        {line.tag && !invoiceLineTagOptions.some((tag) => tag.id === line.tag) && (
+                                          <option value={line.tag}>{line.tag} (retired)</option>
+                                        )}
+                                      </select>
+                                    </label>
+                                  )}
                                   <span className="ip-drawer-note">
                                     One discount per line — filling one box clears the other. The invoice-wide discount below still applies on top.
                                   </span>
+                                  {invoiceLineTagOptions.length > 0 && (
+                                    <span className="ip-drawer-note">
+                                      Tags are your own list — coach, location, whatever you report on — kept in Billing › Settings.
+                                    </span>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -27187,6 +27303,51 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           </button>
                         </div>
                       ))}
+                    </div>
+                    <div className="custom-field-list">
+                      <div className="services-topline">
+                        <div>
+                          <span>Line tags</span>
+                          <h2>How you group invoice lines</h2>
+                        </div>
+                        <button className="outline-button" disabled={billingSettingsIsLocked} onClick={addBillingLineTagDraft} type="button">
+                          <Plus size={16} />
+                          Add Tag
+                        </button>
+                      </div>
+                      {/* Not a fixed list: one workspace reports by coach, another
+                          by location. The tag never appears on the client's copy -
+                          it is only how the coach files the line. */}
+                      <p className="settings-note">
+                        Your own labels for invoice lines — coach, location, whatever you report on. They stay off the
+                        client's invoice. Removing one here leaves it on invoices that already used it.
+                      </p>
+                      {invoiceSettingsDraft.lineTags.length ? (
+                        invoiceSettingsDraft.lineTags.map((tag) => (
+                          <div className="custom-field-row" key={tag.id}>
+                            <label className="settings-field">
+                              <span>Label</span>
+                              <input
+                                value={tag.label}
+                                readOnly={billingSettingsIsLocked}
+                                onChange={(event) => updateBillingLineTagDraft(tag.id, event.target.value)}
+                                placeholder="Coach · Jordan Blake"
+                              />
+                            </label>
+                            <button
+                              className="icon-button"
+                              disabled={billingSettingsIsLocked}
+                              onClick={() => removeBillingLineTagDraft(tag.id)}
+                              type="button"
+                              aria-label="Remove line tag"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="settings-static-value">No tags yet — invoice lines won't show a Tag field.</p>
+                      )}
                     </div>
                   </details>
                   </EditableSettingsBlock>

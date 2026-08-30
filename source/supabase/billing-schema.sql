@@ -72,11 +72,22 @@ create table if not exists public.billing_invoice_items (
   tax_amount numeric not null default 0,
   discount_amount numeric not null default 0,
   line_total numeric not null default 0,
+  -- When the work on this line actually happened, where that is not the
+  -- invoice's issue date. Display only; no total is figured from it.
+  service_date date,
+  -- An id from the account's own invoice_settings.lineTags list. Free text on
+  -- purpose: the list lives in settings JSON, and retiring a tag must not
+  -- rewrite the invoices that already used it.
+  tag text,
   created_at timestamptz not null default now()
 );
 
 create index if not exists idx_billing_invoice_items_invoice
   on public.billing_invoice_items (invoice_id);
+
+create index if not exists idx_billing_invoice_items_account_tag
+  on public.billing_invoice_items (account_id, tag)
+  where tag is not null and tag <> '';
 
 -- Prevents the same completed booking from being invoiced twice: inserting a
 -- second link for a booking_id already scoped to this account fails with a

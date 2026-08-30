@@ -28,6 +28,10 @@ function line(
     discountKind,
     discountValue,
     discountAmount: discountKind === "amount" ? discountValue : 0,
+    // Descriptive only - no total is figured from either, so every case here
+    // leaves them blank.
+    serviceDate: "",
+    tag: "",
   };
 }
 
