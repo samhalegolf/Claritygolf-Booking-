@@ -179,6 +179,7 @@ import { PosCheckoutModal } from "./modules/billing/PosCheckoutModal";
 import {
   defaultInvoiceSettings,
   cleanInvoiceSettings,
+  printableInvoiceCustomFields,
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
@@ -14465,6 +14466,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // survive normalisation in the first place.
   const invoiceLineTagOptions = invoiceSettings.lineTags.filter((tag) => tag.label.trim());
 
+  // The custom fields as they go on the invoice. A settings row that has been
+  // added but not filled in is not one of them - see cleanInvoiceCustomField on
+  // why blank rows survive normalisation in the first place.
+  const invoiceCustomFieldsToPrint = printableInvoiceCustomFields(invoiceSettings.customFields);
+
   // A line's tag as the coach reads it. A tag retired from the settings list
   // after the line was saved still has to render, so an unknown id falls back to
   // the raw id rather than disappearing off a published invoice.
@@ -24453,9 +24459,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                         </div>
                       </div>
 
-                      {invoiceSettings.customFields.some((field) => field.placement === "header" || field.placement === "bill-to") && (
+                      {invoiceCustomFieldsToPrint.some((field) => field.placement === "header" || field.placement === "bill-to") && (
                         <div className="ip-custom-fields">
-                          {invoiceSettings.customFields
+                          {invoiceCustomFieldsToPrint
                             .filter((field) => field.placement === "header" || field.placement === "bill-to")
                             .map((field) => (
                               <span key={field.id}>
@@ -24787,7 +24793,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                         {invoiceSettings.paymentInstructions ||
                         invoiceSettings.bankAccount ||
                         invoiceSettings.taxNumber ||
-                        invoiceSettings.customFields.some((field) => field.placement === "payment") ? (
+                        invoiceCustomFieldsToPrint.some((field) => field.placement === "payment") ? (
                           <>
                             {invoiceSettings.paymentInstructions && <span>{invoiceSettings.paymentInstructions}</span>}
                             <em>
@@ -24799,7 +24805,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                 .filter(Boolean)
                                 .join(" · ")}
                             </em>
-                            {invoiceSettings.customFields
+                            {invoiceCustomFieldsToPrint
                               .filter((field) => field.placement === "payment")
                               .map((field) => (
                                 <em key={field.id}>
@@ -24813,7 +24819,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             Add payment details
                           </button>
                         ) : null}
-                        {invoiceSettings.customFields
+                        {invoiceCustomFieldsToPrint
                           .filter((field) => field.placement === "footer")
                           .map((field) => (
                             <em key={field.id}>
