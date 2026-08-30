@@ -37,20 +37,47 @@ export const defaultInvoiceSettings: InvoiceSettings = {
   unpaidLoudness: 2,
 };
 
+/**
+ * Normalises one of the coach's invoice custom fields.
+ *
+ * A blank row is deliberately kept rather than dropped, and neither the label
+ * nor the value is trimmed. This runs through cleanCoachAccount on every
+ * keystroke in the settings editor and the result is what the inputs render
+ * from, so dropping a blank row would make "Add Field" appear to do nothing,
+ * and a trim here would swallow the space in "Bank Name" as it was typed.
+ * Blank rows and untrimmed labels are dealt with where the fields are actually
+ * printed - see printableInvoiceCustomFields.
+ */
 export function cleanInvoiceCustomField(field?: Partial<InvoiceCustomField>, index = 0): InvoiceCustomField | null {
-  const label = typeof field?.label === "string" ? field.label.trim().slice(0, 80) : "";
-  const value = typeof field?.value === "string" ? field.value.trim().slice(0, 180) : "";
-  if (!label && !value) return null;
+  if (!field || typeof field !== "object") return null;
   const placement: InvoiceCustomFieldPlacement =
-    field?.placement === "bill-to" || field?.placement === "payment" || field?.placement === "footer"
+    field.placement === "bill-to" || field.placement === "payment" || field.placement === "footer"
       ? field.placement
       : "header";
   return {
-    id: typeof field?.id === "string" && field.id.trim() ? field.id.trim().slice(0, 80) : `field-${index + 1}`,
-    label: label || "Custom field",
-    value,
+    id: typeof field.id === "string" && field.id.trim() ? field.id.trim().slice(0, 80) : `field-${index + 1}`,
+    label: typeof field.label === "string" ? field.label.slice(0, 80) : "",
+    value: typeof field.value === "string" ? field.value.slice(0, 180) : "",
     placement,
   };
+}
+
+/**
+ * The custom fields worth printing on an invoice, trimmed for display. A row
+ * with neither a label nor a value is one the coach has added but not filled in
+ * yet, so it is dropped here rather than in cleanInvoiceCustomField; a row with
+ * only a value still prints, under the same "Custom field" heading it used to
+ * get from normalisation.
+ */
+export function printableInvoiceCustomFields(fields: InvoiceCustomField[]): InvoiceCustomField[] {
+  const printable: InvoiceCustomField[] = [];
+  for (const field of fields) {
+    const label = field.label.trim();
+    const value = field.value.trim();
+    if (!label && !value) continue;
+    printable.push({ ...field, label: label || "Custom field", value });
+  }
+  return printable;
 }
 
 /**

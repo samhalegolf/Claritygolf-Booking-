@@ -105,6 +105,11 @@ const defaultInvoiceSettings = {
   paymentInstructions:
     "Please pay by bank transfer and use the invoice number as reference.",
   customFields: [],
+  // The coach's own labels for invoice lines, and how loudly the workspace
+  // flags unpaid invoices. Both are set in Billing Settings - see
+  // src/modules/billing/invoiceSettings.ts, which this mirrors.
+  lineTags: [],
+  unpaidLoudness: 2,
 };
 
 /**
@@ -824,18 +829,40 @@ function defaultCoachAccount() {
 	  };
 	}
 
+/**
+ * Normalises one of the coach's invoice custom fields. Like cleanInvoiceLineTag
+ * below, this keeps a blank row and does not trim, so the settings editor gets
+ * its draft back unchanged when it saves: an added-but-not-filled-in row stays
+ * on screen, and a label still being typed keeps its trailing space. The blank
+ * rows are dropped and the labels trimmed where the fields are printed - see
+ * printableInvoiceCustomFields in src/modules/billing/invoiceSettings.ts, which
+ * this mirrors.
+ */
 function cleanInvoiceCustomField(field, index = 0) {
-  const label = cleanString(field?.label, "", 80);
-  const value = cleanString(field?.value, "", 180);
-  if (!label && !value) return null;
+  if (!field || typeof field !== "object") return null;
   const placement = ["bill-to", "payment", "footer"].includes(field?.placement)
     ? field.placement
     : "header";
   return {
     id: cleanString(field?.id, `field-${index + 1}`, 80),
-    label: label || "Custom field",
-    value,
+    label: typeof field?.label === "string" ? field.label.slice(0, 80) : "",
+    value: typeof field?.value === "string" ? field.value.slice(0, 180) : "",
     placement,
+  };
+}
+
+/**
+ * Normalises one of the coach's invoice-line tags. Deliberately keeps a blank
+ * label and does not trim, so this is the same shape the browser's
+ * cleanInvoiceLineTag returns: the settings editor round-trips its draft
+ * through here on save, and a row the coach has added but not named yet has to
+ * come back the way it went in rather than disappearing under the cursor.
+ */
+function cleanInvoiceLineTag(tag, index = 0) {
+  if (!tag || typeof tag !== "object") return null;
+  return {
+    id: cleanString(tag?.id, `tag-${index + 1}`, 80),
+    label: typeof tag?.label === "string" ? tag.label.slice(0, 60) : "",
   };
 }
 
@@ -853,6 +880,19 @@ function cleanInvoiceSettings(settings = {}) {
         .filter(Boolean)
         .slice(0, 12)
     : [];
+  // Duplicate ids would make the picker ambiguous and split one tag's lines into
+  // two buckets, so the first entry to claim an id keeps it.
+  const seenTagIds = new Set();
+  const lineTags = [];
+  if (Array.isArray(settings?.lineTags)) {
+    for (const [index, raw] of settings.lineTags.entries()) {
+      if (lineTags.length >= 40) break;
+      const tag = cleanInvoiceLineTag(raw, index);
+      if (!tag || seenTagIds.has(tag.id)) continue;
+      seenTagIds.add(tag.id);
+      lineTags.push(tag);
+    }
+  }
   return {
     enabled: settings?.enabled !== false,
     showBillingWorkspace: settings?.showBillingWorkspace !== false,
@@ -860,8 +900,12 @@ function cleanInvoiceSettings(settings = {}) {
       cleanString(settings?.prefix, defaultInvoiceSettings.prefix, 12)
         .toUpperCase()
         .replace(/[^A-Z0-9-]/g, "") || defaultInvoiceSettings.prefix,
+    // Same range the browser allows (see cleanInvoiceSettings in
+    // src/modules/billing/invoiceSettings.ts): min 0 so the field can be cleared
+    // while typing, and up to 9 digits so a year-based scheme like 20260001
+    // survives the save rather than being rewritten to 999999.
     nextNumber: Number.isFinite(nextNumber)
-      ? Math.max(1, Math.min(999999, Math.round(nextNumber)))
+      ? Math.max(0, Math.min(999999999, Math.round(nextNumber)))
       : defaultInvoiceSettings.nextNumber,
     currency: cleanString(
       settings?.currency,
@@ -895,6 +939,10 @@ function cleanInvoiceSettings(settings = {}) {
       400,
     ),
     customFields,
+    lineTags,
+    unpaidLoudness: [1, 2, 3].includes(Number(settings?.unpaidLoudness))
+      ? Number(settings?.unpaidLoudness)
+      : defaultInvoiceSettings.unpaidLoudness,
   };
 }
 
