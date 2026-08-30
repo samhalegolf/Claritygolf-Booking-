@@ -55,3 +55,4 @@ google-scope-fix.tgz
 
 # The npm lockfile, deliberately untracked.
 source/package-lock.json
+source/node_modules

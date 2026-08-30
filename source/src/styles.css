@@ -13691,3 +13691,324 @@ button {
     grid-template-columns: minmax(0, 1fr) 36px 62px 70px;
   }
 }
+
+/* --- Coach profile -------------------------------------------------------
+   A map of the workspace: who the coach is, and everything Clarity is plugged
+   into on their behalf. White cards on the page rather than one outer box, so
+   a section reads as its own thing and nothing nests. */
+
+.profile-page {
+  min-width: 0;
+}
+
+.coach-profile {
+  display: grid;
+  gap: var(--c-space-6);
+  min-width: 0;
+}
+
+.coach-profile .cp-identity {
+  display: flex;
+  gap: var(--c-space-7);
+  align-items: flex-start;
+  flex-wrap: wrap;
+  padding: var(--c-space-6);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+}
+
+.cp-avatar {
+  width: 72px;
+  height: 72px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--c-radius-control);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.cp-identity-main {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.cp-identity-name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--c-space-4);
+  flex-wrap: wrap;
+}
+
+.cp-identity-name strong {
+  font-size: 22px;
+}
+
+.coach-profile .cp-role {
+  padding: 3px var(--c-space-4);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-active);
+  color: var(--c-text-soft);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.coach-profile .cp-identity-where {
+  margin: var(--c-space-2) 0 var(--c-space-5);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-secondary);
+  line-height: 1.5;
+}
+
+.cp-identity-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+  gap: var(--c-space-5);
+}
+
+.coach-profile .cp-identity-facts span {
+  display: block;
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.cp-identity-facts strong {
+  display: block;
+  margin-top: 3px;
+  font-size: var(--c-size-secondary);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* Two columns of section cards. `columns` rather than a grid because the
+   sections are different heights and should pack, not line up in rows. */
+.cp-sections {
+  columns: 2;
+  column-gap: var(--c-space-6);
+}
+
+.coach-profile .cp-section {
+  margin: 0 0 var(--c-space-6);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+  overflow: hidden;
+  break-inside: avoid;
+}
+
+.coach-profile .cp-section h3 {
+  margin: 0;
+  padding: var(--c-space-5) var(--c-space-6);
+  border-bottom: 1px solid var(--c-border-soft);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-group);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* Cells ruled by hairlines rather than a box each: eleven boxes inside a box
+   is the nesting the rest of this app spent a long time getting rid of. */
+.cp-cell {
+  display: grid;
+  gap: var(--c-space-4);
+  align-content: start;
+  padding: var(--c-space-5) var(--c-space-6);
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.cp-section .cp-cell:last-child {
+  border-bottom: 0;
+}
+
+.cp-cell-head {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-4);
+}
+
+.cp-cell-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-2);
+}
+
+.cp-cell-title strong {
+  min-width: 0;
+  font-size: var(--c-size-card-heading);
+}
+
+.coach-profile .cp-cell-summary {
+  margin: 0;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  line-height: 1.5;
+}
+
+/* The point of the failing state is the sentence, not the colour. */
+.coach-profile .cp-cell-error {
+  margin: 0;
+  color: var(--c-danger);
+  font-size: var(--c-size-meta);
+  line-height: 1.5;
+}
+
+/* An outside account, so it can be absent in a way a Clarity setting cannot. */
+.coach-profile .cp-external {
+  flex: none;
+  display: inline-flex;
+  color: var(--c-text-disabled);
+}
+
+/* The provider's mark. Dashed while it is only a possibility, solid once the
+   connection exists. */
+.cp-mark {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+  color: var(--c-text-body);
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+}
+
+.cp-mark.is-placeholder {
+  border-style: dashed;
+  color: var(--c-pencil);
+}
+
+.cp-cell-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-2);
+}
+
+.cp-chip {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--c-radius-control);
+}
+
+.cp-chip.is-ok {
+  background: var(--c-success-wash);
+  color: var(--c-success-text);
+}
+
+.cp-chip.is-bad {
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
+}
+
+.cp-gear,
+.cp-detail-toggle {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text-soft);
+  cursor: pointer;
+}
+
+.cp-gear:hover,
+.cp-detail-toggle:hover:not(:disabled) {
+  background: var(--c-hover);
+  color: var(--c-text);
+}
+
+.cp-detail-toggle:disabled {
+  color: var(--c-text-disabled);
+  cursor: default;
+}
+
+/* Setting one up is the one thing on this screen worth a filled button. */
+.cp-setup {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-accent);
+  border-radius: var(--c-radius-control);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+  cursor: pointer;
+}
+
+.cp-setup:hover {
+  background: var(--c-text-body);
+}
+
+.cp-facts {
+  border-top: 1px solid var(--c-border-soft);
+  padding-top: var(--c-space-3);
+}
+
+.cp-fact {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--c-space-5);
+  padding: var(--c-space-3) 0;
+  border-bottom: 1px solid var(--c-active);
+}
+
+.coach-profile .cp-fact > span:first-child {
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+}
+
+.coach-profile .cp-fact > span:last-child {
+  color: var(--c-text-body);
+  font-size: var(--c-size-meta);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.coach-profile .cp-fact-path {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  margin: var(--c-space-3) 0 0;
+  color: var(--c-pencil);
+  font-size: var(--c-size-group);
+}
+
+.coach-profile .cp-error {
+  display: grid;
+  gap: var(--c-space-2);
+  justify-items: start;
+  padding: var(--c-space-5) var(--c-space-6);
+  border: 1px solid var(--c-danger);
+  border-radius: var(--c-radius-card);
+  background: var(--c-danger-wash);
+  color: var(--c-error-text);
+  font-size: var(--c-size-meta);
+}
+
+@media (max-width: 900px) {
+  .cp-sections {
+    columns: 1;
+  }
+}

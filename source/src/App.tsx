@@ -61,6 +61,7 @@ import {
   Trash2,
   Upload,
   User,
+  UserCog,
   Users,
   Video,
   X,
@@ -79,6 +80,8 @@ import {
 import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
 import { MessageTemplatesPanel } from "./modules/notifications/MessageTemplatesPanel";
 import { InvoiceTemplatePanel } from "./modules/billing/InvoiceTemplatePanel";
+import { CoachProfilePanel } from "./modules/profile/CoachProfilePanel";
+import type { ProfileInternalJob, ProfileTarget } from "./modules/profile/CoachProfilePanel";
 import {
   cleanNotificationTemplates,
   DEFAULT_MAP_LINK_LABEL,
@@ -1025,6 +1028,10 @@ type View =
   | "booking"
   | "sell"
   | "billing"
+  // Who the coach is, and everything Clarity is plugged into on their behalf.
+  // Not a second Settings: every card here routes to where the setting really
+  // lives, so there is still one place each thing is edited.
+  | "profile"
   | "settings"
   | "video"
   | "players";
@@ -1039,6 +1046,25 @@ type BillingSection =
   | "reports"
   | "transactions"
   | "settings";
+
+// Every Billing section, as values. BILLING_SECTION_LABELS below is keyed by
+// the same union, but a Record's keys are not available at runtime, and the
+// coach profile has to check a section exists before switching to it.
+const BILLING_SECTIONS: Exclude<BillingSection, "none">[] = [
+  "dashboard",
+  "new-invoice",
+  "invoices",
+  "expenses",
+  "products",
+  "coupons",
+  "reports",
+  "transactions",
+  "settings",
+];
+
+// The views a coach-profile card is allowed to send you to. Not every View:
+// "booking" is the public page and "settings" has its own target kind.
+const PROFILE_LINKED_VIEWS: View[] = ["calendar", "clients", "players", "sell", "billing", "video"];
 
 // The Billing sections named once, so the tab bar and the topbar's subtitle
 // cannot drift into two different words for the same place.
@@ -1185,10 +1211,16 @@ const SettingsGroupContext = createContext<{
   setOpenGroup: (id: string) => void;
 } | null>(null);
 
-function SettingsGroups({ children }: { children: ReactNode }) {
+function SettingsGroups({ children, requestedGroup = "" }: { children: ReactNode; requestedGroup?: string }) {
   // One value. Which group is open and which header is highlighted are the same
   // fact, so they cannot disagree.
   const [openGroup, setOpenGroup] = useState("");
+  // Coach profile sends a coach here pointed at one card, so the section it
+  // named opens on arrival. Everything else still arrives shut - this only
+  // fires when somebody asked for a specific group by name.
+  useEffect(() => {
+    if (requestedGroup) setOpenGroup(requestedGroup);
+  }, [requestedGroup]);
   const value = useMemo(() => ({ openGroup, setOpenGroup }), [openGroup]);
   return <SettingsGroupContext.Provider value={value}>{children}</SettingsGroupContext.Provider>;
 }
@@ -2413,6 +2445,8 @@ function sectionTitle(view: View) {
       return "Video Analysis";
     case "players":
       return "Player Profiles";
+    case "profile":
+      return "Coach profile";
     default:
       return "Calendar";
   }
@@ -2432,6 +2466,7 @@ function getInitialView(embedded = false): View {
   if (requestedView === "notes") return "players";
   if (requestedView === "players") return "players";
   if (requestedView === "video") return "video";
+  if (requestedView === "profile") return "profile";
   return isBookingWidgetMode() ? "booking" : "calendar";
 }
 
@@ -5773,6 +5808,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       bookingScreenNameEditor,
     ],
   );
+  // Which Settings section the coach profile asked to have open on arrival.
+  // Empty for every other route in, so Settings still opens with nothing
+  // expanded (see SettingsGroups).
+  const [requestedSettingsGroup, setRequestedSettingsGroup] = useState("");
   const [activeEditableBlockId, setActiveEditableBlockId] = useState<string | null>(null);
   const activeEditableBlock = editableBlocks.find((block) => block.id === activeEditableBlockId) ?? null;
   const dirtyEditableBlock = editableBlocks.find((block) => block.editor.dirty) ?? null;
@@ -11584,6 +11623,47 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     // Opening Video from the nav is the general workspace (no player context).
     if (view === "video") setVideoContext(null);
     if (view !== "calendar") closeCalendarDetails();
+    // Arriving anywhere by hand clears whatever the profile last pointed at, so
+    // a section does not spring open the next time Settings is opened normally.
+    if (view !== "settings") setRequestedSettingsGroup("");
+  }
+
+  /**
+   * Follow a Coach profile card to the thing it describes.
+   *
+   * The profile is a map, not a second place to edit: every card lands on the
+   * screen that already owns that setting, opening the right tab and section
+   * rather than reimplementing the form.
+   */
+  function openProfileTarget(target: ProfileTarget) {
+    if (dirtyEditableBlock && !confirmDiscardEditableBlock(dirtyEditableBlock.title)) return;
+    if (activeEditableBlock) activeEditableBlock.editor.cancel();
+    setActiveEditableBlockId(null);
+    setQuickCreate(null);
+    closeCalendarDetails();
+    // Targets are plain strings on the panel's side, so they are checked
+    // against the real lists here. A card naming a destination that no longer
+    // exists does nothing, rather than leaving the app on an impossible tab.
+    if (target.kind === "settings") {
+      const tab = SETTINGS_SECTIONS.find((section) => section.key === target.tab)?.key;
+      if (!tab) return;
+      setActiveView("settings");
+      setSettingsTab(tab);
+      setRequestedSettingsGroup(target.group ?? "");
+      return;
+    }
+    setRequestedSettingsGroup("");
+    if (target.kind === "billing") {
+      const section = BILLING_SECTIONS.find((candidate) => candidate === target.section);
+      if (!section) return;
+      setActiveView("billing");
+      setBillingSection(section);
+      return;
+    }
+    const view = PROFILE_LINKED_VIEWS.find((candidate) => candidate === target.view);
+    if (!view) return;
+    if (view === "video") setVideoContext(null);
+    setActiveView(view);
   }
 
   function openVideoAnalysisForClient(client: {
@@ -20920,6 +21000,189 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
    * which is why the old eyebrow line is gone -- it only ever repeated the
    * title back in capitals.
    */
+  /**
+   * Clarity's own settings, as coach-profile cards.
+   *
+   * Every fact here is read from live workspace state rather than restated, so
+   * a card cannot claim a lesson type exists after it has been deleted. A job
+   * with nothing to count yet simply carries no facts - its card still says
+   * where the setting lives.
+   */
+  const profileInternalJobs = useMemo<ProfileInternalJob[]>(() => {
+    const byFormat = (format: LessonFormat) => services.filter((service) => service.lessonFormat === format && !service.archived).length;
+    const defaultLocation = locations[0]?.name ?? "";
+    const publicServices = services.filter((service) => service.visibility === "public" && !service.archived).length;
+    return [
+      {
+        id: "lesson-types",
+        category: "Calendar",
+        label: "Lesson types",
+        summary: "What a client can book, and what it costs.",
+        path: "Settings › Lesson types",
+        target: { kind: "settings", tab: "services" },
+        facts: [
+          ["Private", String(byFormat("private"))],
+          ["Group", String(byFormat("group"))],
+          ["Package", String(byFormat("package"))],
+          ["On the booking page", String(publicServices)],
+        ],
+      },
+      {
+        id: "locations",
+        category: "Calendar",
+        label: "Locations & availability",
+        summary: "Where you coach, and when.",
+        path: "Settings › Booking › Availability",
+        target: { kind: "settings", tab: "booking", group: "availability" },
+        facts: [
+          ["Locations", String(locations.length)],
+          ...(defaultLocation ? ([["Default", defaultLocation]] as Array<[string, string]>) : []),
+          ["Timezone", coachAccount.timezone || "Not set"],
+        ],
+      },
+      {
+        id: "booking-page",
+        category: "Customer experience",
+        label: "Booking page",
+        summary: "The public page clients book through.",
+        path: "Settings › Booking › Booking page",
+        target: { kind: "settings", tab: "booking", group: "booking-page" },
+        facts: [
+          ["Address", coachAccount.bookingUrl || coachAccount.calendarSlug || "Not set"],
+          ["Minimum notice", formatBookingNoticeLabel(notificationSettings.minBookingNoticeMinutes)],
+          ["Lesson types shown", String(publicServices)],
+        ],
+      },
+      {
+        id: "coach-branding",
+        category: "Customer experience",
+        label: "Coach branding",
+        summary: "Your logo and colours, everywhere a client looks.",
+        path: "Settings › Business › Coach branding",
+        target: { kind: "settings", tab: "business", group: "coach-branding" },
+        facts: [
+          ["Logo", brandSettings.logoName || (brandSettings.logoPreview ? "Set" : "Not set")],
+          ["Primary", brandSettings.primary],
+          ["Applied to", "Booking page, emails, portal"],
+        ],
+      },
+      {
+        id: "email-notifications",
+        category: "Customer experience",
+        sub: "Notifications",
+        label: "Email",
+        summary: "Confirmations, reminders and cancellations.",
+        path: "Settings › Notifications",
+        target: { kind: "settings", tab: "notifications", group: "email-notifications" },
+        facts: [
+          ["Sends to clients", notificationSettings.sendClientEmail ? "On" : "Off"],
+          ["From address", notificationSettings.configuredSenderEmailAddress || notificationSettings.notificationEmail || "Not set"],
+          [
+            "Reminder",
+            notificationSettings.reminderEnabled
+              ? `${Math.round(notificationSettings.reminderLeadMinutes / 60)} hours before`
+              : "Off",
+          ],
+        ],
+      },
+      {
+        id: "sms-notifications",
+        category: "Customer experience",
+        sub: "Notifications",
+        label: "Text messages",
+        summary: "Reminders and cancellations by text.",
+        path: "Settings › Notifications › SMS and webhooks",
+        target: { kind: "settings", tab: "notifications", group: "text-machine" },
+        facts: [
+          ["Sends to clients", notificationSettings.sendClientSms ? "On" : "Off"],
+          ["Provider", notificationSettings.smsProviderName || "Not set"],
+          ["From", notificationSettings.smsFromNumber || "Not set"],
+        ],
+      },
+      {
+        id: "invoicing",
+        category: "Accounting",
+        label: "Invoicing",
+        summary: "Numbering, tax and payment terms.",
+        path: "Billing › Settings",
+        target: { kind: "billing", section: "settings" },
+        facts: [
+          ["Next number", `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`],
+          ["Tax", `${invoiceSettings.taxName} ${invoiceSettings.taxRate}%`],
+          [
+            "Payment terms",
+            invoiceSettings.paymentTermsDays === 0
+              ? "Due on receipt"
+              : `${invoiceSettings.paymentTermsDays} day${invoiceSettings.paymentTermsDays === 1 ? "" : "s"}`,
+          ],
+        ],
+      },
+      {
+        id: "products",
+        category: "Accounting",
+        label: "Products & stock",
+        summary: "What you sell at the counter.",
+        path: "Billing › Products",
+        target: { kind: "billing", section: "products" },
+        facts: catalogItems.length
+          ? [
+              ["Items", String(catalogItems.length)],
+              ["Low stock", String(catalogItems.filter((item) => item.lowStock).length)],
+            ]
+          : [],
+      },
+      {
+        id: "clients",
+        category: "Player portal",
+        label: "Client list",
+        summary: "Everyone who has booked with you.",
+        path: "Clients",
+        target: { kind: "view", view: "clients" },
+        facts: [["Clients", String(people.length)]],
+      },
+      {
+        id: "players",
+        category: "Player portal",
+        label: "Player profiles",
+        summary: "Notes, videos, practice and passes per player.",
+        path: "Player Profiles",
+        target: { kind: "view", view: "players" },
+        facts: [["Coaches", String(coachProfiles.length)]],
+      },
+      {
+        id: "video",
+        category: "Player portal",
+        label: "Video",
+        summary: "Saved analysis, and what a player can watch.",
+        path: "Video",
+        target: { kind: "view", view: "video" },
+        facts: savedVideoItems.length ? [["Saved videos", String(savedVideoItems.length)]] : [],
+      },
+      {
+        id: "practice",
+        category: "Player portal",
+        label: "Practice",
+        summary: "The kinds of block, and the favourites rail.",
+        path: "Settings › Practice",
+        target: { kind: "settings", tab: "practice", group: "practice-blocks" },
+        // Block types and favourites are loaded by the Practice panel itself,
+        // so counting them here would mean a request nobody asked for.
+        facts: [],
+      },
+    ];
+  }, [
+    services,
+    locations,
+    coachAccount,
+    brandSettings,
+    notificationSettings,
+    invoiceSettings,
+    catalogItems,
+    people,
+    coachProfiles,
+    savedVideoItems,
+  ]);
+
   const pageHeading: { title: string; subtitle?: string } =
     activeView === "calendar"
       ? {
@@ -20938,7 +21201,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               title: "Settings",
               subtitle: SETTINGS_SECTIONS.find((section) => section.key === settingsTab)?.label,
             }
-          : { title: sectionTitle(activeView) };
+          : activeView === "profile"
+            ? {
+                title: "Coach profile",
+                subtitle: "Who you are, and everything Clarity is plugged into on your behalf",
+              }
+            : { title: sectionTitle(activeView) };
   const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
   const latestDiagnosticEvent = diagnosticEvents[0];
   const latestDiagnosticError = failedDiagnosticEvents[0];
@@ -21022,6 +21290,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               Billing
             </button>
           )}
+          <button className={activeView === "profile" ? "active" : ""} onClick={() => switchView("profile")}>
+            <UserCog size={18} />
+            Coach profile
+          </button>
           <button className={activeView === "settings" ? "active" : ""} onClick={() => switchView("settings")}>
             <Settings size={18} />
             Settings
@@ -26855,6 +27127,25 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           </section>
         )}
 
+        {!isEmbedMode && adminWorkspaceReady && activeView === "profile" && (
+          <section className="profile-page">
+            <CoachProfilePanel
+              identity={{
+                coachName: coachAccount.coachName || currentAppUser.name,
+                businessName: coachAccount.businessName,
+                venueName: coachAccount.venueShortName || coachAccount.venueName,
+                roleLabel: isPlatformAdmin ? "Platform admin" : isAdminUser ? "Coach · Admin" : "Coach",
+                email: coachAccount.contactEmail || currentAppUser.email,
+                phone: coachProfiles[0]?.phone || "",
+                timezone: coachAccount.timezone,
+                currency: invoiceSettings.currency,
+              }}
+              internalJobs={profileInternalJobs}
+              onOpen={openProfileTarget}
+            />
+          </section>
+        )}
+
         {!isEmbedMode && adminWorkspaceReady && activeView === "settings" && (
           <section className="module-page settings-page">
             {/* Rule 07: the sub-nav keeps its boxes. 216px column, 38px rows,
@@ -26880,7 +27171,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               ))}
             </nav>
 
-            <SettingsGroups>
+            <SettingsGroups requestedGroup={requestedSettingsGroup}>
             <div className={`settings-grid settings-tab-${settingsTab}`}>
               {/* Mounted only on its own tab, like the integrations panels
                   below: it reads block types and favourites on mount, and
