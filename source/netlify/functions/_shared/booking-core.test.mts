@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  coachAccountFromSettings,
   compatiblePersonMatch,
   handlePublicBookingSlotsRequest,
   publicAppointmentContactQuery,
@@ -852,4 +853,81 @@ test("compatiblePersonMatch keeps a contactless booking out of another account",
     contactlessRows,
   );
   assert.equal(match, null);
+});
+
+// The settings editor round-trips the whole account through this cleaner when it
+// saves, so a key it does not carry is a key the coach loses on save.
+test("saving an account keeps the coach's invoice line tags", () => {
+  const account = coachAccountFromSettings(
+    {
+      accountId,
+      accountInvoiceSettingsJson: JSON.stringify({
+        lineTags: [
+          { id: "tag-jordan", label: "Coach · Jordan Blake" },
+          { id: "tag-blank", label: "" },
+          { id: "tag-jordan", label: "Duplicate id" },
+        ],
+      }),
+    },
+    accountId,
+  );
+  assert.deepEqual(account.invoiceSettings.lineTags, [
+    { id: "tag-jordan", label: "Coach · Jordan Blake" },
+    { id: "tag-blank", label: "" },
+  ]);
+});
+
+test("saving an account keeps the coach's unpaid-invoice loudness", () => {
+  const settingsJson = (unpaidLoudness: unknown) => ({
+    accountId,
+    accountInvoiceSettingsJson: JSON.stringify({ unpaidLoudness }),
+  });
+  assert.equal(
+    coachAccountFromSettings(settingsJson(3), accountId).invoiceSettings.unpaidLoudness,
+    3,
+  );
+  assert.equal(
+    coachAccountFromSettings(settingsJson(1), accountId).invoiceSettings.unpaidLoudness,
+    1,
+  );
+  // Anything outside the three levels falls back rather than reaching the UI.
+  assert.equal(
+    coachAccountFromSettings(settingsJson("loud"), accountId).invoiceSettings.unpaidLoudness,
+    2,
+  );
+});
+
+test("saving an account keeps a year-based invoice number", () => {
+  const nextNumber = (value: unknown) =>
+    coachAccountFromSettings(
+      { accountId, accountInvoiceSettingsJson: JSON.stringify({ nextNumber: value }) },
+      accountId,
+    ).invoiceSettings.nextNumber;
+  assert.equal(nextNumber(20260001), 20260001);
+  // Cleared while typing, and beyond anything a sequence can reach.
+  assert.equal(nextNumber(0), 0);
+  assert.equal(nextNumber(1e12), 999999999);
+  assert.equal(nextNumber("not a number"), 1001);
+});
+
+test("saving an account leaves the coach's custom fields as they were typed", () => {
+  const account = coachAccountFromSettings(
+    {
+      accountId,
+      accountInvoiceSettingsJson: JSON.stringify({
+        customFields: [
+          { id: "field-bank", label: "Bank Name ", value: "Sam Hale Golf", placement: "footer" },
+          { id: "field-new", label: "", value: "", placement: "footer" },
+          { id: "field-odd", label: "Ref", value: "A1", placement: "sideways" },
+        ],
+      }),
+    },
+    accountId,
+  );
+  assert.deepEqual(account.invoiceSettings.customFields, [
+    // The trailing space is the coach mid-word, not something to clean up here.
+    { id: "field-bank", label: "Bank Name ", value: "Sam Hale Golf", placement: "footer" },
+    { id: "field-new", label: "", value: "", placement: "footer" },
+    { id: "field-odd", label: "Ref", value: "A1", placement: "header" },
+  ]);
 });
