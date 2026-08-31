@@ -16,7 +16,7 @@ import { FocusSnapshot, VideoAnalysis } from "./models/Analysis";
 import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
 import { VideoCanvas } from "./components/VideoCanvas";
-import { IconBack, IconRecord, IconSettings, IconUpload } from "./components/VideoIcons";
+import { IconBack, IconCamera, IconRecord, IconSettings, IconUpload } from "./components/VideoIcons";
 import {
   PlayerActionBar,
   PlayerToolRail,
@@ -40,7 +40,7 @@ import {
   describePreferredCamera,
   loadPreferredCamera,
   loadRecordingOrientation,
-  orientationVideoConstraints,
+  openPreferredCameraStream,
   resolvePreferredCamera,
   savePreferredCamera,
   saveRecordingOrientation,
@@ -1272,10 +1272,17 @@ export function VideoWorkspace({
   /**
    * Open the coach's saved camera, and only that one.
    *
-   * When it is not there the answer is "camera not connected" -- not the
+   * When it cannot be opened the answer is "camera not connected" -- not the
    * MacBook camera, not Desk View, not whatever the browser would have picked.
    * The coach has already said which picture they want, and quietly recording
    * a different one is a mistake they would only discover on playback.
+   *
+   * The device id is pinned with `exact` on every attempt, which is what makes
+   * it safe to try a camera the device list has not mentioned. That matters:
+   * a Continuity Camera iPhone is often not advertised until something asks
+   * for a camera, so gating the attempt on enumeration was a closed loop --
+   * the phone stayed absent because nothing ever woke it, and nothing ever
+   * woke it because it was absent.
    */
   const connectPreferredCamera = useCallback(
     async (side: ComparisonSide): Promise<MediaStream | null> => {
@@ -1298,60 +1305,53 @@ export function VideoWorkspace({
         return null;
       }
 
-      // Ask the browser for the device list again rather than trusting the
-      // last render: a Continuity Camera iPhone can wake between the coach
-      // reaching for Record and pressing it.
-      const devices = await cameraDeviceList.refresh();
-      const target = resolvePreferredCamera(devices, preferredCamera);
-      if (!target?.deviceId) {
+      setLiveRecording({ side, status: "connecting", error: null, startedAt: null });
+      stopLiveStream(liveStream);
+      setLiveStream(null);
+
+      const { stream, blocked } = await openPreferredCameraStream<MediaStream>({
+        preferred: preferredCamera,
+        orientation: recordingOrientation,
+        openStream: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+        // Re-enumerating here, after the first attempt, is when a phone that
+        // just woke finally shows up in the list.
+        listCameras: () => cameraDeviceList.refresh(),
+      });
+
+      if (!stream) {
         setLiveRecording({
           side,
           status: "error",
-          error: `${describePreferredCamera(preferredCamera)} is not connected.`,
+          error: blocked
+            ? "Camera access was blocked for this site."
+            : `${describePreferredCamera(preferredCamera)} is not connected.`,
           startedAt: null,
         });
         return null;
       }
 
-      setLiveRecording({ side, status: "connecting", error: null, startedAt: null });
-      try {
-        stopLiveStream(liveStream);
-        // The device is exact -- that is the whole point of a saved camera.
-        // The orientation is only ever ideal, so a camera that cannot shoot
-        // the requested way round still opens instead of reading as absent.
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            ...orientationVideoConstraints(recordingOrientation),
-            deviceId: { exact: target.deviceId },
-          },
-          audio: false,
-        });
-        await waitForFirstFrame(stream);
-        setOrientationMismatch(
-          !trackMatchesOrientation(
-            stream.getVideoTracks()[0]?.getSettings(),
-            recordingOrientation
-          )
-        );
-        setLiveStream(stream);
-        setLiveRecording({ side, status: "preview", error: null, startedAt: null });
-        setActiveSideInCompare(side);
-        return stream;
-      } catch (error) {
-        setLiveStream(null);
-        setLiveRecording({
-          side,
-          status: "error",
-          error:
-            error instanceof Error && error.name === "NotAllowedError"
-              ? "Camera access was blocked for this site."
-              : `Could not open ${describePreferredCamera(preferredCamera)}.`,
-          startedAt: null,
-        });
-        return null;
-      }
+      // The phone is awake now, so the list it was missing from is stale.
+      void cameraDeviceList.refresh();
+      await waitForFirstFrame(stream);
+      setOrientationMismatch(
+        !trackMatchesOrientation(
+          stream.getVideoTracks()[0]?.getSettings(),
+          recordingOrientation
+        )
+      );
+      setLiveStream(stream);
+      setLiveRecording({ side, status: "preview", error: null, startedAt: null });
+      setActiveSideInCompare(side);
+      return stream;
     },
-    [cameraDeviceList, liveStream, preferredCamera, setActiveSideInCompare, stopLiveStream]
+    [
+      cameraDeviceList,
+      liveStream,
+      preferredCamera,
+      recordingOrientation,
+      setActiveSideInCompare,
+      stopLiveStream,
+    ]
   );
 
   const closeLiveRecording = useCallback(() => {
@@ -2748,6 +2748,17 @@ export function VideoWorkspace({
       const cameraMissing = !needsSetup && !resolvedCamera;
       const canRecord =
         cameraDeviceList.supported && !needsSetup && !cameraMissing && !isConnecting && !isPending;
+      // Connect asks the same question Record does, but it is allowed to ask
+      // it of a camera the device list has not mentioned -- every attempt is
+      // still pinned to the saved device id, so it can only ever open that one.
+      //
+      // It only appears when it is the thing that helps: a camera the list has
+      // not admitted to, or one that just failed to open. When the camera is
+      // sitting there resolved, Record already connects on the way through,
+      // and a second button next to it would be two ways to do one thing.
+      const showConnect =
+        cameraDeviceList.supported && !needsSetup && (cameraMissing || status === "error");
+      const canConnect = showConnect && !isConnecting && !isPending;
       // Only colour the message as a problem when it is reporting one. A stale
       // error behind a "choose a camera" or "connecting" message is not.
       const isWarning =
@@ -2795,6 +2806,24 @@ export function VideoWorkspace({
           </div>
 
           <div className="video-intake-actions">
+            {/* The way to prod a camera the device list has not admitted to
+                yet -- a sleeping Continuity Camera iPhone, most often. It is
+                deliberately not gated on the camera resolving: that gate is
+                what made "Camera not connected" a dead end. */}
+            {showConnect ? (
+              <button
+                type="button"
+                className="upload-button video-connect-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void connectPreferredCamera(side);
+                }}
+                disabled={!canConnect}
+              >
+                <IconCamera />
+                Connect
+              </button>
+            ) : null}
             <button
               type="button"
               className="upload-button video-record-button"

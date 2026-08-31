@@ -471,6 +471,13 @@
   color: var(--va-muted);
 }
 
+/* Connect only shows up when the camera is missing, so in that moment it is
+   the primary thing to do -- Record is sitting next to it disabled. */
+.video-intake-actions .video-connect-button {
+  border-color: var(--va-accent);
+  font-weight: 700;
+}
+
 .live-recording-toolbar {
   position: absolute;
   z-index: 3;

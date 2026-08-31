@@ -5,6 +5,7 @@ import {
   describePreferredCamera,
   isPreferredCamera,
   normalizeCameraLabel,
+  openPreferredCameraStream,
   orientationAspectRatio,
   orientationVideoConstraints,
   parsePreferredCamera,
@@ -182,5 +183,125 @@ describe("recording orientation", () => {
     // Nothing to judge yet: say nothing rather than warn about a phantom.
     assert.equal(trackMatchesOrientation(undefined, "portrait"), true);
     assert.equal(trackMatchesOrientation({}, "portrait"), true);
+  });
+});
+
+describe("openPreferredCameraStream", () => {
+  const saved = { deviceId: "iphone", label: "Sam's iPhone Camera" };
+
+  /**
+   * A world where a camera can be opened by exact id whether or not the device
+   * list admits it exists -- which is how macOS treats a Continuity Camera
+   * iPhone that nothing has asked for yet.
+   */
+  const world = (options: {
+    listed: CameraDevice[];
+    openable: string[];
+    blocked?: boolean;
+  }) => {
+    const attempts: string[] = [];
+    return {
+      attempts,
+      openStream: async (constraints: MediaStreamConstraints) => {
+        const video = constraints.video as MediaTrackConstraints;
+        const deviceId = (video.deviceId as { exact: string }).exact;
+        attempts.push(deviceId);
+        if (options.blocked) {
+          const error = new Error("denied");
+          error.name = "NotAllowedError";
+          throw error;
+        }
+        if (!options.openable.includes(deviceId)) {
+          const error = new Error("absent");
+          error.name = "OverconstrainedError";
+          throw error;
+        }
+        return { id: deviceId };
+      },
+      listCameras: async () => options.listed,
+    };
+  };
+
+  it("opens a phone the device list has not admitted to yet", async () => {
+    // The dead end this exists to break: the phone is openable, but nothing
+    // will list it until something asks for a camera.
+    const w = world({ listed: [macBook], openable: ["mac-cam-id", "iphone"] });
+    const result = await openPreferredCameraStream({
+      preferred: saved,
+      orientation: "portrait",
+      openStream: w.openStream,
+      listCameras: w.listCameras,
+    });
+    assert.deepEqual(result.stream, { id: "iphone" });
+    assert.deepEqual(w.attempts, ["iphone"]);
+  });
+
+  it("never falls back to another camera when the saved one is absent", async () => {
+    const w = world({ listed: [macBook, macDeskView], openable: ["mac-cam-id", "mac-desk-id"] });
+    const result = await openPreferredCameraStream({
+      preferred: saved,
+      orientation: "portrait",
+      openStream: w.openStream,
+      listCameras: w.listCameras,
+    });
+    assert.equal(result.stream, null);
+    assert.equal(result.blocked, false);
+    assert.deepEqual(w.attempts, ["iphone"]);
+  });
+
+  it("picks the phone up again after Continuity renumbers it", async () => {
+    const renumbered = camera("iphone-2", "Sam’s iPhone Camera");
+    const w = world({ listed: [macBook, renumbered], openable: ["iphone-2"] });
+    const result = await openPreferredCameraStream({
+      preferred: saved,
+      orientation: "portrait",
+      openStream: w.openStream,
+      listCameras: w.listCameras,
+    });
+    assert.deepEqual(result.stream, { id: "iphone-2" });
+    assert.deepEqual(w.attempts, ["iphone", "iphone-2"]);
+  });
+
+  it("never stands Desk View in for the phone camera", async () => {
+    const w = world({ listed: [macBook, iPhoneDeskView], openable: ["iphone-desk-id"] });
+    const result = await openPreferredCameraStream({
+      preferred: saved,
+      orientation: "portrait",
+      openStream: w.openStream,
+      listCameras: w.listCameras,
+    });
+    assert.equal(result.stream, null);
+    assert.equal(w.attempts.includes("iphone-desk-id"), false);
+  });
+
+  it("stops probing once permission is refused", async () => {
+    const w = world({ listed: [macBook, iPhone], openable: ["iphone"], blocked: true });
+    const result = await openPreferredCameraStream({
+      preferred: saved,
+      orientation: "portrait",
+      openStream: w.openStream,
+      listCameras: w.listCameras,
+    });
+    assert.equal(result.stream, null);
+    assert.equal(result.blocked, true);
+    assert.equal(w.attempts.length, 1);
+  });
+
+  it("pins the device exactly and the orientation only loosely", async () => {
+    const seen: MediaStreamConstraints[] = [];
+    await openPreferredCameraStream({
+      preferred: saved,
+      orientation: "portrait",
+      openStream: async (constraints) => {
+        seen.push(constraints);
+        return { id: "iphone" };
+      },
+      listCameras: async () => [],
+    });
+    const video = seen[0].video as MediaTrackConstraints;
+    assert.deepEqual(video.deviceId, { exact: "iphone" });
+    // An exact orientation would refuse a landscape-only camera outright.
+    assert.deepEqual(video.width, { ideal: 1080 });
+    assert.equal(JSON.stringify(video.aspectRatio).includes("exact"), false);
   });
 });

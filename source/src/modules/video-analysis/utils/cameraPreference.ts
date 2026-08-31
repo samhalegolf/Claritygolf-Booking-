@@ -227,3 +227,81 @@ export const trackMatchesOrientation = (
   const isPortrait = settings.height > settings.width;
   return isPortrait === (orientation === "portrait");
 };
+
+
+/* -------------------------------------------------------------------------
+   Opening the saved camera
+   ------------------------------------------------------------------------- */
+
+export interface OpenPreferredCameraOptions<TStream> {
+  preferred: PreferredCamera;
+  orientation: RecordingOrientation;
+  /** Opens a stream for the given constraints, or throws. */
+  openStream: (constraints: MediaStreamConstraints) => Promise<TStream>;
+  /** The video inputs the browser will admit to right now. */
+  listCameras: () => Promise<readonly CameraDevice[]>;
+}
+
+export interface OpenPreferredCameraResult<TStream> {
+  stream: TStream | null;
+  /** The browser refused on permission grounds; trying harder will not help. */
+  blocked: boolean;
+}
+
+/**
+ * Open the saved camera, and only the saved camera.
+ *
+ * Two attempts, both pinned with `exact` on a device id:
+ *
+ *   1. The id we saved. Pinning makes it safe to try a camera the device list
+ *      has not mentioned, and that is the point -- a Continuity Camera iPhone
+ *      is often not advertised until something asks for a camera. Gating the
+ *      attempt on enumeration was a closed loop: the phone stayed absent
+ *      because nothing woke it, and nothing woke it because it was absent.
+ *   2. Whatever the saved camera resolves to after re-enumerating, which is
+ *      how a phone that came back under a fresh id is picked up. Skipped when
+ *      it resolves to the id we already tried.
+ *
+ * There is deliberately no third attempt. If neither works the answer is
+ * "not connected" -- never the MacBook camera, never Desk View, never
+ * whatever the browser would have chosen. A coach who mounted a phone and
+ * picked it would not discover the substitution until playback.
+ */
+export const openPreferredCameraStream = async <TStream>({
+  preferred,
+  orientation,
+  openStream,
+  listCameras,
+}: OpenPreferredCameraOptions<TStream>): Promise<OpenPreferredCameraResult<TStream>> => {
+  const tried = new Set<string>();
+  let blocked = false;
+
+  const attempt = async (deviceId: string): Promise<TStream | null> => {
+    if (!deviceId || tried.has(deviceId)) return null;
+    tried.add(deviceId);
+    try {
+      return await openStream({
+        video: {
+          // Orientation is only ever ideal, so a camera that cannot shoot the
+          // requested way round still opens instead of reading as absent.
+          ...orientationVideoConstraints(orientation),
+          deviceId: { exact: deviceId },
+        },
+        audio: false,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "NotAllowedError") blocked = true;
+      return null;
+    }
+  };
+
+  const bySavedId = await attempt(preferred.deviceId);
+  if (bySavedId) return { stream: bySavedId, blocked: false };
+  if (blocked) return { stream: null, blocked: true };
+
+  const resolved = resolvePreferredCamera(await listCameras(), preferred);
+  const byResolvedId = resolved ? await attempt(resolved.deviceId) : null;
+  if (byResolvedId) return { stream: byResolvedId, blocked: false };
+
+  return { stream: null, blocked };
+};
