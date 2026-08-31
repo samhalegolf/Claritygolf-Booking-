@@ -1062,8 +1062,17 @@ const BILLING_SECTIONS: Exclude<BillingSection, "none">[] = [
   "settings",
 ];
 
+// What an overlay is currently showing. A settings overlay carries the tab so
+// the section's own tab CSS still applies and the group to focus; a billing
+// overlay carries the section. Both carry the title they announce themselves
+// with, which is the coach-profile card's own label.
+type WorkspaceOverlay =
+  | { kind: "settings"; tab: Exclude<SettingsTab, "none">; group: string; title: string }
+  | { kind: "billing"; section: Exclude<BillingSection, "none">; title: string };
+
 // The views a coach-profile card is allowed to send you to. Not every View:
-// "booking" is the public page and "settings" has its own target kind.
+// "booking" is the public page, and "settings" and "billing" open over the
+// profile rather than replacing it.
 const PROFILE_LINKED_VIEWS: View[] = ["calendar", "clients", "players", "sell", "billing", "video"];
 
 // The Billing sections named once, so the tab bar and the topbar's subtitle
@@ -1209,9 +1218,28 @@ function bankCandidateSortText(value: string | null | undefined) {
 const SettingsGroupContext = createContext<{
   openGroup: string;
   setOpenGroup: (id: string) => void;
+  /** When set, only this group renders — see SettingsGroups. */
+  focusOnly: string;
 } | null>(null);
 
-function SettingsGroups({ children, requestedGroup = "" }: { children: ReactNode; requestedGroup?: string }) {
+function SettingsGroups({
+  children,
+  requestedGroup = "",
+  focusOnly = "",
+}: {
+  children: ReactNode;
+  requestedGroup?: string;
+  /**
+   * Render one group and nothing else.
+   *
+   * Coach profile opens a settings section over itself rather than navigating
+   * to it, and what it opens is this same subtree — the real group, with the
+   * real editor and the real save. Focusing it here rather than hiding the
+   * others in CSS means the overlay mounts one group, not thirty with
+   * twenty-nine display:none.
+   */
+  focusOnly?: string;
+}) {
   // One value. Which group is open and which header is highlighted are the same
   // fact, so they cannot disagree.
   const [openGroup, setOpenGroup] = useState("");
@@ -1221,8 +1249,65 @@ function SettingsGroups({ children, requestedGroup = "" }: { children: ReactNode
   useEffect(() => {
     if (requestedGroup) setOpenGroup(requestedGroup);
   }, [requestedGroup]);
-  const value = useMemo(() => ({ openGroup, setOpenGroup }), [openGroup]);
+  const value = useMemo(() => ({ openGroup, setOpenGroup, focusOnly }), [openGroup, focusOnly]);
   return <SettingsGroupContext.Provider value={value}>{children}</SettingsGroupContext.Provider>;
+}
+
+/**
+ * The settings screen, as a page or as an overlay over whatever you were doing.
+ *
+ * Coach profile files the workspace by job ("lessons into my diary"); Settings
+ * files it by category (Business, Booking, Notifications) and Billing by its
+ * own sections. Two indexes, one filing cabinet — so opening a section from the
+ * profile must not be a second copy of that section. It is this same subtree,
+ * mounted in a modal instead of a page, with the same editors and the same save.
+ */
+function WorkspaceSurface({
+  overlay,
+  title,
+  pageClassName,
+  onClose,
+  children,
+}: {
+  overlay: boolean;
+  /** What the overlay says it is showing, in the coach's words. */
+  title: string;
+  /** The class this surface wears as a page — settings-page or billing-page. */
+  pageClassName: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  // Escape closes, like every other dismissable layer in the app.
+  useEffect(() => {
+    if (!overlay) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [overlay, onClose]);
+
+  if (!overlay) return <section className={`module-page ${pageClassName}`}>{children}</section>;
+
+  return (
+    <div className="workspace-overlay" role="dialog" aria-modal="true" aria-label={title}>
+      {/* Clicking the backdrop closes. The dialog itself stops the click, so a
+          drag that ends outside a field does not dismiss an unsaved edit. */}
+      <div className="workspace-overlay-scrim" onClick={onClose} />
+      <div className="workspace-overlay-panel">
+        <header className="workspace-overlay-head">
+          <div>
+            <span>Settings</span>
+            <strong>{title}</strong>
+          </div>
+          <button className="icon-button" onClick={onClose} type="button" aria-label="Close settings">
+            <X size={18} />
+          </button>
+        </header>
+        <div className={`workspace-overlay-body ${pageClassName}`}>{children}</div>
+      </div>
+    </div>
+  );
 }
 
 function SettingsGroup({
@@ -1239,10 +1324,15 @@ function SettingsGroup({
   children: ReactNode;
 }) {
   const context = useContext(SettingsGroupContext);
+  // A focused mount is one section on its own, so the others are not rendered
+  // at all rather than rendered and hidden.
+  if (context?.focusOnly && context.focusOnly !== id) return null;
   // Every section arrives shut. A tab that opens with one section already
   // expanded pushes the rest below the fold and makes that one look like the
-  // screen rather than one choice among several.
-  const open = context ? context.openGroup === id : true;
+  // screen rather than one choice among several. The exception is a section
+  // opened on its own: it is the only thing there, so a collapsed header would
+  // just be a second click on the thing already asked for.
+  const open = context ? context.focusOnly === id || context.openGroup === id : true;
   return (
     <article
       className={`data-card settings-section settings-${section} settings-group${open ? " is-open" : ""}${className ? ` ${className}` : ""}`}
@@ -5812,6 +5902,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // Empty for every other route in, so Settings still opens with nothing
   // expanded (see SettingsGroups).
   const [requestedSettingsGroup, setRequestedSettingsGroup] = useState("");
+  // A section of the workspace opened over the coach profile rather than
+  // navigated to. Null when Settings or Billing is being used as a page.
+  //
+  // Two kinds because the settings a coach reaches from the profile live in two
+  // workspaces: most are SettingsGroups, but invoicing and the product catalogue
+  // are Billing sections. Both mount their real subtree in the same shell.
+  const [workspaceOverlay, setWorkspaceOverlay] = useState<WorkspaceOverlay | null>(null);
   const [activeEditableBlockId, setActiveEditableBlockId] = useState<string | null>(null);
   const activeEditableBlock = editableBlocks.find((block) => block.id === activeEditableBlockId) ?? null;
   const dirtyEditableBlock = editableBlocks.find((block) => block.editor.dirty) ?? null;
@@ -11624,18 +11721,30 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     if (view === "video") setVideoContext(null);
     if (view !== "calendar") closeCalendarDetails();
     // Arriving anywhere by hand clears whatever the profile last pointed at, so
-    // a section does not spring open the next time Settings is opened normally.
+    // a section does not spring open the next time Settings is opened normally,
+    // and an overlay belonging to a profile card does not survive leaving it.
     if (view !== "settings") setRequestedSettingsGroup("");
+    setWorkspaceOverlay(null);
   }
 
   /**
    * Follow a Coach profile card to the thing it describes.
    *
-   * The profile is a map, not a second place to edit: every card lands on the
-   * screen that already owns that setting, opening the right tab and section
-   * rather than reimplementing the form.
+   * The profile is a map, not a second place to edit. A card that names a
+   * settings section or a billing section opens that real subtree over the
+   * profile; only a card naming a whole workspace (Clients, Players, Video)
+   * actually navigates, because there is no one section to open.
    */
-  function openProfileTarget(target: ProfileTarget) {
+  function closeWorkspaceOverlay() {
+    // An unsaved edit is worth a question wherever the block is mounted.
+    if (dirtyEditableBlock && !confirmDiscardEditableBlock(dirtyEditableBlock.title)) return;
+    if (activeEditableBlock) activeEditableBlock.editor.cancel();
+    setActiveEditableBlockId(null);
+    setWorkspaceOverlay(null);
+    setRequestedSettingsGroup("");
+  }
+
+  function openProfileTarget(target: ProfileTarget, label = "") {
     if (dirtyEditableBlock && !confirmDiscardEditableBlock(dirtyEditableBlock.title)) return;
     if (activeEditableBlock) activeEditableBlock.editor.cancel();
     setActiveEditableBlockId(null);
@@ -11645,21 +11754,32 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     // against the real lists here. A card naming a destination that no longer
     // exists does nothing, rather than leaving the app on an impossible tab.
     if (target.kind === "settings") {
-      const tab = SETTINGS_SECTIONS.find((section) => section.key === target.tab)?.key;
-      if (!tab) return;
-      setActiveView("settings");
-      setSettingsTab(tab);
+      const section = SETTINGS_SECTIONS.find((candidate) => candidate.key === target.tab);
+      if (!section) return;
+      // Opened over the profile, not navigated to: the coach stays where they
+      // were, and closing puts them back on the card they clicked.
+      setSettingsTab(section.key);
       setRequestedSettingsGroup(target.group ?? "");
+      setWorkspaceOverlay({
+        kind: "settings",
+        tab: section.key,
+        group: target.group ?? "",
+        title: label || section.label,
+      });
       return;
     }
     setRequestedSettingsGroup("");
     if (target.kind === "billing") {
       const section = BILLING_SECTIONS.find((candidate) => candidate === target.section);
       if (!section) return;
-      setActiveView("billing");
+      // Same as a settings card: the section opens over the profile. Billing's
+      // own tab state follows so the page agrees with the overlay if the coach
+      // goes there afterwards.
       setBillingSection(section);
+      setWorkspaceOverlay({ kind: "billing", section, title: label || BILLING_SECTION_LABELS[section] });
       return;
     }
+    setWorkspaceOverlay(null);
     const view = PROFILE_LINKED_VIEWS.find((candidate) => candidate === target.view);
     if (!view) return;
     if (view === "video") setVideoContext(null);
@@ -21009,10 +21129,24 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
    * where the setting lives.
    */
   const profileInternalJobs = useMemo<ProfileInternalJob[]>(() => {
-    const byFormat = (format: LessonFormat) => services.filter((service) => service.lessonFormat === format && !service.archived).length;
-    const defaultLocation = locations[0]?.name ?? "";
-    const publicServices = services.filter((service) => service.visibility === "public" && !service.archived).length;
-    return [
+    // A card that opens a Billing section is only useful when Billing is on.
+    // Without this the profile is a way into a workspace the nav deliberately
+    // hides for this account.
+    const forThisAccount = (jobs: ProfileInternalJob[]) =>
+      jobs.filter((job) => (job.target.kind === "billing" ? billingWorkspaceEnabled : true));
+    // The profile shows what a setting currently SAYS, not how many of it there
+    // are. A count is a number you cannot act on: "Clients 214" tells a coach
+    // nothing they can change, where "Riverside Range · Pacific/Auckland" is the
+    // setting itself. Where the setting is a list, the first few entries are the
+    // value - the rest are one click away in the section this card opens.
+    const live = services.filter((service) => !service.archived);
+    const publicServices = live.filter((service) => service.visibility === "public").length;
+    const firstFew = <T,>(items: T[], render: (item: T) => [string, string]): Array<[string, string]> => {
+      const shown = items.slice(0, 4).map(render);
+      if (items.length > 4) shown.push(["", `+${items.length - 4} more`]);
+      return shown;
+    };
+    return forThisAccount([
       {
         id: "lesson-types",
         category: "Calendar",
@@ -21020,12 +21154,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         summary: "What a client can book, and what it costs.",
         path: "Settings › Lesson types",
         target: { kind: "settings", tab: "services" },
-        facts: [
-          ["Private", String(byFormat("private"))],
-          ["Group", String(byFormat("group"))],
-          ["Package", String(byFormat("package"))],
-          ["On the booking page", String(publicServices)],
-        ],
+        facts: firstFew(live, (service) => [
+          service.name,
+          `${service.duration} min · ${formatMoney(service.price, invoiceSettings.currency)}`,
+        ]),
       },
       {
         id: "locations",
@@ -21035,8 +21167,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         path: "Settings › Booking › Availability",
         target: { kind: "settings", tab: "booking", group: "availability" },
         facts: [
-          ["Locations", String(locations.length)],
-          ...(defaultLocation ? ([["Default", defaultLocation]] as Array<[string, string]>) : []),
+          ...firstFew(locations, (location) => [location.name, location.address || "No address"]),
           ["Timezone", coachAccount.timezone || "Not set"],
         ],
       },
@@ -21050,7 +21181,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         facts: [
           ["Address", coachAccount.bookingUrl || coachAccount.calendarSlug || "Not set"],
           ["Minimum notice", formatBookingNoticeLabel(notificationSettings.minBookingNoticeMinutes)],
-          ["Lesson types shown", String(publicServices)],
+          ["Bookable types", publicServices ? live.filter((s) => s.visibility === "public").map((s) => s.name).join(", ") : "None public yet"],
         ],
       },
       {
@@ -21115,6 +21246,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               ? "Due on receipt"
               : `${invoiceSettings.paymentTermsDays} day${invoiceSettings.paymentTermsDays === 1 ? "" : "s"}`,
           ],
+          ["Bank account", invoiceSettings.bankAccount || "Not set"],
         ],
       },
       {
@@ -21124,12 +21256,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         summary: "What you sell at the counter.",
         path: "Billing › Products",
         target: { kind: "billing", section: "products" },
-        facts: catalogItems.length
-          ? [
-              ["Items", String(catalogItems.length)],
-              ["Low stock", String(catalogItems.filter((item) => item.lowStock).length)],
-            ]
-          : [],
+        facts: firstFew(
+          catalogItems.filter((item) => item.kind === "product"),
+          (item) => [item.name, formatMoney(item.price, invoiceSettings.currency)],
+        ),
       },
       {
         id: "clients",
@@ -21138,7 +21268,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         summary: "Everyone who has booked with you.",
         path: "Clients",
         target: { kind: "view", view: "clients" },
-        facts: [["Clients", String(people.length)]],
+        // A client list has no settings to show. The card is the way in.
+        facts: [],
       },
       {
         id: "players",
@@ -21147,7 +21278,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         summary: "Notes, videos, practice and passes per player.",
         path: "Player Profiles",
         target: { kind: "view", view: "players" },
-        facts: [["Coaches", String(coachProfiles.length)]],
+        facts: [],
       },
       {
         id: "video",
@@ -21156,7 +21287,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         summary: "Saved analysis, and what a player can watch.",
         path: "Video",
         target: { kind: "view", view: "video" },
-        facts: savedVideoItems.length ? [["Saved videos", String(savedVideoItems.length)]] : [],
+        facts: [],
       },
       {
         id: "practice",
@@ -21169,8 +21300,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         // so counting them here would mean a request nobody asked for.
         facts: [],
       },
-    ];
+    ]);
   }, [
+    billingWorkspaceEnabled,
     services,
     locations,
     coachAccount,
@@ -21178,9 +21310,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     notificationSettings,
     invoiceSettings,
     catalogItems,
-    people,
-    coachProfiles,
-    savedVideoItems,
   ]);
 
   const pageHeading: { title: string; subtitle?: string } =
@@ -23862,8 +23991,17 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           />
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && activeView === "billing" && (
-          <section className="module-page billing-page">
+        {!isEmbedMode && adminWorkspaceReady && (activeView === "billing" || workspaceOverlay?.kind === "billing") && (
+          <WorkspaceSurface
+            overlay={workspaceOverlay?.kind === "billing"}
+            title={workspaceOverlay?.title ?? ""}
+            pageClassName="billing-page"
+            onClose={closeWorkspaceOverlay}
+          >
+            {/* Not drawn in the overlay, for the same reason the settings
+                sub-nav is not: one section was asked for, so a row of tabs
+                offers a journey nobody started. */}
+            {workspaceOverlay?.kind !== "billing" && (
             <div className="settings-tabs billing-tabs" role="tablist" aria-label="Billing sections">
               <button
                 className={billingSection === "dashboard" ? "active" : ""}
@@ -23973,6 +24111,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 Settings
               </button>
             </div>
+            )}
 
             {billingSection === "dashboard" && (
               <div className="billing-dashboard">
@@ -25864,10 +26003,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 onSetActive={setProductActive}
                 onAdjustStock={adjustProductStock}
                 onLoadMovements={fetchStockMovements}
-                onEditLessonTypes={() => {
-                  setActiveView("settings");
-                  setSettingsTab("services");
-                }}
+                onEditLessonTypes={() =>
+                  openProfileTarget({ kind: "settings", tab: "services" }, "Lesson types")
+                }
               />
             )}
 
@@ -26473,7 +26611,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </article>
               </div>
             )}
-          </section>
+          </WorkspaceSurface>
         )}
 
         {isEmbedMode && activeView === "booking" && (
@@ -27141,17 +27279,27 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 currency: invoiceSettings.currency,
               }}
               internalJobs={profileInternalJobs}
-              onOpen={openProfileTarget}
+              onOpen={(target, label) => openProfileTarget(target, label)}
             />
           </section>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && activeView === "settings" && (
-          <section className="module-page settings-page">
+        {!isEmbedMode && adminWorkspaceReady && (activeView === "settings" || workspaceOverlay?.kind === "settings") && (
+          <WorkspaceSurface
+            overlay={workspaceOverlay?.kind === "settings"}
+            title={workspaceOverlay?.title ?? ""}
+            pageClassName="settings-page"
+            onClose={closeWorkspaceOverlay}
+          >
             {/* Rule 07: the sub-nav keeps its boxes. 216px column, 38px rows,
                 9px radius, 2px apart; the open section is a filled block and
                 the rest are plain until hovered. Highlight and open section are
-                the same state value, so they cannot disagree. */}
+                the same state value, so they cannot disagree.
+
+                Not drawn in the overlay: that is one section opened from the
+                coach profile, so a column for picking a different category is
+                offering a journey nobody started. */}
+            {workspaceOverlay?.kind !== "settings" && (
             <nav className="settings-subnav" aria-label="Settings sections">
               {SETTINGS_SECTIONS.filter(
                 (section) =>
@@ -27170,8 +27318,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </button>
               ))}
             </nav>
+            )}
 
-            <SettingsGroups requestedGroup={requestedSettingsGroup}>
+            <SettingsGroups
+              requestedGroup={requestedSettingsGroup}
+              focusOnly={workspaceOverlay?.kind === "settings" ? workspaceOverlay.group : ""}
+            >
             <div className={`settings-grid settings-tab-${settingsTab}`}>
               {/* Mounted only on its own tab, like the integrations panels
                   below: it reads block types and favourites on mount, and
@@ -29499,7 +29651,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               </SettingsGroup>
             </div>
             </SettingsGroups>
-          </section>
+          </WorkspaceSurface>
         )}
       </main>
 

@@ -14012,3 +14012,151 @@ button {
     columns: 1;
   }
 }
+
+/* --- A workspace section, opened over the coach profile -------------------
+   The profile files the workspace by job; Settings files it by category and
+   Billing by its own sections: two indexes, one filing cabinet. So a section
+   opened from a profile card is the real section — same subtree, same editor,
+   same save — mounted here instead of on its own page. Closing puts the coach
+   back on the card they clicked, never somewhere else. */
+
+.workspace-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: var(--c-space-6);
+}
+
+.workspace-overlay-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--c-scrim-soft);
+  backdrop-filter: blur(3px);
+}
+
+.workspace-overlay-panel {
+  position: relative;
+  width: min(860px, 100%);
+  max-height: min(860px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-page);
+  background: var(--c-surface);
+  overflow: hidden;
+}
+
+.workspace-overlay-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--c-space-6);
+  padding: var(--c-space-6) var(--c-space-7);
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.workspace-overlay .workspace-overlay-head span {
+  display: block;
+  color: var(--c-muted);
+  font-size: var(--c-size-group);
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.workspace-overlay-head strong {
+  display: block;
+  margin-top: 3px;
+  font-size: var(--c-size-card-heading);
+}
+
+/* Scrolls inside the panel, so the profile behind it never moves. */
+.workspace-overlay-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  padding: var(--c-space-7);
+}
+
+/* Keeps the .settings-page class for the long tail of descendant rules that
+   normalise settings cards, but not its layout: that is a two-column page
+   (216px sub-nav | content), and with no sub-nav the content would land in
+   the 216px column. .billing-page needs no such override — it is a plain
+   stack, which is what an overlay wants anyway. */
+.workspace-overlay-body.settings-page {
+  display: block;
+}
+
+/* A billing section that is a single card does not need its own border inside
+   the panel: the panel is the card. Only when it is the sole one — sections
+   that stack several cards still need the rules between them. */
+.workspace-overlay-body .billing-dashboard > .data-card:only-child {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+/* One section on its own needs no column beside it and no card of its own —
+   the panel is already the card, and a box inside a box is the nesting this
+   app spends its rules avoiding. */
+.workspace-overlay-body .settings-grid {
+  display: block;
+}
+
+.workspace-overlay-body .settings-group {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+/* The panel's own header already names the section, and the section cannot be
+   collapsed when it is the only thing in the dialog — so its header would be a
+   second copy of the title above a control with nothing to do. */
+.workspace-overlay-body .settings-group-header {
+  display: none;
+}
+
+/* The body's top rule separates it from its header. With the header gone that
+   is a divider under nothing, sitting a few pixels below the panel's own. Its
+   side padding goes too — the overlay body already provides it.
+   Matches .settings-group.is-open .settings-group-body's specificity, which
+   this has to outrank rather than merely follow. */
+.workspace-overlay-body .settings-group.is-open .settings-group-body {
+  border-top: 0;
+  padding: 0;
+}
+
+.workspace-overlay-body .disclosure-wrap {
+  /* The disclosure animates by grid row, so its column is implicit and sizes
+     to content. On the settings page a card constrains it; here the panel is
+     wide and the fields would huddle at max-content width instead. */
+  grid-template-columns: minmax(0, 1fr);
+  /* Never animates open here: it arrives open, and a section that unfolds on
+     arrival reads as the dialog assembling itself. */
+  transition: none;
+}
+
+@media (max-width: 720px) {
+  .workspace-overlay {
+    padding: 0;
+    place-items: stretch;
+  }
+
+  .workspace-overlay-panel {
+    width: 100%;
+    max-height: 100vh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .workspace-overlay-head,
+  .workspace-overlay-body {
+    padding-left: var(--c-space-5);
+    padding-right: var(--c-space-5);
+  }
+}

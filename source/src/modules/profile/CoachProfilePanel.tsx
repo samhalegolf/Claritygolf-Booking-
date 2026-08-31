@@ -133,7 +133,8 @@ export type CoachProfilePanelProps = {
   identity: CoachProfileIdentity;
   /** Clarity's own settings, with facts read from live workspace state. */
   internalJobs: ProfileInternalJob[];
-  onOpen: (target: ProfileTarget) => void;
+  /** `label` is what the card is called, so an overlay can name itself. */
+  onOpen: (target: ProfileTarget, label: string) => void;
 };
 
 export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfilePanelProps) {
@@ -244,7 +245,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
         </div>
         <button
           className="cp-gear"
-          onClick={() => onOpen({ kind: "settings", tab: "account", group: "coach-account" })}
+          onClick={() => onOpen({ kind: "settings", tab: "account", group: "coach-account" }, "Coach account")}
           title="Settings › Account"
           type="button"
         >
@@ -311,7 +312,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
                       {connected ? (
                         <button
                           className="cp-gear"
-                          onClick={() => onOpen(INTEGRATION_TARGET)}
+                          onClick={() => onOpen(INTEGRATION_TARGET, card.label)}
                           title={`Manage — Settings › Integrations › ${card.label}`}
                           type="button"
                         >
@@ -320,7 +321,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
                       ) : (
                         <button
                           className="cp-setup"
-                          onClick={() => onOpen(INTEGRATION_TARGET)}
+                          onClick={() => onOpen(INTEGRATION_TARGET, job)}
                           title={`Set up ${job}`}
                           type="button"
                         >
@@ -346,7 +347,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
                   </span>
                   <span className="cp-cell-actions">
                     {detailToggle(job.id, job.facts.length > 0)}
-                    <button className="cp-gear" onClick={() => onOpen(job.target)} title={`Manage — ${job.path}`} type="button">
+                    <button className="cp-gear" onClick={() => onOpen(job.target, job.label)} title={`Manage — ${job.path}`} type="button">
                       <SettingsIcon size={16} />
                     </button>
                   </span>
