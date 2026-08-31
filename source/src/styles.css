@@ -605,6 +605,7 @@ button {
 
 .settings-grid.settings-tab-business > .settings-business,
 .settings-grid.settings-tab-notifications > .settings-notifications,
+.settings-grid.settings-tab-email-sms > .settings-email-sms,
 .settings-grid.settings-tab-account > .settings-account,
 .settings-grid.settings-tab-developer > .settings-developer,
 .settings-grid.settings-tab-admin > .settings-admin {
@@ -616,6 +617,7 @@ button {
 .settings-business,
 .settings-booking,
 .settings-notifications,
+.settings-email-sms,
 .settings-account,
 .settings-developer,
 .settings-admin {
@@ -3288,15 +3290,6 @@ button {
   overflow-wrap: anywhere;
 }
 
-.email-template-card {
-  align-content: start;
-}
-
-.email-template-split {
-  display: grid;
-  gap: 12px;
-}
-
 .template-token-list {
   display: flex;
   flex-wrap: wrap;
@@ -3336,60 +3329,6 @@ button {
   padding: 0 10px;
   font-family: inherit;
   font-size: 12px;
-}
-
-.email-preview {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 6%, transparent), transparent 60%),
-    var(--panel-soft);
-}
-
-.email-preview span,
-.email-preview dt {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.email-preview strong {
-  color: var(--heading);
-  font-size: 18px;
-  line-height: 1.2;
-}
-
-.email-preview p,
-.email-preview dd,
-.email-preview em {
-  margin: 0;
-  color: var(--body);
-  line-height: 1.4;
-}
-
-.email-preview dl {
-  display: grid;
-  gap: 6px;
-  margin: 2px 0;
-  padding: 10px 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-
-.email-preview div {
-  display: grid;
-  grid-template-columns: 74px minmax(0, 1fr);
-  gap: 10px;
-}
-
-.email-preview em {
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-style: normal;
-  font-size: 13px;
 }
 
 .appointment-dock {

@@ -86,6 +86,8 @@ import {
   cleanNotificationTemplates,
   DEFAULT_MAP_LINK_LABEL,
   emptyNotificationTemplates,
+  isNotificationTemplateEdited,
+  NOTIFICATION_VARIANTS,
 } from "../netlify/functions/_shared/notification-templates.mts";
 import type { NotificationTemplates } from "../netlify/functions/_shared/notification-templates.mts";
 import IntegrationsPanel from "./modules/integrations/IntegrationsPanel";
@@ -1374,7 +1376,12 @@ const SETTINGS_SECTIONS: Array<{
   { key: "booking", label: "Booking", icon: CalendarDays },
   { key: "services", label: "Lesson types", icon: ScissorsLineDashed },
   { key: "practice", label: "Practice", icon: ClipboardList },
+  // Two questions, two sections. Notifications is "what do we say" — the
+  // wording of every client-facing message, in one place. Email / SMS is "how
+  // do we send it" — addresses, provider wiring and send rules. They used to be
+  // one tab holding four cards, two of which were both called a template.
   { key: "notifications", label: "Notifications", icon: Bell, adminOnly: true },
+  { key: "email-sms", label: "Email / SMS", icon: Mail, adminOnly: true },
   { key: "account", label: "Account", icon: User, adminOnly: true },
   // Two lists, two questions. Integrations is "what have I plugged in" — the
   // coach's own accounts. Admin is "what is this software made of" — the
@@ -1396,6 +1403,7 @@ type SettingsTab =
   | "services"
   | "practice"
   | "notifications"
+  | "email-sms"
   | "account"
   | "developer"
   | "admin";
@@ -5866,10 +5874,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     value: notificationSettings,
     onSave: saveNotificationSettings,
   });
-  const emailTemplateEditor = useEditableBlock<NotificationSettings>({
-    value: notificationSettings,
-    onSave: saveNotificationSettings,
-  });
   const messageTemplatesEditor = useEditableBlock<NotificationSettings>({
     value: notificationSettings,
     onSave: saveNotificationSettings,
@@ -5890,10 +5894,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     () => [
       { id: "coach-account", title: "Coach Account", editor: coachAccountEditor },
       { id: "billing-settings", title: "Billing Settings", editor: billingSettingsEditor },
-      { id: "email-notifications", title: "Email Notifications", editor: emailNotificationsEditor },
-      { id: "text-machine", title: "Text Machine", editor: textMachineEditor },
-      { id: "email-template", title: "Email Template", editor: emailTemplateEditor },
-      { id: "message-templates", title: "Message Templates", editor: messageTemplatesEditor },
+      { id: "email-notifications", title: "Email", editor: emailNotificationsEditor },
+      { id: "text-machine", title: "SMS", editor: textMachineEditor },
+      { id: "message-templates", title: "Templates", editor: messageTemplatesEditor },
       { id: "booking-page-notice", title: "Booking Page notice", editor: bookingNoticeEditor },
       { id: "booking-screen-name", title: "Booking Page screen name", editor: bookingScreenNameEditor },
     ],
@@ -5902,7 +5905,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       billingSettingsEditor,
       emailNotificationsEditor,
       textMachineEditor,
-      emailTemplateEditor,
       messageTemplatesEditor,
       bookingNoticeEditor,
       bookingScreenNameEditor,
@@ -5970,8 +5972,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const emailNotificationsIsLocked = emailNotificationsEditor.status !== "editing" && emailNotificationsEditor.status !== "error";
   const textMachineDraft = textMachineEditor.draftValue;
   const textMachineIsLocked = textMachineEditor.status !== "editing" && textMachineEditor.status !== "error";
-  const emailTemplateDraft = emailTemplateEditor.draftValue;
-  const emailTemplateIsLocked = emailTemplateEditor.status !== "editing" && emailTemplateEditor.status !== "error";
   const messageTemplatesDraft = messageTemplatesEditor.draftValue;
   const messageTemplatesIsLocked =
     messageTemplatesEditor.status !== "editing" && messageTemplatesEditor.status !== "error";
@@ -6109,7 +6109,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
   useEffect(() => {
     if (isAdminUser) return;
-    if (["business", "notifications", "account", "developer"].includes(settingsTab)) {
+    if (["business", "notifications", "email-sms", "account", "developer"].includes(settingsTab)) {
       setSettingsTab("services");
     }
   }, [isAdminUser, settingsTab]);
@@ -7017,12 +7017,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const minBookingNoticeSummary = formatBookingNoticeLabel(notificationSettings.minBookingNoticeMinutes);
   const bookingNoticeDraftHours = Math.max(0, Math.round((bookingNoticeDraft.minBookingNoticeMinutes / 60) * 100) / 100);
   const bookingNoticeDraftSummary = formatBookingNoticeLabel(bookingNoticeDraft.minBookingNoticeMinutes);
-  const emailTemplateExample = {
-    adminIntro: renderTemplate(notificationSettings.adminEmailIntro, emailTemplateVariables),
-    adminSubject: renderTemplate(notificationSettings.adminEmailSubject, emailTemplateVariables),
-    clientFooter: renderTemplate(notificationSettings.clientEmailFooter, emailTemplateVariables),
-    clientIntro: renderTemplate(notificationSettings.clientEmailIntro, emailTemplateVariables),
-    clientSubject: renderTemplate(notificationSettings.clientEmailSubject, emailTemplateVariables),
+  // The alert that lands in the coach's own inbox. The client-facing half of
+  // this preview is gone: what a client reads is per-message now and is
+  // previewed on the message itself in Templates, so a second rendering of the
+  // legacy one-size wording here was showing an email nobody receives.
+  const adminAlertExample = {
+    subject: renderTemplate(notificationSettings.adminEmailSubject, emailTemplateVariables),
+    intro: renderTemplate(notificationSettings.adminEmailIntro, emailTemplateVariables),
   };
 
   useEffect(() => {
@@ -12915,7 +12916,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   }
 
   function insertNotificationSubjectToken(token: string) {
-    emailTemplateEditor.setDraftValue((current) => ({
+    messageTemplatesEditor.setDraftValue((current) => ({
       ...current,
       notificationSubjectLine: `${current.notificationSubjectLine ?? ""} ${token}`.trim().slice(0, 180),
     }));
@@ -21221,11 +21222,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       {
         id: "email-notifications",
         category: "Customer experience",
-        sub: "Notifications",
+        sub: "Email / SMS",
         label: "Email",
         summary: "Confirmations, reminders and cancellations.",
-        path: "Settings › Notifications",
-        target: { kind: "settings", tab: "notifications", group: "email-notifications" },
+        path: "Settings › Email / SMS › Email",
+        target: { kind: "settings", tab: "email-sms", group: "email-notifications" },
         facts: [
           ["Sends to clients", notificationSettings.sendClientEmail ? "On" : "Off"],
           ["From address", notificationSettings.configuredSenderEmailAddress || notificationSettings.notificationEmail || "Not set"],
@@ -21238,13 +21239,38 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         ],
       },
       {
-        id: "sms-notifications",
+        id: "notification-templates",
         category: "Customer experience",
         sub: "Notifications",
+        label: "Message wording",
+        summary: "What each booking message says, email and text.",
+        path: "Settings › Notifications › Templates",
+        target: { kind: "settings", tab: "notifications", group: "message-templates" },
+        facts: [
+          [
+            "Rewritten",
+            (() => {
+              const edited = NOTIFICATION_VARIANTS.filter((variant) =>
+                isNotificationTemplateEdited(notificationSettings.notificationTemplates, variant.id),
+              ).length;
+              return edited ? `${edited} of ${NOTIFICATION_VARIANTS.length} messages` : "Clarity's wording";
+            })(),
+          ],
+          ["Channels", "Email and text"],
+          [
+            "Subject override",
+            notificationSettings.notificationSubjectLine.trim() ? "On, wins over every subject" : "Off",
+          ],
+        ],
+      },
+      {
+        id: "sms-notifications",
+        category: "Customer experience",
+        sub: "Email / SMS",
         label: "Text messages",
         summary: "Reminders and cancellations by text.",
-        path: "Settings › Notifications › SMS and webhooks",
-        target: { kind: "settings", tab: "notifications", group: "text-machine" },
+        path: "Settings › Email / SMS › SMS",
+        target: { kind: "settings", tab: "email-sms", group: "text-machine" },
         facts: [
           ["Sends to clients", notificationSettings.sendClientSms ? "On" : "Off"],
           ["Provider", notificationSettings.smsProviderName || "Not set"],
@@ -24272,7 +24298,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           // disables a row. A counter payment is shown but stays
                           // pullable - see addCompletedBookingLine.
                           const posPayment = posPaidBookings[item.id];
-                          const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
+                          const invoiceLink = invoicedBookingIds[item.id];
+                          const alreadyInvoiced = Boolean(invoiceLink);
                           return (
                             <button
                               key={item.id}
@@ -24288,7 +24315,19 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                 </em>
                               </span>
                               {alreadyInvoiced ? (
-                                <em>Already invoiced</em>
+                                // Named, not just flagged - same as the pull rail
+                                // in the invoice editor. The invoice it went onto
+                                // is not necessarily the one open, so "invoiced"
+                                // on its own leaves the coach to go looking.
+                                <em
+                                  title={
+                                    invoiceLink?.invoiceNumber
+                                      ? `Already on invoice ${invoiceLink.invoiceNumber}`
+                                      : "Already on an invoice"
+                                  }
+                                >
+                                  {invoiceLink?.invoiceNumber ? `Invoiced · ${invoiceLink.invoiceNumber}` : "Already invoiced"}
+                                </em>
                               ) : (
                                 <>
                                   {posPayment && <em className="pull-paid-flag">Paid at POS</em>}
@@ -28908,10 +28947,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </details>
               </SettingsGroup>
 
-              <SettingsGroup id="email-notifications" section="notifications" title="Email notifications" className="notification-card">
+              {/* Settings › Email / SMS › Email. How email leaves the building:
+                  who it comes from, who it goes to, and when. What it says is
+                  in Notifications › Templates and not here — the sender name
+                  and the reply-to address used to sit inside a card called
+                  "Email template", which is how one screen ended up owning both
+                  halves of the question. */}
+              <SettingsGroup id="email-notifications" section="email-sms" title="Email" className="notification-card">
                 <EditableSettingsBlock
                   id="email-notifications-block"
-                  title="Email Notifications"
+                  title="Email"
                   status={emailNotificationsEditor.status}
                   dirty={emailNotificationsEditor.dirty}
                   errorMessage={emailNotificationsEditor.errorMessage}
@@ -28941,6 +28986,47 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     reminder
                   </span>
                 </div>
+                <details className="settings-subsection">
+                  <summary className="settings-subsection-title">
+                    <Mail size={18} />
+                    <div>
+                      <span>Sender identity</span>
+                      <strong>{notificationSettings.configuredSenderEmailAddress || "Provider-controlled"}</strong>
+                    </div>
+                  </summary>
+                  <label className="settings-field">
+                    <span>Email sender name</span>
+                    <input
+                      placeholder="Your business name"
+                      value={emailNotificationsDraft.notificationFromName}
+                      readOnly={emailNotificationsIsLocked}
+                      maxLength={120}
+                      onChange={(event) =>
+                        updateNotificationBlockDraft(emailNotificationsEditor, "notificationFromName", event.target.value.slice(0, 120))}
+                    />
+                  </label>
+                  <p className="field-help">This is the display name clients see in their inbox.</p>
+                  <label className="settings-field">
+                    <span>Sender email address</span>
+                    <input
+                      value={notificationSettings.configuredSenderEmailAddress}
+                      type="email"
+                      readOnly
+                      disabled
+                      placeholder="Sender address controlled by provider"
+                    />
+                  </label>
+                  <p className="field-help">The sender email address is controlled by your configured email provider/domain.</p>
+                  <label className="settings-field">
+                    <span>Reply-to email</span>
+                    <input
+                      value={emailNotificationsDraft.replyToEmail}
+                      readOnly={emailNotificationsIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "replyToEmail", event.target.value)}
+                      placeholder={coachAccount.contactEmail}
+                    />
+                  </label>
+                </details>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Mail size={18} />
@@ -29120,13 +29206,67 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     reminder — the confirmation email they just received already has the details.
                   </p>
                 </details>
+                <details className="settings-subsection">
+                  <summary className="settings-subsection-title">
+                    <ExternalLink size={18} />
+                    <div>
+                      <span>Google review link</span>
+                      <strong>{notificationSettings.googleReviewUrl ? "Configured" : "Not set"}</strong>
+                    </div>
+                  </summary>
+                  <label className="settings-field">
+                    <span>Google review URL</span>
+                    <input
+                      type="url"
+                      value={emailNotificationsDraft.googleReviewUrl}
+                      readOnly={emailNotificationsIsLocked}
+                      maxLength={700}
+                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "googleReviewUrl", event.target.value.slice(0, 700))}
+                      placeholder="direct Google review link"
+                    />
+                  </label>
+                  <p className="field-help">Used for optional review buttons in client emails. Leave blank to hide review links.</p>
+                </details>
+                <details className="settings-subsection">
+                  <summary className="settings-subsection-title">
+                    <Mail size={18} />
+                    <div>
+                      <span>Test send</span>
+                      <strong>{testEmailAddress || notificationSettings.notificationEmail || coachAccount.contactEmail}</strong>
+                    </div>
+                  </summary>
+                  <label className="settings-field">
+                    <span>Send test to</span>
+                    <input
+                      value={testEmailAddress}
+                      onChange={(event) => setTestEmailAddress(event.target.value)}
+                      placeholder={notificationSettings.notificationEmail || coachAccount.contactEmail}
+                      type="email"
+                    />
+                  </label>
+                  {/* A connectivity check, not a preview: test-email.mts sends
+                      fixed wording through the provider and does not read the
+                      templates or the sender identity above. Say so, rather
+                      than letting it look like a way to proof a message. */}
+                  <p className="field-help">
+                    Checks that the email provider is reachable. It sends fixed test wording to this address only — not
+                    your templates, and never a client.
+                  </p>
+                  <button className="outline-button" onClick={sendTestEmail} disabled={testEmailState === "sending"} type="button">
+                    <Mail size={16} />
+                    {testEmailState === "sending" ? "Sending..." : testEmailState === "sent" ? "Sent" : "Send Test Email"}
+                  </button>
+                </details>
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-              <SettingsGroup id="text-machine" section="notifications" title="SMS and webhooks" className="notification-card">
+              {/* Settings › Email / SMS › SMS. The provider wiring only. The
+                  words a text carries are the smsText field of each template,
+                  in Notifications › Templates. */}
+              <SettingsGroup id="text-machine" section="email-sms" title="SMS" className="notification-card">
                 <EditableSettingsBlock
                   id="text-machine-block"
-                  title="Text Machine"
+                  title="SMS"
                   status={textMachineEditor.status}
                   dirty={textMachineEditor.dirty}
                   errorMessage={textMachineEditor.errorMessage}
@@ -29214,14 +29354,26 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     />
                     <span>Send admin text alert</span>
                   </label>
+                  <p className="field-help">
+                    What each text says is written on the message itself, in Notifications › Templates.
+                  </p>
                 </details>
                 </EditableSettingsBlock>
               </SettingsGroup>
 
+              {/* Settings › Notifications › Templates. The one place a coach
+                  writes what anybody receives, email and text together. There
+                  used to be a second card here called "Email template" holding
+                  the subject override and the admin alert, so the same question
+                  — what do we say — had two answers in two places; those two
+                  pieces of wording are subsections of this block now, and the
+                  delivery settings that were mixed in with them moved to
+                  Settings › Email / SMS. The group id is unchanged so the
+                  Coach profile's links still land here. */}
               <SettingsGroup
                 id="message-templates"
                 section="notifications"
-                title="Message templates"
+                title="Templates"
                 className="notification-card message-templates-card"
               >
                 <p className="settings-note">
@@ -29230,7 +29382,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </p>
                 <EditableSettingsBlock
                   id="message-templates-block"
-                  title="Message Templates"
+                  title="Templates"
                   status={messageTemplatesEditor.status}
                   dirty={messageTemplatesEditor.dirty}
                   errorMessage={messageTemplatesEditor.errorMessage}
@@ -29253,160 +29405,21 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       updateNotificationBlockDraft(messageTemplatesEditor, "mapLinkLabel", label.slice(0, 40))
                     }
                   />
-                </EditableSettingsBlock>
-              </SettingsGroup>
-
-              <SettingsGroup id="email-template" section="notifications" title="Email template" className="notification-card email-template-card">
-                <div className="email-preview">
-                  <span>Example</span>
-                  <strong>{emailTemplateExample.clientSubject}</strong>
-                  <p>{emailTemplateExample.clientIntro}</p>
-                  <dl>
-                    <div>
-                      <dt>Lesson</dt>
-                      <dd>{emailTemplateVariables.service}</dd>
-                    </div>
-                    <div>
-                      <dt>When</dt>
-                      <dd>
-                        {emailTemplateVariables.date}, {emailTemplateVariables.time}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Where</dt>
-                      <dd>{emailTemplateVariables.venue}</dd>
-                    </div>
-                    <div>
-                      <dt>Price</dt>
-                      <dd>{emailTemplateVariables.price}</dd>
-                    </div>
-                  </dl>
-                  <p>{emailTemplateExample.clientFooter}</p>
-                  <em>
-                    Admin alert: {emailTemplateExample.adminSubject} - {emailTemplateExample.adminIntro}
-                  </em>
-                </div>
-                <EditableSettingsBlock
-                  id="email-template-block"
-                  title="Email Template"
-                  status={emailTemplateEditor.status}
-                  dirty={emailTemplateEditor.dirty}
-                  errorMessage={emailTemplateEditor.errorMessage}
-                  onEdit={() => startEditableBlock("email-template")}
-                  onCancel={() => cancelEditableBlock("email-template")}
-                  onSave={() => void saveEditableBlock("email-template")}
-                >
+                {/* The two pieces of wording that are not one message: a
+                    subject that replaces every subject above, and the alert
+                    that goes to the coach rather than the client. Folded in
+                    below the editor rather than beside it — they are exceptions
+                    to what the panel shows, and reading them first would make
+                    the per-message wording look optional. */}
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Mail size={18} />
                     <div>
-                      <span>Email delivery identity</span>
-                      <strong>{notificationSettings.configuredSenderEmailAddress || "Provider-controlled"}</strong>
-                    </div>
-                  </summary>
-                  <label className="settings-field">
-                    <span>Email sender name</span>
-                    <input
-                      placeholder="Your business name"
-                      value={emailTemplateDraft.notificationFromName}
-                      readOnly={emailTemplateIsLocked}
-                      maxLength={120}
-                      onChange={(event) =>
-                        updateNotificationBlockDraft(emailTemplateEditor, "notificationFromName", event.target.value.slice(0, 120))}
-                    />
-                  </label>
-                  <p className="field-help">This is the display name clients see in their inbox.</p>
-                  <label className="settings-field">
-                    <span>Sender email address</span>
-                    <input
-                      value={notificationSettings.configuredSenderEmailAddress}
-                      type="email"
-                      readOnly
-                      disabled
-                      placeholder="Sender address controlled by provider"
-                    />
-                  </label>
-                  <p className="field-help">The sender email address is controlled by your configured email provider/domain.</p>
-                  <label className="settings-field">
-                    <span>Reply-to email</span>
-                    <input
-                      value={emailTemplateDraft.replyToEmail}
-                      readOnly={emailTemplateIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "replyToEmail", event.target.value)}
-                      placeholder={coachAccount.contactEmail}
-                    />
-                  </label>
-                </details>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ExternalLink size={18} />
-                    <div>
-                      <span>Google review link</span>
-                      <strong>{notificationSettings.googleReviewUrl ? "Configured" : "Not set"}</strong>
-                    </div>
-                  </summary>
-                  <label className="settings-field">
-                    <span>Google review URL</span>
-                    <input
-                      type="url"
-                      value={emailTemplateDraft.googleReviewUrl}
-                      readOnly={emailTemplateIsLocked}
-                      maxLength={700}
-                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "googleReviewUrl", event.target.value.slice(0, 700))}
-                      placeholder="direct Google review link"
-                    />
-                  </label>
-                  <p className="field-help">Used for optional review buttons in client emails. Leave blank to hide review links.</p>
-                </details>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <Mail size={18} />
-                    <div>
-                      <span>Test send</span>
-                      <strong>{testEmailAddress || notificationSettings.notificationEmail || coachAccount.contactEmail}</strong>
-                    </div>
-                  </summary>
-                  <label className="settings-field">
-                    <span>Send test to</span>
-                    <input
-                      value={testEmailAddress}
-                      onChange={(event) => setTestEmailAddress(event.target.value)}
-                      placeholder={notificationSettings.notificationEmail || coachAccount.contactEmail}
-                      type="email"
-                    />
-                  </label>
-                  <button className="outline-button" onClick={sendTestEmail} disabled={testEmailState === "sending"} type="button">
-                    <Mail size={16} />
-                    {testEmailState === "sending" ? "Sending..." : testEmailState === "sent" ? "Sent" : "Send Test Email"}
-                  </button>
-                </details>
-                {/* The customer's subject, opening and footer used to be three
-                    boxes here, applying to every notification at once. They are
-                    per-message in Message templates now, and that wording wins,
-                    so editing them here would have quietly done nothing. What a
-                    coach already saved still applies until they write a template
-                    over it - see clientText() in notification-engine.mts. */}
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <Mail size={18} />
-                    <div>
-                      <span>Customer email</span>
-                      <strong>Written per message</strong>
-                    </div>
-                  </summary>
-                  <p className="field-help">
-                    The subject, opening and sign-off a client reads are written on the message itself, one per thing
-                    that happens — new booking, rescheduled, reminder, cancelled, group and package. Open{" "}
-                    <strong>Message templates</strong> above.
-                  </p>
-                </details>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <Mail size={18} />
-                    <div>
-                      <span>Email subject override</span>
+                      <span>Subject override</span>
                       <strong>
-                        {notificationSettings.notificationSubjectLine.trim() ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables) : "Per-notification defaults"}
+                        {notificationSettings.notificationSubjectLine.trim()
+                          ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)
+                          : "Each message keeps its own"}
                       </strong>
                     </div>
                   </summary>
@@ -29415,13 +29428,21 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <input
                       maxLength={180}
                       placeholder="Use {{client}}, {{service}}, {{date}}, {{time}}, {{action}}"
-                      value={emailTemplateDraft.notificationSubjectLine}
-                      readOnly={emailTemplateIsLocked}
+                      value={messageTemplatesDraft.notificationSubjectLine}
+                      readOnly={messageTemplatesIsLocked}
                       onChange={(event) =>
-                        updateNotificationBlockDraft(emailTemplateEditor, "notificationSubjectLine", event.target.value.slice(0, 180))}
+                        updateNotificationBlockDraft(messageTemplatesEditor, "notificationSubjectLine", event.target.value.slice(0, 180))}
                     />
                   </label>
-                  <p className="field-help">Blank keeps existing per-notification defaults.</p>
+                  {/* templateSubjects() in notification-engine.mts returns this
+                      for every action before it reaches the per-variant
+                      subject, so a coach who fills it in will not see the six
+                      subjects above go out. Say that here rather than let them
+                      find out from a client. */}
+                  <p className="field-help">
+                    One subject line for every message, client and admin alike. Filling this in replaces the six
+                    subjects written above. Leave it blank — that is what keeps each message its own.
+                  </p>
                   <div className="template-token-controls" aria-label="Subject tokens">
                     {NOTIFICATION_SUBJECT_TOKENS.map((token) => (
                       <button className="template-token-button" key={token} onClick={() => insertNotificationSubjectToken(token)} type="button">
@@ -29432,14 +29453,14 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                   <p className="field-help">
                     Preview:{" "}
                     <strong>
-                      {emailSubjectTemplatePreview || "Blank uses existing per-notification defaults."}
+                      {emailSubjectTemplatePreview || "Blank — each message keeps the subject written above."}
                     </strong>
                   </p>
                   <div className="settings-actions">
                     <button
                       className="outline-button"
                       type="button"
-                      onClick={() => updateNotificationBlockDraft(emailTemplateEditor, "notificationSubjectLine", "")}
+                      onClick={() => updateNotificationBlockDraft(messageTemplatesEditor, "notificationSubjectLine", "")}
                     >
                       Clear override
                     </button>
@@ -29450,26 +29471,31 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <User size={18} />
                     <div>
                       <span>Admin alert</span>
-                      <strong>{notificationSettings.adminEmailSubject}</strong>
+                      <strong>{adminAlertExample.subject}</strong>
                     </div>
                   </summary>
+                  <p className="field-help">
+                    The booking alert that lands in your own inbox, not the client&apos;s. It has no per-message
+                    wording — one alert covers every booking.
+                  </p>
                   <label className="settings-field">
                     <span>Admin subject</span>
                     <input
-                      value={emailTemplateDraft.adminEmailSubject}
-                      readOnly={emailTemplateIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "adminEmailSubject", event.target.value)}
+                      value={messageTemplatesDraft.adminEmailSubject}
+                      readOnly={messageTemplatesIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(messageTemplatesEditor, "adminEmailSubject", event.target.value)}
                     />
                   </label>
                   <label className="settings-field">
                     <span>Admin summary</span>
                     <textarea
                       rows={3}
-                      value={emailTemplateDraft.adminEmailIntro}
-                      readOnly={emailTemplateIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailTemplateEditor, "adminEmailIntro", event.target.value)}
+                      value={messageTemplatesDraft.adminEmailIntro}
+                      readOnly={messageTemplatesIsLocked}
+                      onChange={(event) => updateNotificationBlockDraft(messageTemplatesEditor, "adminEmailIntro", event.target.value)}
                     />
                   </label>
+                  <p className="field-help">Preview: {adminAlertExample.intro}</p>
                 </details>
                 <details className="settings-subsection token-subsection">
                   <summary className="settings-subsection-title">
@@ -29479,7 +29505,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       <strong>Template placeholders</strong>
                     </div>
                   </summary>
-                  <div className="template-token-list" aria-label="Email template tokens">
+                  <div className="template-token-list" aria-label="Message template tokens">
                     <code>{"{{client}}"}</code>
                     <code>{"{{firstName}}"}</code>
                     <code>{"{{service}}"}</code>

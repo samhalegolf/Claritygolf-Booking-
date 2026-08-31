@@ -416,3 +416,50 @@ test("everything opens and closes at the same speed", () => {
       "Use var(--c-t-expand), and change tokens.css if the speed is wrong.",
   );
 });
+
+/**
+ * Every notification setting the API accepts still has somewhere to be typed.
+ *
+ * These settings are spread across Settings cards that get rearranged — the
+ * templates and the delivery config used to sit in one card called "Email
+ * template", and are now Notifications › Templates and Settings › Email / SMS.
+ * A field that loses its input during a move like that does not break: it keeps
+ * its stored value, keeps being sent on every save, and keeps being read on
+ * send. It is simply no longer editable, and nothing says so.
+ *
+ * So the list the write path accepts is checked against the bindings in
+ * App.tsx. Four keys are deliberately not editable and are named here with the
+ * reason; anything else that drifts off the screen fails.
+ */
+test("every notification setting the API accepts is editable somewhere", () => {
+  const api = readFileSync(path.join(SRC, "..", "netlify", "functions", "admin-settings.mts"), "utf8");
+  const write = api.slice(api.indexOf("async function writeAdminSettings"));
+  const accepted = [...write.matchAll(/hasOwn\(settings,\s*"([A-Za-z]+)"\)/g)].map((match) => match[1]);
+  assert.ok(accepted.length > 10, "writeAdminSettings not found — has admin-settings.mts been restructured?");
+
+  const app = readFileSync(path.join(SRC, "App.tsx"), "utf8");
+  // The binding is `updateNotificationBlockDraft(someEditor, "field", value)`,
+  // often wrapped across lines by the formatter.
+  const bound = new Set(
+    [...app.matchAll(/updateNotificationBlockDraft\(\s*[A-Za-z]+,\s*"([A-Za-z]+)"/gs)].map((match) => match[1]),
+  );
+
+  /** Stored and sent, but with no input on purpose. The reason is the value. */
+  const notEditable: Record<string, string> = {
+    emailNotificationsEnabled: "no UI; the send path and EMAIL_NOTIFICATIONS_ENABLED own it",
+    clientEmailSubject: "legacy wording, superseded by the per-message templates",
+    clientEmailIntro: "legacy wording, superseded by the per-message templates",
+    clientEmailFooter: "legacy wording, superseded by the per-message templates",
+  };
+
+  const stranded = accepted.filter((key) => !bound.has(key) && !(key in notEditable));
+  assert.deepEqual(
+    stranded,
+    [],
+    `Setting(s) the API accepts with no input left in App.tsx: ${stranded.join(", ")}. ` +
+      "Give each one a field, or add it to notEditable above with the reason.",
+  );
+
+  const stale = Object.keys(notEditable).filter((key) => !accepted.includes(key));
+  assert.deepEqual(stale, [], `notEditable names setting(s) the API no longer accepts: ${stale.join(", ")}`);
+});

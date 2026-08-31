@@ -1,4 +1,4 @@
-// Settings > Notifications > Message templates. The coach writes what a client
+// Settings > Notifications > Templates. The coach writes what a client
 // reads, on a preview of the message itself rather than in a column of labelled
 // boxes — so the length of a subject line and the tone of a sign-off are judged
 // where they will actually be seen.
