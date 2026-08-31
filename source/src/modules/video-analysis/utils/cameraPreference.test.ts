@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DEFAULT_RECORDING_ORIENTATION,
   describePreferredCamera,
   isPreferredCamera,
   normalizeCameraLabel,
+  orientationAspectRatio,
+  orientationVideoConstraints,
   parsePreferredCamera,
+  parseRecordingOrientation,
   resolvePreferredCamera,
+  trackMatchesOrientation,
   type CameraDevice,
 } from "./cameraPreference";
 
@@ -138,5 +143,44 @@ describe("describePreferredCamera", () => {
     );
     assert.equal(describePreferredCamera({ deviceId: "a", label: "" }), "Saved camera");
     assert.equal(describePreferredCamera(null), "");
+  });
+});
+
+describe("recording orientation", () => {
+  it("defaults to portrait, which is what the phone-on-a-tripod workflow needs", () => {
+    assert.equal(DEFAULT_RECORDING_ORIENTATION, "portrait");
+    assert.equal(parseRecordingOrientation(null), "portrait");
+    assert.equal(parseRecordingOrientation("sideways"), "portrait");
+  });
+
+  it("keeps a deliberate landscape choice", () => {
+    assert.equal(parseRecordingOrientation("landscape"), "landscape");
+  });
+
+  it("describes the stage shape each way round", () => {
+    assert.equal(orientationAspectRatio("portrait").toFixed(4), (9 / 16).toFixed(4));
+    assert.equal(orientationAspectRatio("landscape").toFixed(4), (16 / 9).toFixed(4));
+  });
+
+  it("asks for the orientation without ever demanding it", () => {
+    // `exact` here would refuse to open a camera that only shoots landscape,
+    // stranding the coach on "camera not connected" for a camera in plain view.
+    const portrait = orientationVideoConstraints("portrait");
+    assert.deepEqual(portrait.width, { ideal: 1080 });
+    assert.deepEqual(portrait.height, { ideal: 1920 });
+    const landscape = orientationVideoConstraints("landscape");
+    assert.deepEqual(landscape.width, { ideal: 1920 });
+    assert.deepEqual(landscape.height, { ideal: 1080 });
+    const serialised = JSON.stringify([portrait, landscape]);
+    assert.equal(serialised.includes("exact"), false);
+  });
+
+  it("notices when the camera ignored the request", () => {
+    assert.equal(trackMatchesOrientation({ width: 1080, height: 1920 }, "portrait"), true);
+    assert.equal(trackMatchesOrientation({ width: 1920, height: 1080 }, "portrait"), false);
+    assert.equal(trackMatchesOrientation({ width: 1920, height: 1080 }, "landscape"), true);
+    // Nothing to judge yet: say nothing rather than warn about a phantom.
+    assert.equal(trackMatchesOrientation(undefined, "portrait"), true);
+    assert.equal(trackMatchesOrientation({}, "portrait"), true);
   });
 });

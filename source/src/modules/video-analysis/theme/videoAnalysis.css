@@ -330,12 +330,21 @@
      the box takes the panel's full width and becomes a very tall column that
      max-height then flattens back out of ratio; and as a grid item its
      automatic minimum size is the message's min-content width, which widens it
-     past 9:16 again -- hence the explicit `min-width: 0`. */
+     past its ratio again -- hence the explicit `min-width: 0`. The two
+     orientation modifiers below supply the ratio and the matching width. */
   box-sizing: border-box;
-  aspect-ratio: 9 / 16;
   min-width: 0;
-  width: min(100%, 320px, calc(var(--va-video-max-height, 520px) * 0.5625));
   margin: 0 auto;
+}
+
+.video-capture-stage.is-portrait {
+  aspect-ratio: 9 / 16;
+  width: min(100%, 320px, calc(var(--va-video-max-height, 520px) * 0.5625));
+}
+
+.video-capture-stage.is-landscape {
+  aspect-ratio: 16 / 9;
+  width: min(100%, calc(var(--va-video-max-height, 520px) * 1.7778));
 }
 
 .video-capture-stage.is-dragging {
@@ -1387,8 +1396,11 @@
   }
 
   .video-capture-stage {
-    width: min(100%, 260px, calc(var(--va-video-max-height, 420px) * 0.5625));
     padding: 16px;
+  }
+
+  .video-capture-stage.is-portrait {
+    width: min(100%, 260px, calc(var(--va-video-max-height, 420px) * 0.5625));
   }
 
   /* Bottom sheet rather than a floating desktop panel. */
@@ -2044,6 +2056,12 @@
 .va-sheet .va-camera-name {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.va-sheet .va-camera-ratio {
+  flex: none;
+  color: var(--va-muted);
+  font-size: 0.76rem;
 }
 
 /* The saved camera is still the saved camera when it is unplugged. It keeps

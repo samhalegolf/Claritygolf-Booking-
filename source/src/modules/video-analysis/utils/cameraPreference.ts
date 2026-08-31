@@ -1,12 +1,12 @@
 /**
- * The coach's default recording camera.
+ * The coach's recording setup: which camera, and which way up.
  *
- * This is a workstation preference, not lesson data: it belongs to the browser
- * profile in front of the coach and is deliberately not tied to a player, a
- * lesson, an analysis, a recording, or a comparison side. It is chosen once in
- * Video Settings and then honoured silently by the Video Analysis workspace.
+ * Both are workstation preferences, not lesson data. They belong to the browser
+ * profile in front of the coach and are deliberately not tied to a player, a
+ * lesson, an analysis, a recording, or a comparison side. They are chosen once
+ * in Video Settings and then honoured silently by the Video Analysis workspace.
  *
- * The one rule that shapes everything here: once a camera has been chosen, we
+ * The one rule that shapes the camera half: once a camera has been chosen, we
  * never quietly record with a different one. A coach who mounts an iPhone and
  * picks it has told us which picture they want; falling back to the built-in
  * MacBook camera because the phone is asleep would hand them a recording of the
@@ -155,4 +155,75 @@ export const isPreferredCamera = (
 export const describePreferredCamera = (preferred: PreferredCamera | null): string => {
   if (!preferred) return "";
   return preferred.label || "Saved camera";
+};
+
+
+/* -------------------------------------------------------------------------
+   Recording orientation
+   ------------------------------------------------------------------------- */
+
+export type RecordingOrientation = "portrait" | "landscape";
+
+/**
+ * Portrait, because the workflow this is built around is a phone mounted
+ * upright behind the swing. Landscape is there for coaches shooting on a
+ * tripod-mounted camera that has no portrait mode worth using.
+ */
+export const DEFAULT_RECORDING_ORIENTATION: RecordingOrientation = "portrait";
+
+const ORIENTATION_KEY = "clarity.video.recording-orientation";
+
+export const parseRecordingOrientation = (raw: string | null): RecordingOrientation =>
+  raw === "landscape" || raw === "portrait" ? raw : DEFAULT_RECORDING_ORIENTATION;
+
+export const loadRecordingOrientation = (): RecordingOrientation =>
+  parseRecordingOrientation(readStorage(ORIENTATION_KEY));
+
+export const saveRecordingOrientation = (orientation: RecordingOrientation) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ORIENTATION_KEY, orientation);
+  } catch {
+    // The workspace stays usable; the choice just will not outlive the tab.
+  }
+};
+
+/** Width / height of the chosen orientation, for sizing the stage. */
+export const orientationAspectRatio = (orientation: RecordingOrientation): number =>
+  orientation === "portrait" ? 9 / 16 : 16 / 9;
+
+/**
+ * The video half of `getUserMedia` for this orientation.
+ *
+ * Every dimension is an `ideal`, never an `exact`. A camera that cannot shoot
+ * the requested way round should still open -- refusing to connect would put
+ * the coach back in front of "camera not connected" for a camera that is
+ * plainly sitting there. What a camera actually returns is its own business,
+ * and MediaRecorder records that, not this request.
+ */
+export const orientationVideoConstraints = (
+  orientation: RecordingOrientation
+): MediaTrackConstraints =>
+  orientation === "portrait"
+    ? {
+        width: { ideal: 1080 },
+        height: { ideal: 1920 },
+        aspectRatio: { ideal: 9 / 16 },
+        frameRate: { ideal: 60 },
+      }
+    : {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        aspectRatio: { ideal: 16 / 9 },
+        frameRate: { ideal: 60 },
+      };
+
+/** Whether a track that came back matches the orientation that was asked for. */
+export const trackMatchesOrientation = (
+  settings: { width?: number; height?: number } | null | undefined,
+  orientation: RecordingOrientation
+): boolean => {
+  if (!settings?.width || !settings?.height) return true;
+  const isPortrait = settings.height > settings.width;
+  return isPortrait === (orientation === "portrait");
 };

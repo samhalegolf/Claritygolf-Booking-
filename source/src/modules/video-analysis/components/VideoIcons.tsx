@@ -143,6 +143,13 @@ export const IconCamera = ({ className }: IconProps) => (
   </Svg>
 );
 
+export const IconOrientation = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <rect x="8.5" y="3" width="7" height="18" rx="1.8" />
+    <path d="M3.4 9.2h2.2M3.4 14.8h2.2M18.4 9.2h2.2M18.4 14.8h2.2" />
+  </Svg>
+);
+
 export const IconBack = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M10 6 4 12l6 6" />

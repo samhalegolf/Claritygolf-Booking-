@@ -36,12 +36,18 @@ import {
   WorkspaceMode,
 } from "./utils/localPersistence";
 import {
+  DEFAULT_RECORDING_ORIENTATION,
   describePreferredCamera,
   loadPreferredCamera,
+  loadRecordingOrientation,
+  orientationVideoConstraints,
   resolvePreferredCamera,
   savePreferredCamera,
+  saveRecordingOrientation,
+  trackMatchesOrientation,
   type CameraDevice,
   type PreferredCamera,
+  type RecordingOrientation,
 } from "./utils/cameraPreference";
 import {
   buildVideoSlotKey,
@@ -74,6 +80,26 @@ import {
 import { PlayerVideo } from "./models/Video";
 import { DrawingTool } from "./models/Drawing";
 import { TimelineMarker } from "./models/Timeline";
+
+/**
+ * Give a freshly opened camera a moment to produce its first frame.
+ *
+ * Continuity Camera reports a live track well before it has any picture, and a
+ * track in that gap reports no dimensions -- which would make the orientation
+ * check below read "matches" for a camera it has not seen yet. Bounded and
+ * never fatal: if the frame never arrives we carry on regardless, because
+ * refusing to record is worse than recording without the check.
+ */
+const waitForFirstFrame = async (stream: MediaStream, timeoutMs = 1500) => {
+  const track = stream.getVideoTracks()[0];
+  if (!track) return;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const { width, height } = track.getSettings();
+    if (width && height) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+};
 
 const LEFT_ANALYSIS_SLOT = "comparison-left-slot";
 const RIGHT_ANALYSIS_SLOT = "comparison-right-slot";
@@ -529,6 +555,15 @@ export function VideoWorkspace({
   // Read on mount rather than taken from a prop: it belongs to this browser,
   // not to the player or lesson the workspace happens to be showing.
   const [preferredCamera, setPreferredCamera] = useState<PreferredCamera | null>(null);
+  // Which way up the stage sits and what the camera is asked for. Portrait by
+  // default: the workflow is a phone mounted upright behind the swing.
+  const [recordingOrientation, setRecordingOrientation] = useState<RecordingOrientation>(
+    DEFAULT_RECORDING_ORIENTATION
+  );
+  // Set when the camera hands back the other orientation from the one asked
+  // for -- a Continuity Camera that only shoots landscape, say. The coach is
+  // told rather than shown a preview that quietly disagrees with the file.
+  const [orientationMismatch, setOrientationMismatch] = useState(false);
   const cameraDeviceList = useCameraDevices(!isPlayerVariant);
   // The player's drawing rail, tucked away until asked for. It is also the
   // mode switch for the video surface: closed means a drag scrubs frames,
@@ -563,12 +598,28 @@ export function VideoWorkspace({
     persistenceAdapter: persistenceLayer.analysisAdapter,
   });
 
+  /**
+   * Release the camera when the workspace goes away.
+   *
+   * Unmount only, and that is load-bearing. Keyed on `liveStream`, the cleanup
+   * ran on every change of it -- including the render that first published a
+   * new stream. By then `mediaRecorderRef` already held the recorder that had
+   * just been started on that very stream, so the teardown stopped the tracks
+   * it was recording from: the camera lit up, the preview stayed black, and
+   * the file came back empty. The ref keeps the current stream reachable
+   * without making this effect re-run.
+   */
+  const liveStreamRef = useRef<MediaStream | null>(null);
   useEffect(() => {
-    return () => {
+    liveStreamRef.current = liveStream;
+  }, [liveStream]);
+  useEffect(
+    () => () => {
       mediaRecorderRef.current?.stream.getTracks().forEach((track) => track.stop());
-      stopLiveStream(liveStream);
-    };
-  }, [liveStream, stopLiveStream]);
+      stopLiveStream(liveStreamRef.current);
+    },
+    [stopLiveStream]
+  );
 
   // Restore on-device videos once per player/lesson context. Reconstructs a
   // File from the stored blob and runs it through the normal load path so the
@@ -1211,10 +1262,11 @@ export function VideoWorkspace({
     [cameraDeviceList.devices, preferredCamera]
   );
 
-  // The saved camera belongs to this browser, so it is read once on mount
-  // rather than tracked through props.
+  // Both recording preferences belong to this browser, so they are read once
+  // on mount rather than tracked through props.
   useEffect(() => {
     setPreferredCamera(loadPreferredCamera());
+    setRecordingOrientation(loadRecordingOrientation());
   }, []);
 
   /**
@@ -1264,19 +1316,23 @@ export function VideoWorkspace({
       setLiveRecording({ side, status: "connecting", error: null, startedAt: null });
       try {
         stopLiveStream(liveStream);
-        // Portrait ideals, because this workflow is built around a phone
-        // mounted upright. They are ideals rather than hard constraints, so a
-        // camera that can only shoot landscape still opens.
+        // The device is exact -- that is the whole point of a saved camera.
+        // The orientation is only ever ideal, so a camera that cannot shoot
+        // the requested way round still opens instead of reading as absent.
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
+            ...orientationVideoConstraints(recordingOrientation),
             deviceId: { exact: target.deviceId },
-            width: { ideal: 1080 },
-            height: { ideal: 1920 },
-            aspectRatio: { ideal: 9 / 16 },
-            frameRate: { ideal: 60 },
           },
           audio: false,
         });
+        await waitForFirstFrame(stream);
+        setOrientationMismatch(
+          !trackMatchesOrientation(
+            stream.getVideoTracks()[0]?.getSettings(),
+            recordingOrientation
+          )
+        );
         setLiveStream(stream);
         setLiveRecording({ side, status: "preview", error: null, startedAt: null });
         setActiveSideInCompare(side);
@@ -1456,6 +1512,28 @@ export function VideoWorkspace({
       const next: PreferredCamera = { deviceId: device.deviceId, label: device.label };
       savePreferredCamera(next);
       setPreferredCamera(next);
+      setOrientationMismatch(false);
+      if (
+        liveRecording &&
+        liveRecording.status !== "recording" &&
+        liveRecording.status !== "processing"
+      ) {
+        closeLiveRecording();
+      }
+    },
+    [closeLiveRecording, liveRecording]
+  );
+
+  /**
+   * Orientation is asked for when the camera is opened, so a stream that is
+   * already running was opened the other way round. Let it go rather than
+   * leave a preview that no longer matches the setting.
+   */
+  const handleSelectOrientation = useCallback(
+    (orientation: RecordingOrientation) => {
+      saveRecordingOrientation(orientation);
+      setRecordingOrientation(orientation);
+      setOrientationMismatch(false);
       if (
         liveRecording &&
         liveRecording.status !== "recording" &&
@@ -2691,7 +2769,9 @@ export function VideoWorkspace({
           onMouseDown={() => setActiveSideInCompare(side)}
         >
           <div
-            className={`video-capture-stage${dragTargetSide === side ? " is-dragging" : ""}`}
+            className={`video-capture-stage is-${recordingOrientation}${
+              dragTargetSide === side ? " is-dragging" : ""
+            }`}
             onDragEnter={(event) => handleDropZoneDrag(side, event)}
             onDragOver={(event) => handleDropZoneDrag(side, event)}
             onDragLeave={(event) => {
@@ -2827,6 +2907,15 @@ export function VideoWorkspace({
                     ? "Processing"
                     : liveRecording.error || "Ready to record"}
               </span>
+              {/* The preview shows the stream as it really is, so when the
+                  camera hands back the other orientation the coach is told
+                  rather than shown a portrait crop the file will not have. */}
+              {orientationMismatch && liveRecording.status !== "processing" ? (
+                <span className="live-recording-status is-error">
+                  This camera is only offering{" "}
+                  {recordingOrientation === "portrait" ? "landscape" : "portrait"}.
+                </span>
+              ) : null}
               <button
                 type="button"
                 className="video-tool-btn is-subtle"
@@ -3233,6 +3322,8 @@ export function VideoWorkspace({
           cameraError={cameraDeviceList.error}
           onSelectCamera={handleSelectCamera}
           onRequestCameraLabels={() => void cameraDeviceList.requestLabels()}
+          recordingOrientation={recordingOrientation}
+          onSelectOrientation={handleSelectOrientation}
         />
       ) : null}
 

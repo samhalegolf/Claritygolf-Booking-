@@ -3,12 +3,14 @@ import { WorkspaceMode } from "../utils/localPersistence";
 import {
   CameraDevice,
   PreferredCamera,
+  RecordingOrientation,
   describePreferredCamera,
   isPreferredCamera,
 } from "../utils/cameraPreference";
 import {
   IconCamera,
   IconDiagnostics,
+  IconOrientation,
   IconLibrary,
   IconLinked,
   IconModeCompare,
@@ -31,6 +33,15 @@ import {
 // workstation, not a control they should have to step past on the way to
 // every recording. Video Settings picks the camera; Video Analysis records
 // with it.
+
+const ORIENTATION_CHOICES: ReadonlyArray<{
+  value: RecordingOrientation;
+  label: string;
+  ratio: string;
+}> = [
+  { value: "portrait", label: "Portrait", ratio: "9:16" },
+  { value: "landscape", label: "Landscape", ratio: "16:9" },
+];
 
 export type VideoSettingsSheetProps = {
   open: boolean;
@@ -65,6 +76,9 @@ export type VideoSettingsSheetProps = {
   cameraError: string;
   onSelectCamera: (device: CameraDevice) => void;
   onRequestCameraLabels: () => void;
+  /** Which way up the recording stage sits, and what the camera is asked for. */
+  recordingOrientation: RecordingOrientation;
+  onSelectOrientation: (orientation: RecordingOrientation) => void;
 };
 
 export function VideoSettingsSheet({
@@ -97,6 +111,8 @@ export function VideoSettingsSheet({
   cameraError,
   onSelectCamera,
   onRequestCameraLabels,
+  recordingOrientation,
+  onSelectOrientation,
 }: VideoSettingsSheetProps) {
   if (!open) return null;
 
@@ -187,6 +203,40 @@ export function VideoSettingsSheet({
               ) : null}
             </div>
           )}
+        </section>
+
+        <span className="va-sheet-divider" aria-hidden="true" />
+
+        <section className="va-sheet-group" aria-labelledby="va-orientation-heading">
+          <h2 className="va-sheet-group-title" id="va-orientation-heading">
+            <IconOrientation />
+            <span>Orientation</span>
+          </h2>
+          <p className="va-sheet-group-label" id="va-orientation-label">
+            Recording orientation
+          </p>
+          <div role="radiogroup" aria-labelledby="va-orientation-label">
+            {ORIENTATION_CHOICES.map((choice) => {
+              const selected = recordingOrientation === choice.value;
+              return (
+                <button
+                  key={choice.value}
+                  type="button"
+                  className={`va-camera-option va-camera-option-btn${selected ? " is-selected" : ""}`}
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => onSelectOrientation(choice.value)}
+                >
+                  <span
+                    className={`va-camera-dot${selected ? " is-on" : ""}`}
+                    aria-hidden="true"
+                  />
+                  <span className="va-camera-name">{choice.label}</span>
+                  <span className="va-camera-ratio">{choice.ratio}</span>
+                </button>
+              );
+            })}
+          </div>
         </section>
 
         <span className="va-sheet-divider" aria-hidden="true" />
