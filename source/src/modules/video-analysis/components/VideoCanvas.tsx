@@ -177,15 +177,40 @@ export function VideoCanvas({
     };
   }, [measure, onDimensionsChange]);
 
+  /**
+   * Bind the live camera to the element, and -- just as importantly -- unbind
+   * it again.
+   *
+   * `srcObject` outranks `src`: an element still holding a MediaStream ignores
+   * whatever `src` is set afterwards. When a recording finishes this same
+   * element stops being the camera preview and becomes the player for the file
+   * just captured, so leaving the dead stream attached leaves a black 2x2
+   * frame that never loads the clip -- and the `play()` racing it rejects with
+   * AbortError.
+   *
+   * The element is captured in a local rather than read back through the ref,
+   * because the ref this component is handed changes at exactly that moment.
+   */
   useEffect(() => {
-    if (!liveStream || !videoRef.current) return;
-    videoRef.current.srcObject = liveStream;
-    void videoRef.current.play().catch(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (!liveStream) {
+      if (video.srcObject) {
+        video.srcObject = null;
+        video.load();
+      }
+      return;
+    }
+
+    video.srcObject = liveStream;
+    void video.play().catch(() => {
       // Browsers may wait for a user gesture; the video element remains ready.
     });
     return () => {
-      if (videoRef.current?.srcObject === liveStream) {
-        videoRef.current.srcObject = null;
+      if (video.srcObject === liveStream) {
+        video.srcObject = null;
+        video.load();
       }
     };
   }, [liveStream, videoRef]);

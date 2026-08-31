@@ -471,11 +471,11 @@
   color: var(--va-muted);
 }
 
-/* Connect only shows up when the camera is missing, so in that moment it is
-   the primary thing to do -- Record is sitting next to it disabled. */
-.video-intake-actions .video-connect-button {
-  border-color: var(--va-accent);
-  font-weight: 700;
+/* Connect sits next to Record and does the smaller job of the two -- bring the
+   picture up -- so it keeps the plain button treatment and lets Record carry
+   the accent. Two accented buttons side by side is two primary actions. */
+.video-intake-actions .video-connect-button svg {
+  color: var(--va-accent);
 }
 
 .live-recording-toolbar {

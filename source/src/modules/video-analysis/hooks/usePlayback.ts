@@ -176,7 +176,10 @@ export function usePlayback({ videoRef }: UsePlaybackOptions): UsePlaybackState 
   const play = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    void video.play();
+    // A play() interrupted by a source swap or blocked by autoplay policy
+    // rejects, and unhandled it surfaces in the console as "AbortError: The
+    // operation was aborted". The element is left in a valid state either way.
+    void video.play().catch(() => undefined);
   }, [videoRef]);
 
   const pause = useCallback(() => {
@@ -189,7 +192,7 @@ export function usePlayback({ videoRef }: UsePlaybackOptions): UsePlaybackState 
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
-      void video.play();
+      void video.play().catch(() => undefined);
     } else {
       video.pause();
     }

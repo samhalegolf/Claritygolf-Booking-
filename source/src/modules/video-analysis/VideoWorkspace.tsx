@@ -2745,34 +2745,33 @@ export function VideoWorkspace({
       const isConnecting = status === "connecting";
       const isPending = status === "processing";
       const needsSetup = !preferredCamera;
-      const cameraMissing = !needsSetup && !resolvedCamera;
+      // Only believe "not connected" when the device list is actually saying
+      // something. Safari blanks every device id and label until the page has
+      // been granted camera access, so an empty-looking list is usually a
+      // permission state, not an absent camera -- and treating it as absent is
+      // what greyed out Record for a phone sitting there plugged in. When the
+      // list has nothing to tell us we stay optimistic and let the attempt
+      // decide, which is safe because every attempt is pinned to the saved id.
+      const deviceListIsInformative = cameraDeviceList.labelsAvailable;
+      const cameraMissing = !needsSetup && deviceListIsInformative && !resolvedCamera;
       const canRecord =
         cameraDeviceList.supported && !needsSetup && !cameraMissing && !isConnecting && !isPending;
-      // Connect asks the same question Record does, but it is allowed to ask
-      // it of a camera the device list has not mentioned -- every attempt is
-      // still pinned to the saved device id, so it can only ever open that one.
-      //
-      // It only appears when it is the thing that helps: a camera the list has
-      // not admitted to, or one that just failed to open. When the camera is
-      // sitting there resolved, Record already connects on the way through,
-      // and a second button next to it would be two ways to do one thing.
-      const showConnect =
-        cameraDeviceList.supported && !needsSetup && (cameraMissing || status === "error");
-      const canConnect = showConnect && !isConnecting && !isPending;
+      const canConnect = cameraDeviceList.supported && !needsSetup && !isConnecting && !isPending;
+      // An attempt that just failed outranks the resting "Camera not connected"
+      // -- it names which camera and why, and it is the only sign that the
+      // button was pressed at all.
+      const attemptError = status === "error" ? liveRecording?.error || "" : "";
       // Only colour the message as a problem when it is reporting one. A stale
       // error behind a "choose a camera" or "connecting" message is not.
       const isWarning =
-        cameraMissing || (!needsSetup && !isConnecting && !isPending && status === "error");
-
+        !isConnecting && !isPending && (cameraMissing || Boolean(attemptError));
       const message = needsSetup
         ? "Choose a recording camera in Video Settings"
         : isConnecting
           ? "Connecting…"
           : isPending
             ? "Processing…"
-            : cameraMissing
-              ? "Camera not connected"
-              : (status === "error" && liveRecording?.error) || "Ready to record";
+            : attemptError || (cameraMissing ? "Camera not connected" : "Ready to record");
 
       return (
         <div
@@ -2810,20 +2809,18 @@ export function VideoWorkspace({
                 yet -- a sleeping Continuity Camera iPhone, most often. It is
                 deliberately not gated on the camera resolving: that gate is
                 what made "Camera not connected" a dead end. */}
-            {showConnect ? (
-              <button
-                type="button"
-                className="upload-button video-connect-button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void connectPreferredCamera(side);
-                }}
-                disabled={!canConnect}
-              >
-                <IconCamera />
-                Connect
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="upload-button video-connect-button"
+              onClick={(event) => {
+                event.stopPropagation();
+                void connectPreferredCamera(side);
+              }}
+              disabled={!canConnect}
+            >
+              <IconCamera />
+              Connect
+            </button>
             <button
               type="button"
               className="upload-button video-record-button"
@@ -2893,7 +2890,12 @@ export function VideoWorkspace({
           onMouseDown={() => setActiveSideInCompare(side)}
         >
           <div className="video-canvas-shell">
+            {/* Keyed apart from the playback canvas below. Without it React
+                reuses this very <video> element when the recording finishes,
+                and an element still holding a MediaStream ignores the `src`
+                it is then given -- a black frame that never loads the clip. */}
             <VideoCanvas
+              key="live-camera"
               sourceUrl={null}
               liveStream={liveStream}
               videoRef={livePreviewRef}
@@ -3018,6 +3020,7 @@ export function VideoWorkspace({
             coming back the moment you opened a second video. */}
         <div className="video-canvas-shell">
           <VideoCanvas
+            key="clip-playback"
             sourceUrl={mountedSource}
             videoRef={isLeft ? leftVideoRef : rightVideoRef}
             onLoadMetadata={() => onSourceLoad(side)}
