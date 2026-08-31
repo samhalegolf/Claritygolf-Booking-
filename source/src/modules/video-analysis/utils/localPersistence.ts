@@ -9,7 +9,6 @@ import { openIndexedDbDatabase } from "./videoAnalysisDatabase";
 const ANALYSIS_PREFIX = "clarity.video.analysis";
 const WORKSPACE_PREFIX = "clarity.video.workspace";
 const ARTIFACT_PREFIX = "clarity.video.artifact";
-const PREFERRED_CAMERA_KEY = "clarity.video.preferred-camera";
 const DEVICE_DB_NAME = "clarity-video-analysis-device";
 const DEVICE_DB_VERSION = 1;
 const DEVICE_STORE_NAME = "keyValue";
@@ -164,29 +163,6 @@ export const browserStorageAdapter: PersistenceAdapter = {
       // Ignore removal failures.
     }
   },
-};
-
-/**
- * Camera device ids are scoped to this browser origin, making local storage a
- * useful workstation-only preference. It deliberately contains no player or
- * lesson data: a coach normally wants the same mounted camera each session.
- */
-export const loadPreferredCameraId = (): string => {
-  if (typeof window === "undefined") return "";
-  try {
-    return window.localStorage.getItem(PREFERRED_CAMERA_KEY) || "";
-  } catch {
-    return "";
-  }
-};
-
-export const savePreferredCameraId = (cameraId: string) => {
-  if (typeof window === "undefined" || !cameraId) return;
-  try {
-    window.localStorage.setItem(PREFERRED_CAMERA_KEY, cameraId);
-  } catch {
-    // The recorder remains usable when browser storage is unavailable.
-  }
 };
 
 let indexedDbOpenPromise: Promise<IDBDatabase> | null = null;

@@ -1,6 +1,13 @@
 import React from "react";
 import { WorkspaceMode } from "../utils/localPersistence";
 import {
+  CameraDevice,
+  PreferredCamera,
+  describePreferredCamera,
+  isPreferredCamera,
+} from "../utils/cameraPreference";
+import {
+  IconCamera,
   IconDiagnostics,
   IconLibrary,
   IconLinked,
@@ -18,6 +25,12 @@ import {
 // closing it (backdrop tap, Escape, or the gear again) puts it away. Nothing
 // here is a coach-only idea kept secret from the type: the player simply
 // never gets a gear to open it from.
+//
+// Choosing the recording camera is the same kind of thing, and it lives here
+// for the same reason: it is a decision the coach makes once about their
+// workstation, not a control they should have to step past on the way to
+// every recording. Video Settings picks the camera; Video Analysis records
+// with it.
 
 export type VideoSettingsSheetProps = {
   open: boolean;
@@ -41,6 +54,17 @@ export type VideoSettingsSheetProps = {
   onReplaceClip: () => void;
   onRecordReplacement: () => void;
   onClearClip: () => void;
+  /** Video inputs the browser can see right now. */
+  cameraDevices: MediaDeviceInfo[];
+  /** The saved default, whether or not it is currently plugged in. */
+  preferredCamera: PreferredCamera | null;
+  /** The device the saved default resolves to now, or null when it is absent. */
+  resolvedCamera: CameraDevice | null;
+  cameraSupported: boolean;
+  cameraLabelsAvailable: boolean;
+  cameraError: string;
+  onSelectCamera: (device: CameraDevice) => void;
+  onRequestCameraLabels: () => void;
 };
 
 export function VideoSettingsSheet({
@@ -65,8 +89,21 @@ export function VideoSettingsSheet({
   onReplaceClip,
   onRecordReplacement,
   onClearClip,
+  cameraDevices,
+  preferredCamera,
+  resolvedCamera,
+  cameraSupported,
+  cameraLabelsAvailable,
+  cameraError,
+  onSelectCamera,
+  onRequestCameraLabels,
 }: VideoSettingsSheetProps) {
   if (!open) return null;
+
+  // A saved camera that is not in the list is still the coach's choice. It is
+  // shown as its own selected row rather than dropped, so the setting reads as
+  // "still yours, just not here right now" instead of silently emptying.
+  const savedCameraMissing = Boolean(preferredCamera) && !resolvedCamera;
 
   return (
     <>
@@ -78,6 +115,81 @@ export function VideoSettingsSheet({
       />
       <div className="va-sheet" role="dialog" aria-label="Video settings">
         <span className="va-sheet-handle" aria-hidden="true" />
+
+        <section className="va-sheet-group va-camera-group" aria-labelledby="va-camera-heading">
+          <h2 className="va-sheet-group-title" id="va-camera-heading">
+            <IconCamera />
+            <span>Camera</span>
+          </h2>
+          <p className="va-sheet-group-label" id="va-camera-choice-label">
+            Default recording camera
+          </p>
+
+          {!cameraSupported ? (
+            <p className="va-sheet-note">
+              This browser cannot list cameras, so recording is unavailable here.
+            </p>
+          ) : (
+            <div role="radiogroup" aria-labelledby="va-camera-choice-label">
+              {savedCameraMissing ? (
+                <span className="va-camera-option is-missing">
+                  <span className="va-camera-dot is-on" aria-hidden="true" />
+                  <span className="va-camera-name">
+                    {describePreferredCamera(preferredCamera)}
+                  </span>
+                  <span className="va-camera-state">Not connected</span>
+                </span>
+              ) : null}
+
+              {cameraDevices.map((device, index) => {
+                const selected = !savedCameraMissing && isPreferredCamera(device, preferredCamera);
+                return (
+                  <button
+                    key={device.deviceId || index}
+                    type="button"
+                    className={`va-camera-option va-camera-option-btn${selected ? " is-selected" : ""}`}
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() =>
+                      onSelectCamera({ deviceId: device.deviceId, label: device.label })
+                    }
+                  >
+                    <span
+                      className={`va-camera-dot${selected ? " is-on" : ""}`}
+                      aria-hidden="true"
+                    />
+                    <span className="va-camera-name">
+                      {device.label || `Camera ${index + 1}`}
+                    </span>
+                  </button>
+                );
+              })}
+
+              {!cameraDevices.length ? (
+                <p className="va-sheet-note">No cameras found.</p>
+              ) : null}
+
+              {!cameraLabelsAvailable ? (
+                <button
+                  type="button"
+                  className="va-sheet-row va-sheet-row-btn"
+                  onClick={onRequestCameraLabels}
+                >
+                  <IconCamera />
+                  <span>Allow camera access to name your cameras</span>
+                </button>
+              ) : null}
+
+              {cameraError ? (
+                <p className="va-sheet-note" role="alert">
+                  {cameraError}
+                </p>
+              ) : null}
+            </div>
+          )}
+        </section>
+
+        <span className="va-sheet-divider" aria-hidden="true" />
 
         <button
           type="button"

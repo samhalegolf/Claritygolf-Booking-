@@ -135,6 +135,14 @@ export const IconRecord = ({ className }: IconProps) => (
   </Svg>
 );
 
+export const IconCamera = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <rect x="3" y="7" width="18" height="12.5" rx="2.4" />
+    <path d="M8.6 7 10 4.5h4L15.4 7" />
+    <circle cx="12" cy="13.2" r="3.4" />
+  </Svg>
+);
+
 export const IconBack = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M10 6 4 12l6 6" />

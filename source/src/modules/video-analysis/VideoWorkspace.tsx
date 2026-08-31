@@ -16,7 +16,7 @@ import { FocusSnapshot, VideoAnalysis } from "./models/Analysis";
 import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
 import { VideoCanvas } from "./components/VideoCanvas";
-import { IconBack, IconRecord, IconUpload } from "./components/VideoIcons";
+import { IconBack, IconRecord, IconSettings, IconUpload } from "./components/VideoIcons";
 import {
   PlayerActionBar,
   PlayerToolRail,
@@ -31,12 +31,18 @@ import {
   WorkspacePersistenceContext,
   clearComparisonWorkspaceState,
   createVideoAnalysisPersistence,
-  loadPreferredCameraId,
   loadComparisonWorkspaceState,
-  savePreferredCameraId,
   saveComparisonWorkspaceState,
   WorkspaceMode,
 } from "./utils/localPersistence";
+import {
+  describePreferredCamera,
+  loadPreferredCamera,
+  resolvePreferredCamera,
+  savePreferredCamera,
+  type CameraDevice,
+  type PreferredCamera,
+} from "./utils/cameraPreference";
 import {
   buildVideoSlotKey,
   requestPersistentStorage,
@@ -53,6 +59,7 @@ import { useAnalysisStore } from "./hooks/useAnalysisStore";
 import { useDrawing } from "./hooks/useDrawing";
 import { useMarkerThumbnails } from "./hooks/useMarkerThumbnails";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useCameraDevices } from "./hooks/useCameraDevices";
 import { usePlayback } from "./hooks/usePlayback";
 import { useTimeline } from "./hooks/useTimeline";
 import { TimelineEngine } from "./engines/TimelineEngine";
@@ -85,7 +92,15 @@ const SNAPSHOT_PREVIEW_WIDTH = 88;
 const SNAPSHOT_PREVIEW_HEIGHT = 50;
 const DEFAULT_PLAYER_ID = "player-demo-1";
 type SaveStatus = "idle" | "saving" | "sending" | "downloading" | "saved" | "error";
-type RecordingStatus = "ready" | "recording" | "processing" | "error";
+/**
+ * A capture session on one side of the workspace.
+ *
+ * "connecting" is the gap between pressing Record and the saved camera handing
+ * over a stream; "preview" is a camera that is open but not yet rolling, which
+ * only the auto-start entry point produces -- the Record button connects and
+ * rolls in one press.
+ */
+type RecordingStatus = "connecting" | "preview" | "recording" | "processing" | "error";
 type ScreenRecordingStatus = "idle" | "recording" | "saving" | "error";
 type CloudUploadFailureStage =
   | "Configuration"
@@ -510,8 +525,11 @@ export function VideoWorkspace({
   const [intakeError, setIntakeError] = useState("");
   const [liveRecording, setLiveRecording] = useState<LiveRecordingSession | null>(null);
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
-  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedCameraId, setSelectedCameraId] = useState("");
+  // The workstation's default recording camera, chosen once in Video Settings.
+  // Read on mount rather than taken from a prop: it belongs to this browser,
+  // not to the player or lesson the workspace happens to be showing.
+  const [preferredCamera, setPreferredCamera] = useState<PreferredCamera | null>(null);
+  const cameraDeviceList = useCameraDevices(!isPlayerVariant);
   // The player's drawing rail, tucked away until asked for. It is also the
   // mode switch for the video surface: closed means a drag scrubs frames,
   // open means a drag draws. One flag rather than two, because a player who
@@ -1188,15 +1206,27 @@ export function VideoWorkspace({
     });
   }, [restoreSavedVideo, savedVideoId]);
 
-  const openLiveRecording = useCallback(
-    async (side: ComparisonSide, cameraId = selectedCameraId || loadPreferredCameraId()) => {
-      if (
-        liveRecording?.status === "recording" ||
-        liveRecording?.status === "processing"
-      ) {
-        return;
-      }
+  const resolvedCamera = useMemo(
+    () => resolvePreferredCamera(cameraDeviceList.devices, preferredCamera),
+    [cameraDeviceList.devices, preferredCamera]
+  );
 
+  // The saved camera belongs to this browser, so it is read once on mount
+  // rather than tracked through props.
+  useEffect(() => {
+    setPreferredCamera(loadPreferredCamera());
+  }, []);
+
+  /**
+   * Open the coach's saved camera, and only that one.
+   *
+   * When it is not there the answer is "camera not connected" -- not the
+   * MacBook camera, not Desk View, not whatever the browser would have picked.
+   * The coach has already said which picture they want, and quietly recording
+   * a different one is a mistake they would only discover on playback.
+   */
+  const connectPreferredCamera = useCallback(
+    async (side: ComparisonSide): Promise<MediaStream | null> => {
       if (!navigator.mediaDevices?.getUserMedia) {
         setLiveRecording({
           side,
@@ -1204,70 +1234,68 @@ export function VideoWorkspace({
           error: "Live recording is not available in this browser.",
           startedAt: null,
         });
-        return;
+        return null;
       }
-
-      try {
-        stopLiveStream(liveStream);
-        const videoConstraints: MediaTrackConstraints = {
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 60 },
-        };
-        if (cameraId) {
-          videoConstraints.deviceId = { exact: cameraId };
-        }
-        let stream: MediaStream;
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: videoConstraints,
-            audio: false,
-          });
-        } catch (error) {
-          // Device ids can change after a USB camera is unplugged or a browser
-          // permission reset. A remembered camera should never prevent a coach
-          // from recording with the currently available default camera.
-          if (!cameraId) throw error;
-          delete videoConstraints.deviceId;
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: videoConstraints,
-            audio: false,
-          });
-        }
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const cameras = devices.filter((device) => device.kind === "videoinput");
-        const activeDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId || cameraId;
-
-        setCameraDevices(cameras);
-        setSelectedCameraId(activeDeviceId || cameraId || "");
-        if (activeDeviceId || cameraId) {
-          savePreferredCameraId(activeDeviceId || cameraId);
-        }
-        setLiveStream(stream);
+      if (!preferredCamera) {
         setLiveRecording({
           side,
-          status: "ready",
-          error: null,
+          status: "error",
+          error: "Choose a recording camera in Video Settings.",
           startedAt: null,
         });
+        return null;
+      }
+
+      // Ask the browser for the device list again rather than trusting the
+      // last render: a Continuity Camera iPhone can wake between the coach
+      // reaching for Record and pressing it.
+      const devices = await cameraDeviceList.refresh();
+      const target = resolvePreferredCamera(devices, preferredCamera);
+      if (!target?.deviceId) {
+        setLiveRecording({
+          side,
+          status: "error",
+          error: `${describePreferredCamera(preferredCamera)} is not connected.`,
+          startedAt: null,
+        });
+        return null;
+      }
+
+      setLiveRecording({ side, status: "connecting", error: null, startedAt: null });
+      try {
+        stopLiveStream(liveStream);
+        // Portrait ideals, because this workflow is built around a phone
+        // mounted upright. They are ideals rather than hard constraints, so a
+        // camera that can only shoot landscape still opens.
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            deviceId: { exact: target.deviceId },
+            width: { ideal: 1080 },
+            height: { ideal: 1920 },
+            aspectRatio: { ideal: 9 / 16 },
+            frameRate: { ideal: 60 },
+          },
+          audio: false,
+        });
+        setLiveStream(stream);
+        setLiveRecording({ side, status: "preview", error: null, startedAt: null });
         setActiveSideInCompare(side);
+        return stream;
       } catch (error) {
         setLiveStream(null);
         setLiveRecording({
           side,
           status: "error",
-          error: error instanceof Error ? error.message : "Could not open camera.",
+          error:
+            error instanceof Error && error.name === "NotAllowedError"
+              ? "Camera access was blocked for this site."
+              : `Could not open ${describePreferredCamera(preferredCamera)}.`,
           startedAt: null,
         });
+        return null;
       }
     },
-    [
-      liveRecording?.status,
-      liveStream,
-      selectedCameraId,
-      setActiveSideInCompare,
-      stopLiveStream,
-    ]
+    [cameraDeviceList, liveStream, preferredCamera, setActiveSideInCompare, stopLiveStream]
   );
 
   const closeLiveRecording = useCallback(() => {
@@ -1282,134 +1310,125 @@ export function VideoWorkspace({
     setLiveRecording(null);
   }, [liveStream, stopLiveStream]);
 
-  // A file the caller picked before this component existed. Same single-shot
-  // rule as the recorder below: loading it again on every render would throw
-  // away whatever the player has drawn on it.
-  const initialFileLoadedRef = useRef(false);
-  useEffect(() => {
-    if (!initialVideoFile || initialFileLoadedRef.current) return;
-    initialFileLoadedRef.current = true;
-    void loadClipFileForSide("left", initialVideoFile).catch(() => {
-      // loadClipFileForSide surfaces its own failure in the workspace.
-    });
-  }, [initialVideoFile, loadClipFileForSide]);
+  /** Roll on an already-open stream. */
+  const beginMediaRecorder = useCallback(
+    (stream: MediaStream, recordingSide: ComparisonSide) => {
+      if (typeof MediaRecorder === "undefined") {
+        setLiveRecording({
+          side: recordingSide,
+          status: "error",
+          error: "Recording is not available in this browser.",
+          startedAt: null,
+        });
+        return;
+      }
 
-  // Entering straight from the Profile tab's record button. The ref keeps this
-  // to a single shot, so closing the recorder does not immediately reopen it.
-  const autoRecordStartedRef = useRef(false);
-  useEffect(() => {
-    if (!autoStartLiveRecording || autoRecordStartedRef.current) return;
-    if (workspaceHasVideo) return;
-    autoRecordStartedRef.current = true;
-    void openLiveRecording("left");
-  }, [autoStartLiveRecording, openLiveRecording, workspaceHasVideo]);
+      try {
+        const mimeType = getPreferredRecordingMimeType();
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        recordingChunksRef.current = [];
+        mediaRecorderRef.current = recorder;
 
-  const startLiveRecording = useCallback(() => {
-    if (!liveRecording || !liveStream) {
-      return;
-    }
-    if (typeof MediaRecorder === "undefined") {
-      setLiveRecording((current) =>
-        current
-          ? {
-              ...current,
-              status: "error",
-              error: "Recording is not available in this browser.",
-            }
-          : current
-      );
-      return;
-    }
-
-    try {
-      const mimeType = getPreferredRecordingMimeType();
-      const recorder = new MediaRecorder(
-        liveStream,
-        mimeType ? { mimeType } : undefined
-      );
-      const recordingSide = liveRecording.side;
-      recordingChunksRef.current = [];
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          recordingChunksRef.current.push(event.data);
-        }
-      };
-      recorder.onerror = () => {
-        setLiveRecording((current) =>
-          current
-            ? {
-                ...current,
-                status: "error",
-                error: "Recording failed.",
-                startedAt: null,
-              }
-            : current
-        );
-      };
-      recorder.onstop = () => {
-        void (async () => {
-          const blobType =
-            mimeType || recordingChunksRef.current.find((chunk) => chunk.type)?.type || "video/webm";
-          const blob = new Blob(recordingChunksRef.current, { type: blobType });
-          recordingChunksRef.current = [];
-          mediaRecorderRef.current = null;
-
-          if (!blob.size) {
-            setLiveRecording((current) =>
-              current
-                ? {
-                    ...current,
-                    status: "error",
-                    error: "Recording did not capture any video.",
-                    startedAt: null,
-                  }
-                : current
-            );
-            return;
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            recordingChunksRef.current.push(event.data);
           }
-
-          const file = new File(
-            [blob],
-            getRecordingFileName(`live-recording-${recordingSide}`, blob.type || blobType),
-            { type: blob.type || blobType }
+        };
+        recorder.onerror = () => {
+          setLiveRecording((current) =>
+            current
+              ? {
+                  ...current,
+                  status: "error",
+                  error: "Recording failed.",
+                  startedAt: null,
+                }
+              : current
           );
-          await loadClipFileForSide(recordingSide, file);
-          setSaveStatus("idle");
-          setSaveMessage("Recording ready to save.");
-          // The loaded file now owns this side's normal VideoCanvas. Releasing
-          // the stream and session lets playback replace the preview in place.
-          stopLiveStream(liveStream);
-          setLiveStream(null);
-          setLiveRecording(null);
-        })();
-      };
+        };
+        recorder.onstop = () => {
+          void (async () => {
+            const blobType =
+              mimeType || recordingChunksRef.current.find((chunk) => chunk.type)?.type || "video/webm";
+            const blob = new Blob(recordingChunksRef.current, { type: blobType });
+            recordingChunksRef.current = [];
+            mediaRecorderRef.current = null;
 
-      recorder.start(250);
-      setLiveRecording((current) =>
-        current
-          ? {
-              ...current,
-              status: "recording",
-              error: null,
-              startedAt: Date.now(),
+            if (!blob.size) {
+              setLiveRecording((current) =>
+                current
+                  ? {
+                      ...current,
+                      status: "error",
+                      error: "Recording did not capture any video.",
+                      startedAt: null,
+                    }
+                  : current
+              );
+              return;
             }
-          : current
-      );
-    } catch (error) {
-      setLiveRecording((current) =>
-        current
-          ? {
-              ...current,
-              status: "error",
-              error: error instanceof Error ? error.message : "Could not start recording.",
-              startedAt: null,
-            }
-          : current
-      );
-    }
-  }, [liveRecording, liveStream, loadClipFileForSide, stopLiveStream]);
+
+            const file = new File(
+              [blob],
+              getRecordingFileName(`live-recording-${recordingSide}`, blob.type || blobType),
+              { type: blob.type || blobType }
+            );
+            await loadClipFileForSide(recordingSide, file);
+            setSaveStatus("idle");
+            setSaveMessage("Recording ready to save.");
+            // The loaded file now owns this side's normal VideoCanvas. Releasing
+            // the stream and session lets playback replace the preview in place.
+            stopLiveStream(stream);
+            setLiveStream(null);
+            setLiveRecording(null);
+          })();
+        };
+
+        recorder.start(250);
+        setLiveRecording({
+          side: recordingSide,
+          status: "recording",
+          error: null,
+          startedAt: Date.now(),
+        });
+      } catch (error) {
+        setLiveRecording({
+          side: recordingSide,
+          status: "error",
+          error: error instanceof Error ? error.message : "Could not start recording.",
+          startedAt: null,
+        });
+      }
+    },
+    [loadClipFileForSide, stopLiveStream]
+  );
+
+  /**
+   * The everyday Record button: one press connects the saved camera and starts
+   * rolling. There is no source to choose here and no preview to step through,
+   * because the camera was chosen once already in Video Settings.
+   */
+  const startLiveRecording = useCallback(
+    async (side: ComparisonSide) => {
+      if (
+        liveRecording?.status === "connecting" ||
+        liveRecording?.status === "recording" ||
+        liveRecording?.status === "processing"
+      ) {
+        return;
+      }
+      // A camera left open by the auto-start entry point just rolls.
+      if (liveStream && liveRecording?.side === side && liveRecording.status === "preview") {
+        beginMediaRecorder(liveStream, side);
+        return;
+      }
+      const stream = await connectPreferredCamera(side);
+      if (stream) {
+        beginMediaRecorder(stream, side);
+      }
+    },
+    [beginMediaRecorder, connectPreferredCamera, liveRecording, liveStream]
+  );
 
   const stopLiveRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
@@ -1427,23 +1446,51 @@ export function VideoWorkspace({
     recorder.stop();
   }, []);
 
-  const handleCameraChange = useCallback(
-    (event: ChangeEvent<HTMLSelectElement>) => {
-      const nextCameraId = event.target.value;
-      setSelectedCameraId(nextCameraId);
-      if (nextCameraId) {
-        savePreferredCameraId(nextCameraId);
-      }
+  /**
+   * Choosing a camera in Video Settings deliberately replaces the previous
+   * default. Any camera already open belongs to the old choice, so it is let
+   * go; the next Record opens the new one.
+   */
+  const handleSelectCamera = useCallback(
+    (device: CameraDevice) => {
+      const next: PreferredCamera = { deviceId: device.deviceId, label: device.label };
+      savePreferredCamera(next);
+      setPreferredCamera(next);
       if (
         liveRecording &&
         liveRecording.status !== "recording" &&
         liveRecording.status !== "processing"
       ) {
-        void openLiveRecording(liveRecording.side, nextCameraId);
+        closeLiveRecording();
       }
     },
-    [liveRecording, openLiveRecording]
+    [closeLiveRecording, liveRecording]
   );
+
+  // A file the caller picked before this component existed. Same single-shot
+  // rule as the recorder below: loading it again on every render would throw
+  // away whatever the player has drawn on it.
+  const initialFileLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!initialVideoFile || initialFileLoadedRef.current) return;
+    initialFileLoadedRef.current = true;
+    void loadClipFileForSide("left", initialVideoFile).catch(() => {
+      // loadClipFileForSide surfaces its own failure in the workspace.
+    });
+  }, [initialVideoFile, loadClipFileForSide]);
+
+  // Entering straight from the Profile tab's record button. This one opens the
+  // camera and stops there rather than rolling: the coach asked for the
+  // recorder, not for a recording that has already started without them. The
+  // ref keeps it to a single shot, so closing the recorder does not
+  // immediately reopen it.
+  const autoRecordStartedRef = useRef(false);
+  useEffect(() => {
+    if (!autoStartLiveRecording || autoRecordStartedRef.current) return;
+    if (workspaceHasVideo) return;
+    autoRecordStartedRef.current = true;
+    void connectPreferredCamera("left");
+  }, [autoStartLiveRecording, connectPreferredCamera, workspaceHasVideo]);
 
   /**
    * Drag the video itself to move through it, frame by frame.
@@ -2607,10 +2654,128 @@ export function VideoWorkspace({
       </button>
     );
 
+    /**
+     * The stage with no picture in it yet.
+     *
+     * Everything it can say is a fact about the coach's one saved camera --
+     * not chosen, not connected, connecting, ready. There is deliberately no
+     * source picker here: the camera was chosen once in Video Settings, and
+     * the only state that offers a way out points back there.
+     */
+    const renderCaptureStage = () => {
+      const status = liveRecording?.side === side ? liveRecording.status : null;
+      const isConnecting = status === "connecting";
+      const isPending = status === "processing";
+      const needsSetup = !preferredCamera;
+      const cameraMissing = !needsSetup && !resolvedCamera;
+      const canRecord =
+        cameraDeviceList.supported && !needsSetup && !cameraMissing && !isConnecting && !isPending;
+      // Only colour the message as a problem when it is reporting one. A stale
+      // error behind a "choose a camera" or "connecting" message is not.
+      const isWarning =
+        cameraMissing || (!needsSetup && !isConnecting && !isPending && status === "error");
+
+      const message = needsSetup
+        ? "Choose a recording camera in Video Settings"
+        : isConnecting
+          ? "Connecting…"
+          : isPending
+            ? "Processing…"
+            : cameraMissing
+              ? "Camera not connected"
+              : (status === "error" && liveRecording?.error) || "Ready to record";
+
+      return (
+        <div
+          className={`comparison-video-panel is-capture-stage ${isActive ? "is-active" : ""}`}
+          onMouseDown={() => setActiveSideInCompare(side)}
+        >
+          <div
+            className={`video-capture-stage${dragTargetSide === side ? " is-dragging" : ""}`}
+            onDragEnter={(event) => handleDropZoneDrag(side, event)}
+            onDragOver={(event) => handleDropZoneDrag(side, event)}
+            onDragLeave={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setDragTargetSide((current) => (current === side ? null : current));
+            }}
+            onDrop={(event) => void handleDropUpload(side, event)}
+          >
+            <p
+              className={`video-capture-message${isWarning ? " is-warning" : ""}`}
+              aria-live="polite"
+            >
+              {message}
+            </p>
+            {intakeError ? (
+              <span className="video-upload-error" role="alert">
+                {intakeError}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="video-intake-actions">
+            <button
+              type="button"
+              className="upload-button video-record-button"
+              onClick={(event) => {
+                event.stopPropagation();
+                void startLiveRecording(side);
+              }}
+              disabled={!canRecord}
+            >
+              <IconRecord />
+              Record
+            </button>
+            {/* Importing a clip is a different job from recording one, and it
+                still has to work: the stage takes a drop, this takes a click. */}
+            <button
+              type="button"
+              className="upload-button is-subtle"
+              onClick={(event) => {
+                event.stopPropagation();
+                openUpload(side);
+              }}
+            >
+              <IconUpload />
+              Upload a video
+            </button>
+            {/* The only route into Video Settings while the workspace is
+                empty -- the action bar's gear arrives with a clip. It is one
+                link, not a wizard: changing camera is a deliberate trip to
+                the place that owns the setting. */}
+            <button
+              type="button"
+              className="upload-button is-subtle"
+              onClick={(event) => {
+                event.stopPropagation();
+                setSettingsOpen(true);
+              }}
+            >
+              <IconSettings />
+              Video Settings
+            </button>
+            {status ? (
+              <button
+                type="button"
+                className="video-tool-btn is-subtle"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closeLiveRecording();
+                }}
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+        </div>
+      );
+    };
+
     // Recording intentionally uses the same canvas component and shell as a
     // loaded clip. Once capture finishes, `loadClipFileForSide` swaps this
     // preview for the recording's normal playback video without a second UI.
-    if (liveRecording?.side === side) {
+    if (liveRecording?.side === side && liveStream) {
       const isBusy =
         liveRecording.status === "recording" || liveRecording.status === "processing";
       return (
@@ -2633,34 +2798,26 @@ export function VideoWorkspace({
               overlayDimensions={overlayDimensions}
               onDimensionsChange={setOverlayDimensions}
             />
+            {/* Record, Stop, and a way out. No camera picker: the source was
+                settled in Video Settings before the coach got here. */}
             <div className="live-recording-toolbar">
-              <label>
-                <span>Camera</span>
-                <select
-                  value={selectedCameraId}
-                  onChange={handleCameraChange}
-                  disabled={isBusy}
-                >
-                  <option value="">Default camera</option>
-                  {cameraDevices.map((device, index) => (
-                    <option key={device.deviceId || index} value={device.deviceId}>
-                      {device.label || `Camera ${index + 1}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
               {liveRecording.status === "recording" ? (
-                <button type="button" className="upload-button video-record-stop" onClick={stopLiveRecording}>
-                  Stop recording
+                <button
+                  type="button"
+                  className="upload-button video-record-stop"
+                  onClick={stopLiveRecording}
+                >
+                  Stop
                 </button>
               ) : (
                 <button
                   type="button"
-                  className="upload-button"
-                  onClick={startLiveRecording}
-                  disabled={liveRecording.status === "processing" || liveRecording.status === "error" || !liveStream}
+                  className="upload-button video-record-button"
+                  onClick={() => void startLiveRecording(side)}
+                  disabled={liveRecording.status === "processing"}
                 >
-                  {liveRecording.status === "processing" ? "Processing..." : "Start recording"}
+                  <IconRecord />
+                  Record
                 </button>
               )}
               <span className={`live-recording-status is-${liveRecording.status}`}>
@@ -2668,7 +2825,7 @@ export function VideoWorkspace({
                   ? "Recording"
                   : liveRecording.status === "processing"
                     ? "Processing"
-                    : liveRecording.error || "Camera ready"}
+                    : liveRecording.error || "Ready to record"}
               </span>
               <button
                 type="button"
@@ -2685,47 +2842,38 @@ export function VideoWorkspace({
       );
     }
 
+    // A session with no stream yet: connecting, or a saved camera that is not
+    // plugged in. It reuses the empty stage rather than showing a black
+    // VideoCanvas, so the workspace never looks like a camera that is on.
+    if (liveRecording?.side === side) {
+      return renderCaptureStage();
+    }
+
     if (!playerVideo) {
-      if (!workspaceHasVideo && side === "left") {
+      /* A player is always on their own phone -- tapping the card opens iOS's
+         native camera/photo sheet, so there is nothing for a Record button
+         here to do that the card does not already do. Coaches get the capture
+         stage instead: they are recording from a mounted phone or an attached
+         camera, which has no native picker to fall back on. */
+      if (isPlayerVariant) {
+        if (!workspaceHasVideo && side === "left") {
+          return (
+            <div className="comparison-video-panel is-intake-only">
+              {renderUploadDropZone(true)}
+            </div>
+          );
+        }
         return (
-          <div className="comparison-video-panel is-intake-only">
-            {renderUploadDropZone(true)}
+          <div
+            className={`comparison-video-panel ${isActive ? "is-active" : ""}`}
+            onMouseDown={() => setActiveSideInCompare(side)}
+          >
+            {renderUploadDropZone()}
           </div>
         );
       }
 
-      /* The second side of a comparison, still empty. It is the same job as
-         the intake panel above -- fill a side -- so it is the same two
-         controls: the drop zone, which takes a click or a drag, and the
-         record button coaches get because they are not on a phone with a
-         native camera sheet. Both name the side in their own label.
-
-         There is no header row over them any more. It held a "Right / empty"
-         chip restating what the drop zone says, and an upload chip that
-         opened the very picker the drop zone underneath it opens. */
-      return (
-        <div
-          className={`comparison-video-panel ${isActive ? "is-active" : ""}`}
-          onMouseDown={() => setActiveSideInCompare(side)}
-        >
-          {renderUploadDropZone()}
-          {isPlayerVariant ? null : (
-            <div className="video-intake-actions">
-              <button
-                type="button"
-                className="upload-button video-record-button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void openLiveRecording(side);
-                }}
-              >
-                <IconRecord />
-                Record {sideTitle.toLowerCase()} clip
-              </button>
-            </div>
-          )}
-        </div>
-      );
+      return renderCaptureStage();
     }
 
     return (
@@ -2958,31 +3106,15 @@ export function VideoWorkspace({
           save, diagnostics, swapping the active clip -- lives behind the
           settings gear on the action bar below. */}
 
+      {/* The empty workspace is the capture stage and nothing else. Record
+          and Upload are inside the card -- there is no second row of buttons
+          under it, because the card grew the ones it needs. */}
       {!workspaceHasVideo && !liveRecording ? (
         <section className="video-intake-panel" aria-label="Add video">
           {renderVideoCard(
             "left",
             leftOverlayDimensions,
             setLeftOverlayDimensions
-          )}
-          {/* A player is always on their own phone -- tapping the video card
-              above already opens iOS's native camera/photo sheet, so a
-              "record from camera" control here would just be a duplicate
-              tap target. Coaches keep it: this is how they pull in a shot
-              from an external or desktop-attached camera, which has no
-              native picker to fall back on. One button, not two -- both used
-              to call openLiveRecording with nothing distinguishing them. */}
-          {!isPlayerVariant && (
-            <div className="video-intake-actions">
-              <button
-                type="button"
-                className="upload-button video-record-button"
-                onClick={() => void openLiveRecording("left")}
-              >
-                <IconRecord />
-                Record from camera
-              </button>
-            </div>
           )}
         </section>
       ) : null}
@@ -3056,7 +3188,9 @@ export function VideoWorkspace({
         />
       ) : null}
 
-      {workspaceHasVideo && !isPlayerVariant ? (
+      {/* Not gated on having a video: choosing the recording camera lives in
+          here, and an empty workspace is exactly when a coach needs to. */}
+      {!isPlayerVariant ? (
         <VideoSettingsSheet
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
@@ -3083,11 +3217,22 @@ export function VideoWorkspace({
             effectiveActiveSide === "left" ? playerVideoLeft : playerVideoRight
           )}
           onReplaceClip={() => openUpload(effectiveActiveSide)}
-          onRecordReplacement={() => void openLiveRecording(effectiveActiveSide)}
+          onRecordReplacement={() => {
+            setSettingsOpen(false);
+            void startLiveRecording(effectiveActiveSide);
+          }}
           onClearClip={() => {
             clearCurrentSide(effectiveActiveSide);
             setSettingsOpen(false);
           }}
+          cameraDevices={cameraDeviceList.devices}
+          preferredCamera={preferredCamera}
+          resolvedCamera={resolvedCamera}
+          cameraSupported={cameraDeviceList.supported}
+          cameraLabelsAvailable={cameraDeviceList.labelsAvailable}
+          cameraError={cameraDeviceList.error}
+          onSelectCamera={handleSelectCamera}
+          onRequestCameraLabels={() => void cameraDeviceList.requestLabels()}
         />
       ) : null}
 
