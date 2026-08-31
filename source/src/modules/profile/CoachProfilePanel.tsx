@@ -122,6 +122,16 @@ function stateOf(card: IntegrationCard): CardState {
   return "ok";
 }
 
+/**
+ * The providers we hold a mark for, keyed by integration id — which is also the
+ * filename, so there is no mapping table to drift from the catalogue.
+ *
+ * An id not listed here keeps its initials rather than requesting a file that
+ * is not there: a 404 renders as a broken image, which looks like a bug rather
+ * than like an integration nobody has drawn yet.
+ */
+const PROVIDER_LOGOS = new Set(["google-calendar", "google-drive", "optix", "stripe", "akahu"]);
+
 /** The placeholder mark a not-yet-connected provider wears. */
 function providerInitial(label: string): string {
   const words = label.trim().split(/\s+/).filter(Boolean);
@@ -282,12 +292,17 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
               return (
                 <article className="cp-cell" key={card.id}>
                   <div className="cp-cell-head">
-                    {connected ? (
-                      <span className={`cp-mark is-${state}`} title={`${card.label} logo`}>
-                        {providerInitial(card.label)}
+                    {/* Connected: the provider's own mark identifies it. Not
+                        connected: initials in a dashed box, because the card is
+                        the job at that point ("Calendar", not "Google
+                        Calendar") and a full-colour logo would advertise a
+                        connection that does not exist. */}
+                    {connected && PROVIDER_LOGOS.has(card.id) ? (
+                      <span className="cp-mark is-logo" title={card.label}>
+                        <img src={`/assets/integrations/${card.id}.svg`} alt="" />
                       </span>
                     ) : (
-                      <span className="cp-mark is-placeholder" title={card.label}>
+                      <span className={`cp-mark${connected ? "" : " is-placeholder"}`} title={card.label}>
                         {providerInitial(card.label)}
                       </span>
                     )}

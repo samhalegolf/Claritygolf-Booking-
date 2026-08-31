@@ -13899,6 +13899,27 @@ button {
   color: var(--c-pencil);
 }
 
+/* A provider's own mark, edge to edge.
+   Some of these are full-bleed app icons (Optix, Stripe) and some are
+   transparent glyphs (Calendar, Drive, Akahu). A padded, bordered container
+   suits the second kind and makes the first look like a square inside a
+   square, so the container gives up its own chrome: the full-bleed marks fill
+   the rounded box like the app icons they are, and the glyphs get the whole
+   32px instead of 24. */
+.cp-mark.is-logo {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.cp-mark.is-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
 .cp-cell-actions {
   display: flex;
   align-items: center;
