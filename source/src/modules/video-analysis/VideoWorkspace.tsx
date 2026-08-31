@@ -31,7 +31,9 @@ import {
   WorkspacePersistenceContext,
   clearComparisonWorkspaceState,
   createVideoAnalysisPersistence,
+  loadPreferredCameraId,
   loadComparisonWorkspaceState,
+  savePreferredCameraId,
   saveComparisonWorkspaceState,
   WorkspaceMode,
 } from "./utils/localPersistence";
@@ -542,12 +544,6 @@ export function VideoWorkspace({
     videoId: RIGHT_ANALYSIS_SLOT,
     persistenceAdapter: persistenceLayer.analysisAdapter,
   });
-
-  useEffect(() => {
-    if (livePreviewRef.current) {
-      livePreviewRef.current.srcObject = liveStream;
-    }
-  }, [liveStream]);
 
   useEffect(() => {
     return () => {
@@ -1193,7 +1189,7 @@ export function VideoWorkspace({
   }, [restoreSavedVideo, savedVideoId]);
 
   const openLiveRecording = useCallback(
-    async (side: ComparisonSide, cameraId = selectedCameraId) => {
+    async (side: ComparisonSide, cameraId = selectedCameraId || loadPreferredCameraId()) => {
       if (
         liveRecording?.status === "recording" ||
         liveRecording?.status === "processing"
@@ -1221,16 +1217,32 @@ export function VideoWorkspace({
         if (cameraId) {
           videoConstraints.deviceId = { exact: cameraId };
         }
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: videoConstraints,
-          audio: false,
-        });
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: false,
+          });
+        } catch (error) {
+          // Device ids can change after a USB camera is unplugged or a browser
+          // permission reset. A remembered camera should never prevent a coach
+          // from recording with the currently available default camera.
+          if (!cameraId) throw error;
+          delete videoConstraints.deviceId;
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: false,
+          });
+        }
         const devices = await navigator.mediaDevices.enumerateDevices();
         const cameras = devices.filter((device) => device.kind === "videoinput");
         const activeDeviceId = stream.getVideoTracks()[0]?.getSettings().deviceId || cameraId;
 
         setCameraDevices(cameras);
         setSelectedCameraId(activeDeviceId || cameraId || "");
+        if (activeDeviceId || cameraId) {
+          savePreferredCameraId(activeDeviceId || cameraId);
+        }
         setLiveStream(stream);
         setLiveRecording({
           side,
@@ -1366,16 +1378,11 @@ export function VideoWorkspace({
           await loadClipFileForSide(recordingSide, file);
           setSaveStatus("idle");
           setSaveMessage("Recording ready to save.");
-          setLiveRecording((current) =>
-            current && current.side === recordingSide
-              ? {
-                  ...current,
-                  status: "ready",
-                  error: null,
-                  startedAt: null,
-                }
-              : current
-          );
+          // The loaded file now owns this side's normal VideoCanvas. Releasing
+          // the stream and session lets playback replace the preview in place.
+          stopLiveStream(liveStream);
+          setLiveStream(null);
+          setLiveRecording(null);
         })();
       };
 
@@ -1402,7 +1409,7 @@ export function VideoWorkspace({
           : current
       );
     }
-  }, [liveRecording, liveStream, loadClipFileForSide]);
+  }, [liveRecording, liveStream, loadClipFileForSide, stopLiveStream]);
 
   const stopLiveRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
@@ -1424,6 +1431,9 @@ export function VideoWorkspace({
     (event: ChangeEvent<HTMLSelectElement>) => {
       const nextCameraId = event.target.value;
       setSelectedCameraId(nextCameraId);
+      if (nextCameraId) {
+        savePreferredCameraId(nextCameraId);
+      }
       if (
         liveRecording &&
         liveRecording.status !== "recording" &&
@@ -2597,6 +2607,84 @@ export function VideoWorkspace({
       </button>
     );
 
+    // Recording intentionally uses the same canvas component and shell as a
+    // loaded clip. Once capture finishes, `loadClipFileForSide` swaps this
+    // preview for the recording's normal playback video without a second UI.
+    if (liveRecording?.side === side) {
+      const isBusy =
+        liveRecording.status === "recording" || liveRecording.status === "processing";
+      return (
+        <div
+          className={`comparison-video-panel is-live-recording ${isActive ? "is-active" : ""}`}
+          onMouseDown={() => setActiveSideInCompare(side)}
+        >
+          <div className="video-canvas-shell">
+            <VideoCanvas
+              sourceUrl={null}
+              liveStream={liveStream}
+              videoRef={livePreviewRef}
+              onLoadMetadata={() => undefined}
+              objects={[]}
+              draftObject={null}
+              selectedObjectId={null}
+              onPointerDown={() => undefined}
+              onPointerMove={() => undefined}
+              onPointerUp={() => undefined}
+              overlayDimensions={overlayDimensions}
+              onDimensionsChange={setOverlayDimensions}
+            />
+            <div className="live-recording-toolbar">
+              <label>
+                <span>Camera</span>
+                <select
+                  value={selectedCameraId}
+                  onChange={handleCameraChange}
+                  disabled={isBusy}
+                >
+                  <option value="">Default camera</option>
+                  {cameraDevices.map((device, index) => (
+                    <option key={device.deviceId || index} value={device.deviceId}>
+                      {device.label || `Camera ${index + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {liveRecording.status === "recording" ? (
+                <button type="button" className="upload-button video-record-stop" onClick={stopLiveRecording}>
+                  Stop recording
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="upload-button"
+                  onClick={startLiveRecording}
+                  disabled={liveRecording.status === "processing" || liveRecording.status === "error" || !liveStream}
+                >
+                  {liveRecording.status === "processing" ? "Processing..." : "Start recording"}
+                </button>
+              )}
+              <span className={`live-recording-status is-${liveRecording.status}`}>
+                {liveRecording.status === "recording"
+                  ? "Recording"
+                  : liveRecording.status === "processing"
+                    ? "Processing"
+                    : liveRecording.error || "Camera ready"}
+              </span>
+              <button
+                type="button"
+                className="video-tool-btn is-subtle"
+                onClick={closeLiveRecording}
+                disabled={isBusy}
+                aria-label="Close live recording"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     if (!playerVideo) {
       if (!workspaceHasVideo && side === "left") {
         return (
@@ -2870,84 +2958,6 @@ export function VideoWorkspace({
           save, diagnostics, swapping the active clip -- lives behind the
           settings gear on the action bar below. */}
 
-      {liveRecording ? (
-        <section className="live-recording-panel" aria-label="Live recording">
-          <div className="live-recording-header">
-            <div>
-              <h2>Live recording</h2>
-              <span>{getSideTitle(liveRecording.side)} clip</span>
-            </div>
-            <button
-              type="button"
-              className="video-tool-btn is-subtle"
-              onClick={closeLiveRecording}
-              disabled={
-                liveRecording.status === "recording" ||
-                liveRecording.status === "processing"
-              }
-              aria-label="Close live recording"
-            >
-              X
-            </button>
-          </div>
-
-          <div className="live-recording-body">
-            <div className="live-recording-preview">
-              <video ref={livePreviewRef} autoPlay muted playsInline />
-            </div>
-            <div className="live-recording-controls">
-              <label>
-                <span>Camera</span>
-                <select
-                  value={selectedCameraId}
-                  onChange={handleCameraChange}
-                  disabled={
-                    liveRecording.status === "recording" ||
-                    liveRecording.status === "processing"
-                  }
-                >
-                  <option value="">Default camera</option>
-                  {cameraDevices.map((device, index) => (
-                    <option key={device.deviceId || index} value={device.deviceId}>
-                      {device.label || `Camera ${index + 1}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {liveRecording.status === "recording" ? (
-                <button
-                  type="button"
-                  className="upload-button video-record-stop"
-                  onClick={stopLiveRecording}
-                >
-                  Stop recording
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="upload-button"
-                  onClick={startLiveRecording}
-                  disabled={
-                    liveRecording.status === "processing" ||
-                    liveRecording.status === "error" ||
-                    !liveStream
-                  }
-                >
-                  {liveRecording.status === "processing" ? "Processing..." : "Start recording"}
-                </button>
-              )}
-              <span className={`live-recording-status is-${liveRecording.status}`}>
-                {liveRecording.status === "recording"
-                  ? "Recording"
-                  : liveRecording.status === "processing"
-                    ? "Processing"
-                    : liveRecording.error || "Camera ready"}
-              </span>
-            </div>
-          </div>
-        </section>
-      ) : null}
-
       {!workspaceHasVideo && !liveRecording ? (
         <section className="video-intake-panel" aria-label="Add video">
           {renderVideoCard(
@@ -3003,7 +3013,7 @@ export function VideoWorkspace({
         </section>
       ) : null}
 
-      {workspaceHasVideo && !needsCompareRotation ? (
+      {(workspaceHasVideo || liveRecording) && !needsCompareRotation ? (
         <div className={`comparison-layout ${modeIsCompare ? "is-compare" : "is-single"}`}>
           {modeIsCompare ? (
             <>

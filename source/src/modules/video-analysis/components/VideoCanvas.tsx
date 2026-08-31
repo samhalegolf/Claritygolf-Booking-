@@ -5,6 +5,8 @@ import { DrawingPoint } from "../models/Drawing";
 
 export interface VideoCanvasProps {
   sourceUrl: string | null;
+  /** When set, the canvas becomes the recorder preview without changing its layout. */
+  liveStream?: MediaStream | null;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   onLoadMetadata: () => void;
   objects: DrawingObject[];
@@ -82,6 +84,7 @@ const HandlePoint = ({
 
 export function VideoCanvas({
   sourceUrl,
+  liveStream = null,
   videoRef,
   onLoadMetadata,
   objects,
@@ -174,6 +177,19 @@ export function VideoCanvas({
     };
   }, [measure, onDimensionsChange]);
 
+  useEffect(() => {
+    if (!liveStream || !videoRef.current) return;
+    videoRef.current.srcObject = liveStream;
+    void videoRef.current.play().catch(() => {
+      // Browsers may wait for a user gesture; the video element remains ready.
+    });
+    return () => {
+      if (videoRef.current?.srcObject === liveStream) {
+        videoRef.current.srcObject = null;
+      }
+    };
+  }, [liveStream, videoRef]);
+
   // While an existing object is dragged, draftObject is the edited copy and
   // carries the same id. Render only the copy, otherwise the original draws
   // underneath it and React sees two nodes sharing a key.
@@ -250,11 +266,13 @@ export function VideoCanvas({
     >
       <video
         ref={videoRef}
-        src={sourceUrl ?? undefined}
+        src={liveStream ? undefined : sourceUrl ?? undefined}
         controls={false}
+        autoPlay={Boolean(liveStream)}
+        muted={Boolean(liveStream)}
         playsInline
         preload="metadata"
-        onLoadedMetadata={onLoadMetadata}
+        onLoadedMetadata={liveStream ? undefined : onLoadMetadata}
       />
       <div className="video-overlay">
         <svg

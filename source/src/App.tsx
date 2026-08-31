@@ -1125,6 +1125,8 @@ type BankExpenseCandidate = {
 type BankExpenseSortKey = "date" | "account" | "description" | "amount";
 type BankExpenseSortDirection = "asc" | "desc";
 type BankExpenseSort = { key: BankExpenseSortKey; direction: BankExpenseSortDirection };
+// The invoice a completed booking has already been pulled onto.
+type InvoicedBookingLink = { invoiceId: string; invoiceNumber: string };
 // A money-in bank transaction awaiting reconciliation against an invoice.
 type ReconcileSuggestion = {
   invoiceId: string;
@@ -5490,6 +5492,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   // The invoice line whose discount drawer is open, or "" for none. One at a
   // time: the drawer is a detour off a row, not a second column of the table.
   const [openInvoiceLineId, setOpenInvoiceLineId] = useState("");
+  // The line whose discount drawer has been switched from the saved-discount
+  // list to the custom boxes. Held here rather than derived from the line,
+  // because clearing both boxes puts the line back on "no discount" and the
+  // picker must not snap back to the list while the coach is still typing.
+  const [customDiscountLineId, setCustomDiscountLineId] = useState("");
   // Invoice editor lifecycle. invoiceEditing = fields editable (new invoices start
   // editable, saved ones open read-only). openedInvoiceStatus/SentAt describe the
   // saved invoice currently open (draft | sent | paid | overdue | void; sentAt set
@@ -5650,7 +5657,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     skipped: number;
     failed: number;
   } | null>(null);
-  const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, string>>({});
+  // booking id -> the invoice it is already on. The number is what the pull
+  // rail shows; the id is what tells this booking apart from one on a different
+  // invoice.
+  const [invoicedBookingIds, setInvoicedBookingIds] = useState<Record<string, InvoicedBookingLink>>({});
   // --- POS ------------------------------------------------------------------
   // Counter sales. Kept in their own state (and their own tables) so nothing
   // here can leak into invoice totals - a lesson can legitimately be paid at
@@ -15293,7 +15303,18 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       return;
     }
     try {
-      setInvoicedBookingIds(await fetchBookingMap<string>("/api/billing/booking-links", "links", bookingIds));
+      const links = await fetchBookingMap<InvoicedBookingLink | string>("/api/billing/booking-links", "links", bookingIds);
+      // A billing function deployed before the number was added still answers
+      // with a bare invoice id. Normalise rather than let the rail render
+      // "[object Object]" or nothing at all against a stale deploy.
+      setInvoicedBookingIds(
+        Object.fromEntries(
+          Object.entries(links).map(([bookingId, link]) => [
+            bookingId,
+            typeof link === "string" ? { invoiceId: link, invoiceNumber: "" } : link,
+          ]),
+        ),
+      );
     } catch {
       // Leave the previous map in place: showing slightly stale "already
       // invoiced" markers is safer than showing none at all.
@@ -24934,6 +24955,15 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                             );
                           }
                           const drawerOpen = openInvoiceLineId === line.id;
+                          // The discount picker opens as the saved-discount list.
+                          // The custom boxes only appear once they are asked for -
+                          // either by picking "+ Custom", or because this line
+                          // already carries a discount that is not a saved one.
+                          const activeDiscountPresets = discountPresets.filter((preset) => preset.active);
+                          const customDiscountOpen =
+                            !activeDiscountPresets.length ||
+                            customDiscountLineId === line.id ||
+                            (line.discountKind !== "none" && !line.discountPresetId);
                           return (
                             <div className={`ip-line${drawerOpen ? " is-open" : ""}`} key={line.id}>
                               <input
@@ -24969,6 +24999,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                 className="ip-line-remove"
                                 onClick={() => {
                                   if (openInvoiceLineId === line.id) setOpenInvoiceLineId("");
+                                  if (customDiscountLineId === line.id) setCustomDiscountLineId("");
                                   removeInvoiceLine(line.id);
                                 }}
                                 title="Remove this line"
@@ -24979,7 +25010,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                               </button>
                               <button
                                 className={`ip-line-toggle${drawerOpen ? " is-open" : ""}`}
-                                onClick={() => setOpenInvoiceLineId(drawerOpen ? "" : line.id)}
+                                onClick={() => {
+                                  setOpenInvoiceLineId(drawerOpen ? "" : line.id);
+                                  setCustomDiscountLineId("");
+                                }}
                                 title={drawerOpen ? "Close" : "Discount for this line"}
                                 aria-label={drawerOpen ? "Close line options" : "Discount for this line"}
                                 aria-expanded={drawerOpen}
@@ -24990,58 +25024,82 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
                               {drawerOpen && (
                                 <div className="ip-line-drawer">
-                                  <label className="ip-drawer-field ip-drawer-money">
-                                    <span>{currencySymbol(invoiceSettings.currency)} Discount</span>
-                                    <input
-                                      className="ip-dash"
-                                      value={line.discountKind === "amount" ? line.discountValue || "" : ""}
-                                      inputMode="decimal"
-                                      onChange={(event) => {
-                                        const raw = event.target.value;
-                                        setInvoiceLineDiscount(line.id, raw ? "amount" : "");
-                                        if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
-                                      }}
-                                      placeholder="0.00"
-                                      type="text"
-                                    />
-                                  </label>
-                                  <label className="ip-drawer-field ip-drawer-percent">
-                                    <span>% Discount</span>
-                                    <input
-                                      className="ip-dash"
-                                      value={line.discountKind === "percent" ? line.discountValue || "" : ""}
-                                      inputMode="decimal"
-                                      onChange={(event) => {
-                                        const raw = event.target.value;
-                                        setInvoiceLineDiscount(line.id, raw ? "percent" : "");
-                                        if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
-                                      }}
-                                      placeholder="0"
-                                      type="text"
-                                    />
-                                  </label>
-                                  {discountPresets.some((preset) => preset.active) && (
+                                  {customDiscountOpen ? (
+                                    <>
+                                      <label className="ip-drawer-field ip-drawer-money">
+                                        <span>{currencySymbol(invoiceSettings.currency)} Discount</span>
+                                        <input
+                                          className="ip-dash"
+                                          value={line.discountKind === "amount" ? line.discountValue || "" : ""}
+                                          inputMode="decimal"
+                                          onChange={(event) => {
+                                            const raw = event.target.value;
+                                            setInvoiceLineDiscount(line.id, raw ? "amount" : "");
+                                            if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
+                                          }}
+                                          placeholder="0.00"
+                                          type="text"
+                                        />
+                                      </label>
+                                      <label className="ip-drawer-field ip-drawer-percent">
+                                        <span>% Discount</span>
+                                        <input
+                                          className="ip-dash"
+                                          value={line.discountKind === "percent" ? line.discountValue || "" : ""}
+                                          inputMode="decimal"
+                                          onChange={(event) => {
+                                            const raw = event.target.value;
+                                            setInvoiceLineDiscount(line.id, raw ? "percent" : "");
+                                            if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
+                                          }}
+                                          placeholder="0"
+                                          type="text"
+                                        />
+                                      </label>
+                                      {activeDiscountPresets.length > 0 && (
+                                        <button
+                                          className="ip-drawer-back"
+                                          onClick={() => {
+                                            setCustomDiscountLineId("");
+                                            setInvoiceLineDiscount(line.id, "");
+                                          }}
+                                          type="button"
+                                        >
+                                          Saved discounts
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
                                     <label className="ip-drawer-field ip-drawer-preset">
-                                      <span>Saved discount</span>
+                                      <span>Discount</span>
                                       <select
                                         className="ip-dash"
                                         value={invoiceLineDiscountSelection(line)}
-                                        onChange={(event) => setInvoiceLineDiscount(line.id, event.target.value)}
+                                        onChange={(event) => {
+                                          const selection = event.target.value;
+                                          // "+ Custom" is a mode, not a discount:
+                                          // it swaps the list for the boxes and
+                                          // leaves the line undiscounted until a
+                                          // figure is typed.
+                                          if (selection === "custom") {
+                                            setCustomDiscountLineId(line.id);
+                                            return;
+                                          }
+                                          setCustomDiscountLineId("");
+                                          setInvoiceLineDiscount(line.id, selection);
+                                        }}
                                       >
                                         <option value="">No discount</option>
-                                        {discountPresets
-                                          .filter((preset) => preset.active)
-                                          .map((preset) => (
-                                            <option key={preset.id} value={`preset:${preset.id}`}>
-                                              {preset.name} (
-                                              {preset.discountType === "percentage"
-                                                ? `${preset.value}%`
-                                                : formatMoney(preset.value, invoiceSettings.currency)}
-                                              )
-                                            </option>
-                                          ))}
-                                        <option value="amount">Custom amount</option>
-                                        <option value="percent">Custom %</option>
+                                        {activeDiscountPresets.map((preset) => (
+                                          <option key={preset.id} value={`preset:${preset.id}`}>
+                                            {preset.name} (
+                                            {preset.discountType === "percentage"
+                                              ? `${preset.value}%`
+                                              : formatMoney(preset.value, invoiceSettings.currency)}
+                                            )
+                                          </option>
+                                        ))}
+                                        <option value="custom">+ Custom</option>
                                       </select>
                                     </label>
                                   )}
@@ -25082,9 +25140,11 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                       </select>
                                     </label>
                                   )}
-                                  <span className="ip-drawer-note">
-                                    One discount per line — filling one box clears the other. The invoice-wide discount below still applies on top.
-                                  </span>
+                                  {customDiscountOpen && (
+                                    <span className="ip-drawer-note">
+                                      One discount per line — filling one box clears the other. The invoice-wide discount below still applies on top.
+                                    </span>
+                                  )}
                                   {invoiceLineTagOptions.length > 0 && (
                                     <span className="ip-drawer-note">
                                       Tags are your own list — coach, location, whatever you report on — kept in Billing › Settings.
@@ -25319,7 +25379,8 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                           calendarPullRangeSorted.map((item) => {
                             const service = itemService(item, services);
                             const days = buildWeekDays(itemWeek(item));
-                            const alreadyInvoiced = Boolean(invoicedBookingIds[item.id]);
+                            const invoiceLink = invoicedBookingIds[item.id];
+                            const alreadyInvoiced = Boolean(invoiceLink);
                             // A counter payment is flagged but does not disable the
                             // row - the lesson can be paid at the till and still be
                             // invoiced. See addCompletedBookingLine.
@@ -25342,7 +25403,20 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                 <span className="ip-rail-row-side">
                                   {matchesPayer && <em className="ip-badge">Billing client</em>}
                                   {alreadyInvoiced ? (
-                                    <em className="ip-badge">On this invoice</em>
+                                    // The invoice it is on, by number - it is not
+                                    // necessarily the one being edited, and "on an
+                                    // invoice" without saying which one leaves the
+                                    // coach to go hunting for it.
+                                    <em
+                                      className="ip-badge"
+                                      title={
+                                        invoiceLink?.invoiceNumber
+                                          ? `Already on invoice ${invoiceLink.invoiceNumber}`
+                                          : "Already on an invoice"
+                                      }
+                                    >
+                                      {invoiceLink?.invoiceNumber || "Invoiced"}
+                                    </em>
                                   ) : posPayment ? (
                                     <em className="ip-badge is-paid">
                                       Paid · {formatMoney(posPayment.amount, posPayment.currency)}

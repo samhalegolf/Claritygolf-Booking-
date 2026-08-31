@@ -8833,6 +8833,28 @@ button {
   font-size: 12.5px;
 }
 
+/* The way back from the custom boxes to the saved-discount list. A link, not a
+   button: it changes what the drawer is showing, it doesn't commit anything. */
+.ip-drawer-back {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  min-height: 32px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--c-pencil);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.ip-drawer-back:hover,
+.ip-drawer-back:focus-visible {
+  color: var(--c-text);
+}
+
 /* When the line was delivered. Wider than the money boxes because a date input
    carries its own picker chrome, and left-aligned - a date is read, not summed,
    so the right-alignment the amount fields use would be wrong here. */

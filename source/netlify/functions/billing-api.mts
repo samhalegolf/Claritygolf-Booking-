@@ -1289,13 +1289,34 @@ async function deleteInvoice(accountId: string, id: string) {
   return { deleted: true };
 }
 
+// Which of these bookings are already on an invoice, and which invoice. The
+// number - not just the id - comes back because the pull rail names the invoice
+// a booking landed on; an id would tell the coach nothing. Resolved with a
+// second lookup rather than a PostgREST embed so this keeps working whether or
+// not the schema cache knows the link table's foreign key.
 async function checkBookingLinks(accountId: string, bookingIds: string[]) {
   if (!bookingIds.length) return { links: {} };
   const filter = bookingIds.map((id) => `"${id.replace(/"/g, '\\"')}"`).join(",");
-  const rows = await supabase("billing_booking_invoice_links", {
+  const rows = (await supabase("billing_booking_invoice_links", {
     query: `select=booking_id,invoice_id&account_id=eq.${encodeFilter(accountId)}&booking_id=in.(${filter})`,
-  });
-  const links = Object.fromEntries(rows.map((row: Record<string, unknown>) => [row.booking_id, row.invoice_id]));
+  })) as Array<Record<string, unknown>>;
+
+  const invoiceIds = [...new Set(rows.map((row) => String(row.invoice_id ?? "")).filter(Boolean))];
+  const numbers: Record<string, string> = {};
+  for (let index = 0; index < invoiceIds.length; index += 200) {
+    const list = invoiceIds.slice(index, index + 200).map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+    const invoiceRows = (await supabase("billing_invoices", {
+      query: `select=id,invoice_number&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
+    })) as Array<Record<string, unknown>>;
+    for (const invoice of invoiceRows) numbers[String(invoice.id ?? "")] = String(invoice.invoice_number ?? "");
+  }
+
+  const links = Object.fromEntries(
+    rows.map((row) => {
+      const invoiceId = String(row.invoice_id ?? "");
+      return [row.booking_id, { invoiceId, invoiceNumber: numbers[invoiceId] || "" }];
+    }),
+  );
   return { links };
 }
 
