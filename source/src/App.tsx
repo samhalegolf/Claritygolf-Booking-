@@ -30,6 +30,7 @@ import {
   FolderOpen,
   GitMerge,
   GripVertical,
+  Home,
   ImagePlus,
   KeyRound,
   LayoutDashboard,
@@ -61,7 +62,6 @@ import {
   Trash2,
   Upload,
   User,
-  UserCog,
   Users,
   Video,
   X,
@@ -21395,6 +21395,18 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         </div>
 
         <nav className="side-nav" aria-label="Admin sections">
+          {/* Home, and first. The workspaces below it — Clients, Player
+              Profiles, Video — are whole screens rather than sections, so they
+              are the one thing the coach profile cannot open over itself. This
+              is the way back from them, in the one place that is on screen in
+              every view. */}
+          <button
+            className={`nav-home${activeView === "profile" ? " active" : ""}`}
+            onClick={() => switchView("profile")}
+          >
+            <Home size={18} />
+            Coach profile
+          </button>
           <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
             <CalendarDays size={18} />
             Calendar
@@ -21419,10 +21431,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               Billing
             </button>
           )}
-          <button className={activeView === "profile" ? "active" : ""} onClick={() => switchView("profile")}>
-            <UserCog size={18} />
-            Coach profile
-          </button>
           <button className={activeView === "settings" ? "active" : ""} onClick={() => switchView("settings")}>
             <Settings size={18} />
             Settings

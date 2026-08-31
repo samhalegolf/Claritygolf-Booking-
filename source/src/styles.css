@@ -309,6 +309,14 @@ button {
   color: #5f625c;
 }
 
+/* Home is not the first of eight peers, it is the thing they all return to.
+   Space says so. A rule was the first attempt and it sits on the button's own
+   bottom edge, so the active fill swallows it — and a line under a selected
+   item reads as part of the item, not as a divider above the rest. */
+.side-nav button.nav-home {
+  margin-bottom: var(--c-space-4);
+}
+
 .booking-preview {
   margin-top: auto;
   border: 1px solid #deded8;
