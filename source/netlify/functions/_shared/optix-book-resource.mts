@@ -368,6 +368,15 @@ export async function rebookResourceAfterReschedule(
     await ensureOptixSyncTable();
     const existing = cleanId ? await readSyncRecord(cleanId) : null;
     if (!existing?.optixBookingId || existing.syncStatus !== "synced") {
+      console.warn("optix_bay_rebook_after_reschedule_skipped", {
+        calendarItemId: cleanId,
+        reason: "no_synced_bay",
+        syncRecordFound: Boolean(existing),
+        syncStatus: existing?.syncStatus || "",
+        hasOptixBookingId: Boolean(existing?.optixBookingId),
+        resourceId: existing?.resourceId || "",
+        errorCode: existing?.errorCode || "",
+      });
       return { moved: false, skipped: "no_synced_bay" };
     }
     let cancelled = false;
@@ -399,16 +408,33 @@ export async function rebookResourceAfterReschedule(
       (outcome as { message?: string }).message ||
       (outcome as { result?: OptixSyncRecord }).result?.errorMessage ||
       "";
-    console.info("optix_bay_rebook_after_reschedule", {
+    if (outcome.ok === true) {
+      console.info("optix_bay_rebook_after_reschedule_completed", {
+        calendarItemId: cleanId,
+        previousOptixBookingId: existing.optixBookingId,
+        previousResourceId: existing.resourceId,
+        newOptixBookingId: (outcome as { result?: OptixSyncRecord }).result?.optixBookingId || "",
+        newResourceId: (outcome as { result?: OptixSyncRecord }).result?.resourceId || "",
+      });
+      return { moved: true };
+    }
+    console.error("optix_bay_rebook_after_reschedule_failed", {
       calendarItemId: cleanId,
-      ok: outcome.ok === true,
-      error: outcome.ok === true ? "" : errorMessage.slice(0, 300),
+      stage: "book_new_bay",
+      previousOptixBookingId: existing.optixBookingId,
+      previousResourceId: existing.resourceId,
+      errorCode:
+        (outcome as { error?: string }).error ||
+        (outcome as { result?: OptixSyncRecord }).result?.errorCode ||
+        "",
+      error: errorMessage.slice(0, 300),
     });
-    return outcome.ok === true ? { moved: true } : { moved: false, error: errorMessage };
+    return { moved: false, error: errorMessage };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error || "Optix bay rebook failed.");
     console.error("optix_bay_rebook_after_reschedule_failed", {
       calendarItemId: cleanId,
+      stage: "cancel_or_prepare",
       error: message.slice(0, 300),
     });
     return { moved: false, error: message };
