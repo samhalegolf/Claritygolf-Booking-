@@ -523,6 +523,33 @@ test("public slot context preserves invalid serviceId error behaviour", async ()
   );
 });
 
+// Regression: the public booking page showed no times at all. Availability
+// read back from settings lost its accountId in normalisation, and the strict
+// account filter then dropped every window before slots were calculated.
+test("availability read from settings keeps its account and still yields public slots", async () => {
+  const snapshot = settingsSnapshotFromState();
+  const context = await readPublicSlotContext(
+    { accountId, serviceId, week: testWeek },
+    { settingsSnapshot: snapshot, readItemsForWeek: async () => ({ items: [], rowsFetched: 0 }) },
+  );
+  assert.ok(context.availability.flat().length > 0, "availability survives the account filter");
+  assert.ok(context.availability.flat().every((window: any) => window.accountId === accountId));
+  assert.deepEqual(slotStarts(publicBookingSlots(context, { serviceId, week: testWeek })), [firstSlot, secondSlot, thirdSlot]);
+});
+
+test("availability saved before account stamping is filed under the account it was read from", async () => {
+  const snapshot = settingsSnapshotFromState();
+  snapshot.settings.availabilityJson = JSON.stringify(
+    availability().map((day) => day.map(({ accountId: _drop, ...window }) => window)),
+  );
+  const context = await readPublicSlotContext(
+    { accountId, serviceId, week: testWeek },
+    { settingsSnapshot: snapshot, readItemsForWeek: async () => ({ items: [], rowsFetched: 0 }) },
+  );
+  assert.ok(context.availability.flat().every((window: any) => window.accountId === accountId));
+  assert.deepEqual(slotStarts(publicBookingSlots(context, { serviceId, week: testWeek })), [firstSlot, secondSlot, thirdSlot]);
+});
+
 test("items from another week do not affect requested-week public slots", () => {
   const payload = slotsFor([
     item({

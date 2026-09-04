@@ -757,7 +757,13 @@ function normalizeAvailability(availability) {
           Math.min(dayEndMinutes, Math.round(rawEnd / 15) * 15),
         );
         const coachId = cleanSlug(window?.coachId, defaultCoachProfileFromAccount().id);
-        return end > start ? { start, end, coachId } : null;
+        // Keep the owning business on the window. Every account filter is
+        // strict now, so a window that loses its accountId here is dropped
+        // from the public slot calculation and the booking page shows no
+        // times at all.
+        const accountId = cleanSlug(window?.accountId, "");
+        if (end <= start) return null;
+        return accountId ? { start, end, coachId, accountId } : { start, end, coachId };
       })
       .filter(Boolean)
       .sort((a, b) => (a.coachId || "").localeCompare(b.coachId || "") || a.start - b.start)
@@ -5135,7 +5141,16 @@ export function availabilityFromSettings(settings, accountId = "") {
   const scopedAccountId = cleanSlug(settingValue(settings, "accountId") || accountId, "");
   const seed =
     !scopedAccountId || isOriginalWorkspace(scopedAccountId) ? defaultAvailability : [[], [], [], [], [], [], []];
-  return normalizeAvailability(parseSettingJson(settings, "availabilityJson", seed));
+  // availabilityJson is a per-account settings row, so every window in it
+  // belongs to the business whose row was read. Windows saved before accountId
+  // was stamped on write (and the seeded defaults) carry no accountId; file
+  // them under that account so the strict account filters keep them.
+  const ownerAccountId = cleanSlug(accountId, "") || scopedAccountId;
+  return normalizeAvailability(parseSettingJson(settings, "availabilityJson", seed)).map((dayWindows) =>
+    dayWindows.map((window) =>
+      window.accountId || !ownerAccountId ? window : { ...window, accountId: ownerAccountId },
+    ),
+  );
 }
 
 async function readAdminSettings(accountId: string, settingsMap = null) {
