@@ -20,6 +20,7 @@ installBoxAudit();
 // visitor at the login screen downloads neither. This is why the login form
 // lives in its own module rather than inside App.
 const App = lazy(() => import("./App"));
+const PublicBookingApp = lazy(() => import("./modules/public-booking/PublicBookingApp"));
 const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
 const VideoSharePage = lazy(() => import("./modules/video-share/VideoSharePage"));
 
@@ -32,6 +33,10 @@ const VideoSharePage = lazy(() => import("./modules/video-share/VideoSharePage")
 const bookingEmbed = isBookingEmbedMode();
 const playerBooking = isPlayerBookingMode();
 const publicBookingOnly = bookingEmbed && !playerBooking;
+// Rescheduling is an authenticated, appointment-specific exception: it keeps
+// the established compatibility flow (including ignoreId availability) while
+// ordinary customer booking never loads the coach workspace.
+const publicReschedule = publicBookingOnly && new URLSearchParams(window.location.search).get("mode") === "reschedule";
 // The coach's emailed link to a video a guest sent them. Like the booking
 // embed it wins over everything below, including any session -- the token is
 // the credential, and asking a coach to log in to watch one video is exactly
@@ -106,7 +111,7 @@ function Root() {
   if (publicBookingOnly) {
     return (
       <Suspense fallback={<Splash label="Loading booking…" />}>
-        <App />
+        {publicReschedule ? <App /> : <PublicBookingApp />}
       </Suspense>
     );
   }
@@ -130,7 +135,7 @@ function Root() {
   if (bookingEmbed) {
     return (
       <Suspense fallback={<Splash label="Loading booking…" />}>
-        <App />
+        <PublicBookingApp />
       </Suspense>
     );
   }

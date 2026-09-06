@@ -5761,11 +5761,9 @@ export async function readPublicSlotContext({ accountId, serviceId, week } = {},
 
   const { workspaceAccount, state: accountState } = publicAccountState(state);
   const cleanServiceId = cleanString(serviceId, "", 140);
-  if (!cleanServiceId) {
-    throw publicBookingSlotsRequestError("Choose a public lesson type.", 400, "service_required");
-  }
-  const targetService = publicBookableServices(accountState.services).find((service) => service.id === cleanServiceId);
-  if (!targetService) {
+  const publicServices = publicBookableServices(accountState.services);
+  const targetService = cleanServiceId ? publicServices.find((service) => service.id === cleanServiceId) : null;
+  if (cleanServiceId && !targetService) {
     throw publicBookingSlotsRequestError("Choose a public lesson type.", 404);
   }
 
@@ -5773,14 +5771,20 @@ export async function readPublicSlotContext({ accountId, serviceId, week } = {},
   const readItemsForWeek = options.readItemsForWeek || readPublicSlotItemsForWeek;
   const itemRead = await readItemsForWeek({
     accountId: workspaceAccount.id,
-    serviceId: targetService.id,
+    serviceId: targetService?.id || "",
     week: safeWeek,
   });
   const rawItems = Array.isArray(itemRead) ? itemRead : itemRead?.items || [];
   const rowsFetched = Number.isFinite(Number(itemRead?.rowsFetched)) ? Number(itemRead.rowsFetched) : rawItems.length;
   const accountItems = rawItems.filter((item) => recordBelongsToAccount(item, workspaceAccount.id));
   const requestedWeekItems = publicSlotRequestedWeekItems(accountItems, safeWeek);
-  const relevantResourceItems = publicSlotRelevantResourceItems(requestedWeekItems, targetService, accountState);
+  // A normal booking page requests the whole week's public availability once.
+  // It still needs every booking in the week because different public services
+  // can share a coach or location.  The targeted path stays narrow for a
+  // reschedule, where ignoreId makes the calculation genuinely different.
+  const relevantResourceItems = targetService
+    ? publicSlotRelevantResourceItems(requestedWeekItems, targetService, accountState)
+    : requestedWeekItems;
 
   if (metrics) {
     metrics.itemsReadMs = Date.now() - itemsStartedAt;
@@ -9780,9 +9784,6 @@ export function publicBookingSlots(state, options = {}) {
   const serviceId = cleanString(options.serviceId, "", 140);
   const ignoreId = cleanString(options.ignoreId, "", 160);
   const metrics = options.metrics;
-  if (!serviceId) {
-    throw publicBookingSlotsRequestError("Choose a public lesson type.", 400, "service_required");
-  }
   const services = publicBookableServices(accountState.services);
   const totalPublicItemCount = accountState.items.length;
   if (metrics) {
@@ -9790,28 +9791,35 @@ export function publicBookingSlots(state, options = {}) {
     metrics.week = week;
     if (metrics.totalPublicItemCount == null) metrics.totalPublicItemCount = totalPublicItemCount;
   }
-  const targetService = services.find((service) => service.id === serviceId);
-  if (!targetService) {
+  const targetService = serviceId ? services.find((service) => service.id === serviceId) : null;
+  if (serviceId && !targetService) {
     throw publicBookingSlotsRequestError("Choose a public lesson type.", 404);
   }
   const requestedWeekItems = publicSlotRequestedWeekItems(accountState.items, week);
-  const relevantResourceItems = publicSlotRelevantResourceItems(requestedWeekItems, targetService, accountState);
   const cancelledGroupSessions = (accountState.items || []).filter(
     (item) => isCancelledGroupSessionLike(item) && itemWeek(item) === week,
   );
-  const filteredAccountState = { ...accountState, items: relevantResourceItems, cancelledGroupSessions };
+  const filteredAccountState = { ...accountState, items: requestedWeekItems, cancelledGroupSessions };
   if (metrics) {
     if (metrics.requestedWeekItemCount == null) metrics.requestedWeekItemCount = requestedWeekItems.length;
-    if (metrics.relevantResourceItemCount == null) metrics.relevantResourceItemCount = relevantResourceItems.length;
+    if (metrics.relevantResourceItemCount == null) metrics.relevantResourceItemCount = requestedWeekItems.length;
   }
-  const slots = publicSlotsForService(filteredAccountState, targetService, week, ignoreId);
-  if (metrics) metrics.returnedSlotCount = slots.length;
   const servicesById = {};
-  servicesById[targetService.id] = {
-    serviceId: targetService.id,
-    week,
-    slots: slots.map((slot) => ({ ...slot })),
-  };
+  const requestedServices = targetService ? [targetService] : services;
+  for (const service of requestedServices) {
+    // Restrict each calculation to resources that can collide with this
+    // service, while reusing the one weekly database read above.
+    const serviceState = {
+      ...filteredAccountState,
+      items: publicSlotRelevantResourceItems(requestedWeekItems, service, accountState),
+    };
+    const serviceSlots = publicSlotsForService(serviceState, service, week, ignoreId);
+    servicesById[service.id] = { serviceId: service.id, week, slots: serviceSlots.map((slot) => ({ ...slot })) };
+  }
+  // safeJsonStringify deliberately rejects shared references, so retain the
+  // legacy top-level `slots` compatibility field as a separate copy.
+  const slots = targetService ? servicesById[targetService.id].slots.map((slot) => ({ ...slot })) : [];
+  if (metrics) metrics.returnedSlotCount = Object.values(servicesById).reduce((sum, entry: any) => sum + entry.slots.length, 0);
   return {
     updatedAt: state.updatedAt,
     week,
@@ -9843,16 +9851,6 @@ export async function handlePublicBookingSlotsRequest(req, options = {}) {
     status: 500,
   };
   try {
-    if (!serviceId) {
-      metrics.status = 400;
-      return json(
-        {
-          error: "service_required",
-          message: "Choose a public lesson type.",
-        },
-        400,
-      );
-    }
     const readSlotContext = options.readPublicSlotContext || readPublicSlotContext;
     // The business comes from the validated public identifier on the request,
     // not from the settings blob. options.resolveAccountId is the same seam

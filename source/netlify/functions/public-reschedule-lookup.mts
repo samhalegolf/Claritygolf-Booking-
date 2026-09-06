@@ -6,4 +6,5 @@ export default async (req: Request) => handlePublicRescheduleLookupRequest(req);
 
 export const config: Config = {
   path: "/api/public-reschedule/lookup",
+  region: "syd",
 };

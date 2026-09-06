@@ -241,19 +241,25 @@ function slotsFor(items = [], options = {}) {
   });
 }
 
-test("public booking slots endpoint requires serviceId", async () => {
+test("public booking slots endpoint returns all public services without serviceId", async () => {
   const originalInfo = console.info;
   console.info = () => undefined;
   try {
     const response = await handlePublicBookingSlotsRequest(
       new Request(`https://example.test/api/public-booking-slots?week=${testWeek}`),
-      { resolveAccountId: async () => accountId },
+      {
+        resolveAccountId: async () => accountId,
+        readPublicSlotContext: async (params: any) => {
+          assert.deepEqual(params, { accountId, serviceId: "", week: testWeek });
+          return calendarState();
+        },
+      },
     );
     const body = await response.json() as any;
 
-    assert.equal(response.status, 400);
-    assert.equal(body.error, "service_required");
-    assert.equal(body.message, "Choose a public lesson type.");
+    assert.equal(response.status, 200);
+    assert.equal(body.week, testWeek);
+    assert.deepEqual(Object.keys(body.services).sort(), [groupServiceId, otherServiceId, serviceId].sort());
   } finally {
     console.info = originalInfo;
   }

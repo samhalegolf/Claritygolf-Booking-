@@ -22,4 +22,4 @@ export default async function handler(req: Request) {
   return withPublicReadCache(await handlePublicBookingSlotsRequest(req));
 }
 
-export const config: Config = { path: "/api/public-booking-slots" };
+export const config: Config = { path: "/api/public-booking-slots", region: "syd" };

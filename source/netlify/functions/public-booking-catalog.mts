@@ -22,4 +22,4 @@ export default async function handler(req: Request) {
   return withPublicReadCache(await handlePublicBookingCatalogRequest(req));
 }
 
-export const config: Config = { path: "/api/public-booking-catalog" };
+export const config: Config = { path: "/api/public-booking-catalog", region: "syd" };
