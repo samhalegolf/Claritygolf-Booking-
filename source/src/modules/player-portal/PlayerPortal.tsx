@@ -65,7 +65,7 @@ const VideoAnalysisPage = lazy(() =>
 // booking flow, not a player-shaped copy of it. It renders inline inside the
 // Lessons tab's "Book" subtab now, so the navigation bar and the rest of the
 // terminal stay exactly where the player left them.
-const BookingWidget = lazy(() => import("../../App"));
+const BookingWidget = lazy(() => import("../public-booking/PublicBookingApp"));
 
 type Booking = {
   id: string;
@@ -189,6 +189,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   );
   const [playerEmail, setPlayerEmail] = useState(session.email);
   const [playerName, setPlayerName] = useState(session.name);
+  const [playerPhone, setPlayerPhone] = useState("");
   const [playerId, setPlayerId] = useState("");
   const [caddy, setCaddy] = useState<CaddyAccess | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -283,6 +284,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       setPracticeBlockTypes(Array.isArray(data.practiceBlockTypes) ? data.practiceBlockTypes : []);
       if (data.player?.email) setPlayerEmail(data.player.email);
       if (data.player?.name) setPlayerName(data.player.name);
+      if (data.player?.phone) setPlayerPhone(data.player.phone);
       if (data.player?.id) setPlayerId(data.player.id);
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : "We couldn't load your profile.");
@@ -1071,7 +1073,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                   {lessonsSubtab === "book" ? (
                     <div className="player-portal-inline-booking">
                       <Suspense fallback={<p className="player-portal-empty">Loading booking…</p>}>
-                        <BookingWidget bookingEntry="player" />
+                        <BookingWidget
+                          customer={{ name: playerName, email: playerEmail, phone: playerPhone }}
+                          onBookingComplete={() => void loadProfile()}
+                        />
                       </Suspense>
                     </div>
                   ) : (

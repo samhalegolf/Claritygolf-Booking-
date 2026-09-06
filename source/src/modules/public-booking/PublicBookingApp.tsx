@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Clock, X } from "lucide-react";
+import { apiFetch } from "../auth/apiFetch";
 import { appearsOnCurrentPublicBookingScreen } from "./bookingScreen";
 
 type Service = { id: string; name: string; duration: number; price: number; priceMode?: string; description?: string; lessonNote?: string; location?: string; lessonFormat?: string; customGroup?: boolean; customGroupEnabled?: boolean; minParticipants?: number; bookingScreenIds?: string[] };
@@ -7,6 +8,8 @@ type Slot = { week: number; day: number; start: number; remainingSpots?: number;
 type Brand = { logoPreview?: string; showLogo?: boolean };
 type Account = { businessName?: string; coachName?: string; venueShortName?: string };
 type Form = { firstName: string; lastName: string; phone: string; email: string };
+export type PublicBookingCustomer = { name?: string; email?: string; phone?: string };
+export type PublicBookingAppProps = { customer?: PublicBookingCustomer; onBookingComplete?: () => void };
 
 const BASE_WEEK_START = new Date(2026, 5, 1);
 const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -22,10 +25,16 @@ function currentWeek() {
 function dateFor(week: number, day: number) { const date = new Date(BASE_WEEK_START); date.setDate(date.getDate() + week * 7 + day); return date; }
 function time(minutes: number) { const hour = Math.floor(minutes / 60); return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`; }
 function price(service: Service) { return service.priceMode === "free" || !service.price ? "Free" : `$${service.price}`; }
+function manageBookingUrl() { const url = new URL(location.href); url.searchParams.set("embed", "booking"); url.searchParams.set("mode", "reschedule"); return url.toString(); }
 
 /** Customer-only booking surface.  It intentionally owns no coach session,
  * calendar, CRM, video, browser storage, or admin document hooks. */
-export default function PublicBookingApp() {
+function customerForm(customer?: PublicBookingCustomer): Form {
+  const names = (customer?.name ?? "").trim().split(/\s+/).filter(Boolean);
+  return { firstName: names[0] ?? "", lastName: names.slice(1).join(" "), phone: customer?.phone ?? "", email: customer?.email ?? "" };
+}
+
+export default function PublicBookingApp({ customer, onBookingComplete }: PublicBookingAppProps) {
   const [catalogue, setCatalogue] = useState<{ services: Service[]; brand: Brand; account: Account }>({ services: [], brand: {}, account: {} });
   const [catalogueState, setCatalogueState] = useState<"loading" | "ready" | "error">("loading");
   const [week, setWeek] = useState(currentWeek);
@@ -34,26 +43,34 @@ export default function PublicBookingApp() {
   const [serviceId, setServiceId] = useState("");
   const [day, setDay] = useState<number | null>(null);
   const [slot, setSlot] = useState<Slot | null>(null);
-  const [form, setForm] = useState<Form>({ firstName: "", lastName: "", phone: "", email: "" });
+  const [form, setForm] = useState<Form>(() => customerForm(customer));
   const [attendees, setAttendees] = useState<Array<{ name: string; email: string }>>([]);
   const [submitState, setSubmitState] = useState<"idle" | "saving" | "done" | "error">("idle");
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/public-booking-catalog", { headers: { Accept: "application/json" } })
+    apiFetch("/api/public-booking-catalog")
       .then(async (response) => { if (!response.ok) throw new Error("Booking is unavailable."); return response.json(); })
       .then((data) => { if (!cancelled) { setCatalogue({ services: Array.isArray(data.services) ? data.services : [], brand: data.brand ?? {}, account: data.account ?? {} }); setCatalogueState("ready"); } })
       .catch(() => { if (!cancelled) setCatalogueState("error"); });
     return () => { cancelled = true; };
   }, []);
 
+  // Player Portal profile loading finishes after its booking subtab mounts.
+  // Fill the verified identity when it arrives, without putting it in a URL
+  // or asking a signed-in player to type it again.
+  useEffect(() => {
+    if (!customer?.email) return;
+    setForm(customerForm(customer));
+  }, [customer?.name, customer?.email, customer?.phone]);
+
   useEffect(() => {
     let cancelled = false;
     setSlotsState("loading");
     // Deliberately one request for the active week. The endpoint returns every
     // public service keyed by id; do not turn this back into an N+1 loop.
-    fetch(`/api/public-booking-slots?week=${week}`, { headers: { Accept: "application/json" } })
+    apiFetch(`/api/public-booking-slots?week=${week}`)
       .then(async (response) => { if (!response.ok) throw new Error("Availability is unavailable."); return response.json(); })
       .then((data) => {
         if (cancelled) return;
@@ -80,10 +97,10 @@ export default function PublicBookingApp() {
     if (!service || !slot || !canSubmit) return;
     setSubmitState("saving"); setError("");
     try {
-      const response = await fetch("/api/public-booking", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, week: slot.week, day: slot.day, start: slot.start, duration: service.duration, ...form, coachId: slot.coachId, locationId: slot.locationId, attendees: customGroup ? attendees : undefined }) });
+      const response = await apiFetch("/api/public-booking", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, week: slot.week, day: slot.day, start: slot.start, duration: service.duration, ...form, coachId: slot.coachId, locationId: slot.locationId, attendees: customGroup ? attendees : undefined }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.appointment?.id) throw new Error(data.message || "That time is no longer available.");
-      setSubmitState("done");
+      setSubmitState("done"); onBookingComplete?.();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not confirm the booking."); setSubmitState("error"); }
   }
 
@@ -93,7 +110,7 @@ export default function PublicBookingApp() {
 
   return <main className="public-booking">
     <div className="booking-brand">{catalogue.brand.showLogo && catalogue.brand.logoPreview ? <img src={catalogue.brand.logoPreview} alt={`${brandName} logo`} /> : <strong>{brandName}</strong>}<em>{catalogue.account.venueShortName}</em></div>
-    <div className="booking-toolbar"><a className="booking-login-trigger" href={`${location.pathname}?embed=booking&mode=reschedule`}>Manage / reschedule a booking</a></div>
+    <div className="booking-toolbar"><a className="booking-login-trigger" href={manageBookingUrl()}>Manage / reschedule a booking</a></div>
     <div className="booking-columns booking-progressive-flow">
       <section className="booking-progressive-section is-open"><div className="booking-progressive-title"><span className="booking-progressive-title-label">1. Appointment</span><span className="booking-progressive-title-state">{catalogueState === "loading" ? "Loading" : "In progress"}</span></div><div className="booking-progressive-body"><div className="service-picker">{catalogueState === "error" ? <p role="alert">Booking is unavailable. Please try again shortly.</p> : catalogueState === "loading" ? <p>Loading lesson types…</p> : services.length ? services.map((candidate) => <button className={candidate.id === serviceId ? "selected-service" : ""} key={candidate.id} onClick={() => chooseService(candidate.id)} type="button"><strong>{candidate.name}</strong><em>{candidate.duration} minutes @ {price(candidate)}</em>{candidate.description ? <small>{candidate.description}</small> : null}{candidate.lessonNote || candidate.location ? <small>{candidate.lessonNote || candidate.location}</small> : null}</button>) : <p>No public lesson types are active.</p>}</div></div></section>
       <section className={`booking-progressive-section ${service ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">2. Date &amp; Time</span><span className="booking-progressive-title-state">{!service ? "Locked" : slotsState === "loading" ? "Loading" : "In progress"}</span></div>{service ? <div className="booking-progressive-body"><div className="booking-week-controls"><button onClick={() => { setWeek((value) => value - 1); setSlot(null); }} type="button"><ArrowLeft size={15} /><span>Previous week</span></button><strong>{weekLabel}</strong><button onClick={() => { setWeek((value) => value + 1); setSlot(null); }} type="button"><span>Next week</span><ArrowRight size={15} /></button></div>{!scheduledGroup ? <div className="booking-days">{dayNames.map((name, index) => <button className={day === index ? "selected-day" : ""} key={name} onClick={() => { setDay(index); setSlot(null); }} type="button"><strong>{name.slice(0, 3)}</strong><em>{dateFor(week, index).getDate()}</em></button>)}</div> : null}<div className="time-slots">{slotsState === "loading" ? <p>Loading available times…</p> : slotsState === "error" ? <p role="alert">Available times could not be loaded.</p> : !scheduledGroup && day === null ? <p>Choose a day first.</p> : availableSlots.length ? availableSlots.map((candidate) => <button className={slot?.start === candidate.start && slot?.day === candidate.day ? "selected-time" : ""} key={`${candidate.day}-${candidate.start}`} onClick={() => setSlot(candidate)} type="button"><Clock size={15} />{scheduledGroup ? `${dateFor(candidate.week, candidate.day).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · ` : ""}{time(candidate.start)}{candidate.remainingSpots ? ` · ${candidate.remainingSpots} spots left` : ""}</button>) : <p>No public times available for this day.</p>}</div></div> : null}</section>
