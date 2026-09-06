@@ -98,12 +98,10 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
   const [attempt, setAttempt] = useState<ResourceOutcome | null>(null);
   const [busy, setBusy] = useState(false);
   const [slow, setSlow] = useState(false);
-  const [open, setOpen] = useState(false);
   // The modal is reused for whichever lesson is selected, so a reply that
   // arrives after the coach has moved on must not be shown against the new
   // one. Every state write below is gated on this still being the same lesson.
   const shownId = useRef(calendarItemId);
-  const autoOpened = useRef(false);
 
   const readStatus = useCallback(async (id: string) => {
     try {
@@ -134,7 +132,6 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
 
   useEffect(() => {
     shownId.current = calendarItemId;
-    autoOpened.current = false;
     setAttempt(null);
     setBusy(false);
     setSlow(false);
@@ -144,14 +141,6 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
   }, [calendarItemId, readStatus]);
 
   const outcome = attempt || loadOutcome(load);
-
-  // Opened for anything that is not a held bay, once. After that the section
-  // stays wherever the coach put it.
-  useEffect(() => {
-    if (autoOpened.current || load.kind === "loading") return;
-    autoOpened.current = true;
-    if (outcome.tone !== "ok") setOpen(true);
-  }, [load.kind, outcome.tone]);
 
   // The 25 second ceiling is real (OVERALL_TIMEOUT_MS in optix-book-resource),
   // so a long wait is not a hung request. Say that rather than inventing
@@ -203,7 +192,10 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
   const bookLabel = outcome.needsOptixCheckFirst ? "I've checked Optix — book anyway" : "Book bay";
 
   return (
-    <details className="booking-records-tab" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    /* Arrives closed, like every other section. The state that would justify
+       opening it — held, failed, booking — is on the summary line instead, so
+       the coach reads it without opening anything. */
+    <details className="booking-records-tab">
       <summary className="booking-records-summary">
         <Building2 size={16} />
         <span>Resources</span>

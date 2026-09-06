@@ -79,7 +79,7 @@ async function bayNamesFor(resourceIds: string[]): Promise<Map<string, string>> 
         payload_json->>'workspace_id' AS workspace_id,
         payload_json->>'workspace_name' AS workspace_name
       FROM optix_webhook_events
-      WHERE payload_json->>'workspace_id' = ANY(${wanted})
+      WHERE payload_json->>'workspace_id' = ANY(${wanted}::text[])
       ORDER BY payload_json->>'workspace_id', received_at DESC
     `;
     return new Map(
