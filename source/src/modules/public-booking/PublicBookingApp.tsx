@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Clock, X } from "lucide-react";
+import { appearsOnCurrentPublicBookingScreen } from "./bookingScreen";
 
 type Service = { id: string; name: string; duration: number; price: number; priceMode?: string; description?: string; lessonNote?: string; location?: string; lessonFormat?: string; customGroup?: boolean; customGroupEnabled?: boolean; minParticipants?: number; bookingScreenIds?: string[] };
 type Slot = { week: number; day: number; start: number; remainingSpots?: number; locationId?: string; coachId?: string };
@@ -21,7 +22,6 @@ function currentWeek() {
 function dateFor(week: number, day: number) { const date = new Date(BASE_WEEK_START); date.setDate(date.getDate() + week * 7 + day); return date; }
 function time(minutes: number) { const hour = Math.floor(minutes / 60); return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`; }
 function price(service: Service) { return service.priceMode === "free" || !service.price ? "Free" : `$${service.price}`; }
-function screenId() { return location.pathname.split("/").filter(Boolean).pop() || "main"; }
 
 /** Customer-only booking surface.  It intentionally owns no coach session,
  * calendar, CRM, video, browser storage, or admin document hooks. */
@@ -65,7 +65,10 @@ export default function PublicBookingApp() {
     return () => { cancelled = true; };
   }, [week]);
 
-  const services = useMemo(() => catalogue.services.filter((service) => (service.bookingScreenIds ?? ["main"]).includes(screenId())), [catalogue.services]);
+  // This is deliberately the same final derivation as App.tsx:
+  // public catalogue -> public screen -> bookingScreenIds, including the
+  // legacy missing-field fallback and the explicit-empty exclusion.
+  const services = useMemo(() => catalogue.services.filter((service) => appearsOnCurrentPublicBookingScreen(service)), [catalogue.services]);
   const service = services.find((candidate) => candidate.id === serviceId) ?? null;
   const scheduledGroup = service?.lessonFormat === "group" && !service?.customGroup && !service?.customGroupEnabled;
   const customGroup = service?.customGroup || service?.customGroupEnabled;
