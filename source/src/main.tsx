@@ -3,8 +3,6 @@ import { createRoot } from "react-dom/client";
 import LoginScreen from "./modules/auth/LoginScreen";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
 import { isBookingEmbedMode, isPlayerBookingMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
-import { installOptixBookingFeedback } from "./optix-booking-feedback";
-import { installOptixBookingMutationSync } from "./optix-booking-mutation-sync";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
 import { installBoxAudit } from "./lib/boxAudit";
 // Tokens first: styles.css and every module stylesheet read --c-*.
@@ -80,15 +78,15 @@ function Root() {
   // Admin-only document hooks, installed once the coach shell is actually the
   // thing being rendered. They hook the document rather than React, so they
   // cannot live inside App -- but a player must never get them.
+  //
+  // Two of these are gone: installOptixBookingFeedback, whose panel is now the
+  // React BookingResourcesPanel inside the booking modal, and
+  // installOptixBookingMutationSync, whose whole body was a comment saying it
+  // did nothing.
   useEffect(() => {
     if (bookingEmbed || session?.role !== "coach" || adminHooksInstalled) return;
     // (bookingEmbed covers player booking too: the widget never wants them.)
     adminHooksInstalled = true;
-    // This compatibility hook remains installed but is intentionally a no-op.
-    // Clarity-origin resource bookings are created only by the admin card's
-    // explicit Book resource action.
-    installOptixBookingMutationSync();
-    installOptixBookingFeedback();
     installOptixOriginFeedback();
   }, [session?.role]);
 

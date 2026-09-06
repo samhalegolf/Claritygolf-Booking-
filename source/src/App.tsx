@@ -225,8 +225,7 @@ import {
 import type { CalendarAxisMode } from "./calendar-axis";
 import { clamp } from "./lib/number";
 import { dateInputValue } from "./lib/date";
-import { OPTIX_RECONCILE_EVENT } from "./optix-booking-feedback";
-import type { OptixReconcileCompleteDetail } from "./optix-booking-feedback";
+import BookingResourcesPanel from "./BookingResourcesPanel";
 import BrowserNotificationsPanel from "./modules/notifications/BrowserNotificationsPanel";
 import type {
   ChangeEvent,
@@ -8863,28 +8862,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     return () => window.clearInterval(tick);
   }, []);
 
-  // The Book bay button lives in the non-React panel injected by
-  // optix-booking-feedback.ts, so pressing it used to leave the calendar card
-  // with a stale bayBooked and no orange outline until the next hydration.
-  // bayBooked is derived server-side from optix_booking_sync and is never read
-  // back off a PUT, and it is not part of calendarItemsFingerprint — so
-  // patching it here cannot trigger an autosave or be written back wrongly.
-  useEffect(() => {
-    const onBayBooked = (event: Event) => {
-      const detail = (event as CustomEvent<OptixReconcileCompleteDetail>).detail;
-      const calendarItemId = detail?.calendarItemId;
-      if (!calendarItemId) return;
-      setItems((current) =>
-        current.map((item) =>
-          item.id === calendarItemId
-            ? { ...item, bayBooked: true, bayResourceId: detail.bayResourceId || item.bayResourceId }
-            : item,
-        ),
-      );
-    };
-    window.addEventListener(OPTIX_RECONCILE_EVENT, onBayBooked);
-    return () => window.removeEventListener(OPTIX_RECONCILE_EVENT, onBayBooked);
-  }, []);
+  // Removed: a window CustomEvent listener that existed only so the injected
+  // Optix panel could tell React a bay had been booked. BookingResourcesPanel
+  // is React, so it calls setItems through its onBooked prop instead.
+  // (bayBooked is derived server-side from optix_booking_sync, is never read
+  // back off a PUT, and is not part of calendarItemsFingerprint — patching it
+  // cannot trigger an autosave or be written back wrongly.)
 
   // Whatever moved the week — a swipe that landed on a neighbour, the toolbar
   // arrows, Today, or edge navigation during a drag — the pager ends up back
@@ -20900,11 +20883,30 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         </details>
       )}
 
+      {/* Bays and emails are two different jobs and now have a section each.
+          They used to share one: the Optix panel was injected underneath the
+          email records because that was the only anchor an outside-React script
+          could find by name. */}
+      {selected.kind === "appointment" && (
+        <BookingResourcesPanel
+          calendarItemId={selected.id}
+          onBooked={(resourceId) =>
+            setItems((current) =>
+              current.map((item) =>
+                item.id === selected.id
+                  ? { ...item, bayBooked: true, bayResourceId: resourceId || item.bayResourceId }
+                  : item,
+              ),
+            )
+          }
+        />
+      )}
+
       {selected.kind === "appointment" && (
         <details className="booking-records-tab">
           <summary className="booking-records-summary">
             <Mail size={16} />
-            <span>Booking records</span>
+            <span>Emails</span>
             <em>{selectedAppointmentNotifications.length ? `${selectedAppointmentNotifications.length} email records` : "No email records"}</em>
           </summary>
           <div className="booking-records-body">
