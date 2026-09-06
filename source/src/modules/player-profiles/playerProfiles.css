@@ -176,6 +176,13 @@
   font-size: 13px;
 }
 
+.player-tool-header p.player-tool-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  cursor: pointer;
+  word-break: break-all;
+}
+
 .player-tool-tabs {
   display: inline-flex;
   flex-wrap: wrap;

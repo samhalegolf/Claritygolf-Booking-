@@ -5382,6 +5382,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const [clientMergeError, setClientMergeError] = useState("");
   const [clientListTab, setClientListTab] = useState<"main" | "external">("main");
   const [clientMoveSavingId, setClientMoveSavingId] = useState("");
+  const [personDeleteBusyId, setPersonDeleteBusyId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(() => getInitialView(isEmbedMode));
   const [videoContext, setVideoContext] = useState<{
@@ -17684,6 +17685,56 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     }
   }
 
+  // Hard delete. Not the "Remove access" button above -- that only disables a
+  // portal login and keeps the person's record and history. This permanently
+  // removes the person plus their bookings, practice blocks, video
+  // submissions, lesson notes and portal login, and (if they had one) their
+  // Supabase Auth login -- which also removes their Clarity Caddy sign-in,
+  // since the two products share one auth.users table. No email or other
+  // notification is sent. There is no undo.
+  async function hardDeletePerson(person: Pick<Person, "id" | "name" | "email">) {
+    if (personDeleteBusyId) return;
+    const hasPortalLogin = portalPlayers.some(
+      (entry) => entry.personId === person.id && entry.status !== "disabled",
+    );
+    const confirmed = window.confirm(
+      `Permanently delete ${person.name || person.email || "this client"}? This deletes their bookings, ` +
+        `practice blocks, videos and lesson notes` +
+        (hasPortalLogin ? ", and their login (including Clarity Caddy if they use it)" : "") +
+        ". This cannot be undone and no email is sent.",
+    );
+    if (!confirmed) return;
+    setPersonDeleteBusyId(person.id);
+    try {
+      const response = await fetch(`/api/people?id=${encodeURIComponent(person.id)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok || data?.ok === false) {
+        setToast({ message: data?.message || "That client could not be deleted." });
+        return;
+      }
+      if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
+      if (selectedClientId === person.id) closeClientModal();
+      if (notesContext?.playerId === person.id) setNotesContext(null);
+      await refreshPortalPlayers();
+      setToast({
+        message: data.warning || `${person.name || person.email || "The client"} was permanently deleted.`,
+      });
+    } catch {
+      setToast({ message: "Could not reach the booking server." });
+    } finally {
+      setPersonDeleteBusyId("");
+    }
+  }
+
   async function refreshClarityCloudImports() {
     // Deliberately does not wait on googleDriveTransfer.connected first --
     // this used to only fire from an effect gated on that flag, chaining
@@ -22806,6 +22857,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                 <span>Player</span>
                                 <h3>{notesWorkspaceClient.name}</h3>
                                 <p>{notesWorkspaceClient.email || notesWorkspaceClient.phone || "No contact yet"}</p>
+                                <p
+                                  className="player-tool-id"
+                                  title="Copy this player's id"
+                                  onClick={() => {
+                                    void navigator.clipboard?.writeText(notesWorkspaceClient.id).catch(() => {});
+                                    setToast({ message: "Player id copied." });
+                                  }}
+                                >
+                                  ID: {notesWorkspaceClient.id}
+                                </p>
                               </div>
                             </div>
 
@@ -23195,6 +23256,32 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                                     </div>
                                   );
                                 })()}
+
+                                {isAdminUser && (
+                                  <div className="player-portal-access">
+                                    <div className="player-portal-access-body">
+                                      <strong>Danger zone</strong>
+                                      <span>
+                                        Permanently delete this player: their record, bookings, practice blocks,
+                                        videos, lesson notes and portal login. No email is sent, and this cannot be
+                                        undone.
+                                      </span>
+                                    </div>
+                                    <div className="player-portal-access-actions">
+                                      <button
+                                        type="button"
+                                        className="danger-button"
+                                        disabled={personDeleteBusyId === notesWorkspaceClient.id}
+                                        onClick={() => void hardDeletePerson(notesWorkspaceClient)}
+                                      >
+                                        <Trash2 size={16} />
+                                        {personDeleteBusyId === notesWorkspaceClient.id
+                                          ? "Deleting…"
+                                          : "Delete permanently"}
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ) : playerToolExpanded && playerProfileTool === "notes" ? (
                               <div className="player-tool-body">
@@ -29983,6 +30070,21 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                       {selectedClient?.count ?? 0} booking{selectedClient?.count === 1 ? "" : "s"}
                     </span>
                   </div>
+                  {selectedClient && (
+                    <div>
+                      <KeyRound size={16} />
+                      <span
+                        className="client-profile-user-id"
+                        title="Copy this client's id"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(selectedClient.id).catch(() => {});
+                          setToast({ message: "Client id copied." });
+                        }}
+                      >
+                        ID: {selectedClient.id}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 {selectedClient && profileNotesText(selectedClient) && (
                   <div className="client-profile-note-block">
@@ -30268,6 +30370,18 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                     <button className="outline-button" type="button">
                       <Link2 size={16} />
                       Add Clarity Caddy
+                    </button>
+                  )}
+                  {selectedClient && isAdminUser && (
+                    <button
+                      type="button"
+                      className="danger-button"
+                      disabled={personDeleteBusyId === selectedClient.id}
+                      onClick={() => void hardDeletePerson(selectedClient)}
+                      title="Permanently delete this client and their data. No email is sent."
+                    >
+                      <Trash2 size={16} />
+                      {personDeleteBusyId === selectedClient.id ? "Deleting…" : "Delete permanently"}
                     </button>
                   )}
                 </>

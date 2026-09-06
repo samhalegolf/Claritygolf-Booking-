@@ -2606,6 +2606,32 @@ async function requestSupabaseRows(table, options = {}) {
   return payload || [];
 }
 
+/**
+ * Permanently deletes a Supabase Auth user through GoTrue's admin API. There
+ * is no client library call for this -- the app never uses the Supabase JS
+ * admin client, only direct REST with the service role key (see
+ * supabaseStorageConfig above), so this is a plain fetch like the others.
+ */
+async function deleteSupabaseAuthUser(authUserId: string) {
+  const { url, key } = supabaseStorageConfig();
+  const response = await fetch(`${url}/auth/v1/admin/users/${encodeURIComponent(authUserId)}`, {
+    method: "DELETE",
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+    },
+  });
+  // A 404 means the login is already gone, which is the outcome this call
+  // wants -- not a failure to surface.
+  if (!response.ok && response.status !== 404) {
+    const text = await response.text().catch(() => "");
+    throw Object.assign(
+      new Error(`Supabase auth user delete failed ${response.status}: ${String(text || "").slice(0, 300)}`),
+      { status: response.status },
+    );
+  }
+}
+
 function isSupabaseColumnMissingError(error, column) {
   const code = cleanString(error?.code, "", 120).toUpperCase();
   const message = error instanceof Error ? error.message : "";
@@ -4745,6 +4771,141 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
     mergedExternalBookingIds,
     mergedNoteIds,
     people: await readPeople(cleanAccountId),
+  };
+}
+
+/**
+ * Permanently removes a person and everything scoped to them: bookings,
+ * practice blocks, video submissions, portal access, and -- if they had a
+ * portal login -- the underlying Supabase Auth user. Unlike mergePeople there
+ * is no survivor to reassign history onto, so this deletes it instead of
+ * moving it.
+ *
+ * For an admin cleaning out test accounts. Sends no email or other
+ * notification by design: it exists specifically to remove a login and its
+ * data without telling anyone.
+ *
+ * Deleting the Supabase Auth user also removes their Clarity Caddy sign-in if
+ * they had one -- the two products share one auth.users table (see
+ * portal_players' table comment) -- which is why this is a distinct,
+ * explicit action rather than folded into the ordinary client delete UI.
+ */
+async function hardDeletePerson(personId: string, accountId: string) {
+  const cleanAccountId = cleanSlug(accountId, "");
+  if (!cleanAccountId) throw missingAccountScope("delete_person");
+  const cleanPersonId = cleanString(personId, "", 160);
+  if (!cleanPersonId) {
+    throw Object.assign(new Error("A client id is required."), {
+      status: 400,
+      code: "PEOPLE_DELETE_INVALID_ID",
+    });
+  }
+
+  const knownPeople = await readPeople(cleanAccountId);
+  const person = knownPeople.find((candidate) => candidate.id === cleanPersonId);
+  if (!person) {
+    throw Object.assign(new Error("That client was not found in this workspace."), {
+      status: 404,
+      code: "PEOPLE_DELETE_NOT_FOUND",
+    });
+  }
+
+  // Read the portal login, if any, before the cascade below removes the
+  // portal_players row (ON DELETE CASCADE on person_id) -- its Supabase Auth
+  // user has to be deleted separately, through GoTrue's admin API.
+  const portalPlayers = await listPortalPlayers(cleanAccountId);
+  const portalPlayer = portalPlayers.find((entry) => entry.personId === cleanPersonId) || null;
+  if (portalPlayer) {
+    await destroyPortalPlayerSessions(portalPlayer.id);
+  }
+
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+    // video_transfer_sessions and player_sessions are created outside
+    // ensureSchema() (a migration and a lazy first-login create respectively),
+    // so a database that has never needed them is not an error -- same guard
+    // mergePeople uses above.
+    const tableExists = async (table) =>
+      Boolean(
+        queryRows(await client.query("SELECT to_regclass($1) AS name", [`public.${table}`]))[0]?.name,
+      );
+    await client.query(
+      "DELETE FROM calendar_items WHERE account_id = $1 AND person_id = $2",
+      [cleanAccountId, cleanPersonId],
+    );
+    await client.query(
+      "DELETE FROM practice_blocks WHERE account_id = $1 AND player_id = $2",
+      [cleanAccountId, cleanPersonId],
+    );
+    if (await tableExists("video_transfer_sessions")) {
+      await client.query(
+        "DELETE FROM video_transfer_sessions WHERE account_id = $1 AND player_id = $2",
+        [cleanAccountId, cleanPersonId],
+      );
+    }
+    if (await tableExists("player_sessions")) {
+      await client.query(
+        "DELETE FROM player_sessions WHERE account_id = $1 AND person_id = $2",
+        [cleanAccountId, cleanPersonId],
+      );
+    }
+    // Defence in depth, same as deleteCalendarItemById: the account_id in this
+    // predicate means a person id alone can never delete another business's
+    // row even if a check above is ever refactored away. Cascades away the
+    // portal_players row.
+    await client.query(
+      "DELETE FROM people WHERE id = $1 AND account_id = $2",
+      [cleanPersonId, cleanAccountId],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  // Lesson notes live in a per-account settings JSON blob (see
+  // LESSON_NOTES_SETTING_PREFIX), not a table, so they can't be deleted inside
+  // the transaction above -- filtered and rewritten right after it commits,
+  // the same way deleteLessonNote handles a single note.
+  const remainingNotes = (await readLessonNotes(cleanAccountId)).filter(
+    (note) => note.playerId !== cleanPersonId,
+  );
+  await writeLessonNotes(remainingNotes, cleanAccountId);
+
+  let authUserDeleted = false;
+  let warning = "";
+  if (portalPlayer?.authUserId) {
+    try {
+      await deleteSupabaseAuthUser(portalPlayer.authUserId);
+      authUserDeleted = true;
+    } catch (error) {
+      warning = cleanString(
+        error instanceof Error ? error.message : String(error || ""),
+        "Could not delete the linked login.",
+        300,
+      );
+      console.error("hard_delete_person:auth_user_delete_failed", {
+        personId: cleanPersonId,
+        authUserId: portalPlayer.authUserId,
+        detail: warning,
+      });
+    }
+  }
+
+  await setSetting(cleanAccountId, "updatedAt", nowIso());
+
+  return {
+    deletedPersonId: cleanPersonId,
+    authUserDeleted,
+    people: await readPeople(cleanAccountId),
+    ...(warning
+      ? {
+          warning: `${person.name || person.email || "The client"} was deleted, but their login could not be removed: ${warning}`,
+        }
+      : {}),
   };
 }
 
@@ -12129,6 +12290,26 @@ async function routeBookingApiRequest(
       const requestContext = await resolveBackendRequestContext(req, state);
       assertCanManagePerson(requestContext, body.person || body, state);
 	      const result = await updatePerson(body.person || body, requestContext.accountId);
+      return json({
+        ...result,
+        people: filterPeopleForContext(result.people, requestContext, state),
+      });
+    }
+
+    // Hard delete -- not the ordinary client-management action above. Removes
+    // the person and everything scoped to them (bookings, practice blocks,
+    // video submissions, lesson notes, portal login, and the Supabase Auth
+    // user behind it) with no way back and no notification sent. Account
+    // admin only, same gate as importing clients.
+    if (req.method === "DELETE" && pathname === "/api/people") {
+      const state = await readCalendarState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to delete clients.");
+      assertAccountFeature(requestContext.account, "clients");
+      const personId =
+        cleanString(url.searchParams.get("id"), "", 160) ||
+        cleanString((await parseBody(req))?.id, "", 160);
+      const result = await hardDeletePerson(personId, requestContext.accountId);
       return json({
         ...result,
         people: filterPeopleForContext(result.people, requestContext, state),

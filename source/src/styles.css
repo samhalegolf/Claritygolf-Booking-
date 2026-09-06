@@ -1730,6 +1730,13 @@ button {
   margin: 18px 0;
 }
 
+.client-profile-info .client-profile-user-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  cursor: pointer;
+  word-break: break-all;
+}
+
 .client-profile-note-block {
   display: grid;
   gap: 6px;
