@@ -10,6 +10,13 @@ import {
   DEFAULT_MAP_LINK_LABEL,
   parseNotificationTemplates,
 } from "./_shared/notification-templates.mts";
+import {
+  cleanPlayerBookingEmbedHeight,
+  cleanPlayerBookingEmbedIntro,
+  cleanPlayerBookingEmbedLabel,
+  cleanPlayerBookingEmbedUrl,
+  playerBookingEmbedFromSettings,
+} from "./_shared/player-booking-embed.mts";
 
 const defaultMinBookingNoticeMinutes = 240;
 
@@ -165,6 +172,10 @@ async function readAdminSettings(accountId: string) {
     sendAdminSms: settings.sendAdminSms === "true",
     notificationTemplates: parseNotificationTemplates(settings.notificationTemplatesJson),
     mapLinkLabel: cleanString(settings.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40) || DEFAULT_MAP_LINK_LABEL,
+    // The player portal's slot for someone else's booking widget. Flattened
+    // into this object rather than nested, so it saves through the same PUT as
+    // everything else on the Settings screen.
+    ...playerBookingEmbedFromSettings(settings),
   };
 }
 
@@ -205,6 +216,14 @@ async function writeAdminSettings(accountId: string, settings: any) {
   if (hasOwn(settings, "mapLinkLabel")) {
     await setSetting(accountId, "mapLinkLabel", cleanString(settings?.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40) || DEFAULT_MAP_LINK_LABEL);
   }
+  // Written key by key like everything above rather than in a loop: the
+  // "every setting the API accepts is editable somewhere" test in
+  // src/uiRules.test.ts finds accepted keys by scanning for these hasOwn
+  // calls, and a loop would hide these four from it.
+  if (hasOwn(settings, "playerBookingEmbedUrl")) await setSetting(accountId, "playerBookingEmbedUrl", cleanPlayerBookingEmbedUrl(settings?.playerBookingEmbedUrl));
+  if (hasOwn(settings, "playerBookingEmbedLabel")) await setSetting(accountId, "playerBookingEmbedLabel", cleanPlayerBookingEmbedLabel(settings?.playerBookingEmbedLabel));
+  if (hasOwn(settings, "playerBookingEmbedIntro")) await setSetting(accountId, "playerBookingEmbedIntro", cleanPlayerBookingEmbedIntro(settings?.playerBookingEmbedIntro));
+  if (hasOwn(settings, "playerBookingEmbedHeight")) await setSetting(accountId, "playerBookingEmbedHeight", String(cleanPlayerBookingEmbedHeight(settings?.playerBookingEmbedHeight)));
   await setSetting(accountId, "updatedAt", nowIso());
   return readAdminSettings(accountId);
 }

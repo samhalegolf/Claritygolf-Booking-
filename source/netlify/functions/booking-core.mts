@@ -45,6 +45,14 @@ import {
 } from "./_shared/caddy.mts";
 import { unavailableSpans } from "./_shared/availability-blocks.mts";
 import {
+  cleanPlayerBookingEmbedHeight,
+  cleanPlayerBookingEmbedIntro,
+  cleanPlayerBookingEmbedLabel,
+  cleanPlayerBookingEmbedUrl,
+  playerBookingEmbedForPortal,
+  playerBookingEmbedFromSettings,
+} from "./_shared/player-booking-embed.mts";
+import {
   guestRegistrationsPerAccountPerDay,
   guestRetentionDays,
   guestSubmissionsLifetime,
@@ -5230,6 +5238,7 @@ function adminSettingsFromSettings(settings) {
     smsFromNumber: settingValue(settings, "smsFromNumber"),
     sendClientSms: settingValue(settings, "sendClientSms") === "true",
     sendAdminSms: settingValue(settings, "sendAdminSms") === "true",
+    ...playerBookingEmbedFromSettings(settings),
   };
 }
 
@@ -5373,6 +5382,10 @@ async function writeAdminSettings(accountId: string, settings) {
   put("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
   put("sendClientSms", settings?.sendClientSms ? "true" : "false");
   put("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
+  put("playerBookingEmbedUrl", cleanPlayerBookingEmbedUrl(settings?.playerBookingEmbedUrl));
+  put("playerBookingEmbedLabel", cleanPlayerBookingEmbedLabel(settings?.playerBookingEmbedLabel));
+  put("playerBookingEmbedIntro", cleanPlayerBookingEmbedIntro(settings?.playerBookingEmbedIntro));
+  put("playerBookingEmbedHeight", String(cleanPlayerBookingEmbedHeight(settings?.playerBookingEmbedHeight)));
   await setSettingsBulk(accountId, { ...next, updatedAt: nowIso() });
   return readAdminSettings(accountId);
 }
@@ -9125,6 +9138,13 @@ async function readPlayerProfile(session) {
   // appointment) so the client can pre-fill the booking form on hand-off
   // without ever re-asking the player for their details.
   const primary = itemRead.items[0];
+
+  // The business's own booking widget, if it runs one somewhere else. Read
+  // straight from settings rather than off `state`: readPublicCatalogState is
+  // the shape the *public* booking page gets, and this belongs to a signed-in
+  // player's portal, not to it.
+  const bookingEmbed = playerBookingEmbedForPortal(await readSettingsMap(accountId));
+
   return {
     player: {
       // The person id matters to the portal: videos recorded there are filed
@@ -9139,6 +9159,7 @@ async function readPlayerProfile(session) {
     notes,
     practice,
     practiceBlockTypes,
+    bookingEmbed,
   };
 }
 

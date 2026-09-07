@@ -9,7 +9,7 @@
 // Clarity Caddy is deliberately absent. It is a different product, and its one
 // way in is the card on the home route -- a permanent link in the bar would put
 // "leave here" next to every screen in the terminal.
-export type PlayerTerminalDestination = "home" | "lessons" | "practice" | "notes" | "videos";
+export type PlayerTerminalDestination = "home" | "lessons" | "practice" | "notes" | "videos" | "book";
 
 type NavLink = {
   id: PlayerTerminalDestination;
@@ -18,6 +18,10 @@ type NavLink = {
 
 // Practice sits next to Lessons because that is the order of the thing: a
 // lesson happens, practice comes out of it, notes and videos are the record.
+//
+// "book" is not in this list: it only exists for a business that has
+// configured an outside booking widget, and it is named by that business
+// rather than by us, so it is appended from `externalBooking` below.
 const NAV_LINKS: NavLink[] = [
   { id: "home", label: "Home" },
   { id: "lessons", label: "Lessons" },
@@ -39,6 +43,9 @@ export type PlayerTerminalNavProps = {
   /** Browsing without a session: swaps the sign-out control for a sign-in one. */
   guest?: boolean;
   onSignIn?: () => void;
+  /** The business's outside booking widget, when it has configured one. Null
+   *  means the link is not in the bar at all -- there is nothing behind it. */
+  externalBooking?: { label: string } | null;
 };
 
 export function PlayerTerminalNav({
@@ -49,14 +56,23 @@ export function PlayerTerminalNav({
   onRecord,
   guest,
   onSignIn,
+  externalBooking,
 }: PlayerTerminalNavProps) {
   // Lessons -- and booking with it -- doesn't exist for a guest at all, and
   // neither does practice: prescribed practice comes from a coach, and a guest
   // has not got one yet. Not shown-but-locked, just not here: there is nothing
   // behind either of them to show.
-  const visibleLinks = guest
+  const baseLinks = guest
     ? NAV_LINKS.filter((link) => link.id !== "lessons" && link.id !== "practice")
     : NAV_LINKS;
+
+  // Last in the bar, and only when there is one. A guest never gets it either:
+  // the config arrives with the player profile, and a guest has no account to
+  // read one from.
+  const visibleLinks =
+    !guest && externalBooking
+      ? [...baseLinks, { id: "book" as const, label: externalBooking.label }]
+      : baseLinks;
 
   return (
     <header className="player-terminal-nav">

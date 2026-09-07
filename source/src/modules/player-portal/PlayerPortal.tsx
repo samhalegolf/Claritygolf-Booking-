@@ -20,6 +20,11 @@ import {
   type PlayerTerminalDestination,
 } from "./PlayerTerminalNav";
 import { PlayerVideoShelf } from "./PlayerVideoShelf";
+import {
+  PlayerBookingEmbed,
+  isPlayerBookingEmbedConfigured,
+  type PlayerBookingEmbedConfig,
+} from "./PlayerBookingEmbed";
 import { formatDate } from "./format";
 import "../practice/practice.css";
 import { PracticeWall } from "../practice/PracticeWall";
@@ -87,7 +92,7 @@ type Note = {
   updatedAt?: string;
 };
 
-type PortalTab = "home" | "lessons" | "practice" | "notes" | "videos";
+type PortalTab = "home" | "lessons" | "practice" | "notes" | "videos" | "book";
 
 type PracticeExpiryType = "next_lesson" | "set_date" | "none";
 type PracticeStatus = "active" | "completed" | "expired" | "archived";
@@ -201,6 +206,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
   const [completingPracticeId, setCompletingPracticeId] = useState<string | null>(null);
   const [practiceVideos, setPracticeVideos] = useState<ClarityCloudImportTransfer[]>([]);
+  // The business's outside booking widget, if it runs one. Null until the
+  // profile lands, and null forever for a business that has not set one up --
+  // which is what keeps the tab out of the nav.
+  const [bookingEmbed, setBookingEmbed] = useState<PlayerBookingEmbedConfig | null>(null);
 
   // Videos live on this device first. Nothing leaves it until the player
   // presses Send to coach.
@@ -273,6 +282,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         notes?: Note[];
         practice?: PracticeItem[];
         practiceBlockTypes?: PracticeTypeMeta[];
+        bookingEmbed?: PlayerBookingEmbedConfig;
       };
       if (!res.ok) throw new Error(data?.message || "We couldn't load your profile.");
       setBookings(Array.isArray(data.bookings) ? data.bookings : []);
@@ -282,6 +292,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       // object the coach is looking at. Empty means this workspace never
       // edited them and both ends fall back to the same defaults.
       setPracticeBlockTypes(Array.isArray(data.practiceBlockTypes) ? data.practiceBlockTypes : []);
+      setBookingEmbed(isPlayerBookingEmbedConfigured(data.bookingEmbed) ? data.bookingEmbed : null);
       if (data.player?.email) setPlayerEmail(data.player.email);
       if (data.player?.name) setPlayerName(data.player.name);
       if (data.player?.phone) setPlayerPhone(data.player.phone);
@@ -827,6 +838,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     wasGuestRef.current = isGuest;
   }, [isGuest, tab]);
 
+  // The outside booking tab can go away under the player -- the coach clears
+  // the URL, or a reload lands before the profile does. Either way, sitting on
+  // a tab with no link in the bar and nothing in it is worse than being home.
+  useEffect(() => {
+    if (tab === "book" && !bookingEmbed) setTab("home");
+  }, [bookingEmbed, tab]);
+
   // Every screen in the terminal wears the same bar, including the ones that
   // take the whole viewport.
   const renderNav = (
@@ -841,6 +859,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       onRecord={startRecording}
       guest={isGuest}
       onSignIn={onRequestSignIn}
+      externalBooking={bookingEmbed ? { label: bookingEmbed.label } : null}
     />
   );
 
@@ -1117,6 +1136,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                   )}
                 </>
               )}
+
+              {tab === "book" && bookingEmbed && <PlayerBookingEmbed config={bookingEmbed} />}
 
               {tab === "notes" && isGuest && (
                 <section className="player-portal-section">

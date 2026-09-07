@@ -1197,3 +1197,45 @@
   font-weight: 600;
   color: var(--pt-text-body);
 }
+
+/* --- Outside booking widget ---------------------------------------------- */
+
+/* The frame is sized by the coach's setting and can grow if the provider posts
+   a resize, so the height is an inline style -- everything else about the box
+   is here. `position: relative` is load-bearing: the loading line sits behind
+   the frame until the provider paints over it. */
+.player-booking-embed-frame {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 12px;
+  background: var(--pt-surface-soft);
+}
+
+.player-booking-embed-frame iframe {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  /* Transparent, not a colour of ours: the provider paints its own background,
+     and guessing at one puts a light band behind a dark widget. */
+  background: transparent;
+}
+
+.player-booking-embed-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  text-align: center;
+}
+
+.player-booking-embed-escape {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}

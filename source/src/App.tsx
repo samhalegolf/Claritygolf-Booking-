@@ -90,6 +90,16 @@ import {
   NOTIFICATION_VARIANTS,
 } from "../netlify/functions/_shared/notification-templates.mts";
 import type { NotificationTemplates } from "../netlify/functions/_shared/notification-templates.mts";
+import {
+  cleanPlayerBookingEmbedHeight,
+  cleanPlayerBookingEmbedIntro,
+  cleanPlayerBookingEmbedLabel,
+  cleanPlayerBookingEmbedUrl,
+  PLAYER_BOOKING_EMBED_DEFAULT_HEIGHT,
+  PLAYER_BOOKING_EMBED_DEFAULT_LABEL,
+  PLAYER_BOOKING_EMBED_MAX_HEIGHT,
+  PLAYER_BOOKING_EMBED_MIN_HEIGHT,
+} from "../netlify/functions/_shared/player-booking-embed.mts";
 import IntegrationsPanel from "./modules/integrations/IntegrationsPanel";
 import {
   BASE_WEEK_START,
@@ -1936,6 +1946,13 @@ type NotificationSettings = {
   notificationTemplates: NotificationTemplates;
   // What the map link beside the venue is called, on every message.
   mapLinkLabel: string;
+  // The player portal's slot for an outside booking widget: a URL, what the
+  // tab is called, a line above it and how tall it starts. An empty URL means
+  // the tab does not exist in the portal at all.
+  playerBookingEmbedUrl: string;
+  playerBookingEmbedLabel: string;
+  playerBookingEmbedIntro: string;
+  playerBookingEmbedHeight: number;
 };
 
 type ServiceEditor = Omit<Service, "id"> & {
@@ -5132,6 +5149,10 @@ const defaultNotificationSettings: NotificationSettings = {
   sendAdminSms: false,
   notificationTemplates: emptyNotificationTemplates(),
   mapLinkLabel: DEFAULT_MAP_LINK_LABEL,
+  playerBookingEmbedUrl: "",
+  playerBookingEmbedLabel: PLAYER_BOOKING_EMBED_DEFAULT_LABEL,
+  playerBookingEmbedIntro: "",
+  playerBookingEmbedHeight: PLAYER_BOOKING_EMBED_DEFAULT_HEIGHT,
 };
 
 const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
@@ -5882,6 +5903,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     value: notificationSettings,
     onSave: saveNotificationSettings,
   });
+  const playerBookingEmbedEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: saveNotificationSettings,
+  });
   const bookingScreenNameEditor = useEditableBlock<Record<string, string>>({
     value: bookingScreenNames,
     onSave: async (draft) => {
@@ -5899,6 +5924,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       { id: "message-templates", title: "Templates", editor: messageTemplatesEditor },
       { id: "booking-page-notice", title: "Booking Page notice", editor: bookingNoticeEditor },
       { id: "booking-screen-name", title: "Booking Page screen name", editor: bookingScreenNameEditor },
+      { id: "player-booking-embed", title: "Player portal booking widget", editor: playerBookingEmbedEditor },
     ],
     [
       coachAccountEditor,
@@ -5908,6 +5934,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       messageTemplatesEditor,
       bookingNoticeEditor,
       bookingScreenNameEditor,
+      playerBookingEmbedEditor,
     ],
   );
   // Which Settings section the coach profile asked to have open on arrival.
@@ -5979,6 +6006,9 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const bookingNoticeIsLocked = bookingNoticeEditor.status !== "editing" && bookingNoticeEditor.status !== "error";
   const bookingScreenNameDraft = bookingScreenNameEditor.draftValue;
   const bookingScreenNameIsLocked = bookingScreenNameEditor.status !== "editing" && bookingScreenNameEditor.status !== "error";
+  const playerBookingEmbedDraft = playerBookingEmbedEditor.draftValue;
+  const playerBookingEmbedIsLocked =
+    playerBookingEmbedEditor.status !== "editing" && playerBookingEmbedEditor.status !== "error";
 
   function updateCoachAccountBlockDraft<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
     coachAccountEditor.setDraftValue((current) => cleanCoachAccount({ ...current, [field]: value }));
@@ -7702,6 +7732,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         typeof settings?.mapLinkLabel === "string" && settings.mapLinkLabel.trim()
           ? settings.mapLinkLabel
           : DEFAULT_MAP_LINK_LABEL,
+      // The same cleaners the API writes through, so what the panel shows after
+      // a save is what the portal will actually be handed -- an http:// URL
+      // reads back blank here for the same reason it does there.
+      playerBookingEmbedUrl: cleanPlayerBookingEmbedUrl(settings?.playerBookingEmbedUrl),
+      playerBookingEmbedLabel: cleanPlayerBookingEmbedLabel(settings?.playerBookingEmbedLabel),
+      playerBookingEmbedIntro: cleanPlayerBookingEmbedIntro(settings?.playerBookingEmbedIntro),
+      playerBookingEmbedHeight: cleanPlayerBookingEmbedHeight(settings?.playerBookingEmbedHeight),
     });
   }
 
@@ -20097,6 +20134,122 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     </SettingsGroup>
   );
 
+  /**
+   * Where a business points its players when its bays, bookings or tee times
+   * live somewhere else.
+   *
+   * This does not touch Lessons > Book, which is Clarity's own booking against
+   * the coach's calendar. It adds a second tab to the player portal, named by
+   * the business, holding whatever booking page it already runs. Empty URL,
+   * no tab.
+   */
+  const playerBookingEmbedPanel = (
+    <SettingsGroup id="player-booking-embed" section="booking" title="Player portal booking widget">
+      <EditableSettingsBlock
+        id="player-booking-embed-block"
+        title="Player portal booking widget"
+        status={playerBookingEmbedEditor.status}
+        dirty={playerBookingEmbedEditor.dirty}
+        errorMessage={playerBookingEmbedEditor.errorMessage}
+        onEdit={() => startEditableBlock("player-booking-embed")}
+        onCancel={() => cancelEditableBlock("player-booking-embed")}
+        onSave={() => void saveEditableBlock("player-booking-embed")}
+      >
+        <details className="settings-subsection">
+          <summary className="settings-subsection-title">
+            <ExternalLink size={18} />
+            <div>
+              <span>Outside booking page</span>
+              <strong>
+                {playerBookingEmbedDraft.playerBookingEmbedUrl
+                  ? `Shown as "${playerBookingEmbedDraft.playerBookingEmbedLabel}"`
+                  : "Not set"}
+              </strong>
+            </div>
+          </summary>
+          <label className="settings-field">
+            <span>Booking page address</span>
+            <input
+              type="url"
+              inputMode="url"
+              placeholder="https://booking.yourvenue.com/…"
+              value={playerBookingEmbedDraft.playerBookingEmbedUrl}
+              readOnly={playerBookingEmbedIsLocked}
+              onChange={(event) =>
+                updateNotificationBlockDraft(
+                  playerBookingEmbedEditor,
+                  "playerBookingEmbedUrl",
+                  event.target.value.slice(0, 700),
+                )
+              }
+            />
+          </label>
+          <p className="field-help">
+            Must start with https. Leave it empty and players see no extra tab. Some providers block
+            being framed — open the tab in the portal to check before telling players about it.
+          </p>
+          <div className="service-form-row">
+            <label className="settings-field">
+              <span>Tab name</span>
+              <input
+                placeholder={PLAYER_BOOKING_EMBED_DEFAULT_LABEL}
+                value={playerBookingEmbedDraft.playerBookingEmbedLabel}
+                readOnly={playerBookingEmbedIsLocked}
+                onChange={(event) =>
+                  updateNotificationBlockDraft(
+                    playerBookingEmbedEditor,
+                    "playerBookingEmbedLabel",
+                    event.target.value.slice(0, 24),
+                  )
+                }
+              />
+            </label>
+            <label className="settings-field">
+              <span>Starting height in pixels</span>
+              <input
+                type="number"
+                min={PLAYER_BOOKING_EMBED_MIN_HEIGHT}
+                max={PLAYER_BOOKING_EMBED_MAX_HEIGHT}
+                step={20}
+                value={playerBookingEmbedDraft.playerBookingEmbedHeight}
+                readOnly={playerBookingEmbedIsLocked}
+                onChange={(event) =>
+                  updateNotificationBlockDraft(
+                    playerBookingEmbedEditor,
+                    "playerBookingEmbedHeight",
+                    Number(event.target.value || PLAYER_BOOKING_EMBED_DEFAULT_HEIGHT),
+                  )
+                }
+              />
+            </label>
+          </div>
+          <p className="field-help">
+            The tab is called "Bay", "Tee times" or whatever your players call it. The height is only
+            a starting point — providers that ask for more room get it.
+          </p>
+          <label className="settings-field">
+            <span>Line above the widget</span>
+            <input
+              placeholder="Bays only — lessons are under Lessons."
+              value={playerBookingEmbedDraft.playerBookingEmbedIntro}
+              readOnly={playerBookingEmbedIsLocked}
+              onChange={(event) =>
+                updateNotificationBlockDraft(
+                  playerBookingEmbedEditor,
+                  "playerBookingEmbedIntro",
+                  event.target.value.slice(0, 240),
+                )
+              }
+            />
+          </label>
+          <p className="field-help">
+            Optional. Worth setting if the difference between this and booking a lesson is not obvious.
+          </p>
+        </details>
+      </EditableSettingsBlock>
+    </SettingsGroup>
+  );
+
   const bookingSettingsPanel = (
     <SettingsGroup id="booking-page" section="booking" title="Booking page" className="booking-page-settings">
       <details className="settings-subsection">
@@ -27560,6 +27713,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
               {isAdminUser ? locationsSettingsPanel : null}
               {availabilitySettingsPanel}
               {bookingSettingsPanel}
+              {isAdminUser ? playerBookingEmbedPanel : null}
               <SettingsGroup id="coach-account" section="account" title="Coach account" className="notification-card account-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
