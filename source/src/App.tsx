@@ -19415,10 +19415,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
                 </label>
                 <label className="settings-field">
                   <span>Lesson note</span>
+                  {/* Optional and free text. The placeholder is a generic hint on
+                      purpose -- it used to read "Bay hire included", one
+                      business's own wording, which read as a prescribed value. */}
                   <input
                     value={serviceEditor.lessonNote ?? serviceEditor.location ?? ""}
                     onChange={(event) => updateServiceEditor("lessonNote", event.target.value)}
-                    placeholder="Bay hire included"
+                    placeholder="Optional"
                   />
                 </label>
               </div>

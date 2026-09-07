@@ -599,8 +599,26 @@ function cleanEditableServiceText(value, fallback = "", max = 600) {
   return fallback;
 }
 
+// The per-field fallback for a service. Mirrors the frontend's
+// neutralServiceFallback in src/App.tsx.
+//
+// This used to be defaultServices[index] -- the original coach's real lesson
+// list -- so a service arriving with a missing name, price or note had that
+// coach's name, price and "Bay hire included" written into it. Structural
+// defaults (a duration, a capacity of one) are product-level and stay; anything
+// a coach would recognise as *theirs* does not.
+const neutralServiceFallback = {
+  ...defaultServices[0],
+  id: "",
+  name: "",
+  description: "",
+  lessonNote: "",
+  location: "",
+  price: 0,
+};
+
 function cleanService(service, index = 0, accountId = "") {
-  const fallback = defaultServices[index] ?? defaultServices[0];
+  const fallback = neutralServiceFallback;
   const descriptionFallback = service ? "" : fallback.description;
   const locationFallback = service ? "" : fallback.location;
   const lessonNoteFallback = service ? service.location || "" : fallback.lessonNote || fallback.location || "";
