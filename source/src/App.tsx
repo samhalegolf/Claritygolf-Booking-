@@ -73,6 +73,19 @@ import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Perso
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
 import {
+  cleanLessonNotes as cleanLessonNotesWith,
+  type LessonNote,
+  type LessonNoteSource,
+  type NotesResult,
+} from "./modules/player-profiles/lessonNotesModel";
+import {
+  isUnauthorizedNotesError,
+  loadLessonNotes,
+  replaceLessonNotes,
+  resetLessonNotes,
+  useLessonNotesState,
+} from "./modules/player-profiles/lessonNotesStore";
+import {
   canonicalPhoneKey as sharedCanonicalPhoneKey,
   cleanPhoneCountry,
   dialCodeFor,
@@ -84,7 +97,6 @@ import {
 } from "../netlify/functions/_shared/phone.mts";
 import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
 import { MessageTemplatesPanel } from "./modules/notifications/MessageTemplatesPanel";
-import { InvoiceTemplatePanel } from "./modules/billing/InvoiceTemplatePanel";
 import { CoachProfilePanel } from "./modules/profile/CoachProfilePanel";
 import type { ProfileInternalJob, ProfileTarget } from "./modules/profile/CoachProfilePanel";
 import {
@@ -195,17 +207,12 @@ import type {
   CouponRedemption,
   CouponImportCandidate,
 } from "./modules/billing/types";
-import { PosCheckoutModal } from "./modules/billing/PosCheckoutModal";
 import {
   defaultInvoiceSettings,
   cleanInvoiceSettings,
   printableInvoiceCustomFields,
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
-import { BillingReportsPanel } from "./modules/billing/BillingReportsPanel";
-import { ProductsPanel } from "./modules/billing/ProductsPanel";
-import { SellScreen } from "./modules/billing/SellScreen";
-import { CouponsPanel } from "./modules/billing/CouponsPanel";
 import type { CouponIssueValues } from "./modules/billing/CouponsPanel";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
 import {
@@ -283,6 +290,36 @@ const PracticeSettingsPanel = lazy(() =>
 const ClientsPanel = lazy(() =>
   import("./modules/clients/ClientsPanel").then((module) => ({ default: module.ClientsPanel })),
 ) as unknown as typeof ClientsPanelComponent;
+
+// The billing screens. Every coach downloaded all six with the workspace,
+// including the ones whose plan has no billing at all; now each arrives when
+// it is first drawn. The maths and types they share with the workspace stay
+// static -- they are small, and the calendar needs them for the Paid marker.
+const SellScreen = lazy(() => import("./modules/billing/SellScreen").then((module) => ({ default: module.SellScreen })));
+const ProductsPanel = lazy(() => import("./modules/billing/ProductsPanel").then((module) => ({ default: module.ProductsPanel })));
+const CouponsPanel = lazy(() => import("./modules/billing/CouponsPanel").then((module) => ({ default: module.CouponsPanel })));
+const BillingReportsPanel = lazy(() =>
+  import("./modules/billing/BillingReportsPanel").then((module) => ({ default: module.BillingReportsPanel })),
+);
+const InvoiceTemplatePanel = lazy(() =>
+  import("./modules/billing/InvoiceTemplatePanel").then((module) => ({ default: module.InvoiceTemplatePanel })),
+);
+const PosCheckoutModal = lazy(() =>
+  import("./modules/billing/PosCheckoutModal").then((module) => ({ default: module.PosCheckoutModal })),
+);
+
+/**
+ * Run `task` when the browser has a quiet moment, or after `fallbackMs` if it
+ * never offers one (Safari has no requestIdleCallback). Returns a cancel.
+ */
+function whenIdle(task: () => void, fallbackMs: number): () => void {
+  if (typeof window.requestIdleCallback === "function") {
+    const id = window.requestIdleCallback(() => task(), { timeout: fallbackMs * 2 });
+    return () => window.cancelIdleCallback(id);
+  }
+  const id = window.setTimeout(task, fallbackMs);
+  return () => window.clearTimeout(id);
+}
 
 /**
  * Starts a player's practice read the moment their profile opens, rather than
@@ -900,28 +937,10 @@ function cleanNotificationRecords(notifications: unknown[]): NotificationRecord[
   return notifications.map((notification) => cleanNotificationRecord((notification ?? {}) as Partial<NotificationRecord>));
 }
 
-function cleanLessonNote(note: Partial<LessonNote> & { id?: unknown } = {}): LessonNote {
-  const createdAt = safeText(note.createdAt) || new Date().toISOString();
-  return {
-    id: safeText(note.id),
-    accountId: safeText(note.accountId) || defaultWorkspaceAccountFromCoachAccount().id,
-    playerId: safeText(note.playerId),
-    playerName: safeText(note.playerName),
-    lessonId: safeText(note.lessonId),
-    calendarItemId: safeText(note.calendarItemId),
-    title: safeText(note.title) || "Lesson note",
-    body: safeText(note.body),
-    source: note.source === "voice" ? "voice" : "typed",
-    createdAt,
-    updatedAt: safeText(note.updatedAt) || createdAt,
-  };
-}
-
+// The note normaliser lives in modules/player-profiles/lessonNotesModel. This
+// keeps the workspace's fallback account on any note that arrives without one.
 function cleanLessonNotes(notes: unknown[]): LessonNote[] {
-  return notes
-    .map((note) => cleanLessonNote((note ?? {}) as Partial<LessonNote>))
-    .filter((note) => note.playerId && note.body)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return cleanLessonNotesWith(notes, defaultWorkspaceAccountFromCoachAccount().id);
 }
 
 type PeopleImportResult = {
@@ -940,26 +959,6 @@ type PeopleUpdateResult = {
   people: Person[];
 };
 
-type LessonNoteSource = "typed" | "voice";
-
-type LessonNote = {
-  id: string;
-  accountId: string;
-  playerId: string;
-  playerName: string;
-  lessonId: string;
-  calendarItemId: string;
-  title: string;
-  body: string;
-  source: LessonNoteSource;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type NotesResult = {
-  note?: LessonNote;
-  notes?: LessonNote[];
-};
 
 type ClientEditor = Pick<Person, "id" | "name" | "email" | "phone" | "notes" | "caddyProfileId" | "caddyProfileUrl">;
 
@@ -5354,6 +5353,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       if (next === "guest") {
         // The next sign-in on this browser may be a different business.
         resetClients();
+        resetLessonNotes();
         onSessionLost?.();
       }
     },
@@ -5404,7 +5404,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // survives because the writes that answer with a fresh list all use it.
   const { people, status: clientsLoadStatus } = useClientsState();
   const setPeople = replaceClients;
-  const [lessonNotes, setLessonNotes] = useState<LessonNote[]>([]);
+  // Lesson notes are owned by modules/player-profiles/lessonNotesStore, the
+  // other half of what Player Profiles needs before it can list anyone.
+  const { notes: lessonNotes } = useLessonNotesState();
+  const setLessonNotes = replaceLessonNotes;
   const [lessonNoteBusy, setLessonNoteBusy] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [peopleImportText, setPeopleImportText] = useState("");
@@ -5454,25 +5457,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     createdStamps: {},
   }));
   // Player Profiles promotes a client when a lesson note, saved video, or cloud
-  // import references them -- but those four sources load independently and at
-  // different speeds (two network fetches, an IndexedDB read, and a chained
-  // Drive-status-then-cloud-catalogue fetch). Track when each has settled at
-  // least once so the page can show a loading state instead of a misleading
-  // "No player profiles yet" while some of them are still in flight.
+  // import references them -- but those sources load independently and at
+  // different speeds. Track when each has settled at least once so the page
+  // can show a loading state instead of a misleading "No player profiles yet"
+  // while some are still in flight. Cloud imports are deliberately not in
+  // this set: they come back from Google, and a profile that exists only
+  // because of a cloud video simply joins the list when they land. The list
+  // waits on the two server reads (both prefetched by the entry point for a
+  // returning coach) and the local video scan, and no longer on the slowest
+  // thing on the page.
   const [playerProfilesSourcesReady, setPlayerProfilesSourcesReady] = useState({
     people: false,
     notes: false,
     videos: false,
-    cloudImports: false,
   });
   const markPlayerProfilesSourceReady = useCallback((source: keyof typeof playerProfilesSourcesReady) => {
     setPlayerProfilesSourcesReady((current) => (current[source] ? current : { ...current, [source]: true }));
   }, []);
   const playerProfilesDataReady =
-    playerProfilesSourcesReady.people &&
-    playerProfilesSourcesReady.notes &&
-    playerProfilesSourcesReady.videos &&
-    playerProfilesSourcesReady.cloudImports;
+    playerProfilesSourcesReady.people && playerProfilesSourcesReady.notes && playerProfilesSourcesReady.videos;
   const [savedVideoItems, setSavedVideoItems] = useState<SavedVideoItem[]>([]);
   const [legacyVideoRecords, setLegacyVideoRecords] = useState<StoredVideoRecord[]>([]);
   const [uploadingSavedVideoIds, setUploadingSavedVideoIds] = useState<Set<string>>(() => new Set());
@@ -5528,7 +5531,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   useEffect(() => {
     if (activeView === "players") {
       refreshSavedVideoLibrary();
-      void refreshLessonNotes();
+      // Notes written this session already replaced the list as they were
+      // saved, so a list fresh from the last half minute is not asked for again.
+      void refreshLessonNotes({ maxAgeMs: 30_000 });
       void refreshPortalPlayers();
     }
   }, [activeView, refreshSavedVideoLibrary]);
@@ -7480,24 +7485,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
-  async function refreshLessonNotes(runId?: number) {
+  /** Same shape as refreshPeopleList: the store reads, this decides what a failure means. */
+  async function refreshLessonNotes(options: { maxAgeMs?: number } = {}) {
     if (isEmbedMode || authStatus !== "authenticated") return;
     try {
-      const response = await fetch("/api/notes", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (runId !== undefined && !shouldApplyAdminWorkspaceDetail(runId)) return;
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        return;
-      }
-      if (!response.ok) return;
-      const data = (await response.json().catch(() => ({}))) as NotesResult;
-      if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
-    } catch {
-      // Lesson notes are secondary to the calendar frame.
+      await loadLessonNotes(options);
+    } catch (error) {
+      if (isUnauthorizedNotesError(error)) setAuthStatus("guest");
+      // Otherwise: lesson notes are secondary to the calendar frame.
     } finally {
       markPlayerProfilesSourceReady("notes");
     }
@@ -8108,7 +8103,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // the calendar nothing and cost Clients and Player Profiles a whole round
     // trip after the page already looked ready.
     window.setTimeout(() => void refreshPeopleList({ maxAgeMs: 30_000 }), 0);
-    window.setTimeout(() => void refreshLessonNotes(runId), 0);
+    window.setTimeout(() => void refreshLessonNotes({ maxAgeMs: 30_000 }), 0);
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
@@ -15709,11 +15704,31 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
+  // Billing data is not part of the calendar frame. It used to load the moment
+  // the plan allowed it: seven billing-api calls at boot, racing the calendar
+  // shell, whether or not the coach ever opened Billing -- and now that the
+  // session answer carries the plan, that would have been from the very first
+  // render. It loads when the Sell or Billing screen asks for it, and otherwise
+  // in a quiet moment after the calendar has painted, so the first click
+  // usually finds it ready. The till checkout reads its own catalogue and is
+  // not gated on this.
+  const billingWorkspaceWanted =
+    activeView === "sell" || activeView === "billing" || workspaceOverlay?.kind === "billing";
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
     if (billingDataLoadState !== "idle") return;
-    void loadBillingWorkspace();
-  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, billingDataLoadState]);
+    if (billingWorkspaceWanted) {
+      void loadBillingWorkspace();
+      return;
+    }
+    if (adminWorkspaceLoadStatus !== "loaded") return;
+    return whenIdle(() => {
+      void loadBillingWorkspace();
+      // The checkout opens over the calendar, so its chunk is worth having
+      // before the first "Pay" is pressed.
+      void import("./modules/billing/PosCheckoutModal").catch(() => undefined);
+    }, 2000);
+  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, billingDataLoadState, billingWorkspaceWanted, adminWorkspaceLoadStatus]);
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
@@ -17817,8 +17832,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // Not connected yet, or the import inbox is temporarily unavailable;
       // the status cards elsewhere show provider health separately.
       setClarityCloudImports([]);
-    } finally {
-      markPlayerProfilesSourceReady("cloudImports");
     }
   }
 
@@ -22842,7 +22855,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     ) : (
                       <>
                         <h2>Loading player profiles…</h2>
-                        <p>Fetching lesson notes, saved videos, and cloud imports.</p>
+                        <p>Fetching lesson notes and saved videos.</p>
                       </>
                     )}
                   </div>
@@ -24175,19 +24188,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         )}
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "sell" && (
-          <SellScreen
-            currency={invoiceSettings.currency}
-            taxName={invoiceSettings.taxName}
-            defaultTaxRate={invoiceSettings.taxRate}
-            catalog={catalogItems}
-            catalogState={catalogLoadState}
-            onReloadCatalog={() => void fetchBillingProducts().catch(() => {})}
-            formatMoney={formatMoney}
-            clients={clients}
-            onCreateClient={createClientFromTill}
-            onSaleCompleted={handlePosSaleChanged}
-            onToast={(message) => setToast({ message })}
-          />
+          <Suspense fallback={<div className="module-loading">Loading the till…</div>}>
+            <SellScreen
+              currency={invoiceSettings.currency}
+              taxName={invoiceSettings.taxName}
+              defaultTaxRate={invoiceSettings.taxRate}
+              catalog={catalogItems}
+              catalogState={catalogLoadState}
+              onReloadCatalog={() => void fetchBillingProducts().catch(() => {})}
+              formatMoney={formatMoney}
+              clients={clients}
+              onCreateClient={createClientFromTill}
+              onSaleCompleted={handlePosSaleChanged}
+              onToast={(message) => setToast({ message })}
+            />
+          </Suspense>
         )}
 
         {!isEmbedMode && adminWorkspaceReady && (activeView === "billing" || workspaceOverlay?.kind === "billing") && (
@@ -26257,36 +26272,40 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 and also appear on an invoice, so combining them would
                 double-count. */}
             {billingSection === "products" && (
-              <ProductsPanel
-                products={catalogItems}
-                loadState={catalogLoadState}
-                currency={invoiceSettings.currency}
-                defaultTaxRate={invoiceSettings.taxRate}
-                formatMoney={formatMoney}
-                onReload={() => void fetchBillingProducts()}
-                onSave={saveProduct}
-                onSetActive={setProductActive}
-                onAdjustStock={adjustProductStock}
-                onLoadMovements={fetchStockMovements}
-                onEditLessonTypes={() =>
-                  openProfileTarget({ kind: "settings", tab: "services" }, "Lesson types")
-                }
-              />
+              <Suspense fallback={<div className="module-loading">Loading products…</div>}>
+                <ProductsPanel
+                  products={catalogItems}
+                  loadState={catalogLoadState}
+                  currency={invoiceSettings.currency}
+                  defaultTaxRate={invoiceSettings.taxRate}
+                  formatMoney={formatMoney}
+                  onReload={() => void fetchBillingProducts()}
+                  onSave={saveProduct}
+                  onSetActive={setProductActive}
+                  onAdjustStock={adjustProductStock}
+                  onLoadMovements={fetchStockMovements}
+                  onEditLessonTypes={() =>
+                    openProfileTarget({ kind: "settings", tab: "services" }, "Lesson types")
+                  }
+                />
+              </Suspense>
             )}
 
             {billingSection === "coupons" && (
-              <CouponsPanel
-                coupons={coupons}
-                loadState={couponsLoadState}
-                currency={invoiceSettings.currency}
-                formatMoney={formatMoney}
-                onReload={() => void fetchCoupons()}
-                onIssue={issueCoupon}
-                onSetVoid={setCouponVoid}
-                onLoadRedemptions={fetchCouponRedemptions}
-                onFindStripeCandidates={findStripeCouponCandidates}
-                onImport={importStripeCoupons}
-              />
+              <Suspense fallback={<div className="module-loading">Loading coupons…</div>}>
+                <CouponsPanel
+                  coupons={coupons}
+                  loadState={couponsLoadState}
+                  currency={invoiceSettings.currency}
+                  formatMoney={formatMoney}
+                  onReload={() => void fetchCoupons()}
+                  onIssue={issueCoupon}
+                  onSetVoid={setCouponVoid}
+                  onLoadRedemptions={fetchCouponRedemptions}
+                  onFindStripeCandidates={findStripeCouponCandidates}
+                  onImport={importStripeCoupons}
+                />
+              </Suspense>
             )}
 
             {billingSection === "transactions" && (
@@ -26461,26 +26480,28 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             )}
 
             {billingSection === "reports" && (
-              <BillingReportsPanel
-                summary={reportSummary}
-                loadState={reportLoadState}
-                preset={reportPreset}
-                onSelectPreset={handleSelectReportPreset}
-                customStart={reportCustomStart}
-                customEnd={reportCustomEnd}
-                onCustomStartChange={setReportCustomStart}
-                onCustomEndChange={setReportCustomEnd}
-                onApplyCustom={handleApplyReportCustomRange}
-                onExportCsv={handleExportReportCsv}
-                onDownloadPdf={handleDownloadReportPdf}
-                onRetry={() => void fetchReportSummary(reportRange.start, reportRange.end)}
-                enabledSections={reportSections}
-                onToggleSection={handleToggleReportSection}
-                excludedCategories={reportExcludedCategories}
-                onToggleCategory={handleToggleReportCategory}
-                onClearCategories={() => setReportExcludedCategories([])}
-                formatMoney={formatMoney}
-              />
+              <Suspense fallback={<div className="module-loading">Loading reports…</div>}>
+                <BillingReportsPanel
+                  summary={reportSummary}
+                  loadState={reportLoadState}
+                  preset={reportPreset}
+                  onSelectPreset={handleSelectReportPreset}
+                  customStart={reportCustomStart}
+                  customEnd={reportCustomEnd}
+                  onCustomStartChange={setReportCustomStart}
+                  onCustomEndChange={setReportCustomEnd}
+                  onApplyCustom={handleApplyReportCustomRange}
+                  onExportCsv={handleExportReportCsv}
+                  onDownloadPdf={handleDownloadReportPdf}
+                  onRetry={() => void fetchReportSummary(reportRange.start, reportRange.end)}
+                  enabledSections={reportSections}
+                  onToggleSection={handleToggleReportSection}
+                  excludedCategories={reportExcludedCategories}
+                  onToggleCategory={handleToggleReportCategory}
+                  onClearCategories={() => setReportExcludedCategories([])}
+                  formatMoney={formatMoney}
+                />
+              </Suspense>
             )}
 
             {billingSection === "settings" && (
@@ -27972,14 +27993,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         so they are written on it — see InvoiceTemplatePanel.
                         Numbering, currency, tax rate and terms stay fields:
                         they are settings, not things printed on the page. */}
-                    <InvoiceTemplatePanel
-                      settings={invoiceSettingsDraft}
-                      locked={billingSettingsIsLocked}
-                      businessName={coachAccount.businessName}
-                      logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
-                      formatMoney={(value) => formatMoney(value, invoiceSettingsDraft.currency)}
-                      onChange={(field, value) => updateBillingAccountDraft(field, value)}
-                    />
+                    <Suspense fallback={<div className="module-loading">Loading invoice template…</div>}>
+                      <InvoiceTemplatePanel
+                        settings={invoiceSettingsDraft}
+                        locked={billingSettingsIsLocked}
+                        businessName={coachAccount.businessName}
+                        logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
+                        formatMoney={(value) => formatMoney(value, invoiceSettingsDraft.currency)}
+                        onChange={(field, value) => updateBillingAccountDraft(field, value)}
+                      />
+                    </Suspense>
                     <div className="custom-field-list">
                       <div className="services-topline">
                         <div>
@@ -30451,14 +30474,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       )}
 
       {!isEmbedMode && posCheckout && (
-        <PosCheckoutModal
-          context={posCheckout}
-          currency={invoiceSettings.currency}
-          formatMoney={formatMoney}
-          onClose={() => setPosCheckout(null)}
-          onCompleted={handlePosSaleChanged}
-          onToast={(message) => setToast({ message })}
-        />
+        <Suspense fallback={null}>
+          <PosCheckoutModal
+            context={posCheckout}
+            currency={invoiceSettings.currency}
+            formatMoney={formatMoney}
+            onClose={() => setPosCheckout(null)}
+            onCompleted={handlePosSaleChanged}
+            onToast={(message) => setToast({ message })}
+          />
+        </Suspense>
       )}
 
       {toast && (

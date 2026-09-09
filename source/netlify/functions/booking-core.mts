@@ -12141,8 +12141,8 @@ async function routeBookingApiRequest(
     // --- Portal access (admin) ---------------------------------------------
     // Granting is the coach's decision, made per player in Player Profiles.
     if (req.method === "GET" && pathname === "/api/portal-players") {
-      const state = await readCalendarState(await currentAccountId(req));
-      const requestContext = await resolveBackendRequestContext(req, state);
+      // Settings only, for the same reason as /api/notes above.
+      const requestContext = await resolveBackendRequestContext(req, await readSettingsState(await currentAccountId(req)));
       assertAccountFeature(requestContext.account, "clients");
       return json({ portalPlayers: await listPortalPlayers(requestContext.accountId) });
     }
@@ -12254,8 +12254,9 @@ async function routeBookingApiRequest(
     }
 
     if (req.method === "GET" && pathname === "/api/notes") {
-      const state = await readCalendarState(await currentAccountId(req));
-      const requestContext = await resolveBackendRequestContext(req, state);
+      // Settings only: nothing below reads the calendar, and Player Profiles
+      // waits on this answer before it can list anyone.
+      const requestContext = await resolveBackendRequestContext(req, await readSettingsState(await currentAccountId(req)));
       assertAccountFeature(requestContext.account, "clients");
       const playerId = cleanString(url.searchParams.get("playerId"), "", 160);
       const calendarItemId = cleanString(url.searchParams.get("calendarItemId"), "", 160);

@@ -56,6 +56,11 @@ if (!publicBookingOnly && !videoShare && lastVisitorWasCoach()) {
   void import("./modules/clients/clientsStore")
     .then((store) => store.prefetchClients())
     .catch(() => undefined);
+  // And the lesson notes: Player Profiles cannot list anyone until both have
+  // answered, so both start now.
+  void import("./modules/player-profiles/lessonNotesStore")
+    .then((store) => store.prefetchLessonNotes())
+    .catch(() => undefined);
 }
 
 let adminHooksInstalled = false;
