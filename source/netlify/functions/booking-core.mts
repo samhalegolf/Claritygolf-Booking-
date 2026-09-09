@@ -2476,10 +2476,50 @@ async function backfillLegacyPeopleAccountIds(accountId) {
  * is making a request -- a second business is provisioned with its own rows,
  * not by running this again.
  */
+/**
+ * Whether this database has already been through the seed below.
+ *
+ * One round trip, and it decides whether a new container pays for eight. Every
+ * cold start used to run the whole seed -- DDL for every table, the default
+ * settings, the legacy backfill, two counts and the admin user -- in series,
+ * at ~217 ms per hop between Netlify and Supabase, before answering anything.
+ * With seven requests fanning out at boot, that was seven containers each
+ * spending well over a second on work that had been done months ago. The
+ * schema is the migration runner's job now (scripts/migrate.mjs, on deploy),
+ * and the seed only matters on a database that has never seen one.
+ *
+ * The probe reads the admin seed marker rather than any settings row, so a
+ * rotated CLARITY_ADMIN_PASSWORD still reaches the legacy admin user: the
+ * marker stops matching, the full seed runs once, and ensureAdminUser rotates
+ * it as before. A missing table throws, which reads as "fresh database".
+ * CLARITY_RUNTIME_SEED=always is the escape hatch back to the old behaviour.
+ */
+async function seededAlready(accountId: string) {
+  if (env("CLARITY_RUNTIME_SEED") === "always") return false;
+  try {
+    const email = cleanEmail(env("CLARITY_ADMIN_EMAIL"), "");
+    const password = env("CLARITY_ADMIN_PASSWORD");
+    const rows = await db().sql`
+      SELECT key, value FROM settings
+      WHERE account_id = ${accountId} AND key IN ('adminPasswordSeedKey', 'accountBusinessName')
+    `;
+    if (!rows.length) return false;
+    if (!email || !password) return true;
+    const marker = rows.find((row) => row.key === "adminPasswordSeedKey");
+    return Boolean(marker) && marker.value === hashToken(`${email}:${password}`);
+  } catch {
+    return false;
+  }
+}
+
 async function ensureSeeded() {
   if (!seedReadyPromise) {
     seedReadyPromise = (async () => {
       const originalWorkspaceId = legacyOriginalWorkspaceId();
+      if (await seededAlready(originalWorkspaceId)) {
+        console.info("runtime_seed_skipped", { reason: "already_seeded" });
+        return;
+      }
       await ensureCoreTables();
       await seedSettings(originalWorkspaceId);
       await backfillLegacyPeopleAccountIds(originalWorkspaceId);
@@ -9240,7 +9280,9 @@ async function readPlayerProfile(session) {
 }
 
 async function readBackendSettings(accountId: string) {
-  return readCalendarState(accountId);
+  // Who is asking and what they may do: settings only. The calendar itself
+  // is read by the routes that answer with bookings, not by every route.
+  return readSettingsState(accountId);
 }
 
 /**
@@ -11925,24 +11967,33 @@ async function routeBookingApiRequest(
     }
 
     if (req.method === "GET" && pathname === "/api/admin-settings") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountAdminContext(requestContext, "You do not have permission to view account settings.");
       return json(await readAdminSettings(await currentAccountId(req)));
     }
 
     if ((req.method === "PUT" || req.method === "POST") && pathname === "/api/admin-settings") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountAdminContext(requestContext, "You do not have permission to change account settings.");
       return json(await writeAdminSettings(await currentAccountId(req), await parseBody(req)));
     }
 
     if (req.method === "GET" && pathname === "/api/notification-history") {
-      const state = await readCalendarState(await currentAccountId(req));
-      const requestContext = await resolveBackendRequestContext(req, state);
+      // Same split as /api/people: an admin sees the whole account's history
+      // without the calendar being read; only a coach-scoped user needs the
+      // bookings, to keep to the notifications on their own lessons.
+      const settingsState = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, settingsState);
       assertAccountFeature(requestContext.account, "notifications");
-      return json({ notifications: filterNotificationsForContext(await readNotificationHistory(await currentAccountId(req)), requestContext, state) });
+      const [notifications, state] = await Promise.all([
+        readNotificationHistory(requestContext.accountId),
+        requestContext.isAdmin
+          ? Promise.resolve(settingsState)
+          : readItems(requestContext.accountId).then((items) => ({ ...settingsState, items })),
+      ]);
+      return json({ notifications: filterNotificationsForContext(notifications, requestContext, state) });
     }
 
     if (req.method === "POST" && pathname === "/api/booking-confirmation-resend") {
@@ -11954,7 +12005,7 @@ async function routeBookingApiRequest(
 
     if (req.method === "POST" && pathname === "/api/test-email") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountAdminContext(requestContext, "You do not have permission to send test emails.");
       assertAccountFeature(requestContext.account, "notifications");
@@ -12015,7 +12066,7 @@ async function routeBookingApiRequest(
 
     if (req.method === "PUT" && pathname === "/api/coach-account") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountAdminContext(requestContext, "You do not have permission to change business account settings.");
       if (body?.invoiceSettings?.enabled) assertAccountFeature(requestContext.account, "invoicing");
@@ -12023,7 +12074,7 @@ async function routeBookingApiRequest(
     }
 
     if (req.method === "GET" && pathname === "/api/services") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       return json({
         services: state.services.filter((service) => serviceBelongsToContext(service, requestContext, state.coaches)),
@@ -12032,7 +12083,7 @@ async function routeBookingApiRequest(
 
     if (req.method === "PUT" && pathname === "/api/services") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "services");
       const nextServices = mergeServicesForContext(body.services || [], state.services, requestContext, state.coaches);
@@ -12050,7 +12101,7 @@ async function routeBookingApiRequest(
 
     if (req.method === "PUT" && pathname === "/api/locations") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountAdminContext(requestContext, "You do not have permission to manage locations.");
       return json({ locations: await writeLocations(requestContext.accountId, body.locations, requestContext) });
@@ -12067,14 +12118,14 @@ async function routeBookingApiRequest(
 
     if (req.method === "PUT" && pathname === "/api/coaches") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountAdminContext(requestContext, "You do not have permission to manage coaches.");
       return json({ coaches: await writeCoachProfiles(requestContext.accountId, body.coaches, requestContext) });
     }
 
     if (req.method === "GET" && pathname === "/api/availability") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       const fallbackCoachId = defaultCoachId(state.coaches);
       return json({
@@ -12086,7 +12137,7 @@ async function routeBookingApiRequest(
 
     if (req.method === "PUT" && pathname === "/api/availability") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       const nextAvailability = mergeAvailabilityForContext(
         body.availability || [],
@@ -12113,7 +12164,7 @@ async function routeBookingApiRequest(
     }
 
     if (req.method === "PUT" && pathname === "/api/brand-settings") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountAdminContext(requestContext, "You do not have permission to change brand settings.");
       assertAccountFeature(requestContext.account, "customBranding");
@@ -12150,7 +12201,7 @@ async function routeBookingApiRequest(
     // POST both grants access and resends the invite -- for a player who
     // already has a row it just issues a fresh set-password link.
     if (req.method === "POST" && pathname === "/api/portal-players") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const body = await parseBody(req);
@@ -12172,7 +12223,7 @@ async function routeBookingApiRequest(
     // Taking them from the body would turn the coach's own UI into an
     // arbitrary-person-creation endpoint.
     if (req.method === "POST" && pathname === "/api/guest-players") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const body = await parseBody(req);
@@ -12220,7 +12271,7 @@ async function routeBookingApiRequest(
     // The Caddy card on a Booking player profile. Read-only, and it never
     // fails the page: an unreachable Caddy comes back as unavailable.
     if (req.method === "GET" && pathname === "/api/caddy-status") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const personId = cleanString(url.searchParams.get("personId"), "", 160);
@@ -12240,7 +12291,7 @@ async function routeBookingApiRequest(
     }
 
     if (req.method === "DELETE" && pathname === "/api/portal-players") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const portalPlayerId =
@@ -12270,7 +12321,7 @@ async function routeBookingApiRequest(
 
     if ((req.method === "POST" || req.method === "PUT") && pathname === "/api/notes") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const result = await upsertLessonNote(body.note || body, requestContext.accountId);
@@ -12278,7 +12329,7 @@ async function routeBookingApiRequest(
     }
 
     if (req.method === "DELETE" && pathname === "/api/notes") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const noteId = cleanString(url.searchParams.get("id"), "", 120);
@@ -12290,7 +12341,7 @@ async function routeBookingApiRequest(
     // routes, since it authenticates differently and must run before the
     // blanket requireAdmin gate below.
     if (req.method === "GET" && pathname === "/api/practice-blocks") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const playerId = cleanString(url.searchParams.get("playerId"), "", 160);
@@ -12302,7 +12353,7 @@ async function routeBookingApiRequest(
 
     if (req.method === "POST" && pathname === "/api/practice-blocks") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const result = await createPracticeBlock(body.block || body, requestContext);
@@ -12311,7 +12362,7 @@ async function routeBookingApiRequest(
 
     if (req.method === "PUT" && pathname === "/api/practice-blocks") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const result = await updatePracticeBlock(body.id || body.block?.id, body.block || body, requestContext);
@@ -12319,7 +12370,7 @@ async function routeBookingApiRequest(
     }
 
     if (req.method === "DELETE" && pathname === "/api/practice-blocks") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const blockId = cleanString(url.searchParams.get("id"), "", 120);
@@ -12331,7 +12382,7 @@ async function routeBookingApiRequest(
     // only narrows the suggestions (it drops what that player already has
     // active), so a call without it is still valid.
     if (req.method === "GET" && pathname === "/api/practice-block-presets") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const playerId = cleanString(url.searchParams.get("playerId"), "", 160);
@@ -12340,7 +12391,7 @@ async function routeBookingApiRequest(
 
     if (req.method === "POST" && pathname === "/api/practice-block-presets") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       return json(await savePracticeBlockPreset(body.preset || body, requestContext), 201);
@@ -12350,7 +12401,7 @@ async function routeBookingApiRequest(
     // edits to the rail rather than to any block, so both are PUT here.
     if (req.method === "PUT" && pathname === "/api/practice-block-presets") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       return json(await updatePracticeBlockPreset(body.preset || body, requestContext));
@@ -12359,7 +12410,7 @@ async function routeBookingApiRequest(
     // Block types -- the account's own list of kinds. Read by the settings
     // screen; the composer gets them free with its starters call above.
     if (req.method === "GET" && pathname === "/api/practice-block-types") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       return json({ blockTypes: await readPracticeBlockTypes(requestContext.accountId) });
@@ -12370,7 +12421,7 @@ async function routeBookingApiRequest(
     // rather than about any member of it.
     if (req.method === "PUT" && pathname === "/api/practice-block-types") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       return json(await writePracticeBlockTypes(body, requestContext));
@@ -12380,14 +12431,14 @@ async function routeBookingApiRequest(
     // history, so hiding one is a preference, not an edit to any block.
     if (req.method === "POST" && pathname === "/api/practice-block-presets/dismiss") {
       const body = await parseBody(req);
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       return json(await dismissPracticeSuggestion(body, requestContext));
     }
 
     if (req.method === "DELETE" && pathname === "/api/practice-block-presets") {
-      const state = await readCalendarState(await currentAccountId(req));
+      const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const presetId = cleanString(url.searchParams.get("id"), "", 120);
