@@ -14,6 +14,7 @@ import { StrictMode, Suspense, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import LoginScreen from "./modules/auth/LoginScreen";
+import { Loading } from "./modules/shared/Loading";
 import { loadAuthToken, loadGuestToken } from "./modules/auth/apiFetch";
 import { fetchSession, guestSession, signOut, type Session } from "./modules/auth/session";
 import PlayerPortal from "./modules/player-portal/PlayerPortal";
@@ -24,15 +25,6 @@ import "./styles.css";
 import "./switches.css";
 import "./nativeApp.css";
 
-function Splash({ label }: { label: string }) {
-  return (
-    <main className="login-shell">
-      <div className="login-card">
-        <p>{label}</p>
-      </div>
-    </main>
-  );
-}
 
 /**
  * A coach can sign in here -- their password is the same one -- so say plainly
@@ -103,7 +95,7 @@ function Root() {
 
   if (session.role === "player") {
     return (
-      <Suspense fallback={<Splash label="Loading your profile…" />}>
+      <Suspense fallback={<Loading size="screen" what="your profile" />}>
         <PlayerPortal session={session} onSignedOut={handleSessionLost} />
       </Suspense>
     );
@@ -119,7 +111,7 @@ function Root() {
   }
 
   return (
-    <Suspense fallback={<Splash label="Loading…" />}>
+    <Suspense fallback={<Loading size="screen" />}>
       <PlayerPortal
         session={session}
         onSignedOut={handleSessionLost}

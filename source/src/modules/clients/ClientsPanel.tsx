@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 // The Clients screen: search, the two lists, merge mode and the import card.
 //
 // This is the markup that used to sit inline in App.tsx, given its own chunk
@@ -219,10 +220,7 @@ export function ClientsPanel<T extends ClientRow>({
             );
           })
         ) : loading && !term && listTab === "main" ? (
-          <div className="empty-panel compact" role="status">
-            <h2>Loading clients…</h2>
-            <p>Your client list is on its way.</p>
-          </div>
+          <Loading size="panel" what="clients" detail="Your client list is on its way." />
         ) : listTab === "external" ? (
           <div className="empty-panel compact">
             <h2>No external booking clients</h2>

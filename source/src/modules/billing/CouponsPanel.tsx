@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 // Billing > Coupons. Gift vouchers: what has been issued, what is left on each,
 // and the Stripe purchases that still need one.
 //
@@ -347,7 +348,7 @@ export function CouponsPanel({
           </div>
           <Ticket size={24} />
         </div>
-        {loadState === "loading" && <p>Loading coupons...</p>}
+        {loadState === "loading" && <Loading what="coupons" />}
         {loadState === "error" && (
           <p>
             Could not load coupons.{" "}
@@ -413,7 +414,7 @@ export function CouponsPanel({
                       <tr className="product-stock-row">
                         <td colSpan={6}>
                           <div className="product-movement-list">
-                            {redemptionsLoading && <p className="field-help">Loading history...</p>}
+                            {redemptionsLoading && <Loading what="history" className="field-help" />}
                             {!redemptionsLoading && !redemptions.length && (
                               <p className="field-help">Not used yet.</p>
                             )}

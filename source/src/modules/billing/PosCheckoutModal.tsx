@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 // POS checkout modal - the "mini invoice" that opens from a lesson card, a
 // client profile, or the New Sale button in Billing.
 //
@@ -432,7 +433,7 @@ export function PosCheckoutModal({
 
             <div className="settings-field">
               <label>Payment method</label>
-              {!methodsLoaded && <p className="field-help">Loading methods...</p>}
+              {!methodsLoaded && <Loading what="payment methods" className="field-help" />}
               {methodsLoaded && !methods.length && (
                 <p className="field-help">No payment methods yet - add one under Billing &gt; Settings.</p>
               )}

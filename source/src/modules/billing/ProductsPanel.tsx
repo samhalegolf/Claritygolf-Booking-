@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 // Products tab - the shop side of Billing, and the first screen Billing opens.
 //
 // Presentational, like BillingReportsPanel: App.tsx owns the list and every
@@ -512,7 +513,7 @@ export function ProductsPanel({
           <p className="field-help">Stock on hand is worth about {formatMoney(stockValueTotal, currency)} at cost.</p>
         )}
 
-        {loadState === "loading" && <p>Loading catalog...</p>}
+        {loadState === "loading" && <Loading what="the catalog" />}
         {loadState === "error" && (
           <p>
             Could not load the catalog.{" "}
@@ -674,7 +675,7 @@ export function ProductsPanel({
                                       </button>
                                     </div>
                                     <div className="product-movement-list">
-                                      {movementsLoading && <p className="field-help">Loading history...</p>}
+                                      {movementsLoading && <Loading what="history" className="field-help" />}
                                       {!movementsLoading && !movements.length && (
                                         <p className="field-help">No stock movements recorded yet.</p>
                                       )}

@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 import { useCallback, useEffect, useState } from "react";
 
 import { videoShareToken } from "../shared/bookingHandoff";
@@ -117,11 +118,7 @@ export default function VideoSharePage() {
 
   if (state === "loading") {
     return (
-      <main className="login-shell">
-        <div className="login-card">
-          <p>Loading…</p>
-        </div>
-      </main>
+      <Loading size="screen" what="video" />
     );
   }
 

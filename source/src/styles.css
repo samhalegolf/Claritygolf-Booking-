@@ -12502,6 +12502,23 @@ button {
   font-size: var(--c-size-meta);
 }
 
+/* One way of saying "not yet". The shell and every module wait with the
+   Loading component in modules/shared, so the pauses read as one product
+   rather than one wording per screen. The sizes are where a wait sits, not how
+   long it is: inline where a value will be, block where a list will be, panel
+   where a screen will be, screen before any shell exists. Two classes deep on
+   purpose: .data-card p and .data-card span outrank a single class. */
+.loading.loading-inline,
+.loading.loading-block {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.loading.loading-block {
+  margin: 0;
+  padding: var(--c-space-5) 0;
+}
+
 .inline-working {
   color: var(--c-text-soft);
   font-size: var(--c-size-meta);

@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import "./practice.css";
@@ -167,7 +168,7 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
     [busy],
   );
 
-  if (loading) return <div className="module-loading">Loading practice settings…</div>;
+  if (loading) return <Loading what="practice settings" />;
 
   return (
     <div className="practice-settings">

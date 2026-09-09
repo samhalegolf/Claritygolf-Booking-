@@ -69,6 +69,7 @@ import {
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "./modules/auth/session";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
+import { Loading, loadingLabel } from "./modules/shared/Loading";
 import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Person } from "./modules/clients/clientsModel";
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
@@ -96,7 +97,6 @@ import {
   setActivePhoneCountry,
 } from "../netlify/functions/_shared/phone.mts";
 import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
-import { MessageTemplatesPanel } from "./modules/notifications/MessageTemplatesPanel";
 import { CoachProfilePanel } from "./modules/profile/CoachProfilePanel";
 import type { ProfileInternalJob, ProfileTarget } from "./modules/profile/CoachProfilePanel";
 import {
@@ -117,7 +117,7 @@ import {
   PLAYER_BOOKING_EMBED_MAX_HEIGHT,
   PLAYER_BOOKING_EMBED_MIN_HEIGHT,
 } from "../netlify/functions/_shared/player-booking-embed.mts";
-import IntegrationsPanel from "./modules/integrations/IntegrationsPanel";
+import { prefetchIntegrations } from "./modules/integrations/integrationsStore";
 import {
   BASE_WEEK_START,
   BOOKING_EMBED_PARAM,
@@ -248,7 +248,6 @@ import type { CalendarAxisMode } from "./calendar-axis";
 import { clamp } from "./lib/number";
 import { dateInputValue } from "./lib/date";
 import BookingResourcesPanel from "./BookingResourcesPanel";
-import BrowserNotificationsPanel from "./modules/notifications/BrowserNotificationsPanel";
 import type {
   ChangeEvent,
   CSSProperties,
@@ -306,6 +305,15 @@ const InvoiceTemplatePanel = lazy(() =>
 );
 const PosCheckoutModal = lazy(() =>
   import("./modules/billing/PosCheckoutModal").then((module) => ({ default: module.PosCheckoutModal })),
+);
+
+// The Settings panels that are modules already. Each arrives with its tab
+// rather than with the workspace; the integrations one carries the 50 KB
+// detail panel for every provider, which nobody visiting Booking asked for.
+const IntegrationsPanel = lazy(() => import("./modules/integrations/IntegrationsPanel"));
+const BrowserNotificationsPanel = lazy(() => import("./modules/notifications/BrowserNotificationsPanel"));
+const MessageTemplatesPanel = lazy(() =>
+  import("./modules/notifications/MessageTemplatesPanel").then((module) => ({ default: module.MessageTemplatesPanel })),
 );
 
 /**
@@ -1230,15 +1238,25 @@ const SettingsGroupContext = createContext<{
   setOpenGroup: (id: string) => void;
   /** When set, only this group renders — see SettingsGroups. */
   focusOnly: string;
+  /** The open tab. A group filed under another tab is not mounted at all. */
+  activeTab: string;
 } | null>(null);
 
 function SettingsGroups({
   children,
   requestedGroup = "",
   focusOnly = "",
+  activeTab = "",
 }: {
   children: ReactNode;
   requestedGroup?: string;
+  /**
+   * The tab on screen. Every group used to mount on every visit -- fourteen
+   * cards, their editors and their DOM -- and the stylesheet hid all but the
+   * open tab's. Now a group filed under another tab is simply not rendered,
+   * which is most of what made Settings slow to open.
+   */
+  activeTab?: string;
   /**
    * Render one group and nothing else.
    *
@@ -1259,7 +1277,7 @@ function SettingsGroups({
   useEffect(() => {
     if (requestedGroup) setOpenGroup(requestedGroup);
   }, [requestedGroup]);
-  const value = useMemo(() => ({ openGroup, setOpenGroup, focusOnly }), [openGroup, focusOnly]);
+  const value = useMemo(() => ({ openGroup, setOpenGroup, focusOnly, activeTab }), [openGroup, focusOnly, activeTab]);
   return <SettingsGroupContext.Provider value={value}>{children}</SettingsGroupContext.Provider>;
 }
 
@@ -1337,6 +1355,10 @@ function SettingsGroup({
   // A focused mount is one section on its own, so the others are not rendered
   // at all rather than rendered and hidden.
   if (context?.focusOnly && context.focusOnly !== id) return null;
+  // Filed under a tab that is not open: not mounted, rather than mounted and
+  // hidden. The focused case above wins, because an overlay opens one group
+  // by name whatever tab was last on screen.
+  if (context && !context.focusOnly && context.activeTab && context.activeTab !== section) return null;
   // Every section arrives shut. A tab that opens with one section already
   // expanded pushes the rest below the fold and makes that one look like the
   // screen rather than one choice among several. The exception is a section
@@ -5884,6 +5906,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarSyncStatus>(defaultGoogleCalendarStatus);
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
   const [googleCalendarStatusError, setGoogleCalendarStatusError] = useState("");
+  /** When the Google Calendar status last came back, so Settings does not re-ask on every visit. */
+  const googleCalendarStatusLoadedAtRef = useRef(0);
   const [googleCalendarDebug, setGoogleCalendarDebug] = useState<GoogleCalendarDebugLog | null>(null);
   const [googleCalendarDebugOpen, setGoogleCalendarDebugOpen] = useState(false);
   // Which import rule is open for editing. A saved rule collapses to a summary;
@@ -7745,6 +7769,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || activeView !== "settings") return;
+    // Boot already asked, and every connect and disconnect asks again, so a
+    // status from the last half minute is not worth another round trip.
+    if (Date.now() - googleCalendarStatusLoadedAtRef.current < 30_000) return;
     void refreshGoogleCalendarStatus();
   }, [activeView, authStatus, isEmbedMode]);
 
@@ -15704,6 +15731,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
+  // Settings, warmed. Once the calendar has painted and the browser is quiet,
+  // the integrations list (and the panel that shows it) are fetched so that
+  // Settings › Integrations paints with its cards already there instead of a
+  // beat behind the tab. Nothing here blocks anything the coach can see.
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || adminWorkspaceLoadStatus !== "loaded") return;
+    return whenIdle(() => {
+      prefetchIntegrations("integration");
+      if (isPlatformAdmin) prefetchIntegrations("admin");
+      void import("./modules/integrations/IntegrationsPanel").catch(() => undefined);
+    }, 2500);
+  }, [isEmbedMode, authStatus, adminWorkspaceLoadStatus, isPlatformAdmin]);
+
   // Billing data is not part of the calendar frame. It used to load the moment
   // the plan allowed it: seven billing-api calls at boot, racing the calendar
   // shell, whether or not the coach ever opened Billing -- and now that the
@@ -17482,6 +17522,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
       setGoogleCalendarStatusError("");
       applyGoogleCalendarStatus((await response.json()) as Partial<GoogleCalendarSyncStatus>);
+      googleCalendarStatusLoadedAtRef.current = Date.now();
     } catch (error) {
       setGoogleCalendarStatusError(
         `Could not reach the Google Calendar status endpoint${
@@ -20446,7 +20487,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <div className="time-slots">
                 {selectedBookingService ? (
                   publicBookingSlotsLoading ? (
-                    <p>Loading</p>
+                    <Loading what="available times" />
                   ) : bookingSlots.length ? (
                     visibleBookingSlots.map((slot) => {
                       const slotLabel = isGroupBookingTimeSelection
@@ -21090,7 +21131,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 player profile.
               </p>
             )}
-            <Suspense fallback={<div className="module-loading">Loading notes…</div>}>
+            <Suspense fallback={<Loading what="notes" />}>
               <ClarityVoiceTextPanel
                 fieldLabel="Lesson note"
                 placeholder="Type or dictate a note for this lesson."
@@ -21400,7 +21441,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const adminWorkspaceFailed =
     !isEmbedMode && authStatus === "authenticated" && adminWorkspaceLoadStatus === "error";
   const calendarSummaryText = adminWorkspaceLoading
-    ? "Loading calendar bookings"
+    ? loadingLabel("calendar bookings")
     : `${appointments} appointments · ${blocks} blocked ${blocks === 1 ? "time" : "times"}`;
   /**
    * The app's one page header, decided in one place.
@@ -21790,19 +21831,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
         {!isEmbedMode && (adminWorkspaceLoading || adminWorkspaceFailed) && (
         <section className="workspace">
-          <div className="empty-panel compact" role={adminWorkspaceFailed ? "alert" : "status"}>
-            <h2>{adminWorkspaceFailed ? "Calendar could not load" : "Loading calendar"}</h2>
-            <p>
-              {adminWorkspaceFailed
-                ? adminWorkspaceLoadError || "Calendar bookings could not be loaded."
-                : "Bookings are loading first. Client profiles, notifications, and integrations will refresh in the background."}
-            </p>
-            {adminWorkspaceFailed ? (
+          {adminWorkspaceFailed ? (
+            <div className="empty-panel compact" role="alert">
+              <h2>Calendar could not load</h2>
+              <p>{adminWorkspaceLoadError || "Calendar bookings could not be loaded."}</p>
               <button className="outline-button" type="button" onClick={() => void startAdminWorkspaceHydration()}>
                 Retry
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : (
+            <Loading
+              size="panel"
+              what="calendar"
+              detail="Bookings are loading first. Client profiles, notifications, and integrations will refresh in the background."
+            />
+          )}
         </section>
         )}
 
@@ -22786,7 +22829,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         )}
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "clients" && (
-          <Suspense fallback={<div className="module-loading">Loading clients…</div>}>
+          <Suspense fallback={<Loading size="panel" what="clients" />}>
             <ClientsPanel
               clients={clients}
               loading={clientsLoadStatus === "idle" || clientsLoadStatus === "loading"}
@@ -22853,10 +22896,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <p>Add a lesson note or video to a client, or use + to add one.</p>
                       </>
                     ) : (
-                      <>
-                        <h2>Loading player profiles…</h2>
-                        <p>Fetching lesson notes and saved videos.</p>
-                      </>
+                      <Loading size="panel" what="player profiles" detail="Fetching lesson notes and saved videos." />
                     )}
                   </div>
                 ) : (
@@ -23128,7 +23168,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       Save this booking contact as a client to track their transactions.
                                     </p>
                                   ) : playerTransactionsLoadState === "loading" ? (
-                                    <p className="player-tool-card-empty">Loading transactions…</p>
+                                    <Loading what="transactions" className="player-tool-card-empty" />
                                   ) : playerTransactionsLoadState === "error" ? (
                                     <p className="player-tool-card-empty">
                                       Could not load transactions.{" "}
@@ -23355,7 +23395,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               </div>
                             ) : playerToolExpanded && playerProfileTool === "notes" ? (
                               <div className="player-tool-body">
-                                <Suspense fallback={<div className="module-loading">Loading voice notes…</div>}>
+                                <Suspense fallback={<Loading what="voice notes" />}>
                                   <ClarityVoiceTextPanel
                                     fieldLabel="Lesson note"
                                     placeholder="Type or dictate the coach lesson note."
@@ -23411,7 +23451,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         Back to practice list
                                       </button>
                                     </div>
-                                  <Suspense fallback={<div className="module-loading">Loading practice…</div>}>
+                                  <Suspense fallback={<Loading what="practice" />}>
                                     <PracticeBlockPanel
                                       // Keyed so switching player remounts rather
                                       // than showing the previous player's blocks
@@ -23445,7 +23485,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       </button>
                                     </div>
                                     {playerPracticeLoadState === "loading" ? (
-                                      <p className="player-tool-card-empty">Loading practice…</p>
+                                      <Loading what="practice" className="player-tool-card-empty" />
                                     ) : playerPracticeLoadState === "error" ? (
                                       <p className="player-tool-card-empty">Could not load practice for this player.</p>
                                     ) : playerPracticeBlocks.length ? (
@@ -24160,7 +24200,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "video" && (
           <section className="module-page video-analysis-page-host">
-            <Suspense fallback={<div className="module-loading">Loading video analysis…</div>}>
+            <Suspense fallback={<Loading size="panel" what="video analysis" />}>
               <VideoAnalysisPage
                 playerId={videoContext?.playerId}
                 playerName={videoContext?.playerName}
@@ -24188,7 +24228,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         )}
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "sell" && (
-          <Suspense fallback={<div className="module-loading">Loading the till…</div>}>
+          <Suspense fallback={<Loading size="panel" what="the till" />}>
             <SellScreen
               currency={invoiceSettings.currency}
               taxName={invoiceSettings.taxName}
@@ -24366,7 +24406,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </div>
                   </div>
                   {revenueLoadState === "loading" && !revenueReport ? (
-                    <p>Loading revenue...</p>
+                    <Loading what="revenue" />
                   ) : revenueReport ? (
                     <>
                       <div className="revenue-chart" aria-hidden="true">
@@ -24548,7 +24588,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </div>
                   </div>
                   {billingDataLoadState === "loading" && !recentInvoices.length ? (
-                    <p>Loading invoices...</p>
+                    <Loading what="invoices" />
                   ) : recentInvoices.length ? (
                     <table className="recent-invoices-table">
                       <thead>
@@ -24624,7 +24664,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     />
                   </div>
                   {allInvoicesLoadState === "loading" && !allInvoices.length ? (
-                    <p>Loading invoices...</p>
+                    <Loading what="invoices" />
                   ) : allInvoicesLoadState === "error" ? (
                     <p>
                       Could not load invoices.{" "}
@@ -24730,7 +24770,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </div>
                   )}
                   {reconcileLoadState === "loading" && !reconcileCandidates.length ? (
-                    <p>Loading bank payments...</p>
+                    <Loading what="bank payments" />
                   ) : reconcileLoadState === "error" ? (
                     <p>
                       Couldn't load bank payments.{" "}
@@ -25728,7 +25768,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     CSV import below.
                   </p>
                   {bankCandidatesLoadState === "loading" && !bankCandidates.length ? (
-                    <p>Loading bank transactions...</p>
+                    <Loading what="bank transactions" />
                   ) : bankCandidatesLoadState === "error" ? (
                     <p>
                       Couldn't load the bank feed.{" "}
@@ -26227,7 +26267,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </div>
                   </div>
                   {expenseLoadState === "loading" && !expenses.length ? (
-                    <p>Loading expenses...</p>
+                    <Loading what="expenses" />
                   ) : expenses.length ? (
                     <table className="recent-invoices-table">
                       <thead>
@@ -26272,7 +26312,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 and also appear on an invoice, so combining them would
                 double-count. */}
             {billingSection === "products" && (
-              <Suspense fallback={<div className="module-loading">Loading products…</div>}>
+              <Suspense fallback={<Loading what="products" />}>
                 <ProductsPanel
                   products={catalogItems}
                   loadState={catalogLoadState}
@@ -26292,7 +26332,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             )}
 
             {billingSection === "coupons" && (
-              <Suspense fallback={<div className="module-loading">Loading coupons…</div>}>
+              <Suspense fallback={<Loading what="coupons" />}>
                 <CouponsPanel
                   coupons={coupons}
                   loadState={couponsLoadState}
@@ -26373,7 +26413,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </div>
                     <Receipt size={24} />
                   </div>
-                  {posTransactionsLoadState === "loading" && <p>Loading transactions...</p>}
+                  {posTransactionsLoadState === "loading" && <Loading what="transactions" />}
                   {posTransactionsLoadState === "error" && (
                     <p>
                       Could not load transactions.{" "}
@@ -26480,7 +26520,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             )}
 
             {billingSection === "reports" && (
-              <Suspense fallback={<div className="module-loading">Loading reports…</div>}>
+              <Suspense fallback={<Loading what="reports" />}>
                 <BillingReportsPanel
                   summary={reportSummary}
                   loadState={reportLoadState}
@@ -26727,7 +26767,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         </div>
                       ))
                     ) : (
-                      <p>Loading payment methods...</p>
+                      <Loading what="payment methods" />
                     )}
                   </div>
                 </article>
@@ -27026,7 +27066,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <span>Booking Calendar</span>
                   <div className="booking-login-copy">
                     <strong>
-                      {publicBookingStateStatus === "error" ? "Booking unavailable" : "Loading"}
+                      {publicBookingStateStatus === "error" ? "Booking unavailable" : loadingLabel()}
                     </strong>
                   </div>
                 </div>
@@ -27145,7 +27185,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <div className="time-slots">
                           {selectedBookingService ? (
                             publicBookingSlotsLoading ? (
-                              <p>Loading</p>
+                              <Loading what="available times" />
                             ) : bookingSlots.length ? (
                               visibleBookingSlots.map((slot) => {
                                 const slotLabel = isGroupBookingTimeSelection
@@ -27458,7 +27498,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <div className="time-slots">
                       {selectedRescheduleMatch ? (
                         publicBookingSlotsLoading ? (
-                          <p>Loading</p>
+                          <Loading what="available times" />
                         ) : bookingSlots.length ? (
                           bookingSlots.map((slot) => (
                             <button
@@ -27609,6 +27649,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             <SettingsGroups
               requestedGroup={requestedSettingsGroup}
               focusOnly={workspaceOverlay?.kind === "settings" ? workspaceOverlay.group : ""}
+              activeTab={settingsTab}
             >
             <div className={`settings-grid settings-tab-${settingsTab}`}>
               {/* Mounted only on its own tab, like the integrations panels
@@ -27616,18 +27657,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   those are two requests nobody visiting Booking asked for. */}
               {settingsTab === "practice" ? (
                 <SettingsGroup id="practice-blocks" section="practice" title="Practice blocks">
-                  <Suspense fallback={<div className="module-loading">Loading practice settings…</div>}>
+                  <Suspense fallback={<Loading what="practice settings" />}>
                     <PracticeSettingsPanel onToast={(message) => setToast({ message })} />
                   </Suspense>
                 </SettingsGroup>
               ) : null}
-              {settingsTab === "developer" ? <IntegrationsPanel audience="integration" /> : null}
+              {settingsTab === "developer" ? (
+                <Suspense fallback={<Loading what="your connections" />}>
+                  <IntegrationsPanel audience="integration" />
+                </Suspense>
+              ) : null}
               {/* Guarded on render, not just hidden from the nav. Two Clarity
                   Cloud error paths call setSettingsTab("admin") directly, so
                   removing the tab button alone would still let a business owner
                   land on the platform panel. */}
-              {settingsTab === "admin" && isPlatformAdmin ? <IntegrationsPanel audience="admin" /> : null}
-              {isAdminUser ? <BrowserNotificationsPanel /> : null}
+              {settingsTab === "admin" && isPlatformAdmin ? (
+                <Suspense fallback={<Loading what="platform services" />}>
+                  <IntegrationsPanel audience="admin" />
+                </Suspense>
+              ) : null}
+              {/* Mounted on its own tab only: it asks the browser about push
+                  permission on mount, and that is not a Booking question. */}
+              {isAdminUser && settingsTab === "notifications" ? (
+                <Suspense fallback={null}>
+                  <BrowserNotificationsPanel />
+                </Suspense>
+              ) : null}
               {servicesSettingsPanel}
               {isAdminUser ? coachesSettingsPanel : null}
               {isAdminUser ? locationsSettingsPanel : null}
@@ -27993,7 +28048,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         so they are written on it — see InvoiceTemplatePanel.
                         Numbering, currency, tax rate and terms stay fields:
                         they are settings, not things printed on the page. */}
-                    <Suspense fallback={<div className="module-loading">Loading invoice template…</div>}>
+                    <Suspense fallback={<Loading what="invoice template" />}>
                       <InvoiceTemplatePanel
                         settings={invoiceSettingsDraft}
                         locked={billingSettingsIsLocked}
@@ -28468,7 +28523,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       type="button"
                     >
                       <RefreshCw size={16} />
-                      {googleCalendarDebugLoading ? "Loading" : "Refresh"}
+                      {googleCalendarDebugLoading ? loadingLabel() : "Refresh"}
                     </button>
                     <button
                       className="outline-button"
@@ -29558,21 +29613,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onCancel={() => cancelEditableBlock("message-templates")}
                   onSave={() => void saveEditableBlock("message-templates")}
                 >
-                  <MessageTemplatesPanel
-                    templates={messageTemplatesDraft.notificationTemplates}
-                    mapLinkLabel={messageTemplatesDraft.mapLinkLabel}
-                    locked={messageTemplatesIsLocked}
-                    businessName={coachAccount.businessName}
-                    logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
-                    venueName={coachAccount.venueShortName || coachAccount.venueName}
-                    renderPreview={(template) => renderTemplate(template, emailTemplateVariables)}
-                    onChange={(templates) =>
-                      updateNotificationBlockDraft(messageTemplatesEditor, "notificationTemplates", templates)
-                    }
-                    onMapLinkLabelChange={(label) =>
-                      updateNotificationBlockDraft(messageTemplatesEditor, "mapLinkLabel", label.slice(0, 40))
-                    }
-                  />
+                  <Suspense fallback={<Loading what="templates" />}>
+                    <MessageTemplatesPanel
+                      templates={messageTemplatesDraft.notificationTemplates}
+                      mapLinkLabel={messageTemplatesDraft.mapLinkLabel}
+                      locked={messageTemplatesIsLocked}
+                      businessName={coachAccount.businessName}
+                      logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
+                      venueName={coachAccount.venueShortName || coachAccount.venueName}
+                      renderPreview={(template) => renderTemplate(template, emailTemplateVariables)}
+                      onChange={(templates) =>
+                        updateNotificationBlockDraft(messageTemplatesEditor, "notificationTemplates", templates)
+                      }
+                      onMapLinkLabelChange={(label) =>
+                        updateNotificationBlockDraft(messageTemplatesEditor, "mapLinkLabel", label.slice(0, 40))
+                      }
+                    />
+                  </Suspense>
                 {/* The two pieces of wording that are not one message: a
                     subject that replaces every subject above, and the alert
                     that goes to the coach rather than the client. Folded in
@@ -30338,7 +30395,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   ) : selectedClient && selectedClient.id.startsWith("appointment-") ? (
                     <p>Save this booking contact as a client to track their transactions.</p>
                   ) : clientTransactionsLoadState === "loading" ? (
-                    <p>Loading transactions...</p>
+                    <Loading what="transactions" />
                   ) : clientTransactionsLoadState === "error" ? (
                     <p>
                       Could not load transactions.{" "}

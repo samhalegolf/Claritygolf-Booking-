@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
@@ -133,7 +134,7 @@ export function PlayerBookingEmbed({ config }: { config: PlayerBookingEmbedConfi
 
       <div className="player-booking-embed-frame" style={{ height: `${height}px` }}>
         {!loaded && (
-          <p className="player-portal-empty player-booking-embed-loading">Loading booking…</p>
+          <Loading what="booking" className="player-portal-empty player-booking-embed-loading" />
         )}
         <iframe
           ref={frameRef}

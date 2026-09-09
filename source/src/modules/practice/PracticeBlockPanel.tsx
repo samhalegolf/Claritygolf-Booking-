@@ -1,3 +1,4 @@
+import { Loading, loadingLabel } from "../shared/Loading";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 
 import "./practice.css";
@@ -461,7 +462,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       {videoPickerOpen && !draft.linkedVideoId && (
         <div className="practice-video-picker">
           {videoLoading ? (
-            <p className="practice-video-empty">Loading {playerName}'s videos…</p>
+            <Loading what={`${playerName}'s videos`} className="practice-video-empty" />
           ) : videoOptions.length ? (
             <ul className="practice-video-options">
               {videoOptions.map((transfer) => (
@@ -533,7 +534,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         onRemove={(id) => void archive(id)}
         emptyNote={
           firstLoad
-            ? "Loading the wall…"
+            ? loadingLabel("the wall")
             : `Nothing assigned to ${playerName} yet. The first block you save starts the wall.`
         }
       />

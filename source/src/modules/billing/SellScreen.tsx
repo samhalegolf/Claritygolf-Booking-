@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 // Sell - the full-screen till.
 //
 // Two panes: the catalog on the left (search, category tabs, tiles) taking the
@@ -563,7 +564,7 @@ export function SellScreen({
           ))}
         </div>
 
-        {(catalogState === "loading" || catalogState === "idle") && <p className="field-help">Loading the catalog...</p>}
+        {(catalogState === "loading" || catalogState === "idle") && <Loading what="the catalog" className="field-help" />}
         {catalogState === "error" && (
           <p className="field-help">
             Could not load the catalog.{" "}

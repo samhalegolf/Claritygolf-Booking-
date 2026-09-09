@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 // The Coach profile: who the coach is, and everything Clarity is plugged into
 // on their behalf, on one screen.
 //
@@ -375,7 +376,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
         ))}
       </div>
 
-      {!cards && !error && <p className="inline-working">Loading your connections…</p>}
+      {!cards && !error && <Loading what="your connections" />}
     </div>
   );
 }

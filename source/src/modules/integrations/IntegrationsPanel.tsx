@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { Loading } from "../shared/Loading";
+import { useEffect, useState } from "react";
 
 import IntegrationPanel from "./IntegrationPanel";
+import { integrationsStore, type IntegrationCard as Card } from "./integrationsStore";
 
 /**
  * The connection list — used twice, for two different audiences.
@@ -19,23 +21,6 @@ import IntegrationPanel from "./IntegrationPanel";
  * Accounting — because "I want my lessons in my diary" is how somebody arrives
  * here, not "I want to configure an OAuth2 connection".
  */
-
-type Card = {
-  id: string;
-  label: string;
-  audience: "admin" | "integration";
-  category: string;
-  caveat?: string;
-  sharesGrantWith?: string;
-  summary: string;
-  kinds: string[];
-  configured: boolean;
-  missing: string[];
-  needsAuthorisation: boolean;
-  /** OAuth only: who is signed in, and whatever last went wrong. */
-  connectedAs?: string;
-  connectionError?: string;
-};
 
 /** Click-to-connect first, then the rest — easiest effort at the top. */
 const KIND_ORDER: Record<string, number> = { oauth2: 0, "api-key-pair": 1, "api-token": 2, "webhook-in": 3, "service-link": 4 };
@@ -89,31 +74,35 @@ export default function IntegrationsPanel({
   audience?: "admin" | "integration";
 }) {
   const copy = COPY[audience];
-  const [cards, setCards] = useState<Card[] | null>(null);
-  const [error, setError] = useState("");
+  const store = integrationsStore(audience);
+  const { items: cards, status, error } = store.useState();
+  const loading = status === "idle" || status === "loading";
   const [open, setOpen] = useState<string>("");
   const [adding, setAdding] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/integration-setup?audience=${audience}`, { credentials: "same-origin", cache: "no-store" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.message || payload?.error || `Integrations returned ${response.status}.`);
-      setCards(payload.integrations || []);
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The list could not load.");
-    }
-  }, [audience]);
-
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    // Usually already answered: the workspace warms this list in an idle
+    // moment after the calendar paints, and a list from the last half minute
+    // is not asked for again.
+    void store.load({ maxAgeMs: 30_000 }).catch(() => undefined);
+  }, [store]);
 
   if (open) {
-    const card = cards?.find((entry) => entry.id === open);
+    const card = cards.find((entry) => entry.id === open);
     return (
       <article className={`data-card settings-section settings-${audience === "admin" ? "admin" : "developer"} integration-panel`}>
         <div className="integration-breadcrumb">
-          <button className="text-button" onClick={() => setOpen("")} type="button">← {copy.title}</button>
+          <button
+            className="text-button"
+            onClick={() => {
+              setOpen("");
+              // Whatever was just connected or changed should show on the card.
+              void store.load().catch(() => undefined);
+            }}
+            type="button"
+          >
+            ← {copy.title}
+          </button>
           <strong>{card?.label || open}</strong>
         </div>
         <IntegrationPanel integrationId={open} />
@@ -121,8 +110,8 @@ export default function IntegrationsPanel({
     );
   }
 
-  const configured = (cards || []).filter((card) => card.configured);
-  const available = (cards || []).filter((card) => !card.configured);
+  const configured = cards.filter((card) => card.configured);
+  const available = cards.filter((card) => !card.configured);
   const sort = (list: Card[]) =>
     [...list].sort((a, b) => (KIND_ORDER[a.kinds[0]] ?? 9) - (KIND_ORDER[b.kinds[0]] ?? 9) || a.label.localeCompare(b.label));
 
@@ -155,7 +144,7 @@ export default function IntegrationsPanel({
 
       <div className="integration-body">
         {error ? <div className="integration-error"><strong>The list is unavailable</strong>{error}</div> : null}
-        {!cards && !error ? <p className="inline-working">Loading…</p> : null}
+        {loading && !cards.length && !error ? <Loading /> : null}
 
         {byCategory(configured).map((group) => (
           <section className="integration-group" key={group.category}>
@@ -166,7 +155,7 @@ export default function IntegrationsPanel({
           </section>
         ))}
 
-        {cards && !configured.length && !error ? <p className="integration-cards-note">{copy.empty}</p> : null}
+        {!loading && !configured.length && !error ? <p className="integration-cards-note">{copy.empty}</p> : null}
 
         {available.length ? (
           <div className="integration-cards">
@@ -203,7 +192,7 @@ export default function IntegrationsPanel({
           </>
         ) : null}
 
-        {cards?.length ? (
+        {cards.length ? (
           <p className="integration-cards-note">
             {configured.length} of {cards.length} set up.
             {available.length ? " The rest work the same way — they just have nothing filled in yet." : ""}

@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import LoginScreen from "./modules/auth/LoginScreen";
+import { Loading } from "./modules/shared/Loading";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
 import { isBookingEmbedMode, isPlayerBookingMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
 import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
@@ -65,15 +66,6 @@ if (!publicBookingOnly && !videoShare && lastVisitorWasCoach()) {
 
 let adminHooksInstalled = false;
 
-function Splash({ label }: { label: string }) {
-  return (
-    <main className="login-shell">
-      <div className="login-card">
-        <p>{label}</p>
-      </div>
-    </main>
-  );
-}
 
 /**
  * Who is signed in decides which app runs.
@@ -122,7 +114,7 @@ function Root() {
 
   if (videoShare) {
     return (
-      <Suspense fallback={<Splash label="Loading video…" />}>
+      <Suspense fallback={<Loading size="screen" what="video" />}>
         <VideoSharePage />
       </Suspense>
     );
@@ -130,20 +122,20 @@ function Root() {
 
   if (publicBookingOnly) {
     return (
-      <Suspense fallback={<Splash label="Loading booking…" />}>
+      <Suspense fallback={<Loading size="screen" what="booking" />}>
         {publicReschedule ? <PublicBookingManage /> : <PublicBookingApp />}
       </Suspense>
     );
   }
 
-  if (!session) return <Splash label="Checking session…" />;
+  if (!session) return <Loading size="screen" label="Checking session…" />;
 
   // A player always gets the terminal, booking included. The portal renders
   // booking inside its own shell rather than handing the page over, so the
   // navigation bar survives the trip.
   if (session.role === "player") {
     return (
-      <Suspense fallback={<Splash label="Loading your profile…" />}>
+      <Suspense fallback={<Loading size="screen" what="your profile" />}>
         <PlayerPortal session={session} onSignedOut={handleSessionLost} />
       </Suspense>
     );
@@ -154,7 +146,7 @@ function Root() {
   // login wall. The parameter asked; the session decided.
   if (bookingEmbed) {
     return (
-      <Suspense fallback={<Splash label="Loading booking…" />}>
+      <Suspense fallback={<Loading size="screen" what="booking" />}>
         <PublicBookingApp />
       </Suspense>
     );
@@ -162,7 +154,7 @@ function Root() {
 
   if (session.role === "coach") {
     return (
-      <Suspense fallback={<Splash label="Loading your workspace…" />}>
+      <Suspense fallback={<Loading size="screen" what="your workspace" />}>
         <App onSessionLost={handleSessionLost} session={session} />
       </Suspense>
     );

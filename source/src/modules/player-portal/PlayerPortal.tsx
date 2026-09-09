@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 import {
   Suspense,
   lazy,
@@ -870,7 +871,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         <div
           className={`player-portal player-portal-video-host${leavingWorkspace ? " is-leaving" : ""}`}
         >
-          <Suspense fallback={<div className="player-portal-card">Loading video…</div>}>
+          <Suspense fallback={<Loading size="panel" what="video" className="player-portal-card" />}>
             <VideoAnalysisPage
               variant="player"
               playerId={playerId || playerEmail}
@@ -1056,7 +1057,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                   <section className="player-portal-section">
                     <h2>Next lesson</h2>
                     {profileLoading && !bookings.length ? (
-                      <p className="player-portal-empty">Loading your lessons…</p>
+                      <Loading what="your lessons" className="player-portal-empty" />
                     ) : nextLesson ? (
                       <div className="player-portal-next">
                         <strong>{nextLesson.serviceName || "Lesson"}</strong>
@@ -1091,7 +1092,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
                   {lessonsSubtab === "book" ? (
                     <div className="player-portal-inline-booking">
-                      <Suspense fallback={<p className="player-portal-empty">Loading booking…</p>}>
+                      <Suspense fallback={<Loading what="booking" className="player-portal-empty" />}>
                         <BookingWidget
                           customer={{ name: playerName, email: playerEmail, phone: playerPhone }}
                           onBookingComplete={() => void loadProfile()}
@@ -1228,7 +1229,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       : "Everything your coach has set you. Tap a block to read it."}
                   </p>
                   {profileLoading && !practice.length ? (
-                    <p className="player-portal-empty">Loading your practice…</p>
+                    <Loading what="your practice" className="player-portal-empty" />
                   ) : (
                     <>
                       <PracticeWall
@@ -1326,7 +1327,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                 <section className="player-portal-section">
                   <h2>Lesson notes</h2>
                   {profileLoading && !notes.length ? (
-                    <p className="player-portal-empty">Loading your lesson notes…</p>
+                    <Loading what="your lesson notes" className="player-portal-empty" />
                   ) : sortedNotes.length ? (
                     <ul className="player-portal-list">
                       {sortedNotes.map((note) => (

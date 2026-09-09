@@ -1,3 +1,4 @@
+import { Loading } from "../shared/Loading";
 // Billing > Reports sub-view. Presentational: it renders the financial summary
 // (P&L, GST, income vs expenses, top customers, A/R aging) from the payload it
 // is given and reports user intent (range change, export) back through
@@ -169,7 +170,7 @@ export function BillingReportsPanel({
         </article>
       ) : loadState === "loading" && !summary ? (
         <article className="data-card">
-          <p>Loading reports...</p>
+          <Loading what="reports" />
         </article>
       ) : summary ? (
         <>
