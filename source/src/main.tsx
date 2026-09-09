@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import LoginScreen from "./modules/auth/LoginScreen";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
 import { isBookingEmbedMode, isPlayerBookingMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
+import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
 import { installBoxAudit } from "./lib/boxAudit";
 // Tokens first: styles.css and every module stylesheet read --c-*.
@@ -19,7 +20,8 @@ installBoxAudit();
 // Both shells are lazy so a player never downloads the coach workspace, and a
 // visitor at the login screen downloads neither. This is why the login form
 // lives in its own module rather than inside App.
-const App = lazy(() => import("./App"));
+const loadApp = () => import("./App");
+const App = lazy(loadApp);
 const PublicBookingApp = lazy(() => import("./modules/public-booking/PublicBookingApp"));
 const PublicBookingManage = lazy(() => import("./modules/public-booking/PublicBookingManage"));
 const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
@@ -40,6 +42,21 @@ const publicReschedule = publicBookingOnly && new URLSearchParams(window.locatio
 // the credential, and asking a coach to log in to watch one video is exactly
 // the friction the link exists to remove.
 const videoShare = isVideoShareMode();
+
+// A coach who was here last time and did not sign out is a coach again, so
+// their workspace starts downloading now, alongside the session check, rather
+// than after it. The lazy import above reuses the same promise. A player or a
+// stranger never trips this: the hint is removed on logout.
+if (!publicBookingOnly && !videoShare && lastVisitorWasCoach()) {
+  void loadApp();
+  // The client list too. It is the first thing Clients and Player Profiles
+  // need, it is served by its own function, and nothing about the request
+  // depends on the session answer beyond the cookie this page already has.
+  // If the session turns out to be gone the read fails quietly.
+  void import("./modules/clients/clientsStore")
+    .then((store) => store.prefetchClients())
+    .catch(() => undefined);
+}
 
 let adminHooksInstalled = false;
 
@@ -141,7 +158,7 @@ function Root() {
   if (session.role === "coach") {
     return (
       <Suspense fallback={<Splash label="Loading your workspace…" />}>
-        <App onSessionLost={handleSessionLost} />
+        <App onSessionLost={handleSessionLost} session={session} />
       </Suspense>
     );
   }

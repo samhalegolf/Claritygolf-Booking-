@@ -17,6 +17,7 @@ import { apiFetch, clearAuthToken, setAuthToken } from "./apiFetch";
 import type {
   AuthSessionResponse,
   SessionRole as WireSessionRole,
+  WorkspaceBootstrap,
 } from "../../../netlify/functions/_shared/auth-contract.mts";
 
 export type SessionRole = WireSessionRole;
@@ -25,6 +26,12 @@ export type Session = {
   role: SessionRole;
   email: string;
   name: string;
+  /**
+   * Coach sessions: the business, plan, coaches and user the server answered
+   * with, so the workspace can draw its frame before the calendar arrives.
+   * Absent when the server could not read settings; the shell then fills it.
+   */
+  workspace?: WorkspaceBootstrap;
 };
 
 export const guestSession: Session = { role: "guest", email: "", name: "" };
@@ -36,7 +43,9 @@ function toSession(data: SessionResponse | null | undefined): Session {
   const role: SessionRole =
     data.role === "coach" ? "coach" : data.role === "player" ? "player" : "guest";
   if (role === "guest") return guestSession;
-  return { role, email: data.email || "", name: data.name || "" };
+  const session: Session = { role, email: data.email || "", name: data.name || "" };
+  if (role === "coach" && data.workspace) session.workspace = data.workspace;
+  return session;
 }
 
 export async function fetchSession(): Promise<Session> {

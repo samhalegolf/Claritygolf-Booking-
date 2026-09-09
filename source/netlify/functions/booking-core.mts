@@ -33,7 +33,7 @@ import {
   recordBelongsToAccountStrict,
 } from "./_shared/coach-auth.mts";
 import type { CoachActor } from "./_shared/coach-auth.mts";
-import { authSessionResponse } from "./_shared/auth-contract.mts";
+import { authSessionResponse, type WorkspaceBootstrap } from "./_shared/auth-contract.mts";
 import { activeCurrency, activeLocale } from "./_shared/locale.mts";
 import {
   caddyAppUrl,
@@ -5595,6 +5595,52 @@ async function writeBrandSettings(accountId: string, settings) {
   return readBrandSettings(accountId);
 }
 
+/**
+ * What the coach shell needs to draw its frame correctly before the calendar
+ * arrives: the business, its plan, its coaches and who the signed-in user is
+ * inside it. Sent with the session answer so the sidebar is right on first
+ * paint -- without it every load opened on a made-up solo account, and Sell
+ * and Billing turned up whenever the calendar shell did. One settings read;
+ * the shell still re-reads and overwrites all of this when it answers.
+ *
+ * Best effort by design. A session answer must never fail because settings
+ * could not be read, so this returns undefined and the shell fills the gap.
+ */
+async function readWorkspaceBootstrap(membership: CoachActor): Promise<WorkspaceBootstrap | undefined> {
+  try {
+    const { settings: settingsMap } = await readStateSettingsSnapshot(membership.accountId);
+    const account = coachAccountFromSettings(settingsMap, membership.accountId);
+    const coaches = coachProfilesFromSettings(settingsMap, account);
+    const defaultCoachId =
+      coaches.find((coach) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || "";
+    const coachName = settingValue(settingsMap, "accountCoachName") || account.coachName;
+    return {
+      accountId: membership.accountId,
+      workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
+      account,
+      coaches,
+      // Mirrors the calendar shell's currentUser exactly: the app-user
+      // vocabulary, and permissions from the membership rather than settings.
+      currentUser: {
+        id: membership.authUserId,
+        accountId: membership.accountId,
+        name: coachName,
+        role: appUserRoleForMembership(membership.role),
+        coachId: membership.coachId || defaultCoachId,
+        permissions: membership.isAdmin
+          ? { bookings: "all", services: "all", availability: "all", locations: "all", clients: "all", settings: "all" }
+          : { bookings: "own", services: "own", availability: "own", locations: "none", clients: "own", settings: "none" },
+      },
+    };
+  } catch (error) {
+    console.warn("workspace_bootstrap_unavailable", {
+      accountId: membership.accountId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
+}
+
 async function readCalendarState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
   const account = coachAccountFromSettings(settingsMap, accountId);
@@ -5628,6 +5674,36 @@ async function readCalendarState(accountId: string) {
 // permission check reads. It does not need people, notification history or the
 // Google sync status, so this skips those three reads entirely and looks the
 // booking up by id instead of scanning the whole calendar.
+/**
+ * Everything readCalendarState derives from the settings blob, and nothing it
+ * reads from the calendar, people, notifications or Google. This is what a
+ * request needs to know who is asking and what they may do; the calendar
+ * itself is only needed by routes that actually answer with bookings. Every
+ * one of the 49 routes that started with a full readCalendarState was paying
+ * for four table reads to get this.
+ */
+async function readSettingsState(accountId: string) {
+  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
+  const account = coachAccountFromSettings(settingsMap, accountId);
+  return {
+    syncKey,
+    updatedAt,
+    items: [],
+    services: servicesFromSettings(settingsMap, accountId),
+    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
+    coaches: coachProfilesFromSettings(settingsMap, account),
+    currentUser: appUsersFromSettings(settingsMap, account)[0],
+    locations: locationsFromSettings(settingsMap, account),
+    availability: availabilityFromSettings(settingsMap, accountId),
+    people: [],
+    notifications: [],
+    settings: adminSettingsFromSettings(settingsMap),
+    brand: brandSettingsFromSettings(settingsMap, account),
+    accountId,
+    account,
+  };
+}
+
 async function readLessonCompleteState(accountId: string, itemId) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
   const account = coachAccountFromSettings(settingsMap, accountId);
@@ -11059,6 +11135,7 @@ async function routeBookingApiRequest(
             email: loginEmail,
             accountId: membership.accountId,
             expiresAt: session.expiresAt,
+            workspace: await readWorkspaceBootstrap(membership),
           }),
           200,
           { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
@@ -11302,6 +11379,7 @@ async function routeBookingApiRequest(
             accountRole: membership.role,
             email: session.email,
             accountId: membership.accountId,
+            workspace: await readWorkspaceBootstrap(membership),
           }),
         );
       }
@@ -12043,10 +12121,21 @@ async function routeBookingApiRequest(
     }
 
     if (req.method === "GET" && pathname === "/api/people") {
-      const state = await readCalendarState(await currentAccountId(req));
-      const requestContext = await resolveBackendRequestContext(req, state);
+      // The list, and only the list. This used to begin with a full
+      // readCalendarState -- every booking, every notification, the Google
+      // status -- to answer a request for names and phone numbers, which made
+      // the "cheap background" read of the client list cost as much as the
+      // calendar shell. An admin sees every client of the business, so the
+      // calendar is not consulted at all; a coach-scoped user sees the clients
+      // on their own lessons, which is the one case that needs the bookings.
+      const settingsState = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, settingsState);
       assertAccountFeature(requestContext.account, "clients");
-      return json({ people: filterPeopleForContext(await readPeople(requestContext.accountId), requestContext, state) });
+      const people = await readPeople(requestContext.accountId);
+      const state = requestContext.isAdmin
+        ? settingsState
+        : { ...settingsState, items: await readItems(requestContext.accountId) };
+      return json({ people: filterPeopleForContext(people, requestContext, state) });
     }
 
     // --- Portal access (admin) ---------------------------------------------

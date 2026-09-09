@@ -294,7 +294,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       <form className="login-card" onSubmit={onSubmit}>
         <div className="brand">
           <div className="brand-mark">
-            <img src="/assets/clarity-golf-logo.png" alt="Clarity Golf" />
+            <img src="/assets/clarity-golf-logo-208.png" alt="Clarity Golf" />
           </div>
           <div>
             <strong>Clarity Golf</strong>

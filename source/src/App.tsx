@@ -67,6 +67,11 @@ import {
   X,
 } from "lucide-react";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import type { Session } from "./modules/auth/session";
+import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
+import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Person } from "./modules/clients/clientsModel";
+import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
+import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
 import {
   canonicalPhoneKey as sharedCanonicalPhoneKey,
   cleanPhoneCountry,
@@ -271,6 +276,14 @@ const PracticeSettingsPanel = lazy(() =>
   import("./modules/practice/PracticeSettingsPanel").then((module) => ({ default: module.PracticeSettingsPanel })),
 );
 
+// The Clients screen. Its own chunk, and its list comes from
+// modules/clients/clientsStore rather than from state in here.
+// Cast back to the panel's own signature: lazy() erases the generic, and the
+// generic is what lets it take ClientSummary rows and hand them back unchanged.
+const ClientsPanel = lazy(() =>
+  import("./modules/clients/ClientsPanel").then((module) => ({ default: module.ClientsPanel })),
+) as unknown as typeof ClientsPanelComponent;
+
 /**
  * Starts a player's practice read the moment their profile opens, rather than
  * when the Practice tab is clicked.
@@ -284,12 +297,41 @@ const PracticeSettingsPanel = lazy(() =>
  */
 function prefetchPracticeForPlayer(playerId: string) {
   if (!playerId) return;
+  // The panel's own chunk too, or the first click still waits on a download
+  // after the data has long since arrived.
+  void import("./modules/practice/PracticeBlockPanel").catch(() => {
+    // The tab's lazy import tries again on its own.
+  });
   void import("./modules/practice/practiceStore")
     .then((module) => module.prefetchPractice(playerId))
     .catch(() => {
       // A prefetch that fails is not an error the coach needs: the panel does
       // its own read when it mounts, and reports its own failure.
     });
+}
+
+/**
+ * The workspace the session answer carried, cleaned with the same functions the
+ * calendar shell's answer goes through. This is what lets the sidebar be right
+ * on the very first render: the plan decides whether Sell and Billing exist,
+ * the user decides what is editable, and both used to arrive with the shell.
+ * Null when the session came without one; local storage is the fallback then.
+ */
+function workspaceBootstrapFromSession(session?: Session) {
+  const workspace = session?.role === "coach" ? session.workspace : undefined;
+  if (!workspace) return null;
+  const account = cleanCoachAccount(workspace.account as Partial<CoachAccount>);
+  const accounts = cleanWorkspaceAccounts(workspace.workspaceAccounts as Partial<WorkspaceAccount>[], account);
+  return {
+    account,
+    accounts,
+    coaches: cleanCoachProfiles(workspace.coaches as Partial<CoachProfile>[], account),
+    currentUser: cleanAppUser(
+      workspace.currentUser as Partial<AppUser>,
+      defaultAppUserFromCoachAccount(account),
+      defaultAccountId(accounts),
+    ),
+  };
 }
 
 type EditableBlockStatus = "idle" | "editing" | "saving" | "saved" | "error";
@@ -690,24 +732,6 @@ type CalendarHoverPreview = {
   adminEmailStatus: string;
 };
 
-type Person = {
-  id: string;
-  accountId?: string;
-  name: string;
-  email: string;
-  phone: string;
-  notes: string;
-  source: string;
-  caddyProfileId: string;
-  caddyProfileUrl: string;
-  // TRUE for a person an inbound external booking (Optix) created. They show
-  // in the external booking clients list until merged or moved into the main
-  // client list. Backend-owned: set on import, changed via /api/people/set-external.
-  external?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-};
-
 type ClientSummary = Person & {
   count: number;
   next: CalendarItem | null;
@@ -845,28 +869,14 @@ function adminCustomGroupAttendee(name: string, email = ""): CustomGroupAttendee
   };
 }
 
+// The person normaliser lives in modules/clients/clientsModel. These keep the
+// workspace's fallback account on any record that arrives without one.
 function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
-  return {
-    id: safeText(person.id),
-    accountId: safeText(person.accountId) || defaultWorkspaceAccountFromCoachAccount().id,
-    name: safeText(person.name),
-    email: safeText(person.email),
-    phone: safeText(person.phone),
-    notes: safeText(person.notes),
-    source: safeText(person.source),
-    caddyProfileId: safeText(person.caddyProfileId),
-    caddyProfileUrl: safeText(person.caddyProfileUrl),
-    // Backend-owned flag that decides which client list a person appears in.
-    // Dropping it here used to send every person to the main list, so the
-    // External bookings tab always read zero no matter what the API returned.
-    external: person.external === true,
-    createdAt: typeof person.createdAt === "string" ? person.createdAt : undefined,
-    updatedAt: typeof person.updatedAt === "string" ? person.updatedAt : undefined,
-  };
+  return cleanPeopleWith([person], defaultWorkspaceAccountFromCoachAccount().id)[0];
 }
 
 function cleanPeople(people: unknown[]): Person[] {
-  return people.map((person) => cleanPerson((person ?? {}) as Partial<Person>));
+  return cleanPeopleWith(people, defaultWorkspaceAccountFromCoachAccount().id);
 }
 
 function cleanNotificationRecord(notification: Partial<NotificationRecord> & { id?: unknown } = {}): NotificationRecord {
@@ -923,18 +933,6 @@ type PeopleImportResult = {
   failed?: number;
   errors?: Array<{ rowNumber?: string | number; name?: string; message?: string; reason?: string }>;
   people?: Person[];
-};
-
-type PeopleImportDiagnostic = {
-  endpoint: string;
-  status: number;
-  ok: boolean;
-  imported: number;
-  updated: number;
-  skipped: number;
-  failed: number;
-  errors: string[];
-  message: string;
 };
 
 type PeopleUpdateResult = {
@@ -4840,6 +4838,24 @@ function getStoredCoachAccount(): CoachAccount {
   }
 }
 
+/**
+ * The workspace accounts from the last visit, so the sidebar can be right on
+ * first paint. The plan lives here and the plan is what decides whether Sell
+ * and Billing are in the nav at all; without it every load started on a
+ * made-up solo account and those two items arrived with the calendar shell.
+ * The shell still overwrites this the moment it answers.
+ */
+function getStoredWorkspaceAccounts(): Partial<WorkspaceAccount>[] | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const stored = window.localStorage.getItem(WORKSPACE_ACCOUNTS_STORAGE_KEY);
+    const parsed = stored ? (JSON.parse(stored) as unknown) : undefined;
+    return Array.isArray(parsed) ? (parsed as Partial<WorkspaceAccount>[]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function cleanBrandSettings(settings?: Partial<BrandSettings>): BrandSettings {
   return {
     coachName: typeof settings?.coachName === "string" && settings.coachName.trim()
@@ -5267,6 +5283,12 @@ type AppProps = {
    */
   onSessionLost?: () => void;
   /**
+   * The session the entry point already resolved. When it is a coach, the
+   * workspace starts hydrating straight away instead of asking
+   * /api/auth/session a second time.
+   */
+  session?: Session;
+  /**
    * How this booking page load was entered. "player" means the visitor arrived
    * from their signed-in Player Terminal, so the widget already knows who is
    * booking. The entry point resolves this from the server session -- never
@@ -5275,7 +5297,7 @@ type AppProps = {
   bookingEntry?: BookingEntryMode;
 };
 
-function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
+function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: AppProps = {}) {
   // How this component was mounted, not what the URL says.
   //
   // The portal used to hand the whole page over to ?embed=booking&portal=player
@@ -5292,7 +5314,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const ownsPage = isEmbedMode && !isPlayerBooking;
   const bookingCardScheme = useBookingCardScheme();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
-  const [coachAccount, setCoachAccount] = useState<CoachAccount>(getStoredCoachAccount);
+  // What the session answer said about this workspace, if it said anything.
+  // It seeds the state below so the frame is right on the first render; the
+  // stored copies from the last visit are the fallback, and the calendar shell
+  // overwrites all of it when it answers.
+  const [bootstrap] = useState(() => workspaceBootstrapFromSession(entrySession));
+  const [coachAccount, setCoachAccount] = useState<CoachAccount>(() => bootstrap?.account ?? getStoredCoachAccount());
   // Contact matching and phone formatting resolve bare national numbers against
   // the workspace's country. The server does the same, from the same setting —
   // if these two ever disagree, the client and server disagree about whether
@@ -5302,11 +5329,15 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     setActivePhoneCountry(coachAccount.country);
   }, [coachAccount.country]);
   const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>(() =>
-    cleanWorkspaceAccounts(undefined, getStoredCoachAccount()),
+    bootstrap?.accounts ?? cleanWorkspaceAccounts(getStoredWorkspaceAccounts(), getStoredCoachAccount()),
   );
   const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [coachProfiles, setCoachProfiles] = useState<CoachProfile[]>(() => cleanCoachProfiles(undefined, getStoredCoachAccount()));
-  const [currentAppUser, setCurrentAppUser] = useState<AppUser>(() => defaultAppUserFromCoachAccount(getStoredCoachAccount()));
+  const [coachProfiles, setCoachProfiles] = useState<CoachProfile[]>(
+    () => bootstrap?.coaches ?? cleanCoachProfiles(undefined, getStoredCoachAccount()),
+  );
+  const [currentAppUser, setCurrentAppUser] = useState<AppUser>(
+    () => bootstrap?.currentUser ?? defaultAppUserFromCoachAccount(getStoredCoachAccount()),
+  );
   const [brandSettings, setBrandSettings] = useState<BrandSettings>(getStoredBrandSettings);
   const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved">("idle");
   // The entry point only mounts this component for a coach session or the
@@ -5320,11 +5351,15 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const setAuthStatus = useCallback(
     (next: AuthStatus) => {
       setAuthStatusState(next);
-      if (next === "guest") onSessionLost?.();
+      if (next === "guest") {
+        // The next sign-in on this browser may be a different business.
+        resetClients();
+        onSessionLost?.();
+      }
     },
     [onSessionLost],
   );
-  const [adminEmail, setAdminEmail] = useState("");
+  const [adminEmail, setAdminEmail] = useState(entrySession?.role === "coach" ? entrySession.email : "");
   const [adminWorkspaceLoadStatus, setAdminWorkspaceLoadStatus] =
     useState<AdminWorkspaceLoadStatus>(isEmbedMode ? "loaded" : "idle");
   const [adminWorkspaceLoadError, setAdminWorkspaceLoadError] = useState("");
@@ -5364,14 +5399,17 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const [availability, setAvailability] = useState<AvailabilityWindow[][]>(() => (isEmbedMode ? emptyAvailability() : defaultAvailability));
   const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
-  const [people, setPeople] = useState<Person[]>([]);
+  // The client list is owned by modules/clients/clientsStore. Reading it here
+  // keeps every screen that needs people on one copy, and the old setter name
+  // survives because the writes that answer with a fresh list all use it.
+  const { people, status: clientsLoadStatus } = useClientsState();
+  const setPeople = replaceClients;
   const [lessonNotes, setLessonNotes] = useState<LessonNote[]>([]);
   const [lessonNoteBusy, setLessonNoteBusy] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [peopleImportText, setPeopleImportText] = useState("");
   const [peopleImportState, setPeopleImportState] = useState<"idle" | "importing" | "imported">("idle");
   const [peopleImportDiagnostic, setPeopleImportDiagnostic] = useState<PeopleImportDiagnostic | null>(null);
-  const [clientSearch, setClientSearch] = useState("");
   const [showClientImport, setShowClientImport] = useState(false);
   const [isAddingClient, setIsAddingClient] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -5400,7 +5438,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   const [clientMergeReview, setClientMergeReview] = useState<ClientMergeReview | null>(null);
   const [clientMergeSaving, setClientMergeSaving] = useState(false);
   const [clientMergeError, setClientMergeError] = useState("");
-  const [clientListTab, setClientListTab] = useState<"main" | "external">("main");
   const [clientMoveSavingId, setClientMoveSavingId] = useState("");
   const [personDeleteBusyId, setPersonDeleteBusyId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
@@ -7076,6 +7113,10 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
   }, [coachAccount]);
 
   useEffect(() => {
+    window.localStorage.setItem(WORKSPACE_ACCOUNTS_STORAGE_KEY, JSON.stringify(workspaceAccounts));
+  }, [workspaceAccounts]);
+
+  useEffect(() => {
     const defaultSync = getDefaultSyncBaseUrl();
     if (syncBaseUrl === defaultSync || syncBaseUrl === defaultCoachAccount.bookingUrl) {
       setSyncBaseUrl(coachAccount.bookingUrl);
@@ -7323,6 +7364,16 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
           return;
         }
 
+        // The entry point already asked /api/auth/session and only mounts this
+        // component for a coach. Asking again cost a full round trip before the
+        // calendar shell could even start, so its answer is taken as given.
+        if (entrySession?.role === "coach") {
+          if (entrySession.email) setAdminEmail(entrySession.email);
+          setAuthStatus("authenticated");
+          void startAdminWorkspaceHydration();
+          return;
+        }
+
         const sessionController = new AbortController();
         const sessionTimeout = window.setTimeout(() => sessionController.abort(), 8000);
         let sessionResponse: Response;
@@ -7410,24 +7461,20 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     }
   }
 
-  async function refreshPeopleList(runId?: number) {
+  /**
+   * Bring the client list up to date. The list itself lives in
+   * modules/clients/clientsStore; this only decides what a failure means for
+   * the workspace. `maxAgeMs` lets boot accept a list the entry point already
+   * prefetched moments ago rather than asking a second time.
+   */
+  async function refreshPeopleList(options: { maxAgeMs?: number } = {}) {
     if (isEmbedMode || authStatus !== "authenticated") return;
     try {
-      const response = await fetch("/api/people", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      });
-      if (runId !== undefined && !shouldApplyAdminWorkspaceDetail(runId)) return;
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        return;
-      }
-      if (!response.ok) return;
-      const data = (await response.json().catch(() => ({}))) as { people?: Person[] };
-      if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
-    } catch {
-      // Client profiles are secondary to the calendar frame.
+      await loadClients(options);
+    } catch (error) {
+      if (isUnauthorizedClientsError(error)) setAuthStatus("guest");
+      // Otherwise: client profiles are secondary to the calendar frame, and
+      // the store keeps whatever it already had.
     } finally {
       markPlayerProfilesSourceReady("people");
     }
@@ -8056,6 +8103,12 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     hasLoadedCalendarApiRef.current = false;
     setAdminWorkspaceLoadStatus("loading");
     setAdminWorkspaceLoadError("");
+    // Clients and lesson notes go out with the shell rather than after the
+    // calendar has painted. They hit their own functions, so waiting gained
+    // the calendar nothing and cost Clients and Player Profiles a whole round
+    // trip after the page already looked ready.
+    window.setTimeout(() => void refreshPeopleList({ maxAgeMs: 30_000 }), 0);
+    window.setTimeout(() => void refreshLessonNotes(runId), 0);
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
@@ -8380,7 +8433,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         locations: true,
         coaches: true,
         settings: true,
-        people: true,
+        people: false,
         notifications: true,
         googleSyncStatus: true,
         backgroundRefresh: true,
@@ -8388,8 +8441,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         calendarFrameRendered: calendarWasRendered,
       },
     });
-    window.setTimeout(() => void refreshPeopleList(runId), 0);
-    window.setTimeout(() => void refreshLessonNotes(runId), 0);
     window.setTimeout(() => void refreshNotificationHistory(), 0);
     window.setTimeout(() => void refreshGoogleCalendarStatus(), 0);
 
@@ -8993,15 +9044,6 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
     return clients.find((client) => clientKey(client.name, client.email, client.phone) === key) ?? null;
   }, [clients, selected]);
 
-  const clientSearchTerm = clientSearch.trim();
-  const filteredClients = useMemo(() => {
-    if (!clientSearchTerm) return clients;
-    return clients.filter((client) => clientMatchesSearchTerm(client, clientSearchTerm));
-  }, [clientSearchTerm, clients]);
-  // External booking clients (created by an inbound Optix booking) live in
-  // their own list until merged or moved into the main client list.
-  const mainListClients = useMemo(() => filteredClients.filter((client) => client.external !== true), [filteredClients]);
-  const externalListClients = useMemo(() => filteredClients.filter((client) => client.external === true), [filteredClients]);
   // Lesson types offered by the in-card type picker. Custom-group services are
   // excluded: they carry attendees and a computed price, so switching a normal
   // lesson into one (or out of one) would need attendee handling this quick
@@ -17336,6 +17378,13 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
 
   async function handleAdminLogout() {
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    // The next person to sign in here may run a different business. Their
+    // sidebar must not open on this one's plan.
+    try {
+      window.localStorage.removeItem(WORKSPACE_ACCOUNTS_STORAGE_KEY);
+    } catch {
+      // Storage unavailable: nothing was cached to begin with.
+    }
     adminHydrationRunIdRef.current += 1;
     hasLoadedCalendarApiRef.current = false;
     setAuthStatus("guest");
@@ -21642,7 +21691,7 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <img src="/assets/clarity-golf-logo.png" alt="Clarity Golf" />
+            <img src="/assets/clarity-golf-logo-208.png" alt="Clarity Golf" />
           </div>
           <div>
             <strong>Clarity Golf</strong>
@@ -22724,183 +22773,33 @@ function App({ onSessionLost, bookingEntry = "public" }: AppProps = {}) {
         )}
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "clients" && (
-          <section className="module-page clients-page">
-            <div className="client-toolbar">
-              <div className="client-search">
-                <Search size={18} />
-                <input
-                  value={clientSearch}
-                  onChange={(event) => setClientSearch(event.target.value)}
-                  placeholder="Search clients"
-                />
-              </div>
-              <button
-                className={`outline-button import-client-button${showClientImport ? " active" : ""}`}
-                onClick={() => setShowClientImport((current) => !current)}
-                aria-label={showClientImport ? "Hide import clients" : "Import clients"}
-                type="button"
-              >
-                <Upload size={16} />
-                Import
-              </button>
-              <button
-                className={`icon-button merge-clients-button${clientMergeMode ? " active" : ""}`}
-                onClick={toggleClientMergeMode}
-                aria-label={clientMergeMode ? "Cancel merging clients" : "Merge duplicate clients"}
-                title={clientMergeMode ? "Cancel merging clients" : "Merge duplicate clients"}
-                type="button"
-              >
-                <GitMerge size={18} />
-              </button>
-              <button
-                className="icon-button add-client-button"
-                onClick={openNewClient}
-                aria-label="Add client"
-                title="Add client"
-              >
-                <Plus size={18} />
-              </button>
-            </div>
-
-            {clientMergeMode && (
-              <div className="client-merge-bar">
-                <span>
-                  {clientMergeSelection.length === 2
-                    ? "2 clients selected."
-                    : clientMergeSelection.length === 1
-                      ? "Select 1 more client to merge."
-                      : "Select 2 clients to merge."}
-                </span>
-                <button
-                  className="primary-button"
-                  disabled={clientMergeSelection.length !== 2}
-                  onClick={openClientMergeReview}
-                  type="button"
-                >
-                  Review merge
-                </button>
-              </div>
-            )}
-
-            {showClientImport && (
-              <article className="data-card import-card">
-                <div className="data-card-header">
-                  <div>
-                    <span>Import</span>
-                    <h2>Import clients</h2>
-                  </div>
-                  <Upload size={24} />
-                </div>
-	                <textarea
-	                  value={peopleImportText}
-	                  onChange={(event) => {
-	                    setPeopleImportState("idle");
-                      setPeopleImportDiagnostic(null);
-	                    setPeopleImportText(event.target.value);
-	                  }}
-	                  placeholder="name,email,phone,notes,caddyProfileUrl"
-	                />
-	                <div className="import-actions">
-                    <div className="import-action-tools">
-                      <label className="outline-button import-file-button">
-                        <Upload size={16} />
-                        CSV file
-                        <input accept=".csv,text/csv,text/plain" onChange={handlePeopleImportFile} type="file" />
-                      </label>
-	                    <span>{peopleImportPreview} ready</span>
-                    </div>
-	                  <button
-	                    className="primary-button"
-	                    onClick={importPeopleFromText}
-	                    disabled={peopleImportState === "importing" || peopleImportPreview === 0}
-	                  >
-	                    {peopleImportState === "importing" ? "Importing" : peopleImportState === "imported" ? "Imported" : "Import"}
-	                  </button>
-	                </div>
-                  {peopleImportDiagnostic && (
-                    <div className={`import-diagnostics${peopleImportDiagnostic.ok ? "" : " error"}`} role={peopleImportDiagnostic.ok ? "status" : "alert"}>
-                      <strong>{peopleImportDiagnostic.message}</strong>
-                      <span>Endpoint: {peopleImportDiagnostic.endpoint}</span>
-                      <span>HTTP: {peopleImportDiagnostic.status}</span>
-                      <span>
-                        Imported {peopleImportDiagnostic.imported} · Updated {peopleImportDiagnostic.updated} · Skipped {peopleImportDiagnostic.skipped}
-                        {peopleImportDiagnostic.failed ? ` · Failed ${peopleImportDiagnostic.failed}` : ""}
-                      </span>
-                      {peopleImportDiagnostic.errors.map((message) => (
-                        <em key={message}>{message}</em>
-                      ))}
-                    </div>
-                  )}
-	              </article>
-	            )}
-
-            <div className="client-list-tabs" role="tablist" aria-label="Client lists">
-              <button
-                className={`outline-button${clientListTab === "main" ? " active" : ""}`}
-                onClick={() => setClientListTab("main")}
-                role="tab"
-                aria-selected={clientListTab === "main"}
-                type="button"
-              >
-                Clients ({mainListClients.length})
-              </button>
-              <button
-                className={`outline-button${clientListTab === "external" ? " active" : ""}`}
-                onClick={() => setClientListTab("external")}
-                role="tab"
-                aria-selected={clientListTab === "external"}
-                type="button"
-              >
-                External bookings ({externalListClients.length})
-              </button>
-            </div>
-
-            <div className="client-table">
-              {(clientListTab === "external" ? externalListClients : mainListClients).length ? (
-                (clientListTab === "external" ? externalListClients : mainListClients).map((client) => {
-                  const mergeEligible = !client.id.startsWith("appointment-");
-                  const mergeSelected = clientMergeSelection.includes(client.id);
-                  return (
-                    <button
-                      className={`client-row${clientMergeMode ? " merge-mode" : ""}${mergeSelected ? " merge-selected" : ""}`}
-                      key={client.id}
-                      onClick={() => (clientMergeMode ? toggleClientMergeSelection(client) : openClientProfile(client))}
-                      disabled={clientMergeMode && !mergeEligible}
-                      title={clientMergeMode && !mergeEligible ? "Save this client before merging — it isn't linked to a client record yet." : undefined}
-                    >
-                      {clientMergeMode && (
-                        <span className={`merge-row-check${mergeSelected ? " checked" : ""}`} aria-hidden="true">
-                          {mergeSelected ? <Check size={14} /> : null}
-                        </span>
-                      )}
-                      <div className="client-main">
-                        <strong>{client.name}</strong>
-                        <span>{client.email || "No email yet"}</span>
-                      </div>
-                      <span className="client-phone">{client.phone || "No phone"}</span>
-                      <span className="client-booking-count">
-                        {client.count} booking{client.count === 1 ? "" : "s"}
-                        {(client.caddyProfileId || client.caddyProfileUrl) && <em>Linked to Caddy</em>}
-                      </span>
-                      <span className="client-row-arrow">
-                        {clientMergeMode ? null : <ArrowRight size={17} />}
-                      </span>
-                    </button>
-                  );
-                })
-              ) : clientListTab === "external" ? (
-                <div className="empty-panel compact">
-                  <h2>No external booking clients</h2>
-                  <p>People created by an inbound Optix booking appear here until you merge or move them into your clients.</p>
-                </div>
-              ) : (
-                <div className="empty-panel compact">
-                  <h2>No clients found</h2>
-                  <p>Try a different name, email, or phone number.</p>
-                </div>
-              )}
-            </div>
-          </section>
+          <Suspense fallback={<div className="module-loading">Loading clients…</div>}>
+            <ClientsPanel
+              clients={clients}
+              loading={clientsLoadStatus === "idle" || clientsLoadStatus === "loading"}
+              matchesSearch={clientMatchesSearchTerm}
+              mergeMode={clientMergeMode}
+              mergeSelection={clientMergeSelection}
+              onToggleMergeMode={toggleClientMergeMode}
+              onToggleMergeSelection={toggleClientMergeSelection}
+              onReviewMerge={openClientMergeReview}
+              onOpenClient={openClientProfile}
+              onAddClient={openNewClient}
+              importOpen={showClientImport}
+              onToggleImport={() => setShowClientImport((current) => !current)}
+              importText={peopleImportText}
+              onImportTextChange={(text) => {
+                setPeopleImportState("idle");
+                setPeopleImportDiagnostic(null);
+                setPeopleImportText(text);
+              }}
+              importState={peopleImportState}
+              importPreview={peopleImportPreview}
+              importDiagnostic={peopleImportDiagnostic}
+              onImport={() => void importPeopleFromText()}
+              onImportFile={handlePeopleImportFile}
+            />
+          </Suspense>
         )}
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "players" && (

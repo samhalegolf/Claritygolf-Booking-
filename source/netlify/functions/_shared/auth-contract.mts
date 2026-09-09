@@ -35,11 +35,31 @@ export type AppUserRole = "account_admin" | "coach" | "staff" | "platform_admin"
  * `accountRole` reports the membership separately for anything that wants to
  * show it; nothing should route on it.
  */
+/**
+ * What the coach shell needs to draw its frame before the calendar arrives:
+ * the business, its plan, its coaches, and who the signed-in user is inside
+ * it. The shapes are the same JSON the calendar shell sends; the client cleans
+ * them with the same functions, so they are left loose here on purpose.
+ */
+export type WorkspaceBootstrap = {
+  accountId: string;
+  workspaceAccounts: Record<string, unknown>[];
+  account: Record<string, unknown>;
+  coaches: Record<string, unknown>[];
+  currentUser: Record<string, unknown>;
+};
+
 export type AuthSessionResponse = {
   authenticated: boolean;
   role: SessionRole;
   accountRole?: AccountRole;
   accountId?: string;
+  /**
+   * Coach sessions only, and best effort: the workspace the sidebar can be
+   * drawn from straight away. Absent when the settings read failed -- the
+   * session is still valid and the calendar shell fills the gap.
+   */
+  workspace?: WorkspaceBootstrap;
   email?: string;
   name?: string;
   expiresAt?: string;
