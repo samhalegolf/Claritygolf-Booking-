@@ -5591,15 +5591,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // picker must not snap back to the list while the coach is still typing.
   const [customDiscountLineId, setCustomDiscountLineId] = useState("");
   // Invoice editor lifecycle. invoiceEditing = fields editable (new invoices start
-  // editable, saved ones open read-only). openedInvoiceStatus/SentAt describe the
-  // saved invoice currently open (draft | sent | paid | overdue | void; sentAt set
-  // once emailed - status "sent" without it = Published). reviseSourceId is set
-  // when editing a published invoice: saving issues a fresh-numbered invoice and
-  // voids this source id.
+  // editable, saved ones open read-only). openedInvoiceStatus/SentAt and
+  // activeInvoiceAmountPaid describe the saved invoice currently open (draft |
+  // sent | paid | overdue | void; sentAt set once emailed - status "sent"
+  // without it = Published).
+  // reviseSource is set when editing a published invoice: saving voids it and
+  // issues a fresh-numbered replacement. Its status and amount paid are kept so
+  // the original can be put back exactly as it was if the replacement fails to
+  // save.
   const [invoiceEditing, setInvoiceEditing] = useState(true);
   const [openedInvoiceStatus, setOpenedInvoiceStatus] = useState<"" | BillingInvoiceStatus>("");
   const [openedInvoiceSentAt, setOpenedInvoiceSentAt] = useState("");
-  const [reviseSourceId, setReviseSourceId] = useState("");
+  const [activeInvoiceAmountPaid, setActiveInvoiceAmountPaid] = useState(0);
+  const [reviseSource, setReviseSource] = useState<{
+    id: string;
+    status: BillingInvoiceStatus;
+    amountPaid: number;
+  } | null>(null);
+  const reviseSourceId = reviseSource?.id ?? "";
 
   useEffect(() => {
     if (serviceEditor.lessonFormat !== "group") {
@@ -16515,7 +16524,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setEditingInvoiceNumber("");
     setOpenedInvoiceStatus("");
     setOpenedInvoiceSentAt("");
-    setReviseSourceId("");
+    setActiveInvoiceAmountPaid(0);
+    setReviseSource(null);
     setInvoiceEditing(true);
     setSelectedDiscountPresetId("");
     setDiscountEditing(false);
@@ -16611,11 +16621,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setDiscountEditing(false);
       setDatesEditing(false);
       setNewInvoiceCustomer(null);
-      setReviseSourceId("");
+      setReviseSource(null);
       setActiveInvoiceId(String(invoice.id || record.id));
       setEditingInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
       setOpenedInvoiceStatus((invoice.status as BillingInvoiceStatus) || "draft");
       setOpenedInvoiceSentAt(typeof invoice.sentAt === "string" ? invoice.sentAt : "");
+      setActiveInvoiceAmountPaid(Number(invoice.amountPaid) || 0);
       // Open read-only (a view for drafts, a preview for committed invoices); the
       // Edit button unlocks it.
       setInvoiceEditing(false);
@@ -16712,6 +16723,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return;
     }
     setInvoiceIssueState("saving");
+    let revisionSourceVoided = false;
     try {
       let id = activeInvoiceId;
       let number = editingInvoiceNumber || invoiceNumber;
@@ -16734,6 +16746,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         }
       } else {
         number = invoiceNumber;
+        // Void the invoice being revised BEFORE writing its replacement. Its
+        // lessons are still linked to it until then, so saving first would be
+        // refused ("already invoiced") on every lesson carried over - the exact
+        // case this flow exists for. A voided invoice holds no claim on a
+        // lesson, so the replacement can pick them all back up. If the save
+        // below fails, the original is put back the way it was.
+        if (reviseSource) {
+          await patchInvoiceStatus(reviseSource.id, "void");
+          revisionSourceVoided = true;
+        }
         const response = await fetch("/api/billing/invoices", {
           method: "POST",
           credentials: "same-origin",
@@ -16761,11 +16783,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
         }
         id = data?.id || "";
+        // The replacement exists from here on, so the original stays void even
+        // if publishing or emailing fails below: un-voiding it now would put two
+        // invoices for the same lessons back on the books. What is left is a
+        // voided original and a saved (unpublished) replacement, which the coach
+        // can open and publish.
+        if (id) revisionSourceVoided = false;
         // Use the number the server actually assigned (headings/toasts/PDF all
         // key off `number`), then refresh the preview for the next new invoice.
         if (data?.invoiceNumber) number = String(data.invoiceNumber);
         void refreshSuggestedInvoiceNumber();
-        if (reviseSourceId) await patchInvoiceStatus(reviseSourceId, "void").catch(() => {});
       }
       if (!id) throw new Error("Could not save invoice.");
 
@@ -16781,7 +16808,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setEditingInvoiceNumber(number);
       setOpenedInvoiceStatus(mode === "draft" ? "draft" : "sent");
       setOpenedInvoiceSentAt(sentAt);
-      setReviseSourceId("");
+      setActiveInvoiceAmountPaid(0);
+      setReviseSource(null);
       setInvoiceEditing(false);
       setToast({
         message:
@@ -16794,6 +16822,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       void fetchRecentInvoices();
       void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
     } catch (error) {
+      // The replacement never landed, so the original must not be left void -
+      // that would drop the money off the books entirely. Put its status (and
+      // any part payment) back before reporting the failure.
+      if (revisionSourceVoided && reviseSource) {
+        await patchInvoiceStatus(
+          reviseSource.id,
+          reviseSource.status,
+          reviseSource.status === "paid" ? { amountPaid: reviseSource.amountPaid } : {},
+        ).catch(() => {});
+        void fetchRecentInvoices();
+        void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+      }
       setToast({ message: error instanceof Error ? error.message : "Could not save invoice." });
     } finally {
       setInvoiceIssueState("idle");
@@ -16807,7 +16847,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setInvoiceEditing(true);
       return;
     }
-    setReviseSourceId(activeInvoiceId);
+    setReviseSource({
+      id: activeInvoiceId,
+      status: openedInvoiceStatus || "sent",
+      amountPaid: activeInvoiceAmountPaid,
+    });
     setActiveInvoiceId("");
     setEditingInvoiceNumber(invoiceNumber);
     setOpenedInvoiceStatus("");
@@ -16926,6 +16970,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     try {
       await patchInvoiceStatus(activeInvoiceId, "paid");
       setOpenedInvoiceStatus("paid");
+      // No amount was sent, so the server settles it in full. Mirror that here:
+      // revising this invoice reads the amount back to restore it if the
+      // replacement fails to save.
+      setActiveInvoiceAmountPaid(invoiceTotal);
       setToast({ message: `${activeInvoiceNumber} marked paid.` });
       void fetchRecentInvoices();
     } catch (error) {

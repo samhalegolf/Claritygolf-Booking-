@@ -943,7 +943,48 @@ async function getInvoiceWithItems(accountId: string, id: string) {
   return invoiceRowToApi(row, items) as unknown as InvoiceApi;
 }
 
-async function createBookingLinks(
+// The link rows for these bookings, each tagged with the status of the invoice
+// holding it. One round trip for the links, one for the invoices - only ever
+// called off the back of a 409 or a lookup, never on the write path's happy
+// path.
+export async function bookingLinkOwners(accountId: string, bookingIds: string[]) {
+  if (!bookingIds.length) return [];
+  const filter = bookingIds.map((id) => `"${id.replace(/"/g, '\\"')}"`).join(",");
+  const rows = (await supabase("billing_booking_invoice_links", {
+    query: `select=booking_id,invoice_id&account_id=eq.${encodeFilter(accountId)}&booking_id=in.(${filter})`,
+  })) as Array<Record<string, unknown>>;
+
+  const invoiceIds = [...new Set(rows.map((row) => String(row.invoice_id ?? "")).filter(Boolean))];
+  const invoices: Record<string, { invoiceNumber: string; status: string }> = {};
+  for (let index = 0; index < invoiceIds.length; index += 200) {
+    const list = invoiceIds.slice(index, index + 200).map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+    const invoiceRows = (await supabase("billing_invoices", {
+      query: `select=id,invoice_number,status&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
+    })) as Array<Record<string, unknown>>;
+    for (const invoice of invoiceRows) {
+      invoices[String(invoice.id ?? "")] = {
+        invoiceNumber: String(invoice.invoice_number ?? ""),
+        status: String(invoice.status ?? ""),
+      };
+    }
+  }
+
+  return rows.map((row) => {
+    const invoiceId = String(row.invoice_id ?? "");
+    const invoice = invoices[invoiceId];
+    return {
+      bookingId: String(row.booking_id ?? ""),
+      invoiceId,
+      invoiceNumber: invoice?.invoiceNumber || "",
+      // Only a status we actually read back counts as void. An invoice we
+      // could not resolve is left alone: dropping a link on a failed lookup
+      // would quietly un-invoice a lesson that is still billed.
+      voided: invoice?.status === "void",
+    };
+  });
+}
+
+export async function createBookingLinks(
   accountId: string,
   invoiceId: string,
   bookingIds: string[],
@@ -957,25 +998,63 @@ async function createBookingLinks(
     invoice_id: invoiceId,
     created_at: nowIso(),
   }));
+  const insert = () =>
+    supabase("billing_booking_invoice_links", { method: "POST", body: rows, prefer: "return=minimal" });
   try {
-    await supabase("billing_booking_invoice_links", { method: "POST", body: rows, prefer: "return=minimal" });
+    await insert();
   } catch (error) {
     const status = (error as { supabaseStatus?: number })?.supabaseStatus;
     if (status === 409) {
-      // At least one booking already has an invoice. On create we roll back the
-      // invoice we just made so a failed pull doesn't leave an orphaned draft;
-      // on edit we must NOT delete the (pre-existing) invoice - just surface the
-      // conflict so the caller can restore its prior links.
+      // At least one booking already has a link. A link held by a *voided*
+      // invoice is not a claim on anything - that invoice was withdrawn, so the
+      // lesson is billable again. Clear those and retry; only a link on a live
+      // invoice is a real conflict.
+      const owners = await bookingLinkOwners(accountId, bookingIds).catch(() => []);
+      const blocking = owners.filter((owner) => owner.invoiceId !== invoiceId && !owner.voided);
+      const stale = owners.filter((owner) => owner.invoiceId !== invoiceId && owner.voided);
+      if (!blocking.length && stale.length) {
+        const staleBookings = [...new Set(stale.map((owner) => owner.bookingId))]
+          .map((id) => `"${id.replace(/"/g, '\\"')}"`)
+          .join(",");
+        const staleInvoices = [...new Set(stale.map((owner) => owner.invoiceId))]
+          .map((id) => `"${id.replace(/"/g, "")}"`)
+          .join(",");
+        await supabase("billing_booking_invoice_links", {
+          method: "DELETE",
+          query: `account_id=eq.${encodeFilter(accountId)}&booking_id=in.(${staleBookings})&invoice_id=in.(${encodeURIComponent(staleInvoices)})`,
+        });
+        try {
+          await insert();
+          return;
+        } catch (retryError) {
+          // Another save claimed one of these lessons between the cleanup and
+          // the retry. Fall through to the refusal below rather than surfacing
+          // a raw Supabase error to the coach.
+          if ((retryError as { supabaseStatus?: number })?.supabaseStatus !== 409) throw retryError;
+        }
+      }
+
+      // On create we roll back the invoice we just made so a failed pull
+      // doesn't leave an orphaned draft; on edit we must NOT delete the
+      // (pre-existing) invoice - just surface the conflict so the caller can
+      // restore its prior links.
       if (rollbackInvoiceOnConflict) {
         await supabase("billing_invoices", {
           method: "DELETE",
           query: `id=eq.${encodeFilter(invoiceId)}&account_id=eq.${encodeFilter(accountId)}`,
         }).catch(() => {});
       }
-      throw Object.assign(new Error("One or more of these bookings has already been invoiced."), {
-        status: 409,
-        code: "BOOKING_ALREADY_INVOICED",
-      });
+      // Name the invoice holding the lesson. "Already invoiced" on its own
+      // leaves the coach hunting; the number tells them what to void.
+      const numbers = [...new Set(blocking.map((owner) => owner.invoiceNumber).filter(Boolean))];
+      throw Object.assign(
+        new Error(
+          numbers.length
+            ? `One or more of these lessons is already on ${numbers.join(", ")}. Void that invoice to bill them again.`
+            : "One or more of these bookings has already been invoiced.",
+        ),
+        { status: 409, code: "BOOKING_ALREADY_INVOICED" },
+      );
     }
     throw error;
   }
@@ -1289,33 +1368,23 @@ async function deleteInvoice(accountId: string, id: string) {
   return { deleted: true };
 }
 
-// Which of these bookings are already on an invoice, and which invoice. The
-// number - not just the id - comes back because the pull rail names the invoice
-// a booking landed on; an id would tell the coach nothing. Resolved with a
-// second lookup rather than a PostgREST embed so this keeps working whether or
-// not the schema cache knows the link table's foreign key.
-async function checkBookingLinks(accountId: string, bookingIds: string[]) {
+// Which of these bookings are already on a *live* invoice, and which invoice.
+// The number - not just the id - comes back because the pull rail names the
+// invoice a booking landed on; an id would tell the coach nothing. Resolved
+// with a second lookup rather than a PostgREST embed so this keeps working
+// whether or not the schema cache knows the link table's foreign key.
+//
+// A link held by a voided invoice is left out: voiding withdraws the bill, so
+// the lesson is billable again and must not show as "already invoiced" or be
+// dropped from the pull list. This matches the write side - createBookingLinks
+// clears the same stale links rather than refusing the save.
+export async function checkBookingLinks(accountId: string, bookingIds: string[]) {
   if (!bookingIds.length) return { links: {} };
-  const filter = bookingIds.map((id) => `"${id.replace(/"/g, '\\"')}"`).join(",");
-  const rows = (await supabase("billing_booking_invoice_links", {
-    query: `select=booking_id,invoice_id&account_id=eq.${encodeFilter(accountId)}&booking_id=in.(${filter})`,
-  })) as Array<Record<string, unknown>>;
-
-  const invoiceIds = [...new Set(rows.map((row) => String(row.invoice_id ?? "")).filter(Boolean))];
-  const numbers: Record<string, string> = {};
-  for (let index = 0; index < invoiceIds.length; index += 200) {
-    const list = invoiceIds.slice(index, index + 200).map((id) => `"${id.replace(/"/g, "")}"`).join(",");
-    const invoiceRows = (await supabase("billing_invoices", {
-      query: `select=id,invoice_number&account_id=eq.${encodeFilter(accountId)}&id=in.(${encodeURIComponent(list)})`,
-    })) as Array<Record<string, unknown>>;
-    for (const invoice of invoiceRows) numbers[String(invoice.id ?? "")] = String(invoice.invoice_number ?? "");
-  }
-
+  const owners = await bookingLinkOwners(accountId, bookingIds);
   const links = Object.fromEntries(
-    rows.map((row) => {
-      const invoiceId = String(row.invoice_id ?? "");
-      return [row.booking_id, { invoiceId, invoiceNumber: numbers[invoiceId] || "" }];
-    }),
+    owners
+      .filter((owner) => !owner.voided)
+      .map((owner) => [owner.bookingId, { invoiceId: owner.invoiceId, invoiceNumber: owner.invoiceNumber }]),
   );
   return { links };
 }
