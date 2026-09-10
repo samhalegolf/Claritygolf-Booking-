@@ -163,6 +163,61 @@ test("every dedicated /api route is excluded from the wildcard", () => {
 });
 
 /**
+ * Everything Netlify will try to deploy has a name it will accept.
+ *
+ * netlify.toml points [functions] at netlify/functions, and Netlify bundles
+ * every source file directly inside it as one function named after the file,
+ * minus the final extension. That name may only contain letters, digits,
+ * hyphens and underscores - so a second dot in the basename fails the deploy.
+ *
+ * This is written from a real one: two test files landed beside the functions
+ * as billing-api.booking-links.test.mts, and the whole site build failed with
+ * "change the function names to contain only alphanumeric characters, hyphens
+ * or underscore". Nothing local caught it - the tests passed, both typechecks
+ * passed, and the only signal was a red deploy.
+ *
+ * Function tests belong in _shared/, which Netlify skips for the underscore.
+ */
+test("every file Netlify deploys as a function has a legal name", () => {
+  const fnDir = path.join(SRC, "..", "netlify", "functions");
+  // What Netlify's bundler picks up. Anything else in the directory (.md, and
+  // so on) it leaves alone.
+  const BUNDLED = /\.(js|mjs|cjs|ts|mts|cts)$/;
+  const LEGAL_NAME = /^[A-Za-z0-9_-]+$/;
+  const offenders: string[] = [];
+
+  for (const entry of readdirSync(fnDir)) {
+    // A leading underscore is how this repo hides shared code and tests from
+    // the bundler; those are never deployed and never need a legal name.
+    if (entry.startsWith("_") || entry.startsWith(".")) continue;
+    const full = path.join(fnDir, entry);
+
+    if (statSync(full).isDirectory()) {
+      // A directory is one function named after the directory itself.
+      if (!LEGAL_NAME.test(entry)) offenders.push(`${entry}/ would deploy as "${entry}"`);
+      continue;
+    }
+    if (!BUNDLED.test(entry)) continue;
+
+    const name = entry.replace(BUNDLED, "");
+    if (!LEGAL_NAME.test(name)) offenders.push(`${entry} would deploy as "${name}"`);
+    // A test file here is a legal name away from being deployed as a live
+    // endpoint, which is worse than failing the build.
+    if (name.endsWith(".test") || name.endsWith("-test")) {
+      offenders.push(`${entry} is a test - move it to netlify/functions/_shared/`);
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `Netlify will refuse to deploy these:\n  ${offenders.join("\n  ")}\n` +
+      "Function names may only contain letters, digits, hyphens and underscores. " +
+      "Tests go in netlify/functions/_shared/.",
+  );
+});
+
+/**
  * An archetype earns its name when a second integration needs it.
  *
  * Naming five shapes risks the usual failure: an abstraction fitted to what

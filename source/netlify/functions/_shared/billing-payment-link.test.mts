@@ -17,7 +17,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveInvoicePaymentLink } from "./billing-api.mts";
+import { resolveInvoicePaymentLink } from "../billing-api.mts";
 
 type Call = { url: string; method: string; body: string };
 

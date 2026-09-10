@@ -18,7 +18,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { checkBookingLinks, createBookingLinks } from "./billing-api.mts";
+import { checkBookingLinks, createBookingLinks } from "../billing-api.mts";
 
 type Row = Record<string, unknown>;
 
